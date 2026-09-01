@@ -373,6 +373,7 @@ mod tests {
         let mut sections = vec![
             Section {
                 t: 0.0,
+                end: 10.0,
                 image: "a.jpg".into(),
                 speech: vec![TranscriptEvent {
                     start: 0.0,
@@ -383,6 +384,7 @@ mod tests {
             },
             Section {
                 t: 10.0,
+                end: 20.0,
                 image: "b.jpg".into(),
                 speech: vec![
                     TranscriptEvent {

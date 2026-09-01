@@ -172,9 +172,6 @@ mod tests {
         assert!(md.contains("你好") && md.contains("frames/slide_0001.jpg"));
         assert!(render_html(&m, &[]).contains("&lt;课&gt;"));
     }
-<<<<<<< HEAD
-=======
-
     #[test]
     fn html_renders_prose_without_dialogue_quotes() {
         let m = VideoMeta {
@@ -187,6 +184,7 @@ mod tests {
         };
         let s = [Section {
             t: 0.0,
+            end: 10.0,
             image: "frames/slide_0001.jpg".into(),
             speech: vec![TranscriptEvent {
                 start: 0.0,
@@ -199,5 +197,4 @@ mod tests {
         assert!(html.contains("<p>正常段落。</p>"));
         assert!(!html.contains("「正常段落。"));
     }
->>>>>>> a003acb (Polish transcript by paragraph)
 }

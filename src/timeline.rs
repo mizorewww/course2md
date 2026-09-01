@@ -239,6 +239,7 @@ mod tests {
     fn coalesce_sections_groups_speech_without_losing_sentence_boundaries() {
         let mut sections = vec![Section {
             t: 0.0,
+            end: 10.0,
             image: "f0.jpg".into(),
             speech: vec![
                 TranscriptEvent {
@@ -282,6 +283,7 @@ mod tests {
     fn coalesce_sections_keeps_spaces_between_english_words() {
         let mut sections = vec![Section {
             t: 0.0,
+            end: 10.0,
             image: "f0.jpg".into(),
             speech: vec![
                 TranscriptEvent {
