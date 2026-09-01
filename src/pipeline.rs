@@ -180,19 +180,23 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     };
     anyhow::ensure!(!frames.is_empty(), "没有截到任何画面");
     // 转写可能合法返回空（静音课件）；由后续正常渲染成"无语音"讲义
-
-    // 可选的 LLM 润色（配置已在管线开头校验）
-    let events = if cfg.llm.enabled {
-        tracing::info!(model = %cfg.llm.model, "llm polish");
-        let ev = cfg.llm.clone();
-        let joined = tokio::task::spawn_blocking(move || crate::llm::polish(events, &ev)).await;
-        joined.context("LLM 线程 join 失败")?
-    } else {
-        events
-    };
-
-    let sections = timeline::merge(frames.clone(), events.clone(), meta.duration);
+    // timeline.jsonl 始终保存 ASR 的原始细粒度事件，供追溯、调试或二次处理。
     timeline::write_jsonl(&cfg.timeline_path(), &frames, &events)?;
+
+    let mut sections = timeline::merge(frames.clone(), events, meta.duration);
+    timeline::coalesce_sections(&mut sections);
+
+    // 可选 LLM 在已组织好的连续段落上校对，避免 VAD 碎片限制上下文。
+    if cfg.llm.enabled {
+        tracing::info!(model = %cfg.llm.model, "llm polish paragraphs");
+        let ev = cfg.llm.clone();
+        let joined = tokio::task::spawn_blocking(move || {
+            crate::llm::polish_sections(&mut sections, &ev);
+            sections
+        })
+        .await;
+        sections = joined.context("LLM 线程 join 失败")?;
+    }
     tracing::info!(sections = sections.len(), "merged");
 
     render::write_outputs(&cfg.out_dir, &meta, &sections, &cfg.formats).await?;

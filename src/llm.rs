@@ -4,16 +4,16 @@
 //! 支持 OpenAI 兼容 /chat/completions 端点；所有配置项均可被命令行覆盖。
 //! 关闭时每次任务结束打印开启提示（可用配置项或 `--no-llm-hint` 关闭）。
 
-use crate::timeline::TranscriptEvent;
+use crate::timeline::{Section, TranscriptEvent};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::time::Duration;
 
-pub const DEFAULT_PROMPT: &str = "你是字幕校对器。修正语音识别文本中明显的错误\
-（错别字、同音字、专有名词拼写）与不通顺的语气词（如\"呃\"\"嗯\"\"这个那个\"等口头禅），\
-使文字自然、书面化。不增删实质内容、不翻译、不改原意、保持原语言。\
-输出与输入逐条对应的 JSON 字符串数组，不要输出任何其他内容。";
+pub const DEFAULT_PROMPT: &str = "你是视频逐字稿校对器。输入的每一项是一段已按自然停顿组织的连续讲解。\
+修正明显的语音识别错误（错别字、同音字、专有名词拼写），删除不影响原意的冗余口头填充，\
+并修复不自然的断句和标点，使文字自然、书面化。不得概括、扩写、翻译、增删实质内容或改变原意；\
+保持原语言。输出与输入逐条对应的 JSON 对象数组，每项形如 {\"id\":序号,\"text\":\"校对后的文本\"}，不要输出任何其他内容。";
 
 /// 每次请求合并的语音段数。
 const BATCH: usize = 20;
@@ -100,6 +100,33 @@ pub fn polish(mut events: Vec<TranscriptEvent>, s: &LlmSettings) -> Vec<Transcri
     }
     pb.finish_and_clear();
     events
+}
+
+/// 对已经按截图和自然停顿组织好的段落逐段校对。
+///
+/// Section 内的顺序是唯一的回填依据；原始细粒度 ASR 事件由调用方另存到
+/// timeline.jsonl，避免段落校对破坏可追溯的时间线。
+pub fn polish_sections(sections: &mut [Section], s: &LlmSettings) {
+    let (lengths, events) = flatten_sections(sections);
+    restore_sections(sections, &lengths, polish(events, s));
+}
+
+fn flatten_sections(sections: &[Section]) -> (Vec<usize>, Vec<TranscriptEvent>) {
+    let lengths = sections.iter().map(|section| section.speech.len()).collect();
+    let events = sections
+        .iter()
+        .flat_map(|section| section.speech.iter().cloned())
+        .collect();
+    (lengths, events)
+}
+
+fn restore_sections(sections: &mut [Section], lengths: &[usize], events: Vec<TranscriptEvent>) {
+    debug_assert_eq!(sections.len(), lengths.len());
+    let mut events = events.into_iter();
+    for (section, &len) in sections.iter_mut().zip(lengths) {
+        section.speech = events.by_ref().take(len).collect();
+    }
+    debug_assert!(events.next().is_none());
 }
 
 fn warn_once(warned: &mut bool, msg: &str) {
@@ -339,5 +366,46 @@ mod tests {
         assert_eq!(got, vec![(0, "a".into()), (1, "b".into())]);
         assert!(parse_id_text_pairs("没有数组").is_none());
         assert!(parse_id_text_pairs("[]").is_none());
+    }
+
+    #[test]
+    fn section_helpers_preserve_section_boundaries() {
+        let mut sections = vec![
+            Section {
+                t: 0.0,
+                image: "a.jpg".into(),
+                speech: vec![TranscriptEvent {
+                    start: 0.0,
+                    end: 1.0,
+                    text: "first".into(),
+                    raw: None,
+                }],
+            },
+            Section {
+                t: 10.0,
+                image: "b.jpg".into(),
+                speech: vec![
+                    TranscriptEvent {
+                        start: 10.0,
+                        end: 11.0,
+                        text: "second".into(),
+                        raw: None,
+                    },
+                    TranscriptEvent {
+                        start: 11.0,
+                        end: 12.0,
+                        text: "third".into(),
+                        raw: None,
+                    },
+                ],
+            },
+        ];
+
+        let (lengths, mut events) = flatten_sections(&sections);
+        events[0].text = "polished first".into();
+        restore_sections(&mut sections, &lengths, events);
+        assert_eq!(sections[0].speech.len(), 1);
+        assert_eq!(sections[1].speech.len(), 2);
+        assert_eq!(sections[0].speech[0].text, "polished first");
     }
 }

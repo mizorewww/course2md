@@ -27,7 +27,13 @@ URL ── yt-dlp ─┐
               │              └──────────┬──────────┘
               │                         │
               │                         ▼
-              │              [可选] LLM 字幕润色 (默认关闭)
+              │              原始 ASR 事件 -> timeline.jsonl
+              │                         │
+              │                         ▼
+              │              按截图与自然停顿组织段落
+              │                         │
+              │                         ▼
+              │              [可选] LLM 段落校对 (默认关闭)
               │              OpenAI 兼容接口 / 20段批量校对
               └──────────┬──────────────┘
                          ▼
@@ -43,13 +49,13 @@ URL ── yt-dlp ─┐
 
 语音分段（三种后端共享）：VAD 原始段先经能量感知后处理——超过 `--max-speech` 的段在目标切点 ±3s 窗口内选**能量最低点**切断（避开词中间）；切音频时向两侧静音各填充 0.25s（只进静音不进相邻语音，故无重复文本）。事件时间与切分范围分离（`Seg { start, end, cut_start, cut_end }`）。
 
-时间线合并：每段语音按时间中点归属截图，跨越截图边界时仍完整保留该段文字。字符位置和语音时间并不一一对应；按字符比例拆分会破坏句子和后续校对。原始语音事件完整写入 `timeline.jsonl`；Markdown/HTML 渲染时会把同一画面下短停顿内的连续片段组织为自然段，并仅过滤独立出现的无语义填充词。LLM 润色按分段 id 上/下行（防重排错位），润色后保留 `raw` 原文作 provenance（timeline.jsonl 双字段）。
+时间线合并：每段语音按时间中点归属截图，跨越截图边界时仍完整保留该段文字。字符位置和语音时间并不一一对应；按字符比例拆分会破坏句子和后续校对。细粒度的原始语音事件会先完整写入 `timeline.jsonl`，然后同一截图下短停顿内的连续片段会组织为自然段，并仅过滤独立出现的无语义填充词。`course.md`、`course.html` 与 `structured.json` 使用这些段落。若开启 LLM，校对对象是段落而非 VAD 碎片；校对后段落以 `raw` 保留校对前文本，而 `timeline.jsonl` 始终保留原始 ASR 时间线。
 
 语音识别支持两种路径：
 1. **CoreML 原生路径**（macOS Apple Silicon 预编译包默认）：通过静态链接的 `speech-swift` 运行 Silero VAD CoreML（ANE）与 Qwen3-ASR 0.6B CoreML（ANE + GPU），零外部运行时依赖。若 CoreML 初始化或运行失败，会自动回落至 `llama-server` 并发出警告。
 2. **llama.cpp 路径**（Linux / Windows / 通用兜底）：由 ffmpeg `silencedetect` 分段，逐段提交给本地 `llama-server` 进程。模型为约 2.4GB 的 Qwen3-ASR GGUF，缺失时自动下载。
 
-若开启 LLM 润色功能（默认关闭），系统会将识别事件按 20 段一批发送至 OpenAI 兼容端点进行口语修正与同音字纠错，单批失败时自动保留原文且不阻断转换流程。
+若开启 LLM 润色功能（默认关闭），系统会将已组织好的讲解段落按 20 段一批发送至 OpenAI 兼容端点进行口语修正与同音字纠错，单批失败时自动保留原文且不阻断转换流程。
 
 配置优先级遵循：$$\text{命令行参数} > \text{config.toml} > \text{内置默认值}$$。配置文件位于 `~/.config/course2md/config.toml`（Windows 为 `%APPDATA%\course2md\config.toml`）。
 

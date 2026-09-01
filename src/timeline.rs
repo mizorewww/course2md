@@ -1,4 +1,4 @@
-//! 时间线：事件类型、frame/speech 合并成 Section、timeline.jsonl 读写。
+//! 时间线：事件类型、frame/speech 合并、段落组织与 timeline.jsonl 读写。
 
 use crate::fetch::VideoMeta;
 use anyhow::Result;
@@ -34,6 +34,9 @@ pub struct Section {
     pub image: String,
     pub speech: Vec<TranscriptEvent>,
 }
+
+const PARAGRAPH_GAP_SECS: f64 = 3.5;
+const MAX_PARAGRAPH_CHARS: usize = 420;
 
 /// timeline.jsonl 的一行。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +83,75 @@ pub fn merge(
         sections[idx].speech.push(ev);
     }
     sections
+}
+
+/// 将同一截图下连续的 ASR 片段组织为可阅读的段落。
+///
+/// 此函数只作用于供渲染和可选 LLM 校对使用的 Section；调用方应在此之前将
+/// 细粒度 ASR 事件写入 timeline.jsonl，以保留原始时间线和可追溯性。
+/// 独立的无语义填充词不会单独生成段落，但嵌在有效语句中的文本不会被删除。
+pub fn coalesce_sections(sections: &mut [Section]) {
+    for section in sections {
+        let mut paragraphs = Vec::new();
+        let mut current: Option<TranscriptEvent> = None;
+
+        for event in std::mem::take(&mut section.speech) {
+            let text = event.text.trim();
+            if text.is_empty() || is_standalone_filler(text) {
+                continue;
+            }
+
+            let should_break = current.as_ref().is_some_and(|paragraph| {
+                event.start - paragraph.end > PARAGRAPH_GAP_SECS
+                    || paragraph.text.chars().count() + text.chars().count() > MAX_PARAGRAPH_CHARS
+            });
+            if should_break {
+                paragraphs.push(current.take().expect("paragraph exists when breaking"));
+            }
+
+            match current.as_mut() {
+                Some(paragraph) => {
+                    append_text(&mut paragraph.text, text);
+                    paragraph.end = event.end;
+                }
+                None => {
+                    current = Some(TranscriptEvent {
+                        start: event.start,
+                        end: event.end,
+                        text: text.to_string(),
+                        raw: None,
+                    });
+                }
+            }
+        }
+
+        if let Some(paragraph) = current {
+            paragraphs.push(paragraph);
+        }
+        section.speech = paragraphs;
+    }
+}
+
+fn append_text(paragraph: &mut String, next: &str) {
+    let previous_is_word = paragraph
+        .chars()
+        .next_back()
+        .is_some_and(|c| c.is_ascii_alphanumeric());
+    let next_is_word = next
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric());
+    if previous_is_word && next_is_word {
+        paragraph.push(' ');
+    }
+    paragraph.push_str(next);
+}
+
+fn is_standalone_filler(text: &str) -> bool {
+    let normalized = text.trim_matches(|c: char| {
+        c.is_whitespace() || "，。！？、,.!?：:；;“”‘’'\"（）()【】[]".contains(c)
+    });
+    matches!(normalized, "嗯" | "呃" | "额" | "啊" | "哦" | "唔")
 }
 
 pub fn write_jsonl(path: &Path, frames: &[FrameEvent], speech: &[TranscriptEvent]) -> Result<()> {
@@ -161,5 +233,73 @@ mod tests {
         let s = merge(frames, vec![], 95.0);
         assert_eq!(s[0].end, 60.0);
         assert_eq!(s[1].end, 95.0);
+    }
+
+    #[test]
+    fn coalesce_sections_groups_speech_without_losing_sentence_boundaries() {
+        let mut sections = vec![Section {
+            t: 0.0,
+            image: "f0.jpg".into(),
+            speech: vec![
+                TranscriptEvent {
+                    start: 0.0,
+                    end: 0.4,
+                    text: "嗯。".into(),
+                    raw: None,
+                },
+                TranscriptEvent {
+                    start: 0.8,
+                    end: 1.5,
+                    text: "Flash 和硬盘呢，".into(),
+                    raw: None,
+                },
+                TranscriptEvent {
+                    start: 1.7,
+                    end: 3.0,
+                    text: "它可以长期地保存内容。".into(),
+                    raw: None,
+                },
+                TranscriptEvent {
+                    start: 7.0,
+                    end: 8.0,
+                    text: "接下来讲层次结构。".into(),
+                    raw: None,
+                },
+            ],
+        }];
+
+        coalesce_sections(&mut sections);
+        assert_eq!(sections[0].speech.len(), 2);
+        assert_eq!(
+            sections[0].speech[0].text,
+            "Flash 和硬盘呢，它可以长期地保存内容。"
+        );
+        assert_eq!(sections[0].speech[0].start, 0.8);
+        assert_eq!(sections[0].speech[0].end, 3.0);
+    }
+
+    #[test]
+    fn coalesce_sections_keeps_spaces_between_english_words() {
+        let mut sections = vec![Section {
+            t: 0.0,
+            image: "f0.jpg".into(),
+            speech: vec![
+                TranscriptEvent {
+                    start: 0.0,
+                    end: 1.0,
+                    text: "random access".into(),
+                    raw: None,
+                },
+                TranscriptEvent {
+                    start: 1.1,
+                    end: 2.0,
+                    text: "memory".into(),
+                    raw: None,
+                },
+            ],
+        }];
+
+        coalesce_sections(&mut sections);
+        assert_eq!(sections[0].speech[0].text, "random access memory");
     }
 }
