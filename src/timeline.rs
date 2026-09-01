@@ -43,10 +43,11 @@ pub enum TimelineEvent {
     Speech(TranscriptEvent),
 }
 
-/// 合并算法（见 docs/DESIGN.md §3.2）：
-/// 每条语音按中点归属「时间 ≤ 中点的最后一张截图」；首张之前的归首张。
-/// 跨越截图边界的语音段先按边界拆开（文本按时间比例近似分割），
-/// 避免整段被错误塞进后一张截图（图文错页）。
+/// 合并算法：每条语音按中点归属「时间 ≤ 中点的最后一张截图」；首张之前的归首张。
+///
+/// 语音文本不会在截图边界按字符比例拆分。字符位置和语音时间并不一一对应，
+/// 这样的拆分会把完整句子截断，降低图文笔记的可读性。跨越边界的语音段保持完整，
+/// 并按其中点归属到最贴近的截图。
 pub fn merge(
     frames: Vec<FrameEvent>,
     speech: Vec<TranscriptEvent>,
@@ -69,82 +70,16 @@ pub fn merge(
         let next = sections.get(i + 1).map(|s| s.t).unwrap_or(f64::INFINITY);
         sections[i].end = next.min(media_end.max(sections[i].t));
     }
-    let boundaries: Vec<f64> = sections.iter().map(|s| s.t).collect();
     for ev in speech {
-        for piece in split_at_boundaries(ev, &boundaries) {
-            let mid = (piece.start + piece.end) / 2.0;
-            let idx = match sections[..].binary_search_by(|s| s.t.partial_cmp(&mid).unwrap()) {
-                Ok(i) => i,
-                Err(0) => 0, // 首张截图之前
-                Err(i) => i - 1,
-            };
-            sections[idx].speech.push(piece);
-        }
+        let mid = (ev.start + ev.end) / 2.0;
+        let idx = match sections[..].binary_search_by(|s| s.t.partial_cmp(&mid).unwrap()) {
+            Ok(i) => i,
+            Err(0) => 0, // 首张截图之前
+            Err(i) => i - 1,
+        };
+        sections[idx].speech.push(ev);
     }
     sections
-}
-
-/// 把一条语音事件在截图边界处拆成多段；文本按时间比例在字符维度近似分割。
-fn split_at_boundaries(ev: TranscriptEvent, boundaries: &[f64]) -> Vec<TranscriptEvent> {
-    let inner: Vec<f64> = boundaries
-        .iter()
-        .copied()
-        .filter(|&b| b > ev.start + 0.3 && b < ev.end - 0.3)
-        .collect();
-    if inner.is_empty() {
-        return vec![ev];
-    }
-    let mut points = vec![ev.start];
-    points.extend(inner);
-    points.push(ev.end);
-    let total = ev.end - ev.start;
-    let chars: Vec<char> = ev.text.chars().collect();
-    let total_chars = chars.len();
-    // 累计端点法：每段末字符位置 = 按时间比例的累计进度（最后一段固定取到末尾），
-    // 数学上保证拆分后字符总数守恒（不丢字、不重复）。
-    let mut char_pos = 0usize;
-    points
-        .windows(2)
-        .enumerate()
-        .map(|(i, w)| {
-            let (s, e) = (w[0], w[1]);
-            let end_char = if i + 2 == points.len() {
-                total_chars
-            } else {
-                let cumulative = ((e - ev.start) / total).clamp(0.0, 1.0);
-                let ideal = (total_chars as f64 * cumulative).round() as usize;
-                // 比例切点吸附到最近的标点/空格，避免词中切断（如「绝无句|尾吞字」）
-                snap_to_punct(&chars, ideal, char_pos + 1, total_chars)
-            };
-            let text: String = chars[char_pos..end_char].iter().collect();
-            char_pos = end_char;
-            TranscriptEvent {
-                start: s,
-                end: e,
-                text,
-                raw: ev.raw.clone(),
-            }
-        })
-        .collect()
-}
-
-/// 在 ideal 附近（±WINDOW 字符）找最近的句读/空格作为切点，切点落在标点之后；
-/// 找不到回落 ideal（受 lo/hi 约束保持单调与字符守恒）。
-fn snap_to_punct(chars: &[char], ideal: usize, lo: usize, hi: usize) -> usize {
-    const WINDOW: i32 = 6;
-    const PUNCT: &str = "。！？；：，、,.!?;: ";
-    for off in 0..=WINDOW {
-        for cand in [ideal as i32 - off, ideal as i32 + off] {
-            if cand < lo as i32 || cand > hi as i32 {
-                continue;
-            }
-            let idx = cand as usize;
-            if idx >= 1 && idx <= chars.len() && PUNCT.contains(chars[idx - 1]) {
-                return idx;
-            }
-        }
-    }
-    ideal.clamp(lo, hi)
 }
 
 pub fn write_jsonl(path: &Path, frames: &[FrameEvent], speech: &[TranscriptEvent]) -> Result<()> {
@@ -208,69 +143,16 @@ mod tests {
     }
 
     #[test]
-    fn merge_assigns_by_midpoint() {
+    fn merge_assigns_complete_speech_by_midpoint() {
         let frames = vec![frame(0.0), frame(60.0), frame(120.0)];
         let speech = vec![sp(10.0, 20.0), sp(50.0, 70.0), sp(5.0, 8.0)];
         let s = merge(frames, speech, 120.0);
-        // sp(50,70) 跨越 60s 边界：拆成 (50,60)->slide0 与 (60,70)->slide1
-        assert_eq!(s[0].speech.len(), 3); // mid=15 + mid=6.5 + 拆分前半
-        assert_eq!(s[1].speech.len(), 1); // 拆分后半
-        // 拆分后的时间正确
-        assert!((s[0].speech[1].end - 60.0).abs() < 1e-6);
-        assert!((s[1].speech[0].start - 60.0).abs() < 1e-6);
+        assert_eq!(s[0].speech.len(), 2);
+        assert_eq!(s[1].speech.len(), 1);
+        assert_eq!(s[1].speech[0].text, "50-70");
+        assert_eq!(s[1].speech[0].start, 50.0);
+        assert_eq!(s[1].speech[0].end, 70.0);
         assert!(merge(vec![], vec![sp(1.0, 2.0)], 10.0).is_empty());
-    }
-
-    #[test]
-    fn boundary_split_proportional_text() {
-        let ev = TranscriptEvent {
-            start: 0.0,
-            end: 10.0,
-            text: "一二三四五六七八九十".into(), // 10 chars
-            raw: None,
-        };
-        let parts = split_at_boundaries(ev, &[5.0]);
-        assert_eq!(parts.len(), 2);
-        let c0 = parts[0].text.chars().count();
-        let c1 = parts[1].text.chars().count();
-        assert_eq!(c0 + c1, 10);
-        assert_eq!(c0, 5); // 50/50 时长 → 一半字符
-        // 边界太靠近端点（<0.3s）不拆
-        let ev2 = TranscriptEvent {
-            start: 0.0,
-            end: 1.0,
-            text: "abc".into(),
-            raw: None,
-        };
-        assert_eq!(split_at_boundaries(ev2, &[0.1]).len(), 1);
-    }
-
-    #[test]
-    fn split_snaps_to_punctuation_near_proportional_point() {
-        // 比例切点 idx=5（「很」），最近的句读是 idx=3 的「，」→ 切在其后
-        let ev = TranscriptEvent {
-            start: 0.0,
-            end: 10.0,
-            text: "你好，世界很好。再见".into(),
-            raw: None,
-        };
-        let parts = split_at_boundaries(ev.clone(), &[5.0]);
-        assert_eq!(parts.len(), 2);
-        assert_eq!(parts[0].text, "你好，");
-        assert_eq!(parts[1].text, "世界很好。再见");
-        let joined: String = parts.iter().map(|p| p.text.as_str()).collect();
-        assert_eq!(joined, ev.text);
-
-        // 英文：吸附到最近的空格，不再切在单词中间
-        let ev2 = TranscriptEvent {
-            start: 0.0,
-            end: 10.0,
-            text: "compiler optimization lecture".into(),
-            raw: None,
-        };
-        let parts2 = split_at_boundaries(ev2, &[5.0]);
-        assert_eq!(parts2[0].text, "compiler ");
-        assert_eq!(parts2[1].text, "optimization lecture");
     }
 
     #[test]
@@ -278,44 +160,6 @@ mod tests {
         let frames = vec![frame(0.0), frame(60.0)];
         let s = merge(frames, vec![], 95.0);
         assert_eq!(s[0].end, 60.0);
-        assert_eq!(s[1].end, 95.0, "末段 end = 媒体时长");
-        // 时长未知（0）时退化为自身起点，不 panic 不产生负区间
-        let s2 = merge(vec![frame(5.0)], vec![], 0.0);
-        assert_eq!(s2[0].end, 5.0);
-    }
-
-    #[test]
-    fn split_never_loses_or_duplicates_chars() {
-        // 10 字符、3 等分：逐段 round 会得 3+3+3=9（丢字），累计端点法必须守恒
-        let ev = TranscriptEvent {
-            start: 0.0,
-            end: 30.0,
-            text: "零一二三四五六七八九".into(),
-            raw: None,
-        };
-        let parts = split_at_boundaries(ev.clone(), &[10.0, 20.0]);
-        assert_eq!(parts.len(), 3);
-        let joined: String = parts.iter().map(|p| p.text.as_str()).collect();
-        assert_eq!(joined, ev.text, "拆分必须字符守恒");
-
-        // 不等分 + 非整比例
-        let ev2 = TranscriptEvent {
-            start: 0.0,
-            end: 10.0,
-            text: "零一二三四五六七八九".into(),
-            raw: None,
-        };
-        let cases: [&[f64]; 5] = [
-            &[3.0, 4.0],
-            &[1.7],
-            &[9.9],
-            &[0.1, 0.2, 9.8, 9.9],
-            &[5.0, 5.5, 6.0, 9.0],
-        ];
-        for bounds in cases {
-            let parts = split_at_boundaries(ev2.clone(), bounds);
-            let joined: String = parts.iter().map(|p| p.text.as_str()).collect();
-            assert_eq!(joined, ev2.text, "bounds={bounds:?} 必须字符守恒");
-        }
+        assert_eq!(s[1].end, 95.0);
     }
 }

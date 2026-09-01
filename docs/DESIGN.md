@@ -43,7 +43,7 @@ URL ── yt-dlp ─┐
 
 语音分段（三种后端共享）：VAD 原始段先经能量感知后处理——超过 `--max-speech` 的段在目标切点 ±3s 窗口内选**能量最低点**切断（避开词中间）；切音频时向两侧静音各填充 0.25s（只进静音不进相邻语音，故无重复文本）。事件时间与切分范围分离（`Seg { start, end, cut_start, cut_end }`）。
 
-时间线合并：跨越截图边界的语音段先按边界拆开（文本按时间比例在字符维度近似分割），再按中点归属截图，避免整段错页。LLM 润色按分段 id 上/下行（防重排错位），润色后保留 `raw` 原文作 provenance（timeline.jsonl 双字段）。
+时间线合并：每段语音按时间中点归属截图，跨越截图边界时仍完整保留该段文字。字符位置和语音时间并不一一对应；按字符比例拆分会破坏句子和后续校对。原始语音事件完整写入 `timeline.jsonl`；Markdown/HTML 渲染时会把同一画面下短停顿内的连续片段组织为自然段，并仅过滤独立出现的无语义填充词。LLM 润色按分段 id 上/下行（防重排错位），润色后保留 `raw` 原文作 provenance（timeline.jsonl 双字段）。
 
 语音识别支持两种路径：
 1. **CoreML 原生路径**（macOS Apple Silicon 预编译包默认）：通过静态链接的 `speech-swift` 运行 Silero VAD CoreML（ANE）与 Qwen3-ASR 0.6B CoreML（ANE + GPU），零外部运行时依赖。若 CoreML 初始化或运行失败，会自动回落至 `llama-server` 并发出警告。

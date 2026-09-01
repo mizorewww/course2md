@@ -1,9 +1,12 @@
 //! 输出渲染：course.md / course.html / structured.json。
 
 use crate::fetch::VideoMeta;
-use crate::timeline::Section;
+use crate::timeline::{Section, TranscriptEvent};
 use anyhow::Result;
 use std::path::Path;
+
+const PARAGRAPH_GAP_SECS: f64 = 3.5;
+const MAX_PARAGRAPH_CHARS: usize = 420;
 
 /// mm:ss 或 h:mm:ss
 pub fn fmt_ts(sec: f64) -> String {
@@ -21,6 +24,39 @@ pub fn ts_url(meta: &VideoMeta, sec: f64) -> String {
     let base = meta.webpage_url.trim();
     let sep = if base.contains('?') { '&' } else { '?' };
     format!("{base}{sep}t={}", sec.floor() as u64)
+}
+
+/// 将同一画面下连续的语音片段合并成可阅读的自然段。
+fn paragraphs(speech: &[TranscriptEvent]) -> Vec<String> {
+    let mut out = vec![];
+    let mut current = String::new();
+    let mut previous_end = None;
+
+    for event in speech {
+        let text = event.text.trim();
+        if text.is_empty() || is_standalone_filler(text) {
+            continue;
+        }
+        let should_break = previous_end.is_some_and(|end| event.start - end > PARAGRAPH_GAP_SECS)
+            || (!current.is_empty()
+                && current.chars().count() + text.chars().count() > MAX_PARAGRAPH_CHARS);
+        if should_break {
+            out.push(std::mem::take(&mut current));
+        }
+        current.push_str(text);
+        previous_end = Some(event.end);
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
+}
+
+fn is_standalone_filler(text: &str) -> bool {
+    let normalized = text.trim_matches(|c: char| {
+        c.is_whitespace() || "，。！？、,.!?：:；;“”‘’'\"（）()【】[]".contains(c)
+    });
+    matches!(normalized, "嗯" | "呃" | "额" | "啊" | "哦" | "唔")
 }
 
 pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
@@ -44,11 +80,12 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
             fmt_ts(s.t),
             s.image
         ));
-        if s.speech.is_empty() {
+        let paragraphs = paragraphs(&s.speech);
+        if paragraphs.is_empty() {
             md.push_str("_(本段无语音)_\n\n");
         } else {
-            for ev in &s.speech {
-                md.push_str(&format!("{}\n\n", ev.text));
+            for paragraph in paragraphs {
+                md.push_str(&format!("{paragraph}\n\n"));
             }
         }
     }
@@ -74,11 +111,12 @@ pub fn render_html(meta: &VideoMeta, sections: &[Section]) -> String {
             t = esc(&fmt_ts(s.t)),
             img = esc(&s.image),
         ));
-        if s.speech.is_empty() {
+        let paragraphs = paragraphs(&s.speech);
+        if paragraphs.is_empty() {
             body.push_str("<p class=\"mute\">（本段无语音）</p>\n");
         } else {
-            for ev in &s.speech {
-                body.push_str(&format!("<p>「{}」</p>\n", esc(&ev.text)));
+            for paragraph in paragraphs {
+                body.push_str(&format!("<p>{}</p>\n", esc(&paragraph)));
             }
         }
         body.push_str("</section>\n");
