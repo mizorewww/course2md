@@ -48,9 +48,8 @@ pub enum TimelineEvent {
 
 /// 合并算法：每条语音按中点归属「时间 ≤ 中点的最后一张截图」；首张之前的归首张。
 ///
-/// 语音文本不会在截图边界按字符比例拆分。字符位置和语音时间并不一一对应，
-/// 这样的拆分会把完整句子截断，降低图文笔记的可读性。跨越边界的语音段保持完整，
-/// 并按其中点归属到最贴近的截图。
+/// 跨截图的语音优先在边界附近的句读或空格处分开，以保持图文对应；若找不到
+/// 自然断点，则保留完整文本并按中点归属，避免按字符比例把词或短语截断。
 pub fn merge(
     frames: Vec<FrameEvent>,
     speech: Vec<TranscriptEvent>,
@@ -73,16 +72,95 @@ pub fn merge(
         let next = sections.get(i + 1).map(|s| s.t).unwrap_or(f64::INFINITY);
         sections[i].end = next.min(media_end.max(sections[i].t));
     }
-    for ev in speech {
-        let mid = (ev.start + ev.end) / 2.0;
-        let idx = match sections[..].binary_search_by(|s| s.t.partial_cmp(&mid).unwrap()) {
-            Ok(i) => i,
-            Err(0) => 0, // 首张截图之前
-            Err(i) => i - 1,
-        };
-        sections[idx].speech.push(ev);
+    let boundaries: Vec<f64> = sections.iter().map(|section| section.t).collect();
+    for event in speech {
+        for piece in split_at_natural_boundaries(event, &boundaries) {
+            let mid = (piece.start + piece.end) / 2.0;
+            let idx = match sections[..].binary_search_by(|s| s.t.partial_cmp(&mid).unwrap()) {
+                Ok(i) => i,
+                Err(0) => 0,
+                Err(i) => i - 1,
+            };
+            sections[idx].speech.push(piece);
+        }
     }
     sections
+}
+
+/// 仅在边界附近找到句读或空格时拆分文字。
+///
+/// 时间和字符位置没有可靠的一一映射；找不到自然断点时，宁可让整段留在一张
+/// 截图下，也不按比例从词中间截断。多边界事件只要有任一边界无法安全切分，
+/// 就完整保留，避免产生半自然的混合结果。
+fn split_at_natural_boundaries(
+    event: TranscriptEvent,
+    boundaries: &[f64],
+) -> Vec<TranscriptEvent> {
+    let inner: Vec<f64> = boundaries
+        .iter()
+        .copied()
+        .filter(|&boundary| boundary > event.start + 0.3 && boundary < event.end - 0.3)
+        .collect();
+    if inner.is_empty() {
+        return vec![event];
+    }
+
+    let points = std::iter::once(event.start)
+        .chain(inner)
+        .chain(std::iter::once(event.end))
+        .collect::<Vec<_>>();
+    let chars = event.text.chars().collect::<Vec<_>>();
+    let total = event.end - event.start;
+    let mut char_pos = 0;
+    let mut cut_positions = Vec::with_capacity(points.len() - 1);
+
+    for (index, window) in points.windows(2).enumerate() {
+        let end_char = if index + 2 == points.len() {
+            chars.len()
+        } else {
+            let ideal = (chars.len() as f64 * ((window[1] - event.start) / total)).round() as usize;
+            match snap_to_natural_break(&chars, ideal, char_pos + 1, chars.len()) {
+                Some(position) => position,
+                None => return vec![event],
+            }
+        };
+        cut_positions.push(end_char);
+        char_pos = end_char;
+    }
+
+    let mut start_char = 0;
+    points
+        .windows(2)
+        .zip(cut_positions)
+        .map(|(window, end_char)| {
+            let text = chars[start_char..end_char].iter().collect();
+            start_char = end_char;
+            TranscriptEvent {
+                start: window[0],
+                end: window[1],
+                text,
+                raw: event.raw.clone(),
+            }
+        })
+        .collect()
+}
+
+/// 在理想切点附近寻找句读或空格，切点落在标点之后。
+fn snap_to_natural_break(chars: &[char], ideal: usize, lo: usize, hi: usize) -> Option<usize> {
+    const WINDOW: i32 = 6;
+    const BREAKS: &str = "。！？；：，、,.!?;: ";
+    for offset in 0..=WINDOW {
+        for candidate in [ideal as i32 - offset, ideal as i32 + offset] {
+            if candidate < lo as i32 || candidate > hi as i32 {
+                continue;
+            }
+            let index = candidate as usize;
+            if index >= 1 && index <= chars.len() && BREAKS.contains(chars[index - 1]) {
+                return Some(index);
+            }
+        }
+    }
+    None
 }
 
 /// 将同一截图下连续的 ASR 片段组织为可阅读的段落。
@@ -215,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_assigns_complete_speech_by_midpoint() {
+    fn merge_uses_natural_breaks_or_keeps_complete_speech() {
         let frames = vec![frame(0.0), frame(60.0), frame(120.0)];
         let speech = vec![sp(10.0, 20.0), sp(50.0, 70.0), sp(5.0, 8.0)];
         let s = merge(frames, speech, 120.0);
@@ -225,6 +303,31 @@ mod tests {
         assert_eq!(s[1].speech[0].start, 50.0);
         assert_eq!(s[1].speech[0].end, 70.0);
         assert!(merge(vec![], vec![sp(1.0, 2.0)], 10.0).is_empty());
+    }
+
+    #[test]
+    fn merge_splits_at_punctuation_near_a_frame_boundary() {
+        let frames = vec![frame(0.0), frame(5.0)];
+        let speech = vec![TranscriptEvent {
+            start: 0.0,
+            end: 10.0,
+            text: "前半句，后半句。".into(),
+            raw: None,
+        }];
+        let sections = merge(frames, speech, 10.0);
+        assert_eq!(sections[0].speech[0].text, "前半句，");
+        assert_eq!(sections[1].speech[0].text, "后半句。");
+    }
+
+    #[test]
+    fn merge_does_not_split_inside_a_word_without_a_natural_break() {
+        let event = TranscriptEvent {
+            start: 0.0,
+            end: 10.0,
+            text: "abcdefghij".into(),
+            raw: None,
+        };
+        assert_eq!(split_at_natural_boundaries(event.clone(), &[5.0]), vec![event]);
     }
 
     #[test]

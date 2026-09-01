@@ -49,7 +49,7 @@ URL ── yt-dlp ─┐
 
 语音分段（三种后端共享）：VAD 原始段先经能量感知后处理——超过 `--max-speech` 的段在目标切点 ±3s 窗口内选**能量最低点**切断（避开词中间）；切音频时向两侧静音各填充 0.25s（只进静音不进相邻语音，故无重复文本）。事件时间与切分范围分离（`Seg { start, end, cut_start, cut_end }`）。
 
-时间线合并：每段语音按时间中点归属截图，跨越截图边界时仍完整保留该段文字。字符位置和语音时间并不一一对应；按字符比例拆分会破坏句子和后续校对。细粒度的原始语音事件会先完整写入 `timeline.jsonl`，然后同一截图下短停顿内的连续片段会组织为自然段，并仅过滤独立出现的无语义填充词。`course.md`、`course.html` 与 `structured.json` 使用这些段落。若开启 LLM，校对对象是段落而非 VAD 碎片；校对后段落以 `raw` 保留校对前文本，而 `timeline.jsonl` 始终保留原始 ASR 时间线。
+时间线合并：每段语音按时间中点归属截图。跨越截图边界时，优先在边界附近的句读或空格处分开，以保持图文对应；找不到自然断点时保留完整片段，避免按字符比例从词中间截断。细粒度的原始语音事件会先完整写入 `timeline.jsonl`，然后同一截图下短停顿内的连续片段会组织为自然段，并仅过滤独立出现的无语义填充词。`course.md`、`course.html` 与 `structured.json` 使用这些段落。若开启 LLM，校对对象是段落而非 VAD 碎片；校对后段落以 `raw` 保留校对前文本，而 `timeline.jsonl` 始终保留原始 ASR 时间线。
 
 语音识别支持两种路径：
 1. **CoreML 原生路径**（macOS Apple Silicon 预编译包默认）：通过静态链接的 `speech-swift` 运行 Silero VAD CoreML（ANE）与 Qwen3-ASR 0.6B CoreML（ANE + GPU），零外部运行时依赖。若 CoreML 初始化或运行失败，会自动回落至 `llama-server` 并发出警告。
