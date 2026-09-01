@@ -92,10 +92,7 @@ pub fn merge(
 /// 时间和字符位置没有可靠的一一映射；找不到自然断点时，宁可让整段留在一张
 /// 截图下，也不按比例从词中间截断。多边界事件只要有任一边界无法安全切分，
 /// 就完整保留，避免产生半自然的混合结果。
-fn split_at_natural_boundaries(
-    event: TranscriptEvent,
-    boundaries: &[f64],
-) -> Vec<TranscriptEvent> {
+fn split_at_natural_boundaries(event: TranscriptEvent, boundaries: &[f64]) -> Vec<TranscriptEvent> {
     let inner: Vec<f64> = boundaries
         .iter()
         .copied()
@@ -327,7 +324,10 @@ mod tests {
             text: "abcdefghij".into(),
             raw: None,
         };
-        assert_eq!(split_at_natural_boundaries(event.clone(), &[5.0]), vec![event]);
+        assert_eq!(
+            split_at_natural_boundaries(event.clone(), &[5.0]),
+            vec![event]
+        );
     }
 
     #[test]

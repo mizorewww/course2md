@@ -112,7 +112,10 @@ pub fn polish_sections(sections: &mut [Section], s: &LlmSettings) {
 }
 
 fn flatten_sections(sections: &[Section]) -> (Vec<usize>, Vec<TranscriptEvent>) {
-    let lengths = sections.iter().map(|section| section.speech.len()).collect();
+    let lengths = sections
+        .iter()
+        .map(|section| section.speech.len())
+        .collect();
     let events = sections
         .iter()
         .flat_map(|section| section.speech.iter().cloned())
