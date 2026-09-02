@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// 完整性策略。
 #[derive(Debug, Clone, Copy)]
@@ -154,7 +155,13 @@ impl std::error::Error for HttpStatus {}
 /// 单次尝试：请求 + 流式落盘到 tmp。
 /// 返回 (服务器声明的 Content-Length（0 = 未知），实际收到字节数)。
 fn download_once(url: &str, tmp: &Path, label: &str) -> Result<(u64, u64)> {
-    let resp = match ureq::get(url).call() {
+    // 读/连接超时按单次操作计，不限制总时长（2.4GB 模型也要能下完）：
+    // 读停顿超过 60s 视为连接僵死，交给上层重试，避免进度条永久冻结。
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(60))
+        .build();
+    let resp = match agent.get(url).call() {
         Ok(r) => r,
         Err(ureq::Error::Status(code, resp)) => {
             let body = resp.into_string().unwrap_or_default();
@@ -230,7 +237,13 @@ fn finish_download(
     if let Verify::Sha256(sha) = verify {
         manifest["sha256"] = serde_json::json!(sha);
     }
-    let _ = fs::write(dest.with_extension("manifest.json"), manifest.to_string());
+    // 原子写入，避免半截 manifest 被当成有效记账
+    if let Err(e) = crate::checkpoint::atomic_write(
+        &dest.with_extension("manifest.json"),
+        manifest.to_string().as_bytes(),
+    ) {
+        tracing::warn!("写下载 manifest 失败（不影响文件本身）：{e:#}");
+    }
     tracing::debug!(label = %label, "verified & installed");
     Ok(())
 }

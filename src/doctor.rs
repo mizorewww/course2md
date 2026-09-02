@@ -4,23 +4,9 @@
 use crate::config::{AsrProvider, cache_dir, config_dir};
 use anyhow::Result;
 use std::path::Path;
-use std::process::Command;
 
 fn tool_version(cmd: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(cmd).args(args).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout);
-    Some(
-        s.lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .chars()
-            .take(72)
-            .collect(),
-    )
+    crate::runtime::probe_version(cmd, args)
 }
 
 fn check(line: &mut Vec<String>, ok: bool, name: &str, detail: &str) {

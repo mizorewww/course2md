@@ -58,8 +58,10 @@ You do **not** need to install the tools above by hand:
   `course2md doctor` shows the full environment report
 - **Install strategy**: llama-server ships the Vulkan build by default (works on
   NVIDIA/AMD/Intel alike) and auto-switches to the CPU build when `--provider cpu` is set;
-  when a package manager is available, brew/pacman/apt/winget installs are still preferred
-  (system-installed tools are used first)
+  when a package manager is available, brew/pacman/apt/winget installs are still recommended.
+  When the same tool exists in both places, **private-dir tools take precedence**
+  (deterministic behavior, versions pinned by the manifest, immune to system upgrades);
+  delete the file in the private dir to fall back to the system copy
 
 ---
 

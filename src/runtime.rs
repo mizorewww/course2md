@@ -213,6 +213,25 @@ pub fn free_port() -> Result<u16> {
     Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
 }
 
+/// 运行工具的版本探测命令，返回首行（截 72 字符）。
+/// 供 doctor 体检与 deps setup 展示；探测失败（不存在/非零退出）返回 None。
+pub fn probe_version(cmd: impl AsRef<std::path::Path>, args: &[&str]) -> Option<String> {
+    let out = Command::new(cmd.as_ref()).args(args).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    Some(
+        s.lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(72)
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

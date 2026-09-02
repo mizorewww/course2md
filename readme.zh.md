@@ -57,7 +57,8 @@ course2md ./lecture.mp4
   查看完整环境状态
 - **安装策略**：llama-server 默认装 Vulkan 构建（一张通吃 NVIDIA/AMD/Intel 卡），
   配置 `--provider cpu` 时自动切换 CPU 构建；有包管理器时仍推荐 brew/pacman/apt/winget
-  安装（course2md 会优先使用系统内的工具）
+  安装。同名工具同时存在时**私有目录中的优先**（版本/变体受 manifest 控制的行为
+  更确定，也避免系统升级悄悄改变识别链路）；如需用系统版本，清空对应私有目录文件即可
 
 ---
 

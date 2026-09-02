@@ -339,20 +339,7 @@ fn is_upgradable(spec: &ToolSpec, want: Variant, rep: &ToolReport) -> bool {
 }
 
 fn tool_version(cmd: &Path, args: &[&str]) -> Option<String> {
-    let out = std::process::Command::new(cmd).args(args).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout);
-    Some(
-        s.lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .chars()
-            .take(72)
-            .collect(),
-    )
+    crate::runtime::probe_version(cmd, args)
 }
 
 /// 单个工具的体检结果。
@@ -409,7 +396,7 @@ pub async fn install(spec: &'static ToolSpec, want: Variant) -> Result<PathBuf> 
             let dest = dest_dir.join(tool_exe(spec.name));
             net::download_file(&net::Download {
                 url: entry.url.into(),
-                dest,
+                dest: dest.clone(),
                 label: spec.name.into(),
                 verify: Verify::Sha256(entry.sha256),
             })
@@ -417,10 +404,7 @@ pub async fn install(spec: &'static ToolSpec, want: Variant) -> Result<PathBuf> 
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(
-                    dest_dir.join(tool_exe(spec.name)),
-                    std::fs::Permissions::from_mode(0o755),
-                );
+                let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
             }
         }
         AssetKind::Tar | AssetKind::Zip => {
@@ -446,15 +430,28 @@ pub async fn install(spec: &'static ToolSpec, want: Variant) -> Result<PathBuf> 
                 let _ = std::fs::remove_dir_all(&tmp);
                 return Err(e);
             }
-            // 全部成功才替换旧安装：bundle 工具整体清空子目录（避免跨版本残留旧 .so）
-            if spec.bundle_dir && dest_dir.is_dir() {
-                std::fs::remove_dir_all(&dest_dir)?;
+            // 全部成功才替换旧安装：先平铺到同盘 staging 目录，再删旧目录 +
+            // rename 切换（同文件系统内原子）。平铺中途失败时旧安装完好无损。
+            if spec.bundle_dir {
+                let stage = dir.join(format!(".staging-{}-{}", spec.name, std::process::id()));
+                let _ = std::fs::remove_dir_all(&stage);
+                std::fs::create_dir_all(&stage)?;
+                let moved = flatten_move(&extract, &stage);
+                let _ = std::fs::remove_dir_all(&tmp);
+                let moved = moved?;
+                if dest_dir.is_dir() {
+                    std::fs::remove_dir_all(&dest_dir)?;
+                }
+                std::fs::rename(&stage, &dest_dir)?;
+                tracing::debug!(tool = spec.name, files = moved, "extracted (staged swap)");
+            } else {
+                // 平铺工具（当前仅 uv）：文件数少，直接落入工具目录根
+                std::fs::create_dir_all(&dest_dir)?;
+                let moved = flatten_move(&extract, &dest_dir);
+                let _ = std::fs::remove_dir_all(&tmp);
+                let moved = moved?;
+                tracing::debug!(tool = spec.name, files = moved, "extracted");
             }
-            std::fs::create_dir_all(&dest_dir)?;
-            let moved = flatten_move(&extract, &dest_dir);
-            let _ = std::fs::remove_dir_all(&tmp);
-            let moved = moved?;
-            tracing::debug!(tool = spec.name, files = moved, "extracted");
         }
     }
 
@@ -679,16 +676,12 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
         let optional_mark = matches!(spec.req, Req::Providers(_));
         let upg = is_upgradable(spec, want, &rep);
         let ours_mark = if rep.ours {
-            if zh { "  (自动安装)" } else { "  (auto-installed)" }
+            crate::i18n::tr("  (auto-installed)", "  (自动安装)")
         } else {
             ""
         };
         let upg_mark = if upg {
-            if zh {
-                format!("  ↻ 可升级 → {}", spec.version)
-            } else {
-                format!("  ↻ update available → {}", spec.version)
-            }
+            format!("  ↻ {}{}", crate::i18n::tr("update available →", "可升级 →"), spec.version)
         } else {
             String::new()
         };
@@ -707,9 +700,9 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
             (None, _) => {
                 let purpose = if zh { spec.purpose_zh } else { spec.purpose_en };
                 let tag = if optional_mark && !all {
-                    if zh { "可选" } else { "optional" }
+                    crate::i18n::tr("optional", "可选")
                 } else {
-                    if zh { "缺" } else { "missing" }
+                    crate::i18n::tr("missing", "缺")
                 };
                 println!("✗ {:<12} [{}] {}", spec.name, tag, purpose);
                 if !optional_mark {
@@ -729,19 +722,18 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
     if check_only {
         if core_missing {
             eprintln!(
-                "{}",
-                if zh {
-                    "\n核心依赖缺失（退出码 1）。去掉 --check 或加 --yes 可自动安装。"
-                } else {
-                    "\nCore dependencies missing (exit code 1). Re-run without --check (or with --yes) to auto-install."
-                }
+                "\n{}",
+                crate::i18n::tr(
+                    "Core dependencies missing (exit code 1). Re-run without --check (or with --yes) to auto-install.",
+                    "核心依赖缺失（退出码 1）。去掉 --check 或加 --yes 可自动安装。"
+                )
             );
             std::process::exit(1);
         }
         if todo.is_empty() {
             println!(
                 "\n{}",
-                if zh { "核心依赖齐全。" } else { "All core dependencies present." }
+                crate::i18n::tr("All core dependencies present.", "核心依赖齐全。")
             );
         }
         return Ok(());
@@ -749,7 +741,7 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
     if todo.is_empty() {
         println!(
             "\n{}",
-            if zh { "核心依赖齐全。" } else { "All core dependencies present." }
+            crate::i18n::tr("All core dependencies present.", "核心依赖齐全。")
         );
         return Ok(());
     }
