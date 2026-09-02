@@ -214,22 +214,24 @@ pub fn free_port() -> Result<u16> {
 }
 
 /// 运行工具的版本探测命令，返回首行（截 72 字符）。
-/// 供 doctor 体检与 deps setup 展示；探测失败（不存在/非零退出）返回 None。
+/// 供 doctor 体检与 deps setup 展示；探测失败（不存在/非零退出/无输出）返回 None。
+/// stdout 无内容时回落 stderr（如 llama-server 把版本打到 stderr）。
 pub fn probe_version(cmd: impl AsRef<std::path::Path>, args: &[&str]) -> Option<String> {
     let out = Command::new(cmd.as_ref()).args(args).output().ok()?;
     if !out.status.success() {
         return None;
     }
-    let s = String::from_utf8_lossy(&out.stdout);
-    Some(
+    let first_nonempty = |s: &str| {
         s.lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .chars()
-            .take(72)
-            .collect(),
-    )
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(|l| l.chars().take(72).collect::<String>())
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    first_nonempty(&stdout).or_else(|| {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        first_nonempty(&stderr)
+    })
 }
 
 #[cfg(test)]

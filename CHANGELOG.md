@@ -49,6 +49,19 @@
 - **新增 docs/FORK-REVIEW.md**：fork 维护与功能审查 runbook（同步前/本地补丁/
   功能矩阵三场景）
 
+### 修复（setup/doctor 专项真机测试）
+
+- **变体差异不再误报“可升级”**：cpu↔vulkan 构建的 stamp sha 天然不同，
+  原 is_upgradable 未先比对变体导致 CPU 用户永远看到 ↻ 标记；
+  变体切换仍由运行时自动处理
+- **llama-server 版本探测修复**：其 --version 输出走 stderr，
+  probe_version 现在在 stdout 为空时回落 stderr（doctor/setup 版本列
+  不再空白）
+- **`setup --check --all` 有缺失时退出码 1**：原实现只看核心缺失，
+  可选工具（llama-server/uv）缺失被忽略；可升级不算失败
+- **交互确认提示文案本地化**：英文环境不再出现中英混杂
+  （Download & install ... (~32 MB) → ...）
+
 ### 改进
 
 - **LLM 请求重试**：网络/TLS 错误、429、5xx 按指数退避重试（1s→2s，含抖动），

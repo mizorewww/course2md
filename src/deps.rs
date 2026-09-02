@@ -326,16 +326,21 @@ fn write_stamp(spec: &ToolSpec, entry: &AssetEntry) -> Result<()> {
     Ok(())
 }
 
-/// 已装安装（ours）是否落后于当前 manifest（新版可升级）。
+/// 已装安装（ours）是否落后于当前 manifest（同变体下有新版）。
+/// 变体差异（cpu↔vulkan）不算升级，由 ensure_for_run 的变体切换逻辑处理，
+/// 否则 cpu 用户会永远看到 gpu 资产的 sha 不同而被误报"可升级"。
 fn is_upgradable(spec: &ToolSpec, want: Variant, rep: &ToolReport) -> bool {
     let Some(stamp) = &rep.stamp else { return false };
     if !rep.ours {
         return false;
     }
-    platform_key()
-        .and_then(|k| pick_asset(spec, k, want))
-        .map(|(a, _)| !a.sha256.eq_ignore_ascii_case(&stamp.sha256))
-        .unwrap_or(false)
+    let Some((entry, _)) = platform_key().and_then(|k| pick_asset(spec, k, want)) else {
+        return false;
+    };
+    if !entry.variant.as_str().eq_ignore_ascii_case(&stamp.variant) {
+        return false;
+    }
+    !entry.sha256.eq_ignore_ascii_case(&stamp.sha256)
 }
 
 fn tool_version(cmd: &Path, args: &[&str]) -> Option<String> {
@@ -664,6 +669,7 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
 
     let mut todo: Vec<&'static ToolSpec> = Vec::new();
     let mut core_missing = false;
+    let mut missing_any = false;
     // 安装变体：跟随配置的默认后端（gpu→accel 构建，cpu→cpu 构建）
     let provider = crate::settings::load()
         .ok()
@@ -681,7 +687,7 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
             ""
         };
         let upg_mark = if upg {
-            format!("  ↻ {}{}", crate::i18n::tr("update available →", "可升级 →"), spec.version)
+            format!("  ↻ {} {}", crate::i18n::tr("update available →", "可升级 →"), spec.version)
         } else {
             String::new()
         };
@@ -705,6 +711,8 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
                     crate::i18n::tr("missing", "缺")
                 };
                 println!("✗ {:<12} [{}] {}", spec.name, tag, purpose);
+                // 缺失计数：--check 退出码语义（不带 --all 时可选缺失不算失败）
+                missing_any = true;
                 if !optional_mark {
                     core_missing = true;
                 }
@@ -720,7 +728,8 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
     }
 
     if check_only {
-        if core_missing {
+        // 退出码语义：核心缺失，或 --all 时任何缺失 → 1（可升级不算失败）
+        if core_missing || (all && missing_any) {
             eprintln!(
                 "\n{}",
                 crate::i18n::tr(
@@ -755,13 +764,21 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
                 .map(|(a, _)| a.size as f64 / (1024.0 * 1024.0))
                 .unwrap_or(0.0);
             let ok = Confirm::new()
-                .with_prompt(format!(
-                    "{} {name}（约 {size:.0} MB）→ {dir}?",
-                    if zh { "下载并安装" } else { "Download & install" },
-                    name = spec.name,
-                    size = size,
-                    dir = td.display()
-                ))
+                .with_prompt(if zh {
+                    format!(
+                        "下载并安装 {name}（约 {size:.0} MB）→ {dir}?",
+                        name = spec.name,
+                        size = size,
+                        dir = td.display()
+                    )
+                } else {
+                    format!(
+                        "Download & install {name} (~{size:.0} MB) → {dir}?",
+                        name = spec.name,
+                        size = size,
+                        dir = td.display()
+                    )
+                })
                 .default(true)
                 .interact()?;
             if !ok {
