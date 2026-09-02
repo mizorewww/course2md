@@ -63,7 +63,7 @@ fn apply_cli_inner(cmd: &mut clap::Command, zh: bool) {
     }
     *cmd = std::mem::take(cmd).about("把网课视频转成带截图的文字稿");
     let after = Some(
-        "示例：\n  course2md https://www.bilibili.com/video/BV1pb8o6yE8f\n  course2md https://youtu.be/dQw4w9WgXcQ\n  course2md ./lecture.mp4\n  course2md models download\n  course2md config init   # 生成配置文件模板\n  course2md llm setup     # 配置 LLM 字幕润色\n  course2md summarize <输出目录|输出根>  # 为已有输出生成视频总结（支持批量）\n  course2md remove                    # 清除 LLM/STT 的 API 配置（提交代码前执行）",
+        "示例：\n  course2md https://www.bilibili.com/video/BV1pb8o6yE8f\n  course2md https://youtu.be/dQw4w9WgXcQ\n  course2md ./lecture.mp4\n  course2md models download\n  course2md config init   # 生成配置文件模板\n  course2md setup         # 体检并自动安装缺失的外部工具\n  course2md llm setup     # 配置 LLM 字幕润色\n  course2md summarize <输出目录|输出根>  # 为已有输出生成视频总结（支持批量）\n  course2md remove                    # 清除 LLM/STT 的 API 配置（提交代码前执行）",
     );
     *cmd = std::mem::take(cmd).after_help(after);
 
@@ -114,6 +114,7 @@ fn apply_cli_inner(cmd: &mut clap::Command, zh: bool) {
         ("no_llm_hint", "关闭结束时「可开启 LLM」提示（本次运行）"),
         ("verbose", "更详细日志"),
         ("quiet", "只显示错误"),
+        ("no_install", "本次运行禁用外部工具自动安装"),
     ] {
         arg_help(cmd, id, help);
     }
@@ -133,6 +134,18 @@ fn apply_cli_inner(cmd: &mut clap::Command, zh: bool) {
         cmd,
         &["doctor"],
         "环境体检：依赖工具/后端可用性/配置/模型缓存",
+    );
+    sub_about(
+        cmd,
+        &["setup"],
+        "体检并自动安装缺失的外部工具（ffmpeg/yt-dlp/llama-server/uv，下载到私有工具目录）",
+    );
+    sub_about(cmd, &["setup", "check"], "只报告，不做任何更改");
+    sub_about(cmd, &["setup", "yes"], "跳过确认直接安装");
+    sub_about(
+        cmd,
+        &["setup", "all"],
+        "可选工具（llama-server/uv）也一并安装",
     );
     sub_about(cmd, &["config"], "配置文件管理");
     sub_about(

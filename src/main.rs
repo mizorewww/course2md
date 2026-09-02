@@ -1,6 +1,6 @@
 use clap::FromArgMatches;
 use course2md::cli::{Cli, Command, ConfigCmd, LlmCmd, ModelsCmd, RunOpts};
-use course2md::{config, doctor, llm, models, pipeline, settings};
+use course2md::{config, deps, doctor, llm, models, pipeline, runtime, settings};
 use tracing_subscriber::EnvFilter;
 
 fn init_logging(verbose: u8, quiet: bool) {
@@ -118,6 +118,7 @@ fn run_opts_to_cfg(
             .transcript_source
             .or(d.transcript_source)
             .unwrap_or_default(),
+        auto_install_deps: !opts.no_install && file.deps.auto_install,
     })
 }
 
@@ -138,6 +139,9 @@ fn resolve_asr_api(opts: &RunOpts, file: &settings::ConfigFile) -> crate::settin
 
 fn main() -> anyhow::Result<()> {
     course2md::i18n::init();
+    // 私有工具目录前置到 PATH：必须在任何线程/子进程之前（见 runtime.rs 安全注释）
+    // SAFETY: 启动早期单线程调用一次。
+    unsafe { runtime::prepend_tools_to_path() };
     // 帮助文本按 locale 改写后再解析
     let cli = {
         use clap::CommandFactory;
@@ -197,6 +201,10 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Doctor) => {
             init_logging(0, false);
             doctor::run()
+        }
+        Some(Command::Setup { check, yes, all }) => {
+            init_logging(0, false);
+            tokio::runtime::Runtime::new()?.block_on(deps::setup_cmd(check, yes, all))
         }
         Some(Command::Config { cmd }) => {
             init_logging(0, false);

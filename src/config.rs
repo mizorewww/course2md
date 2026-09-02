@@ -126,6 +126,8 @@ pub struct PipelineConfig {
     pub asr_model: Option<String>,
     /// `-o` 根目录，实际课程目录是 `{out_root}/{platform}/{title}/{id}/`
     pub out_root: PathBuf,
+    /// 缺失外部工具时允许按需自动安装（--no-install / [deps].auto_install 控制）
+    pub auto_install_deps: bool,
 }
 
 /// 感兴趣区域；坐标可为像素或比例（0.0-1.0）。
@@ -580,6 +582,7 @@ mod tests {
             asr_api: Default::default(),
             asr_model: None,
             transcript_source: TranscriptSource::Auto,
+            auto_install_deps: false,
         }
     }
 

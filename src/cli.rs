@@ -164,6 +164,10 @@ pub struct RunOpts {
     /// Errors only
     #[arg(short, long)]
     pub quiet: bool,
+
+    /// Disable auto-installing missing external tools (ffmpeg/yt-dlp/...) for this run
+    #[arg(long)]
+    pub no_install: bool,
 }
 
 #[derive(Subcommand)]
@@ -180,6 +184,18 @@ pub enum Command {
     },
     /// Diagnose the environment (tools, backends, config, model cache)
     Doctor,
+    /// Check & auto-install missing external tools (ffmpeg/yt-dlp/llama-server/uv)
+    Setup {
+        /// Report only, change nothing
+        #[arg(long)]
+        check: bool,
+        /// Install without confirmation prompts
+        #[arg(long)]
+        yes: bool,
+        /// Also install optional tools (llama-server, uv) even if the current backend doesn't need them
+        #[arg(long)]
+        all: bool,
+    },
     /// Manage the config file
     Config {
         #[command(subcommand)]

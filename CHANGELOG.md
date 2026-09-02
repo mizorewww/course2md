@@ -5,6 +5,27 @@
 
 ## [未发布]
 
+### 新增：外部依赖链自动安装（`course2md setup`）
+
+- **按需自动安装外部工具**：首次运行缺 ffmpeg/ffprobe/yt-dlp/llama-server/uv 时，
+  自动下载官方预编译二进制到私有工具目录 `~/.local/share/course2md/bin`
+  （`COURSE2MD_TOOLS_DIR` 可重定向）：免 root、不改系统 PATH、删目录即卸载；
+  全部资产固定版本 + sha256 校验（yt-dlp/uv 用官方校验和，llama.cpp/ffmpeg-static
+  由 release 工程预计算固化）；`[deps] auto_install = false` / `--no-install` 可关闭
+- **`course2md setup [--check|--yes|--all]`**：一键体检 + 安装缺失工具；
+  `doctor` 的缺失提示同步指向 setup
+- **需求驱动最小安装集**：本地文件 + `api` 后端只需 ffmpeg；URL 输入才要 yt-dlp；
+  `gpu/cpu` 才要 llama-server；`npu` 才要 uv
+- **llama-server 变体管理**：默认 Vulkan 构建（一张通吃 NVIDIA/AMD/Intel），
+  `--provider cpu` 时自动切换 CPU 构建并清理旧变体；macOS 装 Metal 构建
+  （coreml 回退 gpu 用）
+- **带库工具的子目录布局**：llama-server 连同 ggml 动态库装入
+  `tools_dir/llama-server/`（重装整体替换）；符号链接在解压平铺时原样重建
+  （修复 .so 版本链断裂）；下载器泛化至 `net.rs` 并增加网络抖动重试（×3 退避）
+  与纯 Rust tar.gz 解压（不再依赖系统 tar/gzip）
+- **install.sh 简化为引导器**：只装 course2md 本体 + metallib，依赖交给
+  `course2md setup`（旧脚本的缺依赖即退出闸门已移除）
+
 ### 改进
 
 - **LLM 请求重试**：网络/TLS 错误、429、5xx 按指数退避重试（1s→2s，含抖动），

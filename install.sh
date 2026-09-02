@@ -2,6 +2,8 @@
 set -euo pipefail
 
 # 安装 course2md 预编译二进制到 ~/bin（或 COURSE2MD_BIN_DIR）。
+# 本脚本只装本体；外部依赖（ffmpeg/yt-dlp/llama-server/uv）由安装后的
+# `course2md setup` 自动下载到私有目录，无需手动安装。
 # 用法：
 #   curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
 
@@ -20,23 +22,6 @@ case "$os-$arch" in
     exit 1
     ;;
 esac
-
-missing=()
-need() { command -v "$1" >/dev/null 2>&1 || missing+=("$1"); }
-need ffmpeg
-need ffprobe
-# macOS arm64 预编译包含 CoreML 后端，无需 llama-server；其余平台需要。
-if [ "$os-$arch" != "darwin-arm64" ] && [ "$os-$arch" != "darwin-aarch64" ]; then
-  need yt-dlp
-  need llama-server
-fi
-if [ "${#missing[@]}" -gt 0 ]; then
-  echo "缺少依赖：${missing[*]}" >&2
-  echo "macOS:  brew install ffmpeg yt-dlp llama.cpp" >&2
-  echo "Arch:   sudo pacman -S ffmpeg yt-dlp llama-cpp" >&2
-  echo "Debian: sudo apt install ffmpeg yt-dlp && 安装 llama.cpp（见 README）" >&2
-  exit 1
-fi
 
 mkdir -p "$BIN_DIR"
 tmp="$(mktemp)"
@@ -96,4 +81,5 @@ PY
 fi
 
 echo "请确保 PATH 包含 $BIN_DIR，例如：export PATH=\"\$HOME/bin:\$PATH\""
+echo "下一步：$BIN_DIR/course2md setup  # 体检并自动安装缺失的外部工具（ffmpeg/yt-dlp/llama-server）"
 echo "首次运行会自动下载识别模型（macOS CoreML 约 1-2GB；其他平台 llama.cpp GGUF 约 2.4GB）。"

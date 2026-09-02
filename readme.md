@@ -44,6 +44,23 @@ course2md ./lecture.mp4
 - `yt-dlp` (Online video parsing and downloading; only needed for online URLs)
 - `llama-server` (Provided by `llama.cpp`; only needed for local `gpu` / `cpu` backends, not required for macOS `coreml` or cloud `api` mode)
 
+### Automatic dependency install (read this first)
+
+You do **not** need to install the tools above by hand:
+
+- **On-demand auto-install**: on first run, missing tools are downloaded automatically
+  (official prebuilt binaries, version-pinned & sha256-verified) into a private tools dir
+  at `~/.local/share/course2md/bin` (override with `COURSE2MD_TOOLS_DIR`). No root, no PATH
+  edits, and deleting the dir fully uninstalls them — the same behavior as the automatic
+  model download. Disable with `[deps] auto_install = false` or `--no-install`
+- **Manual top-up**: `course2md setup` checks and installs missing tools in one command
+  (`--check` report only, `--yes` skip prompts, `--all` include optional llama-server/uv);
+  `course2md doctor` shows the full environment report
+- **Install strategy**: llama-server ships the Vulkan build by default (works on
+  NVIDIA/AMD/Intel alike) and auto-switches to the CPU build when `--provider cpu` is set;
+  when a package manager is available, brew/pacman/apt/winget installs are still preferred
+  (system-installed tools are used first)
+
 ---
 
 ### macOS
@@ -252,6 +269,10 @@ formats = ["md", "html"]
 
 # Keep downloaded media.mp4 video file after processing
 keep_video = false
+
+[deps]
+# Auto-download missing external tools into the private dir (~/.local/share/course2md/bin)
+auto_install = true
 
 [asr_api]
 # Cloud STT settings (used when --provider api)

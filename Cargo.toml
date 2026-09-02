@@ -21,6 +21,10 @@ indicatif = "0.17"
 image-compare = "0.5.0"
 libc = "0.2"
 dialoguer = "0.12.0"
+sha2 = "0.10"
+tar = "0.4"
+flate2 = "1"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [profile.release]
 lto = "thin"

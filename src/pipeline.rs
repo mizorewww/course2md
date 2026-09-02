@@ -14,30 +14,21 @@ use std::time::Instant;
 pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     let t_total = Instant::now();
     cfg.validate().context("配置预检失败")?;
-    crate::error::require_cmd("ffmpeg")?;
-    crate::error::require_cmd("ffprobe")?;
-    use config::AsrProvider;
-    if !matches!(
+
+    let local = Path::new(&cfg.url);
+    let is_local = local.is_file();
+    // 外部依赖链预检：缺失工具按需自动安装（ffmpeg/ffprobe/yt-dlp/llama-server/uv，
+    // 由 [deps].auto_install / --no-install 控制；报错文案自带包管理器提示）
+    crate::deps::ensure_for_run(
         cfg.provider,
-        AsrProvider::Coreml | AsrProvider::Api | AsrProvider::Npu
-    ) {
-        crate::error::require_cmd("llama-server")?;
-    } else if cfg.provider == AsrProvider::Coreml
-        && crate::error::require_cmd("llama-server").is_err()
-    {
-        // fallback 是 best-effort：提前告知而不是失败后才发现
-        tracing::warn!("未找到 llama-server：CoreML 若失败将无法回退到 gpu 后端（best-effort）");
-    }
+        !is_local && !cfg.no_download,
+        cfg.auto_install_deps,
+    )
+    .await?;
 
     // LLM 预检：配置错误应在跑完昂贵的下载/识别之前暴露
     if cfg.llm.enabled {
         crate::llm::validate(&cfg.llm)?;
-    }
-
-    let local = Path::new(&cfg.url);
-    let is_local = local.is_file();
-    if !is_local && !cfg.no_download {
-        crate::error::require_cmd("yt-dlp")?;
     }
 
     let mut cfg = cfg.clone();

@@ -9,10 +9,12 @@
 //!     mmproj-Qwen3-ASR-1.7B-Q8_0.gguf
 //! ```
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
+
+// 下载/校验/进度逻辑已泛化到 net.rs（外部工具自动安装共用同一套实现）。
+use crate::net::{self, Verify};
 
 const HF_REPO_PATH: &str = "ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main";
 
@@ -52,20 +54,7 @@ pub fn llama_ready(root: &Path) -> bool {
 /// 文件完整性：有 manifest（下载完成时记录的精确字节数）时按字节数校验；
 /// 无 manifest 的旧缓存退回 >1MB 启发式。
 fn file_complete(path: &Path) -> bool {
-    let Ok(md) = fs::metadata(path) else {
-        return false;
-    };
-    if !path.is_file() || md.len() <= 1_000_000 {
-        return false;
-    }
-    let manifest = path.with_extension("manifest.json");
-    if let Ok(s) = fs::read_to_string(&manifest)
-        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&s)
-        && let Some(expected) = v.get("size").and_then(|s| s.as_u64())
-    {
-        return md.len() == expected;
-    }
-    true
+    net::is_complete(path, &Verify::Size)
 }
 
 pub fn ensure_llama(root: &Path) -> Result<LlamaAsr> {
@@ -115,75 +104,13 @@ pub async fn download_models(root: &Path) -> Result<()> {
 }
 
 async fn download_file(url: &str, dest: &Path, label: &str) -> Result<()> {
-    if dest.is_file() && file_complete(dest) {
-        tracing::info!(label, "skip existing");
-        return Ok(());
-    }
-    if dest.is_file() {
-        // 校验不过的残留文件（截断/损坏）直接移除，避免"发现坏了却重下不了"
-        tracing::warn!(
-            label,
-            "existing file failed integrity check, re-downloading"
-        );
-        let _ = fs::remove_file(dest);
-        let _ = fs::remove_file(dest.with_extension("manifest.json"));
-    }
-    if let Some(p) = dest.parent() {
-        fs::create_dir_all(p)?;
-    }
-    let tmp = dest.with_extension("part");
-    let url = url.to_string();
-    let dest = dest.to_path_buf();
-    let label = label.to_string();
-    tokio::task::spawn_blocking(move || -> Result<()> {
-        tracing::info!(label = %label, url = %url, "download");
-        let resp = ureq::get(&url).call().context("请求失败")?;
-        let total: u64 = resp
-            .header("content-length")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        let pb = indicatif::ProgressBar::new(total.max(1));
-        pb.set_style(
-            indicatif::ProgressStyle::with_template(
-                "{spinner:.green} {msg} [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})",
-            )
-            .unwrap()
-            .progress_chars("##-"),
-        );
-        pb.set_message(label.clone());
-        let mut reader = resp.into_reader();
-        let mut out = fs::File::create(&tmp)?;
-        let mut buf = vec![0u8; 1024 * 512];
-        let mut done: u64 = 0;
-        loop {
-            let n = reader.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            std::io::Write::write_all(&mut out, &buf[..n])?;
-            done += n as u64;
-            pb.set_position(done);
-        }
-        out.sync_all()?;
-        drop(out);
-        // 完整性：以服务器 Content-Length 为准（而非"实际收到多少"——截断响应会伪装成功）
-        if total > 0 && done != total {
-            let _ = fs::remove_file(&tmp);
-            anyhow::bail!("下载不完整：期望 {total} 字节，实际收到 {done}（请重试）");
-        }
-        fs::rename(&tmp, &dest)?;
-        // manifest 记录 authoritative Content-Length，供后续启动校验
-        let _ = fs::write(
-            dest.with_extension("manifest.json"),
-            serde_json::json!({"size": if total > 0 { total } else { done }}).to_string(),
-        );
-        pb.finish_and_clear();
-        tracing::info!(label = %label, bytes = done, "downloaded");
-        Ok(())
+    net::download_file(&net::Download {
+        url: url.to_string(),
+        dest: dest.to_path_buf(),
+        label: label.to_string(),
+        verify: Verify::Size,
     })
     .await
-    .context("下载线程失败")??;
-    Ok(())
 }
 
 pub fn list_models(root: &Path) {

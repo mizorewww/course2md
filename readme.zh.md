@@ -44,6 +44,21 @@ course2md ./lecture.mp4
 - `yt-dlp`（在线视频解析与下载；仅处理在线链接时需要）
 - `llama-server`（由 `llama.cpp` 提供；仅在本地 `gpu` / `cpu` 识别后端下需要，macOS `coreml` 与云端 `api` 模式无需安装）
 
+### 依赖自动安装（推荐先读）
+
+以上外部工具**无需手动逐个安装**：
+
+- **按需自动安装**：首次运行缺少工具时，course2md 会自动下载官方预编译二进制（固定版本
+  + sha256 校验）到私有工具目录 `~/.local/share/course2md/bin`（`COURSE2MD_TOOLS_DIR`
+  可重定向），免 root、不改系统 PATH，删除该目录即完全卸载。识别模型本来就会自动下载，
+  行为一致；`[deps] auto_install = false` 或 `--no-install` 可关闭
+- **手动补齐**：`course2md setup` 一键体检并安装缺失工具（`--check` 只报告、
+  `--yes` 跳过确认、`--all` 连可选的 llama-server/uv 一起装）；`course2md doctor`
+  查看完整环境状态
+- **安装策略**：llama-server 默认装 Vulkan 构建（一张通吃 NVIDIA/AMD/Intel 卡），
+  配置 `--provider cpu` 时自动切换 CPU 构建；有包管理器时仍推荐 brew/pacman/apt/winget
+  安装（course2md 会优先使用系统内的工具）
+
 ---
 
 ### macOS
@@ -252,6 +267,10 @@ formats = ["md", "html"]
 
 # 是否保留下载的原始 media.mp4 文件
 keep_video = false
+
+[deps]
+# 缺失外部工具时自动下载到私有目录（~/.local/share/course2md/bin）
+auto_install = true
 
 [asr_api]
 # 云端 STT 配置（--provider api 时使用）

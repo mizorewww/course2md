@@ -50,12 +50,29 @@ impl Default for AsrApi {
     }
 }
 
+/// `[deps]`：外部工具（ffmpeg/yt-dlp/llama-server/uv）的自动安装策略。
+/// 安装位置：私有工具目录（`~/.local/share/course2md/bin`，
+/// `COURSE2MD_TOOLS_DIR` 可重定向），删除该目录即完全卸载。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Deps {
+    /// 缺失外部工具时自动下载到私有目录（按需、最小集）。
+    pub auto_install: bool,
+}
+
+impl Default for Deps {
+    fn default() -> Self {
+        Self { auto_install: true }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct ConfigFile {
     pub defaults: Defaults,
     pub llm: crate::llm::LlmSettings,
     pub asr_api: AsrApi,
+    pub deps: Deps,
 }
 
 pub fn config_path() -> PathBuf {
@@ -136,6 +153,12 @@ pub const TEMPLATE: &str = r#"# course2md 配置文件
 #model_dir = "~/.cache/course2md/models"
 # 保留下载的视频 media.mp4
 #keep_video = false
+
+[deps]
+# 缺失外部工具（ffmpeg/yt-dlp/llama-server/uv）时自动下载到私有工具目录
+#（~/.local/share/course2md/bin，COURSE2MD_TOOLS_DIR 可重定向）。
+# 关闭后缺工具会直接报错并给出包管理器提示；course2md setup 可随时手动补齐。
+auto_install = true
 
 [asr_api]
 # 云端 STT（--provider api，OpenAI 兼容 /audio/transcriptions；OpenRouter 聚合多模型）
@@ -233,6 +256,8 @@ pub fn print_effective(cfg: &ConfigFile) {
             .unwrap_or_else(|| "(内置缓存目录)".into())
     );
     println!("  keep_video     : {}", d.keep_video.unwrap_or(false));
+    println!("[deps]");
+    println!("  auto_install   : {}", cfg.deps.auto_install);
     println!("[asr_api]");
     println!("  base_url       : {}", cfg.asr_api.base_url);
     println!("  model          : {}", cfg.asr_api.model);

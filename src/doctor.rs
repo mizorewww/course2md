@@ -47,7 +47,7 @@ pub fn run() -> Result<()> {
                 &mut out,
                 false,
                 tool,
-                "  缺失（必需）：brew install ffmpeg / apt install ffmpeg",
+                "  缺失（必需）：course2md setup 可自动安装；或 brew install ffmpeg / apt install ffmpeg",
             ),
         }
     }
@@ -57,7 +57,7 @@ pub fn run() -> Result<()> {
             &mut out,
             false,
             "yt-dlp",
-            "  缺失（远程视频需要）：brew install yt-dlp",
+            "  缺失（远程视频需要）：course2md setup 可自动安装",
         ),
     }
 
@@ -103,7 +103,9 @@ pub fn run() -> Result<()> {
             &format!("  {}", p.display()),
         ),
         None => {
-            out.push("! llama-server  未安装（gpu/cpu 后端需要；coreml/npu/api 不需要）".into())
+            out.push(
+                "! llama-server  未安装（gpu/cpu 后端需要；course2md setup 可自动安装）".into(),
+            )
         }
     }
 

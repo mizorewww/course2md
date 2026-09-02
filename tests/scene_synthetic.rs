@@ -74,6 +74,7 @@ fn scene_detects_slides_with_true_timestamps() {
         asr_api: Default::default(),
         asr_model: None,
         transcript_source: course2md::config::TranscriptSource::Asr,
+        auto_install_deps: false,
     };
 
     let frames = tokio::runtime::Runtime::new()
@@ -147,6 +148,7 @@ drawbox=color=gray:t=fill:enable='gte(t,3.5)'";
         asr_api: Default::default(),
         asr_model: None,
         transcript_source: course2md::config::TranscriptSource::Asr,
+        auto_install_deps: false,
     };
 
     let frames = tokio::runtime::Runtime::new()
