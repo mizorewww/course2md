@@ -51,15 +51,17 @@ pub fn is_complete(dest: &Path, verify: &Verify) -> bool {
     let Ok(md) = fs::metadata(dest) else {
         return false;
     };
-    if !dest.is_file() || md.len() <= 1_000_000 {
+    if !dest.is_file() {
         return false;
     }
     match verify {
+        // sha256 即权威，不设体积下限（工具可能小于 1MB）
         Verify::Sha256(expect) => match sha256_file(dest) {
             Ok(got) => got.eq_ignore_ascii_case(expect),
             Err(_) => false,
         },
-        Verify::Size => size_manifest_complete(dest, md.len()),
+        // 模型缓存的尺寸口径：>1MB 启发式 + manifest 记账
+        Verify::Size => md.len() > 1_000_000 && size_manifest_complete(dest, md.len()),
     }
 }
 
@@ -103,17 +105,25 @@ pub async fn download_file(dl: &Download) -> Result<()> {
     let verify = dl.verify;
     tokio::task::spawn_blocking(move || -> Result<()> {
         tracing::info!(label = %label, url = %url, "download");
-        // 网络抖动重试：瞬时断流/超时不应让整个安装失败（大文件下载常见）
+        // 网络抖动重试：瞬时断流/超时不应让整个安装失败（大文件下载常见）。
+        // 4xx（除 429）不可重试——与 llm.rs 的重试约定一致。
         let mut last_err: Option<anyhow::Error> = None;
         for attempt in 1..=3 {
             match download_once(&url, &tmp, &label) {
-                Ok(total) => {
-                    finish_download(&tmp, &dest, total, verify, &label)?;
+                Ok((total, done)) => {
+                    finish_download(&tmp, &dest, total, done, verify, &label)?;
                     return Ok(());
                 }
                 Err(e) => {
+                    let permanent = e
+                        .downcast_ref::<HttpStatus>()
+                        .map(|s| s.0 < 500 && s.0 != 429)
+                        .unwrap_or(false);
                     let _ = fs::remove_file(&tmp);
                     last_err = Some(e);
+                    if permanent {
+                        break;
+                    }
                     if attempt < 3 {
                         let wait = std::time::Duration::from_secs(if attempt == 1 { 2 } else { 5 });
                         tracing::warn!(label = %label, attempt, "下载失败，{wait:?} 后重试");
@@ -129,9 +139,30 @@ pub async fn download_file(dl: &Download) -> Result<()> {
     Ok(())
 }
 
-/// 单次尝试：请求 + 流式落盘到 tmp。返回服务器声明的 Content-Length（0 = 未知）。
-fn download_once(url: &str, tmp: &Path, label: &str) -> Result<u64> {
-    let resp = ureq::get(url).call().context("请求失败")?;
+/// 不可重试的 HTTP 状态（4xx 且非 429）。用独立类型以便重试循环 downcast 判断。
+#[derive(Debug)]
+struct HttpStatus(u16);
+
+impl std::fmt::Display for HttpStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HTTP {}", self.0)
+    }
+}
+
+impl std::error::Error for HttpStatus {}
+
+/// 单次尝试：请求 + 流式落盘到 tmp。
+/// 返回 (服务器声明的 Content-Length（0 = 未知），实际收到字节数)。
+fn download_once(url: &str, tmp: &Path, label: &str) -> Result<(u64, u64)> {
+    let resp = match ureq::get(url).call() {
+        Ok(r) => r,
+        Err(ureq::Error::Status(code, resp)) => {
+            let body = resp.into_string().unwrap_or_default();
+            let tail: String = body.trim().chars().take(200).collect();
+            return Err(HttpStatus(code)).with_context(|| format!("HTTP {code}: {tail}"));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let total: u64 = resp
         .header("content-length")
         .and_then(|v| v.parse().ok())
@@ -166,11 +197,18 @@ fn download_once(url: &str, tmp: &Path, label: &str) -> Result<u64> {
         anyhow::bail!("下载不完整：期望 {total} 字节，实际收到 {done}（请重试）");
     }
     tracing::info!(label = %label, bytes = done, "downloaded");
-    Ok(total)
+    Ok((total, done))
 }
 
 /// rename 前的最终校验：sha256（可执行文件固定）或尺寸记账，然后原子落盘。
-fn finish_download(tmp: &Path, dest: &Path, total: u64, verify: Verify, label: &str) -> Result<()> {
+fn finish_download(
+    tmp: &Path,
+    dest: &Path,
+    total: u64,
+    done: u64,
+    verify: Verify,
+    label: &str,
+) -> Result<()> {
     // sha256 校验（在 rename 之前，坏文件根本不落正式位）
     let got_sha = match verify {
         Verify::Sha256(_) => Some(sha256_file(tmp)?),
@@ -185,12 +223,54 @@ fn finish_download(tmp: &Path, dest: &Path, total: u64, verify: Verify, label: &
         );
     }
     fs::rename(tmp, dest)?;
-    // manifest 记录 authoritative Content-Length 与哈希，供后续启动校验
-    let mut manifest = serde_json::json!({ "size": if total > 0 { total } else { 0 } });
+    // manifest 记录 authoritative Content-Length 与哈希，供后续启动校验。
+    // 无 Content-Length 时记录实际字节数（原 models.rs 行为；记 0 会导致
+    // 下次启动永远判"不完整"而无限重下）。
+    let mut manifest = serde_json::json!({ "size": if total > 0 { total } else { done } });
     if let Verify::Sha256(sha) = verify {
         manifest["sha256"] = serde_json::json!(sha);
     }
     let _ = fs::write(dest.with_extension("manifest.json"), manifest.to_string());
     tracing::debug!(label = %label, "verified & installed");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_file(name: &str, bytes: &[u8]) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("c2m-net-test-{}-{}", std::process::id(), name));
+        fs::write(&p, bytes).unwrap();
+        p
+    }
+
+    #[test]
+    fn sha_verify_has_no_1mb_floor() {
+        // 修复：sha256 校验不应套用模型的 >1MB 启发式（小工具也要能通过完整性检查）
+        let data = b"hello course2md";
+        let p = tmp_file("sha-small", data);
+        let expect: &'static str = Box::leak(sha256_file(&p).unwrap().into_boxed_str());
+        assert!(is_complete(&p, &Verify::Sha256(expect)));
+        assert!(!is_complete(&p, &Verify::Sha256("deadbeef")));
+        // 同尺寸文件在 Size 口径下应判不完整（启发式保留在模型路径）
+        assert!(!is_complete(&p, &Verify::Size));
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn http_status_is_permanent_for_4xx_except_429() {
+        let mk = |code: u16| -> anyhow::Error { HttpStatus(code).into() };
+        let permanent = |e: &anyhow::Error| {
+            e.downcast_ref::<HttpStatus>()
+                .map(|s| s.0 < 500 && s.0 != 429)
+                .unwrap_or(false)
+        };
+        assert!(permanent(&mk(404)));
+        assert!(permanent(&mk(401)));
+        assert!(!permanent(&mk(429)));
+        assert!(!permanent(&mk(502)));
+        // 网络类错误（非 HttpStatus）应重试
+        assert!(!permanent(&anyhow::anyhow!("connection reset")));
+    }
 }

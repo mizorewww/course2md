@@ -308,13 +308,13 @@ fn read_stamp(name: &str) -> Option<Stamp> {
     serde_json::from_str(&s).ok()
 }
 
-fn write_stamp(name: &str, entry: &AssetEntry) -> Result<()> {
-    let p = stamp_path(name);
+fn write_stamp(spec: &ToolSpec, entry: &AssetEntry) -> Result<()> {
+    let p = stamp_path(spec.name);
     if let Some(d) = p.parent() {
         std::fs::create_dir_all(d)?;
     }
     let st = Stamp {
-        version: "pinned".into(),
+        version: spec.version.to_string(),
         variant: entry.variant.as_str().into(),
         sha256: entry.sha256.into(),
         installed_at: std::time::SystemTime::now()
@@ -324,6 +324,18 @@ fn write_stamp(name: &str, entry: &AssetEntry) -> Result<()> {
     };
     crate::checkpoint::atomic_write(&p, serde_json::to_string_pretty(&st)?.as_bytes())?;
     Ok(())
+}
+
+/// 已装安装（ours）是否落后于当前 manifest（新版可升级）。
+fn is_upgradable(spec: &ToolSpec, want: Variant, rep: &ToolReport) -> bool {
+    let Some(stamp) = &rep.stamp else { return false };
+    if !rep.ours {
+        return false;
+    }
+    platform_key()
+        .and_then(|k| pick_asset(spec, k, want))
+        .map(|(a, _)| !a.sha256.eq_ignore_ascii_case(&stamp.sha256))
+        .unwrap_or(false)
 }
 
 fn tool_version(cmd: &Path, args: &[&str]) -> Option<String> {
@@ -385,14 +397,9 @@ pub async fn install(spec: &'static ToolSpec, want: Variant) -> Result<PathBuf> 
 
     let dir = runtime::tools_dir();
     std::fs::create_dir_all(&dir)?;
+    // bundle 工具的旧安装目录：下载/解压全部成功后才替换（失败不毁现有安装）
     let dest_dir = if spec.bundle_dir {
-        // 带自带动态库的工具：独立子目录，整体替换（避免跨版本残留旧 .so）
-        let d = dir.join(spec.name);
-        if d.is_dir() {
-            std::fs::remove_dir_all(&d)?;
-        }
-        std::fs::create_dir_all(&d)?;
-        d
+        dir.join(spec.name)
     } else {
         dir.clone()
     };
@@ -439,13 +446,19 @@ pub async fn install(spec: &'static ToolSpec, want: Variant) -> Result<PathBuf> 
                 let _ = std::fs::remove_dir_all(&tmp);
                 return Err(e);
             }
-            let moved = flatten_move(&extract, &dest_dir)?;
-            tracing::debug!(tool = spec.name, files = moved, "extracted");
+            // 全部成功才替换旧安装：bundle 工具整体清空子目录（避免跨版本残留旧 .so）
+            if spec.bundle_dir && dest_dir.is_dir() {
+                std::fs::remove_dir_all(&dest_dir)?;
+            }
+            std::fs::create_dir_all(&dest_dir)?;
+            let moved = flatten_move(&extract, &dest_dir);
             let _ = std::fs::remove_dir_all(&tmp);
+            let moved = moved?;
+            tracing::debug!(tool = spec.name, files = moved, "extracted");
         }
     }
 
-    write_stamp(spec.name, entry)?;
+    write_stamp(spec, entry)?;
     let bin = dest_dir.join(tool_exe(spec.name));
     println!(
         "{}",
@@ -552,27 +565,39 @@ pub async fn ensure_for_run(provider: AsrProvider, url_input: bool, auto_install
     for spec in specs_for_run(provider, url_input) {
         let rep = report(spec);
         if rep.path.is_some() {
-            // llama-server 变体检查：已有安装与本次后端不符时按需重装
-            if spec.bundle_dir && want != Variant::Auto {
-                let have = rep.stamp.as_ref().map(|s| s.variant.as_str());
-                if rep.ours && have.is_some() && have != Some(want.as_str()) {
-                    if auto_install {
+            // 已有安装与本机当前需求不一致时按需更新：
+            // 1) 变体切换（bundle 工具，如 llama-server 的 vulkan ↔ cpu）
+            let variant_mismatch = rep.ours
+                && spec.bundle_dir
+                && want != Variant::Auto
+                && rep.stamp.as_ref().map(|s| s.variant.as_str()) != Some(want.as_str());
+            // 2) manifest 升级（stamp sha 与当前清单资产不一致 → 新版可用）
+            let upgradable = is_upgradable(spec, want, &rep);
+            if variant_mismatch || upgradable {
+                if auto_install {
+                    if upgradable && !variant_mismatch {
                         println!(
                             "{}",
                             crate::i18n::tr(
-                                &format!("switching {} to {:?} build for --provider {provider}", spec.name, want),
-                                &format!("检测到 {} 为 {:?} 构建，与 --provider {provider} 不符，正在切换", spec.name, want),
+                                &format!("updating {} to {}…", spec.name, spec.version),
+                                &format!("检测到 {} 新版本（{}），正在升级…", spec.name, spec.version),
                             )
                         );
-                        install(spec, want).await?;
-                    } else {
-                        tracing::warn!(
-                            "{} 当前为 {} 构建（--provider {provider} 建议 {:?}）",
-                            spec.name,
-                            have.unwrap_or("unknown"),
-                            want
-                        );
                     }
+                    install(spec, want).await?;
+                } else if variant_mismatch {
+                    tracing::warn!(
+                        "{} 当前为 {} 构建（--provider {provider} 建议 {:?}）",
+                        spec.name,
+                        rep.stamp.as_ref().map(|s| s.variant.as_str()).unwrap_or("unknown"),
+                        want
+                    );
+                } else {
+                    tracing::info!(
+                        "{} 有新版本（{}）；运行 course2md setup --yes 升级",
+                        spec.name,
+                        spec.version
+                    );
                 }
             }
             continue;
@@ -641,34 +666,78 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
         SPECS.iter().filter(|s| matches!(s.req, Req::Providers(_))).collect();
 
     let mut todo: Vec<&'static ToolSpec> = Vec::new();
+    let mut core_missing = false;
+    // 安装变体：跟随配置的默认后端（gpu→accel 构建，cpu→cpu 构建）
+    let provider = crate::settings::load()
+        .ok()
+        .and_then(|c| c.defaults.provider)
+        .unwrap_or_else(crate::config::default_provider_hint);
+    let want = want_variant(provider);
+
     for spec in core.iter().copied().chain(optional.iter().copied()) {
         let rep = report(spec);
         let optional_mark = matches!(spec.req, Req::Providers(_));
+        let upg = is_upgradable(spec, want, &rep);
+        let ours_mark = if rep.ours {
+            if zh { "  (自动安装)" } else { "  (auto-installed)" }
+        } else {
+            ""
+        };
+        let upg_mark = if upg {
+            if zh {
+                format!("  ↻ 可升级 → {}", spec.version)
+            } else {
+                format!("  ↻ update available → {}", spec.version)
+            }
+        } else {
+            String::new()
+        };
         match (&rep.path, &rep.version) {
             (Some(p), Some(v)) => println!(
-                "✓ {:<12} {:<40} {}{}",
+                "✓ {:<12} {:<40} {}{}{}",
                 spec.name,
                 v,
                 p.display(),
-                if rep.ours { if zh { "  (自动安装)" } else { "  (auto-installed)" } } else { "" }
+                ours_mark,
+                upg_mark
             ),
-            (Some(p), None) => println!("✓ {:<12} {:<40} {}", spec.name, "-", p.display()),
+            (Some(p), None) => {
+                println!("✓ {:<12} {:<40} {}{}", spec.name, "-", p.display(), upg_mark)
+            }
             (None, _) => {
                 let purpose = if zh { spec.purpose_zh } else { spec.purpose_en };
                 let tag = if optional_mark && !all {
                     if zh { "可选" } else { "optional" }
                 } else {
-                    "缺"
+                    if zh { "缺" } else { "missing" }
                 };
                 println!("✗ {:<12} [{}] {}", spec.name, tag, purpose);
+                if !optional_mark {
+                    core_missing = true;
+                }
                 if !optional_mark || all {
                     todo.push(spec);
                 }
             }
         }
+        // 已安装但落后于 manifest：核心工具直接排入安装队列（含 --all 时的可选工具）
+        if rep.path.is_some() && upg && (!optional_mark || all) {
+            todo.push(spec);
+        }
     }
 
-    if check_only || todo.is_empty() {
+    if check_only {
+        if core_missing {
+            eprintln!(
+                "{}",
+                if zh {
+                    "\n核心依赖缺失（退出码 1）。去掉 --check 或加 --yes 可自动安装。"
+                } else {
+                    "\nCore dependencies missing (exit code 1). Re-run without --check (or with --yes) to auto-install."
+                }
+            );
+            std::process::exit(1);
+        }
         if todo.is_empty() {
             println!(
                 "\n{}",
@@ -677,13 +746,13 @@ pub async fn setup_cmd(check_only: bool, yes: bool, all: bool) -> Result<()> {
         }
         return Ok(());
     }
-
-    // 安装变体：跟随配置的默认后端（gpu→accel 构建，cpu→cpu 构建）
-    let provider = crate::settings::load()
-        .ok()
-        .and_then(|c| c.defaults.provider)
-        .unwrap_or_else(crate::config::default_provider_hint);
-    let want = want_variant(provider);
+    if todo.is_empty() {
+        println!(
+            "\n{}",
+            if zh { "核心依赖齐全。" } else { "All core dependencies present." }
+        );
+        return Ok(());
+    }
 
     let interactive = !yes && std::io::IsTerminal::is_terminal(&std::io::stdin());
     println!();

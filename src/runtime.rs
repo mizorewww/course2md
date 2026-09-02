@@ -150,7 +150,8 @@ pub fn tools_dir() -> PathBuf {
     }
     #[cfg(windows)]
     {
-        if let Some(d) = std::env::var_os("APPDATA") {
+        // 二进制不能放 Roaming（APPDATA 会跨机漫游）；用 LOCALAPPDATA 与 cache_dir 一致
+        if let Some(d) = std::env::var_os("LOCALAPPDATA") {
             return PathBuf::from(d).join("course2md").join("bin");
         }
     }
