@@ -46,6 +46,8 @@ course2md ./lecture.mp4
 
 它通过 sidecar 方式内置 `course2md` 二进制，以 `--json` NDJSON 事件流通信；取消任务会连带终止 ffmpeg / llama-server 等子进程。本机已安装 CLI 时也可独立使用（开发模式回落到 PATH）。
 
+每次发版都会在 [GitHub Releases](https://github.com/mizorewww/course2md/releases) 附上预编译安装包：`course2md-gui-macos-arm64.dmg`（Developer ID 签名 + 公证）、`course2md-gui-windows-x86_64-setup.exe` 与 `course2md-gui-linux-x86_64.AppImage`。应用已内置 CLI，但媒体处理仍依赖系统的 `ffmpeg` / `yt-dlp`（见下文[安装指南](#安装指南)）。
+
 构建（macOS，产出 `.app` 与 `.dmg`）：
 
 ```bash
@@ -87,6 +89,8 @@ brew install ffmpeg yt-dlp   # llama.cpp 仅在 gpu/cpu 兜底后端时需要
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
 ```
 </details>
+
+**桌面客户端（GUI）**：从 [Releases](https://github.com/mizorewww/course2md/releases) 下载 `course2md-gui-macos-arm64.dmg` 拖入「应用程序」即可——Developer ID 签名 + 公证，已内置 CLI 与 `mlx.metallib`。
 
 ---
 
@@ -132,6 +136,8 @@ sudo install -m755 llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
 ```
 
+**桌面客户端（GUI）**：从 [Releases](https://github.com/mizorewww/course2md/releases) 下载 `course2md-gui-linux-x86_64.AppImage`，`chmod +x` 后直接运行。
+
 ---
 
 ### Windows
@@ -149,6 +155,8 @@ winget install --id ggml.llamacpp -e
 **安装 course2md**：
 1. 前往 [Releases](https://github.com/mizorewww/course2md/releases) 下载 `course2md-windows-x86_64.exe`。
 2. 重命名为 `course2md.exe` 并将其移动至已加入系统 `PATH` 的目录中。
+
+**桌面客户端（GUI）**：从 [Releases](https://github.com/mizorewww/course2md/releases) 下载并运行 `course2md-gui-windows-x86_64-setup.exe`（NSIS 安装包）。
 
 ---
 

@@ -46,6 +46,8 @@ The `app/` directory contains a Tauri v2 desktop client that wraps the full CLI 
 
 It embeds the `course2md` binary as a sidecar and talks to it via the `--json` NDJSON event stream; cancelling a job also terminates child processes such as ffmpeg / llama-server. If the CLI is already installed, the app can use it standalone (dev mode falls back to PATH).
 
+Prebuilt installers are attached to every [GitHub Release](https://github.com/mizorewww/course2md/releases): `course2md-gui-macos-arm64.dmg` (Developer ID signed & notarized), `course2md-gui-windows-x86_64-setup.exe` and `course2md-gui-linux-x86_64.AppImage`. The app embeds the CLI, but still relies on the system `ffmpeg` / `yt-dlp` (see [Installation](#installation)).
+
 Build (macOS — produces `.app` and `.dmg`):
 
 ```bash
@@ -87,6 +89,8 @@ brew install ffmpeg yt-dlp   # llama.cpp only needed for the gpu/cpu fallback ba
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
 ```
 </details>
+
+**Desktop app (GUI)**: download `course2md-gui-macos-arm64.dmg` from [Releases](https://github.com/mizorewww/course2md/releases) and drag it into Applications — Developer ID signed & notarized, with the CLI and `mlx.metallib` embedded.
 
 ---
 
@@ -132,6 +136,8 @@ sudo install -m755 llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
 ```
 
+**Desktop app (GUI)**: download `course2md-gui-linux-x86_64.AppImage` from [Releases](https://github.com/mizorewww/course2md/releases), `chmod +x` and run it.
+
 ---
 
 ### Windows
@@ -149,6 +155,8 @@ winget install --id ggml.llamacpp -e
 **Install course2md**:
 1. Download `course2md-windows-x86_64.exe` from [Releases](https://github.com/mizorewww/course2md/releases).
 2. Rename to `course2md.exe` and place it in a directory listed in your `PATH`.
+
+**Desktop app (GUI)**: download and run `course2md-gui-windows-x86_64-setup.exe` (NSIS installer) from [Releases](https://github.com/mizorewww/course2md/releases).
 
 ---
 

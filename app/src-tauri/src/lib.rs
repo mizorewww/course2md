@@ -205,6 +205,16 @@ fn spawn_line_reader(
 }
 
 /// 杀进程组/进程树：unix killpg（子进程已 setsid，pgid==pid），windows taskkill /T /F。
+/// libc 仅 unix 依赖，信号常量故做平台定义（windows 值仅占位，taskkill 固定 /F 不使用）。
+#[cfg(unix)]
+const SIG_TERM: i32 = libc::SIGTERM;
+#[cfg(windows)]
+const SIG_TERM: i32 = 15;
+#[cfg(unix)]
+const SIG_KILL: i32 = libc::SIGKILL;
+#[cfg(windows)]
+const SIG_KILL: i32 = 9;
+
 fn kill_process_tree(pid: u32, sig: i32) {
     #[cfg(unix)]
     unsafe {
@@ -510,7 +520,7 @@ fn cancel_job(job_id: String) -> Result<bool, String> {
     };
     // M1：unix 先 SIGTERM 整个进程组，给 CLI 留出清理/写 checkpoint 的机会；
     // 3 秒后仍未退出（JOBS 里 reaper 会移除已退出的，这里直接探测 pid）再 SIGKILL。
-    kill_process_tree(pid, libc::SIGTERM);
+    kill_process_tree(pid, SIG_TERM);
     #[cfg(unix)]
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(3));
@@ -1224,7 +1234,7 @@ pub fn run() {
                 .map(|mut m| m.drain().map(|(_, j)| j).collect())
                 .unwrap_or_default();
             for h in handles {
-                kill_process_tree(h.pid, libc::SIGKILL);
+                kill_process_tree(h.pid, SIG_KILL);
             }
         }
     });
