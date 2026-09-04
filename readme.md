@@ -40,6 +40,24 @@ course2md ./lecture.mp4
 
 ---
 
+## Desktop App (GUI)
+
+The `app/` directory contains a Tauri v2 desktop client that wraps the full CLI in a graphical interface: speech-recognition backends recommended for your machine (best option first), live job progress (stage stepper + progress bar + log console), in-app result preview (transcript / slide grid / files), history, and settings management (model download, `config.toml` editing).
+
+It embeds the `course2md` binary as a sidecar and talks to it via the `--json` NDJSON event stream; cancelling a job also terminates child processes such as ffmpeg / llama-server. If the CLI is already installed, the app can use it standalone (dev mode falls back to PATH).
+
+Build (macOS — produces `.app` and `.dmg`):
+
+```bash
+bash packaging/build-app.sh
+```
+
+> The script builds the release CLI first and copies it in as a sidecar (on macOS together with the `mlx.metallib` required by CoreML), then runs `pnpm install && pnpm tauri build`. Browser-only frontend preview with mock data: `cd app && pnpm dev`.
+
+**Scripting / integrations**: the CLI itself accepts `--json` — stdout then emits newline-delimited JSON events (`stage` / `progress` / `log` / `done` / `error`), so any language can build a progress UI on top.
+
+---
+
 ## Installation
 
 `course2md` relies on the following multimedia tools:

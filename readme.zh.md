@@ -40,6 +40,24 @@ course2md ./lecture.mp4
 
 ---
 
+## 桌面客户端（GUI）
+
+`app/` 目录是一个基于 Tauri v2 的桌面客户端，把 CLI 完整包进图形界面：转写后端按本机能力推荐（推荐项置顶）、任务进度实时展示（阶段步进器 + 进度条 + 日志控制台）、结果在应用内预览（文稿 / 截图网格 / 文件）、历史记录与配置管理（模型下载、config.toml 编辑）。
+
+它通过 sidecar 方式内置 `course2md` 二进制，以 `--json` NDJSON 事件流通信；取消任务会连带终止 ffmpeg / llama-server 等子进程。本机已安装 CLI 时也可独立使用（开发模式回落到 PATH）。
+
+构建（macOS，产出 `.app` 与 `.dmg`）：
+
+```bash
+bash packaging/build-app.sh
+```
+
+> 脚本会先构建 release 版 CLI 并作为 sidecar 拷入（macOS 同时带上 CoreML 所需的 `mlx.metallib`），再执行 `pnpm install && pnpm tauri build`。前端纯浏览器预览（mock 数据）：`cd app && pnpm dev`。
+
+**脚本/二次开发**：CLI 自身支持 `--json` 参数——stdout 输出逐行 JSON 事件（`stage` / `progress` / `log` / `done` / `error`），任何语言都能据此包装出进度界面。
+
+---
+
 ## 安装指南
 
 运行 `course2md` 依赖以下基础多媒体工具：

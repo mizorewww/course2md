@@ -1,0 +1,29 @@
+[package]
+name = "course2md-app"
+version = "0.1.0"
+description = "course2md desktop client"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "course2md_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+toml = "0.8"
+
+# unix 下用于 setsid / killpg（取消任务时杀整个进程组）
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+strip = true
