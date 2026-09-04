@@ -237,6 +237,18 @@ fn spawn_cli_job(app: &AppHandle, args: &[String], kind: JobKind) -> Result<Stri
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // macOS 打包场景：mlx.metallib 只能放 Contents/Resources/（codesign 把
+    // MacOS/ 下文件都当代码），MLX 的最后一条搜索路径是 CWD 下的
+    // default.metallib——故 bundled sidecar 用 exe 旁的 ../Resources 作 CWD。
+    // dev/PATH 场景该目录不存在，保持继承父进程 CWD。
+    #[cfg(target_os = "macos")]
+    if let Some(res) = bin
+        .parent()
+        .map(|p| p.join("../Resources"))
+        .filter(|p| p.join("default.metallib").is_file())
+    {
+        cmd.current_dir(res);
+    }
     #[cfg(unix)]
     {
         // 独立进程组：cancel 时 killpg 一锅端（含 ffmpeg/llama-server 等子孙）

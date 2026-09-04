@@ -86,13 +86,23 @@ pub struct CoremlAsr {
     handle: *mut std::ffi::c_void,
 }
 
-/// MLX 要求 metallib 与可执行文件同目录；缺失时给出明确指引而不是 C++ 崩溃。
+/// MLX 搜索 metallib 的顺序（mlx-swift load_default_library）：
+/// 可执行文件同目录的 mlx.metallib → exe/Resources/mlx.metallib → ……
+/// → CWD 下的 default.metallib（METAL_PATH 编译期常量，相对当前工作目录）。
+/// Tauri sidecar 场景：codesign 把 Contents/MacOS/ 下所有文件都当代码签名，
+/// 数据文件 metallib 只能放 Contents/Resources/（资源密封区）——
+/// 由 GUI 后端在 spawn sidecar 时把 CWD 设为该目录，命中最后一条兜底路径。
 fn ensure_metallib() -> Result<()> {
     let exe = std::env::current_exe()?;
     let dir = exe.parent().unwrap_or(std::path::Path::new("."));
-    for name in ["mlx.metallib", "default.metallib"] {
-        if dir.join(name).is_file() {
-            return Ok(());
+    let resources = dir.join("Resources");
+    let bundle_resources = dir.join("../Resources");
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    for base in [dir, &resources, &bundle_resources, &cwd] {
+        for name in ["mlx.metallib", "default.metallib"] {
+            if base.join(name).is_file() {
+                return Ok(());
+            }
         }
     }
     anyhow::bail!(

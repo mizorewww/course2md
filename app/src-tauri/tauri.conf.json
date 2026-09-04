@@ -39,7 +39,7 @@
     "externalBin": ["binaries/course2md"],
     "macOS": {
       "files": {
-        "MacOS/mlx.metallib": "binaries/mlx.metallib"
+        "Resources/default.metallib": "binaries/mlx.metallib"
       }
     }
   }

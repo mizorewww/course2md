@@ -11,10 +11,19 @@ set -euo pipefail
 #   2. 按 host triple 把 target/release/course2md 拷到 app/src-tauri/binaries/course2md-<triple>
 #      （Tauri sidecar 命名约定；tauri.conf.json 的 bundle.externalBin 引用它）
 #   3. macOS 上把 MLX Metal kernels 拷成 app/src-tauri/binaries/mlx.metallib
-#      （bundle.macOS.files 会把它放进 .app 的 Contents/MacOS/，与 sidecar 同目录，
-#       CLI 运行时从 current_exe 旁边找到它；文件缺失 tauri build 会报错，
-#       找不到真实产物时写一个占位文件并警告）
+#      （bundle.macOS.files 会把它打成 Contents/Resources/default.metallib——
+#       codesign 把 Contents/MacOS/ 下文件都当代码，数据文件只能放 Resources/；
+#       GUI spawn sidecar 时把 CWD 设为该目录，命中 MLX 的 CWD/default.metallib
+#       兜底搜索路径；文件缺失 tauri build 会报错，找不到真实产物时写占位并警告）
 #   4. cd app && pnpm install && pnpm tauri build
+#
+# macOS 签名与公证（可选）：设置以下环境变量后，tauri bundler 会自动
+# Developer ID 签名 + notarytool 公证 + staple：
+#   APPLE_SIGNING_IDENTITY="Developer ID Application: Name (TEAMID)"
+#   APPLE_API_KEY_PATH=/path/AuthKey_XXXX.p8
+#   APPLE_API_KEY=H68A75YKU9        # App Store Connect Key ID
+#   APPLE_API_ISSUER=xxxxxxxx-...   # Issuer ID
+# 未设置时按 ad-hoc 签名（本机可用，分发会被 Gatekeeper 拦）。
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
