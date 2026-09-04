@@ -8,7 +8,6 @@ use crate::timeline::FrameEvent;
 use anyhow::{Context, Result};
 use image::GrayImage;
 use image_compare::Algorithm;
-use indicatif::{ProgressBar, ProgressStyle};
 use std::borrow::Cow;
 use std::path::Path;
 use tokio::io::AsyncReadExt;
@@ -110,14 +109,8 @@ async fn sample_timestamps(cfg: &PipelineConfig, media: &Path) -> Result<Vec<(f6
     });
     let frame_len = (tw as usize) * (th as usize);
     let mut buf = vec![0u8; frame_len];
-    let pb = ProgressBar::new(total);
-    pb.set_style(
-        ProgressStyle::with_template(
-            "{spinner:.green} sample {pos}/{len} [{bar:32.cyan/blue}] {msg}",
-        )
-        .unwrap()
-        .progress_chars("##-"),
-    );
+    let pb = crate::progress::Bar::new("scenes", total)
+        .with_template("{spinner:.green} sample {pos}/{len} [{bar:32.cyan/blue}] {msg}");
 
     // 三状态检测：检测永不休眠（cooldown 只限制「发射」，不再造成盲区）。
     //   last_emitted  已输出的视觉状态
@@ -200,7 +193,7 @@ async fn sample_timestamps(cfg: &PipelineConfig, media: &Path) -> Result<Vec<(f6
             times.push((onset, capture));
         }
     }
-    pb.finish_and_clear();
+    pb.finish();
     let status = child.wait().await?;
     let stderr_bytes = stderr_task.await.unwrap_or_default();
     if !status.success() {
@@ -227,14 +220,8 @@ pub async fn run(cfg: &PipelineConfig, media: &Path) -> Result<Vec<FrameEvent>> 
     let times = sample_timestamps(cfg, media).await?;
     anyhow::ensure!(!times.is_empty(), "未采样到任何帧");
 
-    let pb = ProgressBar::new(times.len() as u64);
-    pb.set_style(
-        ProgressStyle::with_template(
-            "{spinner:.green} extract {pos}/{len} [{bar:32.cyan/blue}] {msg}",
-        )
-        .unwrap()
-        .progress_chars("##-"),
-    );
+    let pb = crate::progress::Bar::new("scenes", times.len() as u64)
+        .with_template("{spinner:.green} extract {pos}/{len} [{bar:32.cyan/blue}] {msg}");
     // JoinSet 限流并发抽帧：最多 EXTRACT_CONCURRENCY 个 ffmpeg 进程并行；
     // 按帧索引收集结果后排序，保证输出文件名与结果顺序与串行版完全一致。
     let mut set: tokio::task::JoinSet<(usize, Result<()>)> = tokio::task::JoinSet::new();
@@ -260,7 +247,7 @@ pub async fn run(cfg: &PipelineConfig, media: &Path) -> Result<Vec<FrameEvent>> 
             None => break,
         }
     }
-    pb.finish_and_clear();
+    pb.finish();
     results.sort_by_key(|(i, _)| *i);
     let mut frames = Vec::with_capacity(results.len());
     for (i, r) in results {

@@ -254,10 +254,8 @@ fn download_once(
         .header("content-length")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let pb = indicatif::ProgressBar::new(total.max(1));
-    pb.set_style(crate::llm::progress_style(
-        "{spinner:.green} {msg} [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})",
-    ));
+    let pb = crate::progress::Bar::new("download", total.max(1))
+        .with_template("{spinner:.green} {msg} [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})");
     pb.set_message(label.to_string());
     let mut reader = resp.into_reader();
     let mut out = fs::File::create(tmp)?;
@@ -277,7 +275,7 @@ fn download_once(
     // 完整性：以服务器 Content-Length 为准（而非"实际收到多少"——截断响应会伪装成功）；
     // 不完整时保留 .part（断点位置见上方日志）
     if total > 0 && done != total {
-        pb.finish_and_clear();
+        pb.finish();
         anyhow::bail!("下载不完整：期望 {total} 字节，实际收到 {done}（请重试）");
     }
     fs::rename(tmp, dest)?;
@@ -288,7 +286,7 @@ fn download_once(
             .to_string()
             .as_bytes(),
     );
-    pb.finish_and_clear();
+    pb.finish();
     tracing::info!(label = %label, bytes = done, "downloaded");
     Ok(())
 }

@@ -1,9 +1,9 @@
 use clap::Parser;
 use course2md::cli::{Cli, Command, ConfigCmd, LlmCmd, ModelsCmd, RunOpts};
-use course2md::{config, doctor, llm, models, pipeline, settings, wizard};
+use course2md::{config, doctor, llm, models, pipeline, progress, settings, wizard};
 use tracing_subscriber::EnvFilter;
 
-fn init_logging(verbose: u8, quiet: bool) {
+fn init_logging(verbose: u8, quiet: bool, json: bool) {
     let default = if quiet {
         "error"
     } else if verbose >= 2 {
@@ -12,7 +12,14 @@ fn init_logging(verbose: u8, quiet: bool) {
         "info"
     };
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| default.into());
-    if verbose >= 2 {
+    if json {
+        // NDJSON 模式：stdout 只出 {"type":"log",...} 行（其余事件由各阶段显式 emit）
+        use tracing_subscriber::prelude::*;
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(progress::json_log_layer())
+            .init();
+    } else if verbose >= 2 {
         // 调试档：完整格式（时间 + target）
         tracing_subscriber::fmt()
             .with_env_filter(filter)
@@ -154,22 +161,25 @@ fn resolve_asr_api(opts: &RunOpts, file: &settings::ConfigFile) -> crate::settin
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Some(Command::Models { cmd }) => {
-            init_logging(0, false);
-            match cmd {
-                ModelsCmd::Download { dir } => {
-                    let root = config::model_dir_from(dir.as_deref());
-                    tokio::runtime::Runtime::new()?.block_on(models::download_models(&root))?;
+        Some(Command::Models { cmd }) => match cmd {
+            ModelsCmd::Download { dir, json } => {
+                if json {
+                    progress::set_json_mode();
                 }
-                ModelsCmd::List { dir } => {
-                    let root = config::model_dir_from(dir.as_deref());
-                    models::list_models(&root);
-                }
+                init_logging(0, false, json);
+                let root = config::model_dir_from(dir.as_deref());
+                tokio::runtime::Runtime::new()?.block_on(models::download_models(&root))?;
+                Ok(())
             }
-            Ok(())
-        }
+            ModelsCmd::List { dir } => {
+                init_logging(0, false, false);
+                let root = config::model_dir_from(dir.as_deref());
+                models::list_models(&root);
+                Ok(())
+            }
+        },
         Some(Command::Llm { cmd }) => {
-            init_logging(0, false);
+            init_logging(0, false, false);
             match cmd {
                 LlmCmd::Setup {
                     base_url,
@@ -202,11 +212,11 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Command::Doctor) => {
-            init_logging(0, false);
+            init_logging(0, false, false);
             doctor::run()
         }
         Some(Command::Config { cmd }) => {
-            init_logging(0, false);
+            init_logging(0, false, false);
             match cmd {
                 ConfigCmd::Init { force } => {
                     let path = settings::config_path();
@@ -225,7 +235,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Command::Summarize(args)) => {
-            init_logging(0, false);
+            init_logging(0, false, false);
             let file = settings::load()?;
             if !file.llm.enabled {
                 anyhow::bail!("LLM 未启用：请先运行 course2md llm setup 配置 API Key");
@@ -251,7 +261,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Command::Remove(args)) => {
-            init_logging(0, false);
+            init_logging(0, false, false);
             let mut cfg = settings::load()?;
             let mut cleared: Vec<String> = vec![];
             // 只列出确实非空、本次真正清掉的字段（空配置不冒充「已清除」）
@@ -297,14 +307,30 @@ fn main() -> anyhow::Result<()> {
                     std::process::exit(2);
                 }
             };
-            init_logging(cli.opts.verbose, cli.opts.quiet);
+            if cli.opts.json {
+                progress::set_json_mode();
+            }
+            init_logging(cli.opts.verbose, cli.opts.quiet, cli.opts.json);
             let file = settings::load()?;
-            // 首次使用向导：无配置文件 + 交互终端时引导配置并写盘（非交互原样返回）
-            let file = wizard::maybe_run(&cli.opts, &file)?;
+            // 首次使用向导：无配置文件 + 交互终端时引导配置并写盘（非交互原样返回）；
+            // json 模式显式跳过——stdout 必须保持纯 NDJSON，不能混进交互提示
+            let file = if cli.opts.json {
+                file
+            } else {
+                wizard::maybe_run(&cli.opts, &file)?
+            };
             let cfg = run_opts_to_cfg(source, &cli.opts, &file)?;
             // 全量预检在 pipeline::run 开头做（下载/抽帧/模型加载之前，毫秒级失败）
             tracing::info!(out = %cfg.out_dir.display(), provider = %cfg.provider, "start");
-            tokio::runtime::Runtime::new()?.block_on(pipeline::run(&cfg))
+            let result = tokio::runtime::Runtime::new()?.block_on(pipeline::run(&cfg));
+            if let Err(e) = &result {
+                // json 模式：传播前先把错误作为协议事件发出去（human 模式 emit 为 no-op）
+                progress::emit(serde_json::json!({
+                    "type": "error",
+                    "message": format!("{e:#}"),
+                }));
+            }
+            result
         }
     }
 }

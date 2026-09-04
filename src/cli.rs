@@ -172,6 +172,10 @@ pub struct RunOpts {
     /// Errors only
     #[arg(short, long)]
     pub quiet: bool,
+
+    /// 以 NDJSON 事件流输出进度到 stdout（供 GUI/脚本消费）
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Subcommand)]
@@ -225,6 +229,9 @@ pub enum ModelsCmd {
     Download {
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// 以 NDJSON 事件流输出进度到 stdout（供 GUI/脚本消费）
+        #[arg(long)]
+        json: bool,
     },
     /// List downloaded models
     List {

@@ -236,14 +236,9 @@ pub(crate) fn run_chunks(
     label: &str,
     mut transcribe: impl FnMut(usize, Seg, &Path) -> Result<Option<String>>,
 ) -> Result<Vec<TranscriptEvent>> {
-    let pb = indicatif::ProgressBar::new(segs.len() as u64);
-    pb.set_style(
-        indicatif::ProgressStyle::with_template(&format!(
-            "{{spinner:.green}} {label} {{pos}}/{{len}} [{{bar:32.cyan/blue}}] {{elapsed}} {{msg}}"
-        ))
-        .unwrap()
-        .progress_chars("##-"),
-    );
+    let pb = crate::progress::Bar::new("transcribe", segs.len() as u64).with_template(&format!(
+        "{{spinner:.green}} {label} {{pos}}/{{len}} [{{bar:32.cyan/blue}}] {{elapsed}} {{msg}}"
+    ));
 
     let mut err: Option<anyhow::Error> = None;
     for (i, seg) in segs.iter().copied().enumerate() {
@@ -274,7 +269,7 @@ pub(crate) fn run_chunks(
         let _ = std::fs::remove_file(&chunk);
         pb.inc(1);
     }
-    pb.finish_and_clear();
+    pb.finish();
     if let Some(e) = err {
         return Err(e);
     }
@@ -312,14 +307,8 @@ fn run_api(
         crate::settings::AsrApiMode::Transcriptions => format!("{base}/audio/transcriptions"),
         crate::settings::AsrApiMode::Chat => format!("{base}/chat/completions"),
     };
-    let pb = indicatif::ProgressBar::new(segs.len() as u64);
-    pb.set_style(
-        indicatif::ProgressStyle::with_template(
-            "{spinner:.green} asr {pos}/{len} [{bar:32.cyan/blue}] {elapsed} {msg}",
-        )
-        .unwrap()
-        .progress_chars("##-"),
-    );
+    let pb = crate::progress::Bar::new("transcribe", segs.len() as u64)
+        .with_template("{spinner:.green} asr {pos}/{len} [{bar:32.cyan/blue}] {elapsed} {msg}");
 
     let client = ureq::AgentBuilder::new()
         .timeout(API_HTTP_TIMEOUT)
@@ -393,7 +382,7 @@ fn run_api(
             pb.inc(1);
         }
     });
-    pb.finish_and_clear();
+    pb.finish();
     if let Some(e) = err {
         return Err(e);
     }

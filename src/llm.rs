@@ -92,13 +92,6 @@ pub(crate) const CHAT_TEMPERATURE: f64 = 0.0;
 /// 单次请求输出 token 上限（润色与总结共用）。
 pub(crate) const CHAT_MAX_TOKENS: u32 = 16384;
 
-/// 共享进度条样式：模板均为静态字符串，解析失败是编程错误。
-pub(crate) fn progress_style(template: &str) -> indicatif::ProgressStyle {
-    indicatif::ProgressStyle::with_template(template)
-        .expect("静态进度条模板")
-        .progress_chars("##-")
-}
-
 /// 构造标准 chat/completions 请求体（temperature=0、json_object 结构化输出）。
 /// 润色与总结共用，避免两处各自拼 body 参数漂移；
 /// `user` 传 &str 为纯文本消息，传 `serde_json::Value::Array` 为多模态内容块。
@@ -138,10 +131,8 @@ pub fn polish_sections(sections: &mut [Section], frames_root: &Path, s: &LlmSett
         .iter()
         .map(|sec| sec.speech.chunks(BATCH).len())
         .sum();
-    let pb = indicatif::ProgressBar::new(total as u64);
-    pb.set_style(progress_style(
-        "{spinner:.green} llm {pos}/{len} [{bar:32.cyan/blue}] {msg}",
-    ));
+    let pb = crate::progress::Bar::new("llm", total as u64)
+        .with_template("{spinner:.green} llm {pos}/{len} [{bar:32.cyan/blue}] {msg}");
     let warned = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let vision_warned = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let workers = s.concurrency.clamp(1, 16);
@@ -164,7 +155,7 @@ pub fn polish_sections(sections: &mut [Section], frames_root: &Path, s: &LlmSett
             });
         }
     });
-    pb.finish_and_clear();
+    pb.finish();
 }
 
 /// 润色单个 Section（含视觉图片解析与纯语气词条目删除）。
@@ -172,7 +163,7 @@ fn polish_section(
     s: &LlmSettings,
     frames_root: &Path,
     sec: &mut Section,
-    pb: &indicatif::ProgressBar,
+    pb: &crate::progress::Bar,
     warned: &std::sync::atomic::AtomicBool,
     vision_warned: &std::sync::atomic::AtomicBool,
 ) {

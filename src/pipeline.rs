@@ -4,6 +4,7 @@ use crate::asr;
 use crate::config::{self, PipelineConfig};
 use crate::fetch::{self, VideoMeta};
 use crate::media;
+use crate::progress;
 use crate::render;
 use crate::scene;
 use crate::timeline;
@@ -42,6 +43,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
 
     let mut cfg = cfg.clone();
 
+    progress::stage("fetch", "start");
     let meta = if is_local {
         let dur = media::probe_duration(local).await.unwrap_or(0.0);
         let stem = local
@@ -61,6 +63,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         tracing::info!("fetch metadata");
         fetch::fetch_meta(&cfg.url).await?
     };
+    progress::stage("fetch", "done");
 
     let id = if is_local {
         // 本地文件：stem + 内容指纹短哈希，避免同名不同目录的课件互相覆盖
@@ -102,6 +105,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         dest
     } else if !cfg.no_download {
         tracing::info!("download video");
+        progress::stage("download", "start");
         fetch::download(
             &cfg.url,
             &dest,
@@ -109,6 +113,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
             tracing::enabled!(tracing::Level::DEBUG),
         )
         .await?;
+        progress::stage("download", "done");
         dest
     } else {
         anyhow::ensure!(dest.is_file(), "--no-download 但 {} 不存在", dest.display());
@@ -163,19 +168,27 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     let transcript_source_used = subtitle.as_ref().map_or("asr", |(_, s)| *s);
     let (frames, events) = if let Some((events, _source)) = subtitle {
         // 字幕路径：只跑场景检测，跳过音频与 ASR
+        progress::stage("scenes", "start");
         let frames = scene::run(&cfg, &media).await?;
+        progress::stage("scenes", "done");
         (frames, events)
     } else {
         tracing::info!("extract slides and audio");
         let audio_path = cfg.audio_path();
+        progress::stage("scenes", "start");
+        progress::stage("audio", "start");
         let (frames_res, audio_res) = tokio::join!(
             scene::run(&cfg, &media),
             media::extract_audio(&media, &audio_path)
         );
         let frames = frames_res?;
         audio_res?;
+        progress::stage("scenes", "done");
+        progress::stage("audio", "done");
         tracing::info!(device = %cfg.provider, "transcribe");
+        progress::stage("transcribe", "start");
         let events = asr::run(&cfg, &cfg.audio_path()).await?;
+        progress::stage("transcribe", "done");
         (frames, events)
     };
     anyhow::ensure!(!frames.is_empty(), "没有截到任何画面");
@@ -190,6 +203,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     let mut sections = timeline::merge(frames, events, meta.duration);
     timeline::coalesce_sections(&mut sections);
     if cfg.llm.enabled {
+        progress::stage("llm", "start");
         tracing::info!(model = %cfg.llm.model, vision = cfg.llm.vision, "llm polish");
         let ev = cfg.llm.clone();
         let root = cfg.out_dir.clone();
@@ -225,8 +239,13 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     } else {
         None
     };
+    if cfg.llm.enabled {
+        // llm 阶段覆盖润色 + 总结（summary 属于同一 LLM 阶段）
+        progress::stage("llm", "done");
+    }
     tracing::info!(sections = sections.len(), "merged");
 
+    progress::stage("render", "start");
     render::write_outputs(
         &cfg.out_dir,
         &meta,
@@ -235,6 +254,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         summary.as_ref(),
     )
     .await?;
+    progress::stage("render", "done");
     // 只删自己下载的视频；本地输入与既有工作区文件不动。
     let media_deleted =
         should_delete_media(is_local, cfg.no_download, media_existed, cfg.keep_video);
@@ -298,6 +318,25 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     ) {
         tracing::warn!("写 run.json 失败（不影响其他产物）：{e:#}");
     }
+
+    // NDJSON done：GUI/脚本靠这一行拿产物清单与统计（human 模式 emit 为 no-op）。
+    // outputs 只列真正写盘成功的格式文件（与 print_summary 的 ✓ 列表同口径）。
+    let outputs: Vec<String> = cfg
+        .formats
+        .iter()
+        .map(|f| f.output_name().to_string())
+        .filter(|name| cfg.out_dir.join(name).is_file())
+        .collect();
+    progress::emit(serde_json::json!({
+        "type": "done",
+        "out_dir": cfg.out_dir.display().to_string(),
+        "title": meta.title,
+        "slides": sections.len(),
+        "segments": speech_n,
+        "chars": chars,
+        "elapsed_secs": (stats.elapsed_secs * 100.0).round() / 100.0,
+        "outputs": outputs,
+    }));
     Ok(())
 }
 
