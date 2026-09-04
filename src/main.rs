@@ -126,6 +126,12 @@ fn run_opts_to_cfg(
         llm: resolve_llm(opts, file),
         asr_api: resolve_asr_api(opts, file),
         asr_model: opts.asr_model.clone().or_else(|| d.asr_model.clone()),
+        gpu_layers: config::resolve_gpu_layers(opts.gpu_layers, d.gpu_layers),
+        mmproj_offload: config::resolve_mmproj_offload(
+            opts.mmproj_offload,
+            opts.no_mmproj_offload,
+            d.mmproj_offload,
+        ),
         transcript_source: opts
             .transcript_source
             .or(d.transcript_source)

@@ -228,4 +228,19 @@ mod tests {
         }
         assert!(!path.exists(), "Drop 必须清理整个目录");
     }
+
+    /// issue #12：错误路径/panic unwind 也必须 kill+wait llama-server——
+    /// 孤儿进程占着 /dev/kfd 会加剧 ROCm 核显问题。这里验证 Drop 的兜底语义。
+    #[cfg(unix)]
+    #[test]
+    fn managed_child_drop_kills_and_reaps() {
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30");
+        let child = ManagedChild::spawn("sleep", &mut cmd).unwrap();
+        let pid = child.id().to_string();
+        drop(child);
+        // kill -0 仅探测存在性：Drop 已 kill+wait，进程应不复存在（zombie 也被收割）
+        let st = Command::new("kill").args(["-0", &pid]).status().unwrap();
+        assert!(!st.success(), "pid {pid} 应已被 Drop 清理");
+    }
 }

@@ -29,6 +29,10 @@ pub struct Defaults {
     pub keep_video: Option<bool>,
     pub no_download: Option<bool>,
     pub resume: Option<bool>,
+    /// GPU 卸载层数（llama-server -ngl，0-99；仅 gpu 后端生效）
+    pub gpu_layers: Option<u32>,
+    /// 是否把多模态 projector（mmproj）卸载到 GPU
+    pub mmproj_offload: Option<bool>,
 }
 
 /// 云端 STT 的请求模式。
@@ -182,6 +186,12 @@ pub const TEMPLATE: &str = r#"# course2md 配置文件
 # - cpu: 纯 CPU 运行 Qwen3-ASR 1.7B Q8，通用兜底
 # - api: 云端 STT（OpenRouter），免本地模型下载
 #provider = "gpu"
+# GPU 卸载层数（llama-server -ngl，0-99；默认 99 = 全量卸载到 GPU）。
+# AMD/ROCm 核显（如 Radeon 780M）同时驱动桌面时，全量卸载已知可能触发 GPU
+# hang/reset（ROCm#6512）；遇到问题时可用此参数手动降载
+#gpu_layers = 99
+# 是否把多模态 projector（mmproj）卸载到 GPU；AMD/ROCm 核显遇 GPU hang 时可试 false
+#mmproj_offload = true
 
 # 识别模型推荐 (各个后端通用)：
 # 识别模型推荐（各后端通用；Apple 原生 coreml 后端：qwen3-1.7b 默认 / qwen3-0.6b 省电 / whisper）：
@@ -309,6 +319,14 @@ pub fn print_effective(cfg: &ConfigFile) {
     println!("  keep_video     : {}", d.keep_video.unwrap_or(false));
     println!("  no_download    : {}", d.no_download.unwrap_or(false));
     println!("  resume         : {}", d.resume.unwrap_or(false));
+    println!(
+        "  gpu_layers     : {}",
+        d.gpu_layers.unwrap_or(c::DEFAULT_GPU_LAYERS)
+    );
+    println!(
+        "  mmproj_offload : {}",
+        d.mmproj_offload.unwrap_or(true)
+    );
     println!("[asr_api]");
     println!("  base_url       : {}", cfg.asr_api.base_url);
     println!("  model          : {}", cfg.asr_api.model);

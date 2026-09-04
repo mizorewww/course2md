@@ -67,6 +67,8 @@ fn test_cfg(
         llm: Default::default(),
         asr_api: Default::default(),
         asr_model: None,
+        gpu_layers: course2md::config::DEFAULT_GPU_LAYERS,
+        mmproj_offload: true,
         transcript_source: course2md::config::TranscriptSource::Asr,
     }
 }

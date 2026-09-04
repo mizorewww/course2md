@@ -101,6 +101,19 @@ pub struct RunOpts {
     #[arg(long, value_enum)]
     pub transcript_source: Option<crate::config::TranscriptSource>,
 
+    /// GPU offload layers for llama-server (-ngl, 0-99). Lower it on iGPUs that also
+    /// drive the desktop (e.g. AMD/ROCm Radeon 780M) to avoid GPU hangs/resets
+    #[arg(long, value_parser = clap::value_parser!(u32).range(0..=99))]
+    pub gpu_layers: Option<u32>,
+
+    /// Offload the multimodal projector (mmproj) to GPU (llama-server default)
+    #[arg(long)]
+    pub mmproj_offload: bool,
+
+    /// Keep the multimodal projector (mmproj) on CPU (recommended on AMD/ROCm iGPUs)
+    #[arg(long, conflicts_with = "mmproj_offload")]
+    pub no_mmproj_offload: bool,
+
     /// Max seconds per speech segment (longer segments are split)
     #[arg(long)]
     pub max_speech: Option<f32>,

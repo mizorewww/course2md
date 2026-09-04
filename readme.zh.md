@@ -170,6 +170,24 @@ cargo build --release
 >
 > **自动回落机制**：在 macOS 上如果 `coreml` 后端初始化或运行失败，系统会自动给出警告并无缝回退至 `gpu` / `llama-server` 模式，确保转换任务顺利完成。
 
+### GPU 卸载控制（`gpu` / `cpu` 后端）
+
+默认情况下 `gpu` 后端以 `-ngl 99` 启动 `llama-server`（全部层含 mmproj 卸载到 GPU）。在核显同时驱动桌面的机器上——典型如 **AMD/ROCm（如 Radeon 780M）**——全量卸载已知可能触发 GPU hang/reset（见 [ROCm#6512](https://github.com/ROCm/ROCm/issues/6512)），甚至把桌面会话拖垮。可用两个参数降载：
+
+- `--gpu-layers <0-99>`（配置项 `gpu_layers = 8`）：限制卸载到 GPU 的层数（`-ngl`）。
+- `--no-mmproj-offload`（配置项 `mmproj_offload = false`）：多模态 projector 留在 CPU；反向开关 `--mmproj-offload` 可重新打开。
+
+> **AMD/ROCm 说明**：没有证据表明某个非零层数或关闭 mmproj 在 gfx 系列核显上稳定，因此 `course2md` 刻意**不设**「安全默认值」。在 Linux + AMD 显卡上使用 `gpu` 后端时会打印风险警告，指向上述参数与 CPU/API 回退。如遇 GPU hang，验证过可靠的路径是 `--provider cpu`（或 `--provider api`）。
+
+`cpu` 后端比 `-ngl 0` 更彻底：还会附加 `--device none --no-op-offload --no-mmproj-offload`，确保所有算子留在 CPU（新版 llama.cpp 下仅 `-ngl 0` 仍可能卸载 projector 或部分算子）。这些附加 flag 仅在 `llama-server --help` 中存在时才追加，因此发行版仓库里的旧版 llama.cpp 行为不受影响。每次运行——无论成功失败——都会在输出目录写 `run.json`，记录版本、provider、错误信息（失败时）与实际 llama-server 参数；提 issue 时请附上。
+
+```bash
+# AMD/ROCm 核显遇 GPU hang 时可尝试
+course2md lecture.mp4 --provider gpu --gpu-layers 8 --no-mmproj-offload
+# 完全走 CPU，不受 GPU hang 影响（较慢，但在 Radeon 780M 上验证可靠）
+course2md lecture.mp4 --provider cpu --transcript-source asr
+```
+
 ---
 
 ---
@@ -431,6 +449,8 @@ out/<平台>/<标题>/<编号>/
 | `-o, --out <目录>` | 指定输出根目录 | `out` |
 | `--transcript-source <auto/subtitle/asr>` | 转写来源：`auto` = 平台字幕优先（人工>自动），无字幕再走本地 ASR；`subtitle` = 强制字幕（无则报错）；`asr` = 跳过字幕直接识别 | `auto` |
 | `--provider <coreml/gpu/cpu/api/npu>` | 识别后端：`coreml`（macOS 默认）、`gpu`（非 Mac 默认）、`cpu`、`api`（云端 STT） | 视平台而定 |
+| `--gpu-layers <0-99>` | `llama-server` 的 GPU 卸载层数（`-ngl`）；AMD/ROCm 核显遇 hang 时可尝试调低 | `99` |
+| `--mmproj-offload` / `--no-mmproj-offload` | 多模态 projector 是否卸载到 GPU | 卸载 |
 | `--asr-model <qwen3-1.7b/qwen3-0.6b/whisper>` | CoreML 识别模型变体：`qwen3-1.7b`（默认，MLX 走 GPU）、`qwen3-0.6b`（CoreML 走 ANE，省电）或 `whisper`（large-v3-turbo） | `qwen3-1.7b` |
 | `--asr-api-base-url <URL>` | 云端 STT base URL（OpenAI 兼容） | `https://openrouter.ai/api/v1` |
 | `--asr-api-key <KEY>` | 云端 STT API Key（亦可设置 `COURSE2MD_ASR_API_KEY` 环境变量） | 配置文件 / 环境变量 |

@@ -24,6 +24,33 @@
   `concurrency` 等非敏感字段展示（#11）
 - 中英文 README 补充 LLM 文本与截图上传的隐私说明（#11）
 
+## [未发布]
+
+### 新增
+
+- **GPU 卸载控制参数**（#12）：新增 `--gpu-layers <0-99>`（对应配置项
+  `gpu_layers`）限制 llama-server 的 GPU 卸载层数；新增
+  `--mmproj-offload` / `--no-mmproj-offload`（对应 `mmproj_offload`）
+  控制多模态 projector 是否卸载到 GPU
+- **失败也写 run.json**（#12）：此前只有成功才写运行溯源，失败现场无迹可查。
+  现在 out_dir 确定之后的失败同样写诊断 run.json（`success: false`、版本、
+  最终 provider、asr_model、错误全文、耗时；若 llama-server 已启动则附带
+  实际 spawn 参数）；成功路径新增 `"success": true` 字段
+- **Linux + AMD GPU 风险警告**（#12）：检测到 AMD 显卡
+  （/sys/class/drm/card*/device/vendor == 0x1002）且使用 gpu 后端时打印警告：
+  ROCm/gfx 系列核显全量 GPU 卸载已知可能触发 GPU hang/reset（ROCm#6512），
+  提示 `--gpu-layers` 降载、`--no-mmproj-offload` 或改用 `--provider cpu`/`api`。
+  刻意不设保守默认——复测没有证据表明某个非零层数在 gfx 核显上稳定
+
+### 修复
+
+- **`--provider cpu` 在新版 llama.cpp 下仍卸载部分算子到 GPU**（#12）：
+  cpu 后端除 `-ngl 0` 外，按 `llama-server --help` 探测结果追加
+  `--device none --no-op-offload --no-mmproj-offload`；探测失败或旧版
+  llama.cpp 不含这些 flag 时只保留 `-ngl 0`，启动行为不变
+- **llama-server 退出清理**（#12）：确认并测试任何离开识别流程的路径
+  （含 panic unwind）都会 kill+wait llama-server，避免孤儿进程占用 /dev/kfd
+
 ## [1.4.0] — 2026-09-03
 
 ### 新增

@@ -170,6 +170,24 @@ cargo build --release
 >
 > **Automatic Fallback**: On macOS, if the `coreml` backend fails during initialization or runtime, `course2md` automatically logs a warning and falls back to the `gpu` / `llama-server` pipeline to ensure task completion.
 
+### GPU Offload Controls (`gpu` / `cpu` backends)
+
+By default the `gpu` backend starts `llama-server` with `-ngl 99` (all layers on GPU, mmproj included). On machines where an iGPU also drives the desktop — notably **AMD/ROCm (e.g. Radeon 780M)** — full offload can hang or reset the GPU (see [ROCm#6512](https://github.com/ROCm/ROCm/issues/6512)) and take the desktop session down with it. Two controls are available:
+
+- `--gpu-layers <0-99>` (config: `gpu_layers = 8`): cap how many layers are offloaded to GPU (`-ngl`).
+- `--no-mmproj-offload` (config: `mmproj_offload = false`): keep the multimodal projector on CPU. The inverse flag `--mmproj-offload` re-enables it.
+
+> **AMD/ROCm note**: there is no evidence that any specific non-zero layer count or disabling mmproj is stable on gfx iGPUs, so `course2md` deliberately does **not** apply a "safe" default. On Linux with an AMD GPU it prints a warning when the `gpu` backend is used, pointing at these options and the CPU/API fallbacks. If you hit hangs, the proven-reliable path is `--provider cpu` (or `--provider api`).
+
+The `cpu` backend goes further than `-ngl 0`: it also passes `--device none --no-op-offload --no-mmproj-offload` to keep every operator on CPU (a bare `-ngl 0` can still offload the projector or host operators on newer llama.cpp). These extra flags are only appended when `llama-server --help` shows them, so older distro builds of llama.cpp keep working unchanged. Every run — successful or failed — writes a `run.json` into the output directory recording the version, provider, error (on failure), and the actual `llama-server` arguments; attach it to issue reports.
+
+```bash
+# Things to try on AMD/ROCm iGPUs if the GPU path hangs
+course2md lecture.mp4 --provider gpu --gpu-layers 8 --no-mmproj-offload
+# Fully CPU, immune to GPU hangs (slower but proven on Radeon 780M)
+course2md lecture.mp4 --provider cpu --transcript-source asr
+```
+
 ---
 
 ---
@@ -431,6 +449,8 @@ Model dir: /Users/username/.cache/course2md/models
 | `-o, --out <DIR>` | Output root directory | `out` |
 | `--transcript-source <auto/subtitle/asr>` | Transcript source: `auto` = platform subtitles first (manual > auto-caption), fall back to local ASR; `subtitle` = fail if none; `asr` = skip subtitles | `auto` |
 | `--provider <coreml/gpu/cpu/api/npu>` | ASR backend: `coreml` (macOS arm64), `gpu` (non-Mac), `cpu`, or `api` (cloud STT) | Platform default |
+| `--gpu-layers <0-99>` | GPU offload layers for `llama-server` (`-ngl`); try lowering it if AMD/ROCm iGPUs hang | `99` |
+| `--mmproj-offload` / `--no-mmproj-offload` | Offload the multimodal projector to GPU or keep it on CPU | Offload |
 | `--asr-model <qwen3-1.7b/qwen3-0.6b/whisper>` | CoreML ASR model variant: `qwen3-1.7b` (default, MLX on GPU), `qwen3-0.6b` (CoreML on ANE, low power), or `whisper` (large-v3-turbo) | `qwen3-1.7b` |
 | `--asr-api-base-url <URL>` | Cloud STT base URL (OpenAI-compatible) | `https://openrouter.ai/api/v1` |
 | `--asr-api-key <KEY>` | Cloud STT API Key (or set `COURSE2MD_ASR_API_KEY` env) | Config / Env |

@@ -29,6 +29,17 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         tracing::warn!("未找到 llama-server：CoreML 若失败将无法回退到 gpu 后端（best-effort）");
     }
 
+    // ROCm/gfx 核显风险警告（issue #12）：全量 GPU 卸载已知可能触发 GPU hang/reset
+    // （ROCm#6512），核显同时驱动桌面时可能拖垮桌面会话。故意不设保守默认——
+    // 复测没有证据表明某个非零层数或关闭 mmproj 就稳定，只提示风险与回退路径。
+    if cfg.provider == AsrProvider::Gpu && config::linux_amd_gpu_present() {
+        tracing::warn!(
+            "检测到 Linux + AMD GPU：ROCm/gfx 系列核显全量 GPU 卸载已知可能触发 GPU hang/reset \
+             （ROCm#6512）。如遇问题：--gpu-layers 降载、--no-mmproj-offload，\
+             或改用 --provider cpu / api（cpu 后端已彻底禁用 GPU 卸载）"
+        );
+    }
+
     // LLM 预检：配置错误应在跑完昂贵的下载/识别之前暴露
     if cfg.llm.enabled {
         crate::llm::validate(&cfg.llm)?;
@@ -89,6 +100,25 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         "video"
     );
 
+    // out_dir 已确定：此后的失败都写诊断 run.json（issue #12 复测：只有成功才写
+    // run.json 让失败现场无迹可查）。更早的失败（预检/meta）无处安放，不写。
+    let r = run_after_prepare(&cfg, &meta, is_local, &platform, &id, t_total).await;
+    if let Err(e) = &r {
+        write_failure_run_json(&cfg, is_local, &platform, &id, e, t_total);
+    }
+    r
+}
+
+/// out_dir 确定之后的主流程（下载 → 截图/音频 → 识别 → 渲染 → 成功 run.json）。
+async fn run_after_prepare(
+    cfg: &PipelineConfig,
+    meta: &VideoMeta,
+    is_local: bool,
+    platform: &str,
+    id: &str,
+    t_total: Instant,
+) -> Result<()> {
+    let local = Path::new(&cfg.url);
     let dest = cfg.media_path();
     // 文件所有权：只有本次运行真正下载的文件才允许结束时清理。
     // --no-download 复用的既有 media.mp4 属于用户资产，永远不删。
@@ -163,19 +193,19 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     let transcript_source_used = subtitle.as_ref().map_or("asr", |(_, s)| *s);
     let (frames, events) = if let Some((events, _source)) = subtitle {
         // 字幕路径：只跑场景检测，跳过音频与 ASR
-        let frames = scene::run(&cfg, &media).await?;
+        let frames = scene::run(cfg, &media).await?;
         (frames, events)
     } else {
         tracing::info!("extract slides and audio");
         let audio_path = cfg.audio_path();
         let (frames_res, audio_res) = tokio::join!(
-            scene::run(&cfg, &media),
+            scene::run(cfg, &media),
             media::extract_audio(&media, &audio_path)
         );
         let frames = frames_res?;
         audio_res?;
         tracing::info!(device = %cfg.provider, "transcribe");
-        let events = asr::run(&cfg, &cfg.audio_path()).await?;
+        let events = asr::run(cfg, &cfg.audio_path()).await?;
         (frames, events)
     };
     anyhow::ensure!(!frames.is_empty(), "没有截到任何画面");
@@ -208,7 +238,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
             .iter()
             .flat_map(|s| s.speech.iter().cloned())
             .collect();
-        match crate::summarize::summarize(&cfg.llm, &speech, &meta).await {
+        match crate::summarize::summarize(&cfg.llm, &speech, meta).await {
             Ok(sm) => {
                 tracing::info!(
                     points = sm.key_points.len(),
@@ -229,7 +259,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
 
     render::write_outputs(
         &cfg.out_dir,
-        &meta,
+        meta,
         &sections,
         &cfg.formats,
         summary.as_ref(),
@@ -254,18 +284,11 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         peak_mb,
         child_peak_mb,
     };
-    print_summary(
-        &cfg,
-        &meta,
-        &sections,
-        &stats,
-        &media,
-        is_local,
-        media_deleted,
-    );
+    print_summary(cfg, meta, &sections, &stats, &media, is_local, media_deleted);
 
     // run.json：本次运行溯源（版本/源/转写来源/后端/模型/统计/耗时）。
     // 「这份文稿到底是什么模型跑的」从此可查；issue 报告请附上此文件。
+    // 失败路径的诊断 run.json 见 write_failure_run_json（issue #12）。
     let speech_n: usize = sections.iter().map(|s| s.speech.len()).sum();
     let chars: usize = sections
         .iter()
@@ -273,6 +296,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         .map(|e| e.text.chars().count())
         .sum();
     let run_info = serde_json::json!({
+        "success": true,
         "course2md_version": env!("CARGO_PKG_VERSION"),
         "source": {
             "kind": if is_local { "local" } else { "remote" },
@@ -299,6 +323,47 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         tracing::warn!("写 run.json 失败（不影响其他产物）：{e:#}");
     }
     Ok(())
+}
+
+/// 失败诊断 run.json（issue #12 复测：只有成功才写 run.json 是诊断缺口）。
+/// 记录版本/来源/最终 provider/asr_model/错误全文/耗时；若 llama-server 已
+/// spawn 过，附带实际启动参数（GPU hang 类问题的关键证据）。
+/// 写失败只告警——原错误才是主角，诊断记录绝不能反过来搞砸错误路径。
+fn write_failure_run_json(
+    cfg: &PipelineConfig,
+    is_local: bool,
+    platform: &str,
+    id: &str,
+    err: &anyhow::Error,
+    t_total: Instant,
+) {
+    let mut info = serde_json::json!({
+        "success": false,
+        "course2md_version": env!("CARGO_PKG_VERSION"),
+        "source": {
+            "kind": if is_local { "local" } else { "remote" },
+            "platform": platform,
+            "id": id,
+            "url": cfg.url,
+        },
+        "provider": cfg.provider.as_str(),
+        "asr_model": cfg.asr_model.clone().unwrap_or_else(|| "backend-default".into()),
+        "error": format!("{err:#}"),
+        "elapsed_secs": (t_total.elapsed().as_secs_f64() * 100.0).round() / 100.0,
+    });
+    if let Some(args) = crate::asr::last_llama_spawn_args() {
+        info["llama_server_args"] = serde_json::json!(args);
+    }
+    match serde_json::to_string_pretty(&info) {
+        Ok(s) => {
+            if let Err(e) =
+                crate::checkpoint::atomic_write(&cfg.out_dir.join("run.json"), s.as_bytes())
+            {
+                tracing::warn!("写失败诊断 run.json 失败：{e:#}");
+            }
+        }
+        Err(e) => tracing::warn!("序列化失败诊断 run.json 失败：{e:#}"),
+    }
 }
 
 struct RunStats {
@@ -465,7 +530,7 @@ fn peak_rss_mb(_who: i32) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::should_delete_media;
+    use super::{local_fingerprint, run, sanitize_stem, should_delete_media};
 
     #[test]
     fn never_delete_files_we_did_not_download() {
@@ -479,5 +544,66 @@ mod tests {
         assert!(!should_delete_media(false, false, false, true));
         // 本次真下载 + 未要求保留：删
         assert!(should_delete_media(false, false, false, false));
+    }
+
+    /// issue #12：失败也写诊断 run.json（success:false + 错误全文）。
+    /// 用损坏的本地视频让 pipeline 在 out_dir 确定之后（场景检测阶段）必然失败。
+    #[test]
+    fn failure_writes_diagnostic_run_json() {
+        // 缺任何一个工具都会在 out_dir 确定之前的预检失败（不写 run.json），跳过
+        for tool in ["ffmpeg", "ffprobe", "llama-server"] {
+            if crate::runtime::which(tool).is_none() {
+                eprintln!("skip: {tool} not found");
+                return;
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("c2md-failrun-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("broken.mp4");
+        std::fs::write(&video, b"not a real mp4").unwrap();
+        use crate::config as c;
+        let cfg = c::PipelineConfig {
+            url: video.display().to_string(),
+            out_dir: dir.clone(),
+            out_root: dir.clone(),
+            similarity: 0.9,
+            sample_interval: 0.5,
+            cooldown: 10.0,
+            slide_mode: c::SlideMode::First,
+            stable_secs: 0.0,
+            max_height: 1080,
+            roi: None,
+            threads: 2,
+            provider: c::AsrProvider::Cpu,
+            max_speech: 20.0,
+            formats: vec![c::OutputFormat::Md],
+            model_dir: dir.clone(),
+            keep_video: true,
+            no_download: true,
+            resume: false,
+            llm: Default::default(),
+            asr_api: Default::default(),
+            asr_model: None,
+            gpu_layers: c::DEFAULT_GPU_LAYERS,
+            mmproj_offload: true,
+            transcript_source: c::TranscriptSource::Asr,
+        };
+        let r = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(run(&cfg));
+        assert!(r.is_err(), "损坏视频必须失败");
+
+        let id = format!("{}-{}", sanitize_stem(&video), local_fingerprint(&video));
+        let out = c::course_dir(&dir, "local", "broken", &id);
+        let text = std::fs::read_to_string(out.join("run.json")).expect("失败也应写 run.json");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["success"], false);
+        assert!(!v["error"].as_str().unwrap_or_default().is_empty());
+        assert_eq!(v["provider"], "cpu");
+        assert!(v["course2md_version"].as_str().is_some());
+        assert!(v["elapsed_secs"].is_number());
+        // 失败发生在 llama-server spawn 之前 → 无 llama_server_args 字段
+        assert!(v.get("llama_server_args").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
