@@ -1,6 +1,6 @@
 [package]
 name = "course2md"
-version = "1.4.1"
+version = "1.5.0"
 edition = "2024"
 description = "Turn online course videos (YouTube/Bilibili) into image+transcript markdown notes"
 license = "MIT"

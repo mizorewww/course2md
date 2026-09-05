@@ -3,6 +3,27 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.5.0] — 2026-09-05
+
+### 新增
+
+- **桌面客户端（GUI）**：`app/` 目录新增 Tauri v2 客户端——转写后端按本机
+  能力推荐、阶段步进器 + 实时进度条 + 日志控制台、应用内结果预览
+  （文稿/截图网格/文件）、历史记录、设置页（模型下载、config.toml 编辑）；
+  sidecar 内置 CLI 二进制，取消任务连带终止子进程。`packaging/build-app.sh`
+  一键构建 macOS .app/.dmg
+- **发版附三平台 GUI 安装包**：macOS dmg（Developer ID 签名 + 公证 +
+  staple）、Windows nsis 安装包、Linux AppImage，随 Release 一同产出
+- **`--json` 机器可读模式**：stdout 输出 NDJSON 事件流
+  （stage/progress/log/done/error），供 GUI 与脚本消费；`models download`
+  同样支持。人类模式输出与行为不变
+
+### 修复
+
+- macOS 签名公证适配：`mlx.metallib` 移入 `.app` 的 Resources 密封区
+  （codesign 把 Contents/MacOS/ 下文件都当代码，数据文件在其中无法签名），
+  GUI 启动 sidecar 时以该目录为 CWD 命中 MLX 的兜底搜索路径
+
 ## [1.4.1] — 2026-09-03
 
 ### 修复
@@ -23,19 +44,6 @@
 - `config init` 模板与 `config show` / `llm status` 补齐 `vision`、
   `concurrency` 等非敏感字段展示（#11）
 - 中英文 README 补充 LLM 文本与截图上传的隐私说明（#11）
-
-## [未发布]
-
-### 新增
-
-- **桌面客户端（GUI）**：`app/` 目录新增 Tauri v2 客户端——转写后端按本机
-  能力推荐、阶段步进器 + 实时进度条 + 日志控制台、应用内结果预览
-  （文稿/截图网格/文件）、历史记录、设置页（模型下载、config.toml 编辑）；
-  sidecar 内置 CLI 二进制，取消任务连带终止子进程。`packaging/build-app.sh`
-  一键构建 macOS .app/.dmg
-- **`--json` 机器可读模式**：stdout 输出 NDJSON 事件流
-  （stage/progress/log/done/error），供 GUI 与脚本消费；`models download`
-  同样支持。人类模式输出与行为不变
 
 ## [1.4.0] — 2026-09-03
 
