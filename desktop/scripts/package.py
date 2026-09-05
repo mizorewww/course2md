@@ -109,8 +109,15 @@ def main():
             dmg.unlink()
         applications = base / "Applications"
         applications.symlink_to("/Applications")
+        # Size the volume from logical file bytes, not host allocation/cloning.
+        # Reserve 64 MiB for filesystem metadata and block rounding. Empty space
+        # compresses in UDZO, so this does not inflate the download by 64 MiB.
+        payload_bytes = sum(path.stat().st_size for path in base.rglob("*")
+                            if not path.is_symlink() and path.is_file())
+        image_mib = (payload_bytes + 1024 * 1024 - 1) // (1024 * 1024) + 64
+        print(f"Creating {image_mib} MiB HFS+ image for {payload_bytes} bytes of files", flush=True)
         run("hdiutil", "create", "-volname", "course2md", "-srcfolder", str(base),
-            "-ov", "-format", "UDZO", str(dmg))
+            "-fs", "HFS+", "-size", f"{image_mib}m", "-ov", "-format", "UDZO", str(dmg))
         applications.unlink()
         if identity != "-":
             run("codesign", "--force", "--sign", identity, "--timestamp", str(dmg))

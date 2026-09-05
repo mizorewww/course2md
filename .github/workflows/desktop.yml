@@ -38,9 +38,22 @@ jobs:
           fi
       - name: Check and test desktop
         run: cargo test --manifest-path desktop/Cargo.toml
-      - name: Build development binaries
-        if: github.ref_type != 'tag'
+      - name: Build development packages
+        if: github.ref_type != 'tag' && runner.os != 'macOS'
         run: python desktop/scripts/package.py --debug
+      - name: Build macOS development binaries
+        if: github.ref_type != 'tag' && runner.os == 'macOS'
+        run: |
+          cargo build
+          cargo build --manifest-path desktop/Cargo.toml
+      - name: Free completed compiler caches before creating the disk image
+        if: github.ref_type != 'tag' && runner.os == 'macOS'
+        run: |
+          rm -rf target/debug/deps target/debug/incremental desktop/target/debug/deps desktop/target/debug/incremental
+          df -h .
+      - name: Package macOS development binaries
+        if: github.ref_type != 'tag' && runner.os == 'macOS'
+        run: python desktop/scripts/package.py --debug --no-build
       - name: Build release with tested source revisions
         if: github.ref_type == 'tag'
         run: python desktop/scripts/package.py
