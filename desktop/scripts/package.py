@@ -39,6 +39,8 @@ def main():
     suffix = ".exe" if system == "Windows" else ""
     package_name = f"course2md-desktop-{system.lower()}-{platform.machine()}"
     base = ROOT / "target" / "packages" / package_name
+    if base.exists():
+        shutil.rmtree(base)
     base.mkdir(parents=True, exist_ok=True)
     if system == "Darwin":
         bundle = base / "course2md.app"
