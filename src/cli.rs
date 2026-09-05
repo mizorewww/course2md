@@ -34,7 +34,7 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
-#[derive(Args, Clone, Debug)]
+#[derive(Args, Clone, Debug, Default)]
 pub struct RunOpts {
     /// Output root dir (files go to <platform>/<title>/<id>/)
     #[arg(short, long)]

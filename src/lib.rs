@@ -10,6 +10,7 @@ pub mod llm;
 pub mod media;
 pub mod models;
 pub mod npu;
+pub mod options;
 pub mod pipeline;
 pub mod progress;
 pub mod render;
