@@ -39,6 +39,22 @@ mod ffi {
     }
 }
 
+// Swift downloads report through the same serialized NDJSON stream as Rust.
+#[unsafe(no_mangle)]
+extern "C" fn c2m_model_progress(fraction: f64, message: *const std::ffi::c_char) {
+    if message.is_null() {
+        return;
+    }
+    let message = unsafe { CStr::from_ptr(message) }.to_string_lossy();
+    if crate::progress::is_json() {
+        crate::progress::emit(serde_json::json!({"type":"progress", "stage":"model/apple",
+            "current": (fraction.clamp(0.0, 1.0) * 10000.0) as u64, "total":10000,
+            "message":message}));
+    } else {
+        eprintln!("model {:.0}% · {message}", fraction * 100.0);
+    }
+}
+
 fn last_error() -> String {
     unsafe {
         let p = ffi::c2m_last_error();
@@ -183,7 +199,9 @@ fn normalize(s: &str) -> Result<String> {
 fn prompt_model_choice() -> String {
     use std::io::IsTerminal as _;
     if !std::io::stdin().is_terminal() {
-        tracing::info!("非交互环境，默认使用 Qwen3-ASR 1.7B 模型（--asr-model qwen3-0.6b/whisper 可切换）");
+        tracing::info!(
+            "非交互环境，默认使用 Qwen3-ASR 1.7B 模型（--asr-model qwen3-0.6b/whisper 可切换）"
+        );
         return "qwen3-1.7b".into();
     }
     let choice = dialoguer::Select::new()
@@ -264,7 +282,9 @@ pub fn run_coreml(
     cp: &mut crate::checkpoint::Checkpoint,
 ) -> Result<Vec<TranscriptEvent>> {
     let t0 = Instant::now();
+    crate::progress::stage("model/apple", "start");
     let raw = vad(wav, 0.25, 0.35)?;
+    crate::progress::stage("model/apple", "done");
     // 时长只探测一次（与 ffmpeg_vad 同样约定：normalize_segments 不再自行 ffprobe）
     let dur = crate::media::probe_duration_blocking(wav).unwrap_or(0.0);
     let segs = crate::asr::normalize_segments(raw, max_speech, wav, dur)?;
@@ -276,7 +296,9 @@ pub fn run_coreml(
 
     ensure_metallib()?;
     tracing::info!(model, "loading Apple native ASR（首次使用会自动下载模型）");
+    crate::progress::stage("model/apple", "start");
     let asr = CoremlAsr::load(model).context("CoreML 模型加载失败")?;
+    crate::progress::stage("model/apple", "done");
     tracing::info!(
         secs = format_args!("{:.1}", t0.elapsed().as_secs_f64()),
         "coreml ready"

@@ -123,20 +123,14 @@ pub async fn download_models(root: &Path) -> Result<()> {
     let p = llama_paths(root);
     let base = hf_base(current_hf_endpoint());
     tracing::info!(endpoint = %base, "huggingface endpoint");
-    download_file(
-        &format!("{base}/{HF_REPO_PATH}/{LLAMA_MODEL_FILE}"),
-        &p.model,
-        LLAMA_MODEL_FILE,
-    )
-    .await
-    .with_context(mirror_hint)?;
-    download_file(
-        &format!("{base}/{HF_REPO_PATH}/{LLAMA_MMPROJ_FILE}"),
-        &p.mmproj,
-        LLAMA_MMPROJ_FILE,
-    )
-    .await
-    .with_context(mirror_hint)?;
+    let model_url = format!("{base}/{HF_REPO_PATH}/{LLAMA_MODEL_FILE}");
+    let projector_url = format!("{base}/{HF_REPO_PATH}/{LLAMA_MMPROJ_FILE}");
+    let (model, projector) = tokio::join!(
+        download_file(&model_url, &p.model, LLAMA_MODEL_FILE),
+        download_file(&projector_url, &p.mmproj, LLAMA_MMPROJ_FILE),
+    );
+    model.with_context(mirror_hint)?;
+    projector.with_context(mirror_hint)?;
     tracing::info!(path = %root.display(), "models ready");
     Ok(())
 }
@@ -183,6 +177,8 @@ async fn download_file(url: &str, dest: &Path, label: &str) -> Result<()> {
     let url = url.to_string();
     let dest = dest.to_path_buf();
     let label = label.to_string();
+    let stage = format!("model/{label}");
+    crate::progress::stage(&stage, "start");
     tokio::task::spawn_blocking(move || -> Result<()> {
         // 只设连接/读超时，不设整体超时：2.4GB 大文件下完为止，
         // 读超时 10 分钟无数据视为挂起
@@ -224,6 +220,7 @@ async fn download_file(url: &str, dest: &Path, label: &str) -> Result<()> {
     })
     .await
     .context("下载线程失败")??;
+    crate::progress::stage(&stage, "done");
     Ok(())
 }
 
@@ -255,7 +252,7 @@ fn download_once(
         .header("content-length")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let pb = crate::progress::Bar::new("download", total.max(1))
+    let pb = crate::progress::Bar::new(format!("model/{label}"), total)
         .with_template("{spinner:.green} {msg} [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})");
     pb.set_message(label.to_string());
     let mut reader = resp.into_reader();

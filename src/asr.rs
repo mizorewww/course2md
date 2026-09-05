@@ -180,6 +180,7 @@ fn run_blocking(
     let bin = find_llama_server()?;
     let port = crate::runtime::free_port()?;
     tracing::info!(bin = %bin.display(), port, ngl, "llama-server");
+    crate::progress::stage("model-load", "start");
     let mut child = spawn_server(&bin, model, mmproj, ngl, threads, port)?;
     let stderr_tail = child
         .take_stderr()
@@ -203,6 +204,8 @@ fn run_blocking(
         secs = format_args!("{:.1}", t0.elapsed().as_secs_f64()),
         "server ready"
     );
+
+    crate::progress::stage("model-load", "done");
 
     // 共享 agent（连接复用），不再每个 chunk 新建
     let client = ureq::AgentBuilder::new()
@@ -325,6 +328,7 @@ fn run_api(
         .filter(|&i| !cp.is_done(segs[i].start, segs[i].end))
         .collect();
     pb.set_position((segs.len() - pending.len()) as u64);
+    crate::progress::emit(serde_json::json!({"type":"workers", "stage":"transcribe", "workers": WORKERS.min(pending.len())}));
 
     // 有界并发（std::thread::scope + 借用，无需 Arc）：网络往返是主要瓶颈；
     // 结果经 channel 回收后记录。abort 后 in-flight 请求自然结束，无人 join 不到。
