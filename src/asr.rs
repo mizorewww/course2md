@@ -87,7 +87,12 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
 
     if cfg.provider == AsrProvider::Api {
         // 同一模型在 transcriptions / chat 两种端点下的输出可能不同，身份须含模式
-        let model_id = format!("{}:{}:{}", cfg.asr_api.base_url.trim().trim_end_matches('/'), cfg.asr_api.mode, cfg.asr_api.model);
+        let model_id = format!(
+            "{}:{}:{}",
+            cfg.asr_api.base_url.trim().trim_end_matches('/'),
+            cfg.asr_api.mode,
+            cfg.asr_api.model
+        );
         let id = AsrIdentity::new("api", &model_id, cfg.max_speech);
         let api = cfg.asr_api.clone();
         let max_speech = cfg.max_speech as f64;
@@ -141,7 +146,11 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
     let llama = crate::models::ensure_llama_or_download(&cfg.model_dir).await?;
     // coreml 回落场景：身份随实际转写后端（llama/qwen3），旧 coreml 进度作废，
     // 避免同一 checkpoint 混入两个模型的转写文本。
-    let id = AsrIdentity::new("llama", crate::models::llama_gguf_identity(), cfg.max_speech);
+    let id = AsrIdentity::new(
+        "llama",
+        crate::models::llama_gguf_identity(),
+        cfg.max_speech,
+    );
     let model = llama.model;
     let mmproj = llama.mmproj;
     let wav = wav.to_path_buf();
@@ -310,9 +319,7 @@ fn run_api(
     let pb = crate::progress::Bar::new("transcribe", segs.len() as u64)
         .with_template("{spinner:.green} asr {pos}/{len} [{bar:32.cyan/blue}] {elapsed} {msg}");
 
-    let client = ureq::AgentBuilder::new()
-        .timeout(API_HTTP_TIMEOUT)
-        .build();
+    let client = ureq::AgentBuilder::new().timeout(API_HTTP_TIMEOUT).build();
     // 断点续跑：预先过滤出未完成的 chunk（worker 只拿真正需要执行的任务）
     let pending: Vec<usize> = (0..segs.len())
         .filter(|&i| !cp.is_done(segs[i].start, segs[i].end))
@@ -337,23 +344,21 @@ fn run_api(
             };
             let (tmp_dir, wav) = (tmp.path(), wav);
             let (segs, pending, next, abort) = (&segs, &pending, &next, &abort);
-            s.spawn(move || loop {
-                if abort.load(std::sync::atomic::Ordering::Relaxed) {
-                    break;
-                }
-                let idx = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let Some(i) = pending.get(idx).copied() else {
-                    break;
-                };
-                let seg = segs[i];
-                let r = transcribe_api(
-                    &target,
-                    &tmp_dir.join(format!("c{i:04}.wav")),
-                    seg,
-                    wav,
-                );
-                if tx.send((i, r)).is_err() {
-                    break;
+            s.spawn(move || {
+                loop {
+                    if abort.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
+                    let idx = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some(i) = pending.get(idx).copied() else {
+                        break;
+                    };
+                    let seg = segs[i];
+                    let r =
+                        transcribe_api(&target, &tmp_dir.join(format!("c{i:04}.wav")), seg, wav);
+                    if tx.send((i, r)).is_err() {
+                        break;
+                    }
                 }
             });
         }
@@ -405,17 +410,33 @@ fn post_json_retry(
     key: Option<&str>,
     body: &serde_json::Value,
 ) -> Result<serde_json::Value> {
+    post_bytes_retry(
+        agent,
+        url,
+        key,
+        "application/json",
+        &serde_json::to_vec(body)?,
+    )
+}
+
+fn post_bytes_retry(
+    agent: &ureq::Agent,
+    url: &str,
+    key: Option<&str>,
+    content_type: &str,
+    body: &[u8],
+) -> Result<serde_json::Value> {
     let mut delay = RETRY_BACKOFF_BASE;
     for attempt in 1..=MAX_ATTEMPTS {
         let mut req = agent.post(url);
         if let Some(k) = key {
             req = req.set("Authorization", &format!("Bearer {k}"));
         }
-        match req.send_json(body.clone()) {
+        match req.set("Content-Type", content_type).send_bytes(body) {
             Ok(resp) => return resp.into_json().context("响应解析失败"),
             Err(e) => {
                 let retryable = match &e {
-                    ureq::Error::Status(code, _) => *code >= 500,
+                    ureq::Error::Status(code, _) => *code == 429 || *code >= 500,
                     ureq::Error::Transport(_) => true,
                 };
                 if retryable && attempt < MAX_ATTEMPTS {
@@ -449,35 +470,28 @@ struct ApiTarget<'a> {
 }
 
 /// 转写单个 chunk；Ok(None) = 无语音内容。
-fn transcribe_api(
-    t: &ApiTarget,
-    chunk: &Path,
-    seg: Seg,
-    wav: &Path,
-) -> Result<Option<String>> {
+fn transcribe_api(t: &ApiTarget, chunk: &Path, seg: Seg, wav: &Path) -> Result<Option<String>> {
     use base64::Engine as _;
     cut_wav(wav, seg.cut_start, seg.cut_end, chunk).context("切分音频失败")?;
-    let bytes =
-        std::fs::read(chunk).with_context(|| format!("读取 chunk {}", chunk.display()))?;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    let body = match t.mode {
-        crate::settings::AsrApiMode::Transcriptions => serde_json::json!({
-            "model": t.model,
-            "input_audio": {"data": b64, "format": "wav"},
-        }),
-        crate::settings::AsrApiMode::Chat => serde_json::json!({
-            "model": t.model,
-            "temperature": 0.0,
-            "messages": [{
-                "role": "user",
-                "content": [
+    let bytes = std::fs::read(chunk).with_context(|| format!("读取 chunk {}", chunk.display()))?;
+    let v = match t.mode {
+        crate::settings::AsrApiMode::Transcriptions => {
+            let (content_type, body) = transcription_form(t.model, &bytes);
+            post_bytes_retry(t.client, t.url, Some(t.key), &content_type, &body)?
+        }
+        crate::settings::AsrApiMode::Chat => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let body = serde_json::json!({
+                "model": t.model,
+                "temperature": 0.0,
+                "messages": [{"role": "user", "content": [
                     {"type": "text", "text": CHAT_TRANSCRIBE_PROMPT},
-                    {"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}},
-                ],
-            }],
-        }),
+                    {"type": "input_audio", "input_audio": {"data": b64, "format": "wav"}}
+                ]}]
+            });
+            post_json_retry(t.client, t.url, Some(t.key), &body)?
+        }
     };
-    let v = post_json_retry(t.client, t.url, Some(t.key), &body)?;
     if let Some(e) = v
         .get("error")
         .and_then(|e| e.get("message"))
@@ -486,13 +500,41 @@ fn transcribe_api(
         anyhow::bail!("API 报错: {e}");
     }
     let text = match t.mode {
-        crate::settings::AsrApiMode::Transcriptions => {
-            v["text"].as_str().context("转写响应缺少 text 字段，不能当作静音")?.trim().to_string()
+        crate::settings::AsrApiMode::Transcriptions => v["text"]
+            .as_str()
+            .context("转写响应缺少 text 字段，不能当作静音")?
+            .trim()
+            .to_string(),
+        crate::settings::AsrApiMode::Chat => {
+            let content = &v["choices"][0]["message"]["content"];
+            anyhow::ensure!(
+                content.is_string()
+                    || content
+                        .as_array()
+                        .is_some_and(|parts| parts.iter().any(|part| part["text"].is_string())),
+                "转写响应缺少文本内容，不能当作静音"
+            );
+            parse_chat_content(&v).trim().to_string()
         }
-        crate::settings::AsrApiMode::Chat => parse_chat_content(&v).trim().to_string(),
     };
     let _ = std::fs::remove_file(chunk);
     Ok(if text.is_empty() { None } else { Some(text) })
+}
+
+/// Standard OpenAI-compatible file upload, also accepted by OpenRouter.
+fn transcription_form(model: &str, audio: &[u8]) -> (String, Vec<u8>) {
+    let boundary = format!(
+        "course2md-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let mut body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{model}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n").into_bytes();
+    body.extend_from_slice(audio);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={boundary}"), body)
 }
 
 /// 从 chat/completions 响应取文本：content 通常是字符串；部分多模态端点
@@ -853,6 +895,19 @@ pub fn cut_wav(src: &Path, start: f64, end: f64, dest: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transcription_upload_preserves_audio_bytes() {
+        let audio = b"RIFF\0\xff\r\nWAVE";
+        let (content_type, body) = transcription_form("whisper-1", audio);
+        let boundary = content_type
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap();
+        assert!(body.starts_with(format!("--{boundary}\r\n").as_bytes()));
+        assert!(body.windows(audio.len()).any(|slice| slice == audio));
+        assert!(body.ends_with(format!("\r\n--{boundary}--\r\n").as_bytes()));
+        assert!(String::from_utf8_lossy(&body).contains("name=\"file\"; filename=\"audio.wav\""));
+    }
 
     #[test]
     fn sanitize_and_vad_invert() {

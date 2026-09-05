@@ -462,12 +462,28 @@ fn parse_items(v: &[serde_json::Value]) -> Option<Vec<(usize, String)>> {
 }
 
 pub(crate) fn clean_trailing_commas(s: &str) -> String {
-    let mut out = s.to_string();
-    loop {
-        let prev = out.clone();
-        out = out.replace(",}", "}").replace(",]", "]");
-        if out == prev {
-            break;
+    let mut out = String::with_capacity(s.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+        } else if ch == '"' {
+            in_string = true;
+            out.push(ch);
+        } else if ch == ',' && matches!(chars.clone().find(|c| !c.is_whitespace()), Some('}' | ']'))
+        {
+            // Repair syntax only; commas inside transcript strings are data.
+        } else {
+            out.push(ch);
         }
     }
     out
@@ -874,6 +890,13 @@ pub fn write_hint_note(path: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trailing_comma_repair_preserves_transcript_literals() {
+        let input = r#"{"segments":[{"id":0,"text":"literal ,} and ,] and \"quoted\"", }, ] }"#;
+        let parsed = parse_segments(input).unwrap();
+        assert_eq!(parsed[0].1, "literal ,} and ,] and \"quoted\"");
+    }
 
     #[test]
     fn endpoint_join() {
