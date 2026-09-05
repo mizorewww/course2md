@@ -11,6 +11,8 @@
 - 120 秒视频的 CLI 事件记录进一步确认：音频提取在 0.112 秒结束并启动转写；模型在 1.151 秒加载完成；画面提取在 6.116 秒结束；转写在 8.735 秒结束。此记录证明流水重叠，不用于宣称未经对照测量的加速百分比。
 - 自动保存通过实际输入验证。清空目录曾发现空路径被保存的问题，`1bbe4f4` 修复后，界面显示「未保存：请选择笔记保存目录」，磁盘保留原路径；恢复有效目录后自动保存，课程列表保持正确。
 - 系统标题栏开关及减少动态效果开关保存并在重启后恢复。系统标题栏切换明确提示重启生效。通过窗口的原生 zoom 动作放大、还原，设置控件及底栏仍可操作。
+- 拖动窗口缩小至约 900 × 634，顶部操作和底栏保持可见，展开的转换选项可以滚动完整访问。
+- Apple 原生识别补充实测：8 秒音频经 VAD、Qwen3-ASR 1.7B 完成转写，输出 136 字及 Markdown/JSON。Swift 回调产生 `model/apple` 进度事件并正常结束，使用本机已有模型缓存；不是首次完整模型下载的性能测量。
 - YouTube 预览取得 Big Buck Bunny 的真实封面、标题、作者和 9:57 时长。Bilibili 本次网络返回 HTTP 412，输入保留并显示重试入口；此前成功预览的记录见上一份验收。没有伪造成功状态或替换封面。
 - 实际展开、收起转换选项，并切换减少动态效果偏好。实现采用 GPUI 180 ms 三次 ease-out 入场及组件进度过渡；截图工具没有逐帧测量动画时序，不能作为帧率或动画时长的测量证据。
 
@@ -18,15 +20,17 @@
 
 - 核心 `cargo test --lib`：79 项通过。
 - 桌面 `cargo test --manifest-path desktop/Cargo.toml`：10 项通过，2 项外部集成测试默认忽略；真实来源及转换由上述操作补充验收。
-- 桌面所有 targets 的 Clippy（`--no-deps -- -D warnings`）、本地编译和开发包构建通过。
+- 核心库 Clippy（`--lib -- -D warnings`）、桌面所有 targets 的 Clippy（`--no-deps -- -D warnings`）、本地编译和开发包构建通过。
 - ETA 回归测试覆盖缓存工作不计入吞吐量、重试重置估算、未知总量不编造百分比或 ETA；不是模拟成功的脚手架测试。
 - 闲置事件轮询不触发重绘；运行进度事件节流至约 100 ms，计时显示每秒更新；阅读页避免深拷贝完整预览，文件夹计数一次遍历课程。
 - 两个独立 GGUF 文件并行下载，画面提取与音频/转写流水并行；API 转写显示工作池并发上限。
 
 ## 范围与产物
 
-Windows 和 Linux 由 GitHub Actions 构建、测试和打包；本机实际 GUI 操作仅覆盖 macOS。Intel NPU 未进行硬件验收，未知进度的模型加载只显示已用时间，不编造下载 ETA。Apple 原生桥接已通过 Swift/Rust 编译链接，本轮没有完整执行 Apple 模型推理。
+Windows 和 Linux 由 GitHub Actions 构建、测试和打包；本机实际 GUI 操作仅覆盖 macOS。Intel NPU 未进行硬件验收，未知进度的模型加载只显示已用时间，不编造下载 ETA。Apple 原生桥接已通过 Swift/Rust 编译链接及上述真实推理。
 
 开发依赖使用拉取后的主线源码，开发包记录实际提交：Zed `5a9b9558db01a6b906cec2fb70a797affdc58cdd`，GPUI Component `d59d1a16bfb1de85b0a52dbd472e90509478d064`。正式发布锁定文件不因开发构建改变。
 
-本轮三平台检查：[GitHub Actions](https://github.com/mizorewww/course2md/actions/runs/33975022712)。最终状态以此运行结果为准。
+本地 macOS 应用通过 `codesign --verify --deep --strict`，DMG 通过 `hdiutil verify`。下载核对本轮 CI 的 Linux ELF 与 Windows x86-64 GUI/Console PE 产物，均包含 GUI、CLI 和相同的实际依赖提交记录。
+
+最终代码 `1bbe4f4` 的 [三平台检查](https://github.com/mizorewww/course2md/actions/runs/33975022712) 全部通过：macOS、Windows、Linux 的检查、测试及开发包构建成功。后续提交仅补充文档。

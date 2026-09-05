@@ -48,7 +48,7 @@ Download from [GitHub Releases](https://github.com/mizorewww/course2md/releases)
 
 See the [native build guide](desktop/README.md) for development and packaging. Development follows upstream main; releases freeze the revisions actually tested.
 
-**Scripting / integrations**: `course2md --json` emits newline-delimited `stage`, `progress`, `log`, `done`, and `error` events.
+**Scripting / integrations**: `course2md --json` emits newline-delimited `stage`, `progress`, `workers`, `log`, `done`, and `error` events. Independent stages may overlap; `workers` reports a stage's concurrency limit. A progress total of zero means the total is unknown.
 
 ---
 
