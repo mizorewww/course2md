@@ -1398,12 +1398,15 @@ dependencies = [
  "gpui-component",
  "gpui-kit-assets",
  "gpui_platform",
+ "image",
  "libc",
  "serde",
  "serde_json",
  "smol",
  "tempfile",
  "toml 0.8.23",
+ "ureq",
+ "url",
 ]
 
 [[package]]

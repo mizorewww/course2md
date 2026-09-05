@@ -103,80 +103,38 @@ impl Desktop {
             )
     }
     fn new_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let mode_help = [
-            "优先读取字幕，没有字幕时使用语音识别。",
-            "只读取字幕，不调用语音模型；找不到字幕时会提示。",
-            "直接从音频转写，适合没有字幕的录屏与会议。",
-        ];
-        let mut content = v_flex()
-            .gap_4()
-            .child(
-                card()
-                    .child(section("视频来源", "粘贴课程链接，或选择本地视频。"))
-                    .child(
-                        h_flex()
-                            .gap_3()
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Input::new(&self.inputs[&Field::Source])
-                                        .aria_label("课程来源")
-                                        .h(px(42.)),
-                                ),
-                            )
-                            .child(
-                                Button::new("choose-video")
-                                    .label("选择文件")
-                                    .icon(IconName::FolderOpen)
-                                    .h(px(42.))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.pick(false, window, cx)
-                                    })),
-                            ),
-                    )
-                    .child(muted(
-                        "支持 YouTube、Bilibili、本地视频及同名 SRT / VTT 字幕",
-                    )),
-            )
-            .child(
-                card()
-                    .child(section("文字来源", ""))
-                    .child(h_flex().gap_2().children(SOURCES.iter().enumerate().map(
-                        |(index, (_, label))| {
-                            Button::new(("source-mode", index))
-                                .label(*label)
-                                .flex_1()
-                                .h(px(38.))
-                                .selected(self.source_mode == index)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.source_mode = index;
+        let mut content = v_flex().gap_5().child(self.source_card(cx)).when(
+            self.source_preview.is_some(),
+            |view| {
+                view.child(
+                    h_flex()
+                        .gap_3()
+                        .child(div().flex_1().text_color(rgb(MUTED)).child(format!(
+                            "{} · {}",
+                            SOURCES[self.source_mode].1,
+                            if self.llm {
+                                "AI 整理已启用"
+                            } else {
+                                "保留原始讲解"
+                            }
+                        )))
+                        .child(
+                            Button::new("more-options")
+                                .ghost()
+                                .label(if self.show_options {
+                                    "收起转换选项"
+                                } else {
+                                    "转换选项"
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.show_options = !this.show_options;
                                     cx.notify();
-                                }))
-                        },
-                    )))
-                    .child(muted(mode_help[self.source_mode]))
-                    .when(self.source_mode != 1, |view| {
-                        view.child(
-                            h_flex()
-                                .justify_between()
-                                .gap_3()
-                                .child(muted(format!("识别方式：{}", PROVIDERS[self.provider].1)))
-                                .child(
-                                    Button::new("change-provider")
-                                        .ghost()
-                                        .label(if self.show_options {
-                                            "收起选项"
-                                        } else {
-                                            "更改识别方式"
-                                        })
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.show_options = !this.show_options;
-                                            cx.notify();
-                                        })),
-                                ),
-                        )
-                    }),
-            );
-        if self.show_options {
+                                })),
+                        ),
+                )
+            },
+        );
+        if self.show_options && self.source_preview.is_some() {
             content = content.child(
                 card()
                     .child(section(
@@ -234,85 +192,32 @@ impl Desktop {
             );
         }
         content
-            .child(
-                card()
-                    .child(
-                        h_flex()
-                            .justify_between()
-                            .gap_3()
-                            .child(
-                                v_flex()
-                                    .gap_1()
-                                    .child("AI 整理")
-                                    .child(muted("校对文字并整理段落，需要配置 AI 服务。")),
-                            )
-                            .child(
-                                Checkbox::new("llm")
-                                    .label("启用")
-                                    .checked(self.llm)
-                                    .on_click(cx.listener(|this, value, _, cx| {
-                                        this.llm = *value;
+            .when(self.show_options && self.source_preview.is_some(), |view| {
+                view.child(
+                    v_flex()
+                        .gap_3()
+                        .child(h_flex().gap_2().children(SOURCES.iter().enumerate().map(
+                            |(index, (_, name))| {
+                                Button::new(("source-mode", index))
+                                    .label(*name)
+                                    .selected(self.source_mode == index)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.source_mode = index;
                                         cx.notify();
-                                    })),
-                            ),
-                    )
-                    .when(self.llm, |view| {
-                        view.child(
-                            Button::new("configure-llm")
-                                .ghost()
-                                .label("查看 AI 服务设置")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.settings_tab = 2;
-                                    this.navigate(Page::Settings, cx);
+                                    }))
+                            },
+                        )))
+                        .child(
+                            Checkbox::new("llm")
+                                .label("使用 AI 整理文字")
+                                .checked(self.llm)
+                                .on_click(cx.listener(|this, checked, _, cx| {
+                                    this.llm = *checked;
+                                    cx.notify();
                                 })),
-                        )
-                    }),
-            )
-            .child(
-                h_flex()
-                    .justify_between()
-                    .gap_3()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(muted("保存到"))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_ellipsis()
-                                    .child(self.output(cx).display().to_string()),
-                            ),
-                    )
-                    .child(
-                        Button::new("choose-output")
-                            .ghost()
-                            .label("更改目录")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.pick(true, window, cx)),
-                            ),
-                    ),
-            )
-            .child(
-                Button::new("more-options")
-                    .ghost()
-                    .justify_start()
-                    .icon(if self.show_options {
-                        IconName::ChevronUp
-                    } else {
-                        IconName::ChevronDown
-                    })
-                    .label(if self.show_options {
-                        "收起更多选项"
-                    } else {
-                        "更多选项 · 识别方式、导出格式、继续转换"
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.show_options = !this.show_options;
-                        cx.notify();
-                    })),
-            )
+                        ),
+                )
+            })
             .into_any_element()
     }
     fn task_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -488,7 +393,7 @@ impl Desktop {
             .child(
                 Button::new("empty-new")
                     .primary()
-                    .label("添加第一节课")
+                    .label("添加课程")
                     .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::New, cx))),
             )
             .into_any_element()
@@ -498,7 +403,15 @@ impl Desktop {
         let courses = self
             .courses
             .iter()
-            .filter(|course| course.title.to_lowercase().contains(&query))
+            .filter(|course| {
+                course.title.to_lowercase().contains(&query)
+                    && self.folder_filter.is_none_or(|id| {
+                        self.library
+                            .folder(&self.library_root, &course.dir)
+                            .unwrap_or(0)
+                            == id
+                    })
+            })
             .cloned()
             .collect::<Vec<_>>();
         let mut view = v_flex().gap_4().child(
@@ -518,13 +431,45 @@ impl Desktop {
                         .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
                 ),
         );
+        if let Some(id) = self.folder_filter.filter(|id| *id != 0) {
+            view = view.child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("rename-folder")
+                            .ghost()
+                            .label("重命名")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.begin_folder(Some(id), window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("remove-folder")
+                            .ghost()
+                            .label("删除文件夹")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.delete_folder = Some(id);
+                                this.folder_editor = None;
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
         if self.loading {
             view = view.child(muted("正在读取课程…"));
         } else if courses.is_empty() {
             view = view.child(if query.is_empty() {
                 self.empty_state(
-                    "你的课程，整理在这里",
-                    "完成转换后，笔记会自动加入课程库。",
+                    if self.folder_filter.is_some() {
+                        "这个文件夹还没有课程"
+                    } else {
+                        "把值得回看的课程，留在这里"
+                    },
+                    if self.folder_filter.is_some() {
+                        "添加课程时可直接归档，也可以从全部课程中移入。"
+                    } else {
+                        "从一个视频链接开始，积累自己的学习资料库。"
+                    },
                     cx,
                 )
             } else {
@@ -545,56 +490,85 @@ impl Desktop {
                     .into_any_element()
             });
         }
-        view.children(courses.into_iter().enumerate().map(|(index, course)| {
-            let open = course.clone();
-            let dir = course.dir.clone();
-            card().p_4().child(
-                h_flex()
-                    .gap_4()
-                    .child(
-                        div()
-                            .w(px(104.))
-                            .h(px(68.))
-                            .flex_shrink_0()
-                            .rounded_lg()
-                            .overflow_hidden()
-                            .bg(rgb(SIDEBAR))
-                            .when_some(course.thumbnail.clone(), |view, path| {
-                                view.child(img(path).size_full().object_fit(ObjectFit::Cover))
-                            }),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_ellipsis()
-                                    .child(course.title),
-                            )
-                            .child(muted(format!(
-                                "{} 张截图 · {} 段讲解",
-                                course.slides, course.segments
-                            ))),
-                    )
-                    .child(
-                        Button::new(("read-course", index))
-                            .label("阅读")
-                            .icon(IconName::ArrowRight)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.open_course(open.clone(), cx)
-                            })),
-                    )
-                    .child(
-                        Button::new(("course-folder", index))
-                            .ghost()
-                            .icon(IconName::FolderOpen)
-                            .accessibility_label("打开课程文件夹")
-                            .on_click(move |_, _, cx| cx.reveal_path(&dir)),
-                    ),
-            )
+        view.children(courses.chunks(2).enumerate().map(|(row, courses)| {
+            h_flex()
+                .gap_5()
+                .items_start()
+                .children(courses.iter().enumerate().map(|(col, course)| {
+                    let index = row * 2 + col;
+                    let open = course.clone();
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .rounded_xl()
+                        .overflow_hidden()
+                        .bg(rgb(SURFACE))
+                        .border_1()
+                        .border_color(rgb(LINE))
+                        .child(
+                            Button::new(("read-course", index))
+                                .ghost()
+                                .w_full()
+                                .h(px(184.))
+                                .p_0()
+                                .accessibility_label(format!("阅读 {}", course.title))
+                                .child(
+                                    div()
+                                        .size_full()
+                                        .bg(rgb(SIDEBAR))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .when_some(course.thumbnail.clone(), |view, path| {
+                                            view.child(
+                                                img(path).size_full().object_fit(ObjectFit::Cover),
+                                            )
+                                        })
+                                        .when(course.thumbnail.is_none(), |view| {
+                                            view.child(Icon::new(IconName::BookOpen).size_6())
+                                        }),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.open_course(open.clone(), cx)
+                                })),
+                        )
+                        .child(
+                            v_flex()
+                                .p_4()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .h(px(44.))
+                                        .overflow_hidden()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(course.title.clone()),
+                                )
+                                .child(muted(format!(
+                                    "{} 张截图 · {} 段讲解",
+                                    course.slides, course.segments
+                                )))
+                                .child(
+                                    h_flex()
+                                        .justify_between()
+                                        .child(self.folder_picker(
+                                            Some(course.dir.clone()),
+                                            index + 1,
+                                            cx,
+                                        ))
+                                        .child(
+                                            Button::new(("course-files", index))
+                                                .ghost()
+                                                .icon(IconName::FolderOpen)
+                                                .accessibility_label("打开导出文件")
+                                                .on_click({
+                                                    let dir = course.dir.clone();
+                                                    move |_, _, cx| cx.reveal_path(&dir)
+                                                }),
+                                        ),
+                                ),
+                        )
+                }))
+                .when(courses.len() == 1, |view| view.child(div().flex_1()))
         }))
         .into_any_element()
     }
@@ -927,12 +901,34 @@ impl Desktop {
     fn page_header(&self, cx: &mut Context<Self>) -> Div {
         let (title, subtitle) = match self.page {
             Page::New => (
-                "新建笔记".to_owned(),
+                "添加课程".to_owned(),
                 "把课程中的画面与讲解，整理成可以回看的笔记。".to_owned(),
             ),
             Page::Library => (
-                "课程库".into(),
-                format!("{} 份笔记 · 保存在你的电脑上", self.courses.len()),
+                self.folder_filter
+                    .map(|id| {
+                        if id == 0 {
+                            "未分类".into()
+                        } else {
+                            self.library
+                                .folders
+                                .get(&id)
+                                .cloned()
+                                .unwrap_or_else(|| "课程库".into())
+                        }
+                    })
+                    .unwrap_or_else(|| "全部课程".into()),
+                format!(
+                    "{} 份笔记 · 保存在你的电脑上",
+                    self.courses
+                        .iter()
+                        .filter(|course| self.folder_filter.is_none_or(|id| self
+                            .library
+                            .folder(&self.library_root, &course.dir)
+                            .unwrap_or(0)
+                            == id))
+                        .count()
+                ),
             ),
             Page::Settings => (
                 "设置".into(),
@@ -964,15 +960,22 @@ impl Desktop {
         let mut header = v_flex().gap_5().child(
             h_flex()
                 .gap_3()
-                .when(self.page == Page::Result, |view| {
+                .when(matches!(self.page, Page::Result | Page::New), |view| {
                     view.child(
                         Button::new("result-back")
                             .ghost()
                             .icon(IconName::ArrowLeft)
                             .accessibility_label("返回上一页")
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.navigate(this.result_origin, cx)),
-                            ),
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.navigate(
+                                    if this.page == Page::New {
+                                        Page::Library
+                                    } else {
+                                        this.result_origin
+                                    },
+                                    cx,
+                                )
+                            })),
                     )
                 })
                 .child(
@@ -1046,8 +1049,10 @@ impl Desktop {
             Page::New => footer
                 .child(muted(if self.job.is_some() {
                     "任务在后台运行，输入内容会保留。"
+                } else if self.source_preview.is_none() {
+                    "先预览并确认课程内容。"
                 } else {
-                    "原始本地视频会保留。"
+                    "笔记生成后会自动加入课程库。"
                 }))
                 .child(
                     Button::new("start")
@@ -1057,10 +1062,10 @@ impl Desktop {
                         .label(if self.job.is_some() {
                             "查看进行中的任务"
                         } else {
-                            "开始转换"
+                            "生成笔记"
                         })
                         .icon(IconName::ArrowRight)
-                        .disabled(self.job.is_none() && self.value(Field::Source, cx).is_empty())
+                        .disabled(self.job.is_none() && self.source_preview.is_none())
                         .on_click(cx.listener(|this, _, _, cx| this.start(Kind::Convert, cx))),
                 ),
             Page::Settings => footer
@@ -1126,7 +1131,7 @@ impl Render for Desktop {
             .text_sm()
             .child(
                 v_flex()
-                    .w(px(204.))
+                    .w(px(220.))
                     .h_full()
                     .flex_shrink_0()
                     .px_3()
@@ -1164,23 +1169,15 @@ impl Render for Desktop {
                     .child(
                         v_flex().gap_1().children(
                             [
-                                (Page::New, "新建笔记", IconName::Plus),
-                                (Page::Library, "课程库", IconName::BookOpen),
-                                (
-                                    Page::Task,
-                                    if self.job.is_some() {
-                                        "正在处理"
-                                    } else {
-                                        "任务记录"
-                                    },
-                                    IconName::Loader,
-                                ),
+                                (Page::New, "添加课程", IconName::Plus),
+                                (Page::Library, "全部课程", IconName::BookOpen),
                             ]
                             .into_iter()
                             .enumerate()
                             .map(|(index, (page, label, icon))| {
                                 Button::new(("nav", index))
                                     .ghost()
+                                    .when(page == Page::New, |button| button.primary())
                                     .w_full()
                                     .h(px(40.))
                                     .justify_start()
@@ -1193,16 +1190,48 @@ impl Render for Desktop {
                                             .child(label),
                                     )
                                     .selected(
-                                        self.page == page
+                                        (self.page == page
+                                            && (page != Page::Library
+                                                || self.folder_filter.is_none()))
                                             || self.page == Page::Result && page == Page::Library,
                                     )
-                                    .on_click(
-                                        cx.listener(move |this, _, _, cx| this.navigate(page, cx)),
-                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if page == Page::Library {
+                                            this.folder_filter = None;
+                                        }
+                                        this.navigate(page, cx)
+                                    }))
                             }),
                         ),
                     )
-                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .id("folder-scroll")
+                            .min_h_0()
+                            .flex_1()
+                            .overflow_y_scroll()
+                            .child(self.folder_sidebar(cx)),
+                    )
+                    .child(
+                        Button::new("nav-task")
+                            .ghost()
+                            .w_full()
+                            .h(px(38.))
+                            .selected(self.page == Page::Task)
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .gap_3()
+                                    .child(Icon::new(IconName::Loader))
+                                    .child(if self.job.is_some() {
+                                        "正在处理"
+                                    } else {
+                                        "任务记录"
+                                    }),
+                            )
+                            .accessibility_label("任务记录")
+                            .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx))),
+                    )
                     .child(
                         Button::new("nav-settings")
                             .ghost()
@@ -1267,6 +1296,10 @@ impl Render for Desktop {
                             .pb_5()
                             .flex_shrink_0()
                             .child(self.page_header(cx).w_full().max_w(px(780.)).mx_auto()),
+                    )
+                    .when(
+                        self.folder_editor.is_some() || self.delete_folder.is_some(),
+                        |view| view.child(div().px_8().pb_4().child(self.folder_editor_view(cx))),
                     )
                     .when_some(self.message.clone(), |view, message| {
                         view.child(

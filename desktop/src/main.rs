@@ -1,11 +1,14 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 mod backend;
+mod library_ui;
+mod organize;
+mod source;
 mod theme;
 mod views;
 use backend::{Completed, Course, Event, Job};
 use gpui::{prelude::*, *};
 use gpui_component::{
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
     *,
 };
 use std::{
@@ -31,6 +34,7 @@ enum Kind {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Field {
     Source,
+    FolderName,
     Output,
     Search,
     AsrUrl,
@@ -64,6 +68,20 @@ const SOURCES: [(&str, &str); 3] = [
 ];
 
 struct Desktop {
+    online: bool,
+    last_source_input: String,
+    source_preview: Option<source::Source>,
+    preview_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    preview_generation: u64,
+    preview_workers: usize,
+    preview_error: Option<String>,
+    library: organize::Library,
+    library_root: PathBuf,
+    folder_filter: Option<u64>, // None = all; 0 = unfiled
+    target_folder: Option<u64>,
+    folder_editor: Option<Option<u64>>,
+    delete_folder: Option<u64>,
+    task_destination: Option<(PathBuf, Option<u64>, source::Source)>,
     page: Page,
     result_origin: Page,
     result_tab: usize,
@@ -103,6 +121,12 @@ actions!(course2md_desktop, [Quit]);
 
 impl Desktop {
     fn request_close(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.preview_workers > 0 {
+            if let Some(cancel) = &self.preview_cancel {
+                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            self.closing = true;
+        }
         if let Some(job) = &self.job {
             job.cancel();
             self.closing = true;
@@ -111,7 +135,7 @@ impl Desktop {
             cx.notify();
             false
         } else {
-            true
+            self.preview_workers == 0
         }
     }
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -132,7 +156,7 @@ impl Desktop {
         let fields = [
             (
                 Field::Source,
-                "粘贴 YouTube、Bilibili 链接，或选择本地视频",
+                "粘贴 YouTube 或 Bilibili 视频链接",
                 String::new(),
             ),
             (
@@ -141,6 +165,7 @@ impl Desktop {
                 output.display().to_string(),
             ),
             (Field::Search, "搜索课程标题", String::new()),
+            (Field::FolderName, "文件夹名称", String::new()),
             (
                 Field::AsrUrl,
                 "https://api.example.com/v1",
@@ -170,10 +195,42 @@ impl Desktop {
                 )
             })
             .collect();
-        let subscriptions = inputs
-            .values()
-            .map(|input| cx.observe(input, |_, _, cx| cx.notify()))
+        let mut subscriptions: Vec<Subscription> = inputs
+            .iter()
+            .map(|(field, input)| {
+                let field = *field;
+                cx.observe(input, move |this: &mut Self, _, cx| {
+                    if field == Field::Source {
+                        let value = this.value(Field::Source, cx);
+                        if value != this.last_source_input {
+                            this.last_source_input = value;
+                            this.invalidate_source();
+                        }
+                    }
+                    cx.notify();
+                })
+            })
             .collect();
+        subscriptions.push(cx.subscribe(
+            &inputs[&Field::Source],
+            |this: &mut Self, _, event, cx| {
+                if matches!(event, InputEvent::PressEnter { .. })
+                    && this.page == Page::New
+                    && this.online
+                    && this.preview_cancel.is_none()
+                {
+                    this.inspect_source(cx);
+                }
+            },
+        ));
+        subscriptions.push(cx.subscribe(
+            &inputs[&Field::FolderName],
+            |this: &mut Self, _, event, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.save_folder(cx);
+                }
+            },
+        ));
         let provider = config
             .defaults
             .provider
@@ -214,7 +271,21 @@ impl Desktop {
             }
         });
         let mut this = Self {
-            page: Page::New,
+            page: Page::Library,
+            online: true,
+            last_source_input: String::new(),
+            source_preview: None,
+            preview_cancel: None,
+            preview_generation: 0,
+            preview_workers: 0,
+            preview_error: None,
+            library: Default::default(),
+            library_root: output,
+            folder_filter: None,
+            target_folder: None,
+            folder_editor: None,
+            delete_folder: None,
+            task_destination: None,
             result_origin: Page::Library,
             result_tab: 0,
             settings_tab: 0,
@@ -249,6 +320,7 @@ impl Desktop {
             _poll: poll,
         };
         this.refresh_environment(cx);
+        this.refresh_library(cx);
         this
     }
     fn refresh_environment(&mut self, cx: &mut Context<Self>) {
@@ -266,6 +338,9 @@ impl Desktop {
         .detach();
     }
     fn navigate(&mut self, page: Page, cx: &mut Context<Self>) {
+        if page == Page::New {
+            self.target_folder = self.folder_filter.filter(|id| *id != 0);
+        }
         self.page = page;
         self.message = None;
         if page == Page::Library {
@@ -314,6 +389,11 @@ impl Desktop {
                             this.inputs[&field].update(cx, |state, cx| {
                                 state.set_value(path.display().to_string(), window, cx)
                             });
+                            if !directory {
+                                this.inspect_source(cx);
+                            } else {
+                                this.refresh_library(cx);
+                            }
                         }
                     }
                     Ok(Ok(None)) => {}
@@ -348,6 +428,14 @@ impl Desktop {
                     .to_string(),
             ],
             Kind::Convert => {
+                if self
+                    .source_preview
+                    .as_ref()
+                    .is_none_or(|source| source.input != self.value(Field::Source, cx))
+                {
+                    self.preview_error = Some("请先预览并确认课程内容".into());
+                    return;
+                }
                 let source = self.value(Field::Source, cx);
                 let source = course2md::config::expand_tilde(source.into())
                     .display()
@@ -417,6 +505,12 @@ impl Desktop {
         };
         match Job::start(args) {
             Ok(job) => {
+                if kind == Kind::Convert {
+                    self.task_destination = self
+                        .source_preview
+                        .clone()
+                        .map(|source| (self.output(cx), self.target_folder, source));
+                }
                 self.job = Some(job);
                 self.kind = kind;
                 self.cancelling = false;
@@ -474,7 +568,9 @@ impl Desktop {
                     self.job = None;
                     self.cancelling = false;
                     if self.closing {
-                        cx.quit();
+                        if self.preview_workers == 0 {
+                            cx.quit();
+                        }
                         return;
                     }
                     if cancelled {
@@ -483,6 +579,23 @@ impl Desktop {
                     {
                         self.task_status = "已完成".into();
                         self.completed = self.pending_done.take();
+                        if let (Some(done), Some((root, folder, source))) =
+                            (&self.completed, self.task_destination.take())
+                        {
+                            if let Err(e) = source::save_cover(&source, &done.out_dir) {
+                                self.message = Some(format!("笔记已完成，但封面保存失败：{e:#}"));
+                            }
+                            if let Err(e) = organize::Library::edit(&root, |library| {
+                                library.assign(
+                                    &root,
+                                    &done.out_dir,
+                                    folder.filter(|id| library.folders.contains_key(id)),
+                                )
+                            }) {
+                                self.message = Some(format!("笔记已完成，但归档失败：{e:#}"));
+                            }
+                            self.refresh_library(cx);
+                        }
                         if self.page == Page::Task
                             && let Some(done) = self.completed.clone()
                         {
@@ -510,15 +623,40 @@ impl Desktop {
         }
         self.loading = true;
         let root = self.output(cx);
-        let task = cx
-            .background_executor()
-            .spawn(async move { backend::library(&root) });
+        if self.library_root != root {
+            self.library_root = root.clone();
+            self.library = Default::default();
+            self.courses.clear();
+            self.folder_filter = None;
+            self.target_folder = None;
+            self.folder_editor = None;
+            self.delete_folder = None;
+        }
+        let task_root = root.clone();
+        let task = cx.background_executor().spawn(async move {
+            Ok::<_, anyhow::Error>((
+                backend::library(&task_root)?,
+                organize::Library::load(&task_root)?,
+            ))
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
+                if this.output(cx) != root {
+                    this.refresh_library(cx);
+                    return;
+                }
                 match result {
-                    Ok(courses) => this.courses = courses,
+                    Ok((courses, library)) => {
+                        if this.library_root != root {
+                            this.folder_filter = None;
+                            this.target_folder = None;
+                        }
+                        this.library_root = root;
+                        this.courses = courses;
+                        this.library = library;
+                    }
                     Err(error) => this.message = Some(format!("{error:#}")),
                 }
                 cx.notify();
@@ -665,6 +803,14 @@ impl Desktop {
         self.inputs[&Field::Output].update(cx, |state, cx| {
             state.set_value(output.display().to_string(), window, cx)
         });
+    }
+}
+
+impl Drop for Desktop {
+    fn drop(&mut self) {
+        if let Some(cancel) = &self.preview_cancel {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
