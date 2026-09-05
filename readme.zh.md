@@ -117,6 +117,9 @@ yay -S course2md-bin
 ```bash
 # 1. 安装系统依赖
 sudo pacman -S ffmpeg yt-dlp llama-cpp
+# GPU 识别还需后端和显卡驱动（Intel 示例）
+sudo pacman -S ggml-vulkan vulkan-intel
+llama-server --list-devices
 
 # 2. 安装 course2md
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash

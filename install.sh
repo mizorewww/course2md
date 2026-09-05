@@ -34,6 +34,7 @@ if [ "${#missing[@]}" -gt 0 ]; then
   echo "缺少依赖：${missing[*]}" >&2
   echo "macOS:  brew install ffmpeg yt-dlp llama.cpp" >&2
   echo "Arch:   sudo pacman -S ffmpeg yt-dlp llama-cpp" >&2
+  echo "GPU:    Arch/CachyOS also needs a GPU backend (e.g. ggml-vulkan) and the GPU driver; check llama-server --list-devices" >&2
   echo "Debian: sudo apt install ffmpeg yt-dlp && 安装 llama.cpp（见 README）" >&2
   exit 1
 fi

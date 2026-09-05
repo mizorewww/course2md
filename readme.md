@@ -117,6 +117,9 @@ yay -S course2md-bin
 ```bash
 # 1. Install dependencies
 sudo pacman -S ffmpeg yt-dlp llama-cpp
+# GPU ASR also needs a backend and GPU driver (Intel example)
+sudo pacman -S ggml-vulkan vulkan-intel
+llama-server --list-devices
 
 # 2. Install course2md
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash

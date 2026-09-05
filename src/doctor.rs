@@ -99,12 +99,29 @@ pub fn run() -> Result<()> {
     }
 
     match crate::runtime::which("llama-server") {
-        Some(p) => check(
-            &mut out,
-            true,
-            "llama-server",
-            &format!("  {}", p.display()),
-        ),
+        Some(p) => {
+            check(
+                &mut out,
+                true,
+                "llama-server",
+                &format!("  {}", p.display()),
+            );
+            match crate::asr::gpu_devices(&p) {
+                Ok(devices) if !devices.is_empty() => {
+                    check(&mut out, true, "GPU", &format!("  {}", devices.join(", ")))
+                }
+                Ok(_) => check(
+                    &mut out,
+                    false,
+                    "GPU",
+                    &format!(
+                        "  llama-server 未检测到 GPU。{}",
+                        crate::asr::GPU_SETUP_HINT
+                    ),
+                ),
+                Err(e) => check(&mut out, false, "GPU", &format!("  {e:#}")),
+            }
+        }
         None => {
             out.push("! llama-server  未安装（gpu/cpu 后端需要；coreml/npu/api 不需要）".into())
         }

@@ -12,6 +12,8 @@ license=('MIT')
 depends=(ffmpeg yt-dlp)
 optdepends=(
     'llama-cpp: local GPU/CPU ASR via llama-server'
+    'ggml-vulkan: GPU ASR via Vulkan (also install the Vulkan driver for your GPU)'
+    'ggml-cuda: alternative GPU ASR backend for NVIDIA GPUs'
     'intel-npu-driver: Intel Core Ultra NPU acceleration driver'
     'openvino-intel-npu-plugin: Intel Core Ultra NPU OpenVINO plugin'
     'python-openvino: OpenVINO Python runtime for NPU'
