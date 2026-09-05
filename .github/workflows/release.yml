@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish after every build passes (for example v1.6.0)'
+        required: true
 
 permissions:
   contents: write
@@ -93,184 +97,87 @@ jobs:
             ${{ matrix.asset }}
             mlx-macos-arm64.metallib
 
-  # GUI 桌面客户端（Tauri v2）：三平台安装包，流程与 packaging/build-app.sh 等价
-  app:
+  desktop:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-26
-            target: aarch64-apple-darwin
-            bundle: dmg
-            asset: course2md-gui-macos-arm64.dmg
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            bundle: nsis
-            asset: course2md-gui-windows-x86_64-setup.exe
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            bundle: appimage
-            asset: course2md-gui-linux-x86_64.AppImage
-
+        os: [macos-26, ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
-      # secrets 不能直接进 if:，先映射到 env 供条件判断与步骤使用
       MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
       MACOS_CERT_PASS: ${{ secrets.MACOS_CERT_PASS }}
-      # secret APPLE_API_KEY 是 p8 内容；tauri 公证要的 APPLE_API_KEY 是 Key ID
       APPLE_API_P8: ${{ secrets.APPLE_API_KEY }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
         with:
-          targets: ${{ matrix.target }}
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
-
-      # Tauri v2 官方 Ubuntu 依赖列表
-      - name: Install Tauri system dependencies (linux)
+          python-version: '3.12'
+      - name: Linux native dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
-            libssl-dev libxdo-dev patchelf build-essential curl wget file
-
-      - name: Build CLI
-        run: cargo build --release --locked --target ${{ matrix.target }}
-
-      # sidecar 命名约定：course2md-<target-triple>（tauri.conf.json externalBin 引用）；
-      # bundle.macOS.files 引用 mlx.metallib，缺失会让 tauri build 失败
-      - name: Stage sidecar (+ mlx.metallib on macOS)
-        shell: bash
+          sudo apt-get install -y build-essential clang cmake pkg-config libasound2-dev libx11-xcb-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig1-dev libssl-dev libclang-dev libgit2-dev libstdc++-14-dev
+      - name: Windows LLVM
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          set -euo pipefail
-          bin_dir=app/src-tauri/binaries
-          mkdir -p "$bin_dir"
-          ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
-          install -m 755 "target/${{ matrix.target }}/release/course2md$ext" \
-            "$bin_dir/course2md-${{ matrix.target }}$ext"
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            mlb=""
-            for cand in \
-              native/apple-asr/mlx.metallib \
-              "target/${{ matrix.target }}/release/mlx.metallib" \
-            ; do
-              if [ -f "$cand" ]; then mlb="$cand"; break; fi
-            done
-            [ -n "$mlb" ] || mlb="$(find native/apple-asr/.build -name default.metallib | head -1)"
-            [ -n "$mlb" ] || { echo "::error::未找到 mlx.metallib" >&2; exit 1; }
-            install -m 644 "$mlb" "$bin_dir/mlx.metallib"
-          fi
-
-      # tag 发版时 app 版本号同步成 tag（去 v 前缀）；workflow_dispatch 用 0.0.0-dev
-      - name: Sync app version from tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="0.0.0-dev"
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then version="${GITHUB_REF_NAME#v}"; fi
-          tmp="$(mktemp)"
-          jq --arg v "$version" '.version = $v' app/src-tauri/tauri.conf.json > "$tmp"
-          mv "$tmp" app/src-tauri/tauri.conf.json
-          echo "app version: $version"
-
-      # Developer ID 证书进 keychain，tauri bundler 读 APPLE_SIGNING_IDENTITY 签名；
-      # 身份字符串动态取（find-identity），不硬编码
-      - name: Import signing certificate (macOS)
+          choco install llvm --no-progress -y
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+      - name: Prepare tested GPUI sources
+        run: python desktop/scripts/sources.py --locked
+      - name: Desktop regression tests
+        run: cargo test --release --manifest-path desktop/Cargo.toml --locked
+      - name: Import signing certificate
         if: runner.os == 'macOS' && env.MACOS_CERT_P12 != ''
+        shell: bash
         run: |
           set -euo pipefail
-          keychain="$RUNNER_TEMP/build.keychain"
-          echo "$MACOS_CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          keychain="$RUNNER_TEMP/desktop.keychain"
+          printf '%s' "$MACOS_CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
           security create-keychain -p build "$keychain"
-          security unlock-keychain -p build "$keychain"
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASS" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -k build "$keychain"
           security list-keychains -d user -s "$keychain" login.keychain-db
           rm -f "$RUNNER_TEMP/cert.p12"
-          curl -fsSL -o "$RUNNER_TEMP/g2.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer || true
-          security import "$RUNNER_TEMP/g2.cer" -k "$keychain" || true
-          identity="$(security find-identity -v -p codesigning "$keychain" | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')"
-          [ -n "$identity" ] || { echo "::error::keychain 中找不到 Developer ID Application 证书" >&2; exit 1; }
+          curl -fsSL -o "$RUNNER_TEMP/g2.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security import "$RUNNER_TEMP/g2.cer" -k "$keychain"
+          identity="$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)"
+          test -n "$identity"
           echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
-
-      # 公证：p8 落盘（权限 600，cleanup 步骤删除），tauri bundler 走 notarytool。
-      # 无证书时是 ad-hoc 签名，不应尝试公证 → 条件里同样要求证书存在
-      - name: Setup notarization credentials (macOS)
-        if: runner.os == 'macOS' && env.MACOS_CERT_P12 != '' && env.APPLE_API_P8 != '' && env.APPLE_API_KEY_ID != '' && env.APPLE_API_ISSUER != ''
+      - name: Prepare notarization
+        if: runner.os == 'macOS' && env.MACOS_CERT_P12 != '' && env.APPLE_API_P8 != ''
+        shell: bash
         run: |
-          set -euo pipefail
           p8="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-          printf '%s\n' "$APPLE_API_P8" > "$p8"
+          printf '%s' "$APPLE_API_P8" > "$p8"
           chmod 600 "$p8"
           echo "APPLE_API_KEY_PATH=$p8" >> "$GITHUB_ENV"
-          echo "APPLE_API_KEY=$APPLE_API_KEY_ID" >> "$GITHUB_ENV"
-
-      - name: pnpm install
-        working-directory: app
-        run: pnpm install --frozen-lockfile
-
-      # 无证书/无公证 secret 时优雅降级：APPLE_* 均未设置，tauri 按 ad-hoc 构建
-      - name: tauri build (${{ matrix.bundle }})
-        working-directory: app
-        run: pnpm tauri build --bundles ${{ matrix.bundle }}
-
-      # tauri bundler 只公证 .app，dmg 要单独 notarytool + stapler；
-      # 条件与 Setup notarization credentials 一致（if 里读不到 GITHUB_ENV 的运行时值）
-      - name: Notarize and staple dmg (macOS)
-        if: runner.os == 'macOS' && env.MACOS_CERT_P12 != '' && env.APPLE_API_P8 != '' && env.APPLE_API_KEY_ID != '' && env.APPLE_API_ISSUER != ''
-        working-directory: app
-        shell: bash
-        run: |
-          set -euo pipefail
-          dmg="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' | head -1)"
-          [ -n "$dmg" ] || { echo "::error::dmg 产物未找到" >&2; exit 1; }
-          xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
-          xcrun stapler staple "$dmg"
-
-      - name: Collect installer
-        shell: bash
-        run: |
-          set -euo pipefail
-          bundle_dir="app/src-tauri/target/release/bundle"
-          case "${{ matrix.bundle }}" in
-            dmg)      src="$(find "$bundle_dir/dmg" -maxdepth 1 -name '*.dmg' | head -1)" ;;
-            nsis)     src="$(find "$bundle_dir/nsis" -maxdepth 1 -name '*-setup.exe' | head -1)" ;;
-            appimage) src="$(find "$bundle_dir/appimage" -maxdepth 1 -name '*.AppImage' | head -1)" ;;
-          esac
-          [ -n "$src" ] || { echo "::error::bundle 产物未找到" >&2; exit 1; }
-          cp "$src" "${{ matrix.asset }}"
-
+      - name: Build and package native app
+        run: python desktop/scripts/package.py
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          name: native-${{ runner.os }}
+          path: |
+            desktop/target/packages/*.zip
+            desktop/target/packages/*.tar.gz
+            desktop/target/packages/*.dmg
           if-no-files-found: error
-
-      # 签名材料用完即删，不留到后续步骤
-      - name: Cleanup signing material (macOS)
+      - name: Remove signing material
         if: always() && runner.os == 'macOS'
+        shell: bash
         run: |
-          security delete-keychain "$RUNNER_TEMP/build.keychain" 2>/dev/null || true
-          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+          security delete-keychain "$RUNNER_TEMP/desktop.keychain" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$RUNNER_TEMP/cert.p12"
 
   release:
-    needs: [build, app]
+    needs: [build, desktop]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -279,5 +186,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.version || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: dist/*
+          body_path: docs/releases/v1.6.0.md
+          fail_on_unmatched_files: true
           generate_release_notes: true

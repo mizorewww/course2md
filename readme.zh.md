@@ -42,25 +42,13 @@ course2md ./lecture.mp4
 
 ## 桌面客户端（GUI）
 
-新的原生客户端位于 [`desktop/`](desktop/README.md)，基于 GPUI 与 GPUI Component，面向 macOS、Windows 和 Linux。包含转换、取消任务、课程搜索、图文笔记阅读和共享配置。开发时更新两个上游的 main；发布时冻结实际测试的源码提交。详见[构建指南](desktop/README.md)和[审查与实际验收记录](docs/REVIEW-2026-09.md)。
+原生客户端位于 [`desktop/`](desktop/README.md)，基于 GPUI 与 GPUI Component，已替代 Tauri。包含简洁的新建流程、进度与取消、课程搜索、文稿 / 截图 / 文件视图，以及与 CLI 共享的配置。
 
-下面的 Tauri 客户端保留为参考实现，现有 Tauri 发布包与新的原生客户端分别构建。
+从 [GitHub Releases](https://github.com/mizorewww/course2md/releases) 下载 macOS DMG、Windows 便携 ZIP 或 Linux tar.gz。包内包含匹配的 CLI；需要另行安装 ffmpeg/ffprobe，在线视频还需要 yt-dlp。macOS 发布流程在仓库签名凭据可用时执行 Developer ID 签名与公证。
 
-`app/` 目录是一个基于 Tauri v2 的桌面客户端，把 CLI 完整包进图形界面：转写后端按本机能力推荐（推荐项置顶）、任务进度实时展示（阶段步进器 + 进度条 + 日志控制台）、结果在应用内预览（文稿 / 截图网格 / 文件）、历史记录与配置管理（模型下载、config.toml 编辑）。
+开发和打包方法见[原生客户端指南](desktop/README.md)。开发跟随两个上游 main，发布冻结实际测试的源码提交。
 
-它通过 sidecar 方式内置 `course2md` 二进制，以 `--json` NDJSON 事件流通信；取消任务会连带终止 ffmpeg / llama-server 等子进程。本机已安装 CLI 时也可独立使用（开发模式回落到 PATH）。
-
-每次发版都会在 [GitHub Releases](https://github.com/mizorewww/course2md/releases) 附上预编译安装包：`course2md-gui-macos-arm64.dmg`（Developer ID 签名 + 公证）、`course2md-gui-windows-x86_64-setup.exe` 与 `course2md-gui-linux-x86_64.AppImage`。应用已内置 CLI，但媒体处理仍依赖系统的 `ffmpeg` / `yt-dlp`（见下文[安装指南](#安装指南)）。
-
-构建（macOS，产出 `.app` 与 `.dmg`）：
-
-```bash
-bash packaging/build-app.sh
-```
-
-> 脚本会先构建 release 版 CLI 并作为 sidecar 拷入（macOS 同时带上 CoreML 所需的 `mlx.metallib`），再执行 `pnpm install && pnpm tauri build`。前端纯浏览器预览（mock 数据）：`cd app && pnpm dev`。
-
-**脚本/二次开发**：CLI 自身支持 `--json` 参数——stdout 输出逐行 JSON 事件（`stage` / `progress` / `log` / `done` / `error`），任何语言都能据此包装出进度界面。
+**脚本集成**：CLI 的 `--json` 输出逐行 JSON 事件，包含 `stage`、`progress`、`log`、`done` 和 `error`。
 
 ---
 
@@ -140,7 +128,7 @@ sudo install -m755 llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
 ```
 
-**桌面客户端（GUI）**：从 [Releases](https://github.com/mizorewww/course2md/releases) 下载 `course2md-gui-linux-x86_64.AppImage`，`chmod +x` 后直接运行。
+**桌面客户端（GUI）**：从 [Releases](https://github.com/mizorewww/course2md/releases) 下载 `course2md-desktop-linux-x86_64.tar.gz`，解压后运行其中的 `course2md-desktop`。
 
 ---
 
@@ -160,7 +148,7 @@ winget install --id ggml.llamacpp -e
 1. 前往 [Releases](https://github.com/mizorewww/course2md/releases) 下载 `course2md-windows-x86_64.exe`。
 2. 重命名为 `course2md.exe` 并将其移动至已加入系统 `PATH` 的目录中。
 
-**桌面客户端（GUI）**：从 [Releases](https://github.com/mizorewww/course2md/releases) 下载并运行 `course2md-gui-windows-x86_64-setup.exe`（NSIS 安装包）。
+**桌面客户端（GUI）**：从 [Releases](https://github.com/mizorewww/course2md/releases) 下载 `course2md-desktop-windows-AMD64.zip`，解压后运行 `course2md-desktop.exe`。
 
 ---
 

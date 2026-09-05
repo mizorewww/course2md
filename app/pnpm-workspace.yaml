@@ -1,4 +1,0 @@
-# pnpm 11 的构建脚本白名单（替代旧的 package.json pnpm.onlyBuiltDependencies）。
-# esbuild 的 postinstall 用于校验平台二进制，必须批准。
-allowBuilds:
-  esbuild: true

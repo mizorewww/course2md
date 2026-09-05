@@ -8,6 +8,7 @@ import platform
 import plistlib
 import shutil
 import subprocess
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT.parent
@@ -35,6 +36,7 @@ def main():
     if not args.no_build:
         run("cargo", "build", *flags)
         run("cargo", "build", "--manifest-path", str(ROOT / "Cargo.toml"), *flags)
+    version = tomllib.loads((PROJECT / "Cargo.toml").read_text())["package"]["version"]
     system = platform.system()
     suffix = ".exe" if system == "Windows" else ""
     package_name = f"course2md-desktop-{system.lower()}-{platform.machine()}"
@@ -53,17 +55,18 @@ def main():
                 "CFBundleName": "course2md", "CFBundleDisplayName": "course2md",
                 "CFBundleIdentifier": "dev.course2md.desktop",
                 "CFBundleExecutable": "course2md-desktop", "CFBundlePackageType": "APPL",
-                "CFBundleVersion": "1", "CFBundleShortVersionString": "0.1.0",
+                "CFBundleVersion": version, "CFBundleShortVersionString": version,
                 "NSHighResolutionCapable": True, "NSPrincipalClass": "NSApplication",
                 "LSMinimumSystemVersion": "14.0", "CFBundleIconFile": "course2md.icns",
             }, stream)
-        shutil.copy2(PROJECT / "app/src-tauri/icons/icon.icns", resources / "course2md.icns")
+        shutil.copy2(ROOT / "assets/icon.icns", resources / "course2md.icns")
         # MLX first searches beside the executable for mlx.metallib. Keeping
         # that layout avoids changing the CLI's working directory and breaking
         # user-supplied relative source, output, and model paths.
         metal = PROJECT / "target" / profile / "mlx.metallib"
         if metal.is_file():
-            shutil.copy2(metal, binaries / "mlx.metallib")
+            shutil.copy2(metal, resources / "mlx.metallib")
+            (binaries / "mlx.metallib").symlink_to("../Resources/mlx.metallib")
         elif platform.machine() == "arm64" and not os.environ.get("COURSE2MD_NO_APPLE"):
             raise SystemExit("Apple speech library was built without mlx.metallib; inspect the core build output")
     else:
@@ -72,7 +75,7 @@ def main():
             (base / "course2md.desktop").write_text(
                 "[Desktop Entry]\nType=Application\nName=course2md\nComment=Turn courses into illustrated notes\n"
                 "Exec=course2md-desktop\nIcon=course2md\nTerminal=false\nCategories=Education;AudioVideo;\n")
-            shutil.copy2(PROJECT / "app/src-tauri/icons/icon.png", base / "course2md.png")
+            shutil.copy2(ROOT / "assets/icon.png", base / "course2md.png")
     shutil.copy2(PROJECT / "target" / profile / f"course2md{suffix}", binaries / f"course2md{suffix}")
     shutil.copy2(ROOT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
     shutil.copy2(PROJECT / "LICENSE", base / "LICENSE")
@@ -80,10 +83,43 @@ def main():
     if (ROOT / "sources.lock.json").exists():
         shutil.copy2(ROOT / "sources.lock.json", base / "sources.lock.json")
     if system == "Darwin":
-        run("codesign", "--force", "--sign", "-", str(binaries / "course2md"))
-        run("codesign", "--force", "--deep", "--sign", "-", str(bundle))
+        identity = os.environ.get("APPLE_SIGNING_IDENTITY", "-")
+        signing = ["--force", "--sign", identity]
+        if identity != "-":
+            signing.extend(["--options", "runtime", "--timestamp"])
+        run("codesign", *signing, str(binaries / "course2md"))
+        run("codesign", *signing, str(binaries / "course2md-desktop"))
+        run("codesign", *signing, str(bundle))
         run("codesign", "--verify", "--deep", "--strict", str(bundle))
-    archive = shutil.make_archive(str(base), "zip" if system in ("Darwin", "Windows") else "gztar", base.parent, base.name)
+        notarization = [os.environ.get(key) for key in ("APPLE_API_KEY_PATH", "APPLE_API_KEY_ID", "APPLE_API_ISSUER")]
+        if identity != "-" and all(notarization):
+            upload = base.parent / "notarization.zip"
+            run("ditto", "-c", "-k", "--keepParent", str(bundle), str(upload))
+            run("xcrun", "notarytool", "submit", str(upload), "--key", notarization[0],
+                "--key-id", notarization[1], "--issuer", notarization[2], "--wait")
+            run("xcrun", "stapler", "staple", str(bundle))
+            upload.unlink()
+        dmg = base.parent / f"course2md-gui-macos-{platform.machine()}.dmg"
+        if dmg.exists():
+            dmg.unlink()
+        applications = base / "Applications"
+        applications.symlink_to("/Applications")
+        run("hdiutil", "create", "-volname", "course2md", "-srcfolder", str(base),
+            "-ov", "-format", "UDZO", str(dmg))
+        applications.unlink()
+        if identity != "-":
+            run("codesign", "--force", "--sign", identity, "--timestamp", str(dmg))
+        if identity != "-" and all(notarization):
+            run("xcrun", "notarytool", "submit", str(dmg), "--key", notarization[0],
+                "--key-id", notarization[1], "--issuer", notarization[2], "--wait")
+            run("xcrun", "stapler", "staple", str(dmg))
+        print(dmg)
+    if system == "Darwin":
+        archive = str(base) + ".zip"
+        # ditto preserves the signed app's symlinks and resource metadata.
+        run("ditto", "-c", "-k", "--keepParent", str(base), archive)
+    else:
+        archive = shutil.make_archive(str(base), "zip" if system == "Windows" else "gztar", base.parent, base.name)
     print(archive)
 
 

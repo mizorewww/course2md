@@ -42,25 +42,13 @@ course2md ./lecture.mp4
 
 ## Desktop App (GUI)
 
-The new native client lives in [`desktop/`](desktop/README.md), built with GPUI and GPUI Component for macOS, Windows and Linux. It provides conversion, cancellation, a searchable course library, illustrated note previews and shared configuration. Development pulls both upstream main branches; release packaging freezes the exact tested revisions. See the [native build guide](desktop/README.md) and [audit and acceptance record](docs/REVIEW-2026-09.md).
+The native desktop app in [`desktop/`](desktop/README.md) uses GPUI and GPUI Component. It includes a focused conversion form, progress and cancellation, a searchable library, document / screenshot / file views, and shared CLI settings. The Tauri client has been replaced.
 
-The Tauri client below remains as a reference implementation and its existing release packages are separate from the native client.
+Download from [GitHub Releases](https://github.com/mizorewww/course2md/releases): macOS DMG, Windows portable ZIP, or Linux tar.gz. The packages include the matching CLI; install ffmpeg/ffprobe separately, plus yt-dlp for online videos. macOS release builds use Developer ID signing and notarization when the repository credentials are available.
 
-The `app/` directory contains a Tauri v2 desktop client that wraps the full CLI in a graphical interface: speech-recognition backends recommended for your machine (best option first), live job progress (stage stepper + progress bar + log console), in-app result preview (transcript / slide grid / files), history, and settings management (model download, `config.toml` editing).
+See the [native build guide](desktop/README.md) for development and packaging. Development follows upstream main; releases freeze the revisions actually tested.
 
-It embeds the `course2md` binary as a sidecar and talks to it via the `--json` NDJSON event stream; cancelling a job also terminates child processes such as ffmpeg / llama-server. If the CLI is already installed, the app can use it standalone (dev mode falls back to PATH).
-
-Prebuilt installers are attached to every [GitHub Release](https://github.com/mizorewww/course2md/releases): `course2md-gui-macos-arm64.dmg` (Developer ID signed & notarized), `course2md-gui-windows-x86_64-setup.exe` and `course2md-gui-linux-x86_64.AppImage`. The app embeds the CLI, but still relies on the system `ffmpeg` / `yt-dlp` (see [Installation](#installation)).
-
-Build (macOS — produces `.app` and `.dmg`):
-
-```bash
-bash packaging/build-app.sh
-```
-
-> The script builds the release CLI first and copies it in as a sidecar (on macOS together with the `mlx.metallib` required by CoreML), then runs `pnpm install && pnpm tauri build`. Browser-only frontend preview with mock data: `cd app && pnpm dev`.
-
-**Scripting / integrations**: the CLI itself accepts `--json` — stdout then emits newline-delimited JSON events (`stage` / `progress` / `log` / `done` / `error`), so any language can build a progress UI on top.
+**Scripting / integrations**: `course2md --json` emits newline-delimited `stage`, `progress`, `log`, `done`, and `error` events.
 
 ---
 
@@ -140,7 +128,7 @@ sudo install -m755 llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
 ```
 
-**Desktop app (GUI)**: download `course2md-gui-linux-x86_64.AppImage` from [Releases](https://github.com/mizorewww/course2md/releases), `chmod +x` and run it.
+**Desktop app (GUI)**: download `course2md-desktop-linux-x86_64.tar.gz` from [Releases](https://github.com/mizorewww/course2md/releases), extract it and run `course2md-desktop` from that directory.
 
 ---
 
@@ -160,7 +148,7 @@ winget install --id ggml.llamacpp -e
 1. Download `course2md-windows-x86_64.exe` from [Releases](https://github.com/mizorewww/course2md/releases).
 2. Rename to `course2md.exe` and place it in a directory listed in your `PATH`.
 
-**Desktop app (GUI)**: download and run `course2md-gui-windows-x86_64-setup.exe` (NSIS installer) from [Releases](https://github.com/mizorewww/course2md/releases).
+**Desktop app (GUI)**: download and run `course2md-desktop-windows-AMD64.zip`, extract it and open `course2md-desktop.exe` from [Releases](https://github.com/mizorewww/course2md/releases).
 
 ---
 

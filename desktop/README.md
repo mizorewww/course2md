@@ -4,7 +4,7 @@
 
 ## 开发
 
-需要 Rust stable、Python 3.10+、Git。macOS 需 Xcode Command Line Tools；Windows 需 Visual Studio C++ Build Tools 和 LLVM；Linux 系统依赖见 `.github/workflows/desktop.yml`。处理视频需要 ffmpeg/ffprobe，远程链接还需要 yt-dlp。GPU/CPU 识别需 llama-server；Apple 原生、Intel NPU 和 API 的要求与 CLI 相同。
+需要 Rust stable、Python 3.11+、Git。macOS 需 Xcode Command Line Tools；Windows 需 Visual Studio C++ Build Tools 和 LLVM；Linux 系统依赖见 `.github/workflows/desktop.yml`。处理视频需要 ffmpeg/ffprobe，远程链接还需要 yt-dlp。GPU/CPU 识别需 llama-server；Apple 原生、Intel NPU 和 API 的要求与 CLI 相同。
 
 ```sh
 python3 desktop/scripts/sources.py
@@ -26,7 +26,7 @@ COURSE2MD_BIN="$PWD/target/debug/course2md" cargo run --manifest-path desktop/Ca
 python3 desktop/scripts/package.py --debug
 ```
 
-产物位于 `desktop/target/packages/`。macOS 为包含 CLI 和 MLX Metal 库的 `.app`；Windows 为两份 `.exe`；Linux 为两份可执行文件以及桌面入口。Windows/Linux 解压后保留两份程序在同一目录。macOS 产物做 ad-hoc 签名，公开分发可另接 Developer ID 签名与公证。
+产物位于 `desktop/target/packages/`。macOS 为包含 CLI 和 MLX Metal 库的 `.app`；Windows 为两份 `.exe`；Linux 为两份可执行文件以及桌面入口。Windows/Linux 解压后保留两份程序在同一目录。本机默认 ad-hoc 签名；发布 CI 使用已有 Developer ID 与 Apple API 凭据签名、公证并生成 DMG。macOS ZIP 使用 ditto 保留签名所需的符号链接。
 
 ## 发布
 
@@ -39,7 +39,7 @@ python3 desktop/scripts/sources.py --locked
 python3 desktop/scripts/package.py
 ```
 
-发布命令核对实际工作树与冻结记录，并使用 Cargo `--locked`。普通开发命令仍继续追踪 main。CI 为三个系统分别构建；tag 构建使用冻结记录，日常构建使用主线。
+发布命令核对实际工作树与冻结记录，并使用 Cargo `--locked`。普通开发命令仍继续追踪 main。CI 为三个系统分别构建；发布使用冻结记录，PR 构建使用主线。可以手动运行 release 工作流并指定版本，全部构建成功后再创建对应 tag 和 GitHub Release。
 
 ## 验证
 
@@ -49,3 +49,12 @@ cargo test --manifest-path desktop/Cargo.toml
 ```
 
 实际操作记录与已知边界见 `../docs/REVIEW-2026-09.md`。开发验收使用独立 `XDG_CONFIG_HOME`，不修改个人 API 配置。
+
+
+## 界面与操作
+
+- 新建页只展示来源、字幕策略和 AI 开关；识别方式、导出格式、继续转换等选项可以展开。
+- 开始、取消、保存操作固定在底部，缩小窗口或滚动页面也可访问。
+- 任务在后台运行；完成时正在查看任务页会自动进入阅读，在其他页面时不会打断当前操作。
+- 课程库显示缩略图与内容数量；阅读页提供文稿、截图、文件分区，复制后明确反馈。
+- 设置按通用、语音识别、AI 整理、运行环境分组。切换页面保留未保存的输入，保存后供下一次任务使用。
