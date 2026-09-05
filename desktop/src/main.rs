@@ -815,6 +815,10 @@ impl Desktop {
             self.settings_status = "配置文件损坏，请修正后重新加载".into();
             return;
         }
+        if self.value(Field::Output, cx).trim().is_empty() {
+            self.settings_status = "未保存：请选择笔记保存目录".into();
+            return;
+        }
         let mut config = self.edited_settings(cx);
         if let Err(error) =
             course2md::options::resolve("configuration".into(), &Default::default(), &config)

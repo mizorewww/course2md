@@ -1206,7 +1206,10 @@ impl Render for Desktop {
                     .pb_6()
                     .child(content),
             );
-        let status = if self.page == Page::Settings {
+        let status = if self.page == Page::Settings
+            || self.settings_status.starts_with("未保存：")
+            || self.settings_status.starts_with("保存失败")
+        {
             self.settings_status.clone()
         } else if self.job.is_some() {
             self.task_summary()
