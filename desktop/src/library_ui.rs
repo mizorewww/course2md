@@ -332,11 +332,8 @@ impl Desktop {
                 .gap_2()
                 .children([(true, "在线链接"), (false, "本地视频")].into_iter().map(
                     |(online, label)| {
-                        Button::new(label)
-                            .label(label)
-                            .selected(self.online == online)
-                            .toggled(self.online == online)
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                        choice(Button::new(label).label(label), self.online == online).on_click(
+                            cx.listener(move |this, _, window, cx| {
                                 if this.online != online {
                                     this.online = online;
                                     this.invalidate_source();
@@ -344,7 +341,8 @@ impl Desktop {
                                         .update(cx, |state, cx| state.set_value("", window, cx));
                                 }
                                 cx.notify();
-                            }))
+                            }),
+                        )
                     },
                 )),
         );

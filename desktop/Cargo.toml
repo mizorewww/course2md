@@ -13,6 +13,7 @@ course2md = { path = ".." }
 gpui = { path = ".deps/zed/crates/gpui" }
 gpui_platform = { path = ".deps/zed/crates/gpui_platform", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
 gpui-component = { path = ".deps/component/crates/component" }
+gpui-base = { path = ".deps/component/crates/base" }
 gpui-kit-assets = { path = ".deps/component/crates/assets" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

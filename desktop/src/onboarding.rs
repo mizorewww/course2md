@@ -221,6 +221,9 @@ impl Desktop {
                         .w_full()
                         .h_auto()
                         .p_3()
+                        .border_2()
+                        .border_color(rgb(if selected { BLUE } else { CONTROL }))
+                        .bg(rgb(SURFACE))
                         .selected(selected)
                         .toggled(selected)
                         .accessibility_label(format!(
@@ -239,7 +242,7 @@ impl Desktop {
                                 .gap_3()
                                 .child(
                                     div()
-                                        .size(px(16.))
+                                        .size(px(20.))
                                         .flex_shrink_0()
                                         .rounded_full()
                                         .border_2()
@@ -253,7 +256,14 @@ impl Desktop {
                                 )
                                 .child(content),
                         )
-                        .on_click(cx.listener(move |this, _, _, cx| {
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if index != 5 {
+                                this.blur_fields(
+                                    &[Field::AsrUrl, Field::AsrModel, Field::AsrKey],
+                                    window,
+                                    cx,
+                                );
+                            }
                             let options = this.editing_options_mut();
                             if index == 6 {
                                 options.source_mode = 1;
@@ -303,6 +313,9 @@ impl Desktop {
             .when(self.show_engine_details, |v| {
                 v.child(
                     Button::new("engine-help")
+                        .self_start()
+                        .h(px(36.))
+                        .min_h(px(36.))
                         .label("识别诊断…")
                         .on_click(cx.listener(|this, _, window, cx| {
                             if this.setup_open && !this.finish_setup(false, window, cx) {
@@ -321,6 +334,7 @@ impl Desktop {
             return;
         }
         self.settings_deadline = None;
+        self.setup_return = self.desktop_settings.setup_completed.then_some(self.page);
         self.setup_open = true;
         self.show_engine_details = false;
         if self.settings_options.provider == 0
@@ -342,7 +356,7 @@ impl Desktop {
             let weak = weak.clone();
             let confirm = weak.clone();
             dialog
-                .title("设置 course2md")
+                .title("开始使用 course2md")
                 .w(px(620.))
                 .margin_top(px(24.))
                 .close_button(false)
@@ -364,6 +378,7 @@ impl Desktop {
     fn finish_setup(&mut self, apply: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
         // Missing prerequisites lead to installation help, without claiming that
         // a speech configuration has been completed or saving its draft.
+        let requested_apply = apply;
         let apply = apply && self.environment.as_ref().is_none_or(|env| env.ready());
         if apply {
             if self.settings_options.source_mode != 1 {
@@ -382,7 +397,7 @@ impl Desktop {
             self.save_settings(cx);
             if self.settings_status != "已自动保存" {
                 self.desktop_settings.setup_completed = false;
-                if let Some((field, _)) = self.missing_setting(cx) {
+                if let Some((field, _)) = self.invalid_setting(cx) {
                     self.inputs[&field].update(cx, |input, cx| input.focus(window, cx));
                 }
                 return false;
@@ -404,7 +419,10 @@ impl Desktop {
         self.settings_deadline = None;
         self.settings_snapshot = self.edited_settings(cx);
         self.settings_status.clear();
-        if self.environment.as_ref().is_some_and(|env| !env.ready()) {
+        let return_to = self.setup_return.take();
+        if !requested_apply && let Some(page) = return_to {
+            self.navigate(page, cx);
+        } else if self.environment.as_ref().is_some_and(|env| !env.ready()) {
             self.settings_tab = 3;
             self.navigate(Page::Settings, cx);
         } else {
@@ -418,57 +436,38 @@ impl Desktop {
         true
     }
 
-    fn setup_content(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let form =
+    fn setup_content(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let cloud = disclosure(
+            "setup-cloud-fields",
+            self.settings_options.provider == 5 && self.settings_options.source_mode != 1,
             v_flex()
+                .pt_4()
                 .gap_4()
-                .child(
+                .child(self.input(Field::AsrUrl, "服务地址", cx))
+                .child(self.input(Field::AsrModel, "模型名称", cx))
+                .child(self.input(Field::AsrKey, "API Key", cx)),
+            window,
+            cx,
+        );
+        let form = v_flex()
+            .gap_4()
+            .child(
+                div()
+                    .text_color(rgb(MUTED))
+                    .child("确认识别方式和保存位置，即可添加第一门课程。以后可在「设置」中修改。"),
+            )
+            .when_some(self.environment.as_ref().filter(|e| !e.ready()), |v, _| {
+                v.child(
                     div()
-                        .text_color(rgb(MUTED))
-                        .child("以后可随时在左下角「设置」中修改。"),
+                        .p_3()
+                        .bg(rgb(0xfff0db))
+                        .text_color(rgb(0x784600))
+                        .child("还需要完成安装，才能开始转换。"),
                 )
-                .when_some(self.environment.as_ref().filter(|e| !e.ready()), |v, _| {
-                    v.child(
-                        div()
-                            .p_3()
-                            .bg(rgb(0xfff0db))
-                            .text_color(rgb(0x784600))
-                            .child("还需要完成安装，才能开始转换。"),
-                    )
-                })
-                .child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("1. 选择识别方式"),
-                )
-                .child(self.engine_panel(cx))
-                .when(
-                    self.settings_options.provider == 5 && self.settings_options.source_mode != 1,
-                    |v| {
-                        v.child(self.input(Field::AsrUrl, "API 服务地址"))
-                            .child(self.input(Field::AsrModel, "识别模型"))
-                            .child(self.input(Field::AsrKey, "API Key"))
-                    },
-                )
-                .child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("2. 笔记保存位置"),
-                )
-                .child(
-                    h_flex()
-                        .items_end()
-                        .gap_3()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(self.input(Field::Output, "保存目录")),
-                        )
-                        .child(Button::new("setup-directory").label("选择目录…").on_click(
-                            cx.listener(|this, _, window, cx| this.pick(true, window, cx)),
-                        )),
-                );
+            })
+            .child(div().font_weight(FontWeight::SEMIBOLD).child("识别位置"))
+            .child(v_flex().gap_0().child(self.engine_panel(cx)).child(cloud))
+            .child(self.directory_field("setup-directory", cx));
         v_flex()
             .gap_4()
             .text_size(px(14.))
@@ -480,19 +479,27 @@ impl Desktop {
                     .overflow_y_scroll()
                     .child(form),
             )
-            .when(!self.settings_status.is_empty(), |v| {
-                v.child(
-                    div()
-                        .text_color(rgb(0xa32626))
-                        .child(self.settings_status.clone()),
-                )
-            })
+            .when(
+                !self.settings_status.is_empty()
+                    && self.invalid_setting(cx).is_none_or(|(field, _)| {
+                        matches!(field, Field::LlmUrl | Field::LlmModel | Field::LlmKey)
+                    }),
+                |v| {
+                    v.child(
+                        div()
+                            .text_color(rgb(0xa32626))
+                            .child(self.settings_status.clone()),
+                    )
+                },
+            )
             .child(
                 h_flex()
                     .justify_between()
                     .gap_3()
                     .child(
                         Button::new("setup-later")
+                            .h(px(36.))
+                            .min_h(px(36.))
                             .label("稍后设置")
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.finish_setup(false, window, cx) {
@@ -502,6 +509,8 @@ impl Desktop {
                     )
                     .child(
                         Button::new("setup-done")
+                            .h(px(36.))
+                            .min_h(px(36.))
                             .primary()
                             .label(
                                 if self.environment.as_ref().is_some_and(|env| !env.ready()) {

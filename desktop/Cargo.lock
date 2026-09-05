@@ -1371,6 +1371,7 @@ dependencies = [
  "anyhow",
  "course2md",
  "gpui",
+ "gpui-base",
  "gpui-component",
  "gpui-kit-assets",
  "gpui_platform",

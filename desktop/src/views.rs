@@ -31,23 +31,32 @@ fn card() -> Div {
 }
 
 impl Desktop {
-    fn format_choices(&self, cx: &mut Context<Self>) -> Div {
-        h_flex()
-            .gap_6()
-            .children(
-                ["Markdown", "HTML", "JSON"]
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, label)| {
-                        Checkbox::new(("format", index))
-                            .label(label)
-                            .checked(self.editing_options().formats[index])
-                            .on_click(cx.listener(move |this, checked, _, cx| {
-                                this.editing_options_mut().formats[index] = *checked;
-                                cx.notify();
-                            }))
-                    }),
-            )
+    pub fn format_choices(&self, cx: &mut Context<Self>) -> Div {
+        h_flex().gap_3().flex_wrap().children(
+            ["Markdown", "HTML", "JSON"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, label)| {
+                    let checked = self.editing_options().formats[index];
+                    choice(Button::new(("format", index)), checked)
+                        .min_w(px(108.))
+                        .accessibility_label(label)
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(Icon::new(IconName::Check).size_4().opacity(if checked {
+                                    1.
+                                } else {
+                                    0.
+                                }))
+                                .child(label),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.editing_options_mut().formats[index] = !checked;
+                            cx.notify();
+                        }))
+                }),
+        )
     }
     fn new_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let mut view = v_flex().gap_4().child(self.source_card(cx));
@@ -74,13 +83,16 @@ impl Desktop {
                         .gap_4()
                         .child(h_flex().gap_2().flex_wrap().children(
                             SOURCES.iter().enumerate().map(|(index, (_, label))| {
-                                Button::new(("source-mode", index))
-                                    .label(*label)
-                                    .selected(self.task_options.source_mode == index)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                choice(
+                                    Button::new(("source-mode", index)).label(*label),
+                                    self.task_options.source_mode == index,
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
                                         this.task_options.source_mode = index;
                                         cx.notify();
-                                    }))
+                                    },
+                                ))
                             }),
                         ))
                         .when(self.task_options.source_mode != 1, |v| {
@@ -497,294 +509,6 @@ impl Desktop {
         }))
         .into_any_element()
     }
-    fn settings_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let mut view = v_flex().gap_0().max_w(px(760.));
-        match self.settings_tab {
-            0 => {
-                view = view
-                    .child(h_flex().pb_6().child(
-                        Button::new("reopen-setup").label("打开设置引导…").on_click(
-                            cx.listener(|this, _, window, cx| this.open_setup(window, cx)),
-                        ),
-                    ))
-                    .child(
-                        v_flex()
-                            .gap_3()
-                            .pb_6()
-                            .child(section("窗口", ""))
-                            .child(
-                                Checkbox::new("system-titlebar")
-                                    .label("使用系统标题栏")
-                                    .checked(self.desktop_settings.system_titlebar)
-                                    .on_click(cx.listener(|this, value, _, cx| {
-                                        this.desktop_settings.system_titlebar = *value;
-                                        cx.notify();
-                                    })),
-                            )
-                            .when(
-                                self.desktop_settings.system_titlebar != self.system_titlebar,
-                                |view| view.child(muted("重启后生效")),
-                            )
-                            .child(
-                                Checkbox::new("reduce-motion")
-                                    .label("减少动态效果")
-                                    .checked(self.desktop_settings.reduce_motion)
-                                    .on_click(cx.listener(|this, value, _, cx| {
-                                        this.desktop_settings.reduce_motion = *value;
-                                        cx.set_reduce_motion(*value);
-                                        cx.notify();
-                                    })),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .gap_4()
-                            .pb_6()
-                            .child(section("保存与导出", ""))
-                            .child(
-                                h_flex()
-                                    .gap_3()
-                                    .items_end()
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .child(self.input(Field::Output, "笔记保存目录")),
-                                    )
-                                    .child(
-                                        Button::new("settings-output")
-                                            .h(px(32.))
-                                            .label("选择…")
-                                            .accessibility_label("选择目录")
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.pick(true, window, cx)
-                                            })),
-                                    ),
-                            )
-                            .child(self.format_choices(cx)),
-                    )
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .gap_4()
-                            .pb_6()
-                            .child(section("任务偏好", ""))
-                            .child(
-                                Checkbox::new("settings-resume")
-                                    .label("继续未完成的任务")
-                                    .checked(self.editing_options().resume)
-                                    .on_click(cx.listener(|this, value, _, cx| {
-                                        this.editing_options_mut().resume = *value;
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Checkbox::new("settings-keep")
-                                    .label("保留下载的视频")
-                                    .checked(self.editing_options().keep_video)
-                                    .on_click(cx.listener(|this, value, _, cx| {
-                                        this.editing_options_mut().keep_video = *value;
-                                        cx.notify();
-                                    })),
-                            ),
-                    );
-            }
-            1 => {
-                view = view
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .gap_4()
-                            .pb_6()
-                            .child(section("默认识别方式", ""))
-                            .child(h_flex().gap_2().flex_wrap().children(
-                                SOURCES.iter().enumerate().map(|(index, (_, label))| {
-                                    Button::new(("default-source", index))
-                                        .label(*label)
-                                        .selected(self.settings_options.source_mode == index)
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.settings_options.source_mode = index;
-                                            cx.notify();
-                                        }))
-                                }),
-                            ))
-                            .when(self.settings_options.source_mode != 1, |v| {
-                                v.child(self.engine_panel(cx))
-                            }),
-                    )
-                    .when(
-                        self.settings_options.provider == 5
-                            && self.settings_options.source_mode != 1,
-                        |v| {
-                            v.child(
-                                v_flex()
-                                    .w_full()
-                                    .gap_4()
-                                    .pb_6()
-                                    .child(section(
-                                        "云端语音服务",
-                                        "选择云端识别时，音频将发送至此服务。",
-                                    ))
-                                    .child(self.input(Field::AsrUrl, "服务地址"))
-                                    .child(self.input(Field::AsrModel, "模型名称"))
-                                    .child(self.input(Field::AsrKey, "API Key")),
-                            )
-                        },
-                    );
-            }
-            2 => {
-                view = view.child(
-                    v_flex()
-                        .w_full()
-                        .gap_4()
-                        .pb_6()
-                        .child(section("AI 整理", ""))
-                        .child(
-                            Checkbox::new("settings-ai")
-                                .label("默认启用 AI 整理")
-                                .checked(self.editing_options().llm)
-                                .on_click(cx.listener(|this, value, _, cx| {
-                                    this.editing_options_mut().llm = *value;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(self.input(Field::LlmUrl, "服务地址"))
-                        .child(self.input(Field::LlmModel, "模型名称"))
-                        .child(self.input(Field::LlmKey, "API Key"))
-                        .child(muted("启用后，转录文字会发送至你配置的服务。")),
-                );
-            }
-            _ => {
-                view = view
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .gap_4()
-                            .pb_6()
-                            .child(section("运行环境", ""))
-                            .children(
-                                self.environment
-                                    .as_ref()
-                                    .into_iter()
-                                    .flat_map(|env| {
-                                        [
-                                            ("转换引擎", env.engine),
-                                            ("ffmpeg", env.ffmpeg),
-                                            ("ffprobe", env.ffprobe),
-                                            ("yt-dlp · 在线视频", env.ytdlp),
-                                            ("llama-server · GPU / CPU 识别", env.llama),
-                                        ]
-                                    })
-                                    .map(|(name, ready)| {
-                                        h_flex().justify_between().child(name).child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(rgb(if ready {
-                                                    SUCCESS
-                                                } else {
-                                                    MUTED
-                                                }))
-                                                .child(if ready {
-                                                    "已检测到"
-                                                } else {
-                                                    "未检测到"
-                                                }),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                Button::new("refresh-environment")
-                                    .label("重新检测")
-                                    .icon(icons::refresh())
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.refresh_environment(cx);
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(muted(if cfg!(target_os = "macos") {
-                                "安装视频工具：brew install ffmpeg yt-dlp"
-                            } else if cfg!(target_os = "windows") {
-                                "安装视频工具：winget install Gyan.FFmpeg yt-dlp.yt-dlp"
-                            } else {
-                                "安装 ffmpeg，并使用 pipx install yt-dlp 安装下载工具。"
-                            })),
-                    )
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .gap_4()
-                            .pb_6()
-                            .child(section("模型与诊断", ""))
-                            .child(
-                                h_flex()
-                                    .gap_3()
-                                    .child(
-                                        Button::new("doctor")
-                                            .label("运行完整诊断")
-                                            .disabled(self.job.is_some())
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.start(Kind::Doctor, cx)
-                                            })),
-                                    )
-                                    .child(
-                                        Button::new("models")
-                                            .label("下载 GPU / CPU 模型")
-                                            .disabled(self.job.is_some())
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.start(Kind::Models, cx)
-                                            })),
-                                    ),
-                            )
-                            .child(muted("Apple 原生与 Intel NPU 模型在首次识别时下载。")),
-                    )
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .gap_4()
-                            .pb_6()
-                            .child(section(
-                                "高级配置",
-                                "需要调整截图采样、识别参数等选项时，编辑配置文件。",
-                            ))
-                            .child(
-                                h_flex()
-                                    .gap_3()
-                                    .child(
-                                        Button::new("open-config").label("打开配置文件").on_click(
-                                            |_, _, cx| {
-                                                cx.open_with_system(
-                                                    &course2md::settings::config_path(),
-                                                )
-                                            },
-                                        ),
-                                    )
-                                    .child(
-                                        Button::new("reload-config")
-                                            .label("从文件重新加载")
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                match course2md::settings::load() {
-                                                    Ok(config) => {
-                                                        this.config = config;
-                                                        this.config_error = false;
-                                                        this.sync_settings(window, cx);
-                                                        this.message =
-                                                            Some("已从文件重新加载设置".into());
-                                                    }
-                                                    Err(error) => {
-                                                        this.message =
-                                                            Some(format!("读取失败：{error:#}"))
-                                                    }
-                                                }
-                                                cx.notify();
-                                            })),
-                                    ),
-                            ),
-                    );
-            }
-        }
-        view.into_any_element()
-    }
     fn result_page(&mut self, _cx: &mut Context<Self>) -> AnyElement {
         let Some(preview) = self.preview.as_ref() else {
             return muted("正在打开笔记…").into_any_element();
@@ -885,7 +609,7 @@ impl Desktop {
     }
     fn tabs(&self, cx: &mut Context<Self>) -> Div {
         let tabs: Vec<&str> = if self.page == Page::Settings {
-            vec!["通用", "语音识别", "AI 整理", "运行环境"]
+            vec!["通用", "语音识别", "AI 整理", "运行环境", "关于"]
         } else {
             vec!["文稿", "截图", "文件"]
         };
@@ -897,13 +621,26 @@ impl Desktop {
         h_flex()
             .gap_2()
             .children(tabs.into_iter().enumerate().map(|(index, label)| {
-                Button::new(("tab", index))
-                    .ghost()
-                    .label(label)
-                    .selected(selected == index)
+                choice(Button::new(("tab", index)).label(label), selected == index)
                     .h(px(36.))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.blur_fields(
+                            &[
+                                Field::Output,
+                                Field::AsrUrl,
+                                Field::AsrModel,
+                                Field::AsrKey,
+                                Field::LlmUrl,
+                                Field::LlmModel,
+                                Field::LlmKey,
+                            ],
+                            window,
+                            cx,
+                        );
                         if this.page == Page::Settings {
+                            if this.settings_tab != index {
+                                this.settings_transition = this.settings_transition.wrapping_add(1);
+                            }
                             this.settings_tab = index;
                         } else {
                             this.result_tab = index;
@@ -1046,6 +783,21 @@ impl Desktop {
 
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.setup_open && self.page == Page::Settings && self.settings_tab == 4 {
+            self.blur_fields(
+                &[
+                    Field::Output,
+                    Field::AsrUrl,
+                    Field::AsrModel,
+                    Field::AsrKey,
+                    Field::LlmUrl,
+                    Field::LlmModel,
+                    Field::LlmKey,
+                ],
+                window,
+                cx,
+            );
+        }
         // Compare drafts once per render; only actual changes restart the debounce.
         let draft = self.edited_settings(cx);
         if !self.setup_open && draft != self.settings_snapshot {
@@ -1057,7 +809,7 @@ impl Render for Desktop {
             Page::New => self.new_page(cx),
             Page::Task => self.task_page(cx),
             Page::Library => self.library_page(cx),
-            Page::Settings => self.settings_page(cx),
+            Page::Settings => self.settings_page(window, cx),
             Page::Result => self.result_page(cx),
         };
         let settings_problem = self.config_error
@@ -1187,6 +939,8 @@ impl Render for Desktop {
             })
             .when(
                 self.page == Page::Settings
+                    && self.settings_tab != 4
+                    && self.invalid_setting(cx).is_none()
                     && (self.settings_status.starts_with("未保存：")
                         || self.settings_status.starts_with("保存失败")
                         || self.config_error),

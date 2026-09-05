@@ -1,10 +1,12 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+mod about;
 mod activity;
 mod backend;
 mod icons;
 mod library_ui;
 mod onboarding;
 mod organize;
+mod settings_ui;
 mod source;
 mod theme;
 mod views;
@@ -135,10 +137,13 @@ struct Desktop {
     result_origin: Page,
     result_tab: usize,
     settings_tab: usize,
+    settings_transition: usize,
     show_options: bool,
     show_logs: bool,
     setup_open: bool,
+    setup_return: Option<Page>,
     show_engine_details: bool,
+    show_diagnostics: bool,
     environment: Option<backend::Environment>,
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
@@ -169,7 +174,7 @@ struct Desktop {
     _poll: Task<()>,
 }
 
-actions!(course2md_desktop, [Quit, OpenSettings]);
+actions!(course2md_desktop, [Quit, OpenSettings, OpenAbout]);
 
 impl Desktop {
     fn editing_options(&self) -> &ConversionOptions {
@@ -345,10 +350,13 @@ impl Desktop {
             result_origin: Page::Library,
             result_tab: 0,
             settings_tab: 0,
+            settings_transition: 0,
             show_options: false,
             show_logs: false,
             setup_open: false,
+            setup_return: None,
             show_engine_details: false,
+            show_diagnostics: false,
             environment: None,
             scrolls: std::array::from_fn(|_| ScrollHandle::new()),
             inputs,
@@ -426,12 +434,38 @@ impl Desktop {
     fn value(&self, field: Field, cx: &App) -> String {
         self.inputs[&field].read(cx).value().trim().to_string()
     }
-    fn input(&self, field: Field, label: &'static str) -> impl IntoElement {
+    fn blur_fields(&self, fields: &[Field], window: &mut Window, cx: &mut App) {
+        if fields
+            .iter()
+            .any(|field| self.inputs[field].focus_handle(cx).is_focused(window))
+        {
+            window.blur(cx);
+        }
+    }
+    fn field_error(&self, field: Field, cx: &App) -> Option<&'static str> {
+        self.settings_status
+            .starts_with("未保存：")
+            .then(|| self.invalid_setting(cx))
+            .flatten()
+            .filter(|(invalid, _)| *invalid == field)
+            .map(|(_, message)| message)
+    }
+    fn input(&self, field: Field, label: &'static str, cx: &App) -> Div {
+        let error = self.field_error(field, cx);
         v_flex()
             .gap_2()
             .w_full()
             .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(label))
-            .child(Input::new(&self.inputs[&field]).aria_label(label))
+            .child(
+                Input::new(&self.inputs[&field])
+                    .min_h(px(36.))
+                    .max_h(px(36.))
+                    .aria_label(label)
+                    .when(error.is_some(), |input| input.border_color(rgb(0xa32626))),
+            )
+            .when_some(error, |v, message| {
+                v.child(div().text_sm().text_color(rgb(0xa32626)).child(message))
+            })
     }
     fn output(&self, _cx: &App) -> PathBuf {
         self.config
@@ -829,7 +863,7 @@ impl Desktop {
         );
         config
     }
-    fn missing_setting(&self, cx: &App) -> Option<(Field, &'static str)> {
+    fn invalid_setting(&self, cx: &App) -> Option<(Field, &'static str)> {
         if self.value(Field::Output, cx).is_empty() {
             return Some((Field::Output, "请选择笔记保存目录"));
         }
@@ -847,6 +881,33 @@ impl Desktop {
                 }
             }
         }
+        if self.settings_options.llm {
+            for (field, message) in [
+                (Field::LlmUrl, "请填写 AI 服务地址"),
+                (Field::LlmModel, "请填写 AI 模型名称"),
+            ] {
+                if self.value(field, cx).is_empty() {
+                    return Some((field, message));
+                }
+            }
+        }
+        for (field, enabled) in [
+            (
+                Field::AsrUrl,
+                self.settings_options.provider == 5 && self.settings_options.source_mode != 1,
+            ),
+            (Field::LlmUrl, self.settings_options.llm),
+        ] {
+            if enabled
+                && url::Url::parse(&self.value(field, cx))
+                    .ok()
+                    .is_none_or(|url| {
+                        !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
+                    })
+            {
+                return Some((field, "请输入完整的 http:// 或 https:// 服务地址"));
+            }
+        }
         None
     }
     fn save_settings(&mut self, cx: &mut Context<Self>) {
@@ -855,8 +916,12 @@ impl Desktop {
             self.settings_status = "配置文件损坏，请修正后重新加载".into();
             return;
         }
-        if let Some((_, message)) = self.missing_setting(cx) {
+        if let Some((_, message)) = self.invalid_setting(cx) {
             self.settings_status = format!("未保存：{message}");
+            return;
+        }
+        if !self.settings_options.formats.iter().any(|enabled| *enabled) {
+            self.settings_status = "未保存：请至少选择一种导出格式".into();
             return;
         }
         let mut config = self.edited_settings(cx);
@@ -889,6 +954,7 @@ impl Desktop {
     }
     fn sync_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.desktop_settings = self.config.desktop.clone();
+        cx.set_reduce_motion(self.desktop_settings.reduce_motion);
         self.settings_snapshot = self.config.clone();
         let cfg = &self.config;
         for (field, value) in [
@@ -970,6 +1036,13 @@ fn main() {
                     let weak = view.downgrade();
                     let quit_view = weak.clone();
                     let settings_view = weak.clone();
+                    let about_view = weak.clone();
+                    cx.on_action(move |_: &OpenAbout, cx| {
+                        let _ = about_view.update(cx, |this, cx| {
+                            this.settings_tab = 4;
+                            this.navigate(Page::Settings, cx);
+                        });
+                    });
                     cx.on_action(move |_: &OpenSettings, cx| {
                         let _ =
                             settings_view.update(cx, |this, cx| this.navigate(Page::Settings, cx));
@@ -1001,6 +1074,7 @@ fn main() {
                 KeyBinding::new("secondary-,", OpenSettings, None),
             ]);
             cx.set_menus([gpui::Menu::new("course2md").items([
+                gpui::MenuItem::action("关于 course2md", OpenAbout),
                 gpui::MenuItem::action("设置…", OpenSettings),
                 gpui::MenuItem::action("退出 course2md", Quit),
             ])]);
