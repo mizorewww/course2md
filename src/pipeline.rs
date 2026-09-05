@@ -14,7 +14,7 @@ use std::time::Instant;
 
 pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     let t_total = Instant::now();
-    cfg.validate().context("配置预检失败")?;
+    cfg.validate().context("配置预检失败 / Invalid settings")?;
     crate::error::require_cmd("ffmpeg")?;
     crate::error::require_cmd("ffprobe")?;
     // LLM 预检：配置错误应在跑完昂贵的下载/识别之前暴露
@@ -104,7 +104,11 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         progress::stage("download", "done");
         dest
     } else {
-        anyhow::ensure!(dest.is_file(), "--no-download 但 {} 不存在", dest.display());
+        anyhow::ensure!(
+            dest.is_file(),
+            "找不到缓存视频 / Cached video missing: {}. 移除 --no-download 后重试 / Retry without --no-download",
+            dest.display()
+        );
         dest
     };
 
@@ -130,7 +134,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
                         .with_context(|| format!("读取字幕 {}", f.path.display()))?;
                     let events = crate::subtitle::parse_subtitle(&content);
                     if events.is_empty() {
-                        tracing::warn!(path = %f.path.display(), "字幕解析为空，回落 ASR");
+                        tracing::warn!(path = %f.path.display(), "字幕中没有可用文字 / No usable text found in subtitles");
                         None
                     } else {
                         let source: &'static str = if f.auto { "auto-caption" } else { "subtitle" };
@@ -149,10 +153,19 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     };
     if cfg.transcript_source == config::TranscriptSource::Subtitle && subtitle.is_none() {
         anyhow::bail!(
-            "--transcript-source subtitle：未获取到字幕（平台未提供人工/自动字幕，本地输入无同名 .srt/.vtt）"
+            "未找到字幕 / No subtitles found. 本地视频可添加同名 .srt/.vtt，或改用 --transcript-source asr / Add a matching .srt/.vtt sidecar or use --transcript-source asr."
         );
     }
 
+    if !progress::is_json() && !progress::is_quiet() {
+        if subtitle.is_some() {
+            eprintln!(
+                "使用现有字幕，无需语音识别 / Using subtitles; speech recognition is not needed."
+            );
+        } else {
+            eprintln!("使用语音识别 / Using speech recognition: {}", cfg.provider);
+        }
+    }
     let transcript_source_used = subtitle.as_ref().map_or("asr", |(_, s)| *s);
     let (frames, events) = if let Some((events, _source)) = subtitle {
         // 字幕路径：只跑场景检测，跳过音频与 ASR
@@ -168,13 +181,6 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
             AsrProvider::Coreml | AsrProvider::Api | AsrProvider::Npu
         ) {
             crate::error::require_cmd("llama-server")?;
-        } else if cfg.provider == AsrProvider::Coreml
-            && crate::error::require_cmd("llama-server").is_err()
-        {
-            // fallback 是 best-effort：提前告知而不是失败后才发现
-            tracing::warn!(
-                "未找到 llama-server：CoreML 若失败将无法回退到 gpu 后端（best-effort）"
-            );
         }
 
         tracing::info!("extract slides and audio");
@@ -204,7 +210,10 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         let events = events_res?;
         (frames, events)
     };
-    anyhow::ensure!(!frames.is_empty(), "没有截到任何画面");
+    anyhow::ensure!(
+        !frames.is_empty(),
+        "未提取到画面，请检查视频是否可播放 / No frames captured; check that the video plays correctly"
+    );
     // 转写可能合法返回空（静音课件）；由后续正常渲染成"无语音"讲义
 
     // timeline.jsonl 始终保存 ASR/字幕的原始细粒度事件（段落组织之前），
@@ -245,7 +254,9 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
                 Some(sm)
             }
             Err(e) => {
-                tracing::warn!("LLM 总结失败（{e:#}），跳过总结");
+                tracing::warn!(
+                    "AI 总结失败，仍会保存笔记；可稍后用 course2md summarize 重试 / AI summary failed; notes will still be saved. Retry with course2md summarize: {e:#}"
+                );
                 None
             }
         }
@@ -329,7 +340,9 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         &cfg.out_dir.join("run.json"),
         serde_json::to_string_pretty(&run_info)?.as_bytes(),
     ) {
-        tracing::warn!("写 run.json 失败（不影响其他产物）：{e:#}");
+        tracing::warn!(
+            "无法保存运行信息，笔记已保留 / Could not save run metadata; notes are retained: {e:#}"
+        );
     }
 
     // NDJSON done：GUI/脚本靠这一行拿产物清单与统计（human 模式 emit 为 no-op）。
@@ -368,6 +381,9 @@ fn print_summary(
     is_local: bool,
     media_deleted: bool,
 ) {
+    if progress::is_json() || progress::is_quiet() {
+        return;
+    }
     let out = &cfg.out_dir;
     let speech_n: usize = sections.iter().map(|s| s.speech.len()).sum();
     let chars: usize = sections
@@ -377,55 +393,67 @@ fn print_summary(
         .sum();
 
     eprintln!();
-    eprintln!("──────── ✓ course2md 完成 ────────");
-    eprintln!("标题:     {}", meta.title);
-    eprintln!("输出目录: {}", out.display());
+    eprintln!("✓ 笔记已生成 / Notes ready");
+    eprintln!("标题 / Title: {}", meta.title);
+    eprintln!("输出目录 / Output: {}", out.display());
     eprintln!();
-    eprintln!("文稿:");
+    eprintln!("打开以下文件查看笔记 / Open a file to read your notes:");
     for f in &cfg.formats {
         let p = out.join(f.output_name());
         if p.is_file() {
             eprintln!("  ✓ {}", p.display());
         }
     }
-    eprintln!("截图: {}/frames/  ({} 张)", out.display(), sections.len());
+    eprintln!(
+        "截图 / Slides: {}/frames/ ({} images)",
+        out.display(),
+        sections.len()
+    );
     // 字幕优先的视频不产生 audio.wav，不存在的路径打出来只会误导
     let audio = cfg.audio_path();
     if audio.is_file() {
-        eprintln!("音频: {}", audio.display());
+        eprintln!("音频 / Audio: {}", audio.display());
     }
     if is_local {
-        eprintln!("视频: {}  (本地输入，未改动)", media.display());
+        eprintln!(
+            "视频 / Video: {} (本地原文件 / Original local file)",
+            media.display()
+        );
     } else if media_deleted {
-        eprintln!("视频: 本次下载，已删除 (用 --keep-video 可保留)");
+        eprintln!(
+            "下载的视频已清理；用 --keep-video 保留 / Downloaded video removed; use --keep-video to keep it"
+        );
     } else {
-        eprintln!("视频: {}  (已保留)", media.display());
+        eprintln!("视频 / Video: {} (已保留 / Kept)", media.display());
     }
-    eprintln!("时间线: {}", cfg.timeline_path().display());
+    eprintln!("时间线 / Timeline: {}", cfg.timeline_path().display());
     eprintln!();
     eprintln!(
-        "统计: {} 张截图 / {} 段语音 / {} 字",
+        "统计 / Stats: {} slides / {} speech segments / {} characters",
         sections.len(),
         speech_n,
         chars
     );
-    eprintln!("耗时: {}", fmt_duration(stats.elapsed_secs));
-    match (stats.peak_mb, stats.child_peak_mb) {
-        (Some(mb), Some(c)) => eprintln!(
-            "峰值内存: {mb:.0} MB (course2md) + 最大子进程 {c:.0} MB (llama-server/ffmpeg)"
-        ),
-        (Some(mb), None) => eprintln!("峰值内存（本进程 RSS）: {mb:.0} MB"),
-        _ => eprintln!("峰值内存: 不可用"),
-    }
-    // 模型目录只对 llama.cpp 后端（gpu/cpu）有意义；coreml 走系统缓存、api 无本地模型
-    if matches!(
-        cfg.provider,
-        config::AsrProvider::Gpu | config::AsrProvider::Cpu
-    ) {
-        eprintln!("模型目录: {}", cfg.model_dir.display());
+    eprintln!("耗时 / Elapsed: {}", fmt_duration(stats.elapsed_secs));
+    if tracing::enabled!(tracing::Level::INFO) {
+        match (stats.peak_mb, stats.child_peak_mb) {
+            (Some(mb), Some(c)) => {
+                eprintln!("峰值内存 / Peak memory: {mb:.0} MB + child process {c:.0} MB")
+            }
+            (Some(mb), None) => eprintln!("峰值内存 / Peak memory: {mb:.0} MB"),
+            _ => eprintln!("峰值内存不可用 / Peak memory unavailable"),
+        }
+        // 模型目录只对 llama.cpp 后端（gpu/cpu）有意义；coreml 走系统缓存、api 无本地模型
+        if matches!(
+            cfg.provider,
+            config::AsrProvider::Gpu | config::AsrProvider::Cpu
+        ) {
+            eprintln!("模型目录 / Models: {}", cfg.model_dir.display());
+        }
     }
     eprintln!("──────────────────────────────");
-    if !cfg.llm.enabled && !cfg.llm.disable_hint {
+    use std::io::IsTerminal as _;
+    if std::io::stderr().is_terminal() && !cfg.llm.enabled && !cfg.llm.disable_hint {
         crate::llm::write_hint_note(&crate::settings::config_path());
     }
 }

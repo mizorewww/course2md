@@ -50,8 +50,8 @@ extern "C" fn c2m_model_progress(fraction: f64, message: *const std::ffi::c_char
         crate::progress::emit(serde_json::json!({"type":"progress", "stage":"model/apple",
             "current": (fraction.clamp(0.0, 1.0) * 10000.0) as u64, "total":10000,
             "message":message}));
-    } else {
-        eprintln!("model {:.0}% · {message}", fraction * 100.0);
+    } else if !crate::progress::is_quiet() {
+        eprintln!("模型 / Model {:.0}% · {message}", fraction * 100.0);
     }
 }
 
@@ -83,7 +83,7 @@ pub fn vad(wav: &Path, min_speech: f64, min_silence: f64) -> Result<Vec<(f64, f6
         )
     };
     if rc != 0 {
-        anyhow::bail!("Silero VAD 失败: {}", last_error());
+        anyhow::bail!("语音检测失败 / Speech detection failed: {}", last_error());
     }
     let mut out = Vec::with_capacity(n as usize);
     if n > 0 {
@@ -143,8 +143,15 @@ pub fn resolve_model(explicit: Option<&str>) -> Result<String> {
         migrate_marker(&marker, &m);
         return Ok(m);
     }
-    let chosen = prompt_model_choice();
-    persist_model_choice(&chosen);
+    let chosen = prompt_model_choice()?;
+    use std::io::IsTerminal as _;
+    if !crate::progress::is_json()
+        && !crate::progress::is_quiet()
+        && std::io::stdin().is_terminal()
+        && std::io::stderr().is_terminal()
+    {
+        persist_model_choice(&chosen);
+    }
     Ok(chosen)
 }
 
@@ -157,7 +164,9 @@ fn persist_model_choice(model: &str) {
         crate::settings::save(&cfg)?;
         Ok(())
     })() {
-        tracing::warn!("保存模型选择到 config.toml 失败（下次仍会询问）：{e:#}");
+        tracing::warn!(
+            "无法保存模型选择，下次仍会询问 / Could not save model choice; you will be asked again next time: {e:#}"
+        );
     }
 }
 
@@ -174,7 +183,9 @@ fn migrate_marker(marker: &Path, model: &str) {
             let _ = std::fs::remove_file(marker);
             tracing::info!("已将模型选择从 asr_model marker 迁移到 config.toml");
         }
-        Err(e) => tracing::warn!("迁移 asr_model marker 到 config.toml 失败（保留 marker）：{e:#}"),
+        Err(e) => tracing::warn!(
+            "无法更新旧模型配置，已保留原设置 / Could not update legacy model settings; original settings kept: {e:#}"
+        ),
     }
 }
 
@@ -190,33 +201,42 @@ fn normalize(s: &str) -> Result<String> {
     } else if s.is_empty() || s.contains("qwen") || s.contains("1.7") {
         Ok("qwen3-1.7b".into())
     } else {
-        anyhow::bail!("未知的 Apple 原生模型名 `{s}`（可选：qwen3-1.7b | qwen3-0.6b | whisper）")
+        anyhow::bail!(
+            "未知的 Apple 模型 / Unknown Apple model: `{s}`. 请选择 / Choose: qwen3-1.7b, qwen3-0.6b, whisper"
+        )
     }
 }
 
 /// 首次使用：让用户选择下载哪个模型（非交互环境默认 qwen3-1.7b）。
 /// dialoguer 提供标准行编辑与方向键选择（裸 read_line 不处理转义序列，issue #3）。
-fn prompt_model_choice() -> String {
+fn prompt_model_choice() -> Result<String> {
     use std::io::IsTerminal as _;
-    if !std::io::stdin().is_terminal() {
+    if crate::progress::is_json()
+        || crate::progress::is_quiet()
+        || !std::io::stdin().is_terminal()
+        || !std::io::stderr().is_terminal()
+    {
         tracing::info!(
             "非交互环境，默认使用 Qwen3-ASR 1.7B 模型（--asr-model qwen3-0.6b/whisper 可切换）"
         );
-        return "qwen3-1.7b".into();
+        return Ok("qwen3-1.7b".into());
     }
     let choice = dialoguer::Select::new()
         .with_prompt("选择识别模型 / Select ASR Model")
         .items([
-            "qwen3-1.7b — Qwen3-ASR 1.7B MLX（推荐；中文/中英混合最准，下载约 2.3GB）",
-            "qwen3-0.6b — Qwen3-ASR 0.6B CoreML（ANE 省电低功耗，下载约 1GB）",
-            "whisper — Whisper Large-v3 Turbo（多语种；纯英文/非中文可选）",
+            "qwen3-1.7b — Qwen3-ASR 1.7B MLX（推荐，下载约 2.3GB / Recommended, ~2.3GB download）",
+            "qwen3-0.6b — Qwen3-ASR 0.6B CoreML（低功耗，约 1GB / Low power, ~1GB download）",
+            "whisper — Whisper Large-v3 Turbo（多语种 / Multilingual）",
         ])
         .default(0)
-        .interact_opt();
+        .interact_opt()?;
     match choice {
-        Ok(Some(1)) => "qwen3-0.6b".into(),
-        Ok(Some(2)) => "whisper".into(),
-        _ => "qwen3-1.7b".into(),
+        Some(1) => Ok("qwen3-0.6b".into()),
+        Some(2) => Ok("whisper".into()),
+        Some(_) => Ok("qwen3-1.7b".into()),
+        None => anyhow::bail!(
+            "已取消模型选择，未开始下载 / Model selection cancelled; download not started"
+        ),
     }
 }
 
@@ -255,12 +275,17 @@ impl CoremlAsr {
                     .unwrap_or_default();
                 if rc == 2 {
                     // shim 侧缓冲（16KB）不够，文本被截断：至少留痕
-                    tracing::warn!("CoreML 转写结果超过缓冲上限被截断");
+                    tracing::warn!(
+                        "Apple 识别结果过长，部分文字被截断 / Apple transcript exceeded the size limit; some text was truncated"
+                    );
                 }
                 Ok(Some(s))
             }
             1 => Ok(None),
-            _ => anyhow::bail!("CoreML 转写失败: {}", last_error()),
+            _ => anyhow::bail!(
+                "Apple 语音识别失败 / Apple transcription failed: {}",
+                last_error()
+            ),
         }
     }
 }
@@ -290,7 +315,9 @@ pub fn run_coreml(
     let segs = crate::asr::normalize_segments(raw, max_speech, wav, dur)?;
     tracing::info!(segs = segs.len(), engine = "silero-coreml", "vad");
     if segs.is_empty() {
-        tracing::warn!("未检测到语音（VAD 结果为空），跳过识别");
+        tracing::warn!(
+            "未检测到语音，将仅保留截图 / No speech detected; keeping slides without a transcript"
+        );
         return Ok(vec![]);
     }
 

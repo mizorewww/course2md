@@ -81,12 +81,12 @@ impl fmt::Display for SlideMode {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TranscriptSource {
-    /// 字幕优先：平台人工字幕 > 平台自动字幕 > 本地 ASR
+    /// 优先字幕，无字幕时识别语音 / Prefer subtitles; transcribe speech if unavailable
     #[default]
     Auto,
-    /// 强制字幕：获取不到即报错（远程走 yt-dlp，本地查同名 .srt/.vtt）
+    /// 仅字幕；本地需同名 .srt/.vtt / Subtitles only; local files need a matching .srt/.vtt
     Subtitle,
-    /// 强制本地 ASR（不查询平台字幕）
+    /// 使用所选后端识别，不查字幕 / Transcribe with the selected backend; skip subtitles
     Asr,
 }
 
@@ -169,13 +169,13 @@ impl Roi {
     pub fn parse(s: &str) -> anyhow::Result<Self> {
         let (a, b) = s
             .split_once('-')
-            .ok_or_else(|| anyhow::anyhow!("ROI 格式应为 x1,y1-x2,y2，收到 {s:?}"))?;
+            .ok_or_else(|| anyhow::anyhow!("ROI 格式应为 / ROI must use x1,y1-x2,y2: {s:?}"))?;
         let (x1, y1) = parse_xy(a)?;
         let (x2, y2) = parse_xy(b)?;
         let (x1, x2) = (x1.min(x2), x1.max(x2));
         let (y1, y2) = (y1.min(y2), y1.max(y2));
         if x2 <= x1 || y2 <= y1 {
-            anyhow::bail!("ROI 为空矩形: {s:?}");
+            anyhow::bail!("ROI 区域不能为空 / ROI must have a positive width and height: {s:?}");
         }
         Ok(Self { x1, y1, x2, y2 })
     }
@@ -209,9 +209,9 @@ impl Roi {
 }
 
 fn parse_xy(pair: &str) -> anyhow::Result<(f64, f64)> {
-    let (a, b) = pair
-        .split_once(',')
-        .ok_or_else(|| anyhow::anyhow!("ROI 坐标对格式应为 x,y，收到 {pair:?}"))?;
+    let (a, b) = pair.split_once(',').ok_or_else(|| {
+        anyhow::anyhow!("ROI 坐标格式应为 / ROI coordinates must use x,y: {pair:?}")
+    })?;
     Ok((parse_coord(a)?, parse_coord(b)?))
 }
 
@@ -219,12 +219,18 @@ fn parse_coord(s: &str) -> anyhow::Result<f64> {
     let s = s.trim();
     let v = if let Some(p) = s.strip_suffix('%') {
         let percent: f64 = p.trim().parse()?;
-        anyhow::ensure!((0.0..=100.0).contains(&percent), "ROI 百分比必须在 0..=100");
+        anyhow::ensure!(
+            (0.0..=100.0).contains(&percent),
+            "ROI 百分比必须在 0–100 / ROI percentages must be between 0 and 100"
+        );
         percent / 100.0
     } else {
         s.parse::<f64>()?
     };
-    anyhow::ensure!(v.is_finite() && v >= 0.0, "ROI 坐标必须为非负有限数值");
+    anyhow::ensure!(
+        v.is_finite() && v >= 0.0,
+        "ROI 坐标必须为非负有限数值 / ROI coordinates must be finite, non-negative numbers"
+    );
     Ok(v)
 }
 
@@ -233,7 +239,10 @@ impl PipelineConfig {
     /// 返回 Err 的送进 main 后直接退出，不会碰网络与模型。
     pub fn validate(&self) -> AnyhowResult<()> {
         let finite = |name: &str, v: f64| -> AnyhowResult<()> {
-            anyhow::ensure!(v.is_finite(), "{name} 必须是有限数值（收到 {v}）");
+            anyhow::ensure!(
+                v.is_finite(),
+                "{name} 必须是有限数值 / must be a finite number (received {v})"
+            );
             Ok(())
         };
         finite("similarity", self.similarity)?;
@@ -244,43 +253,43 @@ impl PipelineConfig {
 
         anyhow::ensure!(
             self.similarity > 0.0 && self.similarity <= 1.0,
-            "similarity 必须在 (0, 1]：SSIM 阈值越高越敏感（截图更多），收到 {}",
+            "--similarity 必须大于 0 且不超过 1 / must be greater than 0 and at most 1 (received {})",
             self.similarity
         );
         anyhow::ensure!(
             self.sample_interval > 0.0,
-            "sample_interval 必须 > 0 秒（收到 {}）",
+            "--sample-interval 必须 > 0 秒 / must be greater than 0 seconds (received {})",
             self.sample_interval
         );
         anyhow::ensure!(
             self.cooldown >= 0.0,
-            "cooldown 必须 >= 0 秒（收到 {}）",
+            "--cooldown 必须 >= 0 秒 / must be at least 0 seconds (received {})",
             self.cooldown
         );
         anyhow::ensure!(
             self.stable_secs >= 0.0,
-            "stable_secs 必须 >= 0 秒（收到 {}）",
+            "--stable-secs 必须 >= 0 秒 / must be at least 0 seconds (received {})",
             self.stable_secs
         );
         // 上限防御 split_smart 的 clamp panic（0 会让 clamp(min>max) abort）
         anyhow::ensure!(
             self.max_speech >= 1.0 && self.max_speech <= 600.0,
-            "max_speech 必须在 1..=600 秒（收到 {}）；切分算法不允许 0/负值",
+            "--max-speech 必须在 1–600 秒 / must be between 1 and 600 seconds (received {})",
             self.max_speech
         );
         anyhow::ensure!(
             self.threads >= 1,
-            "threads 必须 >= 1（收到 {}）",
+            "--threads 必须 >= 1 / must be at least 1 (received {})",
             self.threads
         );
         anyhow::ensure!(
             self.max_height >= 144,
-            "max_height 必须 >= 144（收到 {}）",
+            "--max-height 必须 >= 144 / must be at least 144 (received {})",
             self.max_height
         );
         anyhow::ensure!(
             !self.formats.is_empty(),
-            "formats 不能为空（至少 md/html/json 之一）"
+            "--formats 不能为空 / Choose at least one output format: md,html,json"
         );
 
         Ok(())
@@ -300,21 +309,21 @@ impl PipelineConfig {
                 AsrProvider::Gpu | AsrProvider::Cpu => {
                     anyhow::ensure!(
                         lower.contains("qwen"),
-                        "provider {:?} 只支持 qwen3 系模型（当前缓存仅有 Qwen3-ASR GGUF）；
-                         要用 Whisper 请选 --provider coreml / npu / api",
+                        "provider {:?} 只支持 qwen3 系模型 / supports only Qwen3 models.
+                         Whisper 请使用兼容后端 / For Whisper, select a compatible backend: coreml, npu or api",
                         self.provider
                     );
                 }
                 AsrProvider::Coreml => {
                     anyhow::ensure!(
                         lower.contains("qwen") || lower.contains("whisper"),
-                        "provider coreml 只支持 qwen3-1.7b / qwen3-0.6b / whisper（收到 {m:?}）"
+                        "provider coreml 支持的模型 / supported models: qwen3-1.7b, qwen3-0.6b, whisper (received {m:?})"
                     );
                 }
                 AsrProvider::Npu => {
                     anyhow::ensure!(
                         crate::npu::npu_model_alias(m).is_some() || lower.contains('/'),
-                        "provider npu 的 asr_model 需是已知别名或 HuggingFace 仓库 id（含 /，收到 {m:?}）"
+                        "provider npu 需要模型别名或仓库 ID / requires a known model alias or Hugging Face repository ID containing / (received {m:?})"
                     );
                 }
                 AsrProvider::Api => {}
@@ -326,7 +335,7 @@ impl PipelineConfig {
             anyhow::ensure!(
                 !self.asr_api.api_key.trim().is_empty() || asr_api_key_from_env().is_some(),
                 "provider api 需要 API key：配置文件 [asr_api].api_key、--asr-api-key \
-                 或环境变量 COURSE2MD_ASR_API_KEY（兼容旧名 OPENROUTER_API_KEY）"
+                 或环境变量 COURSE2MD_ASR_API_KEY。/ Cloud transcription requires an API key; set COURSE2MD_ASR_API_KEY or [asr_api].api_key."
             );
         }
 

@@ -10,7 +10,7 @@ pub(crate) async fn run_cmd(cmd: &mut Command, what: &str) -> Result<std::proces
         .kill_on_drop(true)
         .output()
         .await
-        .with_context(|| format!("启动 {what} 失败"))?;
+        .with_context(|| format!("无法启动 {what} / Could not start {what}"))?;
     if !out.status.success() {
         return Err(crate::error::cmd_error(
             what,

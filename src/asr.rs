@@ -78,7 +78,7 @@ where
         r
     })
     .await
-    .context("ASR 线程 join 失败")?
+    .context("语音识别任务未能完成 / Speech recognition task did not complete")?
 }
 
 pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<TranscriptEvent>> {
@@ -125,13 +125,15 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
             .await;
             match joined {
                 Ok(events) => return Ok(events), // 空 = VAD 无语音（终态，不再回落）
-                Err(e) => tracing::warn!("CoreML 后端失败（{e:#}），回落 llama-server"),
+                Err(e) => tracing::warn!(
+                    "Apple 识别失败，正在尝试 llama.cpp / Apple transcription failed; trying llama.cpp: {e:#}"
+                ),
             }
         }
         #[cfg(not(apple_native))]
         {
             anyhow::bail!(
-                "此构建未包含 Apple CoreML 后端（仅 macOS Apple Silicon 构建支持）。请用 --provider gpu 或 cpu"
+                "此构建不含 Apple 识别后端 / This build does not include Apple transcription. 使用 / Use --provider gpu or cpu (requires llama-server)."
             );
         }
     }
@@ -173,7 +175,9 @@ fn run_blocking(
     let segs = ffmpeg_vad(wav, max_speech)?;
     tracing::info!(segs = segs.len(), "vad");
     if segs.is_empty() {
-        tracing::warn!("未检测到语音（VAD 结果为空），跳过识别");
+        tracing::warn!(
+            "未检测到语音，将仅保留截图 / No speech detected; keeping slides without a transcript"
+        );
         return Ok(vec![]);
     }
 
@@ -196,7 +200,7 @@ fn run_blocking(
         Some("\"status\":\"ok\""),
     ) {
         return Err(e.context(format!(
-            "llama-server 启动失败，其 stderr 尾部：\n{}",
+            "无法启动识别服务 / Could not start llama-server. Details:\n{}",
             stderr_tail.tail()
         )));
     }
@@ -226,7 +230,10 @@ fn run_blocking(
         if tail.is_empty() {
             e
         } else {
-            e.context(format!("llama-server stderr 尾部：\n{}", tail))
+            e.context(format!(
+                "识别服务错误详情 / llama-server error details:\n{}",
+                tail
+            ))
         }
     })?;
     tracing::info!(
@@ -304,12 +311,14 @@ fn run_api(
         api.api_key.clone()
     } else {
         crate::config::asr_api_key_from_env()
-            .context("云端 STT 未配置 API Key：在配置文件 [asr_api] 设置 api_key，或用 --asr-api-key / COURSE2MD_ASR_API_KEY（兼容旧名 OPENROUTER_API_KEY）")?
+            .context("云端识别未设置密钥 / Cloud speech API key missing. 设置 / Set COURSE2MD_ASR_API_KEY or [asr_api].api_key.")?
     };
     let segs = ffmpeg_vad(wav, max_speech as f32)?;
     tracing::info!(segs = segs.len(), endpoint = %api.base_url, model = %api.model, "api vad");
     if segs.is_empty() {
-        tracing::warn!("未检测到语音（VAD 结果为空），跳过识别");
+        tracing::warn!(
+            "未检测到语音，将仅保留截图 / No speech detected; keeping slides without a transcript"
+        );
         return Ok(vec![]);
     }
 
@@ -328,7 +337,9 @@ fn run_api(
         .filter(|&i| !cp.is_done(segs[i].start, segs[i].end))
         .collect();
     pb.set_position((segs.len() - pending.len()) as u64);
-    crate::progress::emit(serde_json::json!({"type":"workers", "stage":"transcribe", "workers": WORKERS.min(pending.len())}));
+    crate::progress::emit(
+        serde_json::json!({"type":"workers", "stage":"transcribe", "workers": WORKERS.min(pending.len())}),
+    );
 
     // 有界并发（std::thread::scope + 借用，无需 Arc）：网络往返是主要瓶颈；
     // 结果经 channel 回收后记录。abort 后 in-flight 请求自然结束，无人 join 不到。
@@ -383,7 +394,9 @@ fn run_api(
                 }
                 Err(e) => {
                     if err.is_none() {
-                        err = Some(e.context(format!("云端 STT 失败（chunk {i}）")));
+                        err = Some(e.context(format!(
+                            "云端语音识别失败 / Cloud transcription failed (segment {i})"
+                        )));
                         abort.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
@@ -437,7 +450,11 @@ fn post_bytes_retry(
             req = req.set("Authorization", &format!("Bearer {k}"));
         }
         match req.set("Content-Type", content_type).send_bytes(body) {
-            Ok(resp) => return resp.into_json().context("响应解析失败"),
+            Ok(resp) => {
+                return resp
+                    .into_json()
+                    .context("无法解析服务响应 / Could not parse the service response");
+            }
             Err(e) => {
                 let retryable = match &e {
                     ureq::Error::Status(code, _) => *code == 429 || *code >= 500,
@@ -447,12 +464,14 @@ fn post_bytes_retry(
                     tracing::warn!(
                         attempt,
                         backoff_secs = delay.as_secs(),
-                        "请求失败（{e}），稍后重试"
+                        "请求失败，稍后重试 / Request failed; retrying shortly: {e}"
                     );
                     std::thread::sleep(delay);
                     delay *= 2;
                 } else {
-                    return Err(anyhow::anyhow!("请求失败: {e}"));
+                    return Err(anyhow::anyhow!(
+                        "请求失败，请检查网络和服务配置 / Request failed; check your connection and service settings: {e}"
+                    ));
                 }
             }
         }
@@ -476,8 +495,10 @@ struct ApiTarget<'a> {
 /// 转写单个 chunk；Ok(None) = 无语音内容。
 fn transcribe_api(t: &ApiTarget, chunk: &Path, seg: Seg, wav: &Path) -> Result<Option<String>> {
     use base64::Engine as _;
-    cut_wav(wav, seg.cut_start, seg.cut_end, chunk).context("切分音频失败")?;
-    let bytes = std::fs::read(chunk).with_context(|| format!("读取 chunk {}", chunk.display()))?;
+    cut_wav(wav, seg.cut_start, seg.cut_end, chunk)
+        .context("无法切分音频 / Could not split audio")?;
+    let bytes = std::fs::read(chunk)
+        .with_context(|| format!("读取音频片段 / Reading audio segment: {}", chunk.display()))?;
     let v = match t.mode {
         crate::settings::AsrApiMode::Transcriptions => {
             let (content_type, body) = transcription_form(t.model, &bytes);
@@ -501,12 +522,12 @@ fn transcribe_api(t: &ApiTarget, chunk: &Path, seg: Seg, wav: &Path) -> Result<O
         .and_then(|e| e.get("message"))
         .and_then(|m| m.as_str())
     {
-        anyhow::bail!("API 报错: {e}");
+        anyhow::bail!("语音服务返回错误 / Speech API returned an error: {e}");
     }
     let text = match t.mode {
         crate::settings::AsrApiMode::Transcriptions => v["text"]
             .as_str()
-            .context("转写响应缺少 text 字段，不能当作静音")?
+            .context("识别响应缺少文字，请检查服务的 API 兼容性 / Transcription response is missing text; check API compatibility")?
             .trim()
             .to_string(),
         crate::settings::AsrApiMode::Chat => {
@@ -562,7 +583,7 @@ fn parse_chat_content(v: &serde_json::Value) -> String {
 
 fn find_llama_server() -> Result<PathBuf> {
     crate::runtime::which("llama-server")
-        .context("找不到 llama-server，请安装 llama.cpp 并加入 PATH")
+        .context("未找到 llama-server / llama-server not found. 安装 llama.cpp 并加入 PATH / Install llama.cpp and add it to PATH.")
 }
 
 fn spawn_server(
@@ -614,13 +635,13 @@ fn transcribe_file(client: &ureq::Agent, base: &str, wav: &Path) -> Result<Strin
         }]
     });
     let v = post_json_retry(client, &format!("{base}/v1/chat/completions"), None, &body)
-        .context("llama-server 识别请求失败")?;
+        .context("本地语音识别请求失败 / Local transcription request failed")?;
     let text = v["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("")
         .to_string();
     if text.is_empty() {
-        anyhow::bail!("llama-server 返回空文本: {v}");
+        anyhow::bail!("本地识别返回空文本 / Local transcription returned empty text: {v}");
     }
     Ok(text)
 }
@@ -650,7 +671,9 @@ pub(crate) fn ffmpeg_vad(wav: &Path, max_speech: f32) -> Result<Vec<Seg>> {
     let dur = match crate::media::probe_duration_blocking(wav) {
         Some(d) => d,
         None => {
-            tracing::warn!("ffprobe 时长探测失败，按 0 处理（末段语音可能丢失）");
+            tracing::warn!(
+                "无法读取音频时长，末段语音可能不完整 / Could not read audio duration; the final transcript segment may be incomplete"
+            );
             0.0
         }
     };
@@ -661,7 +684,9 @@ pub(crate) fn ffmpeg_vad(wav: &Path, max_speech: f32) -> Result<Vec<Seg>> {
             match v.trim().parse::<f64>() {
                 Ok(t) => start = Some(t),
                 // 解析失败不能静默丢弃：0.0 会产生倒挂区间进 invert_silence
-                Err(e) => tracing::warn!("silencedetect silence_start 解析失败（{v:?}）：{e}"),
+                Err(e) => {
+                    tracing::warn!("无法读取静音起点 / Could not read silence start ({v:?}): {e}")
+                }
             }
         } else if let Some(v) = line.split("silence_end:").nth(1) {
             match v.split_whitespace().next().unwrap_or("").parse::<f64>() {
@@ -670,7 +695,9 @@ pub(crate) fn ffmpeg_vad(wav: &Path, max_speech: f32) -> Result<Vec<Seg>> {
                         silences.push((s, end));
                     }
                 }
-                Err(e) => tracing::warn!("silencedetect silence_end 解析失败（{v:?}）：{e}"),
+                Err(e) => {
+                    tracing::warn!("无法读取静音终点 / Could not read silence end ({v:?}): {e}")
+                }
             }
         }
     }
@@ -695,7 +722,8 @@ pub struct Energy {
 impl Energy {
     pub fn load(wav: &Path) -> Result<Self> {
         // 直接解析 16k 单声道 s16 wav（extract_audio 的固定产物）
-        let data = std::fs::read(wav).with_context(|| format!("读取音频失败 {}", wav.display()))?;
+        let data = std::fs::read(wav)
+            .with_context(|| format!("无法读取音频 / Could not read audio: {}", wav.display()))?;
         let (body, _) =
             find_pcm_body(&data).ok_or_else(|| anyhow::anyhow!("无法解析 wav PCM 数据"))?;
         let mut samples = Vec::with_capacity(body.len() / 2);
@@ -891,7 +919,7 @@ pub fn cut_wav(src: &Path, start: f64, end: f64, dest: &Path) -> Result<()> {
         .status()
         .context("ffmpeg cut")?;
     if !st.success() {
-        anyhow::bail!("ffmpeg 切分失败");
+        anyhow::bail!("无法切分音频 / ffmpeg could not split audio");
     }
     Ok(())
 }

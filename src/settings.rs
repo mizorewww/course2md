@@ -101,11 +101,15 @@ pub fn load() -> anyhow::Result<ConfigFile> {
     if !p.is_file() {
         return Ok(ConfigFile::default());
     }
-    let s =
-        std::fs::read_to_string(&p).with_context(|| format!("无法读取配置文件 {}", p.display()))?;
+    let s = std::fs::read_to_string(&p).with_context(|| {
+        format!(
+            "无法读取配置文件 / Cannot read configuration: {}",
+            p.display()
+        )
+    })?;
     toml::from_str(&s).with_context(|| {
         format!(
-            "配置文件解析失败（修正后重试；本次不回退默认值）：{}",
+            "配置格式有误，请修正后重试 / Fix the configuration syntax and retry: {}",
             p.display()
         )
     })
@@ -123,7 +127,10 @@ pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {
             .map_err(anyhow::Error::from)
             .and_then(|bytes| crate::checkpoint::atomic_write(&bak, &bytes))
         {
-            tracing::warn!("备份旧配置到 {} 失败：{e}", bak.display());
+            tracing::warn!(
+                "无法备份旧配置 / Could not back up configuration to {}: {e}",
+                bak.display()
+            );
         }
     }
     let bytes = toml::to_string_pretty(cfg)?;
@@ -132,75 +139,77 @@ pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {
 }
 
 /// `config init` 写入的带注释模板。
-pub const TEMPLATE: &str = r#"# course2md 配置文件
-# 优先级：命令行参数 > 本文件 > 内置默认值。
-# 任何命令行参数（如 --similarity）都可以在这里设置默认值；
-# 保持注释状态即使用内置默认（内置默认值见源码 src/config.rs 顶部常量）。
+pub const TEMPLATE: &str = r#"# course2md 配置 / Configuration
+# 优先级：命令行 > 本文件 > 内置默认 / Priority: CLI > this file > built-in defaults
+# 取消注释以设置默认值 / Uncomment values to set defaults
+# 查看当前设置：course2md config show / View settings: course2md config show
 
 [defaults]
-# 输出根目录（其下按 平台/标题/编号 归类）
+# 输出根目录，按平台/标题/ID 分类 / Output root, organized by platform/title/ID
 #out = "out"
-# SSIM 画面相似度阈值，越高越敏感、截图越多
+# 截图相似度 (0,1]，越高截图越多 / Similarity (0,1]; higher captures more slides
 #similarity = 0.85
-# 每隔几秒检查一次画面
+# 画面采样间隔（秒）/ Frame sampling interval (seconds)
 #sample_interval = 1.0
-# 新截图之后至少间隔多少秒
+# 截图最短间隔（秒）/ Minimum interval between slides (seconds)
 #cooldown = 10.0
-# 只比较画面中的区域，如 "40%,0%-100%,100%"
+# 下载视频最大高度 / Maximum downloaded video height
+#max_height = 1080
+# first 立即截图，stable 等动画结束 / first: immediate; stable: wait for animations
+#slide_mode = "stable"
+#stable_secs = 1.0
+# 仅比较指定画面区域 / Compare only this region
 #roi = "40%,0%-100%,100%"
-# 识别线程数
+# 识别线程数 / Speech recognition threads
 #threads = 4
-# 识别后端推荐：
-# - gpu: 强烈推荐！Metal (macOS) / CUDA (Linux) / Vulkan，加载 Qwen3-ASR 1.7B Q8，3分钟音频仅需13秒，专有名词与标点极准
-# - npu: Intel Core Ultra NPU 硬件加速（Linux/Windows），高能效比，比纯 CPU 快 6.5 倍
-# - coreml: macOS Apple Silicon 原生 CoreML / Neural Engine 模式，零外部依赖
-# - cpu: 纯 CPU 运行 Qwen3-ASR 1.7B Q8，通用兜底
-# - api: 云端 STT（OpenRouter），免本地模型下载
+# coreml: Apple Silicon 原生构建 / Apple Silicon native build
+# gpu/cpu: 需要 llama-server 和约 2.4GB 模型 / requires llama-server and ~2.4GB model
+# npu: Intel NPU，需要 OpenVINO / Intel NPU, requires OpenVINO
+# api: 云端识别，需要 API 密钥 / cloud transcription, requires an API key
+# 留空自动选择后端；course2md doctor 查看可用性 / Leave unset for automatic selection; check with course2md doctor
 #provider = "gpu"
-
-# 识别模型推荐 (各个后端通用)：
-# 识别模型推荐（各后端通用；Apple 原生 coreml 后端：qwen3-1.7b 默认 / qwen3-0.6b 省电 / whisper）：
-# - qwen3 / qwen3-1.7b (默认推荐): Qwen3-ASR 1.7B，中文及中英混合技术课程整体更好，标点较完整
-# - whisper: Whisper Large-v3 Turbo，适合纯英文或多语种视频
+# 模型需与后端兼容 / Models must match the backend
+# gpu/cpu: qwen3; coreml: qwen3-1.7b, qwen3-0.6b, whisper
 #asr_model = "qwen3"
-# 转写来源：auto = 平台字幕优先（人工>自动），无字幕再走本地 ASR；
-# subtitle = 强制字幕（无字幕报错）；asr = 跳过字幕直接识别
+# auto 优先字幕，无字幕再识别 / auto: subtitles first, then speech recognition
+# subtitle 仅字幕；asr 仅识别 / subtitle: subtitles only; asr: speech recognition only
 #transcript_source = "auto"
-
-# 单段语音最长秒数（过长会切分，自动在静音低能量点切分并外补 0.25s 静音 padding）
+# 每段语音最长秒数 (1–600) / Maximum speech segment length in seconds (1–600)
 #max_speech = 20.0
-# 输出格式：md / html / json
+# 输出格式 / Output formats: md, html, json
 #formats = ["md", "html"]
-# 模型目录（llama.cpp GGUF；CoreML 模型缓存在 ~/Library/Caches/qwen3-speech/）
+# gpu/cpu 模型目录；默认使用系统缓存 / gpu/cpu model directory; platform cache by default
 #model_dir = "~/.cache/course2md/models"
-# 保留下载的视频 media.mp4
+# 成功后保留下载的视频 / Keep downloaded video after success
 #keep_video = false
+# 从语音检查点恢复 / Resume from speech checkpoints
+#resume = false
 
 [asr_api]
-# 云端 STT（--provider api）。base_url 可指向任何 OpenAI 兼容端点（自定义端点）。
-#mode = "transcriptions"   # transcriptions = POST /audio/transcriptions（默认，专用转录端点）
-                            # chat = POST /chat/completions（支持音频输入的多模态 LLM，
-                            #        如 gpt-4o-audio-preview、google/gemini-2.5-flash、qwen2-audio）
+# OpenAI 兼容语音服务 / OpenAI-compatible speech service
+# transcriptions: /audio/transcriptions; chat: /chat/completions
+# 请求方式和模型需由服务商支持 / The provider must support the selected mode and model
+#mode = "transcriptions"
 #base_url = "https://openrouter.ai/api/v1"
-#api_key = "sk-or-..."
+# 推荐通过 COURSE2MD_ASR_API_KEY 环境变量提供密钥 / Prefer the COURSE2MD_ASR_API_KEY environment variable
+#api_key = ""
 #model = "qwen/qwen3-asr-flash-2026-02-10"
-# 其他常用模型：openai/whisper-large-v3-turbo、qwen/qwen3-asr-1.7b（transcriptions 模式）
 
 [llm]
-# LLM 字幕润色（默认关闭）。运行 `course2md llm setup` 可交互式配置。
+# 可选 AI 润色；运行 course2md llm setup 配置 / Optional AI proofreading; configure with course2md llm setup
 enabled = false
 #base_url = "https://api.deepseek.com/v1"
-#api_key = "sk-..."
+#api_key = ""
 #model = "deepseek-chat"
-# 自定义校对指令（输出格式约束由系统自动追加；留空用内置）
+# 自定义润色要求 / Custom proofreading instructions
 #prompt = ""
-# 关闭任务结束时的 LLM 开启提示
+# 隐藏完成后的提示 / Hide the completion tip
 #disable_hint = false
-# 视觉润色：润色请求附对应幻灯片截图，辅助纠正术语拼写（需模型支持图片输入）
+# 附截图辅助润色，需要视觉模型 / Attach slides; requires an image-capable model
 #vision = false
-# 润色并发数（Section 间相互独立；自建网关/代理可调高）
+# 并发请求数 / Concurrent requests
 #concurrency = 8
-# 转换完成后自动生成视频总结（TL;DR/要点/大纲）并写入 md/html 开头（需 enabled）
+# 在笔记中加入 AI 总结，需要 enabled = true / Add AI summaries; requires enabled = true
 #summarize = false
 "#;
 
@@ -208,7 +217,10 @@ enabled = false
 pub fn print_effective(cfg: &ConfigFile) {
     use crate::config as c;
     let d = &cfg.defaults;
-    println!("配置文件: {}", config_path().display());
+    println!("配置文件 / Configuration: {}", config_path().display());
+    println!(
+        "文件设置与内置默认值；不含本次命令行或环境变量覆盖 / File settings and built-in defaults, before CLI and environment overrides"
+    );
     println!("[defaults]");
     let s = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".into());
     println!(
@@ -243,7 +255,7 @@ pub fn print_effective(cfg: &ConfigFile) {
         "  provider       : {}",
         d.provider
             .map(|p| p.to_string())
-            .unwrap_or_else(|| "(按平台自动)".into())
+            .unwrap_or_else(|| "(自动选择 / automatic)".into())
     );
     println!("  slide_mode     : {}", d.slide_mode.unwrap_or_default());
     println!(
@@ -279,7 +291,7 @@ pub fn print_effective(cfg: &ConfigFile) {
         d.model_dir
             .as_ref()
             .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "(内置缓存目录)".into())
+            .unwrap_or_else(|| "(系统缓存 / platform cache)".into())
     );
     println!("  keep_video     : {}", d.keep_video.unwrap_or(false));
     println!("  no_download    : {}", d.no_download.unwrap_or(false));
@@ -292,7 +304,7 @@ pub fn print_effective(cfg: &ConfigFile) {
         if cfg.asr_api.api_key.is_empty() {
             "-"
         } else {
-            "(已配置)"
+            "(已设置，隐藏 / set, hidden)"
         }
     );
     println!("[llm]");

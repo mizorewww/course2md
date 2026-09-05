@@ -74,11 +74,18 @@ pub fn endpoint(base_url: &str) -> String {
 /// 校验配置可直接使用。
 pub fn validate(s: &LlmSettings) -> Result<()> {
     if s.base_url.trim().is_empty() {
-        bail!("llm.base_url 未配置，请运行 course2md llm setup");
+        bail!("未配置 LLM 服务地址。 / LLM base URL is missing. Run: course2md llm setup");
     }
     if s.model.trim().is_empty() {
-        bail!("llm.model 未配置，请运行 course2md llm setup");
+        bail!("未配置 LLM 模型。 / LLM model is missing. Run: course2md llm setup");
     }
+    let endpoint = url::Url::parse(s.base_url.trim()).context(
+        "服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid base URL; use a complete HTTP(S) URL.",
+    )?;
+    anyhow::ensure!(
+        matches!(endpoint.scheme(), "http" | "https") && endpoint.host_str().is_some(),
+        "服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid base URL; use a complete HTTP(S) URL."
+    );
     Ok(())
 }
 
@@ -124,7 +131,9 @@ pub(crate) fn chat_body(
 pub fn polish_sections(sections: &mut [Section], frames_root: &Path, s: &LlmSettings) {
     // 配置缺失一次性拦截：否则每个分块都会各发满重试后失败，白白放大请求量
     if let Err(e) = validate(s) {
-        tracing::warn!("{e:#}，跳过 LLM 润色");
+        tracing::warn!(
+            "{e:#}；保留原字幕，跳过润色 / Keeping original transcript; skipping LLM polish"
+        );
         return;
     }
     let total: usize = sections
@@ -184,7 +193,7 @@ fn polish_section(
                     warn_once(
                         warned,
                         &format!(
-                            "读取幻灯片截图 {} 失败（{e:#}），该节按纯文本润色",
+                            "无法读取截图 / Cannot read slide image {}: {e:#}. 本节仅润色文字 / Using text-only polish for this section.",
                             p.display()
                         ),
                     );
@@ -258,7 +267,9 @@ fn polish_chunk(
         (Err(e), Some(_)) if e.allows_vision_fallback() => {
             warn_once(
                 vision_warned,
-                &format!("端点拒绝带图请求（{e}），疑似不支持图片输入，该批降级为纯文本重试"),
+                &format!(
+                    "服务拒绝图片输入，改用文字重试 / Image input rejected; retrying with text only: {e}"
+                ),
             );
             chat(s, &items, None)
         }
@@ -271,7 +282,10 @@ fn polish_chunk(
                 if chunk.len() > 1 {
                     split_and_retry(s, chunk, image_b64, warned, vision_warned);
                 } else {
-                    warn_once(warned, "LLM 返回 id 集与输入不符，该批保留原文");
+                    warn_once(
+                        warned,
+                        "润色结果与原文段落不匹配，保留原文 / Polished segments do not match the input; keeping original text",
+                    );
                 }
             }
         }
@@ -279,7 +293,10 @@ fn polish_chunk(
             if chunk.len() > 1 && e.allows_split() {
                 split_and_retry(s, chunk, image_b64, warned, vision_warned);
             } else {
-                warn_once(warned, &format!("LLM 润色失败（{e}），保留原文"));
+                warn_once(
+                    warned,
+                    &format!("润色失败，保留原文 / Polish failed; keeping original text: {e}"),
+                );
             }
         }
     }
@@ -324,7 +341,7 @@ fn apply_polish(chunk: &mut [TranscriptEvent], polished: &[(usize, String)]) -> 
 fn warn_once(warned: &std::sync::atomic::AtomicBool, msg: &str) {
     use std::sync::atomic::Ordering;
     if !warned.swap(true, Ordering::Relaxed) {
-        tracing::warn!("{msg}（后续同类问题不再重复提示）");
+        tracing::warn!("{msg}（同类提示仅显示一次 / shown once per issue）");
     } else {
         tracing::debug!("{msg}");
     }
@@ -346,7 +363,7 @@ fn chat(
     })?;
     parse_segments(&content).ok_or_else(|| {
         no_status(anyhow::anyhow!(
-            "LLM 响应不是 segments JSON: {:.200}",
+            "润色响应格式无效 / Invalid polish response (expected segments JSON): {:.200}",
             content
         ))
     })
@@ -590,16 +607,21 @@ pub(crate) fn send_chat(
         retryable: false,
         err,
     };
-    let v: serde_json::Value = resp
-        .into_json()
-        .map_err(|e| no_status(anyhow::Error::new(e).context("LLM 响应解析失败")))?;
+    let v: serde_json::Value = resp.into_json().map_err(|e| {
+        no_status(anyhow::Error::new(e).context("无法解析 LLM 响应 / Cannot parse LLM response"))
+    })?;
     // 代理/网关可能返回 200 但 body 是错误结构；静默取空串会劣化成
     // 「解析失败 → 拆半重试」的请求风暴，这里直接报出响应头部便于定位
     v["choices"][0]["message"]["content"]
         .as_str()
         .filter(|c| !c.is_empty())
         .map(|c| c.to_string())
-        .ok_or_else(|| no_status(anyhow::anyhow!("LLM 响应缺少 message.content: {:.200}", v)))
+        .ok_or_else(|| {
+            no_status(anyhow::anyhow!(
+                "LLM 响应缺少正文 / LLM response is missing message.content: {:.200}",
+                v
+            ))
+        })
 }
 
 /// LLM 请求失败：携带 HTTP 状态码（网络错误为 None）与是否可重试，
@@ -654,12 +676,15 @@ fn request_chat_once(
                     (
                         Some(code),
                         anyhow::anyhow!(
-                            "LLM 端点返回 {code}：{}",
+                            "LLM 服务返回错误 / LLM service returned HTTP {code}: {}",
                             tail.chars().take(300).collect::<String>()
                         ),
                     )
                 }
-                other => (None, anyhow::anyhow!("LLM 请求失败: {other}")),
+                other => (
+                    None,
+                    anyhow::anyhow!("LLM 请求失败 / LLM request failed: {other}"),
+                ),
             };
             Err(ChatFailure {
                 status,
@@ -683,7 +708,7 @@ fn request_chat(
                 attempt,
                 of = MAX_ATTEMPTS,
                 ?wait,
-                "LLM 请求失败，指数退避后重试"
+                "LLM 请求失败，稍后重试 / LLM request failed; retrying shortly"
             );
             std::thread::sleep(wait);
         }
@@ -696,7 +721,7 @@ fn request_chat(
     Err(last_err.unwrap_or_else(|| ChatFailure {
         status: None,
         retryable: false,
-        err: anyhow::anyhow!("LLM 请求失败"),
+        err: anyhow::anyhow!("LLM 请求失败 / LLM request failed"),
     }))
 }
 
@@ -732,20 +757,22 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
         "messages": [{"role": "user", "content": user}],
     });
     let fail_hint = if s.vision {
-        "连接失败（vision 已开启：请确认该端点与模型支持图片输入）"
+        "连接失败。请确认服务地址、密钥及模型，并检查图片输入支持。 / Connection failed. Check the URL, API key, model, and image input support."
     } else {
-        "连接失败"
+        "连接失败。请检查服务地址、密钥和模型。 / Connection failed. Check the URL, API key, and model."
     };
     let resp = ureq::post(&endpoint(&s.base_url))
         .timeout(Duration::from_secs(60))
         .set("Authorization", &format!("Bearer {}", s.api_key))
         .send_json(body)
         .context(fail_hint)?;
-    let v: serde_json::Value = resp.into_json().context("响应解析失败")?;
+    let v: serde_json::Value = resp
+        .into_json()
+        .context("无法解析响应 / Cannot parse response")?;
     let text = v["choices"][0]["message"]["content"].as_str().unwrap_or("");
-    println!("端点返回：{}", text.trim());
+    println!("服务响应 / Service response: {}", text.trim());
     if s.vision {
-        println!("（已附带图片输入测试）");
+        println!("已测试图片输入。 / Image input tested.");
     }
     Ok(())
 }
@@ -760,19 +787,21 @@ pub fn setup_interactive(
     model: Option<String>,
     disable_hint: bool,
 ) -> Result<crate::settings::ConfigFile> {
+    let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
     let cur_or = |v: String, cur: &str| {
         if v.trim().is_empty() {
             cur.to_string()
         } else {
-            v
+            v.trim().to_string()
         }
     };
-
     if let Some(v) = base_url {
-        cfg.llm.base_url = v;
-    } else {
+        cfg.llm.base_url = v.trim().to_string();
+    } else if interactive {
         let v: String = dialoguer::Input::new()
-            .with_prompt("Base URL（OpenAI 兼容，如 https://api.deepseek.com/v1）")
+            .with_prompt(
+                "服务地址 / Base URL (OpenAI-compatible, e.g. https://api.deepseek.com/v1)",
+            )
             .with_initial_text(&cfg.llm.base_url)
             .allow_empty(true)
             .interact_text()?;
@@ -780,116 +809,127 @@ pub fn setup_interactive(
     }
     if let Some(v) = api_key {
         cfg.llm.api_key = v;
-    } else {
-        // 不回显已保存的 key：空输入 = 保留当前值
+    } else if interactive {
         let keep_hint = if cfg.llm.api_key.is_empty() {
-            String::new()
+            "（输入隐藏；无密钥的本地服务可留空） / API key (hidden; leave blank for a local service without authentication)"
         } else {
-            format!(
-                "（回车保留已配置的 {}...）",
-                cfg.llm.api_key.chars().take(6).collect::<String>()
-            )
+            "（输入隐藏；回车保留已保存的密钥） / API key (hidden; Enter keeps the saved key)"
         };
-        let v: String = dialoguer::Input::<String>::new()
+        let v = dialoguer::Password::new()
             .with_prompt(format!("API Key{keep_hint}"))
-            .allow_empty(true)
-            .interact_text()?;
+            .allow_empty_password(true)
+            .interact()?;
         cfg.llm.api_key = cur_or(v, &cfg.llm.api_key);
     }
     if let Some(v) = model {
-        cfg.llm.model = v;
-    } else {
+        cfg.llm.model = v.trim().to_string();
+    } else if interactive {
         let v: String = dialoguer::Input::new()
-            .with_prompt("模型名（如 deepseek-chat）")
+            .with_prompt("模型名 / Model name (e.g. deepseek-chat)")
             .with_initial_text(&cfg.llm.model)
             .allow_empty(true)
             .interact_text()?;
         cfg.llm.model = cur_or(v, &cfg.llm.model);
     }
+    anyhow::ensure!(
+        !cfg.llm.base_url.trim().is_empty() && !cfg.llm.model.trim().is_empty(),
+        "服务地址和模型名不能为空。交互设置请在终端运行 course2md llm setup；脚本请提供 --base-url <URL> --model <MODEL>（服务需要鉴权时加 --api-key）。 / Base URL and model are required. Run course2md llm setup in a terminal, or pass --base-url <URL> --model <MODEL> in scripts (add --api-key if authentication is required)."
+    );
     // 容错：没写 scheme 时补 https://
     if !cfg.llm.base_url.is_empty() && !cfg.llm.base_url.contains("://") {
         cfg.llm.base_url = format!("https://{}", cfg.llm.base_url.trim());
     }
     // 视觉能力仅交互式终端询问（脚本化调用全部传参时不阻塞）；
     // 检查 stdin 而非 stderr，与 dialoguer 读取的流一致
-    if std::io::stdin().is_terminal() {
+    if interactive {
         cfg.llm.vision = dialoguer::Select::new()
-            .with_prompt("该模型支持视觉输入吗？（开启后润色时附幻灯片截图，辅助纠正技术词汇）")
+            .with_prompt("润色时附上幻灯片截图？需支持图片的模型。 / Attach slide images when polishing? Requires an image-capable model.")
             .items([
-                "不支持 / 不使用（默认，纯文本润色）",
-                "支持（需多模态模型，如 Gemini / GPT-4o / Qwen-VL）",
+                "仅发送文字 / Send text only",
+                "发送文字和截图 / Send text and slide images",
             ])
             .default(if cfg.llm.vision { 1 } else { 0 })
             .interact_opt()?
-            .is_some_and(|i| i == 1);
+            .ok_or_else(|| anyhow::anyhow!("已取消设置，未保存配置。 / Setup cancelled; no configuration saved."))? == 1;
     }
-    cfg.llm.disable_hint = disable_hint;
+    validate(&cfg.llm)?;
+    cfg.llm.disable_hint |= disable_hint;
     cfg.llm.enabled = true;
     Ok(cfg)
 }
 
 pub fn print_status(cfg: &crate::settings::ConfigFile) {
     let s = &cfg.llm;
-    println!("配置文件：{}", crate::settings::config_path().display());
+    let state = |enabled| {
+        if enabled {
+            "开启 / enabled"
+        } else {
+            "关闭 / disabled"
+        }
+    };
     println!(
-        "  LLM 润色：{}",
-        if s.enabled { "已开启" } else { "已关闭" }
+        "配置文件 / Configuration: {}",
+        crate::settings::config_path().display()
     );
+    println!("  LLM 润色 / Transcript polish: {}", state(s.enabled));
     println!(
-        "  base_url：{}",
+        "  服务地址 / Base URL: {}",
         if s.base_url.is_empty() {
-            "-"
+            "—"
         } else {
             &s.base_url
         }
     );
-    let key_disp = if s.api_key.is_empty() {
-        "-".to_string()
-    } else {
-        format!(
-            "{}...（已隐藏）",
-            s.api_key.chars().take(6).collect::<String>()
-        )
-    };
-    println!("  api_key ：{key_disp}");
     println!(
-        "  model   ：{}",
-        if s.model.is_empty() { "-" } else { &s.model }
-    );
-    println!(
-        "  视觉润色：{}",
-        if s.vision {
-            "开启（润色请求附幻灯片截图）"
+        "  API key: {}",
+        if s.api_key.is_empty() {
+            "未设置 / not set"
         } else {
-            "关闭"
+            "已设置（隐藏） / set (hidden)"
         }
     );
-    println!("  自动总结：{}", if s.summarize { "开启" } else { "关闭" });
-    println!("  并发数  ：{}", s.concurrency);
     println!(
-        "  结束提示：{}",
-        if s.disable_hint {
-            "已关闭"
-        } else {
-            "开启"
-        }
+        "  模型 / Model: {}",
+        if s.model.is_empty() { "—" } else { &s.model }
     );
-    if !s.enabled && !s.disable_hint {
-        println!("（运行 course2md llm setup 可开启）");
+    println!(
+        "  截图辅助润色 / Slide-assisted polish: {}",
+        state(s.vision)
+    );
+    println!("  自动总结 / Automatic summary: {}", state(s.summarize));
+    println!("  并发请求 / Concurrent requests: {}", s.concurrency);
+    println!("  使用提示 / Usage hint: {}", state(!s.disable_hint));
+    if !s.enabled {
+        println!("开启润色 / Enable transcript polish: course2md llm setup");
     }
 }
 
-pub fn write_hint_note(path: &std::path::Path) {
-    let msg = format!(
-        "\n提示：可用 LLM 自动润色字幕（修正语气词与明显识别错误），运行 `course2md llm setup` 一键开启。\n配置文件：{}（加 --no-llm-hint 或在配置中设 disable_hint 可关闭本提示）\n",
-        path.display()
-    );
+pub fn write_hint_note(_path: &std::path::Path) {
+    let msg = "\n可选：配置 LLM 润色字幕 / Optional: set up transcript polishing with course2md llm setup.\n隐藏此提示 / Hide this hint: --no-llm-hint\n";
     let _ = std::io::stderr().write_all(msg.as_bytes());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_rejects_unusable_service_urls() {
+        for base_url in ["", "not a URL", "file:///tmp/service", "https://"] {
+            let settings = LlmSettings {
+                base_url: base_url.into(),
+                model: "test-model".into(),
+                ..Default::default()
+            };
+            assert!(validate(&settings).is_err(), "accepted {base_url}");
+        }
+        let settings = LlmSettings {
+            base_url: "http://localhost:8080/v1".into(),
+            model: "test-model".into(),
+            ..Default::default()
+        };
+        assert!(validate(&settings).is_ok());
+    }
 
     #[test]
     fn trailing_comma_repair_preserves_transcript_literals() {
