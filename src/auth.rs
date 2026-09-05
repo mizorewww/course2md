@@ -21,6 +21,20 @@ const COOKIE_NAMES: &[&str] = &[
 ];
 type Cookies = BTreeMap<String, String>;
 
+pub const BILIBILI_SETUP_TIP: &str = "使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。";
+
+/// Keep the original failure visible; login is a suggested next step, not a diagnosis.
+pub fn with_bilibili_login_tip(url: &str, error: anyhow::Error) -> anyhow::Error {
+    let message = format!("{error:#}");
+    if is_bilibili_url(url) && !message.contains("--login bilibili") {
+        anyhow::anyhow!(
+            "{message}\n提示：可运行 course2md --login bilibili 扫码登录后重试；已登录时可重新登录。"
+        )
+    } else {
+        error
+    }
+}
+
 pub fn cookie_path() -> PathBuf {
     crate::config::config_dir().join("auth/bilibili.cookies.txt")
 }
@@ -298,6 +312,21 @@ pub fn login_bilibili() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn login_tip_preserves_failure_and_only_applies_to_bilibili_once() {
+        let error = anyhow::anyhow!("HTTP Error 403").context("无法读取视频");
+        let error = with_bilibili_login_tip("https://b23.tv/example", error);
+        let error = with_bilibili_login_tip("https://b23.tv/example", error);
+        let message = error.to_string();
+        assert!(message.contains("无法读取视频: HTTP Error 403"));
+        assert_eq!(message.matches("--login bilibili").count(), 1);
+        let error = with_bilibili_login_tip(
+            "https://youtube.com/watch?v=bilibili.com",
+            anyhow::anyhow!("HTTP Error 403"),
+        );
+        assert_eq!(error.to_string(), "HTTP Error 403");
+    }
+
     #[test]
     fn cookie_scope_excludes_lookalike_hosts() {
         for url in [

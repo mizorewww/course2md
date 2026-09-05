@@ -119,6 +119,7 @@ fn main() -> anyhow::Result<()> {
                     std::fs::write(&path, settings::TEMPLATE)?;
                     println!("已生成配置模板：{}", path.display());
                     println!("按需取消注释并修改；命令行参数优先于此文件。");
+                    println!("{}", course2md::auth::BILIBILI_SETUP_TIP);
                 }
                 ConfigCmd::Show => settings::print_effective(&settings::load()?),
             }

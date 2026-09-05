@@ -44,8 +44,19 @@ fn command(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Vec<u8>> {
         let result = command_once(name, args, cancel, start);
         let Err(error) = &result else { return result };
         let message = error.to_string();
-        if name != "yt-dlp" || !course2md::fetch::is_bilibili_412(&message) {
+        if name != "yt-dlp"
+            || cancel.load(Ordering::Relaxed)
+            || start.elapsed() >= Duration::from_secs(45)
+        {
             return result;
+        }
+        if !course2md::fetch::is_bilibili_412(&message) {
+            return result.map_err(|e| {
+                course2md::auth::with_bilibili_login_tip(
+                    args.last().copied().unwrap_or_default(),
+                    e,
+                )
+            });
         }
         let Some(delay) = course2md::fetch::bilibili_retry_delay(&message, retries) else {
             return result.context(course2md::fetch::BILIBILI_412_HINT);

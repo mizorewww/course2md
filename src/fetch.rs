@@ -34,8 +34,11 @@ pub async fn fetch_meta(url: &str) -> Result<VideoMeta> {
     let out = run(cmd
         .args(["-J", "--no-warnings", "--no-playlist", "--"])
         .arg(url))
-    .await?;
-    let meta: VideoMeta = serde_json::from_str(&out).context("解析 yt-dlp 元数据 JSON 失败")?;
+    .await
+    .map_err(|e| crate::auth::with_bilibili_login_tip(url, e))?;
+    let meta: VideoMeta = serde_json::from_str(&out)
+        .context("解析 yt-dlp 元数据 JSON 失败")
+        .map_err(|e| crate::auth::with_bilibili_login_tip(url, e))?;
     Ok(meta)
 }
 
@@ -79,7 +82,10 @@ pub async fn fetch_subtitle(url: &str, out_dir: &Path) -> Result<Option<Subtitle
         cmd.arg(url);
         // 命令失败（yt-dlp 缺失/网络错误）：记 warn（错误内含 stderr 尾部摘要）后继续尝试 auto；
         // 命令成功但无产物（平台无字幕，yt-dlp 打 warning 后正常退出）不算错误
-        if let Err(e) = run(&mut cmd).await {
+        if let Err(e) = run(&mut cmd)
+            .await
+            .map_err(|e| crate::auth::with_bilibili_login_tip(url, e))
+        {
             tracing::warn!(auto, error = %e, "yt-dlp 字幕抓取失败");
             continue;
         }
@@ -131,7 +137,10 @@ pub async fn download(url: &str, dest: &Path, max_height: u32, verbose: bool) ->
         if verbose {
             cmd.arg("-v");
         }
-        match run_status(&mut cmd).await {
+        match run_status(&mut cmd)
+            .await
+            .map_err(|e| crate::auth::with_bilibili_login_tip(url, e))
+        {
             Ok(()) => {
                 // 新版 yt-dlp 在 merge 时会按 --merge-output-format 再补后缀：
                 // -o media.mp4.part 实际产出 media.mp4.part.mp4。两种命名都兼容。
