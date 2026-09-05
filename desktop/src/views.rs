@@ -31,27 +31,6 @@ fn card() -> Div {
 }
 
 impl Desktop {
-    fn provider_choices(&self, cx: &mut Context<Self>) -> Div {
-        h_flex()
-            .gap_2()
-            .flex_wrap()
-            .children(PROVIDERS.iter().enumerate().map(|(index, (_, name))| {
-                let supported = match index {
-                    1 => cfg!(all(target_os = "macos", target_arch = "aarch64")),
-                    4 => cfg!(any(target_os = "linux", target_os = "windows")),
-                    _ => true,
-                };
-                Button::new(("provider", index))
-                    .h(px(32.))
-                    .label(*name)
-                    .disabled(!supported)
-                    .selected(self.editing_options().provider == index)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.editing_options_mut().provider = index;
-                        cx.notify();
-                    }))
-            }))
-    }
     fn format_choices(&self, cx: &mut Context<Self>) -> Div {
         h_flex()
             .gap_6()
@@ -105,7 +84,7 @@ impl Desktop {
                             }),
                         ))
                         .when(self.task_options.source_mode != 1, |v| {
-                            v.child(self.provider_choices(cx))
+                            v.child(self.engine_panel(cx))
                         })
                         .child(self.format_choices(cx))
                         .child(
@@ -519,10 +498,15 @@ impl Desktop {
         .into_any_element()
     }
     fn settings_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let mut view = v_flex().gap_0();
+        let mut view = v_flex().gap_0().max_w(px(760.));
         match self.settings_tab {
             0 => {
                 view = view
+                    .child(h_flex().pb_6().child(
+                        Button::new("reopen-setup").label("打开设置引导…").on_click(
+                            cx.listener(|this, _, window, cx| this.open_setup(window, cx)),
+                        ),
+                    ))
                     .child(
                         v_flex()
                             .gap_3()
@@ -625,7 +609,7 @@ impl Desktop {
                                         }))
                                 }),
                             ))
-                            .child(self.provider_choices(cx)),
+                            .child(self.engine_panel(cx)),
                     )
                     .child(
                         v_flex()
@@ -694,7 +678,7 @@ impl Desktop {
                                                     MUTED
                                                 }))
                                                 .child(if ready {
-                                                    "已就绪"
+                                                    "已检测到"
                                                 } else {
                                                     "未检测到"
                                                 }),
@@ -976,7 +960,7 @@ impl Desktop {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(self.page_title()),
             );
-        if self.page == Page::New {
+        if self.page == Page::New && (self.source_preview.is_some() || self.job.is_some()) {
             row = row.child(
                 Button::new("start")
                     .primary()
@@ -986,7 +970,6 @@ impl Desktop {
                     } else {
                         "生成笔记"
                     })
-                    .disabled(self.job.is_none() && self.source_preview.is_none())
                     .on_click(cx.listener(|this, _, _, cx| this.start(Kind::Convert, cx))),
             );
         } else if self.page == Page::Task && self.job.is_some() {
@@ -1054,10 +1037,10 @@ impl Desktop {
 }
 
 impl Render for Desktop {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Compare drafts once per render; only actual changes restart the debounce.
         let draft = self.edited_settings(cx);
-        if draft != self.settings_snapshot {
+        if !self.setup_open && draft != self.settings_snapshot {
             self.settings_snapshot = draft;
             self.settings_deadline = Some(Instant::now() + Duration::from_millis(700));
             self.settings_status = "未保存".into();
@@ -1257,11 +1240,7 @@ impl Render for Desktop {
                             .ghost()
                             .h(px(24.))
                             .text_xs()
-                            .label(match &self.environment {
-                                None => "检测中…",
-                                Some(e) if e.ready() => "就绪",
-                                _ => "缺少视频工具",
-                            })
+                            .label(self.engine_summary(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.settings_tab = 3;
                                 this.navigate(Page::Settings, cx);
@@ -1288,5 +1267,6 @@ impl Render for Desktop {
                         )
                     }),
             )
+            .children(Root::render_dialog_layer(window, cx))
     }
 }

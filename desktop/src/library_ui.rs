@@ -286,7 +286,6 @@ impl Desktop {
         let folders = self.library.folders.clone();
         let entity = cx.entity().downgrade();
         Button::new(("folder-picker", index))
-            .ghost()
             .icon(IconName::Folder)
             .label(label)
             .dropdown_menu(move |menu, _, _| {
@@ -328,6 +327,7 @@ impl Desktop {
                         Button::new(label)
                             .label(label)
                             .selected(self.online == online)
+                            .toggled(self.online == online)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 if this.online != online {
                                     this.online = online;
@@ -342,35 +342,39 @@ impl Desktop {
         );
         if self.online {
             view = view.child(
-                v_flex().gap_2().child(
-                    h_flex()
-                        .gap_3()
-                        .child(
-                            div().flex_1().min_w_0().child(
-                                Input::new(&self.inputs[&Field::Source])
-                                    .aria_label("视频链接")
-                                    .h(px(36.)),
+                v_flex()
+                    .gap_2()
+                    .child(div().font_weight(FontWeight::MEDIUM).child("视频链接"))
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.inputs[&Field::Source])
+                                        .aria_label("视频链接")
+                                        .h(px(36.)),
+                                ),
+                            )
+                            .child(
+                                Button::new("preview-source")
+                                    .primary()
+                                    .when(self.source_preview.is_some(), |button| {
+                                        button.with_variant(ButtonVariant::Default)
+                                    })
+                                    .h(px(36.))
+                                    .label(if self.preview_cancel.is_some() {
+                                        "正在读取…"
+                                    } else if self.source_preview.is_some() {
+                                        "重新读取"
+                                    } else {
+                                        "预览课程"
+                                    })
+                                    .disabled(self.preview_cancel.is_some())
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.inspect_source(cx)),
+                                    ),
                             ),
-                        )
-                        .child(
-                            Button::new("preview-source")
-                                .primary()
-                                .when(self.source_preview.is_some(), |button| button.ghost())
-                                .h(px(36.))
-                                .label(if self.preview_cancel.is_some() {
-                                    "正在读取…"
-                                } else if self.source_preview.is_some() {
-                                    "重新读取"
-                                } else {
-                                    "预览课程"
-                                })
-                                .disabled(
-                                    self.preview_cancel.is_some()
-                                        || self.value(Field::Source, cx).is_empty(),
-                                )
-                                .on_click(cx.listener(|this, _, _, cx| this.inspect_source(cx))),
-                        ),
-                ),
+                    ),
             );
         } else if self.source_preview.is_none() {
             view = view.child(

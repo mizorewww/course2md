@@ -2,6 +2,7 @@
 mod activity;
 mod backend;
 mod library_ui;
+mod onboarding;
 mod organize;
 mod source;
 mod theme;
@@ -135,6 +136,7 @@ struct Desktop {
     settings_tab: usize,
     show_options: bool,
     show_logs: bool,
+    setup_open: bool,
     environment: Option<backend::Environment>,
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
@@ -169,14 +171,14 @@ actions!(course2md_desktop, [Quit, OpenSettings]);
 
 impl Desktop {
     fn editing_options(&self) -> &ConversionOptions {
-        if self.page == Page::Settings {
+        if self.page == Page::Settings || self.setup_open {
             &self.settings_options
         } else {
             &self.task_options
         }
     }
     fn editing_options_mut(&mut self) -> &mut ConversionOptions {
-        if self.page == Page::Settings {
+        if self.page == Page::Settings || self.setup_open {
             &mut self.settings_options
         } else {
             &mut self.task_options
@@ -343,6 +345,7 @@ impl Desktop {
             settings_tab: 0,
             show_options: false,
             show_logs: false,
+            setup_open: false,
             environment: None,
             scrolls: std::array::from_fn(|_| ScrollHandle::new()),
             inputs,
@@ -387,6 +390,18 @@ impl Desktop {
             let environment = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.environment = Some(environment);
+                if this.setup_open && this.settings_options.provider == 0 {
+                    let env = this.environment.as_ref().unwrap();
+                    this.settings_options.provider = if env.apple {
+                        1
+                    } else if env.gpu.is_some() {
+                        2
+                    } else if env.llama {
+                        3
+                    } else {
+                        0
+                    };
+                }
                 cx.notify();
             });
         })
@@ -809,14 +824,34 @@ impl Desktop {
         );
         config
     }
+    fn missing_setting(&self, cx: &App) -> Option<(Field, &'static str)> {
+        if self.value(Field::Output, cx).is_empty() {
+            return Some((Field::Output, "请选择笔记保存目录"));
+        }
+        if self.settings_options.provider == 5 && self.settings_options.source_mode != 1 {
+            for (field, label) in [
+                (Field::AsrUrl, "请填写云端 API 服务地址"),
+                (Field::AsrModel, "请填写云端识别模型"),
+                (Field::AsrKey, "请填写云端 API Key"),
+            ] {
+                if self.value(field, cx).is_empty()
+                    && !(field == Field::AsrKey
+                        && course2md::config::asr_api_key_from_env().is_some())
+                {
+                    return Some((field, label));
+                }
+            }
+        }
+        None
+    }
     fn save_settings(&mut self, cx: &mut Context<Self>) {
         cx.notify();
         if self.config_error {
             self.settings_status = "配置文件损坏，请修正后重新加载".into();
             return;
         }
-        if self.value(Field::Output, cx).trim().is_empty() {
-            self.settings_status = "未保存：请选择笔记保存目录".into();
+        if let Some((_, message)) = self.missing_setting(cx) {
+            self.settings_status = format!("未保存：{message}");
             return;
         }
         let mut config = self.edited_settings(cx);
@@ -912,6 +947,13 @@ fn main() {
                 |window, cx| {
                     window.set_window_title("course2md");
                     let view = cx.new(|cx| Desktop::new(window, cx));
+                    if !view.read(cx).desktop_settings.setup_completed {
+                        view.update(cx, |_, cx| {
+                            cx.defer_in(window, |this, window, cx| {
+                                this.open_setup(window, cx);
+                            })
+                        });
+                    }
                     let weak = view.downgrade();
                     let quit_view = weak.clone();
                     let settings_view = weak.clone();

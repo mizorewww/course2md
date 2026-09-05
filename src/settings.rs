@@ -76,6 +76,7 @@ impl Default for AsrApi {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct DesktopSettings {
+    pub setup_completed: bool,
     pub system_titlebar: bool,
     pub reduce_motion: bool,
 }
