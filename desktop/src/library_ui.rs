@@ -211,13 +211,23 @@ impl Desktop {
                 .iter()
                 .map(|(id, name)| (Some(*id), name.clone())),
         );
+        let mut counts = BTreeMap::<u64, usize>::new();
+        for course in &self.courses {
+            *counts
+                .entry(
+                    self.library
+                        .folder(&self.library_root, &course.dir)
+                        .unwrap_or(0),
+                )
+                .or_default() += 1;
+        }
         v_flex()
             .gap_1()
             .child(
                 h_flex()
                     .justify_between()
                     .px_2()
-                    .child(div().text_xs().text_color(rgb(MUTED)).child("我的文件夹"))
+                    .child(div().text_xs().text_color(rgb(MUTED)).child("文件夹"))
                     .child(
                         Button::new("new-folder")
                             .ghost()
@@ -229,20 +239,11 @@ impl Desktop {
                     ),
             )
             .children(entries.into_iter().map(|(id, name)| {
-                let count = self
-                    .courses
-                    .iter()
-                    .filter(|course| {
-                        self.library
-                            .folder(&self.library_root, &course.dir)
-                            .unwrap_or(0)
-                            == id.unwrap_or(0)
-                    })
-                    .count();
+                let count = counts.get(&id.unwrap_or(0)).copied().unwrap_or(0);
                 Button::new(("folder-nav", id.unwrap_or(0) as usize))
                     .ghost()
                     .w_full()
-                    .h(px(38.))
+                    .h(px(32.))
                     .accessibility_label(name.clone())
                     .selected(self.page == Page::Library && self.folder_filter == id)
                     .child(
@@ -303,10 +304,6 @@ impl Desktop {
                                     }) {
                                         Ok(library) => {
                                             this.library = library;
-                                            this.message = Some(format!(
-                                                "课程已移至「{}」",
-                                                this.folder_name(id)
-                                            ));
                                         }
                                         Err(e) => {
                                             this.message = Some(format!("无法移动课程：{e:#}"))
@@ -323,7 +320,7 @@ impl Desktop {
             })
     }
     pub fn source_card(&self, cx: &mut Context<Self>) -> Div {
-        let mut view = v_flex().gap_5().child(
+        let mut view = v_flex().gap_4().child(
             h_flex()
                 .gap_2()
                 .children([(true, "在线链接"), (false, "本地视频")].into_iter().map(
@@ -345,46 +342,35 @@ impl Desktop {
         );
         if self.online {
             view = view.child(
-                v_flex()
-                    .gap_2()
-                    .child("视频链接")
-                    .child(
-                        h_flex()
-                            .gap_3()
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Input::new(&self.inputs[&Field::Source])
-                                        .aria_label("视频链接")
-                                        .h(px(44.)),
-                                ),
-                            )
-                            .child(
-                                Button::new("preview-source")
-                                    .primary()
-                                    .when(self.source_preview.is_some(), |button| button.ghost())
-                                    .h(px(44.))
-                                    .label(if self.preview_cancel.is_some() {
-                                        "正在读取…"
-                                    } else if self.source_preview.is_some() {
-                                        "重新读取"
-                                    } else {
-                                        "预览课程"
-                                    })
-                                    .disabled(
-                                        self.preview_cancel.is_some()
-                                            || self.value(Field::Source, cx).is_empty(),
-                                    )
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.inspect_source(cx)),
-                                    ),
+                v_flex().gap_2().child(
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            div().flex_1().min_w_0().child(
+                                Input::new(&self.inputs[&Field::Source])
+                                    .aria_label("视频链接")
+                                    .h(px(36.)),
                             ),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(rgb(MUTED))
-                            .child("支持 YouTube、Bilibili。先确认内容，再生成笔记。"),
-                    ),
+                        )
+                        .child(
+                            Button::new("preview-source")
+                                .primary()
+                                .when(self.source_preview.is_some(), |button| button.ghost())
+                                .h(px(36.))
+                                .label(if self.preview_cancel.is_some() {
+                                    "正在读取…"
+                                } else if self.source_preview.is_some() {
+                                    "重新读取"
+                                } else {
+                                    "预览课程"
+                                })
+                                .disabled(
+                                    self.preview_cancel.is_some()
+                                        || self.value(Field::Source, cx).is_empty(),
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| this.inspect_source(cx))),
+                        ),
+                ),
             );
         } else if self.source_preview.is_some() {
             view = view.child(
@@ -420,12 +406,12 @@ impl Desktop {
                     .gap_3()
                     .p_6()
                     .bg(rgb(SURFACE))
-                    .rounded_xl()
+                    .rounded_md()
                     .border_1()
                     .border_color(rgb(LINE))
                     .items_center()
                     .child(Icon::new(IconName::FolderOpen).size_6())
-                    .child("从录屏、讲座或本地课程开始")
+                    .child("导入本地视频")
                     .child(
                         div()
                             .text_sm()
@@ -484,18 +470,18 @@ impl Desktop {
         }
         if let Some(source) = &self.source_preview {
             view = view
-                .child(
+                .child(reveal(
                     h_flex()
-                        .gap_5()
-                        .p_5()
-                        .rounded_xl()
+                        .gap_4()
+                        .p_4()
+                        .rounded_md()
                         .bg(rgb(SURFACE))
                         .border_1()
                         .border_color(rgb(LINE))
                         .child(
                             div()
-                                .w(px(260.))
-                                .h(px(146.))
+                                .w(px(192.))
+                                .h(px(108.))
                                 .flex_shrink_0()
                                 .rounded_lg()
                                 .overflow_hidden()
@@ -513,10 +499,9 @@ impl Desktop {
                                 .flex_1()
                                 .min_w_0()
                                 .gap_3()
-                                .child(div().text_xs().text_color(rgb(SUCCESS)).child("已识别课程"))
                                 .child(
                                     div()
-                                        .text_xl()
+                                        .text_lg()
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .child(source.title.clone()),
                                 )
@@ -525,7 +510,9 @@ impl Desktop {
                                     view.child(div().text_xs().text_color(rgb(MUTED)).child(error))
                                 }),
                         ),
-                )
+                    ("source-reveal", self.preview_generation as usize),
+                    cx,
+                ))
                 .child(
                     h_flex()
                         .gap_3()

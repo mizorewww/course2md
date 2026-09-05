@@ -17,8 +17,6 @@ pub struct Completed {
     pub title: String,
     pub slides: usize,
     pub segments: usize,
-    pub elapsed_secs: f64,
-    pub outputs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +34,10 @@ pub enum Event {
         current: u64,
         total: u64,
         message: Option<String>,
+    },
+    Workers {
+        stage: String,
+        workers: usize,
     },
     Done(Completed),
     Error {

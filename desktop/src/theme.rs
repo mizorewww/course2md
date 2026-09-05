@@ -15,9 +15,9 @@ pub const SUCCESS: u32 = 0x237552;
 pub fn init(cx: &mut App) {
     Theme::change(ThemeMode::Light, None, cx);
     let theme = Theme::global_mut(cx);
-    theme.font_size = px(16.);
-    theme.radius = px(8.);
-    theme.radius_lg = px(12.);
+    theme.font_size = px(14.);
+    theme.radius = px(6.);
+    theme.radius_lg = px(8.);
     let colors = &mut theme.colors;
     colors.background = rgb(CANVAS).into();
     colors.foreground = rgb(INK).into();
@@ -28,6 +28,7 @@ pub fn init(cx: &mut App) {
     colors.accent = rgb(TINT).into();
     colors.accent_foreground = rgb(BLUE).into();
     colors.primary = rgb(BLUE).into();
+    colors.progress_bar = rgb(BLUE).into();
     colors.primary_foreground = rgb(SURFACE).into();
     colors.primary_hover = rgb(0x284eae).into();
     colors.primary_active = rgb(0x214396).into();
@@ -44,4 +45,19 @@ pub fn init(cx: &mut App) {
     colors.selection = rgb(0xcbdafa).into();
     theme.tokens = theme.colors.into();
     Theme::sync_base(cx);
+}
+
+/// Infrequent reveals only: source confirmation and expanded task options.
+pub fn reveal(view: gpui::Div, id: impl Into<gpui::ElementId>, cx: &App) -> gpui::AnyElement {
+    use gpui::{Animation, AnimationExt, IntoElement, Styled};
+    if cx.reduce_motion() {
+        return view.into_any_element();
+    }
+    view.with_animation(
+        id,
+        Animation::new(std::time::Duration::from_millis(180))
+            .with_easing(|t| 1. - (1. - t).powi(3)),
+        |view, t| view.relative().top(px(6. * (1. - t))).opacity(t),
+    )
+    .into_any_element()
 }

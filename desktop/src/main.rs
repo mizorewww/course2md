@@ -1,4 +1,5 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+mod activity;
 mod backend;
 mod library_ui;
 mod organize;
@@ -14,7 +15,7 @@ use gpui_component::{
 use std::{
     collections::{BTreeMap, VecDeque},
     path::PathBuf,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -44,15 +45,6 @@ enum Field {
     LlmKey,
     LlmModel,
 }
-const STAGES: [(&str, &str); 7] = [
-    ("fetch", "读取课程"),
-    ("download", "下载视频"),
-    ("scenes", "提取画面"),
-    ("audio", "提取音频"),
-    ("transcribe", "语音转写"),
-    ("llm", "整理文字"),
-    ("render", "生成笔记"),
-];
 const PROVIDERS: [(&str, &str); 6] = [
     ("", "自动"),
     ("coreml", "Apple 原生"),
@@ -155,8 +147,13 @@ struct Desktop {
     cancelling: bool,
     closing: bool,
     task_status: String,
-    stages: BTreeMap<String, String>,
-    progress: BTreeMap<String, (u64, u64)>,
+    progress: BTreeMap<String, activity::Activity>,
+    settings_snapshot: course2md::settings::ConfigFile,
+    settings_deadline: Option<Instant>,
+    settings_status: String,
+    system_titlebar: bool,
+    desktop_settings: course2md::settings::DesktopSettings,
+    last_tick: Instant,
     logs: VecDeque<String>,
     pending_done: Option<Completed>,
     completed: Option<Completed>,
@@ -168,7 +165,7 @@ struct Desktop {
     _poll: Task<()>,
 }
 
-actions!(course2md_desktop, [Quit]);
+actions!(course2md_desktop, [Quit, OpenSettings]);
 
 impl Desktop {
     fn editing_options(&self) -> &ConversionOptions {
@@ -187,6 +184,9 @@ impl Desktop {
     }
 
     fn request_close(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.settings_deadline.take().is_some() {
+            self.save_settings(cx);
+        }
         if self.preview_workers > 0 {
             if let Some(cancel) = &self.preview_cancel {
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -301,11 +301,23 @@ impl Desktop {
             },
         ));
         let options = ConversionOptions::from_config(&config);
-        let poll = cx.spawn(async |this, cx| {
+        let poll = cx.spawn_in(window, async |this, cx| {
+            let mut busy = false;
             loop {
-                smol::Timer::after(Duration::from_millis(80)).await;
-                if this.update(cx, |this, cx| this.poll(cx)).is_err() {
-                    break;
+                smol::Timer::after(Duration::from_millis(if busy { 100 } else { 500 })).await;
+                match this.update_in(cx, |this, _, cx| {
+                    this.poll(cx);
+                    if this
+                        .settings_deadline
+                        .is_some_and(|deadline| Instant::now() >= deadline)
+                    {
+                        this.settings_deadline = None;
+                        this.save_settings(cx);
+                    }
+                    this.job.is_some() || this.settings_deadline.is_some()
+                }) {
+                    Ok(active) => busy = active,
+                    Err(_) => break,
                 }
             }
         });
@@ -334,6 +346,12 @@ impl Desktop {
             environment: None,
             scrolls: std::array::from_fn(|_| ScrollHandle::new()),
             inputs,
+            settings_snapshot: config.clone(),
+            desktop_settings: config.desktop.clone(),
+            system_titlebar: config.desktop.system_titlebar,
+            settings_deadline: None,
+            settings_status: String::new(),
+            last_tick: Instant::now(),
             config,
             config_error,
             task_options: options.clone(),
@@ -343,7 +361,6 @@ impl Desktop {
             cancelling: false,
             closing: false,
             task_status: "尚无运行中的任务".into(),
-            stages: BTreeMap::new(),
             progress: BTreeMap::new(),
             logs: VecDeque::new(),
             pending_done: None,
@@ -355,6 +372,8 @@ impl Desktop {
             _subscriptions: subscriptions,
             _poll: poll,
         };
+        this.settings_snapshot = this.edited_settings(cx);
+        cx.set_reduce_motion(this.desktop_settings.reduce_motion);
         this.refresh_environment(cx);
         this.refresh_library(cx);
         this
@@ -561,9 +580,8 @@ impl Desktop {
                 self.job = Some(job);
                 self.kind = kind;
                 self.cancelling = false;
-                self.show_logs = kind != Kind::Convert;
+                self.show_logs = false;
                 self.scrolls[Page::Task as usize].set_offset(point(px(0.), px(0.)));
-                self.stages.clear();
                 self.progress.clear();
                 self.logs.clear();
                 self.completed = None;
@@ -587,13 +605,25 @@ impl Desktop {
             .map(|job| job.events.try_iter().take(512).collect())
             .unwrap_or_default();
         if events.is_empty() {
+            if self.job.is_some() && self.last_tick.elapsed() >= Duration::from_secs(1) {
+                self.last_tick = Instant::now();
+                cx.notify();
+            }
             return;
         }
         for event in events {
             match event {
                 Event::Log { message } => self.logs.push_back(message),
                 Event::Stage { stage, status } => {
-                    self.stages.insert(stage, status);
+                    if status == "start" {
+                        self.progress
+                            .insert(stage.clone(), activity::Activity::new());
+                    } else if status == "done" {
+                        self.progress
+                            .entry(stage.clone())
+                            .or_insert_with(activity::Activity::new)
+                            .done = true;
+                    }
                 }
                 Event::Progress {
                     stage,
@@ -601,10 +631,16 @@ impl Desktop {
                     total,
                     message,
                 } => {
-                    self.progress.insert(stage, (current, total));
-                    if let Some(message) = message {
-                        self.task_status = message;
-                    }
+                    self.progress
+                        .entry(stage)
+                        .or_insert_with(activity::Activity::new)
+                        .update(current, total, message);
+                }
+                Event::Workers { stage, workers } => {
+                    self.progress
+                        .entry(stage)
+                        .or_insert_with(activity::Activity::new)
+                        .workers = workers;
                 }
                 Event::Error { message } => {
                     self.logs.push_back(message.clone());
@@ -738,6 +774,7 @@ impl Desktop {
     }
     fn edited_settings(&self, cx: &App) -> course2md::settings::ConfigFile {
         let mut config = self.config.clone();
+        config.desktop = self.desktop_settings.clone();
         config.asr_api.base_url = self.value(Field::AsrUrl, cx);
         config.asr_api.api_key = self.value(Field::AsrKey, cx);
         config.asr_api.model = self.value(Field::AsrModel, cx);
@@ -772,10 +809,10 @@ impl Desktop {
         );
         config
     }
-    fn save_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn save_settings(&mut self, cx: &mut Context<Self>) {
         cx.notify();
         if self.config_error {
-            self.message = Some("请先在外部编辑器中修正原配置，然后重新加载。".into());
+            self.settings_status = "配置文件损坏，请修正后重新加载".into();
             return;
         }
         let mut config = self.edited_settings(cx);
@@ -783,28 +820,32 @@ impl Desktop {
             course2md::options::resolve("configuration".into(), &Default::default(), &config)
                 .and_then(|cfg| cfg.validate())
         {
-            self.message = Some(format!("未保存：{error:#}"));
+            self.settings_status = format!("未保存：{error:#}");
             return;
         }
         if config.llm.enabled
             && let Err(error) = course2md::llm::validate(&config.llm)
         {
-            self.message = Some(format!("未保存：{error:#}"));
+            self.settings_status = format!("未保存：{error:#}");
             return;
         }
         config.llm.disable_hint = true;
         match course2md::settings::save(&config) {
             Ok(_) => {
                 self.config = config;
-                self.sync_settings(window, cx);
+                self.task_options = ConversionOptions::from_config(&self.config);
+                self.settings_snapshot = self.edited_settings(cx);
+                cx.set_reduce_motion(self.desktop_settings.reduce_motion);
                 self.refresh_library(cx);
-                self.message = Some("设置已保存。下一次任务会使用新设置。".into());
+                self.settings_status = "已自动保存".into();
             }
-            Err(error) => self.message = Some(format!("保存失败：{error:#}")),
+            Err(error) => self.settings_status = format!("保存失败：{error:#}"),
         }
         cx.notify();
     }
     fn sync_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.desktop_settings = self.config.desktop.clone();
+        self.settings_snapshot = self.config.clone();
         let cfg = &self.config;
         for (field, value) in [
             (Field::AsrUrl, cfg.asr_api.base_url.clone()),
@@ -845,20 +886,35 @@ fn main() {
             gpui_component::init(cx);
             gpui_component::set_locale("zh-CN");
             theme::init(cx);
+            let system_titlebar = course2md::settings::load()
+                .map(|c| c.desktop.system_titlebar)
+                .unwrap_or(false);
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::centered(size(px(1140.), px(820.)), cx)),
                     window_min_size: Some(size(px(860.), px(620.))),
-                    titlebar: Some(TitlebarOptions {
-                        title: Some("course2md".into()),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
+                    ..if system_titlebar {
+                        WindowOptions {
+                            titlebar: Some(TitlebarOptions {
+                                title: Some("course2md".into()),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }
+                    } else {
+                        TitleBar::window_options()
+                    }
                 },
                 |window, cx| {
+                    window.set_window_title("course2md");
                     let view = cx.new(|cx| Desktop::new(window, cx));
                     let weak = view.downgrade();
                     let quit_view = weak.clone();
+                    let settings_view = weak.clone();
+                    cx.on_action(move |_: &OpenSettings, cx| {
+                        let _ =
+                            settings_view.update(cx, |this, cx| this.navigate(Page::Settings, cx));
+                    });
                     cx.on_action(move |_: &Quit, cx| {
                         if quit_view
                             .update(cx, |this, cx| this.request_close(cx))
@@ -881,9 +937,14 @@ fn main() {
                 }
             })
             .detach();
-            cx.bind_keys([KeyBinding::new("secondary-q", Quit, None)]);
-            cx.set_menus([gpui::Menu::new("course2md")
-                .items([gpui::MenuItem::action("退出 course2md", Quit)])]);
+            cx.bind_keys([
+                KeyBinding::new("secondary-q", Quit, None),
+                KeyBinding::new("secondary-,", OpenSettings, None),
+            ]);
+            cx.set_menus([gpui::Menu::new("course2md").items([
+                gpui::MenuItem::action("设置…", OpenSettings),
+                gpui::MenuItem::action("退出 course2md", Quit),
+            ])]);
             cx.activate(true);
         });
 }
