@@ -117,6 +117,10 @@ pub struct RunOpts {
     #[arg(long)]
     pub keep_video: bool,
 
+    /// Remove newly downloaded video after success (overrides config)
+    #[arg(long, conflicts_with = "keep_video")]
+    pub no_keep_video: bool,
+
     /// Skip download (video already exists)
     #[arg(long)]
     pub no_download: bool,

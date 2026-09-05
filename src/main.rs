@@ -134,7 +134,7 @@ fn run_opts_to_cfg(
             .or_else(|| d.formats.clone())
             .unwrap_or_else(|| vec![OutputFormat::Md, OutputFormat::Html]),
         model_dir: config::model_dir_from(opts.model_dir.as_deref().or(d.model_dir.as_deref())),
-        keep_video: opts.keep_video || d.keep_video.unwrap_or(false),
+        keep_video: !opts.no_keep_video && (opts.keep_video || d.keep_video.unwrap_or(false)),
         no_download: opts.no_download || d.no_download.unwrap_or(false),
         resume: config::resolve_resume(opts.resume, opts.no_resume, d.resume),
         llm: resolve_llm(opts, file),
