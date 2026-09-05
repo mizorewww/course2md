@@ -366,13 +366,19 @@ impl Desktop {
                                         "正在读取…"
                                     } else if self.source_preview.is_some() {
                                         "重新读取"
+                                    } else if self.preview_error.is_some() {
+                                        "重试预览"
                                     } else {
                                         "预览课程"
                                     })
                                     .disabled(self.preview_cancel.is_some())
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.inspect_source(cx)),
-                                    ),
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if this.value(Field::Source, cx).is_empty() {
+                                            this.inputs[&Field::Source]
+                                                .update(cx, |input, cx| input.focus(window, cx));
+                                        }
+                                        this.inspect_source(cx);
+                                    })),
                             ),
                     ),
             );
@@ -437,11 +443,13 @@ impl Desktop {
                     .rounded_lg()
                     .bg(rgb(0xffefeb))
                     .child(error.clone())
-                    .child(
-                        Button::new("retry-preview")
-                            .label("重新预览")
-                            .on_click(cx.listener(|this, _, _, cx| this.inspect_source(cx))),
-                    ),
+                    .when(!self.online, |view| {
+                        view.child(
+                            Button::new("retry-preview")
+                                .label("重新预览")
+                                .on_click(cx.listener(|this, _, _, cx| this.inspect_source(cx))),
+                        )
+                    }),
             );
         }
         if let Some(source) = &self.source_preview {

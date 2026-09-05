@@ -310,6 +310,9 @@ impl Desktop {
     }
 
     fn finish_setup(&mut self, apply: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        // Missing prerequisites lead to installation help, without claiming that
+        // a speech configuration has been completed or saving its draft.
+        let apply = apply && self.environment.as_ref().is_none_or(|env| env.ready());
         if apply {
             if self.settings_options.source_mode != 1 {
                 let selected = self.settings_options.provider;
@@ -412,7 +415,13 @@ impl Desktop {
                     .child(
                         Button::new("setup-done")
                             .primary()
-                            .label("完成设置，添加课程")
+                            .label(
+                                if self.environment.as_ref().is_some_and(|env| !env.ready()) {
+                                    "查看安装方法"
+                                } else {
+                                    "完成设置，添加课程"
+                                },
+                            )
                             .disabled(self.environment.is_none())
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.finish_setup(true, window, cx) {
