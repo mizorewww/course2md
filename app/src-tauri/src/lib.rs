@@ -21,7 +21,7 @@ use tauri::{AppHandle, Emitter};
 // ---------------------------------------------------------------------------
 
 struct JobHandle {
-    pid: u32,
+    cancel: std::sync::mpsc::Sender<()>,
     kind: JobKind,
 }
 
@@ -70,7 +70,8 @@ fn resolve_cli() -> Result<(PathBuf, &'static str), String> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            for cand in [dir.join("course2md"), dir.join("binaries").join("course2md")] {
+            let name = format!("course2md{}", std::env::consts::EXE_SUFFIX);
+            for cand in [dir.join(&name), dir.join("binaries").join(&name)] {
                 if cand.is_file() {
                     return Ok((cand, "bundled"));
                 }
@@ -152,9 +153,9 @@ fn spawn_line_reader(
     job_id: String,
     reader: impl BufRead + Send + 'static,
     is_stderr: bool,
-) {
+) -> std::thread::JoinHandle<()> {
     use std::sync::mpsc;
-    let (tx, rx) = mpsc::channel::<serde_json::Value>();
+    let (tx, rx) = mpsc::sync_channel::<serde_json::Value>(512);
     std::thread::spawn(move || {
         for line in reader.lines() {
             let Ok(line) = line else { break };
@@ -174,10 +175,12 @@ fn spawn_line_reader(
     });
     std::thread::spawn(move || {
         let mut buf: Vec<serde_json::Value> = Vec::new();
+        let mut deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
         loop {
-            match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+            match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
                 Ok(ev) => buf.push(ev),
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
                     if buf.len() == 1 {
                         emit_event(&app, &job_id, buf.remove(0));
                     } else if !buf.is_empty() {
@@ -201,15 +204,10 @@ fn spawn_line_reader(
                 }
             }
         }
-    });
+    })
 }
 
 /// 杀进程组/进程树：unix killpg（子进程已 setsid，pgid==pid），windows taskkill /T /F。
-/// libc 仅 unix 依赖，信号常量故做平台定义（windows 值仅占位，taskkill 固定 /F 不使用）。
-#[cfg(unix)]
-const SIG_TERM: i32 = libc::SIGTERM;
-#[cfg(windows)]
-const SIG_TERM: i32 = 15;
 #[cfg(unix)]
 const SIG_KILL: i32 = libc::SIGKILL;
 #[cfg(windows)]
@@ -235,11 +233,9 @@ fn kill_process_tree(pid: u32, sig: i32) {
 /// spawn CLI 子进程并接管输出转发，返回 job_id。start_job / download_models 共用。
 /// 同类任务已在跑时拒绝并发（S1）。
 fn spawn_cli_job(app: &AppHandle, args: &[String], kind: JobKind) -> Result<String, String> {
-    {
-        let jobs = JOBS.lock().map_err(|e| e.to_string())?;
-        if jobs.values().any(|j| j.kind == kind) {
-            return Err(kind.busy_msg().to_string());
-        }
+    let mut jobs = JOBS.lock().map_err(|e| e.to_string())?;
+    if jobs.values().any(|j| j.kind == kind) {
+        return Err(kind.busy_msg().to_string());
     }
     let (bin, _) = resolve_cli()?;
     let mut cmd = Command::new(&bin);
@@ -263,12 +259,7 @@ fn spawn_cli_job(app: &AppHandle, args: &[String], kind: JobKind) -> Result<Stri
     {
         // 独立进程组：cancel 时 killpg 一锅端（含 ffmpeg/llama-server 等子孙）
         use std::os::unix::process::CommandExt;
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
+        cmd.process_group(0);
     }
     let mut child: Child = cmd
         .spawn()
@@ -276,21 +267,33 @@ fn spawn_cli_job(app: &AppHandle, args: &[String], kind: JobKind) -> Result<Stri
     let pid = child.id();
     let job_id = next_job_id();
 
-    JOBS.lock()
-        .map_err(|e| e.to_string())?
-        .insert(job_id.clone(), JobHandle { pid, kind });
-
+    let (cancel, cancellation) = std::sync::mpsc::channel();
+    jobs.insert(job_id.clone(), JobHandle { cancel, kind });
+    drop(jobs);
+    let mut readers = Vec::new();
     if let Some(out) = child.stdout.take() {
-        spawn_line_reader(app.clone(), job_id.clone(), BufReader::new(out), false);
+        readers.push(spawn_line_reader(app.clone(), job_id.clone(), BufReader::new(out), false));
     }
     if let Some(err) = child.stderr.take() {
-        spawn_line_reader(app.clone(), job_id.clone(), BufReader::new(err), true);
+        readers.push(spawn_line_reader(app.clone(), job_id.clone(), BufReader::new(err), true));
     }
 
     let app2 = app.clone();
     let job_id2 = job_id.clone();
     std::thread::spawn(move || {
-        let code = child.wait().ok().and_then(|s| s.code());
+        let code = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status.code(),
+                Err(_) => { kill_process_tree(pid, SIG_KILL); let _ = child.wait(); break None; }
+                Ok(None) => {}
+            }
+            if cancellation.try_recv().is_ok() {
+                kill_process_tree(pid, SIG_KILL);
+                break child.wait().ok().and_then(|status| status.code());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        };
+        for reader in readers { let _ = reader.join(); }
         JOBS.lock().map(|mut m| m.remove(&job_id2)).ok();
         if let Err(e) = app2.emit(
             "job-exit",
@@ -511,27 +514,8 @@ fn start_job(app: AppHandle, opts: JobOpts) -> Result<String, String> {
 
 #[tauri::command]
 fn cancel_job(job_id: String) -> Result<bool, String> {
-    let pid = {
-        let mut jobs = JOBS.lock().map_err(|e| e.to_string())?;
-        jobs.remove(&job_id).map(|j| j.pid)
-    };
-    let Some(pid) = pid else {
-        return Ok(false);
-    };
-    // M1：unix 先 SIGTERM 整个进程组，给 CLI 留出清理/写 checkpoint 的机会；
-    // 3 秒后仍未退出（JOBS 里 reaper 会移除已退出的，这里直接探测 pid）再 SIGKILL。
-    kill_process_tree(pid, SIG_TERM);
-    #[cfg(unix)]
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(3));
-        unsafe {
-            // kill(pid, 0) == 0 → 进程还在
-            if libc::kill(pid as i32, 0) == 0 {
-                libc::killpg(pid as i32, libc::SIGKILL);
-            }
-        }
-    });
-    Ok(true)
+    let jobs = JOBS.lock().map_err(|e| e.to_string())?;
+    Ok(jobs.get(&job_id).is_some_and(|job| job.cancel.send(()).is_ok()))
 }
 
 #[tauri::command]
@@ -1234,7 +1218,7 @@ pub fn run() {
                 .map(|mut m| m.drain().map(|(_, j)| j).collect())
                 .unwrap_or_default();
             for h in handles {
-                kill_process_tree(h.pid, SIG_KILL);
+                let _ = h.cancel.send(());
             }
         }
     });
