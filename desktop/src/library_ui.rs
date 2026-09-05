@@ -360,9 +360,12 @@ impl Desktop {
                             .child(
                                 Button::new("preview-source")
                                     .primary()
+                                    .when(self.source_preview.is_some(), |button| button.ghost())
                                     .h(px(44.))
                                     .label(if self.preview_cancel.is_some() {
                                         "正在读取…"
+                                    } else if self.source_preview.is_some() {
+                                        "重新读取"
                                     } else {
                                         "预览课程"
                                     })
@@ -380,6 +383,34 @@ impl Desktop {
                             .text_sm()
                             .text_color(rgb(MUTED))
                             .child("支持 YouTube、Bilibili。先确认内容，再生成笔记。"),
+                    ),
+            );
+        } else if self.source_preview.is_some() {
+            view = view.child(
+                h_flex()
+                    .gap_3()
+                    .p_4()
+                    .bg(rgb(SURFACE))
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(rgb(LINE))
+                    .child(Icon::new(IconName::FolderOpen))
+                    .child(
+                        div().flex_1().min_w_0().text_ellipsis().child(
+                            PathBuf::from(self.value(Field::Source, cx))
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .into_owned(),
+                        ),
+                    )
+                    .child(
+                        Button::new("choose-video")
+                            .ghost()
+                            .label("更换视频")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.pick(false, window, cx)),
+                            ),
                     ),
             );
         } else {

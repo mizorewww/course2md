@@ -538,11 +538,25 @@ impl Desktop {
                                 .p_4()
                                 .gap_3()
                                 .child(
-                                    div()
+                                    Button::new(("read-title", index))
+                                        .ghost()
+                                        .w_full()
                                         .h(px(44.))
-                                        .line_clamp(2)
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .child(course.title.clone()),
+                                        .p_0()
+                                        .accessibility_label(format!("阅读 {}", course.title))
+                                        .child(
+                                            div()
+                                                .w_full()
+                                                .line_clamp(2)
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .child(course.title.clone()),
+                                        )
+                                        .on_click({
+                                            let course = course.clone();
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.open_course(course.clone(), cx)
+                                            })
+                                        }),
                                 )
                                 .child(muted(format!(
                                     "{} 张截图 · {} 段讲解",
