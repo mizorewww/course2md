@@ -55,6 +55,7 @@ async fn extract_frame(media: &Path, t: f64, dest: &Path) -> Result<()> {
         "ffmpeg",
     )
     .await?;
+    anyhow::ensure!(dest.is_file(), "ffmpeg 未生成截图 {}", dest.display());
     Ok(())
 }
 
@@ -89,6 +90,7 @@ async fn sample_timestamps(cfg: &PipelineConfig, media: &Path) -> Result<Vec<(f6
     );
 
     let mut child = Command::new("ffmpeg")
+        .kill_on_drop(true)
         .args(["-hide_banner", "-loglevel", "error", "-an"])
         .arg("-i")
         .arg(media)

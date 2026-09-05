@@ -85,17 +85,22 @@ fn run_opts_to_cfg(
         // out_dir 此处只是初值；pipeline 里会改写为 {out_root}/{platform}/{title}/{id}/
         out_dir: out_root.clone(),
         out_root,
-        similarity: opts.similarity.or(d.similarity).unwrap_or(config::DEFAULT_SIMILARITY),
+        similarity: opts
+            .similarity
+            .or(d.similarity)
+            .unwrap_or(config::DEFAULT_SIMILARITY),
         sample_interval: opts
             .sample_interval
             .or(d.sample_interval)
             .unwrap_or(config::DEFAULT_SAMPLE_INTERVAL),
-        cooldown: opts.cooldown.or(d.cooldown).unwrap_or(config::DEFAULT_COOLDOWN),
+        cooldown: opts
+            .cooldown
+            .or(d.cooldown)
+            .unwrap_or(config::DEFAULT_COOLDOWN),
         max_height: opts
             .max_height
             .or(d.max_height)
-            .unwrap_or(config::DEFAULT_MAX_HEIGHT)
-            .clamp(240, 2160),
+            .unwrap_or(config::DEFAULT_MAX_HEIGHT),
         slide_mode: opts
             .slide_mode
             .or(d.slide_mode)
@@ -103,8 +108,7 @@ fn run_opts_to_cfg(
         stable_secs: opts
             .stable_secs
             .or(d.stable_secs)
-            .unwrap_or(config::DEFAULT_STABLE_SECS)
-            .clamp(0.0, 10.0),
+            .unwrap_or(config::DEFAULT_STABLE_SECS),
         roi: match &opts.roi {
             Some(s) => Some(config::Roi::parse(s)?),
             None => match &d.roi {
@@ -112,7 +116,10 @@ fn run_opts_to_cfg(
                 None => None,
             },
         },
-        threads: opts.threads.or(d.threads).unwrap_or(config::DEFAULT_THREADS),
+        threads: opts
+            .threads
+            .or(d.threads)
+            .unwrap_or(config::DEFAULT_THREADS),
         provider: opts
             .provider
             .or(d.provider)
@@ -290,7 +297,11 @@ fn main() -> anyhow::Result<()> {
             if cleared.is_empty() {
                 println!("没有需要清除的 API 配置：{}", path.display());
             } else {
-                println!("已清除 API 配置（{}）：{}", cleared.join(", "), path.display());
+                println!(
+                    "已清除 API 配置（{}）：{}",
+                    cleared.join(", "),
+                    path.display()
+                );
             }
             if !args.asr {
                 println!("提示：--asr 可同时清除云端 STT（[asr_api]）的 API Key。");

@@ -17,19 +17,6 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     cfg.validate().context("配置预检失败")?;
     crate::error::require_cmd("ffmpeg")?;
     crate::error::require_cmd("ffprobe")?;
-    use config::AsrProvider;
-    if !matches!(
-        cfg.provider,
-        AsrProvider::Coreml | AsrProvider::Api | AsrProvider::Npu
-    ) {
-        crate::error::require_cmd("llama-server")?;
-    } else if cfg.provider == AsrProvider::Coreml
-        && crate::error::require_cmd("llama-server").is_err()
-    {
-        // fallback 是 best-effort：提前告知而不是失败后才发现
-        tracing::warn!("未找到 llama-server：CoreML 若失败将无法回退到 gpu 后端（best-effort）");
-    }
-
     // LLM 预检：配置错误应在跑完昂贵的下载/识别之前暴露
     if cfg.llm.enabled {
         crate::llm::validate(&cfg.llm)?;
@@ -37,7 +24,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
 
     let local = Path::new(&cfg.url);
     let is_local = local.is_file();
-    if !is_local && !cfg.no_download {
+    if !is_local {
         crate::error::require_cmd("yt-dlp")?;
     }
 
@@ -173,6 +160,22 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         progress::stage("scenes", "done");
         (frames, events)
     } else {
+        cfg.validate_asr()?;
+        use config::AsrProvider;
+        if !matches!(
+            cfg.provider,
+            AsrProvider::Coreml | AsrProvider::Api | AsrProvider::Npu
+        ) {
+            crate::error::require_cmd("llama-server")?;
+        } else if cfg.provider == AsrProvider::Coreml
+            && crate::error::require_cmd("llama-server").is_err()
+        {
+            // fallback 是 best-effort：提前告知而不是失败后才发现
+            tracing::warn!(
+                "未找到 llama-server：CoreML 若失败将无法回退到 gpu 后端（best-effort）"
+            );
+        }
+
         tracing::info!("extract slides and audio");
         let audio_path = cfg.audio_path();
         progress::stage("scenes", "start");
@@ -450,6 +453,7 @@ fn local_fingerprint(p: &Path) -> String {
             && let Ok(d) = m.duration_since(std::time::UNIX_EPOCH)
         {
             feed(&d.as_secs().to_le_bytes());
+            feed(&d.subsec_nanos().to_le_bytes());
         }
     }
     format!("{h:016x}")[..8].to_string()

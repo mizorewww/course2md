@@ -7,6 +7,7 @@ use tokio::process::Command;
 /// 跑子进程并检查退出码；失败时返回带 stderr 尾部摘要的错误（供各模块复用）。
 pub(crate) async fn run_cmd(cmd: &mut Command, what: &str) -> Result<std::process::Output> {
     let out = cmd
+        .kill_on_drop(true)
         .output()
         .await
         .with_context(|| format!("启动 {what} 失败"))?;
@@ -29,16 +30,20 @@ pub async fn extract_audio(media: &Path, dest: &Path) -> Result<()> {
     if let Some(p) = dest.parent() {
         tokio::fs::create_dir_all(p).await?;
     }
+    let temporary = tempfile::Builder::new()
+        .suffix(".wav")
+        .tempfile_in(dest.parent().unwrap_or(Path::new(".")))?;
     run_cmd(
         Command::new("ffmpeg")
             .args(["-hide_banner", "-loglevel", "error", "-y"])
             .arg("-i")
             .arg(media)
             .args(["-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"])
-            .arg(dest),
+            .arg(temporary.path()),
         "ffmpeg",
     )
     .await?;
+    temporary.persist(dest)?;
     Ok(())
 }
 

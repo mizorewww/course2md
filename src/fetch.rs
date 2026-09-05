@@ -56,6 +56,7 @@ pub async fn fetch_subtitle(url: &str, out_dir: &Path) -> Result<Option<Subtitle
         let mut cmd = Command::new("yt-dlp");
         cmd.args([
             "--skip-download",
+            "--no-playlist",
             // 转为 srt：pick_subtitle_file（subtitle.rs）只认 .srt，两处约定需保持一致
             "--convert-subs",
             "srt",
@@ -162,7 +163,11 @@ async fn run(cmd: &mut Command) -> Result<String> {
 }
 
 async fn run_status(cmd: &mut Command) -> Result<()> {
-    let status = cmd.status().await.context("启动子进程失败")?;
+    let status = cmd
+        .kill_on_drop(true)
+        .status()
+        .await
+        .context("启动子进程失败")?;
     if !status.success() {
         anyhow::bail!(crate::error::cmd_error(
             "yt-dlp",

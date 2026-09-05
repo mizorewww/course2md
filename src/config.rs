@@ -217,12 +217,15 @@ fn parse_xy(pair: &str) -> anyhow::Result<(f64, f64)> {
 
 fn parse_coord(s: &str) -> anyhow::Result<f64> {
     let s = s.trim();
-    if let Some(p) = s.strip_suffix('%') {
-        let v: f64 = p.trim().parse()?;
-        Ok(v / 100.0)
+    let v = if let Some(p) = s.strip_suffix('%') {
+        let percent: f64 = p.trim().parse()?;
+        anyhow::ensure!((0.0..=100.0).contains(&percent), "ROI 百分比必须在 0..=100");
+        percent / 100.0
     } else {
-        Ok(s.parse()?)
-    }
+        s.parse::<f64>()?
+    };
+    anyhow::ensure!(v.is_finite() && v >= 0.0, "ROI 坐标必须为非负有限数值");
+    Ok(v)
 }
 
 /// provider=npu 已知的模型别名表（来源：npu.rs `resolve_npu_model` 的映射，
@@ -301,6 +304,11 @@ impl PipelineConfig {
             "formats 不能为空（至少 md/html/json 之一）"
         );
 
+        Ok(())
+    }
+
+    /// 仅在确实需要语音识别时验证后端配置；字幕路径不依赖 ASR。
+    pub fn validate_asr(&self) -> AnyhowResult<()> {
         // provider × 模型兼容性：静默忽略用户指定的模型属于静默错误结果
         if let Some(m) = self
             .asr_model
@@ -655,15 +663,15 @@ mod tests {
         // gpu/cpu 只有 Qwen3 GGUF：显式要 whisper 必须报错而不是静默用 qwen
         let mut c = valid_cfg();
         c.asr_model = Some("whisper".into());
-        assert!(c.validate().is_err());
+        assert!(c.validate_asr().is_err());
         c.provider = AsrProvider::Coreml;
         c.asr_model = Some("whisper".into());
-        c.validate().unwrap();
+        c.validate_asr().unwrap();
         c.provider = AsrProvider::Npu;
         c.asr_model = Some("org/custom-ov-model".into());
-        c.validate().unwrap();
+        c.validate_asr().unwrap();
         c.asr_model = Some("not-a-repo-id".into());
-        assert!(c.validate().is_err());
+        assert!(c.validate_asr().is_err());
     }
 
     #[test]
