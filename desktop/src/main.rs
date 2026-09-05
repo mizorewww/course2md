@@ -1,9 +1,11 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 mod backend;
+mod theme;
 mod views;
 use backend::{Completed, Course, Event, Job};
 use gpui::{prelude::*, *};
 use gpui_component::{
-    input::{Input, InputState, Textarea, TextareaState},
+    input::{Input, InputState},
     *,
 };
 use std::{
@@ -63,11 +65,16 @@ const SOURCES: [(&str, &str); 3] = [
 
 struct Desktop {
     page: Page,
+    result_origin: Page,
+    result_tab: usize,
+    settings_tab: usize,
+    show_options: bool,
+    show_logs: bool,
+    environment: Option<backend::Environment>,
+    scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
     config: course2md::settings::ConfigFile,
     config_error: bool,
-    advanced: Entity<TextareaState>,
-    show_advanced: bool,
     provider: usize,
     source_mode: usize,
     llm: bool,
@@ -167,11 +174,6 @@ impl Desktop {
             .values()
             .map(|input| cx.observe(input, |_, _, cx| cx.notify()))
             .collect();
-        let advanced = cx.new(|cx| {
-            TextareaState::new(window, cx)
-                .rows(18)
-                .default_value(toml::to_string_pretty(&config).unwrap_or_default())
-        });
         let provider = config
             .defaults
             .provider
@@ -211,13 +213,18 @@ impl Desktop {
                 }
             }
         });
-        Self {
+        let mut this = Self {
             page: Page::New,
+            result_origin: Page::Library,
+            result_tab: 0,
+            settings_tab: 0,
+            show_options: false,
+            show_logs: false,
+            environment: None,
+            scrolls: std::array::from_fn(|_| ScrollHandle::new()),
             inputs,
             config,
             config_error,
-            advanced,
-            show_advanced: false,
             provider,
             source_mode,
             llm,
@@ -240,7 +247,31 @@ impl Desktop {
             message,
             _subscriptions: subscriptions,
             _poll: poll,
+        };
+        this.refresh_environment(cx);
+        this
+    }
+    fn refresh_environment(&mut self, cx: &mut Context<Self>) {
+        self.environment = None;
+        let task = cx
+            .background_executor()
+            .spawn(async { backend::Environment::detect() });
+        cx.spawn(async move |this, cx| {
+            let environment = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.environment = Some(environment);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+    fn navigate(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.page = page;
+        self.message = None;
+        if page == Page::Library {
+            self.refresh_library(cx);
         }
+        cx.notify();
     }
     fn value(&self, field: Field, cx: &App) -> String {
         self.inputs[&field].read(cx).value().trim().to_string()
@@ -321,6 +352,20 @@ impl Desktop {
                 let source = course2md::config::expand_tilde(source.into())
                     .display()
                     .to_string();
+                if let Some(environment) = &self.environment {
+                    if !environment.ffmpeg || !environment.ffprobe {
+                        self.message = Some(
+                            "缺少视频处理工具。请在设置 → 运行环境中查看安装方式，然后重新检测。"
+                                .into(),
+                        );
+                        return;
+                    }
+                    if source.starts_with("http") && !environment.ytdlp {
+                        self.message =
+                            Some("在线课程需要 yt-dlp。请在设置 → 运行环境中查看安装方式。".into());
+                        return;
+                    }
+                }
                 if !course2md::config::looks_like_source(&source) {
                     self.message = Some("请输入有效的视频链接，或选择存在的本地视频文件。".into());
                     return;
@@ -375,6 +420,8 @@ impl Desktop {
                 self.job = Some(job);
                 self.kind = kind;
                 self.cancelling = false;
+                self.show_logs = kind != Kind::Convert;
+                self.scrolls[Page::Task as usize].set_offset(point(px(0.), px(0.)));
                 self.stages.clear();
                 self.progress.clear();
                 self.logs.clear();
@@ -436,8 +483,14 @@ impl Desktop {
                     {
                         self.task_status = "已完成".into();
                         self.completed = self.pending_done.take();
+                        if self.page == Page::Task
+                            && let Some(done) = self.completed.clone()
+                        {
+                            self.open_course(Course::from_completed(&done), cx);
+                        }
                     } else {
                         self.task_status = "任务未完成".into();
+                        self.show_logs = true;
                         if self.message.is_none() {
                             self.message =
                                 Some("引擎退出，未生成完整结果。请查看下方日志并重试。".into());
@@ -475,6 +528,7 @@ impl Desktop {
     }
     fn open_course(&mut self, course: Course, cx: &mut Context<Self>) {
         self.loading = true;
+        self.result_origin = self.page;
         let task = cx
             .background_executor()
             .spawn(async move { backend::read_preview(course) });
@@ -484,7 +538,9 @@ impl Desktop {
                 this.loading = false;
                 match result {
                     Ok(preview) => {
+                        this.result_tab = if preview.has_markdown { 0 } else { 2 };
                         this.preview = Some(preview);
+                        this.scrolls[Page::Result as usize].set_offset(point(px(0.), px(0.)));
                         this.page = Page::Result;
                     }
                     Err(error) => this.message = Some(format!("读取笔记失败：{error:#}")),
@@ -533,18 +589,7 @@ impl Desktop {
             self.message = Some("请先在外部编辑器中修正原配置，然后重新加载。".into());
             return;
         }
-        let mut config = if self.show_advanced {
-            match toml::from_str::<course2md::settings::ConfigFile>(&self.advanced.read(cx).value())
-            {
-                Ok(config) => config,
-                Err(error) => {
-                    self.message = Some(format!("TOML 无效，未保存：{error}"));
-                    return;
-                }
-            }
-        } else {
-            self.edited_settings(cx)
-        };
+        let mut config = self.edited_settings(cx);
         if let Err(error) =
             course2md::options::resolve("configuration".into(), &Default::default(), &config)
                 .and_then(|cfg| cfg.validate())
@@ -620,13 +665,6 @@ impl Desktop {
         self.inputs[&Field::Output].update(cx, |state, cx| {
             state.set_value(output.display().to_string(), window, cx)
         });
-        self.advanced.update(cx, |state, cx| {
-            state.set_value(
-                toml::to_string_pretty(&self.config).unwrap_or_default(),
-                window,
-                cx,
-            )
-        });
     }
 }
 
@@ -636,11 +674,11 @@ fn main() {
         .run(|cx| {
             gpui_component::init(cx);
             gpui_component::set_locale("zh-CN");
-            Theme::change(ThemeMode::Light, None, cx);
+            theme::init(cx);
             cx.open_window(
                 WindowOptions {
-                    window_bounds: Some(WindowBounds::centered(size(px(1120.), px(860.)), cx)),
-                    window_min_size: Some(size(px(780.), px(600.))),
+                    window_bounds: Some(WindowBounds::centered(size(px(1140.), px(820.)), cx)),
+                    window_min_size: Some(size(px(860.), px(620.))),
                     titlebar: Some(TitlebarOptions {
                         title: Some("course2md".into()),
                         ..Default::default()

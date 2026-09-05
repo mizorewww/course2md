@@ -162,7 +162,9 @@ fn terminate(child: &mut std::process::Child) {
     }
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         let _ = Command::new("taskkill")
+            .creation_flags(0x08000000)
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -211,10 +213,52 @@ pub fn resolve_cli() -> Result<PathBuf> {
 }
 
 #[derive(Clone)]
+pub struct Environment {
+    pub engine: bool,
+    pub ffmpeg: bool,
+    pub ffprobe: bool,
+    pub ytdlp: bool,
+    pub llama: bool,
+}
+impl Environment {
+    pub fn detect() -> Self {
+        let available = |name: &str| {
+            let name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+            std::env::split_paths(&tool_path()).any(|dir| dir.join(&name).is_file())
+        };
+        Self {
+            engine: resolve_cli().is_ok(),
+            ffmpeg: available("ffmpeg"),
+            ffprobe: available("ffprobe"),
+            ytdlp: available("yt-dlp"),
+            llama: available("llama-server"),
+        }
+    }
+    pub fn ready(&self) -> bool {
+        self.engine && self.ffmpeg && self.ffprobe
+    }
+}
+
+#[derive(Clone)]
 pub struct Course {
     pub dir: PathBuf,
     pub title: String,
     pub modified: SystemTime,
+    pub slides: usize,
+    pub segments: usize,
+    pub thumbnail: Option<PathBuf>,
+}
+impl Course {
+    pub fn from_completed(done: &Completed) -> Self {
+        Self {
+            dir: done.out_dir.clone(),
+            title: done.title.clone(),
+            modified: SystemTime::now(),
+            slides: done.slides,
+            segments: done.segments,
+            thumbnail: None,
+        }
+    }
 }
 pub fn library(root: &Path) -> Result<Vec<Course>> {
     if !root.exists() {
@@ -235,7 +279,13 @@ pub fn library(root: &Path) -> Result<Vec<Course>> {
                         .into_owned()
                 });
             let modified = dir.join("run.json").metadata()?.modified()?;
+            let run: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(dir.join("run.json"))?).unwrap_or_default();
+            let thumbnail = frame_paths(&dir).into_iter().next();
             courses.push(Course {
+                slides: run["sections"].as_u64().unwrap_or(0) as usize,
+                segments: run["speech_segments"].as_u64().unwrap_or(0) as usize,
+                thumbnail,
                 dir,
                 title,
                 modified,
@@ -270,11 +320,54 @@ pub struct Preview {
     pub course: Course,
     pub markdown: String,
     pub blocks: Vec<PreviewBlock>,
+    pub frames: Vec<PathBuf>,
+    pub has_markdown: bool,
+    pub outputs: Vec<String>,
+}
+
+fn frame_paths(dir: &Path) -> Vec<PathBuf> {
+    let Ok(root) = dir.canonicalize() else {
+        return Vec::new();
+    };
+    let mut paths = std::fs::read_dir(root.join("frames"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.path().canonicalize().ok())
+        .filter(|path| {
+            path.starts_with(&root)
+                && path.is_file()
+                && matches!(
+                    path.extension().and_then(|s| s.to_str()),
+                    Some("jpg" | "jpeg" | "png")
+                )
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
 }
 
 pub fn read_preview(course: Course) -> Result<Preview> {
     let path = course.dir.join("course.md");
-    let markdown = if path.is_file() {
+    let run = std::fs::read(course.dir.join("run.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let formats = run.as_ref().and_then(|run| run["formats"].as_array());
+    let outputs = [
+        ("md", "course.md"),
+        ("html", "course.html"),
+        ("json", "structured.json"),
+    ]
+    .into_iter()
+    .filter(|(format, name)| {
+        course.dir.join(name).is_file()
+            && formats
+                .is_none_or(|formats| formats.iter().any(|value| value.as_str() == Some(*format)))
+    })
+    .map(|(_, name)| name.to_owned())
+    .collect::<Vec<_>>();
+    let has_markdown = outputs.iter().any(|name| name == "course.md");
+    let markdown = if has_markdown {
         std::fs::read_to_string(path)?
     } else {
         "这份课程未导出 Markdown。请使用上方按钮打开 HTML 或 JSON 产物。".into()
@@ -282,7 +375,17 @@ pub fn read_preview(course: Course) -> Result<Preview> {
     let root = course.dir.canonicalize()?;
     let mut blocks = Vec::new();
     let mut text = String::new();
-    for line in markdown.lines() {
+    // The page header already presents the title and statistics. Keep the full
+    // original document for copying, but start the reader at its first section.
+    let body = if markdown.contains("- 由 course2md 生成") {
+        markdown
+            .split_once("\n## ")
+            .map(|(_, body)| format!("## {body}"))
+            .unwrap_or_else(|| markdown.clone())
+    } else {
+        markdown.clone()
+    };
+    for line in body.lines() {
         let image = line
             .strip_prefix("![")
             .and_then(|line| line.split_once("]("))
@@ -304,6 +407,9 @@ pub fn read_preview(course: Course) -> Result<Preview> {
         blocks.push(PreviewBlock::Markdown(text));
     }
     Ok(Preview {
+        frames: frame_paths(&course.dir),
+        has_markdown,
+        outputs,
         course,
         markdown,
         blocks,
@@ -318,6 +424,18 @@ mod tests {
     fn done_event_uses_the_cli_protocol() {
         let event: Event = serde_json::from_str(r#"{"type":"done","out_dir":"out/test","title":"课程","slides":3,"segments":4,"chars":50,"elapsed_secs":1.5,"outputs":["course.md"]}"#).unwrap();
         assert!(matches!(event, Event::Done(Completed { slides: 3, .. })));
+    }
+
+    #[test]
+    fn preview_hides_exports_left_over_from_a_previous_run() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("course.md"), "# Updated notes").unwrap();
+        std::fs::write(dir.path().join("structured.json"), "{}").unwrap();
+        std::fs::write(dir.path().join("run.json"), r#"{"formats":["md"]}"#).unwrap();
+        let preview = read_preview(Course { dir: dir.path().into(), title: "course".into(),
+            modified: SystemTime::now(), slides: 0, segments: 0, thumbnail: None }).unwrap();
+        assert_eq!(preview.outputs, ["course.md"]);
+        assert!(preview.has_markdown);
     }
 
     #[test]
@@ -336,6 +454,9 @@ mod tests {
             dir: course_dir,
             title: "Course".into(),
             modified: SystemTime::now(),
+            slides: 0,
+            segments: 0,
+            thumbnail: None,
         })
         .unwrap();
         assert_eq!(
