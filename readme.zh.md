@@ -42,6 +42,10 @@ course2md ./lecture.mp4
 
 ## 桌面客户端（GUI）
 
+新的原生客户端位于 [`desktop/`](desktop/README.md)，基于 GPUI 与 GPUI Component，面向 macOS、Windows 和 Linux。包含转换、取消任务、课程搜索、图文笔记阅读和共享配置。开发时更新两个上游的 main；发布时冻结实际测试的源码提交。详见[构建指南](desktop/README.md)和[审查与实际验收记录](docs/REVIEW-2026-09.md)。
+
+下面的 Tauri 客户端保留为参考实现，现有 Tauri 发布包与新的原生客户端分别构建。
+
 `app/` 目录是一个基于 Tauri v2 的桌面客户端，把 CLI 完整包进图形界面：转写后端按本机能力推荐（推荐项置顶）、任务进度实时展示（阶段步进器 + 进度条 + 日志控制台）、结果在应用内预览（文稿 / 截图网格 / 文件）、历史记录与配置管理（模型下载、config.toml 编辑）。
 
 它通过 sidecar 方式内置 `course2md` 二进制，以 `--json` NDJSON 事件流通信；取消任务会连带终止 ffmpeg / llama-server 等子进程。本机已安装 CLI 时也可独立使用（开发模式回落到 PATH）。

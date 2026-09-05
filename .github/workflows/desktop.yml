@@ -1,0 +1,49 @@
+name: native desktop
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake pkg-config libasound2-dev libx11-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig1-dev libssl-dev libclang-dev libgit2-dev libstdc++-12-dev ffmpeg
+      - name: Prepare source dependencies
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            python desktop/scripts/sources.py --locked
+          else
+            python desktop/scripts/sources.py
+          fi
+      - name: Check and test desktop
+        run: cargo test --manifest-path desktop/Cargo.toml
+      - name: Build development binaries
+        if: github.ref_type != 'tag'
+        run: python desktop/scripts/package.py --debug
+      - name: Build release with tested source revisions
+        if: github.ref_type == 'tag'
+        run: python desktop/scripts/package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: course2md-desktop-${{ runner.os }}
+          path: |
+            desktop/target/packages/*.zip
+            desktop/target/packages/*.tar.gz

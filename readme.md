@@ -42,6 +42,10 @@ course2md ./lecture.mp4
 
 ## Desktop App (GUI)
 
+The new native client lives in [`desktop/`](desktop/README.md), built with GPUI and GPUI Component for macOS, Windows and Linux. It provides conversion, cancellation, a searchable course library, illustrated note previews and shared configuration. Development pulls both upstream main branches; release packaging freezes the exact tested revisions. See the [native build guide](desktop/README.md) and [audit and acceptance record](docs/REVIEW-2026-09.md).
+
+The Tauri client below remains as a reference implementation and its existing release packages are separate from the native client.
+
 The `app/` directory contains a Tauri v2 desktop client that wraps the full CLI in a graphical interface: speech-recognition backends recommended for your machine (best option first), live job progress (stage stepper + progress bar + log console), in-app result preview (transcript / slide grid / files), history, and settings management (model download, `config.toml` editing).
 
 It embeds the `course2md` binary as a sidecar and talks to it via the `--json` NDJSON event stream; cancelling a job also terminates child processes such as ffmpeg / llama-server. If the CLI is already installed, the app can use it standalone (dev mode falls back to PATH).
