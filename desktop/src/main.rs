@@ -137,6 +137,7 @@ struct Desktop {
     show_options: bool,
     show_logs: bool,
     setup_open: bool,
+    show_engine_details: bool,
     environment: Option<backend::Environment>,
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
@@ -346,6 +347,7 @@ impl Desktop {
             show_options: false,
             show_logs: false,
             setup_open: false,
+            show_engine_details: false,
             environment: None,
             scrolls: std::array::from_fn(|_| ScrollHandle::new()),
             inputs,
@@ -390,17 +392,16 @@ impl Desktop {
             let environment = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.environment = Some(environment);
-                if this.setup_open && this.settings_options.provider == 0 {
-                    let env = this.environment.as_ref().unwrap();
-                    this.settings_options.provider = if env.apple {
-                        1
-                    } else if env.gpu.is_some() {
-                        2
-                    } else if env.llama {
-                        3
-                    } else {
-                        0
-                    };
+                if this.settings_options.provider == 0
+                    && let Some(choice) = this
+                        .engine_choices(cx)
+                        .into_iter()
+                        .find(|choice| (1..=4).contains(&choice.index) && choice.selectable)
+                {
+                    this.settings_options.provider = choice.index;
+                    if this.job.is_none() && this.task_options.provider == 0 {
+                        this.task_options.provider = choice.index;
+                    }
                 }
                 cx.notify();
             });
@@ -410,6 +411,9 @@ impl Desktop {
     fn navigate(&mut self, page: Page, cx: &mut Context<Self>) {
         if page == Page::New && self.page == Page::Library {
             self.target_folder = self.folder_filter.filter(|id| *id != 0);
+        }
+        if self.page != page {
+            self.show_engine_details = false;
         }
         self.page = page;
         self.message = None;
@@ -897,6 +901,14 @@ impl Desktop {
             self.inputs[&field].update(cx, |state, cx| state.set_value(value, window, cx));
         }
         self.settings_options = ConversionOptions::from_config(cfg);
+        if self.settings_options.provider == 0
+            && let Some(choice) = self
+                .engine_choices(cx)
+                .into_iter()
+                .find(|c| (1..=4).contains(&c.index) && c.selectable)
+        {
+            self.settings_options.provider = choice.index;
+        }
         self.task_options = self.settings_options.clone();
         let output = cfg
             .defaults

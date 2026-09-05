@@ -23,34 +23,6 @@ pub struct EngineChoice {
 }
 
 impl Desktop {
-    pub fn engine_summary(&self, cx: &App) -> String {
-        let Some(env) = &self.environment else {
-            return "正在检测视频工具与识别引擎…".into();
-        };
-        if !env.engine {
-            return "转换程序无法启动 · 查看安装检查".into();
-        }
-        if !env.ffmpeg || !env.ffprobe {
-            return "缺少 ffmpeg / ffprobe · 查看安装方法".into();
-        }
-        if self.editing_options().source_mode == 1 {
-            return "识别方式：仅使用字幕".into();
-        }
-        let index = if self.editing_options().provider == 0 {
-            match course2md::config::default_provider_hint() {
-                course2md::config::AsrProvider::Coreml => 1,
-                course2md::config::AsrProvider::Npu => 4,
-                _ => 2,
-            }
-        } else {
-            self.editing_options().provider
-        };
-        self.engine_choices(cx)
-            .into_iter()
-            .find(|c| c.index == index)
-            .map(|c| format!("识别：{} · {}", c.name, c.status))
-            .unwrap_or_else(|| "尚未选择识别方式 · 打开设置".into())
-    }
     pub fn engine_choices(&self, cx: &App) -> Vec<EngineChoice> {
         let Some(env) = &self.environment else {
             return Vec::new();
@@ -136,14 +108,14 @@ impl Desktop {
             && !self.value(Field::AsrModel, cx).is_empty();
         choices.push(EngineChoice {
             index: 5,
-            name: "云端 API",
+            name: "使用云端服务",
             selectable: true,
             status: if api_configured {
                 "已填写配置"
             } else {
                 "需要配置"
             },
-            detail: "音频将发送到你指定的服务；服务连接在转写时验证".into(),
+            detail: "音频会发送到你选择的云端服务".into(),
         });
         choices.push(EngineChoice {
             index: 6,
@@ -161,116 +133,187 @@ impl Desktop {
         } else {
             self.editing_options().provider
         };
+        let choices = self.engine_choices(cx);
+        let local = choices
+            .iter()
+            .find(|c| (1..=4).contains(&c.index) && c.selectable && c.index == selected)
+            .or_else(|| {
+                choices
+                    .iter()
+                    .find(|c| (1..=4).contains(&c.index) && c.selectable)
+            });
+        let local_index = local.map(|c| c.index);
+        let mut visible = Vec::new();
+        if let Some(local) = local
+            && !self.show_engine_details
+        {
+            visible.push(EngineChoice {
+                index: local.index,
+                name: "在本机识别",
+                status: "推荐",
+                detail: "音频留在这台电脑上".into(),
+                selectable: true,
+            });
+        }
+        if self.show_engine_details {
+            visible.extend(
+                self.engine_choices(cx)
+                    .into_iter()
+                    .filter(|c| {
+                        c.selectable
+                            && ((1..=4).contains(&c.index)
+                                || (self.setup_open && local_index.is_some() && c.index == 6))
+                    })
+                    .map(|mut c| {
+                        c.status = "";
+                        c.detail = match c.index {
+                            1 => "适合这台 Mac",
+                            2 => "使用显卡加速",
+                            3 => "使用处理器识别",
+                            4 => "使用神经处理器",
+                            _ => "视频没有字幕时不转写",
+                        }
+                        .into();
+                        c
+                    }),
+            );
+        }
+        visible.extend(choices.into_iter().filter(|c| {
+            c.index == 5 || (self.setup_open && local_index.is_none() && c.index == 6)
+        }));
         v_flex()
             .gap_2()
             .when(self.environment.is_none(), |v| {
                 v.child("正在检测本机识别方式…")
             })
-            .children(
-                self.engine_choices(cx)
-                    .into_iter()
-                    .filter(|c| self.setup_open || c.index != 6)
-                    .map(|choice| {
-                        let index = choice.index;
-                        let selected = selected == index;
-                        let content = v_flex()
-                            .w_full()
-                            .min_w_0()
-                            .gap_1()
+            .children(visible.into_iter().enumerate().map(|(row, choice)| {
+                let index = choice.index;
+                let selected = selected == index;
+                let content = v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .gap_2()
                             .child(
-                                h_flex()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .child(choice.name),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(12.))
-                                            .text_color(rgb(MUTED))
-                                            .child(choice.status),
-                                    ),
+                                div()
+                                    .flex_1()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(choice.name),
                             )
                             .child(
                                 div()
-                                    .text_size(px(13.))
+                                    .text_size(px(12.))
                                     .text_color(rgb(MUTED))
-                                    .whitespace_normal()
-                                    .child(choice.detail),
-                            );
-                        if choice.selectable {
-                            Button::new(("engine-choice", index))
-                                .w_full()
-                                .h_auto()
-                                .p_3()
-                                .selected(selected)
-                                .toggled(selected)
-                                .accessibility_label(format!(
-                                    "{}，{}{}",
-                                    choice.name,
-                                    choice.status,
-                                    if selected { "，已选择" } else { "" }
-                                ))
-                                .child(
-                                    h_flex()
-                                        .w_full()
-                                        .gap_3()
-                                        .child(
-                                            div()
-                                                .size(px(16.))
-                                                .flex_shrink_0()
-                                                .rounded_full()
-                                                .border_2()
-                                                .border_color(rgb(if selected {
-                                                    BLUE
-                                                } else {
-                                                    CONTROL
-                                                }))
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .when(selected, |v| {
-                                                    v.child(
-                                                        div()
-                                                            .size(px(8.))
-                                                            .rounded_full()
-                                                            .bg(rgb(BLUE)),
-                                                    )
-                                                }),
-                                        )
-                                        .child(content),
-                                )
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    let options = this.editing_options_mut();
-                                    if index == 6 {
-                                        options.source_mode = 1;
-                                    } else {
-                                        options.provider = index;
-                                        if options.source_mode == 1 {
-                                            options.source_mode = 0;
-                                        }
-                                    }
-                                    if this.setup_open {
-                                        this.settings_status.clear();
-                                    }
-                                    cx.notify();
-                                }))
-                                .into_any_element()
-                        } else {
+                                    .child(choice.status),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .text_color(rgb(MUTED))
+                            .whitespace_normal()
+                            .child(choice.detail),
+                    );
+                if choice.selectable {
+                    Button::new(("engine-choice", row))
+                        .w_full()
+                        .h_auto()
+                        .p_3()
+                        .selected(selected)
+                        .toggled(selected)
+                        .accessibility_label(format!(
+                            "{}{}{}",
+                            choice.name,
+                            if choice.status.is_empty() {
+                                String::new()
+                            } else {
+                                format!("，{}", choice.status)
+                            },
+                            if selected { "，已选择" } else { "" }
+                        ))
+                        .child(
                             h_flex()
                                 .w_full()
-                                .p_3()
                                 .gap_3()
-                                .rounded_md()
-                                .bg(rgb(SIDEBAR))
-                                .child(Icon::new(IconName::CircleX).size_4().text_color(rgb(MUTED)))
-                                .child(content)
-                                .into_any_element()
-                        }
-                    }),
+                                .child(
+                                    div()
+                                        .size(px(16.))
+                                        .flex_shrink_0()
+                                        .rounded_full()
+                                        .border_2()
+                                        .border_color(rgb(if selected { BLUE } else { CONTROL }))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .when(selected, |v| {
+                                            v.child(div().size(px(8.)).rounded_full().bg(rgb(BLUE)))
+                                        }),
+                                )
+                                .child(content),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let options = this.editing_options_mut();
+                            if index == 6 {
+                                options.source_mode = 1;
+                            } else {
+                                options.provider = index;
+                                if options.source_mode == 1 {
+                                    options.source_mode = 0;
+                                }
+                            }
+                            if this.setup_open {
+                                this.settings_status.clear();
+                            }
+                            cx.notify();
+                        }))
+                        .into_any_element()
+                } else {
+                    h_flex()
+                        .w_full()
+                        .p_3()
+                        .gap_3()
+                        .rounded_md()
+                        .bg(rgb(SIDEBAR))
+                        .child(Icon::new(IconName::CircleX).size_4().text_color(rgb(MUTED)))
+                        .child(content)
+                        .into_any_element()
+                }
+            }))
+            .child(
+                Button::new("engine-details")
+                    .ghost()
+                    .self_start()
+                    .label(if self.show_engine_details {
+                        "收起高级设置"
+                    } else {
+                        "高级设置"
+                    })
+                    .icon(if self.show_engine_details {
+                        IconName::ChevronUp
+                    } else {
+                        IconName::ChevronDown
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_engine_details = !this.show_engine_details;
+                        cx.notify();
+                    })),
             )
+            .when(self.show_engine_details, |v| {
+                v.child(
+                    Button::new("engine-help")
+                        .label("识别诊断…")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if this.setup_open && !this.finish_setup(false, window, cx) {
+                                return;
+                            }
+                            window.close_dialog(cx);
+                            this.settings_tab = 3;
+                            this.navigate(Page::Settings, cx);
+                        })),
+                )
+            })
     }
 
     pub fn open_setup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -279,6 +322,15 @@ impl Desktop {
         }
         self.settings_deadline = None;
         self.setup_open = true;
+        self.show_engine_details = false;
+        if self.settings_options.provider == 0
+            && let Some(choice) = self
+                .engine_choices(cx)
+                .into_iter()
+                .find(|c| (1..=4).contains(&c.index) && c.selectable)
+        {
+            self.settings_options.provider = choice.index;
+        }
         self.settings_status.clear();
         let desktop = cx.entity();
         let setup = cx.new(|cx| Setup {
@@ -357,30 +409,66 @@ impl Desktop {
             self.navigate(Page::Settings, cx);
         } else {
             self.navigate(Page::New, cx);
-            cx.defer_in(window, |this, window, cx| this.begin_add(window, cx));
+            cx.defer_in(window, |this, window, cx| {
+                if this.page == Page::New {
+                    this.begin_add(window, cx);
+                }
+            });
         }
         true
     }
 
     fn setup_content(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let form = v_flex().gap_4()
-            .child(div().text_color(rgb(MUTED)).child("选择识别方式和笔记位置。以后可随时在左下角「设置」中修改。"))
-            .when_some(self.environment.as_ref().filter(|e| !e.ready()), |v, _| {
-                v.child(div().p_3().bg(rgb(0xfff0db)).text_color(rgb(0x784600))
-                    .child("尚不能转换视频：缺少必要工具。完成引导后，请在设置 → 运行环境中查看安装方法。"))
-            })
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("1. 选择识别方式"))
-            .child(self.engine_panel(cx))
-            .when(self.settings_options.provider == 5 && self.settings_options.source_mode != 1, |v| {
-                v.child(self.input(Field::AsrUrl, "API 服务地址"))
-                    .child(self.input(Field::AsrModel, "识别模型"))
-                    .child(self.input(Field::AsrKey, "API Key"))
-            })
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("2. 笔记保存位置"))
-            .child(h_flex().items_end().gap_3()
-                .child(div().flex_1().min_w_0().child(self.input(Field::Output, "保存目录")))
-                .child(Button::new("setup-directory").label("选择目录…")
-                    .on_click(cx.listener(|this, _, window, cx| this.pick(true, window, cx)))));
+        let form =
+            v_flex()
+                .gap_4()
+                .child(
+                    div()
+                        .text_color(rgb(MUTED))
+                        .child("以后可随时在左下角「设置」中修改。"),
+                )
+                .when_some(self.environment.as_ref().filter(|e| !e.ready()), |v, _| {
+                    v.child(
+                        div()
+                            .p_3()
+                            .bg(rgb(0xfff0db))
+                            .text_color(rgb(0x784600))
+                            .child("还需要完成安装，才能开始转换。"),
+                    )
+                })
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("1. 选择识别方式"),
+                )
+                .child(self.engine_panel(cx))
+                .when(
+                    self.settings_options.provider == 5 && self.settings_options.source_mode != 1,
+                    |v| {
+                        v.child(self.input(Field::AsrUrl, "API 服务地址"))
+                            .child(self.input(Field::AsrModel, "识别模型"))
+                            .child(self.input(Field::AsrKey, "API Key"))
+                    },
+                )
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("2. 笔记保存位置"),
+                )
+                .child(
+                    h_flex()
+                        .items_end()
+                        .gap_3()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(self.input(Field::Output, "保存目录")),
+                        )
+                        .child(Button::new("setup-directory").label("选择目录…").on_click(
+                            cx.listener(|this, _, window, cx| this.pick(true, window, cx)),
+                        )),
+                );
         v_flex()
             .gap_4()
             .text_size(px(14.))

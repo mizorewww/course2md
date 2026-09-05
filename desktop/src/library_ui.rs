@@ -240,30 +240,38 @@ impl Desktop {
             )
             .children(entries.into_iter().map(|(id, name)| {
                 let count = counts.get(&id.unwrap_or(0)).copied().unwrap_or(0);
-                Button::new(("folder-nav", id.unwrap_or(0) as usize))
-                    .ghost()
-                    .w_full()
-                    .h(px(32.))
-                    .accessibility_label(name.clone())
-                    .selected(self.page == Page::Library && self.folder_filter == id)
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .gap_2()
-                            .child(Icon::new(IconName::Folder))
-                            .child(div().flex_1().min_w_0().text_ellipsis().child(name))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(rgb(MUTED))
-                                    .child(count.to_string()),
-                            ),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.folder_filter = id;
-                        this.scrolls[Page::Library as usize].set_offset(point(px(0.), px(0.)));
-                        this.navigate(Page::Library, cx);
-                    }))
+                navigation(
+                    Button::new(("folder-nav", id.unwrap_or(0) as usize)),
+                    self.page == Page::Library && self.folder_filter == id,
+                )
+                .w_full()
+                .h(px(32.))
+                .accessibility_label(name.clone())
+                .selected(self.page == Page::Library && self.folder_filter == id)
+                .child(
+                    h_flex()
+                        .w_full()
+                        .gap_2()
+                        .child(Icon::new(IconName::Folder))
+                        .child(div().flex_1().min_w_0().text_ellipsis().child(name))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(
+                                    if self.page == Page::Library && self.folder_filter == id {
+                                        SURFACE
+                                    } else {
+                                        MUTED
+                                    },
+                                ))
+                                .child(count.to_string()),
+                        ),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.folder_filter = id;
+                    this.scrolls[Page::Library as usize].set_offset(point(px(0.), px(0.)));
+                    this.navigate(Page::Library, cx);
+                }))
             }))
     }
     pub fn folder_picker(

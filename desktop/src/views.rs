@@ -609,20 +609,28 @@ impl Desktop {
                                         }))
                                 }),
                             ))
-                            .child(self.engine_panel(cx)),
+                            .when(self.settings_options.source_mode != 1, |v| {
+                                v.child(self.engine_panel(cx))
+                            }),
                     )
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .gap_4()
-                            .pb_6()
-                            .child(section(
-                                "云端语音服务",
-                                "选择云端识别时，音频将发送至此服务。",
-                            ))
-                            .child(self.input(Field::AsrUrl, "服务地址"))
-                            .child(self.input(Field::AsrModel, "模型名称"))
-                            .child(self.input(Field::AsrKey, "API Key")),
+                    .when(
+                        self.settings_options.provider == 5
+                            && self.settings_options.source_mode != 1,
+                        |v| {
+                            v.child(
+                                v_flex()
+                                    .w_full()
+                                    .gap_4()
+                                    .pb_6()
+                                    .child(section(
+                                        "云端语音服务",
+                                        "选择云端识别时，音频将发送至此服务。",
+                                    ))
+                                    .child(self.input(Field::AsrUrl, "服务地址"))
+                                    .child(self.input(Field::AsrModel, "模型名称"))
+                                    .child(self.input(Field::AsrKey, "API Key")),
+                            )
+                        },
                     );
             }
             2 => {
@@ -1052,6 +1060,9 @@ impl Render for Desktop {
             Page::Settings => self.settings_page(cx),
             Page::Result => self.result_page(cx),
         };
+        let settings_problem = self.config_error
+            || self.settings_status.starts_with("未保存：")
+            || self.settings_status.starts_with("保存失败");
         let sidebar = v_flex()
             .w(px(200.))
             .h_full()
@@ -1071,24 +1082,28 @@ impl Render for Desktop {
                     .into_iter()
                     .enumerate()
                     .map(|(index, (page, label, icon))| {
-                        Button::new(("nav", index))
-                            .ghost()
-                            .w_full()
-                            .h(px(32.))
-                            .justify_start()
-                            .accessibility_label(label)
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .gap_2()
-                                    .child(Icon::new(icon))
-                                    .child(label),
-                            )
-                            .selected(
-                                self.page == page
-                                    && (page != Page::Library || self.folder_filter.is_none()),
-                            )
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                        navigation(
+                            Button::new(("nav", index)),
+                            self.page == page
+                                && (page != Page::Library || self.folder_filter.is_none()),
+                        )
+                        .w_full()
+                        .h(px(32.))
+                        .justify_start()
+                        .accessibility_label(label)
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .gap_2()
+                                .child(Icon::new(icon))
+                                .child(label),
+                        )
+                        .selected(
+                            self.page == page
+                                && (page != Page::Library || self.folder_filter.is_none()),
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
                                 if page == Page::New {
                                     this.begin_add(window, cx);
                                 } else {
@@ -1097,7 +1112,8 @@ impl Render for Desktop {
                                     }
                                     this.navigate(page, cx);
                                 }
-                            }))
+                            },
+                        ))
                     }),
                 ),
             )
@@ -1110,18 +1126,25 @@ impl Render for Desktop {
                     .child(self.folder_sidebar(cx)),
             )
             .child(
-                Button::new("nav-settings")
-                    .ghost()
+                navigation(Button::new("nav-settings"), self.page == Page::Settings)
                     .w_full()
                     .h(px(32.))
                     .justify_start()
-                    .accessibility_label("设置")
+                    .accessibility_label(if settings_problem {
+                        "设置，未保存"
+                    } else {
+                        "设置"
+                    })
                     .child(
                         h_flex()
                             .w_full()
                             .gap_2()
                             .child(Icon::new(IconName::Settings))
-                            .child("设置"),
+                            .child(if settings_problem {
+                                "设置 · 未保存"
+                            } else {
+                                "设置"
+                            }),
                     )
                     .selected(self.page == Page::Settings)
                     .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Settings, cx))),
@@ -1189,18 +1212,6 @@ impl Render for Desktop {
                     .pb_6()
                     .child(content),
             );
-        let status = if self.page == Page::Settings
-            || self.settings_status.starts_with("未保存：")
-            || self.settings_status.starts_with("保存失败")
-        {
-            self.settings_status.clone()
-        } else if self.job.is_some() {
-            self.task_summary()
-        } else if self.preview_cancel.is_some() {
-            "正在读取课程…".into()
-        } else {
-            String::new()
-        };
         v_flex()
             .size_full()
             .bg(rgb(CANVAS))
@@ -1226,47 +1237,30 @@ impl Render for Desktop {
                     .child(sidebar)
                     .child(body),
             )
-            .child(
-                h_flex()
-                    .h(px(28.))
-                    .flex_shrink_0()
-                    .px_3()
-                    .gap_3()
-                    .bg(rgb(SIDEBAR))
-                    .border_t_1()
-                    .border_color(rgb(LINE))
-                    .child(
-                        Button::new("environment-status")
-                            .ghost()
-                            .h(px(24.))
-                            .text_xs()
-                            .label(self.engine_summary(cx))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.settings_tab = 3;
-                                this.navigate(Page::Settings, cx);
-                            })),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_ellipsis()
-                            .text_xs()
-                            .text_color(rgb(MUTED))
-                            .child(status),
-                    )
-                    .when(self.job.is_some() && self.page != Page::Task, |v| {
-                        v.child(
-                            Button::new("status-task")
-                                .ghost()
-                                .h(px(24.))
-                                .label("查看任务")
-                                .on_click(
-                                    cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx)),
-                                ),
+            .when(self.job.is_some(), |v| {
+                v.child(
+                    h_flex()
+                        .h(px(36.))
+                        .flex_shrink_0()
+                        .px_4()
+                        .gap_3()
+                        .bg(rgb(SURFACE))
+                        .border_t_1()
+                        .border_color(rgb(LINE))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_ellipsis()
+                                .child(self.task_summary()),
                         )
-                    }),
-            )
+                        .when(self.page != Page::Task, |v| {
+                            v.child(Button::new("status-task").label("查看任务").on_click(
+                                cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx)),
+                            ))
+                        }),
+                )
+            })
             .children(Root::render_dialog_layer(window, cx))
     }
 }

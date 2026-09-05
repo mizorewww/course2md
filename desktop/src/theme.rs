@@ -4,7 +4,7 @@ use gpui_component::{Theme, ThemeMode};
 
 pub const CANVAS: u32 = 0xf8f8f6;
 pub const SURFACE: u32 = 0xffffff;
-pub const SIDEBAR: u32 = 0xf0f1ee;
+pub const SIDEBAR: u32 = 0xe8ebf0;
 pub const INK: u32 = 0x252a32;
 pub const MUTED: u32 = 0x485363;
 pub const LINE: u32 = 0xe3e5e2;
@@ -12,6 +12,23 @@ pub const CONTROL: u32 = 0x7b8492;
 pub const BLUE: u32 = 0x315bc5;
 pub const TINT: u32 = 0xeaf0ff;
 pub const SUCCESS: u32 = 0x237552;
+
+/// Navigation has an explicit current-location treatment, separate from form toggles.
+pub fn navigation(
+    button: gpui_component::button::Button,
+    selected: bool,
+) -> gpui_component::button::Button {
+    use gpui::{Styled, prelude::FluentBuilder};
+    use gpui_component::{Selectable, button::ButtonVariants};
+    button
+        .ghost()
+        .selected(selected)
+        .toggled(selected)
+        .text_color(rgb(if selected { SURFACE } else { INK }))
+        .when(selected, |button| {
+            button.bg(rgb(BLUE)).font_weight(gpui::FontWeight::SEMIBOLD)
+        })
+}
 
 pub fn init(cx: &mut App) {
     Theme::change(ThemeMode::Light, None, cx);
