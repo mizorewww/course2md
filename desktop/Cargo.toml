@@ -1,6 +1,6 @@
 [package]
 name = "course2md-desktop"
-version = "0.1.0"
+version = "1.6.0"
 edition = "2024"
 license = "MIT"
 description = "Native course2md desktop application"

@@ -432,8 +432,15 @@ mod tests {
         std::fs::write(dir.path().join("course.md"), "# Updated notes").unwrap();
         std::fs::write(dir.path().join("structured.json"), "{}").unwrap();
         std::fs::write(dir.path().join("run.json"), r#"{"formats":["md"]}"#).unwrap();
-        let preview = read_preview(Course { dir: dir.path().into(), title: "course".into(),
-            modified: SystemTime::now(), slides: 0, segments: 0, thumbnail: None }).unwrap();
+        let preview = read_preview(Course {
+            dir: dir.path().into(),
+            title: "course".into(),
+            modified: SystemTime::now(),
+            slides: 0,
+            segments: 0,
+            thumbnail: None,
+        })
+        .unwrap();
         assert_eq!(preview.outputs, ["course.md"]);
         assert!(preview.has_markdown);
     }
