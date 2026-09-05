@@ -484,29 +484,35 @@ impl Desktop {
         if let Some(source) = &self.source_preview {
             view = view
                 .child(
-                    v_flex()
+                    h_flex()
+                        .gap_5()
+                        .p_5()
                         .rounded_xl()
-                        .overflow_hidden()
                         .bg(rgb(SURFACE))
                         .border_1()
                         .border_color(rgb(LINE))
                         .child(
                             div()
-                                .h(px(250.))
-                                .w_full()
+                                .w(px(260.))
+                                .h(px(146.))
+                                .flex_shrink_0()
+                                .rounded_lg()
+                                .overflow_hidden()
                                 .bg(rgb(SIDEBAR))
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .when_some(source.cover.clone(), |view, path| {
-                                    view.child(img(path).size_full().object_fit(ObjectFit::Contain))
+                                    view.child(img(path).size_full().object_fit(ObjectFit::Cover))
                                 })
                                 .when(source.cover.is_none(), |view| view.child("暂无封面")),
                         )
                         .child(
                             v_flex()
-                                .p_5()
-                                .gap_2()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_3()
+                                .child(div().text_xs().text_color(rgb(SUCCESS)).child("已识别课程"))
                                 .child(
                                     div()
                                         .text_xl()
