@@ -67,6 +67,60 @@ const SOURCES: [(&str, &str); 3] = [
     ("asr", "语音识别"),
 ];
 
+#[derive(Clone)]
+struct ConversionOptions {
+    provider: usize,
+    source_mode: usize,
+    llm: bool,
+    keep_video: bool,
+    resume: bool,
+    formats: [bool; 3],
+}
+
+impl ConversionOptions {
+    fn from_config(config: &course2md::settings::ConfigFile) -> Self {
+        let provider = config
+            .defaults
+            .provider
+            .map(|p| {
+                PROVIDERS
+                    .iter()
+                    .position(|(id, _)| *id == p.as_str())
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        let source_mode = match config.defaults.transcript_source.unwrap_or_default() {
+            course2md::config::TranscriptSource::Auto => 0,
+            course2md::config::TranscriptSource::Subtitle => 1,
+            course2md::config::TranscriptSource::Asr => 2,
+        };
+        let llm = config.llm.enabled;
+        let keep_video = config.defaults.keep_video.unwrap_or(false);
+        let resume = config.defaults.resume.unwrap_or(false);
+        let formats = config
+            .defaults
+            .formats
+            .as_ref()
+            .map(|formats| {
+                use course2md::config::OutputFormat::*;
+                [
+                    formats.contains(&Md),
+                    formats.contains(&Html),
+                    formats.contains(&Json),
+                ]
+            })
+            .unwrap_or([true, true, false]);
+        Self {
+            provider,
+            source_mode,
+            llm,
+            keep_video,
+            resume,
+            formats,
+        }
+    }
+}
+
 struct Desktop {
     online: bool,
     last_source_input: String,
@@ -94,12 +148,8 @@ struct Desktop {
     inputs: BTreeMap<Field, Entity<InputState>>,
     config: course2md::settings::ConfigFile,
     config_error: bool,
-    provider: usize,
-    source_mode: usize,
-    llm: bool,
-    keep_video: bool,
-    resume: bool,
-    formats: [bool; 3],
+    task_options: ConversionOptions,
+    settings_options: ConversionOptions,
     job: Option<Job>,
     kind: Kind,
     cancelling: bool,
@@ -121,6 +171,21 @@ struct Desktop {
 actions!(course2md_desktop, [Quit]);
 
 impl Desktop {
+    fn editing_options(&self) -> &ConversionOptions {
+        if self.page == Page::Settings {
+            &self.settings_options
+        } else {
+            &self.task_options
+        }
+    }
+    fn editing_options_mut(&mut self) -> &mut ConversionOptions {
+        if self.page == Page::Settings {
+            &mut self.settings_options
+        } else {
+            &mut self.task_options
+        }
+    }
+
     fn request_close(&mut self, cx: &mut Context<Self>) -> bool {
         if self.preview_workers > 0 {
             if let Some(cancel) = &self.preview_cancel {
@@ -235,37 +300,7 @@ impl Desktop {
                 }
             },
         ));
-        let provider = config
-            .defaults
-            .provider
-            .map(|p| {
-                PROVIDERS
-                    .iter()
-                    .position(|(id, _)| *id == p.as_str())
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
-        let source_mode = match config.defaults.transcript_source.unwrap_or_default() {
-            course2md::config::TranscriptSource::Auto => 0,
-            course2md::config::TranscriptSource::Subtitle => 1,
-            course2md::config::TranscriptSource::Asr => 2,
-        };
-        let llm = config.llm.enabled;
-        let keep_video = config.defaults.keep_video.unwrap_or(false);
-        let resume = config.defaults.resume.unwrap_or(false);
-        let formats = config
-            .defaults
-            .formats
-            .as_ref()
-            .map(|formats| {
-                use course2md::config::OutputFormat::*;
-                [
-                    formats.contains(&Md),
-                    formats.contains(&Html),
-                    formats.contains(&Json),
-                ]
-            })
-            .unwrap_or([true, true, false]);
+        let options = ConversionOptions::from_config(&config);
         let poll = cx.spawn(async |this, cx| {
             loop {
                 smol::Timer::after(Duration::from_millis(80)).await;
@@ -301,12 +336,8 @@ impl Desktop {
             inputs,
             config,
             config_error,
-            provider,
-            source_mode,
-            llm,
-            keep_video,
-            resume,
-            formats,
+            task_options: options.clone(),
+            settings_options: options,
             job: None,
             kind: Kind::Convert,
             cancelling: false,
@@ -363,8 +394,13 @@ impl Desktop {
             .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(label))
             .child(Input::new(&self.inputs[&field]).aria_label(label))
     }
-    fn output(&self, cx: &App) -> PathBuf {
-        course2md::config::expand_tilde(self.value(Field::Output, cx).into())
+    fn output(&self, _cx: &App) -> PathBuf {
+        self.config
+            .defaults
+            .out
+            .clone()
+            .map(course2md::config::expand_tilde)
+            .unwrap_or_else(backend::default_output)
     }
     fn pick(&mut self, directory: bool, window: &mut Window, cx: &mut Context<Self>) {
         let prompt = cx.prompt_for_paths(PathPromptOptions {
@@ -396,8 +432,6 @@ impl Desktop {
                             });
                             if !directory {
                                 this.inspect_source(cx);
-                            } else {
-                                this.refresh_library(cx);
                             }
                         }
                     }
@@ -463,13 +497,13 @@ impl Desktop {
                     self.message = Some("请输入有效的视频链接，或选择存在的本地视频文件。".into());
                     return;
                 }
-                if self.value(Field::Output, cx).is_empty() {
+                if self.output(cx).as_os_str().is_empty() {
                     self.message = Some("请选择笔记保存目录。".into());
                     return;
                 }
                 let formats = ["md", "html", "json"]
                     .into_iter()
-                    .zip(self.formats)
+                    .zip(self.task_options.formats)
                     .filter(|(_, selected)| *selected)
                     .map(|(name, _)| name)
                     .collect::<Vec<_>>();
@@ -483,22 +517,30 @@ impl Desktop {
                     "--out".into(),
                     self.output(cx).display().to_string(),
                     "--transcript-source".into(),
-                    SOURCES[self.source_mode].0.into(),
+                    SOURCES[self.task_options.source_mode].0.into(),
                     "--formats".into(),
                     formats.join(","),
-                    if self.llm { "--llm" } else { "--no-llm" }.into(),
-                    if self.resume {
+                    if self.task_options.llm {
+                        "--llm"
+                    } else {
+                        "--no-llm"
+                    }
+                    .into(),
+                    if self.task_options.resume {
                         "--resume"
                     } else {
                         "--no-resume"
                     }
                     .into(),
                 ];
-                if self.provider > 0 {
-                    args.extend(["--provider".into(), PROVIDERS[self.provider].0.into()]);
+                if self.task_options.provider > 0 {
+                    args.extend([
+                        "--provider".into(),
+                        PROVIDERS[self.task_options.provider].0.into(),
+                    ]);
                 }
                 args.push(
-                    if self.keep_video {
+                    if self.task_options.keep_video {
                         "--keep-video"
                     } else {
                         "--no-keep-video"
@@ -624,10 +666,6 @@ impl Desktop {
         cx.notify();
     }
     fn refresh_library(&mut self, cx: &mut Context<Self>) {
-        if self.loading {
-            return;
-        }
-        self.loading = true;
         let root = self.output(cx);
         if self.library_root != root {
             self.library_root = root.clone();
@@ -638,6 +676,10 @@ impl Desktop {
             self.folder_editor = None;
             self.delete_folder = None;
         }
+        if self.loading {
+            return;
+        }
+        self.loading = true;
         let task_root = root.clone();
         let task = cx.background_executor().spawn(async move {
             Ok::<_, anyhow::Error>((
@@ -702,10 +744,12 @@ impl Desktop {
         config.llm.base_url = self.value(Field::LlmUrl, cx);
         config.llm.api_key = self.value(Field::LlmKey, cx);
         config.llm.model = self.value(Field::LlmModel, cx);
-        config.llm.enabled = self.llm;
-        config.defaults.out = Some(self.output(cx));
-        config.defaults.keep_video = Some(self.keep_video);
-        config.defaults.resume = Some(self.resume);
+        config.llm.enabled = self.settings_options.llm;
+        config.defaults.out = Some(course2md::config::expand_tilde(
+            self.value(Field::Output, cx).into(),
+        ));
+        config.defaults.keep_video = Some(self.settings_options.keep_video);
+        config.defaults.resume = Some(self.settings_options.resume);
         use course2md::config::{AsrProvider::*, TranscriptSource::*};
         config.defaults.provider = [
             None,
@@ -714,13 +758,14 @@ impl Desktop {
             Some(Cpu),
             Some(Npu),
             Some(Api),
-        ][self.provider];
-        config.defaults.transcript_source = Some([Auto, Subtitle, Asr][self.source_mode]);
+        ][self.settings_options.provider];
+        config.defaults.transcript_source =
+            Some([Auto, Subtitle, Asr][self.settings_options.source_mode]);
         use course2md::config::OutputFormat::*;
         config.defaults.formats = Some(
             [Md, Html, Json]
                 .into_iter()
-                .zip(self.formats)
+                .zip(self.settings_options.formats)
                 .filter(|(_, selected)| *selected)
                 .map(|(format, _)| format)
                 .collect(),
@@ -752,6 +797,7 @@ impl Desktop {
             Ok(_) => {
                 self.config = config;
                 self.sync_settings(window, cx);
+                self.refresh_library(cx);
                 self.message = Some("设置已保存。下一次任务会使用新设置。".into());
             }
             Err(error) => self.message = Some(format!("保存失败：{error:#}")),
@@ -770,36 +816,8 @@ impl Desktop {
         ] {
             self.inputs[&field].update(cx, |state, cx| state.set_value(value, window, cx));
         }
-        self.llm = cfg.llm.enabled;
-        self.keep_video = cfg.defaults.keep_video.unwrap_or(false);
-        self.resume = cfg.defaults.resume.unwrap_or(false);
-        self.provider = cfg
-            .defaults
-            .provider
-            .and_then(|provider| {
-                PROVIDERS
-                    .iter()
-                    .position(|(id, _)| *id == provider.as_str())
-            })
-            .unwrap_or(0);
-        self.source_mode = match cfg.defaults.transcript_source.unwrap_or_default() {
-            course2md::config::TranscriptSource::Auto => 0,
-            course2md::config::TranscriptSource::Subtitle => 1,
-            course2md::config::TranscriptSource::Asr => 2,
-        };
-        use course2md::config::OutputFormat::*;
-        self.formats = cfg
-            .defaults
-            .formats
-            .as_ref()
-            .map(|formats| {
-                [
-                    formats.contains(&Md),
-                    formats.contains(&Html),
-                    formats.contains(&Json),
-                ]
-            })
-            .unwrap_or([true, true, false]);
+        self.settings_options = ConversionOptions::from_config(cfg);
+        self.task_options = self.settings_options.clone();
         let output = cfg
             .defaults
             .out

@@ -16,6 +16,7 @@ impl Desktop {
         {
             self.invalidate_source();
             self.online = true;
+            self.task_options = ConversionOptions::from_config(&self.config);
             self.show_options = false;
             self.last_source_input.clear();
             self.inputs[&Field::Source].update(cx, |state, cx| state.set_value("", window, cx));

@@ -54,7 +54,7 @@ impl Desktop {
                         .flex_1()
                         .h(px(76.))
                         .justify_start()
-                        .selected(self.provider == index)
+                        .selected(self.editing_options().provider == index)
                         .disabled(!platform_supported)
                         .accessibility_label(PROVIDERS[index].1)
                         .child(
@@ -78,7 +78,7 @@ impl Desktop {
                                 )),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.provider = index;
+                            this.editing_options_mut().provider = index;
                             cx.notify();
                         }))
                 }))
@@ -94,9 +94,9 @@ impl Desktop {
                     .map(|(index, label)| {
                         Checkbox::new(("format", index))
                             .label(label)
-                            .checked(self.formats[index])
+                            .checked(self.editing_options().formats[index])
                             .on_click(cx.listener(move |this, checked, _, cx| {
-                                this.formats[index] = *checked;
+                                this.editing_options_mut().formats[index] = *checked;
                                 cx.notify();
                             }))
                     }),
@@ -111,8 +111,8 @@ impl Desktop {
                         .gap_3()
                         .child(div().flex_1().text_color(rgb(MUTED)).child(format!(
                             "{} · {}",
-                            SOURCES[self.source_mode].1,
-                            if self.llm {
+                            SOURCES[self.editing_options().source_mode].1,
+                            if self.editing_options().llm {
                                 "AI 整理已启用"
                             } else {
                                 "保留原始讲解"
@@ -141,29 +141,33 @@ impl Desktop {
                         "识别与输出选项",
                         "只影响这次转换。默认设置可在侧栏中修改。",
                     ))
-                    .when(self.source_mode != 1, |view| {
+                    .when(self.editing_options().source_mode != 1, |view| {
                         view.child(self.provider_choices(cx))
                     })
-                    .when(self.provider == 5 && self.source_mode != 1, |view| {
-                        view.child(
-                            h_flex()
-                                .gap_3()
-                                .justify_between()
-                                .child(muted(if self.config.asr_api.model.is_empty() {
-                                    "云端服务尚未配置"
-                                } else {
-                                    "使用已保存的云端服务"
-                                }))
-                                .child(
-                                    Button::new("configure-asr").label("配置语音服务").on_click(
-                                        cx.listener(|this, _, _, cx| {
-                                            this.settings_tab = 1;
-                                            this.navigate(Page::Settings, cx);
-                                        }),
+                    .when(
+                        self.editing_options().provider == 5
+                            && self.editing_options().source_mode != 1,
+                        |view| {
+                            view.child(
+                                h_flex()
+                                    .gap_3()
+                                    .justify_between()
+                                    .child(muted(if self.config.asr_api.model.is_empty() {
+                                        "云端服务尚未配置"
+                                    } else {
+                                        "使用已保存的云端服务"
+                                    }))
+                                    .child(
+                                        Button::new("configure-asr")
+                                            .label("配置语音服务")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.settings_tab = 1;
+                                                this.navigate(Page::Settings, cx);
+                                            })),
                                     ),
-                                ),
-                        )
-                    })
+                            )
+                        },
+                    )
                     .child(section("导出格式", ""))
                     .child(self.format_choices(cx))
                     .child(
@@ -173,18 +177,18 @@ impl Desktop {
                             .child(
                                 Checkbox::new("resume")
                                     .label("继续上次未完成的转换")
-                                    .checked(self.resume)
+                                    .checked(self.editing_options().resume)
                                     .on_click(cx.listener(|this, value, _, cx| {
-                                        this.resume = *value;
+                                        this.editing_options_mut().resume = *value;
                                         cx.notify();
                                     })),
                             )
                             .child(
                                 Checkbox::new("keep-video")
                                     .label("保留下载的视频")
-                                    .checked(self.keep_video)
+                                    .checked(self.editing_options().keep_video)
                                     .on_click(cx.listener(|this, value, _, cx| {
-                                        this.keep_video = *value;
+                                        this.editing_options_mut().keep_video = *value;
                                         cx.notify();
                                     })),
                             ),
@@ -200,9 +204,9 @@ impl Desktop {
                             |(index, (_, name))| {
                                 Button::new(("source-mode", index))
                                     .label(*name)
-                                    .selected(self.source_mode == index)
+                                    .selected(self.editing_options().source_mode == index)
                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.source_mode = index;
+                                        this.editing_options_mut().source_mode = index;
                                         cx.notify();
                                     }))
                             },
@@ -210,9 +214,9 @@ impl Desktop {
                         .child(
                             Checkbox::new("llm")
                                 .label("使用 AI 整理文字")
-                                .checked(self.llm)
+                                .checked(self.editing_options().llm)
                                 .on_click(cx.listener(|this, checked, _, cx| {
-                                    this.llm = *checked;
+                                    this.editing_options_mut().llm = *checked;
                                     cx.notify();
                                 })),
                         ),
@@ -607,18 +611,18 @@ impl Desktop {
                             .child(
                                 Checkbox::new("settings-resume")
                                     .label("继续未完成的任务，复用已处理的内容")
-                                    .checked(self.resume)
+                                    .checked(self.editing_options().resume)
                                     .on_click(cx.listener(|this, value, _, cx| {
-                                        this.resume = *value;
+                                        this.editing_options_mut().resume = *value;
                                         cx.notify();
                                     })),
                             )
                             .child(
                                 Checkbox::new("settings-keep")
                                     .label("保留从网上下载的视频")
-                                    .checked(self.keep_video)
+                                    .checked(self.editing_options().keep_video)
                                     .on_click(cx.listener(|this, value, _, cx| {
-                                        this.keep_video = *value;
+                                        this.editing_options_mut().keep_video = *value;
                                         cx.notify();
                                     })),
                             ),
@@ -653,9 +657,9 @@ impl Desktop {
                         .child(
                             Checkbox::new("settings-ai")
                                 .label("默认启用 AI 整理")
-                                .checked(self.llm)
+                                .checked(self.editing_options().llm)
                                 .on_click(cx.listener(|this, value, _, cx| {
-                                    this.llm = *value;
+                                    this.editing_options_mut().llm = *value;
                                     cx.notify();
                                 })),
                         )
