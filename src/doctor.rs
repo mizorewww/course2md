@@ -1,7 +1,7 @@
 //! 环境体检：一次性报告依赖工具、平台后端可用性、配置与模型缓存状态。
 //! 用户报 issue 时附上 `course2md doctor` 输出即可定位大多数环境问题。
 
-use crate::config::{AsrProvider, cache_dir, config_dir};
+use crate::config::AsrProvider;
 use anyhow::Result;
 use std::path::Path;
 use std::process::Command;
@@ -32,188 +32,146 @@ fn check(line: &mut Vec<String>, ok: bool, name: &str, detail: &str) {
 }
 
 pub fn run() -> Result<()> {
-    let mut out: Vec<String> = Vec::new();
-    let platform = format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH);
-    out.push(format!(
-        "course2md {}  ({platform})",
-        env!("CARGO_PKG_VERSION")
-    ));
-
-    // —— 核心依赖（必需）——
-    for (tool, args) in [
-        ("ffmpeg", &["-version", "-hide_banner"] as &[&str]),
-        ("ffprobe", &["-version", "-hide_banner"]),
-    ] {
-        match tool_version(tool, args) {
-            Some(v) => check(&mut out, true, tool, &format!("  {v}")),
-            None => check(
-                &mut out,
-                false,
-                tool,
-                "  缺失（必需）：brew install ffmpeg / apt install ffmpeg",
-            ),
+    let mut out = vec![format!(
+        "course2md {} ({}/{})",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    )];
+    let mut failures = 0;
+    out.push("\n必需工具 / Required tools".into());
+    for tool in ["ffmpeg", "ffprobe"] {
+        match tool_version(tool, &["-version", "-hide_banner"]) {
+            Some(version) => check(&mut out, true, tool, &format!("  {version}")),
+            None => {
+                failures += 1;
+                check(
+                    &mut out,
+                    false,
+                    tool,
+                    "  缺失 / Missing: brew install ffmpeg (macOS); sudo apt install ffmpeg (Debian/Ubuntu)",
+                );
+            }
         }
     }
+    out.push("\n按用途选装 / Optional tools by use".into());
     match tool_version("yt-dlp", &["--version"]) {
-        Some(v) => check(&mut out, true, "yt-dlp", &format!("  {v}")),
-        None => check(
-            &mut out,
-            false,
-            "yt-dlp",
-            "  缺失（远程视频需要）：brew install yt-dlp",
-        ),
+        Some(version) => check(&mut out, true, "yt-dlp", &format!("  {version}")),
+        None => out.push("- yt-dlp  远程视频需要，本地文件不需要 / Required for URLs, optional for local files: brew install yt-dlp (macOS); pipx install yt-dlp".into()),
     }
-
-    // —— 按平台的本地 ASR 后端 ——
     #[cfg(apple_native)]
     {
-        check(
-            &mut out,
-            true,
-            "coreml",
-            "  本构建含 Apple 原生后端（CoreML/ANE + Silero VAD）",
-        );
         let exe = std::env::current_exe().unwrap_or_default();
         let dir = exe.parent().unwrap_or(Path::new("."));
-        let has_metallib = ["mlx.metallib", "default.metallib"]
+        let shaders = ["mlx.metallib", "default.metallib"]
             .iter()
-            .any(|n| dir.join(n).is_file());
-        if has_metallib {
-            check(&mut out, true, "mlx.metallib", "  已就位（与二进制同目录）");
-        } else {
-            check(
-                &mut out,
-                false,
-                "mlx.metallib",
-                "  缺失：CoreML 推理会失败；重跑 install.sh 安装",
-            );
-        }
-    }
-    #[cfg(not(apple_native))]
-    {
-        if cfg!(target_os = "macos") {
-            out.push(
-                "! coreml        本构建未包含 Apple 原生后端（仅 macOS arm64 原生构建支持）".into(),
-            );
-        }
-    }
-
-    match crate::runtime::which("llama-server") {
-        Some(p) => check(
-            &mut out,
-            true,
-            "llama-server",
-            &format!("  {}", p.display()),
-        ),
-        None => {
-            out.push("! llama-server  未安装（gpu/cpu 后端需要；coreml/npu/api 不需要）".into())
-        }
-    }
-
-    // NPU：仅 Linux 且设备节点存在时报告
-    if cfg!(target_os = "linux") {
-        let npu_dev = Path::new("/dev/accel/accel0").exists();
-        if npu_dev {
+            .any(|name| dir.join(name).is_file());
+        if shaders {
             check(
                 &mut out,
                 true,
-                "npu",
-                "  检测到 /dev/accel/accel0（Intel AI Boost）",
+                "coreml",
+                "  Apple 原生后端可用 / Apple native backend available",
             );
-        }
-        let py = crate::runtime::which("python3").or_else(|| crate::runtime::which("python"));
-        match (crate::runtime::which("uv"), py) {
-            (Some(p), _) => check(&mut out, true, "uv", &format!("  {}", p.display())),
-            (None, Some(p)) => out.push(format!(
-                "! uv            未安装（NPU 后端推荐）；将回退 {}",
-                p.display()
-            )),
-            (None, None) => out.push("✗ python/uv     均缺失（npu 后端需要）".into()),
+        } else {
+            out.push("! coreml  缺少 Metal 着色器资源，请重新安装 / Metal shader resources missing; reinstall course2md".into());
         }
     }
-
-    // —— 配置与模型缓存 ——
-    // settings::load 全程只调一次：重复调用既浪费又在第二次静默吞错
-    let cfg_loaded = crate::settings::load();
-    let cfg_path = config_dir().join("config.toml");
-    if cfg_path.is_file() {
-        match &cfg_loaded {
-            Ok(_) => {
-                let perms_note = {
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let mode = std::fs::metadata(&cfg_path)
-                            .map(|m| m.permissions().mode())
-                            .unwrap_or(0);
-                        if mode & 0o077 != 0 {
-                            format!("（权限 {:o}，建议 0600：含 API key）", mode & 0o777)
-                        } else {
-                            String::new()
-                        }
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        String::new()
-                    }
-                };
+    #[cfg(not(apple_native))]
+    out.push("- coreml  本构建不包含 Apple 原生后端 / Apple native backend is not included in this build".into());
+    match crate::runtime::which("llama-server") {
+        Some(path) => check(&mut out, true, "gpu/cpu", &format!("  {}", path.display())),
+        None => out.push("- gpu/cpu  缺少 llama-server / llama-server missing. 安装 llama.cpp 后重试 / Install llama.cpp to use these backends.".into()),
+    }
+    if cfg!(target_os = "linux") {
+        let device = Path::new("/dev/accel/accel0").exists();
+        out.push(if device {
+            "✓ npu  检测到 Intel NPU；仍需 OpenVINO 运行环境 / Intel NPU detected; OpenVINO runtime also required"
+        } else {
+            "- npu  未检测到 Intel NPU 设备 / No Intel NPU device detected"
+        }.into());
+        if crate::runtime::which("uv").is_none()
+            && crate::runtime::which("python3").is_none()
+            && crate::runtime::which("python").is_none()
+        {
+            out.push(
+                "- npu  缺少 Python/uv / Python or uv is required for NPU transcription".into(),
+            );
+        }
+    }
+    out.push("\n配置与模型 / Configuration and models".into());
+    let path = crate::settings::config_path();
+    let loaded = crate::settings::load();
+    match &loaded {
+        Ok(cfg) => {
+            if path.is_file() {
+                check(&mut out, true, "config", &format!("  {}", path.display()));
+            } else {
+                out.push(format!(
+                    "- config  使用内置默认值 / Using built-in defaults: {}",
+                    path.display()
+                ));
+                out.push("  可选配置 / Optional setup: course2md config init".into());
+            }
+            // Validate the same merged defaults as conversion, without requiring a source or network.
+            match crate::options::resolve(String::new(), &crate::cli::RunOpts::default(), cfg)
+                .and_then(|cfg| cfg.validate())
+            {
+                Ok(()) => {}
+                Err(error) => {
+                    failures += 1;
+                    check(&mut out, false, "settings", &format!("  {error:#}"));
+                }
+            }
+            let root = crate::config::model_dir_from(cfg.defaults.model_dir.as_deref());
+            if crate::models::llama_ready(&root) {
                 check(
                     &mut out,
                     true,
-                    "config",
-                    &format!("  {}{perms_note}", cfg_path.display()),
+                    "gpu/cpu models",
+                    &format!("  {}", root.display()),
                 );
+            } else {
+                out.push(format!(
+                    "- gpu/cpu models  未下载或不完整 / Missing or incomplete: {}",
+                    root.display()
+                ));
+                out.push(format!("  仅 gpu/cpu 需要；下载约 2.4GB / Only needed for gpu/cpu (~2.4GB): course2md models download --dir {:?}", root));
             }
-            Err(e) => check(&mut out, false, "config", &format!("  解析失败：{e:#}")),
+            let key = !cfg.asr_api.api_key.trim().is_empty()
+                || crate::config::asr_api_key_from_env().is_some();
+            out.push(if key { "✓ api  已设置密钥（隐藏）/ API key set (hidden)" } else { "- api  未设置密钥；仅云端识别需要 / API key not set; only required for cloud transcription: COURSE2MD_ASR_API_KEY" }.into());
+            let provider = cfg
+                .defaults
+                .provider
+                .unwrap_or_else(crate::config::default_provider_hint);
+            let label = match provider {
+                AsrProvider::Coreml => "Apple native",
+                AsrProvider::Gpu => "llama.cpp GPU",
+                AsrProvider::Cpu => "llama.cpp CPU",
+                AsrProvider::Npu => "Intel NPU / OpenVINO",
+                AsrProvider::Api => "Cloud speech API",
+            };
+            out.push(format!(
+                "\n当前识别后端 / Configured speech backend: {provider} ({label})"
+            ));
+            out.push("字幕可用时无需语音识别；可用 --provider 覆盖后端 / Subtitles do not require speech recognition; override the backend with --provider.".into());
         }
-    } else if crate::wizard::is_first_run(true) {
-        out.push("- config        未配置（首次运行将进入向导）".into());
-    } else {
-        out.push("- config        未创建（可选，course2md config init 生成）".into());
-    }
-
-    let model_root = crate::config::cache_dir().join("models");
-    if crate::models::llama_ready(&model_root) {
-        check(
-            &mut out,
-            true,
-            "models",
-            &format!("  Qwen3 GGUF 就绪（{}）", model_root.display()),
-        );
-    } else {
-        out.push(format!(
-            "- models        未下载（gpu/cpu 首次运行会自动下载约 2.4GB 到 {}）",
-            cache_dir().display()
-        ));
-    }
-
-    // api key 提示
-    let has_key = cfg_loaded
-        .as_ref()
-        .map(|c| !c.asr_api.api_key.trim().is_empty())
-        .unwrap_or(false)
-        || crate::config::asr_api_key_from_env().is_some();
-    if !has_key {
-        out.push("- asr_api key   未配置（--provider api 时需要）".into());
-    }
-
-    // —— 默认后端结论 ——
-    let default = crate::config::default_provider_hint();
-    out.push(String::new());
-    out.push(format!(
-        "默认后端：{}（未指定 --provider 且配置文件无 provider 时，本机将使用 {}）",
-        default,
-        match default {
-            AsrProvider::Coreml => "Apple Neural Engine / CoreML",
-            AsrProvider::Gpu => "llama.cpp GPU（Metal/CUDA/Vulkan）",
-            AsrProvider::Npu => "Intel NPU (OpenVINO)",
-            AsrProvider::Cpu => "llama.cpp CPU",
-            AsrProvider::Api => "云端 STT",
+        Err(error) => {
+            failures += 1;
+            check(&mut out, false, "config", &format!("  {error:#}"));
         }
-    ));
-
-    for line in &out {
+    }
+    out.push("\n✓ 可用 / available · - 可选或未设置 / optional or unset · ! 需要检查 / needs attention · ✗ 必须修复 / must fix".into());
+    for line in out {
         println!("{line}");
     }
+    anyhow::ensure!(
+        failures == 0,
+        "发现 {failures} 项必需依赖或配置问题；请按上方提示修复 / Fix the {failures} required-tool or configuration issues listed above"
+    );
+    println!(
+        "基础检查通过；可选服务未进行联网测试 / Basic checks passed; optional services were not tested online."
+    );
     Ok(())
 }

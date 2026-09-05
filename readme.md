@@ -30,10 +30,10 @@ course2md ./lecture.mp4
 
 > **First Run Note**: The very first run (`course2md <URL or file>` with no config file yet and no `--provider` flag, in an interactive terminal) launches a setup wizard for speech recognition:
 > - **Local or cloud first**: **Local recognition** (recommended — offline, free, private; model download required) or **Cloud API** (no model download; needs an OpenAI-compatible endpoint API key, pay-as-you-go).
-> - **Local backends, matched to your machine**: the recommended option is listed first — `coreml` (Apple native) on macOS Apple Silicon, `gpu` when `llama-server` is installed, `npu` on Intel NPU machines, and `cpu` as the universal fallback.
-> - **`gpu` / `cpu` chosen**: confirms whether to download the ~2.4 GB model now, switch to the cloud API instead, or exit and download later via `course2md models download`.
+> - **Local backends, matched to your machine**: the recommended option is listed first — `coreml` (Apple native) on macOS Apple Silicon, `gpu` when `llama-server` is installed, `npu` on Intel NPU machines, and `cpu` when `llama-server` is installed.
+> - **`gpu` / `cpu` chosen**: reuses complete cached models; otherwise confirms whether to download the ~2.4 GB model now, switch to the cloud API instead, or exit and download later via `course2md models download`.
 > - **`coreml` chosen (macOS)**: the model is downloaded on first transcription (~1–2.3 GB to `~/Library/Caches/qwen3-speech/`); an interactive prompt lets you pick **qwen3-1.7b** (default — Qwen3-ASR 1.7B MLX, most accurate) / **qwen3-0.6b** (CoreML on ANE, power-sipping, ~1 GB) / **whisper** (large-v3-turbo, multilingual).
-> - **Cloud API chosen**: prompts for base URL (defaults to OpenRouter), API key (may be left empty and supplied later via the `COURSE2MD_ASR_API_KEY` environment variable), and model name.
+> - **Cloud API chosen**: prompts for base URL (defaults to OpenRouter), API key (hidden input; may be left empty if `COURSE2MD_ASR_API_KEY` is already set), and model name.
 > - The choice is saved to `~/.config/course2md/config.toml` — override it any time with `--provider` or by editing the file directly. Non-interactive environments (CI, pipes) skip the wizard and use the platform defaults.
 > - **Slow / blocked network?** Set a HuggingFace mirror first: `export HF_ENDPOINT=https://hf-mirror.com` (download errors print this hint too) — or skip local models entirely with `course2md <URL> --provider api`.
 > - Tip: pre-download the offline model any time with `course2md models download`.
@@ -393,7 +393,11 @@ course2md https://... --no-llm-hint
 
 ## Language
 
-CLI help (`--help`) is in English; runtime logs, completion summaries, and prompts are in Chinese.
+CLI help, setup prompts, common errors, and completion summaries display Chinese and English together. Commands, option names, and JSON field names stay unchanged. Run `course2md` without arguments for help; use `<command> --help` for a subcommand.
+
+The default output shows processing stages and saved notes. `-v` adds diagnostic logs and resource details; `-vv` adds debug logs. `--quiet` suppresses progress and summaries, even when `RUST_LOG` is set. `--json` disables prompts and emits NDJSON on stdout, including parsing/configuration failures; errors exit nonzero. `--help` and `--version` remain text output.
+
+The wizard is skipped for `--transcript-source subtitle`, `--quiet`, `--json`, and non-interactive input/output. Esc cancels setup without saving. API keys are hidden during entry. In scripts, `llm setup` requires missing settings through `--base-url`, `--api-key`, and `--model`; existing saved values can be reused. Connection-test failures keep the saved configuration and exit nonzero.
 
 ---
 
@@ -418,26 +422,19 @@ out/<platform>/<title>/<id>/
 
 ### Completion Summary Example
 
-Upon completion, `course2md` outputs a comprehensive summary detailing paths, metrics, elapsed time, and resident memory usage (RSS):
+On success, open one of the listed note files. Only generated files are listed; `-v` also shows peak memory and the local model directory.
 
 ```text
-──────── course2md done ────────
-Title: Introduction to Computer Science - Lecture 01
-Output dir: out/bilibili/Introduction to Computer Science - Lecture 01/BV1pb8o6yE8f
+✓ 笔记已生成 / Notes ready
+标题 / Title: Lecture
+输出目录 / Output: out/local/Lecture/lecture-ID
 
-Documents:
-  out/bilibili/Introduction to Computer Science - Lecture 01/BV1pb8o6yE8f/course.md
-  out/bilibili/Introduction to Computer Science - Lecture 01/BV1pb8o6yE8f/course.html
-Screenshots: out/bilibili/Introduction to Computer Science - Lecture 01/BV1pb8o6yE8f/frames/ (24 images)
-Audio: out/bilibili/Introduction to Computer Science - Lecture 01/BV1pb8o6yE8f/audio.wav
-Video: deleted (--keep-video)
-Timeline: out/bilibili/Introduction to Computer Science - Lecture 01/BV1pb8o6yE8f/timeline.jsonl
-
-Stats: 24 screenshots / 142 speech segments / 8930 chars
-Elapsed: 47s
-Peak memory: 1406 MB (course2md) + largest child 59 MB (llama-server/ffmpeg)
-Model dir: /Users/username/.cache/course2md/models
-──────────────────────────────
+打开以下文件查看笔记 / Open a file to read your notes:
+  ✓ out/local/Lecture/lecture-ID/course.md
+  ✓ out/local/Lecture/lecture-ID/course.html
+截图 / Slides: out/local/Lecture/lecture-ID/frames/ (24 images)
+统计 / Stats: 24 slides / 142 speech segments / 8930 characters
+耗时 / Elapsed: 47s
 ```
 
 ---
@@ -469,7 +466,7 @@ Model dir: /Users/username/.cache/course2md/models
 | `--no-llm-hint` | Suppress post-run LLM suggestion hint | Disabled |
 | `--resume` | Resume unfinished ASR chunks from the output dir | Disabled |
 | `--no-resume` | Discard existing checkpoints and redo everything | Disabled |
-| `-v, --verbose` | Increase logging verbosity (use `-vv` for debug; default logs omit timestamps, `-vv` restores the full RFC3339 format) | `info` |
+| `-v, --verbose` | Add diagnostic logs (`-v`) or debug details (`-vv`) | Stages and warnings |
 | `-q, --quiet` | Quiet mode (errors only) | Disabled |
 
 Display full help:

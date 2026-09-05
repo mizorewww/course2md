@@ -30,10 +30,10 @@ course2md ./lecture.mp4
 
 > **首次运行说明**：首次运行（配置文件尚不存在、未传 `--provider`、且处于交互式终端）会进入配置向导，引导设置语音转写方式：
 > - **先选本地还是云端**：**本地识别**（推荐——离线、免费、隐私；首次需下载模型）或**云端 API**（免下载模型；需 OpenAI 兼容端点 API key，按量计费）。
-> - **本地后端按本机能力列出**：推荐项置顶——macOS Apple Silicon 上为 `coreml`（Apple 原生），装有 `llama-server` 时可选 `gpu`，Intel NPU 机器可选 `npu`，`cpu` 通用兜底。
-> - **选 `gpu` / `cpu`**：会确认是否现在下载约 2.4GB 模型，也可改为云端 API，或退出后稍后运行 `course2md models download` 手动下载。
+> - **本地后端按本机能力列出**：推荐项置顶——macOS Apple Silicon 上为 `coreml`（Apple 原生），装有 `llama-server` 时可选 `gpu`，Intel NPU 机器可选 `npu`，装有 `llama-server` 时也可选 `cpu`。
+> - **选 `gpu` / `cpu`**：复用已完整下载的模型；缺少模型时确认是否现在下载约 2.4GB，也可改为云端 API，或退出后稍后运行 `course2md models download` 手动下载。
 > - **选 `coreml`（macOS）**：模型在首次识别时才下载（约 1~2.3GB，保存到 `~/Library/Caches/qwen3-speech/`），届时可交互选择 **qwen3-1.7b**（默认——Qwen3-ASR 1.7B MLX，中文/中英混合最准）/ **qwen3-0.6b**（CoreML 走 ANE，省电低功耗，约 1GB）/ **whisper**（large-v3-turbo，多语种）。
-> - **选云端 API**：依次引导填写 base URL（默认 OpenRouter）、API Key（可留空，稍后用 `COURSE2MD_ASR_API_KEY` 环境变量提供）与模型名。
+> - **选云端 API**：依次引导填写 base URL（默认 OpenRouter）、API Key（输入隐藏；已设置 `COURSE2MD_ASR_API_KEY` 时可留空）与模型名。
 > - 选择会写入 `~/.config/course2md/config.toml`——以后可用 `--provider` 临时切换，或直接编辑配置文件。非交互环境（CI、管道）不触发向导，走平台默认。
 > - **网络受限？** 先设 HuggingFace 镜像：`export HF_ENDPOINT=https://hf-mirror.com`（下载失败时错误信息也会提示）；或直接 `course2md <URL> --provider api` 免本地模型试用。
 > - 提示：随时可用 `course2md models download` 预先下载离线识别模型。
@@ -393,7 +393,11 @@ course2md https://... --no-llm-hint
 
 ## 语言
 
-命令行帮助（`--help`）为英文；运行日志、完成摘要与提示信息为中文。
+命令行帮助、设置向导、常见错误和完成摘要采用中英同屏提示。命令、参数名称和 JSON 字段保持不变。不带参数运行 `course2md` 查看入门帮助，使用 `<command> --help` 查看子命令。
+
+默认输出处理阶段和笔记位置；`-v` 增加诊断日志及资源详情，`-vv` 增加调试信息。`--quiet` 隐藏进度与完成摘要，即使设置了 `RUST_LOG` 也只报告错误。`--json` 禁用交互，在 stdout 输出 NDJSON，包括参数和配置错误；失败返回非零退出码。`--help` 和 `--version` 仍输出文本。
+
+`--transcript-source subtitle`、`--quiet`、`--json` 和非交互输入输出会跳过设置向导。Esc 取消且不保存配置，密钥输入隐藏。脚本调用 `llm setup` 时，通过 `--base-url`、`--api-key`、`--model` 补全缺失设置，也可复用已保存值。连接测试失败会保留配置，并返回非零退出码。
 
 ---
 
@@ -418,26 +422,19 @@ out/<平台>/<标题>/<编号>/
 
 ### 完成摘要输出示例
 
-任务完成后，终端会详细打印生成文稿、截图、音频、视频及时间线路径，汇总统计数据、总耗时以及进程常驻内存（RSS），清晰透明：
+任务完成后，终端会列出笔记路径、统计信息和耗时；使用 `-v` 可查看峰值内存和模型目录：
 
 ```text
-──────── course2md 完成 ────────
-标题: 计算机科学导论-第01讲
-输出目录: out/bilibili/计算机科学导论-第01讲/BV1pb8o6yE8f
+✓ 笔记已生成 / Notes ready
+标题 / Title: 课程
+输出目录 / Output: out/local/课程/lecture-ID
 
-文稿:
-  out/bilibili/计算机科学导论-第01讲/BV1pb8o6yE8f/course.md
-  out/bilibili/计算机科学导论-第01讲/BV1pb8o6yE8f/course.html
-截图: out/bilibili/计算机科学导论-第01讲/BV1pb8o6yE8f/frames/ (24 张)
-音频: out/bilibili/计算机科学导论-第01讲/BV1pb8o6yE8f/audio.wav
-视频: 已删除 (--keep-video 可保留)
-时间线: out/bilibili/计算机科学导论-第01讲/BV1pb8o6yE8f/timeline.jsonl
-
-统计: 24 张截图 / 142 段语音 / 8930 字
-耗时: 47s
-峰值内存: 1406 MB (course2md) + 最大子进程 59 MB (llama-server/ffmpeg)
-模型目录: /Users/username/.cache/course2md/models
-──────────────────────────────
+打开以下文件查看笔记 / Open a file to read your notes:
+  ✓ out/local/课程/lecture-ID/course.md
+  ✓ out/local/课程/lecture-ID/course.html
+截图 / Slides: out/local/课程/lecture-ID/frames/ (24 images)
+统计 / Stats: 24 slides / 142 speech segments / 8930 characters
+耗时 / Elapsed: 47s
 ```
 
 ---
@@ -469,7 +466,7 @@ out/<平台>/<标题>/<编号>/
 | `--no-llm-hint` | 本次运行关闭任务结束时的 LLM 开启提示 | 关闭 |
 | `--resume` | 从输出目录续跑未完成的 ASR chunk | 关闭 |
 | `--no-resume` | 丢弃既有进度，全部重算 | 关闭 |
-| `-v, --verbose` | 输出更详细的执行日志（可叠加 `-vv` 进入 debug；默认日志不带时间戳，`-vv` 恢复完整 RFC3339 格式） | 默认 info |
+| `-v, --verbose` | `-v` 显示诊断日志，`-vv` 显示调试细节 | 默认阶段和警告 |
 | `-q, --quiet` | 静默模式，只显示错误 | 关闭 |
 
 查看完整参数与子命令列表：

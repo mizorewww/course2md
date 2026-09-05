@@ -8,10 +8,16 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
         "error"
     } else if verbose >= 2 {
         "debug"
-    } else {
+    } else if verbose == 1 || json {
         "info"
+    } else {
+        "warn"
     };
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| default.into());
+    let filter = if quiet {
+        EnvFilter::new("error")
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| default.into())
+    };
     if json {
         // NDJSON 模式：stdout 只出 {"type":"log",...} 行（其余事件由各阶段显式 emit）
         use tracing_subscriber::prelude::*;
@@ -23,20 +29,74 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
         // 调试档：完整格式（时间 + target）
         tracing_subscriber::fmt()
             .with_env_filter(filter)
+            .with_writer(std::io::stderr)
             .with_target(true)
             .init();
     } else {
         // 默认档：个人 CLI 时间戳是纯噪音，compact 单行
         tracing_subscriber::fmt()
             .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .with_target(false)
             .without_time()
             .compact()
             .init();
     }
 }
 
-fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+fn main() -> std::process::ExitCode {
+    let args: Vec<_> = std::env::args_os().collect();
+    let json_requested = args
+        .iter()
+        .skip(1)
+        .take_while(|a| *a != "--")
+        .any(|a| a == "--json");
+    let cli = match Cli::try_parse_from(&args) {
+        Ok(cli) => cli,
+        Err(error) => {
+            if error.use_stderr() && json_requested {
+                progress::set_json_mode();
+                progress::emit(
+                    serde_json::json!({"type": "error", "message": format!("参数无效 / Invalid arguments: {error}")}),
+                );
+            } else {
+                if error.use_stderr() {
+                    eprintln!("参数无效，请参考下方帮助 / Invalid arguments; see the help below.");
+                }
+                let _ = error.print();
+            }
+            return std::process::ExitCode::from(error.exit_code() as u8);
+        }
+    };
+    let json = cli.opts.json
+        || matches!(
+            &cli.command,
+            Some(Command::Models {
+                cmd: ModelsCmd::Download { json: true, .. }
+            })
+        );
+    if json {
+        progress::set_json_mode();
+    }
+    progress::set_quiet(cli.opts.quiet);
+    match run(cli) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            let message = format!("{error:#}");
+            if json {
+                progress::emit(serde_json::json!({"type": "error", "message": message}));
+            } else {
+                eprintln!("错误 / Error: {message}");
+                eprintln!(
+                    "帮助 / Help: course2md --help · 环境检查 / Check environment: course2md doctor"
+                );
+            }
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Some(Command::Models { cmd }) => match cmd {
             ModelsCmd::Download { dir, json } => {
@@ -44,13 +104,23 @@ fn main() -> anyhow::Result<()> {
                     progress::set_json_mode();
                 }
                 init_logging(0, false, json);
-                let root = config::model_dir_from(dir.as_deref());
+                let file = settings::load()?;
+                let root =
+                    config::model_dir_from(dir.as_deref().or(file.defaults.model_dir.as_deref()));
                 tokio::runtime::Runtime::new()?.block_on(models::download_models(&root))?;
+                progress::emit(
+                    serde_json::json!({"type":"done", "model_dir": root.display().to_string()}),
+                );
+                if !json {
+                    println!("模型已就绪 / Models ready: {}", root.display());
+                }
                 Ok(())
             }
             ModelsCmd::List { dir } => {
                 init_logging(0, false, false);
-                let root = config::model_dir_from(dir.as_deref());
+                let file = settings::load()?;
+                let root =
+                    config::model_dir_from(dir.as_deref().or(file.defaults.model_dir.as_deref()));
                 models::list_models(&root);
                 Ok(())
             }
@@ -72,10 +142,12 @@ fn main() -> anyhow::Result<()> {
                         disable_hint,
                     )?;
                     let path = settings::save(&cfg)?;
-                    println!("已写入并开启：{}", path.display());
+                    println!("已保存并启用 / Saved and enabled: {}", path.display());
                     match llm::test_connection(&cfg.llm) {
-                        Ok(()) => println!("连接测试通过。"),
-                        Err(e) => eprintln!("连接测试未通过（已保存配置）：{e:#}"),
+                        Ok(()) => println!("连接测试通过 / Connection test passed."),
+                        Err(e) => anyhow::bail!(
+                            "配置已保存，但连接测试失败；请检查服务地址、密钥和模型 / Settings saved, but connection test failed; check endpoint, key and model: {e:#}"
+                        ),
                     }
                 }
                 LlmCmd::Status => llm::print_status(&settings::load()?),
@@ -83,7 +155,10 @@ fn main() -> anyhow::Result<()> {
                     let mut cfg = settings::load()?;
                     cfg.llm.enabled = false;
                     let path = settings::save(&cfg)?;
-                    println!("已关闭 LLM 润色（凭据保留）：{}", path.display());
+                    println!(
+                        "已关闭 AI 润色，凭据保留 / AI proofreading disabled; credentials kept: {}",
+                        path.display()
+                    );
                 }
             }
             Ok(())
@@ -98,14 +173,22 @@ fn main() -> anyhow::Result<()> {
                 ConfigCmd::Init { force } => {
                     let path = settings::config_path();
                     if path.is_file() && !force {
-                        anyhow::bail!("配置文件已存在：{}（--force 覆盖）", path.display());
+                        anyhow::bail!(
+                            "配置已存在 / Config already exists: {}. 使用 --force 替换 / Use --force to replace it.",
+                            path.display()
+                        );
                     }
                     if let Some(dir) = path.parent() {
                         std::fs::create_dir_all(dir)?;
                     }
                     std::fs::write(&path, settings::TEMPLATE)?;
-                    println!("已生成配置模板：{}", path.display());
-                    println!("按需取消注释并修改；命令行参数优先于此文件。");
+                    println!(
+                        "已生成配置模板 / Configuration template created: {}",
+                        path.display()
+                    );
+                    println!(
+                        "按需取消注释并修改；命令行参数优先。/ Uncomment and edit as needed; CLI options take priority."
+                    );
                 }
                 ConfigCmd::Show => settings::print_effective(&settings::load()?),
             }
@@ -115,7 +198,9 @@ fn main() -> anyhow::Result<()> {
             init_logging(0, false, false);
             let file = settings::load()?;
             if !file.llm.enabled {
-                anyhow::bail!("LLM 未启用：请先运行 course2md llm setup 配置 API Key");
+                anyhow::bail!(
+                    "AI 总结需要先配置服务 / Set up AI before summarizing: course2md llm setup"
+                );
             }
             let rt = tokio::runtime::Runtime::new()?;
             let mut targets: Vec<std::path::PathBuf> = vec![];
@@ -124,7 +209,7 @@ fn main() -> anyhow::Result<()> {
             }
             if targets.is_empty() {
                 anyhow::bail!(
-                    "未找到包含 timeline.jsonl 的输出目录：{}",
+                    "未找到笔记目录 / No note directories containing timeline.jsonl found: {}. 请先转换视频 / Convert a video first.",
                     args.dirs
                         .iter()
                         .map(|d| d.display().to_string())
@@ -165,27 +250,38 @@ fn main() -> anyhow::Result<()> {
             }
             let path = settings::save(&cfg)?;
             if cleared.is_empty() {
-                println!("没有需要清除的 API 配置：{}", path.display());
+                println!(
+                    "没有需要清除的 API 配置 / No saved API settings to clear: {}",
+                    path.display()
+                );
             } else {
                 println!(
-                    "已清除 API 配置（{}）：{}",
+                    "已清除 API 配置 / Cleared API settings ({}): {}",
                     cleared.join(", "),
                     path.display()
                 );
             }
             if !args.asr {
-                println!("提示：--asr 可同时清除云端 STT（[asr_api]）的 API Key。");
+                println!(
+                    "云端语音密钥单独保留；使用 remove --asr 可清除。/ To also clear the cloud speech key, run: course2md remove --asr"
+                );
             }
             Ok(())
         }
         None => {
             let source = match cli.source {
-                Some(s) if config::looks_like_source(&s) => s,
-                _ => {
-                    use clap::CommandFactory;
-                    let mut cmd = Cli::command();
-                    cmd.print_help()?;
-                    std::process::exit(2);
+                Some(source) => normalize_source(&source)?,
+                None => {
+                    anyhow::ensure!(
+                        std::env::args_os().len() == 1,
+                        "缺少视频来源 / Missing video source. 示例 / Example: course2md ./lecture.mp4"
+                    );
+                    println!(
+                        "course2md — 将视频转换为图文笔记 / Turn videos into illustrated notes\n"
+                    );
+                    println!("{}", course2md::cli::QUICK_START);
+                    println!("全部参数 / All options: course2md --help");
+                    return Ok(());
                 }
             };
             if cli.opts.json {
@@ -193,9 +289,17 @@ fn main() -> anyhow::Result<()> {
             }
             init_logging(cli.opts.verbose, cli.opts.quiet, cli.opts.json);
             let file = settings::load()?;
+            let initial = course2md::options::resolve(source.clone(), &cli.opts, &file)?;
+            initial.validate()?;
+            if initial.llm.enabled {
+                llm::validate(&initial.llm)?;
+            }
+            if !std::path::Path::new(&source).is_file() {
+                course2md::error::require_cmd("yt-dlp")?;
+            }
             // 首次使用向导：无配置文件 + 交互终端时引导配置并写盘（非交互原样返回）；
             // json 模式显式跳过——stdout 必须保持纯 NDJSON，不能混进交互提示
-            let file = if cli.opts.json {
+            let file = if cli.opts.json || cli.opts.quiet {
                 file
             } else {
                 wizard::maybe_run(&cli.opts, &file)?
@@ -203,15 +307,7 @@ fn main() -> anyhow::Result<()> {
             let cfg = course2md::options::resolve(source, &cli.opts, &file)?;
             // 全量预检在 pipeline::run 开头做（下载/抽帧/模型加载之前，毫秒级失败）
             tracing::info!(out = %cfg.out_dir.display(), provider = %cfg.provider, "start");
-            let result = tokio::runtime::Runtime::new()?.block_on(pipeline::run(&cfg));
-            if let Err(e) = &result {
-                // json 模式：传播前先把错误作为协议事件发出去（human 模式 emit 为 no-op）
-                progress::emit(serde_json::json!({
-                    "type": "error",
-                    "message": format!("{e:#}"),
-                }));
-            }
-            result
+            tokio::runtime::Runtime::new()?.block_on(pipeline::run(&cfg))
         }
     }
 }
@@ -252,7 +348,7 @@ fn summarize_dir(
     let html_path = dir.join("course.html");
     anyhow::ensure!(
         timeline_path.is_file(),
-        "缺少 {}（不是有效的 course2md 输出目录？）",
+        "缺少笔记时间线 / Missing note timeline: {}. 请指定转换生成的目录 / Use a converted note directory.",
         timeline_path.display()
     );
     let mut events: Vec<course2md::timeline::TranscriptEvent> = vec![];
@@ -263,7 +359,7 @@ fn summarize_dir(
     }
     anyhow::ensure!(
         !events.is_empty(),
-        "{} 中没有语音事件",
+        "{} 中没有可总结的文字 / No transcript text to summarize",
         timeline_path.display()
     );
 
@@ -273,7 +369,10 @@ fn summarize_dir(
         let has_html = html_path.is_file()
             && course2md::summarize::contains_html_summary(&std::fs::read_to_string(&html_path)?);
         if has_md && has_html {
-            println!("跳过（已有总结，--force 可覆盖）：{}", dir.display());
+            println!(
+                "已有总结，跳过 / Summary exists; skipped: {}. 使用 --force 替换 / Use --force to replace.",
+                dir.display()
+            );
             return Ok(());
         }
     }
@@ -327,13 +426,48 @@ fn summarize_dir(
             &target,
             course2md::summarize::render_standalone_md(&title, &sm),
         )?;
-        println!("已导出总结：{}", target.display());
+        println!("已导出总结 / Summary exported: {}", target.display());
     }
     println!(
-        "已写入总结（要点 {} 条 / 大纲 {} 节）：{}",
+        "已写入总结 / Summary saved ({} key points / {} outline sections): {}",
         sm.key_points.len(),
         sm.outline.len(),
         dir.display()
     );
     Ok(())
+}
+
+/// Accept existing files and normalize URLs pasted without a scheme.
+fn normalize_source(source: &str) -> anyhow::Result<String> {
+    if std::path::Path::new(source).is_file() {
+        return Ok(source.to_owned());
+    }
+    let source = source.trim();
+    if source.starts_with("http://") || source.starts_with("https://") {
+        let url = url::Url::parse(source).map_err(|_| {
+            anyhow::anyhow!(
+                "链接无效；请提供完整的视频链接 / Invalid URL; provide a complete video URL"
+            )
+        })?;
+        anyhow::ensure!(
+            url.host_str().is_some(),
+            "链接缺少主机名 / URL is missing a host"
+        );
+        return Ok(source.to_owned());
+    }
+    if [
+        "bilibili.com/",
+        "www.bilibili.com/",
+        "youtube.com/",
+        "www.youtube.com/",
+        "youtu.be/",
+    ]
+    .iter()
+    .any(|host| source.starts_with(host))
+    {
+        return Ok(format!("https://{source}"));
+    }
+    anyhow::bail!(
+        "找不到视频文件或无法识别链接 / Video file not found or URL not recognized: {source}\n请检查路径；含空格的路径需加引号 / Check the path and quote paths containing spaces."
+    )
 }

@@ -63,7 +63,7 @@ async fn extract_frame(media: &Path, t: f64, dest: &Path) -> Result<()> {
 async fn sample_timestamps(cfg: &PipelineConfig, media: &Path) -> Result<Vec<(f64, f64)>> {
     let info = media::probe_video(media)
         .await
-        .context("ffprobe 无法读取视频宽高")?;
+        .context("无法读取视频尺寸，请检查文件是否可播放 / Could not read video dimensions; check that the file plays correctly")?;
     // sample_interval 下限 0.2s（即采样率上限 5fps）；配置被收紧时必须告知用户
     let interval = if cfg.sample_interval < 0.2 {
         tracing::warn!(
@@ -98,7 +98,7 @@ async fn sample_timestamps(cfg: &PipelineConfig, media: &Path) -> Result<Vec<(f6
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .context("启动 ffmpeg 采样失败")?;
+        .context("无法读取视频画面 / Could not start ffmpeg frame sampling")?;
     let mut stdout = child.stdout.take().context("ffmpeg stdout")?;
     // stderr 必须全程 drain：piped 而不读的话，写满 64KB 管道缓冲会死锁。
     // 缓存尾部供失败诊断，debug 时逐行转发。
@@ -208,7 +208,7 @@ async fn sample_timestamps(cfg: &PipelineConfig, media: &Path) -> Result<Vec<(f6
             .rev()
             .collect::<Vec<_>>()
             .join("\n");
-        anyhow::bail!("ffmpeg 采样进程异常退出（{status}）：{tail}");
+        anyhow::bail!("读取视频画面失败 / Frame sampling failed ({status}): {tail}");
     }
     tracing::info!(slides = times.len(), frames = i, mode = %cfg.slide_mode, "ssim scan done");
     Ok(times)
@@ -245,7 +245,9 @@ pub async fn run(cfg: &PipelineConfig, media: &Path) -> Result<Vec<FrameEvent>> 
                 pb.inc(1);
                 results.push(item);
             }
-            Some(Err(e)) => return Err(e).context("抽帧任务异常终止"),
+            Some(Err(e)) => {
+                return Err(e).context("截图任务异常终止 / Slide extraction stopped unexpectedly");
+            }
             None => break,
         }
     }
@@ -254,7 +256,12 @@ pub async fn run(cfg: &PipelineConfig, media: &Path) -> Result<Vec<FrameEvent>> 
     let mut frames = Vec::with_capacity(results.len());
     for (i, r) in results {
         let (onset_t, _) = times[i];
-        r.with_context(|| format!("抽取第 {} 帧（t={onset_t:.1}s）失败", i + 1))?;
+        r.with_context(|| {
+            format!(
+                "无法提取截图 / Could not extract slide {} (t={onset_t:.1}s)",
+                i + 1
+            )
+        })?;
         let name = format!("slide_{:04}.jpg", i + 1);
         frames.push(FrameEvent {
             t: onset_t,

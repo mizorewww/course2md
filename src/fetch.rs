@@ -33,7 +33,8 @@ pub async fn fetch_meta(url: &str) -> Result<VideoMeta> {
         .args(["-J", "--no-warnings", "--no-playlist"])
         .arg(url))
     .await?;
-    let meta: VideoMeta = serde_json::from_str(&out).context("解析 yt-dlp 元数据 JSON 失败")?;
+    let meta: VideoMeta = serde_json::from_str(&out)
+        .context("无法读取视频信息 / Could not parse video metadata from yt-dlp")?;
     Ok(meta)
 }
 
@@ -77,7 +78,7 @@ pub async fn fetch_subtitle(url: &str, out_dir: &Path) -> Result<Option<Subtitle
         // 命令失败（yt-dlp 缺失/网络错误）：记 warn（错误内含 stderr 尾部摘要）后继续尝试 auto；
         // 命令成功但无产物（平台无字幕，yt-dlp 打 warning 后正常退出）不算错误
         if let Err(e) = run(&mut cmd).await {
-            tracing::warn!(auto, error = %e, "yt-dlp 字幕抓取失败");
+            tracing::warn!(auto, error = %e, "字幕获取失败，将尝试其他字幕 / Subtitle fetch failed; trying other captions");
             continue;
         }
         if let Some(path) = crate::subtitle::pick_subtitle_file(&dir) {
@@ -106,7 +107,7 @@ pub async fn download(url: &str, dest: &Path, max_height: u32, verbose: bool) ->
     let mut last_err = None;
     for attempt in 0..3 {
         if attempt > 0 {
-            tracing::warn!(attempt, "retry yt-dlp");
+            tracing::warn!(attempt, "视频下载失败，正在重试 / Retrying video download");
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
         let mut cmd = Command::new("yt-dlp");
@@ -120,6 +121,7 @@ pub async fn download(url: &str, dest: &Path, max_height: u32, verbose: bool) ->
             "mp4",
             "--no-playlist",
             "--no-part",
+            "--no-progress",
             "-o",
         ])
         .arg(&tmp)
@@ -143,7 +145,7 @@ pub async fn download(url: &str, dest: &Path, max_height: u32, verbose: bool) ->
                     tmp
                 } else {
                     anyhow::bail!(
-                        "yt-dlp 结束但未找到产物（期望 {} 或 {}）",
+                        "未找到下载的视频 / Downloaded video missing (expected {} or {})",
                         tmp.display(),
                         merged.display()
                     );
@@ -154,7 +156,7 @@ pub async fn download(url: &str, dest: &Path, max_height: u32, verbose: bool) ->
             Err(e) => last_err = Some(e),
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("yt-dlp 下载失败")))
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("视频下载失败 / Video download failed")))
 }
 
 async fn run(cmd: &mut Command) -> Result<String> {
@@ -163,17 +165,9 @@ async fn run(cmd: &mut Command) -> Result<String> {
 }
 
 async fn run_status(cmd: &mut Command) -> Result<()> {
-    let status = cmd
-        .kill_on_drop(true)
-        .status()
-        .await
-        .context("启动子进程失败")?;
-    if !status.success() {
-        anyhow::bail!(crate::error::cmd_error(
-            "yt-dlp",
-            status.code(),
-            "详见上方 yt-dlp 输出"
-        ));
+    let out = crate::media::run_cmd(cmd, "yt-dlp").await?;
+    if !out.stderr.is_empty() {
+        tracing::debug!("{}", String::from_utf8_lossy(&out.stderr).trim());
     }
     Ok(())
 }

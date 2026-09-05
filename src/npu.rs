@@ -133,7 +133,9 @@ server.serve_forever()
 
 pub(crate) fn npu_model_alias(raw: &str) -> Option<&'static str> {
     Some(match raw.trim().to_ascii_lowercase().as_str() {
-        "whisper" | "turbo" | "whisper-turbo" | "whisper-large" | "large" => "OpenVINO/whisper-large-v3-turbo-int8-ov",
+        "whisper" | "turbo" | "whisper-turbo" | "whisper-large" | "large" => {
+            "OpenVINO/whisper-large-v3-turbo-int8-ov"
+        }
         "tiny" | "whisper-tiny" => "OpenVINO/whisper-tiny-fp16-ov",
         "base" | "whisper-base" => "OpenVINO/whisper-base-fp16-ov",
         "small" | "whisper-small" => "OpenVINO/whisper-small-fp16-ov",
@@ -160,7 +162,9 @@ pub fn run_npu(
     let segs = crate::asr::ffmpeg_vad(wav, max_speech as f32)?;
     tracing::info!(segs = segs.len(), "npu vad");
     if segs.is_empty() {
-        tracing::warn!("未检测到语音（VAD 结果为空），跳过识别");
+        tracing::warn!(
+            "未检测到语音，将仅保留截图 / No speech detected; keeping slides without a transcript"
+        );
         return Ok(vec![]);
     }
 
@@ -198,9 +202,7 @@ pub fn run_npu(
     );
 
     crate::progress::stage("model-load", "done");
-    let client = ureq::AgentBuilder::new()
-        .timeout(NPU_HTTP_TIMEOUT)
-        .build();
+    let client = ureq::AgentBuilder::new().timeout(NPU_HTTP_TIMEOUT).build();
 
     let r = crate::asr::run_chunks(wav, &segs, cp, tmp.path(), "npu asr", |_i, _seg, chunk| {
         let req_body = serde_json::json!({
@@ -209,12 +211,12 @@ pub fn run_npu(
         let resp = client
             .post(&format!("{base}/audio/transcriptions"))
             .send_json(req_body)
-            .map_err(|e| anyhow::anyhow!("NPU 转写请求失败: {e}"))?;
-        let v: serde_json::Value = resp
-            .into_json()
-            .map_err(|e| anyhow::anyhow!("NPU 响应解析失败: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("NPU 转写请求失败，请检查网络和服务配置 / Request failed; check your connection and service settings: {e}"))?;
+        let v: serde_json::Value = resp.into_json().map_err(|e| {
+            anyhow::anyhow!("NPU 无法解析服务响应 / Could not parse the service response: {e}")
+        })?;
         if let Some(e) = v.get("error").and_then(|e| e.as_str()) {
-            anyhow::bail!("NPU worker 报错: {e}");
+            anyhow::bail!("NPU 识别失败 / NPU transcription failed: {e}");
         }
         let text = v["text"].as_str().unwrap_or("").trim().to_string();
         let sanitized = crate::asr::sanitize_qwen_text(&text);
@@ -243,7 +245,9 @@ pub fn run_npu(
         if tail.is_empty() {
             e
         } else {
-            e.context(format!("NPU worker stderr 尾部：\n{tail}"))
+            e.context(format!(
+                "NPU 识别错误详情 / NPU transcription error details:\n{tail}"
+            ))
         }
     })?;
     tracing::info!(
@@ -286,7 +290,9 @@ fn spawn_npu_worker(script: &Path, model: &str, port: u16) -> Result<crate::runt
     } else if crate::runtime::which("python3").is_some() {
         Command::new("python3")
     } else {
-        anyhow::bail!("未找到 uv 或 python3，无法启动 Intel NPU 识别后端。请先安装 uv 或 python3");
+        anyhow::bail!(
+            "未找到 Python/uv，无法启动 NPU 识别 / Install Python or uv to use Intel NPU transcription"
+        );
     };
 
     #[cfg(unix)]
@@ -315,8 +321,14 @@ mod tests {
     /// 无 python3 的环境下跳过。
     #[test]
     fn custom_repository_case_is_preserved_and_aliases_are_shared() {
-        assert_eq!(resolve_npu_model(Some("MyOrg/MyModel-INT8")), "MyOrg/MyModel-INT8");
-        assert_eq!(resolve_npu_model(Some("WHISPER-LARGE")), resolve_npu_model(Some("whisper")));
+        assert_eq!(
+            resolve_npu_model(Some("MyOrg/MyModel-INT8")),
+            "MyOrg/MyModel-INT8"
+        );
+        assert_eq!(
+            resolve_npu_model(Some("WHISPER-LARGE")),
+            resolve_npu_model(Some("whisper"))
+        );
         assert!(npu_model_alias("whisper-large").is_some());
     }
 

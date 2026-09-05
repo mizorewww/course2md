@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
+    emit_commit_hash();
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let skip = std::env::var_os("COURSE2MD_NO_APPLE").is_some();
@@ -34,16 +35,12 @@ fn main() {
     // mlx-swift Cmlx 里的 .metal shader，产不出 default.metallib，
     // CoreML 推理运行时必挂（CI macos-26 默认 Xcode 较老时踩中）。
     // 工具链不支持 swiftbuild 时回退默认构建系统。
-    let ok = run(Command::new("swift").args([
-        "build",
-        "-c",
-        "release",
-        "--build-system",
-        "swiftbuild",
-    ])
-    .current_dir(&pkg)) || run(Command::new("swift")
-        .args(["build", "-c", "release"])
-        .current_dir(&pkg));
+    let ok = run(Command::new("swift")
+        .args(["build", "-c", "release", "--build-system", "swiftbuild"])
+        .current_dir(&pkg))
+        || run(Command::new("swift")
+            .args(["build", "-c", "release"])
+            .current_dir(&pkg));
     if !ok {
         println!(
             "cargo:warning=swift build 失败（见上方输出），跳过 Apple 原生模块；coreml 后端不可用"
@@ -282,4 +279,39 @@ fn find_file_recursive(dir: &Path, name: &str, depth: u32) -> Option<PathBuf> {
     }
     dirs.into_iter()
         .find_map(|d| find_file_recursive(&d, name, depth - 1))
+}
+
+/// Embed build provenance, including when this checkout is a linked worktree.
+fn emit_commit_hash() {
+    let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let git = |args: &[&str]| -> Option<String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let value = String::from_utf8(output.stdout).ok()?.trim().to_owned();
+        (!value.is_empty()).then_some(value)
+    };
+    let mut commit = None;
+    // Source archives have no .git; do not accidentally use an enclosing repository.
+    if root.join(".git").exists() {
+        println!("cargo:rerun-if-changed={}", root.join(".git").display());
+        for name in ["HEAD", "refs", "packed-refs"] {
+            if let Some(path) = git(&["rev-parse", "--git-path", name]) {
+                let path = root.join(path);
+                if path.exists() {
+                    println!("cargo:rerun-if-changed={}", path.display());
+                }
+            }
+        }
+        commit = git(&["rev-parse", "--short=12", "HEAD"]);
+    }
+    println!(
+        "cargo:rustc-env=COURSE2MD_COMMIT_HASH={}",
+        commit.as_deref().unwrap_or("unknown")
+    );
 }

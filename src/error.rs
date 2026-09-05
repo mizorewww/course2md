@@ -11,13 +11,16 @@ pub fn cmd_error(program: &str, code: Option<i32>, stderr: &str) -> anyhow::Erro
         .rev()
         .collect::<Vec<_>>()
         .join("\n");
-    anyhow::anyhow!("{program} failed (code={code:?}):\n{tail}")
+    anyhow::anyhow!("{program} 运行失败 / failed (code={code:?}):\n{tail}")
 }
 
 /// 校验外部工具存在。
 pub fn require_cmd(cmd: &str) -> Result<()> {
     if crate::runtime::which(cmd).is_none() {
-        anyhow::bail!("未找到 {cmd}，请先安装。{}", install_hint(cmd));
+        anyhow::bail!(
+            "未找到 {cmd}，请先安装 / {cmd} is not installed. {}",
+            install_hint(cmd)
+        );
     }
     Ok(())
 }

@@ -20,7 +20,10 @@ pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
             // 外部数据不信任：非有限时间戳的 cue 直接丢弃，
             // 避免 NaN/inf 污染下游排序与二分查找
             if !start.is_finite() || !end.is_finite() || end <= start {
-                tracing::warn!(line, "字幕 cue 时间区间无效，跳过");
+                tracing::warn!(
+                    line,
+                    "字幕时间区间无效，已跳过 / Skipped subtitle with invalid timestamps"
+                );
                 continue;
             }
             let mut text_parts: Vec<String> = vec![];
@@ -35,7 +38,9 @@ pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
             // 滚动字幕去重：相邻 cue 文本相同则只保留首个（并延长时长）
             if !text.is_empty() {
                 match out.last_mut() {
-                    Some(prev) if prev.text == text && start <= prev.end => prev.end = end.max(prev.end),
+                    Some(prev) if prev.text == text && start <= prev.end => {
+                        prev.end = end.max(prev.end)
+                    }
                     _ => out.push(TranscriptEvent {
                         start,
                         end,
@@ -169,7 +174,9 @@ mod tests {
 
     #[test]
     fn repeated_words_after_a_pause_remain_separate() {
-        let events = parse_subtitle("1\n00:00:01,000 --> 00:00:02,000\nhello\n\n2\n00:00:10,000 --> 00:00:11,000\nhello\n");
+        let events = parse_subtitle(
+            "1\n00:00:01,000 --> 00:00:02,000\nhello\n\n2\n00:00:10,000 --> 00:00:11,000\nhello\n",
+        );
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].end, 2.0);
         assert!(parse_ts("00:00:01.bad").is_none());

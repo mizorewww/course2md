@@ -174,7 +174,12 @@ fn summarize_text(s: &LlmSettings, transcript: &str) -> Result<Summary> {
         &user_prompt(transcript),
     )?;
     // 报错须打印刚失败的 repair 内容，而不是第一次的 content
-    parse_summary(&repair).with_context(|| format!("LLM 总结响应解析失败: {:.200}", repair))
+    parse_summary(&repair).with_context(|| {
+        format!(
+            "LLM 总结无法解析服务响应 / Could not parse the service response: {:.200}",
+            repair
+        )
+    })
 }
 
 fn split_chunks(events: &[TranscriptEvent], char_limit: usize) -> Vec<Vec<TranscriptEvent>> {
@@ -249,7 +254,7 @@ pub async fn summarize(
         for (off, h) in handles.into_iter().enumerate() {
             let idx = base + off;
             let sm = h.await.context("总结线程 join 失败")?.unwrap_or_else(|e| {
-                tracing::warn!("分段总结失败（chunk {idx}）：{e:#}");
+                tracing::warn!("部分内容总结失败 / Could not summarize section {idx}: {e:#}");
                 Summary {
                     tldr: String::new(),
                     key_points: vec![],
@@ -419,7 +424,9 @@ fn replace_sentinel_block(doc: &str, block: &str) -> String {
         return doc.to_string();
     };
     let Some(end_rel) = doc[start..].find(SUMMARY_END) else {
-        tracing::warn!("发现总结起始哨兵但缺少闭合哨兵，保守不替换");
+        tracing::warn!(
+            "已有总结的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept"
+        );
         return doc.to_string();
     };
     let end = start + end_rel + SUMMARY_END.len();
@@ -469,7 +476,9 @@ fn strip_sentinel_block(doc: &str) -> String {
         return doc.to_string();
     };
     let Some(end_rel) = doc[start..].find(SUMMARY_END) else {
-        tracing::warn!("发现总结起始哨兵但缺少闭合哨兵，保守不删除");
+        tracing::warn!(
+            "已有总结的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept"
+        );
         return doc.to_string();
     };
     let end = start + end_rel + SUMMARY_END.len();

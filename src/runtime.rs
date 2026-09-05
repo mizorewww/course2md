@@ -19,7 +19,9 @@ pub struct ManagedChild {
 
 impl ManagedChild {
     pub fn spawn(name: &'static str, cmd: &mut Command) -> Result<Self> {
-        let child = cmd.spawn().with_context(|| format!("启动 {name} 失败"))?;
+        let child = cmd
+            .spawn()
+            .with_context(|| format!("无法启动 {name} / Could not start {name}"))?;
         Ok(Self { child, name })
     }
 
@@ -113,12 +115,16 @@ pub fn wait_ready(
     loop {
         if let Some(st) = child.try_wait() {
             anyhow::bail!(
-                "{} 启动过程中已退出（{st}），详见其 stderr 输出",
+                "{} 启动失败 / exited during startup ({st}); see error details",
                 child.name()
             );
         }
         if t0.elapsed() > timeout {
-            anyhow::bail!("{} 启动超时（{:.0}s）", child.name(), timeout.as_secs_f64());
+            anyhow::bail!(
+                "{} 启动超时 / startup timed out ({:.0}s)",
+                child.name(),
+                timeout.as_secs_f64()
+            );
         }
         if let Ok(resp) = ureq::get(&url).timeout(Duration::from_secs(2)).call() {
             match expect_body {
@@ -174,7 +180,7 @@ pub fn lock_file(path: &Path) -> Result<std::fs::File> {
         .open(path)?;
     file.try_lock().with_context(|| {
         format!(
-            "目录正被另一个任务使用（{}），请等待该任务结束",
+            "目录正被另一任务使用 / Directory is in use: {}. 请等待任务结束 / Wait for it to finish.",
             path.display()
         )
     })?;
@@ -199,7 +205,7 @@ impl TempWorkDir {
         let dir = tempfile::Builder::new()
             .prefix(&format!("course2md-{tag}-"))
             .tempdir()
-            .context("创建临时工作目录")?;
+            .context("无法创建临时工作目录 / Could not create a temporary working directory")?;
         Ok(Self { dir })
     }
 

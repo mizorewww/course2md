@@ -85,7 +85,7 @@ fn file_complete(path: &Path) -> bool {
 pub fn ensure_llama(root: &Path) -> Result<LlamaAsr> {
     if !llama_ready(root) {
         anyhow::bail!(
-            "缺少识别模型，请运行：course2md models download\n目录：{}",
+            "缺少识别模型 / Speech models missing. 运行 / Run: course2md models download\n目录 / Directory: {}",
             root.display()
         );
     }
@@ -95,11 +95,12 @@ pub fn ensure_llama(root: &Path) -> Result<LlamaAsr> {
 /// 没有模型就下载；下载过程请保持进程运行。
 pub async fn ensure_llama_or_download(root: &Path) -> Result<LlamaAsr> {
     if !llama_ready(root) {
-        // eprintln 而非 tracing::warn：-q 下 warn 被静默，2.4GB 下载前必须可见
-        eprintln!(
-            "识别模型未就绪，正在下载（约 2.4GB）到 {}，请不要退出。",
-            root.display()
-        );
+        if !crate::progress::is_json() && !crate::progress::is_quiet() {
+            eprintln!(
+                "正在下载识别模型（约 2.4GB）/ Downloading speech models (~2.4GB): {}",
+                root.display()
+            );
+        }
         download_models(root).await?;
     }
     Ok(llama_paths(root))
@@ -109,9 +110,9 @@ pub async fn ensure_llama_or_download(root: &Path) -> Result<LlamaAsr> {
 /// 不稳定是常见失败原因）；已设镜像则回显当前端点便于排查。
 fn mirror_hint() -> String {
     match current_hf_endpoint() {
-        Some(ep) => format!("下载失败（当前 HF_ENDPOINT={ep}）"),
-        None => "下载失败：如直连 Hugging Face 不稳定，可设镜像环境变量 \
-                 HF_ENDPOINT=https://hf-mirror.com 后重试"
+        Some(ep) => format!("下载失败 / Download failed (HF_ENDPOINT={ep})"),
+        None => "下载失败，请检查网络或配置镜像 / Download failed; check your connection or configure a mirror: \
+                 HF_ENDPOINT=https://hf-mirror.com"
             .into(),
     }
 }
@@ -165,7 +166,7 @@ async fn download_file(url: &str, dest: &Path, label: &str) -> Result<()> {
         // 校验不过的残留文件（截断/损坏）直接移除，避免"发现坏了却重下不了"
         tracing::warn!(
             label,
-            "existing file failed integrity check, re-downloading"
+            "模型文件不完整，正在重新下载 / Model file incomplete; downloading again"
         );
         let _ = fs::remove_file(dest);
         let _ = fs::remove_file(dest.with_extension("manifest.json"));
@@ -195,7 +196,7 @@ async fn download_file(url: &str, dest: &Path, label: &str) -> Result<()> {
                     attempt,
                     of = DOWNLOAD_ATTEMPTS,
                     ?wait,
-                    "下载失败，退避后重试"
+                    "下载失败，稍后重试 / Download failed; retrying shortly"
                 );
                 std::thread::sleep(wait);
             }
@@ -210,16 +211,16 @@ async fn download_file(url: &str, dest: &Path, label: &str) -> Result<()> {
                     tracing::warn!(
                         label = %label,
                         part = %tmp.display(),
-                        "下载失败（{e:#}），已保留断点文件（重跑将重新下载）"
+                        "下载失败，重试将从头下载 / Download failed; retrying starts a fresh download: {e:#}"
                     );
                     last_err = Some(e);
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("下载失败")))
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("模型下载失败 / Model download failed")))
     })
     .await
-    .context("下载线程失败")??;
+    .context("模型下载任务失败 / Model download task failed")??;
     crate::progress::stage(&stage, "done");
     Ok(())
 }
@@ -244,9 +245,11 @@ fn download_once(
             if is_permanent_status(code) {
                 return Err(anyhow::anyhow!(PermanentHttp(msg)));
             }
-            return Err(anyhow::anyhow!("请求失败: {msg}"));
+            return Err(anyhow::anyhow!(
+                "模型请求失败 / Model request failed: {msg}"
+            ));
         }
-        Err(e) => return Err(anyhow::Error::new(e).context("请求失败")),
+        Err(e) => return Err(anyhow::Error::new(e).context("模型请求失败 / Model request failed")),
     };
     let total: u64 = resp
         .header("content-length")
@@ -274,7 +277,9 @@ fn download_once(
     // 不完整时保留 .part（断点位置见上方日志）
     if total > 0 && done != total {
         pb.finish();
-        anyhow::bail!("下载不完整：期望 {total} 字节，实际收到 {done}（请重试）");
+        anyhow::bail!(
+            "下载不完整，请重试 / Incomplete download; retry (expected {total} bytes, received {done})"
+        );
     }
     fs::rename(tmp, dest)?;
     // manifest 记录 authoritative Content-Length，供后续启动校验（原子写，防半截 JSON）
@@ -291,16 +296,36 @@ fn download_once(
 
 pub fn list_models(root: &Path) {
     let p = llama_paths(root);
-    println!("模型目录：{}", root.display());
+    println!(
+        "gpu/cpu 模型目录 / gpu/cpu model directory: {}",
+        root.display()
+    );
     println!(
         "  model  {} {}",
-        if p.model.is_file() { "OK" } else { "缺" },
+        if file_complete(&p.model) {
+            "就绪 / Ready"
+        } else {
+            "缺失或不完整 / Missing or incomplete"
+        },
         p.model.display()
     );
     println!(
         "  mmproj {} {}",
-        if p.mmproj.is_file() { "OK" } else { "缺" },
+        if file_complete(&p.mmproj) {
+            "就绪 / Ready"
+        } else {
+            "缺失或不完整 / Missing or incomplete"
+        },
         p.mmproj.display()
+    );
+    if !llama_ready(root) {
+        println!(
+            "下载或修复 / Download or repair: course2md models download --dir {:?}",
+            root
+        );
+    }
+    println!(
+        "Apple 和 NPU 模型由各自后端管理 / Apple and NPU models are managed by their backends."
     );
 }
 

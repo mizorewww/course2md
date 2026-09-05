@@ -1,30 +1,38 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+pub const QUICK_START: &str = "快速开始 / Quick start:
+  course2md ./lecture.mp4
+  course2md https://www.youtube.com/watch?v=VIDEO_ID
+  course2md ./lecture.mp4 -o ./notes
+
+转写方式 / Transcripts:
+  默认优先使用平台字幕，无字幕时使用语音识别。
+  Uses platform subtitles first, then speech recognition when needed.
+  --transcript-source subtitle  仅使用字幕 / Subtitles only
+  --transcript-source asr       强制语音识别 / Speech recognition only
+
+下一步 / Next steps:
+  course2md doctor          检查依赖与配置 / Check dependencies and settings
+  course2md config init     生成配置模板 / Create a configuration template
+  course2md llm setup       配置可选的 AI 润色 / Set up optional AI proofreading
+  course2md summarize ./notes  为已有笔记生成总结 / Summarize existing notes
+
+交互终端首次转换会引导配置；脚本请显式传入所需参数。
+First conversion in a terminal offers setup; scripts should pass options explicitly.
+使用 <command> --help 查看子命令帮助 / Use <command> --help for details.
+";
+
 #[derive(Parser)]
 #[command(
     name = "course2md",
-    version,
-    about = "Turn course videos into illustrated notes (markdown/HTML)",
-    arg_required_else_help = true,
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("COURSE2MD_COMMIT_HASH"), ")"),
+    about = "将课程视频转换为图文笔记 / Turn course videos into illustrated notes",
     args_conflicts_with_subcommands = true,
-    after_help = "\
-Examples:
-  course2md https://www.bilibili.com/video/BV1pb8o6yE8f
-  course2md https://youtu.be/dQw4w9WgXcQ
-  course2md ./lecture.mp4
-  course2md models download
-  course2md doctor      # 体检环境（依赖/后端/配置/模型缓存）
-  course2md config init   # 生成配置文件模板
-  course2md llm setup     # 配置 LLM 字幕润色
-  course2md summarize <输出目录|输出根>  # 为已有输出生成视频总结（支持批量）
-  course2md remove                    # 清除 LLM/STT 的 API 配置（提交代码前执行）
-
-首次运行（无配置文件且处于交互终端）会进入向导，引导选择转写方式。
-"
+    after_help = QUICK_START
 )]
 pub struct Cli {
-    /// Video URL or local file
+    /// 视频链接或本地文件 / Video URL or local file
     pub source: Option<String>,
 
     #[command(flatten)]
@@ -36,208 +44,244 @@ pub struct Cli {
 
 #[derive(Args, Clone, Debug, Default)]
 pub struct RunOpts {
-    /// Output root dir (files go to <platform>/<title>/<id>/)
+    /// 输出根目录（按平台/标题/ID 建目录）/ Output root (platform/title/ID)
     #[arg(short, long)]
+    #[arg(help_heading = "输入与输出 / Input and output")]
     pub out: Option<PathBuf>,
 
-    /// Frame-similarity threshold; higher = more sensitive = more screenshots
+    /// 画面相似度阈值 (0,1]，越高截图越多 / Similarity threshold; higher captures more slides
     #[arg(long)]
+    #[arg(help_heading = "截图 / Slides")]
     pub similarity: Option<f64>,
 
-    /// Check the frame every N seconds
+    /// 画面采样间隔（秒）/ Frame sampling interval in seconds
     #[arg(long)]
+    #[arg(help_heading = "截图 / Slides")]
     pub sample_interval: Option<f64>,
 
-    /// Minimum seconds between two screenshots
+    /// 截图最短间隔（秒）/ Minimum seconds between screenshots
     #[arg(long)]
+    #[arg(help_heading = "截图 / Slides")]
     pub cooldown: Option<f64>,
 
-    /// Max video height to download (1080 recommended for slides/code)
+    /// 下载视频最大高度 / Maximum download height (1080 recommended)
     #[arg(long)]
+    #[arg(help_heading = "截图 / Slides")]
     pub max_height: Option<u32>,
 
-    /// Slide emission mode: first | stable (stable waits for animation to settle)
+    /// 截图时机：first 立即，stable 等画面稳定 / Capture immediately or wait for stable slides
     #[arg(long, value_enum)]
+    #[arg(help_heading = "截图 / Slides")]
     pub slide_mode: Option<crate::config::SlideMode>,
 
-    /// Seconds a frame must stay unchanged before emitting (stable mode)
+    /// stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame
     #[arg(long)]
+    #[arg(help_heading = "截图 / Slides")]
     pub stable_secs: Option<f64>,
 
-    /// Compare only a region, e.g. 40%,0%-100%,100%
+    /// 仅比较指定区域 / Compare a region, e.g. 40%,0%-100%,100%
     #[arg(long)]
+    #[arg(help_heading = "截图 / Slides")]
     pub roi: Option<String>,
 
-    /// ASR threads
+    /// 语音识别线程数（至少 1）/ Speech recognition threads (minimum 1)
     #[arg(long)]
+    #[arg(help_heading = "语音识别 / Speech recognition")]
     pub threads: Option<i32>,
 
-    /// ASR backend: coreml (Apple Silicon only) / gpu (Metal/CUDA) / cpu / npu (Intel NPU) / api (cloud STT)
+    /// 识别后端 / Speech backend: coreml (Apple Silicon), gpu, cpu, npu (Intel), api (cloud)
     #[arg(long, value_enum)]
+    #[arg(help_heading = "语音识别 / Speech recognition")]
     pub provider: Option<crate::config::AsrProvider>,
 
-    /// ASR model: qwen3 (default & recommended Qwen3-ASR 1.7B) | qwen3-0.6b (Apple ANE, low power) | whisper (large-v3-turbo) | tiny | base
-    /// (backend constraints: gpu/cpu only support qwen3 family; whisper sizes like tiny/base only on coreml/npu/api)
+    /// 识别模型（需与后端兼容）/ Speech model (must match backend)
+    /// gpu/cpu: qwen3; coreml: qwen3-1.7b, qwen3-0.6b, whisper; npu/api: 按后端配置 / backend-specific
     #[arg(long)]
+    #[arg(help_heading = "语音识别 / Speech recognition")]
     pub asr_model: Option<String>,
 
-    /// Cloud STT base URL (OpenAI-compatible, e.g. https://openrouter.ai/api/v1)
+    /// 云端识别地址 / Cloud speech API base URL (OpenAI-compatible)
     #[arg(long)]
+    #[arg(help_heading = "语音识别 / Speech recognition")]
     pub asr_api_base_url: Option<String>,
 
-    /// Cloud STT API key (env COURSE2MD_ASR_API_KEY honored, OPENROUTER_API_KEY as legacy fallback; note: CLI values land in shell history — prefer config file or env)
+    /// 云端识别密钥；建议用 COURSE2MD_ASR_API_KEY 环境变量 / Cloud API key; prefer the environment variable to avoid shell history
     #[arg(long)]
+    #[arg(help_heading = "语音识别 / Speech recognition")]
     pub asr_api_key: Option<String>,
 
-    /// Cloud STT model (e.g. qwen/qwen3-asr-flash-2026-02-10)
+    /// 云端识别模型名称 / Cloud speech model name
     #[arg(long)]
+    #[arg(help_heading = "语音识别 / Speech recognition")]
     pub asr_api_model: Option<String>,
 
-    /// Cloud STT request mode: transcriptions (/audio/transcriptions, default) | chat (/chat/completions, for audio-capable LLMs)
+    /// 云端请求方式 / Cloud request mode: transcriptions (default) or chat (audio-capable models)
     #[arg(long, value_enum)]
+    #[arg(help_heading = "语音识别 / Speech recognition")]
     pub asr_api_mode: Option<crate::settings::AsrApiMode>,
 
-    /// Transcript source: auto (subtitle first, then ASR) | subtitle | asr
+    /// 文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别 / Transcript source: auto, subtitle, asr
     #[arg(long, value_enum)]
+    #[arg(help_heading = "输入与输出 / Input and output")]
     pub transcript_source: Option<crate::config::TranscriptSource>,
 
-    /// Max seconds per speech segment (longer segments are split)
+    /// 每段语音最长秒数 (1–600) / Maximum speech segment length in seconds
     #[arg(long)]
+    #[arg(help_heading = "语音识别 / Speech recognition")]
     pub max_speech: Option<f32>,
 
-    /// Output formats (md/html/json)
+    /// 输出格式，逗号分隔 / Output formats, comma-separated: md,html,json
     #[arg(long, value_delimiter = ',', value_enum)]
+    #[arg(help_heading = "输入与输出 / Input and output")]
     pub formats: Option<Vec<crate::config::OutputFormat>>,
 
-    /// Model directory (default ~/.cache/course2md/models)
+    /// 本地模型目录 / Local model directory (default: platform cache)
     #[arg(long)]
+    #[arg(help_heading = "语音识别 / Speech recognition")]
     pub model_dir: Option<PathBuf>,
 
-    /// Keep the downloaded media.mp4
+    /// 保留下载的视频 / Keep downloaded media.mp4
     #[arg(long)]
+    #[arg(help_heading = "输入与输出 / Input and output")]
     pub keep_video: bool,
 
-    /// Remove newly downloaded video after success (overrides config)
+    /// 成功后删除本次下载的视频 / Delete newly downloaded video after success
     #[arg(long, conflicts_with = "keep_video")]
+    #[arg(help_heading = "输入与输出 / Input and output")]
     pub no_keep_video: bool,
 
-    /// Skip download (video already exists)
+    /// 复用输出目录中已有的 media.mp4 / Reuse media.mp4 already in the output directory
     #[arg(long)]
+    #[arg(help_heading = "输入与输出 / Input and output")]
     pub no_download: bool,
 
-    /// Enable LLM transcript polish for this run (overrides config)
+    /// 本次启用 AI 润色 / Enable AI proofreading for this run
     #[arg(long)]
+    #[arg(help_heading = "AI 润色 / AI proofreading")]
     pub llm: bool,
 
-    /// Disable LLM transcript polish for this run
+    /// 本次禁用 AI 润色 / Disable AI proofreading for this run
     #[arg(long, conflicts_with = "llm")]
+    #[arg(help_heading = "AI 润色 / AI proofreading")]
     pub no_llm: bool,
 
-    /// Override LLM base URL (OpenAI-compatible)
+    /// AI 润色服务地址 / AI proofreading base URL (OpenAI-compatible)
     #[arg(long)]
+    #[arg(help_heading = "AI 润色 / AI proofreading")]
     pub llm_base_url: Option<String>,
 
-    /// Override LLM API key (note: lands in shell history — prefer the config file)
+    /// AI 润色密钥（建议通过 llm setup 设置，避免命令历史记录）/ AI API key (prefer llm setup)
     #[arg(long)]
+    #[arg(help_heading = "AI 润色 / AI proofreading")]
     pub llm_api_key: Option<String>,
 
-    /// Override LLM model name
+    /// AI 润色模型名称 / AI proofreading model name
     #[arg(long)]
+    #[arg(help_heading = "AI 润色 / AI proofreading")]
     pub llm_model: Option<String>,
 
-    /// Override LLM proofreading prompt
+    /// AI 润色提示词 / AI proofreading instructions
     #[arg(long)]
+    #[arg(help_heading = "AI 润色 / AI proofreading")]
     pub llm_prompt: Option<String>,
 
-    /// Enable vision-assisted polish (attach the section slide; model must support image input)
+    /// 附截图辅助润色（需要视觉模型）/ Attach slides for proofreading (requires image support)
     #[arg(long, conflicts_with = "no_llm_vision")]
+    #[arg(help_heading = "AI 润色 / AI proofreading")]
     pub llm_vision: bool,
 
-    /// Disable vision-assisted polish for this run
+    /// 本次禁用截图辅助润色 / Disable image-assisted proofreading
     #[arg(long, conflicts_with = "llm_vision")]
+    #[arg(help_heading = "AI 润色 / AI proofreading")]
     pub no_llm_vision: bool,
 
-    /// Suppress the end-of-run LLM hint (this run)
+    /// 隐藏完成后的 AI 润色提示 / Hide the optional AI proofreading tip
     #[arg(long)]
+    #[arg(help_heading = "AI 润色 / AI proofreading")]
     pub no_llm_hint: bool,
 
-    /// More verbose logging
+    /// 显示诊断日志；-vv 显示调试细节 / Diagnostic logs; -vv for debug details
     #[arg(short, long, action = clap::ArgAction::Count)]
+    #[arg(help_heading = "终端输出 / Terminal output")]
     pub verbose: u8,
 
-    /// Resume from checkpoints in the output dir (skip completed ASR chunks)
+    /// 从检查点恢复，跳过已识别片段 / Resume from saved speech checkpoints
     #[arg(long)]
+    #[arg(help_heading = "输入与输出 / Input and output")]
     pub resume: bool,
 
-    /// Ignore existing checkpoints and redo everything
+    /// 忽略语音识别检查点，重新识别 / Ignore speech checkpoints and transcribe again
     #[arg(long, conflicts_with = "resume")]
+    #[arg(help_heading = "输入与输出 / Input and output")]
     pub no_resume: bool,
 
-    /// Errors only
+    /// 静默模式，仅报告错误 / Quiet mode: report errors only
     #[arg(short, long)]
+    #[arg(help_heading = "终端输出 / Terminal output")]
     pub quiet: bool,
 
-    /// 以 NDJSON 事件流输出进度到 stdout（供 GUI/脚本消费）
+    /// 以 NDJSON 输出进度，禁用交互 / Stream NDJSON progress without prompts
     #[arg(long)]
+    #[arg(help_heading = "终端输出 / Terminal output")]
     pub json: bool,
 }
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Manage local models
+    /// 管理 gpu/cpu 本地识别模型 / Manage gpu/cpu speech models
     Models {
         #[command(subcommand)]
         cmd: ModelsCmd,
     },
-    /// Configure LLM transcript polish
+    /// 配置可选的 AI 润色 / Configure optional AI proofreading
     Llm {
         #[command(subcommand)]
         cmd: LlmCmd,
     },
-    /// Diagnose the environment (tools, backends, config, model cache)
+    /// 检查依赖、识别后端和配置 / Check tools, speech backends and settings
     Doctor,
-    /// Manage the config file
+    /// 管理配置文件 / Manage the configuration file
     Config {
         #[command(subcommand)]
         cmd: ConfigCmd,
     },
-    /// Summarize existing outputs with LLM (writes summary into course.md/html)
+    /// 为已有笔记生成 AI 总结 / Add AI summaries to existing course.md/html
     Summarize(SummarizeArgs),
-    /// Clear LLM/STT API credentials from the config file
+    /// 清除已保存的 AI 服务配置 / Clear saved AI service settings
     Remove(RemoveArgs),
 }
 
 #[derive(Args)]
 pub struct RemoveArgs {
-    /// 同时清除云端 STT（[asr_api]）的 API Key
+    /// 同时清除云端语音识别密钥 / Also clear the cloud speech API key
     #[arg(long)]
     pub asr: bool,
 }
 
 #[derive(Args)]
 pub struct SummarizeArgs {
-    /// Output directories (each containing timeline.jsonl / course.md / course.html)
+    /// 笔记目录或其父目录（包含 timeline.jsonl）/ Note directories or a parent directory
     #[arg(required = true)]
     pub dirs: Vec<PathBuf>,
-    /// Overwrite an existing summary block
+    /// 替换已有总结 / Replace existing summaries
     #[arg(long)]
     pub force: bool,
-    /// 额外导出独立总结文件到指定目录（每个视频一个 <标题>.summary.md）
+    /// 另存独立总结到此目录 / Also export standalone summaries to this directory
     #[arg(short = 'o', long)]
     pub out: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
 pub enum ModelsCmd {
-    /// Download the offline ASR model (~2.4GB)
+    /// 下载 gpu/cpu 模型（约 2.4GB）/ Download gpu/cpu models (~2.4GB)
     Download {
         #[arg(long)]
         dir: Option<PathBuf>,
-        /// 以 NDJSON 事件流输出进度到 stdout（供 GUI/脚本消费）
+        /// 以 NDJSON 输出进度，禁用交互 / Stream NDJSON progress without prompts
         #[arg(long)]
         json: bool,
     },
-    /// List downloaded models
+    /// 检查 gpu/cpu 模型文件 / Check downloaded gpu/cpu model files
     List {
         #[arg(long)]
         dir: Option<PathBuf>,
@@ -246,7 +290,7 @@ pub enum ModelsCmd {
 
 #[derive(Subcommand)]
 pub enum LlmCmd {
-    /// Interactive setup and enable (missing fields are prompted)
+    /// 配置并启用 AI 润色（终端内询问缺失项）/ Set up AI proofreading; prompts in a terminal
     Setup {
         #[arg(long)]
         base_url: Option<String>,
@@ -254,23 +298,23 @@ pub enum LlmCmd {
         api_key: Option<String>,
         #[arg(long)]
         model: Option<String>,
-        /// 同时关闭结束提示
+        /// 关闭完成后的润色提示 / Hide the completion tip
         #[arg(long)]
         disable_hint: bool,
     },
-    /// Show current settings (key masked)
+    /// 显示当前配置（隐藏密钥）/ Show settings with keys hidden
     Status,
-    /// Disable LLM polish (keep credentials)
+    /// 关闭 AI 润色并保留凭据 / Disable AI proofreading and keep credentials
     Disable,
 }
 
 #[derive(Subcommand)]
 pub enum ConfigCmd {
-    /// Write a commented config template (refuses to overwrite unless --force)
+    /// 生成配置模板（--force 覆盖已有配置）/ Create a template; --force replaces existing settings
     Init {
         #[arg(long)]
         force: bool,
     },
-    /// Show config path and settings read from the file
+    /// 显示配置路径和文件设置 / Show the config path and file settings
     Show,
 }

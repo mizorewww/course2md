@@ -13,6 +13,15 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+static QUIET_MODE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_quiet(quiet: bool) {
+    QUIET_MODE.store(quiet, Ordering::Relaxed);
+}
+pub fn is_quiet() -> bool {
+    QUIET_MODE.load(Ordering::Relaxed)
+}
+
 static JSON_MODE: AtomicBool = AtomicBool::new(false);
 
 /// 进入 NDJSON 事件流模式（进程级，main 在解析完 CLI 后调用一次）。
@@ -42,6 +51,24 @@ fn emit_to(mut w: impl std::io::Write, ev: &serde_json::Value) -> std::io::Resul
 /// 阶段边界事件（json 模式才发）。
 pub fn stage(name: &str, status: &str) {
     emit(stage_event(name, status));
+    if !is_json() && !is_quiet() && status == "start" {
+        let label = match name {
+            "model-load" | "model/apple" => {
+                "加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)"
+            }
+            "fetch" => "读取视频信息 / Reading video information",
+            "download" => "下载视频 / Downloading video",
+            "scenes" => "提取截图 / Extracting slides",
+            "audio" => "提取音频 / Extracting audio",
+            "transcribe" | "asr" => "识别语音 / Transcribing speech",
+            "llm" => "润色文字 / Proofreading transcript",
+            "summarize" => "生成总结 / Generating summary",
+            "render" => "生成笔记 / Writing notes",
+            name if name.starts_with("model/") => "下载识别模型 / Downloading speech model",
+            _ => return,
+        };
+        eprintln!("{label}…");
+    }
 }
 
 fn stage_event(name: &str, status: &str) -> serde_json::Value {
@@ -85,7 +112,7 @@ pub struct Bar {
 
 impl Bar {
     pub fn new(stage: impl Into<String>, len: u64) -> Self {
-        let bar = if is_json() {
+        let bar = if is_json() || is_quiet() {
             ProgressBar::hidden()
         } else {
             ProgressBar::new(len)

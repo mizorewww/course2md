@@ -204,7 +204,10 @@ impl Checkpoint {
                     if seen.insert(k) {
                         out.push(ev);
                     } else if i != last_idx {
-                        tracing::warn!(line = i + 1, "checkpoint 存在重复 chunk 记录，仅保留首条");
+                        tracing::warn!(
+                            line = i + 1,
+                            "重复的识别检查点已忽略 / Ignored duplicate transcription checkpoint"
+                        );
                     }
                 }
                 Err(e) => {
@@ -355,10 +358,17 @@ mod tests {
         atomic_write(&path, b"first").unwrap();
         atomic_write(&path, b"second").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"second");
-        assert_eq!(std::fs::read(path.with_extension("tmp")).unwrap(), b"unrelated");
-        #[cfg(unix)] {
+        assert_eq!(
+            std::fs::read(path.with_extension("tmp")).unwrap(),
+            b"unrelated"
+        );
+        #[cfg(unix)]
+        {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
         }
     }
 
