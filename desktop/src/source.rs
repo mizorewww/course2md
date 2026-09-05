@@ -130,9 +130,8 @@ pub fn inspect(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<S
         let bytes = command(
             "yt-dlp",
             &[
-                "--ignore-config",
+                "--simulate",
                 "--dump-single-json",
-                "--skip-download",
                 "--no-playlist",
                 "--no-warnings",
                 "--socket-timeout",
