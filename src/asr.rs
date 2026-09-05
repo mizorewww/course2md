@@ -87,7 +87,7 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
 
     if cfg.provider == AsrProvider::Api {
         // 同一模型在 transcriptions / chat 两种端点下的输出可能不同，身份须含模式
-        let model_id = format!("{}:{}", cfg.asr_api.mode, cfg.asr_api.model);
+        let model_id = format!("{}:{}:{}", cfg.asr_api.base_url.trim().trim_end_matches('/'), cfg.asr_api.mode, cfg.asr_api.model);
         let id = AsrIdentity::new("api", &model_id, cfg.max_speech);
         let api = cfg.asr_api.clone();
         let max_speech = cfg.max_speech as f64;
@@ -487,7 +487,7 @@ fn transcribe_api(
     }
     let text = match t.mode {
         crate::settings::AsrApiMode::Transcriptions => {
-            v["text"].as_str().unwrap_or("").trim().to_string()
+            v["text"].as_str().context("转写响应缺少 text 字段，不能当作静音")?.trim().to_string()
         }
         crate::settings::AsrApiMode::Chat => parse_chat_content(&v).trim().to_string(),
     };

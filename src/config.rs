@@ -228,27 +228,6 @@ fn parse_coord(s: &str) -> anyhow::Result<f64> {
     Ok(v)
 }
 
-/// provider=npu 已知的模型别名表（来源：npu.rs `resolve_npu_model` 的映射，
-/// 对应 HuggingFace 上的 OpenVINO 预转换仓库）。新增别名时两处需同步。
-const NPU_MODEL_ALIASES: &[&str] = &[
-    "qwen3",
-    "qwen3-1.7b",
-    "qwen3-0.6b",
-    "1.7b",
-    "0.6b",
-    "whisper",
-    "turbo",
-    "whisper-turbo",
-    "whisper-large",
-    "large",
-    "tiny",
-    "whisper-tiny",
-    "base",
-    "whisper-base",
-    "small",
-    "whisper-small",
-];
-
 impl PipelineConfig {
     /// 全量预检：所有配置错误必须在任何昂贵操作（下载/抽帧/模型加载）之前暴露。
     /// 返回 Err 的送进 main 后直接退出，不会碰网络与模型。
@@ -334,7 +313,7 @@ impl PipelineConfig {
                 }
                 AsrProvider::Npu => {
                     anyhow::ensure!(
-                        NPU_MODEL_ALIASES.contains(&lower.as_str()) || lower.contains('/'),
+                        crate::npu::npu_model_alias(m).is_some() || lower.contains('/'),
                         "provider npu 的 asr_model 需是已知别名或 HuggingFace 仓库 id（含 /，收到 {m:?}）"
                     );
                 }

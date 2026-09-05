@@ -19,8 +19,8 @@ pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
             i += 1;
             // 外部数据不信任：非有限时间戳的 cue 直接丢弃，
             // 避免 NaN/inf 污染下游排序与二分查找
-            if !start.is_finite() || !end.is_finite() {
-                tracing::warn!(line, "字幕 cue 时间戳非有限值，跳过");
+            if !start.is_finite() || !end.is_finite() || end <= start {
+                tracing::warn!(line, "字幕 cue 时间区间无效，跳过");
                 continue;
             }
             let mut text_parts: Vec<String> = vec![];
@@ -35,7 +35,7 @@ pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
             // 滚动字幕去重：相邻 cue 文本相同则只保留首个（并延长时长）
             if !text.is_empty() {
                 match out.last_mut() {
-                    Some(prev) if prev.text == text => prev.end = end.max(prev.end),
+                    Some(prev) if prev.text == text && start <= prev.end => prev.end = end.max(prev.end),
                     _ => out.push(TranscriptEvent {
                         start,
                         end,
@@ -74,17 +74,16 @@ fn parse_ts(s: &str) -> Option<f64> {
         [s] => (0, 0, *s),
         _ => return None,
     };
-    // 毫秒按位数显式解析缩放（"050" → 50/10^3）；非法字段告警并落 0，不静默吞错
-    let ms: f64 = if frac.is_empty() {
+    if (parts.len() >= 2 && sec >= 60) || (parts.len() == 3 && m >= 60) {
+        return None;
+    }
+    let ms = if frac.is_empty() {
         0.0
     } else {
-        match frac.parse::<u32>() {
-            Ok(v) => v as f64 / 10f64.powi(frac.len() as i32),
-            Err(_) => {
-                tracing::warn!(ts = s, "字幕时间戳毫秒字段非法，按 0 处理");
-                0.0
-            }
+        if !frac.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
         }
+        format!("0.{frac}").parse::<f64>().ok()?
     };
     Some(h as f64 * 3600.0 + m as f64 * 60.0 + sec as f64 + ms)
 }
@@ -167,6 +166,16 @@ pub fn sidecar_subtitle(video: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_words_after_a_pause_remain_separate() {
+        let events = parse_subtitle("1\n00:00:01,000 --> 00:00:02,000\nhello\n\n2\n00:00:10,000 --> 00:00:11,000\nhello\n");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].end, 2.0);
+        assert!(parse_ts("00:00:01.bad").is_none());
+        assert!(parse_ts("00:99:01.000").is_none());
+        assert!(parse_subtitle("00:00:02,000 --> 00:00:01,000\nbackwards\n").is_empty());
+    }
 
     #[test]
     fn parses_srt_with_multiline_cues() {

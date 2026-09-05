@@ -131,20 +131,21 @@ print("[NPU] 监听 http://127.0.0.1:" + str(port), flush=True)
 server.serve_forever()
 "#;
 
+pub(crate) fn npu_model_alias(raw: &str) -> Option<&'static str> {
+    Some(match raw.trim().to_ascii_lowercase().as_str() {
+        "whisper" | "turbo" | "whisper-turbo" | "whisper-large" | "large" => "OpenVINO/whisper-large-v3-turbo-int8-ov",
+        "tiny" | "whisper-tiny" => "OpenVINO/whisper-tiny-fp16-ov",
+        "base" | "whisper-base" => "OpenVINO/whisper-base-fp16-ov",
+        "small" | "whisper-small" => "OpenVINO/whisper-small-fp16-ov",
+        "qwen3-0.6b" | "0.6b" => "dseditor/Qwen3-ASR-0.6B-INT8_ASYM-OpenVINO",
+        "qwen3" | "qwen3-1.7b" | "1.7b" | "" => "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO",
+        _ => return None,
+    })
+}
+
 pub fn resolve_npu_model(raw: Option<&str>) -> String {
-    let s = raw.unwrap_or("").trim().to_ascii_lowercase();
-    match s.as_str() {
-        "whisper" | "turbo" | "whisper-turbo" | "large" => {
-            "OpenVINO/whisper-large-v3-turbo-int8-ov".into()
-        }
-        "tiny" | "whisper-tiny" => "OpenVINO/whisper-tiny-fp16-ov".into(),
-        "base" | "whisper-base" => "OpenVINO/whisper-base-fp16-ov".into(),
-        "small" | "whisper-small" => "OpenVINO/whisper-small-fp16-ov".into(),
-        "qwen3-0.6b" | "0.6b" => "dseditor/Qwen3-ASR-0.6B-INT8_ASYM-OpenVINO".into(),
-        // 优先默认推荐 Qwen3-ASR 1.7B
-        "qwen3" | "qwen3-1.7b" | "1.7b" | "" => "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO".into(),
-        other => other.to_string(),
-    }
+    let raw = raw.unwrap_or("").trim();
+    npu_model_alias(raw).unwrap_or(raw).to_string()
 }
 
 /// `model_id` 由调用方经 [`resolve_npu_model`] 解析后传入（checkpoint 身份与
@@ -310,6 +311,13 @@ mod tests {
     /// 内嵌脚本必须能被 Python 解析。0.8.x 曾因 f-string 内嵌字面换行导致
     /// 整个 NPU 后端无法启动（SyntaxError 在编译期拦截，任何路径都跑不到）。
     /// 无 python3 的环境下跳过。
+    #[test]
+    fn custom_repository_case_is_preserved_and_aliases_are_shared() {
+        assert_eq!(resolve_npu_model(Some("MyOrg/MyModel-INT8")), "MyOrg/MyModel-INT8");
+        assert_eq!(resolve_npu_model(Some("WHISPER-LARGE")), resolve_npu_model(Some("whisper")));
+        assert!(npu_model_alias("whisper-large").is_some());
+    }
+
     #[test]
     fn worker_script_is_valid_python() {
         let Some(py) = crate::runtime::which("python3") else {
