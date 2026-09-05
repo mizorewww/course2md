@@ -70,6 +70,7 @@ const SOURCES: [(&str, &str); 3] = [
 struct Desktop {
     online: bool,
     last_source_input: String,
+    completed_source: Option<String>,
     source_preview: Option<source::Source>,
     preview_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     preview_generation: u64,
@@ -207,6 +208,9 @@ impl Desktop {
                             this.invalidate_source();
                         }
                     }
+                    if field == Field::Search {
+                        this.scrolls[Page::Library as usize].set_offset(point(px(0.), px(0.)));
+                    }
                     cx.notify();
                 })
             })
@@ -274,6 +278,7 @@ impl Desktop {
             page: Page::Library,
             online: true,
             last_source_input: String::new(),
+            completed_source: None,
             source_preview: None,
             preview_cancel: None,
             preview_generation: 0,
@@ -338,7 +343,7 @@ impl Desktop {
         .detach();
     }
     fn navigate(&mut self, page: Page, cx: &mut Context<Self>) {
-        if page == Page::New {
+        if page == Page::New && self.page == Page::Library {
             self.target_folder = self.folder_filter.filter(|id| *id != 0);
         }
         self.page = page;
@@ -582,6 +587,7 @@ impl Desktop {
                         if let (Some(done), Some((root, folder, source))) =
                             (&self.completed, self.task_destination.take())
                         {
+                            self.completed_source = Some(source.input.clone());
                             if let Err(e) = source::save_cover(&source, &done.out_dir) {
                                 self.message = Some(format!("笔记已完成，但封面保存失败：{e:#}"));
                             }

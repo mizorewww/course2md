@@ -10,6 +10,23 @@ use std::sync::{
 };
 
 impl Desktop {
+    pub fn begin_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.job.is_none()
+            && self.completed_source.as_deref() == Some(self.value(Field::Source, cx).as_str())
+        {
+            self.invalidate_source();
+            self.online = true;
+            self.show_options = false;
+            self.last_source_input.clear();
+            self.inputs[&Field::Source].update(cx, |state, cx| state.set_value("", window, cx));
+            self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
+        }
+        self.navigate(Page::New, cx);
+        if self.online {
+            self.inputs[&Field::Source].update(cx, |state, cx| state.focus(window, cx));
+        }
+    }
+
     pub fn invalidate_source(&mut self) {
         if let Some(cancel) = self.preview_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
@@ -242,6 +259,7 @@ impl Desktop {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.folder_filter = id;
+                        this.scrolls[Page::Library as usize].set_offset(point(px(0.), px(0.)));
                         this.navigate(Page::Library, cx);
                     }))
             }))
@@ -282,7 +300,13 @@ impl Desktop {
                                     match organize::Library::edit(&this.library_root, |library| {
                                         library.assign(&this.library_root, path, id)
                                     }) {
-                                        Ok(library) => this.library = library,
+                                        Ok(library) => {
+                                            this.library = library;
+                                            this.message = Some(format!(
+                                                "课程已移至「{}」",
+                                                this.folder_name(id)
+                                            ));
+                                        }
                                         Err(e) => {
                                             this.message = Some(format!("无法移动课程：{e:#}"))
                                         }

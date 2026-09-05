@@ -394,7 +394,7 @@ impl Desktop {
                 Button::new("empty-new")
                     .primary()
                     .label("添加课程")
-                    .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::New, cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.begin_add(window, cx))),
             )
             .into_any_element()
     }
@@ -509,7 +509,8 @@ impl Desktop {
                             Button::new(("read-course", index))
                                 .ghost()
                                 .w_full()
-                                .h(px(184.))
+                                .h_auto()
+                                .aspect_ratio(16. / 9.)
                                 .p_0()
                                 .accessibility_label(format!("阅读 {}", course.title))
                                 .child(
@@ -539,7 +540,7 @@ impl Desktop {
                                 .child(
                                     div()
                                         .h(px(44.))
-                                        .overflow_hidden()
+                                        .line_clamp(2)
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .child(course.title.clone()),
                                 )
@@ -1195,7 +1196,11 @@ impl Render for Desktop {
                                                 || self.folder_filter.is_none()))
                                             || self.page == Page::Result && page == Page::Library,
                                     )
-                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        if page == Page::New {
+                                            this.begin_add(window, cx);
+                                            return;
+                                        }
                                         if page == Page::Library {
                                             this.folder_filter = None;
                                         }
