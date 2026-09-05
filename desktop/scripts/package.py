@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Build and package the native app and its matching CLI on the current platform."""
+import argparse
+import json
+import os
+from pathlib import Path
+import platform
+import plistlib
+import shutil
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[1]
+PROJECT = ROOT.parent
+
+
+def run(*args):
+    subprocess.run(args, cwd=PROJECT, check=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--no-build", action="store_true")
+    args = parser.parse_args()
+    profile = "debug" if args.debug else "release"
+    flags = [] if args.debug else ["--release", "--locked"]
+    if not args.debug and not (ROOT / "sources.lock.json").is_file():
+        raise SystemExit("Freeze the tested source revisions with scripts/sources.py --freeze before release")
+    if not args.debug:
+        revisions = json.loads((ROOT / "sources.lock.json").read_text())
+        for name, revision in revisions.items():
+            actual = subprocess.check_output(["git", "-C", str(ROOT / ".deps" / name), "rev-parse", "HEAD"], text=True).strip()
+            if actual != revision:
+                raise SystemExit(f"{name} differs from the tested release revision; prepare sources with --locked")
+    if not args.no_build:
+        run("cargo", "build", *flags)
+        run("cargo", "build", "--manifest-path", str(ROOT / "Cargo.toml"), *flags)
+    system = platform.system()
+    suffix = ".exe" if system == "Windows" else ""
+    package_name = f"course2md-desktop-{system.lower()}-{platform.machine()}"
+    base = ROOT / "target" / "packages" / package_name
+    base.mkdir(parents=True, exist_ok=True)
+    if system == "Darwin":
+        bundle = base / "course2md.app"
+        binaries = bundle / "Contents/MacOS"
+        resources = bundle / "Contents/Resources"
+        binaries.mkdir(parents=True, exist_ok=True)
+        resources.mkdir(parents=True, exist_ok=True)
+        with (bundle / "Contents/Info.plist").open("wb") as stream:
+            plistlib.dump({
+                "CFBundleName": "course2md", "CFBundleDisplayName": "course2md",
+                "CFBundleIdentifier": "dev.course2md.desktop",
+                "CFBundleExecutable": "course2md-desktop", "CFBundlePackageType": "APPL",
+                "CFBundleVersion": "1", "CFBundleShortVersionString": "0.1.0",
+                "NSHighResolutionCapable": True, "NSPrincipalClass": "NSApplication",
+                "LSMinimumSystemVersion": "14.0", "CFBundleIconFile": "course2md.icns",
+            }, stream)
+        shutil.copy2(PROJECT / "app/src-tauri/icons/icon.icns", resources / "course2md.icns")
+        # MLX first searches beside the executable for mlx.metallib. Keeping
+        # that layout avoids changing the CLI's working directory and breaking
+        # user-supplied relative source, output, and model paths.
+        metal = PROJECT / "target" / profile / "mlx.metallib"
+        if metal.is_file():
+            shutil.copy2(metal, binaries / "mlx.metallib")
+        elif platform.machine() == "arm64" and not os.environ.get("COURSE2MD_NO_APPLE"):
+            raise SystemExit("Apple speech library was built without mlx.metallib; inspect the core build output")
+    else:
+        binaries = base
+        if system == "Linux":
+            (base / "course2md.desktop").write_text(
+                "[Desktop Entry]\nType=Application\nName=course2md\nComment=Turn courses into illustrated notes\n"
+                "Exec=course2md-desktop\nIcon=course2md\nTerminal=false\nCategories=Education;AudioVideo;\n")
+            shutil.copy2(PROJECT / "app/src-tauri/icons/icon.png", base / "course2md.png")
+    shutil.copy2(PROJECT / "target" / profile / f"course2md{suffix}", binaries / f"course2md{suffix}")
+    shutil.copy2(ROOT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
+    shutil.copy2(PROJECT / "LICENSE", base / "LICENSE")
+    shutil.copy2(ROOT / "README.md", base / "README.md")
+    if (ROOT / "sources.lock.json").exists():
+        shutil.copy2(ROOT / "sources.lock.json", base / "sources.lock.json")
+    if system == "Darwin":
+        run("codesign", "--force", "--sign", "-", str(binaries / "course2md"))
+        run("codesign", "--force", "--deep", "--sign", "-", str(bundle))
+        run("codesign", "--verify", "--deep", "--strict", str(bundle))
+    archive = shutil.make_archive(str(base), "zip" if system in ("Darwin", "Windows") else "gztar", base.parent, base.name)
+    print(archive)
+
+
+if __name__ == "__main__":
+    main()
