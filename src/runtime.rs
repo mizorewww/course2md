@@ -173,25 +173,20 @@ pub fn free_port() -> Result<u16> {
 /// 临时工作目录（chunk / worker 脚本等中间产物）：创建失败立即报错，
 /// Drop 时尽力清理整个目录。目录名带 tag 与 pid 区分来源与并发实例。
 pub struct TempWorkDir {
-    path: PathBuf,
+    dir: tempfile::TempDir,
 }
 
 impl TempWorkDir {
     pub fn new(tag: &str) -> Result<Self> {
-        let path = std::env::temp_dir().join(format!("course2md-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&path)
-            .with_context(|| format!("创建临时目录 {}", path.display()))?;
-        Ok(Self { path })
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("course2md-{tag}-"))
+            .tempdir()
+            .context("创建临时工作目录")?;
+        Ok(Self { dir })
     }
 
     pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TempWorkDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
+        self.dir.path()
     }
 }
 
@@ -215,6 +210,16 @@ mod tests {
         let p = free_port().unwrap();
         // 立即再绑同一端口不一定成功（TOCTOU），但必须是合法端口值
         assert!(p > 0);
+    }
+
+    #[test]
+    fn same_tag_directories_do_not_share_or_delete_each_others_files() {
+        let first = TempWorkDir::new("parallel").unwrap();
+        let second = TempWorkDir::new("parallel").unwrap();
+        assert_ne!(first.path(), second.path());
+        std::fs::write(second.path().join("chunk.wav"), b"audio").unwrap();
+        drop(first);
+        assert_eq!(std::fs::read(second.path().join("chunk.wav")).unwrap(), b"audio");
     }
 
     #[test]

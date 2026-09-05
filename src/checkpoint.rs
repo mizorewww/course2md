@@ -114,7 +114,7 @@ impl Checkpoint {
             tracing::info!(n = cp.events.len(), "asr checkpoint complete, reusing");
         } else {
             let loaded = Self::load_events(&path)?;
-            if !loaded.events.is_empty() {
+            if path.is_file() {
                 tracing::info!(n = loaded.events.len(), "asr checkpoint resumed (partial)");
                 cp.done = loaded.events.iter().map(|e| key(e.start, e.end)).collect();
                 cp.events = loaded
@@ -208,7 +208,7 @@ impl Checkpoint {
                     }
                 }
                 Err(e) => {
-                    if i == last_idx {
+                    if i == last_idx && !content.ends_with('\n') {
                         // 崩溃时最后一行可能只写了一半：容忍
                         tracing::debug!("checkpoint 末行解析失败（按崩溃残留忽略）：{e}");
                     } else {
@@ -298,22 +298,17 @@ impl Checkpoint {
 /// 保证级别：崩溃安全（文件本体已 fsync 后才 rename）；
 /// 不含掉电场景下父目录的 fsync（极端掉电时目录项本身可能未落盘）。
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).with_context(|| format!("创建目录 {}", dir.display()))?;
-    }
-    {
-        let mut f =
-            std::fs::File::create(&tmp).with_context(|| format!("创建 {}", tmp.display()))?;
-        std::io::Write::write_all(&mut f, bytes)
-            .with_context(|| format!("写 {}", tmp.display()))?;
-        if let Err(e) = f.sync_all() {
-            // 某些文件系统不支持 fsync：不致命，但崩溃可能丢失刚写的内容，必须可观测
-            tracing::warn!(path = %tmp.display(), "fsync 失败（崩溃时可能丢失本次写入）：{e}");
-        }
-    }
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("rename {} → {}", tmp.display(), path.display()))?;
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir).with_context(|| format!("创建目录 {}", dir.display()))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    tmp.write_all(bytes)
+        .with_context(|| format!("写 {}", path.display()))?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path)
+        .with_context(|| format!("替换 {}", path.display()))?;
     Ok(())
 }
 
@@ -330,6 +325,41 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn first_truncated_record_is_repaired_before_append() {
+        let dir = tempfile::tempdir().unwrap();
+        Checkpoint::open(dir.path(), true, &identity("qwen3")).unwrap();
+        std::fs::write(dir.path().join("asr.jsonl"), b"{\"start\":").unwrap();
+        let mut cp = Checkpoint::open(dir.path(), true, &identity("qwen3")).unwrap();
+        cp.record(1.0, 2.0, "recovered").unwrap();
+        drop(cp);
+        let cp = Checkpoint::open(dir.path(), true, &identity("qwen3")).unwrap();
+        assert_eq!(cp.events()[0].text, "recovered");
+    }
+
+    #[test]
+    fn complete_corrupt_line_is_not_treated_as_truncation() {
+        let dir = tempfile::tempdir().unwrap();
+        Checkpoint::open(dir.path(), true, &identity("qwen3")).unwrap();
+        std::fs::write(dir.path().join("asr.jsonl"), b"garbage\n").unwrap();
+        assert!(Checkpoint::open(dir.path(), true, &identity("qwen3")).is_err());
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_file_without_touching_sibling_tmp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(path.with_extension("tmp"), b"unrelated").unwrap();
+        atomic_write(&path, b"first").unwrap();
+        atomic_write(&path, b"second").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        assert_eq!(std::fs::read(path.with_extension("tmp")).unwrap(), b"unrelated");
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
     }
 
     #[test]

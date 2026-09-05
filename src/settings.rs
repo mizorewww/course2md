@@ -110,50 +110,16 @@ pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {
     // 覆盖前备份旧配置（用户可能有手改内容），失败只告警不阻断
     if p.is_file() {
         let bak = p.with_extension("toml.bak");
-        if let Err(e) = std::fs::copy(&p, &bak) {
+        if let Err(e) = std::fs::read(&p)
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| crate::checkpoint::atomic_write(&bak, &bytes))
+        {
             tracing::warn!("备份旧配置到 {} 失败：{e}", bak.display());
         }
     }
     let bytes = toml::to_string_pretty(cfg)?;
-    write_private(&p, bytes.as_bytes())?;
+    crate::checkpoint::atomic_write(&p, bytes.as_bytes())?;
     Ok(p)
-}
-
-/// 写含 API key 的配置文件。tmp → fsync → rename 沿用 checkpoint::atomic_write 的
-/// 崩溃安全语义，但 tmp 以 0600 一步建成——先建 0644 再 chmod 有暴露窗口。
-#[cfg(unix)]
-fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let tmp = path.with_extension("tmp");
-    {
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)
-            .with_context(|| format!("创建 {}", tmp.display()))?;
-        f.write_all(bytes)
-            .with_context(|| format!("写 {}", tmp.display()))?;
-        if let Err(e) = f.sync_all() {
-            tracing::warn!("fsync {} 失败：{e}", tmp.display());
-        }
-    }
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("rename {} → {}", tmp.display(), path.display()))?;
-    // mode 仅在建文件时生效；tmp 若已存在且权限不同则兜底 chmod
-    use std::os::unix::fs::PermissionsExt;
-    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
-        tracing::warn!("设置 {} 权限 0600 失败：{e}", path.display());
-    }
-    Ok(())
-}
-
-/// 非 Unix：无权限位概念，直接复用通用原子写。
-#[cfg(not(unix))]
-fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    crate::checkpoint::atomic_write(path, bytes)
 }
 
 /// `config init` 写入的带注释模板。
