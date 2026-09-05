@@ -197,7 +197,7 @@ cargo build --release
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`coreml`** | **macOS Apple Silicon**<br>(预编译包默认) | **Silero VAD v6.2.1 CoreML** (ANE)<br>+ **Qwen3-ASR 1.7B MLX 8bit**（默认，走 GPU）/ **Qwen3-ASR 0.6B**（CoreML 走 ANE）/ **Whisper large-v3-turbo** ([speech-swift](https://github.com/soniqo/speech-swift)) | **零外部依赖**<br>(仅需同目录 `mlx.metallib`) | 约 1~2.3GB<br>`~/Library/Caches/qwen3-speech/`<br>*(支持 `HF_ENDPOINT` 镜像)* | 零外部依赖、无子进程；默认 1.7B MLX 模型最准；`qwen3-0.6b` 走神经网络引擎 (ANE)，功耗极低（3 分钟约 375 J） |
 | **`gpu`** | **Linux / Windows / Intel Mac**<br>(非 Apple Silicon 默认) | **ffmpeg silencedetect**<br>+ **Qwen3-ASR 1.7B GGUF Q8** | 需要 `llama-server`<br>(由 `llama.cpp` 提供) | 约 2.4GB<br>`~/.cache/course2md/models/` | 1.7B 高精度量化模型，支持 Metal / CUDA / Vulkan 等显卡加速，吞吐极高 |
-| **`cpu`** | **通用兜底** | 同 `gpu`，禁用 GPU 卸载 (`-ngl 0`) | 需要 `llama-server` | 约 2.4GB<br>`~/.cache/course2md/models/` | 纯 CPU 计算，兼容性最高 |
+| **`cpu`** | **通用兜底** | 同 `gpu`，严格禁用 GPU 卸载 | 需要 `llama-server` | 约 2.4GB<br>`~/.cache/course2md/models/` | 纯 CPU 计算，兼容性最高 |
 | **`api`** | **云端 STT（跨平台通用）** | **ffmpeg silencedetect**<br>+ OpenAI 兼容 `/audio/transcriptions` 端点（如 OpenRouter） | **零本地模型依赖**<br>(需网络与 API Key) | **无**（云端托管） | 零磁盘模型占用，低配置设备友好。*隐私提示：音频切片将上传云端。* |
 | **`npu`** | **Linux / Windows**<br>(Intel Core Ultra / AI Boost) | **ffmpeg silencedetect**<br>+ **OpenVINO Whisper Large-v3 Turbo** (默认) / Base / Tiny | 需要 `uv` 或 `python` 带 `openvino-genai` 与 NPU 驱动 | 按需自 HuggingFace 下载 | **比纯 CPU 快 6 倍以上**，极低功耗，显存/内存节省 84%（550MB vs 3.5GB） |
 
@@ -205,9 +205,30 @@ cargo build --release
 >
 > **自动回落机制**：在 macOS 上如果 `coreml` 后端初始化或运行失败，系统会自动给出警告并无缝回退至 `gpu` / `llama-server` 模式，确保转换任务顺利完成。
 
----
+### GPU 卸载控制（`gpu` / `cpu` 后端）
 
----
+`--provider gpu` 默认请求最多 99 层 GPU 卸载，并启用音频编码器（mmproj）的 GPU 卸载。启动前会检查 `llama-server --list-devices`；没有可用设备时给出安装提示，避免静默使用 CPU。Arch/CachyOS 除 `llama-cpp` 外还需 GPU 后端，例如 `ggml-vulkan`，以及对应显卡驱动。可用 `course2md doctor` 检查设备。
+
+```bash
+# 限制主模型 GPU 层数，并让音频编码器留在 CPU
+course2md lecture.mp4 --provider gpu --gpu-layers 8 --no-mmproj-offload --transcript-source asr
+# 禁用主模型、音频编码器和算子的 GPU 卸载
+course2md lecture.mp4 --provider cpu --transcript-source asr
+```
+
+持久配置与 CLI/桌面端共享，命令行参数优先：
+
+```toml
+[defaults]
+gpu_layers = 8          # 0–99，默认 99
+mmproj_offload = false  # 默认 true；--mmproj-offload 可临时重新启用
+```
+
+`--gpu-layers 0` 本身不等于纯 CPU。`--provider cpu` 会在支持的 llama.cpp 上附加 `-ngl 0 --device none --no-op-offload --no-mmproj-offload`。旧版缺少这些控制时，只有确认没有 GPU 设备才继续；否则提示更新 llama.cpp 或使用 CPU-only 构建。明确要求 `--no-mmproj-offload` 而当前版本不支持时也会报错。
+
+[#12](https://github.com/mizorewww/course2md/issues/12) 报告了 Fedora + Radeon 780M/ROCm 下的 GPU hang/reset。减少层数或关闭 mmproj 卸载是可尝试的调节方式，不能保证解决驱动问题；遇到此类问题可改用 CPU 或 API。项目未设置未经验证的 AMD 专用“安全层数”。
+
+成功转换会写入 `run.json`；输出目录确定后的处理失败也会写入诊断记录，其中包含请求的后端配置、错误及已启动 llama-server 的实际参数。更早的预检或元数据失败不会生成该文件。报告问题时可附上此文件和 `course2md doctor` 输出。使用字幕时会跳过 ASR 和 GPU 检查。
 
 ## 模型选型与错漏分析指南（Model Selection & Accuracy Guide）
 
@@ -466,6 +487,8 @@ out/<平台>/<标题>/<编号>/
 | `-o, --out <目录>` | 指定输出根目录 | `out` |
 | `--transcript-source <auto/subtitle/asr>` | 转写来源：`auto` = 平台字幕优先（人工>自动），无字幕再走本地 ASR；`subtitle` = 强制字幕（无则报错）；`asr` = 跳过字幕直接识别 | `auto` |
 | `--provider <coreml/gpu/cpu/api/npu>` | 识别后端：`coreml`（macOS 默认）、`gpu`（非 Mac 默认）、`cpu`、`api`（云端 STT） | 视平台而定 |
+| `--gpu-layers <0-99>` | `llama-server` 的 GPU 卸载层数（`-ngl`）；AMD/ROCm 核显遇 hang 时可尝试调低 | `99` |
+| `--mmproj-offload` / `--no-mmproj-offload` | 多模态 projector 是否卸载到 GPU | 卸载 |
 | `--asr-model <qwen3-1.7b/qwen3-0.6b/whisper>` | CoreML 识别模型变体：`qwen3-1.7b`（默认，MLX 走 GPU）、`qwen3-0.6b`（CoreML 走 ANE，省电）或 `whisper`（large-v3-turbo） | `qwen3-1.7b` |
 | `--asr-api-base-url <URL>` | 云端 STT base URL（OpenAI 兼容） | `https://openrouter.ai/api/v1` |
 | `--asr-api-key <KEY>` | 云端 STT API Key（亦可设置 `COURSE2MD_ASR_API_KEY` 环境变量） | 配置文件 / 环境变量 |

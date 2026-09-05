@@ -136,10 +136,10 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
         }
     }
     // 剩余 Gpu/Cpu 走 llama-server（Metal/CUDA/Vulkan/CPU）
-    let ngl = if cfg.provider == AsrProvider::Cpu {
-        0
-    } else {
-        99
+    let offload = OffloadOpts {
+        provider: cfg.provider,
+        gpu_layers: cfg.gpu_layers,
+        mmproj_offload: cfg.mmproj_offload,
     };
     let threads = cfg.threads;
     let max_speech = cfg.max_speech;
@@ -155,7 +155,7 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
     let mmproj = llama.mmproj;
     let wav = wav.to_path_buf();
     run_with_cp(cfg, &id, move |cp| {
-        run_blocking(&wav, &model, &mmproj, ngl, threads, max_speech, cp)
+        run_blocking(&wav, &model, &mmproj, offload, threads, max_speech, cp)
     })
     .await
 }
@@ -164,7 +164,7 @@ fn run_blocking(
     wav: &Path,
     model: &Path,
     mmproj: &Path,
-    ngl: i32,
+    offload: OffloadOpts,
     threads: i32,
     max_speech: f32,
     cp: &mut crate::checkpoint::Checkpoint,
@@ -178,7 +178,7 @@ fn run_blocking(
     }
 
     let bin = find_llama_server()?;
-    if ngl > 0 {
+    if offload.provider != crate::config::AsrProvider::Cpu {
         let devices = gpu_devices(&bin)?;
         anyhow::ensure!(
             !devices.is_empty(),
@@ -188,9 +188,37 @@ fn run_blocking(
         tracing::info!(devices = %devices.join(", "), "GPU backend detected");
     }
     let port = crate::runtime::free_port()?;
-    tracing::info!(bin = %bin.display(), port, ngl, "llama-server");
+    let caps = llama_server_caps(&bin);
+    let cpu_only = offload.provider == crate::config::AsrProvider::Cpu;
+    if cpu_only && !(caps.device && caps.no_op_offload && caps.no_mmproj_offload) {
+        let devices = gpu_devices(&bin).context(
+            "无法确认当前 llama-server 能严格禁用 GPU，请更新 llama.cpp 后重试 CPU 模式",
+        )?;
+        anyhow::ensure!(
+            devices.is_empty(),
+            "当前 llama-server 缺少严格禁用 GPU 所需的参数，请升级 llama.cpp 或使用 CPU-only 构建后重试 --provider cpu"
+        );
+    } else if !cpu_only && !offload.mmproj_offload {
+        anyhow::ensure!(
+            caps.no_mmproj_offload,
+            "当前 llama-server 不支持 --no-mmproj-offload，请升级 llama.cpp 后重试"
+        );
+    }
+    let args = build_server_args(model, mmproj, offload, caps, threads, port);
+    tracing::info!(
+        bin = %bin.display(),
+        port,
+        gpu_layers = if cpu_only { 0 } else { offload.gpu_layers },
+        mmproj_offload = !cpu_only && offload.mmproj_offload,
+        "llama-server"
+    );
+    tracing::debug!(args = %args.join(" "), "llama-server spawn");
+    // 存档实际 spawn 参数：失败 run.json 会附带（诊断 GPU hang 的关键证据）
+    if let Ok(mut g) = LAST_LLAMA_SPAWN_ARGS.lock() {
+        *g = Some(args.clone());
+    }
     crate::progress::stage("model-load", "start");
-    let mut child = spawn_server(&bin, model, mmproj, ngl, threads, port)?;
+    let mut child = spawn_server(&bin, &args)?;
     let stderr_tail = child
         .take_stderr()
         .map(|s| crate::runtime::drain_stderr(s, "llama_server"))
@@ -227,6 +255,9 @@ fn run_blocking(
             (!t.is_empty()).then_some(t)
         })
     });
+    // llama-server 退出清理双保险（issue #12：孤儿进程占着 /dev/kfd 会加剧 ROCm 问题）：
+    // 成功路径在这里主动 kill+wait；错误路径（? 早退 / panic unwind 经过的 drop）
+    // 由 ManagedChild 的 Drop 兜底 kill+wait，任何离开 run_blocking 的路径都不孤儿。
     child.kill();
     let _ = child.wait();
     let events = r.map_err(|e| {
@@ -337,7 +368,9 @@ fn run_api(
         .filter(|&i| !cp.is_done(segs[i].start, segs[i].end))
         .collect();
     pb.set_position((segs.len() - pending.len()) as u64);
-    crate::progress::emit(serde_json::json!({"type":"workers", "stage":"transcribe", "workers": WORKERS.min(pending.len())}));
+    crate::progress::emit(
+        serde_json::json!({"type":"workers", "stage":"transcribe", "workers": WORKERS.min(pending.len())}),
+    );
 
     // 有界并发（std::thread::scope + 借用，无需 Arc）：网络往返是主要瓶颈；
     // 结果经 channel 回收后记录。abort 后 in-flight 请求自然结束，无人 join 不到。
@@ -628,31 +661,164 @@ fn find_llama_server() -> Result<PathBuf> {
         .context("找不到 llama-server，请安装 llama.cpp 并加入 PATH")
 }
 
-fn spawn_server(
-    bin: &Path,
+/// `llama-server --help` 探测超时：进程启动很快，5s 足够；超时按不支持处理
+const HELP_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// llama-server 对 offload 相关新 flag 的支持情况（issue #12）。
+/// --no-mmproj-offload / --no-op-offload / --device 都是新版 llama.cpp 才有的；
+/// 盲目附加会让发行版仓库的旧 llama-server 直接启动失败，故逐条按 --help 探测。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct LlamaServerCaps {
+    /// `--device`（cpu 后端用于 `--device none` 禁用 GPU 设备）
+    pub device: bool,
+    /// `--no-op-offload`（禁止把 host 算子卸载到 GPU）
+    pub no_op_offload: bool,
+    /// `--no-mmproj-offload`（多模态 projector 留在 CPU）
+    pub no_mmproj_offload: bool,
+}
+
+/// 从 `--help` 文本解析支持情况（纯函数，便于单测）。
+fn caps_from_help(help: &str) -> LlamaServerCaps {
+    LlamaServerCaps {
+        device: help.contains("--device"),
+        no_op_offload: help.contains("--no-op-offload"),
+        no_mmproj_offload: help.contains("--no-mmproj-offload"),
+    }
+}
+
+/// 探测一次并缓存（OnceLock：llama-server 在进程生命周期内不会换版本）。
+/// 探测失败（旧版无 --help 文本、超时、启动失败）→ 全 false，只保留 `-ngl`，
+/// 不阻断主流程。
+fn llama_server_caps(bin: &Path) -> LlamaServerCaps {
+    static CAPS: std::sync::OnceLock<LlamaServerCaps> = std::sync::OnceLock::new();
+    *CAPS.get_or_init(|| match probe_help_text(bin) {
+        Some(text) => {
+            let caps = caps_from_help(&text);
+            tracing::debug!(
+                device = caps.device,
+                no_op_offload = caps.no_op_offload,
+                no_mmproj_offload = caps.no_mmproj_offload,
+                "llama-server flag 探测"
+            );
+            caps
+        }
+        None => {
+            tracing::debug!("llama-server --help 探测失败，按旧版处理（仅 -ngl）");
+            LlamaServerCaps::default()
+        }
+    })
+}
+
+/// File-backed capture avoids pipe-capacity deadlocks with modern, long help output.
+fn probe_help_text(bin: &Path) -> Option<String> {
+    use std::io::{Read, Seek};
+    let mut out = tempfile::tempfile().ok()?;
+    let mut err = tempfile::tempfile().ok()?;
+    let mut cmd = Command::new(bin);
+    cmd.arg("--help")
+        .stdin(Stdio::null())
+        .stdout(out.try_clone().ok()?)
+        .stderr(err.try_clone().ok()?);
+    let mut child = crate::runtime::ManagedChild::spawn("llama-server", &mut cmd).ok()?;
+    let deadline = Instant::now() + HELP_PROBE_TIMEOUT;
+    loop {
+        if let Some(status) = child.try_wait() {
+            if !status.success() {
+                return None;
+            }
+            break;
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    out.rewind().ok()?;
+    err.rewind().ok()?;
+    let mut text = String::new();
+    out.take(1024 * 1024).read_to_string(&mut text).ok()?;
+    text.push('\n');
+    err.take(1024 * 1024).read_to_string(&mut text).ok()?;
+    Some(text)
+}
+
+/// llama-server GPU 卸载控制（由 PipelineConfig 解析而来，issue #12）。
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OffloadOpts {
+    pub provider: crate::config::AsrProvider,
+    pub gpu_layers: u32,
+    pub mmproj_offload: bool,
+}
+
+/// 最近一次 llama-server spawn 的完整参数（诊断用：失败 run.json 附带，issue #12）。
+/// 单进程同一时刻只有一个 llama-server 实例，静态足够。
+static LAST_LLAMA_SPAWN_ARGS: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+
+pub(crate) fn reset_llama_spawn_args() {
+    if let Ok(mut args) = LAST_LLAMA_SPAWN_ARGS.lock() {
+        *args = None;
+    }
+}
+
+/// 最近一次 llama-server spawn 的参数（未 spawn 过 → None），供失败诊断记录。
+pub(crate) fn last_llama_spawn_args() -> Option<Vec<String>> {
+    LAST_LLAMA_SPAWN_ARGS.lock().ok().and_then(|g| g.clone())
+}
+
+/// 组装 llama-server 启动参数（纯函数，便于单测；issue #12）：
+/// - gpu 后端：`-ngl <gpu_layers>`；mmproj_offload=false 且 llama.cpp 支持时
+///   追加 `--no-mmproj-offload`
+/// - cpu 后端：`-ngl 0`，并按探测结果追加 `--device none --no-op-offload
+///   --no-mmproj-offload`——新版 llama.cpp 下仅 -ngl 0 仍可能把 mmproj/部分
+///   算子卸载到 GPU
+/// - 不支持的 flag（caps=false）一律不加，兼容发行版仓库的旧 llama-server
+fn build_server_args(
     model: &Path,
     mmproj: &Path,
-    ngl: i32,
+    offload: OffloadOpts,
+    caps: LlamaServerCaps,
     threads: i32,
     port: u16,
-) -> Result<crate::runtime::ManagedChild> {
+) -> Vec<String> {
+    let cpu_only = offload.provider == crate::config::AsrProvider::Cpu;
+    let ngl = if cpu_only { 0 } else { offload.gpu_layers };
+    let mut args: Vec<String> = vec![
+        "-m".into(),
+        model.display().to_string(),
+        "--mmproj".into(),
+        mmproj.display().to_string(),
+        "-ngl".into(),
+        ngl.to_string(),
+        "-c".into(),
+        LLAMA_CTX.into(),
+        "-n".into(),
+        LLAMA_MAX_GEN.into(),
+        "-t".into(),
+        threads.to_string(),
+        "--port".into(),
+        port.to_string(),
+        "--host".into(),
+        "127.0.0.1".into(),
+    ];
+    if cpu_only {
+        if caps.device {
+            args.extend(["--device".into(), "none".into()]);
+        }
+        if caps.no_op_offload {
+            args.push("--no-op-offload".into());
+        }
+        if caps.no_mmproj_offload {
+            args.push("--no-mmproj-offload".into());
+        }
+    } else if !offload.mmproj_offload && caps.no_mmproj_offload {
+        args.push("--no-mmproj-offload".into());
+    }
+    args
+}
+
+fn spawn_server(bin: &Path, args: &[String]) -> Result<crate::runtime::ManagedChild> {
     let mut cmd = Command::new(bin);
-    cmd.arg("-m")
-        .arg(model)
-        .arg("--mmproj")
-        .arg(mmproj)
-        .arg("-ngl")
-        .arg(ngl.to_string())
-        .arg("-c")
-        .arg(LLAMA_CTX)
-        .arg("-n")
-        .arg(LLAMA_MAX_GEN)
-        .arg("-t")
-        .arg(threads.to_string())
-        .arg("--port")
-        .arg(port.to_string())
-        .arg("--host")
-        .arg("127.0.0.1")
+    cmd.args(args)
         .stdout(Stdio::null())
         // stderr 不能 inherit：llama-server 每个 chunk 都打 slot timing 日志，
         // 会插在进度条重绘中间，破坏 indicatif 的原地更新（issue #4）。
@@ -1014,5 +1180,137 @@ mod tests {
         // 缺字段/异常响应 → 空串（调用方按无语音处理）
         let v = serde_json::json!({"choices":[]});
         assert_eq!(parse_chat_content(&v), "");
+    }
+
+    // ---------- issue #12：GPU 卸载控制 ----------
+
+    fn args_of(
+        provider: crate::config::AsrProvider,
+        gpu_layers: u32,
+        mmproj_offload: bool,
+        caps: LlamaServerCaps,
+    ) -> Vec<String> {
+        let offload = OffloadOpts {
+            provider,
+            gpu_layers,
+            mmproj_offload,
+        };
+        build_server_args(
+            Path::new("/m.gguf"),
+            Path::new("/mm.gguf"),
+            offload,
+            caps,
+            4,
+            8081,
+        )
+    }
+
+    /// 取出 `-ngl` 后面的值
+    fn ngl_of(args: &[String]) -> String {
+        args[args.iter().position(|a| a == "-ngl").unwrap() + 1].clone()
+    }
+
+    #[test]
+    fn args_gpu_backend() {
+        use crate::config::AsrProvider::Gpu;
+        let full = LlamaServerCaps {
+            device: true,
+            no_op_offload: true,
+            no_mmproj_offload: true,
+        };
+        // 默认：全量卸载，mmproj 也卸载 → 无额外 flag
+        let a = args_of(Gpu, 99, true, full);
+        assert_eq!(ngl_of(&a), "99");
+        assert!(!a.contains(&"--no-mmproj-offload".to_string()));
+        // 限制层数 + mmproj 留 CPU
+        let a = args_of(Gpu, 8, false, full);
+        assert_eq!(ngl_of(&a), "8");
+        assert!(a.contains(&"--no-mmproj-offload".to_string()));
+        // 旧版 llama.cpp（无 caps）：mmproj_offload=false 也不加 flag，避免启动失败
+        let a = args_of(Gpu, 8, false, LlamaServerCaps::default());
+        assert_eq!(ngl_of(&a), "8");
+        assert!(!a.contains(&"--no-mmproj-offload".to_string()));
+        // gpu 后端即使探测到新 flag 也不加 --device/--no-op-offload
+        assert!(!a.contains(&"--device".to_string()));
+        assert!(!a.contains(&"--no-op-offload".to_string()));
+    }
+
+    #[test]
+    fn args_cpu_backend() {
+        use crate::config::AsrProvider::Cpu;
+        let full = LlamaServerCaps {
+            device: true,
+            no_op_offload: true,
+            no_mmproj_offload: true,
+        };
+        // 新版 llama.cpp：彻底禁用 GPU 的三件套全部附加（mmproj_offload=true 也一样，
+        // cpu 后端的语义就是任何部分都不上 GPU）
+        for mmproj_offload in [true, false] {
+            let a = args_of(Cpu, 99, mmproj_offload, full);
+            assert_eq!(ngl_of(&a), "0");
+            let i = a.iter().position(|x| x == "--device").unwrap();
+            assert_eq!(a[i + 1], "none");
+            assert!(a.contains(&"--no-op-offload".to_string()));
+            assert!(a.contains(&"--no-mmproj-offload".to_string()));
+        }
+        // 旧版 llama.cpp（--help 无新 flag）：只保留 -ngl 0
+        let a = args_of(Cpu, 99, false, LlamaServerCaps::default());
+        assert_eq!(ngl_of(&a), "0");
+        assert!(!a.contains(&"--device".to_string()));
+        assert!(!a.contains(&"--no-op-offload".to_string()));
+        assert!(!a.contains(&"--no-mmproj-offload".to_string()));
+        // 部分支持：只附加探测到的
+        let a = args_of(
+            Cpu,
+            99,
+            false,
+            LlamaServerCaps {
+                device: false,
+                no_op_offload: true,
+                no_mmproj_offload: false,
+            },
+        );
+        assert!(!a.contains(&"--device".to_string()));
+        assert!(a.contains(&"--no-op-offload".to_string()));
+        assert!(!a.contains(&"--no-mmproj-offload".to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn help_probe_handles_output_larger_than_a_pipe_buffer() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("llama-server");
+        std::fs::write(&script, "#!/bin/sh\nhead -c 262144 /dev/zero | tr '\\000' x\nprintf '\\n--device --no-op-offload --no-mmproj-offload\\n'\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let help = probe_help_text(&script).expect("long help must not time out");
+        assert!(help.len() > 262144);
+        let caps = caps_from_help(&help);
+        assert!(caps.device && caps.no_op_offload && caps.no_mmproj_offload);
+    }
+
+    #[test]
+    fn caps_parsing() {
+        // 新版 llama.cpp（含全部 offload 控制 flag）
+        let new_help = "\
+            -dev,  --device <dev1,dev2,..>   comma-separated list of devices to use for offloading\n\
+            --op-offload, --no-op-offload    whether to offload host tensor operations to device\n\
+            --mmproj-offload, --no-mmproj-offload   whether to enable GPU offloading for multimodal projector\n";
+        let caps = caps_from_help(new_help);
+        assert_eq!(
+            caps,
+            LlamaServerCaps {
+                device: true,
+                no_op_offload: true,
+                no_mmproj_offload: true,
+            }
+        );
+        // 旧版 llama.cpp：只有 -ngl，没有新 flag
+        let old_help = "\
+            -ngl,  --gpu-layers N   number of layers to store in VRAM\n\
+            -m MODEL  model path\n";
+        assert_eq!(caps_from_help(old_help), LlamaServerCaps::default());
+        // 空输出 / 探测失败文本
+        assert_eq!(caps_from_help(""), LlamaServerCaps::default());
     }
 }

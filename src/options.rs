@@ -1,6 +1,6 @@
 //! CLI 与桌面端共享的配置合并规则。
-use crate::{config, llm, settings};
 use crate::cli::RunOpts;
+use crate::{config, llm, settings};
 
 /// 配置文件 + CLI 覆盖 -> 生效 LLM 设置。
 fn resolve_llm(opts: &RunOpts, file: &settings::ConfigFile) -> llm::LlmSettings {
@@ -107,6 +107,12 @@ pub fn resolve(
         llm: resolve_llm(opts, file),
         asr_api: resolve_asr_api(opts, file),
         asr_model: opts.asr_model.clone().or_else(|| d.asr_model.clone()),
+        gpu_layers: config::resolve_gpu_layers(opts.gpu_layers, d.gpu_layers),
+        mmproj_offload: config::resolve_mmproj_offload(
+            opts.mmproj_offload,
+            opts.no_mmproj_offload,
+            d.mmproj_offload,
+        ),
         transcript_source: opts
             .transcript_source
             .or(d.transcript_source)
@@ -132,9 +138,27 @@ fn resolve_asr_api(opts: &RunOpts, file: &settings::ConfigFile) -> crate::settin
     a
 }
 
-
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn offload_settings_reach_shared_pipeline_and_cli_overrides_config() {
+        let mut file = crate::settings::ConfigFile::default();
+        file.defaults.gpu_layers = Some(8);
+        file.defaults.mmproj_offload = Some(false);
+        let cfg =
+            super::resolve("lecture.mp4".into(), &crate::cli::RunOpts::default(), &file).unwrap();
+        assert_eq!(cfg.gpu_layers, 8);
+        assert!(!cfg.mmproj_offload);
+        let opts = crate::cli::RunOpts {
+            gpu_layers: Some(4),
+            mmproj_offload: true,
+            ..Default::default()
+        };
+        let cfg = super::resolve("lecture.mp4".into(), &opts, &file).unwrap();
+        assert_eq!(cfg.gpu_layers, 4);
+        assert!(cfg.mmproj_offload);
+    }
+
     use super::*;
 
     #[test]
@@ -142,7 +166,12 @@ mod tests {
         let mut file = settings::ConfigFile::default();
         file.defaults.keep_video = Some(true);
         file.defaults.resume = Some(true);
-        let opts = RunOpts { no_keep_video: true, no_resume: true, stable_secs: Some(-1.0), ..Default::default() };
+        let opts = RunOpts {
+            no_keep_video: true,
+            no_resume: true,
+            stable_secs: Some(-1.0),
+            ..Default::default()
+        };
         let cfg = resolve("video".into(), &opts, &file).unwrap();
         assert!(!cfg.keep_video && !cfg.resume);
         assert_eq!(cfg.stable_secs, -1.0);
@@ -151,7 +180,14 @@ mod tests {
 
     #[test]
     fn subtitle_configuration_does_not_require_api_credentials() {
-        let opts = RunOpts { provider: Some(config::AsrProvider::Api), transcript_source: Some(config::TranscriptSource::Subtitle), ..Default::default() };
-        resolve("video".into(), &opts, &Default::default()).unwrap().validate().unwrap();
+        let opts = RunOpts {
+            provider: Some(config::AsrProvider::Api),
+            transcript_source: Some(config::TranscriptSource::Subtitle),
+            ..Default::default()
+        };
+        resolve("video".into(), &opts, &Default::default())
+            .unwrap()
+            .validate()
+            .unwrap();
     }
 }

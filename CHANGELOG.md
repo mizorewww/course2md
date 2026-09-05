@@ -3,6 +3,22 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- Bilibili 扫码登录与退出：`--login bilibili` / `--logout bilibili`；CLI 和桌面预览共享登录状态，凭据与课程输出分开保存。
+- GPU 卸载控制（#12）：`--gpu-layers <0-99>`、`--mmproj-offload` / `--no-mmproj-offload`，以及共享配置中的 `gpu_layers`、`mmproj_offload`。
+- 输出目录确定后的失败也写入诊断 `run.json`；成功和失败记录可包含实际 llama-server 启动参数。
+
+### 修复
+
+- Bilibili 412 有限重试；视频解析、字幕或下载失败时提示登录，首次设置推荐登录以获取账号有权访问的更高清晰度。
+- GPU 模式检查 llama-server 可用设备，缺少 GPU 后端时明确报错；`doctor` 显示设备，Arch 安装文档及 AUR 可选依赖补齐 Vulkan 后端。
+- CPU 模式显式禁用主模型、算子和 mmproj 的 GPU 卸载（#12）。旧版参数不足且无法确认没有 GPU 时停止运行，提示升级或使用 CPU-only 构建。
+- llama-server 帮助探测改用临时文件，避免长帮助输出填满管道，导致探测误超时而漏加 CPU 保护参数。
+- 合并 GPU 控制时保留字幕优先、并行场景检测/转写及桌面进度事件；CLI 与桌面端统一应用新增配置。
+
 ## [1.5.0] — 2026-09-05
 
 ### 新增

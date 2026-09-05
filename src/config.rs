@@ -20,6 +20,10 @@ pub const DEFAULT_THREADS: i32 = 4;
 pub const DEFAULT_MAX_SPEECH: f32 = 20.0;
 /// 默认输出根目录
 pub const DEFAULT_OUT_DIR: &str = "out";
+/// GPU 卸载层数默认（llama-server -ngl）：全量卸载。
+/// 注意：没有证据表明某个非零层数在 AMD/ROCm 核显上稳定（issue #12 复测结论），
+/// 因此不设平台差异化默认——Linux+AMD 只做风险警告（pipeline.rs），由用户手动降载。
+pub const DEFAULT_GPU_LAYERS: u32 = 99;
 
 /// 云端 STT API key 环境变量：新名 `COURSE2MD_ASR_API_KEY` 优先，
 /// `OPENROUTER_API_KEY` 仅作兼容回落（旧文档/脚本中已存在）。
@@ -151,6 +155,10 @@ pub struct PipelineConfig {
     pub transcript_source: TranscriptSource,
     /// coreml 后端模型选择：qwen3 | whisper
     pub asr_model: Option<String>,
+    /// GPU 卸载层数（llama-server -ngl；gpu 后端生效，cpu 后端恒为 0）
+    pub gpu_layers: u32,
+    /// 是否把多模态 projector（mmproj）卸载到 GPU
+    pub mmproj_offload: bool,
     /// `-o` 根目录，实际课程目录是 `{out_root}/{platform}/{title}/{id}/`
     pub out_root: PathBuf,
 }
@@ -281,6 +289,11 @@ impl PipelineConfig {
         anyhow::ensure!(
             !self.formats.is_empty(),
             "formats 不能为空（至少 md/html/json 之一）"
+        );
+        anyhow::ensure!(
+            self.gpu_layers <= 99,
+            "gpu_layers 必须在 0..=99（收到 {}）",
+            self.gpu_layers
         );
 
         Ok(())
@@ -417,6 +430,54 @@ pub fn resolve_resume(cli_resume: bool, cli_no_resume: bool, file_resume: Option
         return true;
     }
     file_resume.unwrap_or(false)
+}
+
+/// Linux + AMD GPU 检测（issue #12）：任一 /sys/class/drm/card*/device/vendor
+/// 内容为 "0x1002"（AMD PCI vendor id）即视为 AMD 显卡机器。
+/// 文件不存在（非 Linux、无 DRM 设备）→ false，不影响其他平台。
+/// 用途：provider=gpu 时的 ROCm 风险警告（pipeline.rs），不参与默认值计算——
+/// 没有证据表明某个非零层数或关闭 mmproj 在 gfx 系列核显上稳定（issue #12 复测），
+/// 不设「安全默认值」，只提示风险与回退路径。
+pub fn linux_amd_gpu_present() -> bool {
+    cfg!(target_os = "linux") && any_amd_drm_card(Path::new("/sys/class/drm"))
+}
+
+/// 扫描 `<sys_drm>/card*/device/vendor`，任一内容为 AMD vendor id 即 true。
+/// 独立成可注入路径的函数以便单测（/sys 在测试机上不可构造）。
+fn any_amd_drm_card(sys_drm: &Path) -> bool {
+    const AMD_VENDOR: &str = "0x1002";
+    let Ok(entries) = std::fs::read_dir(sys_drm) else {
+        return false;
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with("card"))
+        })
+        .any(|e| {
+            std::fs::read_to_string(e.path().join("device/vendor"))
+                .is_ok_and(|v| v.trim() == AMD_VENDOR)
+        })
+}
+
+/// gpu_layers 三态解析：CLI > 配置文件 > 内置默认 99（全量卸载）。
+pub fn resolve_gpu_layers(cli: Option<u32>, file: Option<u32>) -> u32 {
+    cli.or(file).unwrap_or(DEFAULT_GPU_LAYERS)
+}
+
+/// mmproj_offload 三态解析：`--no-mmproj-offload` > `--mmproj-offload` > 配置文件 >
+/// 默认开启（llama-server 原生行为）。
+/// 两个 CLI flag 互斥（clap conflicts_with），不会同时为 true。
+pub fn resolve_mmproj_offload(cli_on: bool, cli_off: bool, file: Option<bool>) -> bool {
+    if cli_off {
+        return false;
+    }
+    if cli_on {
+        return true;
+    }
+    file.unwrap_or(true)
 }
 
 /// 平台默认后端提示（doctor 展示与 main 实际选择保持同一逻辑）。
@@ -600,6 +661,8 @@ mod tests {
             llm: Default::default(),
             asr_api: Default::default(),
             asr_model: None,
+            gpu_layers: DEFAULT_GPU_LAYERS,
+            mmproj_offload: true,
             transcript_source: TranscriptSource::Auto,
         }
     }
@@ -664,6 +727,51 @@ mod tests {
         assert!(resolve_resume(false, false, Some(true)));
         assert!(!resolve_resume(false, false, Some(false)));
         assert!(!resolve_resume(false, false, None));
+    }
+
+    #[test]
+    fn validate_rejects_gpu_layers_out_of_range() {
+        let mut c = valid_cfg();
+        c.gpu_layers = 100;
+        assert!(c.validate().is_err());
+        c.gpu_layers = 0;
+        c.validate().unwrap();
+        c.gpu_layers = 99;
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn gpu_offload_priority() {
+        // CLI > 配置文件 > 内置默认（全平台一致：不设平台差异化的「安全默认值」，
+        // 没有证据表明某个非零层数在 AMD/ROCm 核显上稳定，issue #12 复测结论）
+        assert_eq!(resolve_gpu_layers(Some(8), Some(4)), 8);
+        assert_eq!(resolve_gpu_layers(None, Some(4)), 4);
+        assert_eq!(resolve_gpu_layers(None, None), DEFAULT_GPU_LAYERS);
+
+        assert!(!resolve_mmproj_offload(true, true, Some(true)));
+        assert!(resolve_mmproj_offload(true, false, Some(false)));
+        assert!(!resolve_mmproj_offload(false, true, Some(true)));
+        assert!(!resolve_mmproj_offload(false, false, Some(false)));
+        assert!(resolve_mmproj_offload(false, false, Some(true)));
+        assert!(resolve_mmproj_offload(false, false, None));
+    }
+
+    #[test]
+    fn amd_drm_card_detection() {
+        let tmp = std::env::temp_dir().join(format!("c2md-drm-{}", std::process::id()));
+        let vendor = tmp.join("card0/device");
+        std::fs::create_dir_all(&vendor).unwrap();
+        // 无 vendor 文件 → false
+        assert!(!any_amd_drm_card(&tmp));
+        // NVIDIA vendor id → false
+        std::fs::write(vendor.join("vendor"), "0x10de\n").unwrap();
+        assert!(!any_amd_drm_card(&tmp));
+        // AMD vendor id（带换行）→ true
+        std::fs::write(vendor.join("vendor"), "0x1002\n").unwrap();
+        assert!(any_amd_drm_card(&tmp));
+        // 不存在的根目录 → false
+        assert!(!any_amd_drm_card(Path::new("/nonexistent/c2md-drm")));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
