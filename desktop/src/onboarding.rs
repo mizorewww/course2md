@@ -393,11 +393,17 @@ impl Desktop {
                     return false;
                 }
             }
+            let previously_completed = self.desktop_settings.setup_completed;
             self.desktop_settings.setup_completed = true;
             self.save_settings(cx);
             if self.settings_status != "已自动保存" {
-                self.desktop_settings.setup_completed = false;
-                if let Some((field, _)) = self.invalid_setting(cx) {
+                self.desktop_settings.setup_completed = previously_completed;
+                if let Some((field, _)) = self.invalid_setting(cx)
+                    && matches!(
+                        field,
+                        Field::Output | Field::AsrUrl | Field::AsrModel | Field::AsrKey
+                    )
+                {
                     self.inputs[&field].update(cx, |input, cx| input.focus(window, cx));
                 }
                 return false;
@@ -486,9 +492,36 @@ impl Desktop {
                     }),
                 |v| {
                     v.child(
-                        div()
+                        v_flex()
+                            .gap_2()
+                            .items_start()
                             .text_color(rgb(0xa32626))
-                            .child(self.settings_status.clone()),
+                            .child(self.settings_status.clone())
+                            .when(
+                                self.invalid_setting(cx).is_some_and(|(field, _)| {
+                                    matches!(field, Field::LlmUrl | Field::LlmModel | Field::LlmKey)
+                                }),
+                                |v| {
+                                    v.child(
+                                        Button::new("setup-repair-ai")
+                                            .h(px(36.))
+                                            .min_h(px(36.))
+                                            .label("前往 AI 设置")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.setup_open = false;
+                                                this.setup_return = None;
+                                                this.settings_tab = 2;
+                                                this.navigate(Page::Settings, cx);
+                                                window.close_dialog(cx);
+                                                if let Some((field, _)) = this.invalid_setting(cx) {
+                                                    this.inputs[&field].update(cx, |input, cx| {
+                                                        input.focus(window, cx)
+                                                    });
+                                                }
+                                            })),
+                                    )
+                                },
+                            ),
                     )
                 },
             )

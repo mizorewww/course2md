@@ -53,7 +53,10 @@ impl Desktop {
                                 .min_h(px(36.))
                                 .max_h(px(36.))
                                 .aria_label("笔记保存位置")
-                                .w_full(),
+                                .w_full()
+                                .when(self.field_error(Field::Output, cx).is_some(), |input| {
+                                    input.border_color(rgb(0xa32626))
+                                }),
                         ),
                     )
                     .child(
