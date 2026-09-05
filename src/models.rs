@@ -119,6 +119,7 @@ fn mirror_hint() -> String {
 /// 下载 llama.cpp Qwen3-ASR GGUF。
 pub async fn download_models(root: &Path) -> Result<()> {
     fs::create_dir_all(root)?;
+    let _download_lock = crate::runtime::lock_file(&root.join(".download.lock"))?;
     let p = llama_paths(root);
     let base = hf_base(current_hf_endpoint());
     tracing::info!(endpoint = %base, "huggingface endpoint");

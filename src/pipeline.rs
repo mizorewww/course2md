@@ -69,6 +69,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     let platform = config::platform_from(&cfg.url, &meta.extractor);
     cfg.out_dir = config::course_dir(&cfg.out_root, &platform, &title, &id);
     tokio::fs::create_dir_all(&cfg.out_dir).await?;
+    let _run_lock = crate::runtime::lock_file(&cfg.out_dir.join(".course2md.lock"))?;
     meta.save(&cfg.meta_path())?;
     tracing::info!(
         title = %meta.title,

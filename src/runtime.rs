@@ -163,6 +163,24 @@ fn is_executable(p: &Path) -> bool {
     p.is_file()
 }
 
+/// Hold an OS file lock for the lifetime of the returned file. The lock file
+/// remains in place so another process cannot open a different inode at its path.
+pub fn lock_file(path: &Path) -> Result<std::fs::File> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.try_lock().with_context(|| {
+        format!(
+            "目录正被另一个任务使用（{}），请等待该任务结束",
+            path.display()
+        )
+    })?;
+    Ok(file)
+}
+
 /// 让 OS 分配一个空闲端口。
 /// 注意 TOCTOU：返回后到真正 bind 之间端口可能被抢占，
 /// 调用方需用 `wait_ready` 的响应体校验兜底。
@@ -195,6 +213,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn workspace_lock_rejects_a_second_writer_and_releases_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".lock");
+        let first = lock_file(&path).unwrap();
+        assert!(lock_file(&path).is_err());
+        drop(first);
+        assert!(lock_file(&path).is_ok());
+    }
+
+    #[test]
     fn which_finds_common_tools() {
         // CI 环境保证 cargo 存在；本测试机器必有 shell 基础工具
         #[cfg(unix)]
@@ -219,7 +247,10 @@ mod tests {
         assert_ne!(first.path(), second.path());
         std::fs::write(second.path().join("chunk.wav"), b"audio").unwrap();
         drop(first);
-        assert_eq!(std::fs::read(second.path().join("chunk.wav")).unwrap(), b"audio");
+        assert_eq!(
+            std::fs::read(second.path().join("chunk.wav")).unwrap(),
+            b"audio"
+        );
     }
 
     #[test]
