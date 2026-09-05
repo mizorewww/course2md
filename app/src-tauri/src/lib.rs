@@ -22,6 +22,7 @@ use tauri::{AppHandle, Emitter};
 
 struct JobHandle {
     cancel: std::sync::mpsc::Sender<()>,
+    stopped: std::sync::mpsc::Receiver<()>,
     kind: JobKind,
 }
 
@@ -268,7 +269,8 @@ fn spawn_cli_job(app: &AppHandle, args: &[String], kind: JobKind) -> Result<Stri
     let job_id = next_job_id();
 
     let (cancel, cancellation) = std::sync::mpsc::channel();
-    jobs.insert(job_id.clone(), JobHandle { cancel, kind });
+    let (stop_notice, stopped) = std::sync::mpsc::channel();
+    jobs.insert(job_id.clone(), JobHandle { cancel, stopped, kind });
     drop(jobs);
     let mut readers = Vec::new();
     if let Some(out) = child.stdout.take() {
@@ -293,6 +295,7 @@ fn spawn_cli_job(app: &AppHandle, args: &[String], kind: JobKind) -> Result<Stri
             }
             std::thread::sleep(std::time::Duration::from_millis(40));
         };
+        let _ = stop_notice.send(());
         for reader in readers { let _ = reader.join(); }
         JOBS.lock().map(|mut m| m.remove(&job_id2)).ok();
         if let Err(e) = app2.emit(
@@ -913,38 +916,16 @@ struct ConfigOut {
     llm: LlmOut,
 }
 
-/// 写含 API key 的配置文件：tmp（unix 0600）→ fsync → rename，
-/// 语义对齐 CLI settings::save / write_private。
-#[cfg(unix)]
+/// Exclusive temporary creation prevents stale .tmp symlinks or permissions
+/// from exposing API keys, and persist replaces existing files on Windows too.
 fn write_config_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let tmp = path.with_extension("tmp");
-    {
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)
-            .map_err(|e| format!("创建 {} 失败: {e}", tmp.display()))?;
-        f.write_all(bytes)
-            .map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
-        let _ = f.sync_all();
-    }
-    std::fs::rename(&tmp, path)
-        .map_err(|e| format!("rename {} → {} 失败: {e}", tmp.display(), path.display()))?;
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    let parent = path.parent().ok_or("配置文件缺少父目录")?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    tmp.write_all(bytes).map_err(|e| e.to_string())?;
+    tmp.as_file().sync_all().map_err(|e| e.to_string())?;
+    tmp.persist(path).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-#[cfg(not(unix))]
-fn write_config_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| format!("写 {} 失败: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
-        .map_err(|e| format!("rename {} → {} 失败: {e}", tmp.display(), path.display()))
 }
 
 #[tauri::command]
@@ -963,7 +944,7 @@ fn save_config(cfg: ConfigDto) -> Result<(), String> {
     // 覆盖前备份旧配置（用户可能有手改内容），失败只告警不阻断
     if p.is_file() {
         let bak = p.with_extension("toml.bak");
-        let _ = std::fs::copy(&p, &bak);
+        if let Ok(bytes) = std::fs::read(&p) { let _ = write_config_private(&bak, &bytes); }
     }
     write_config_private(&p, toml_text.as_bytes())?;
     Ok(())
@@ -1217,9 +1198,8 @@ pub fn run() {
                 .lock()
                 .map(|mut m| m.drain().map(|(_, j)| j).collect())
                 .unwrap_or_default();
-            for h in handles {
-                let _ = h.cancel.send(());
-            }
+            for h in &handles { let _ = h.cancel.send(()); }
+            for h in handles { let _ = h.stopped.recv(); }
         }
     });
 }
