@@ -614,6 +614,17 @@ impl Desktop {
                             .gap_4()
                             .pb_6()
                             .child(section("默认识别方式", ""))
+                            .child(h_flex().gap_2().flex_wrap().children(
+                                SOURCES.iter().enumerate().map(|(index, (_, label))| {
+                                    Button::new(("default-source", index))
+                                        .label(*label)
+                                        .selected(self.settings_options.source_mode == index)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.settings_options.source_mode = index;
+                                            cx.notify();
+                                        }))
+                                }),
+                            ))
                             .child(self.provider_choices(cx)),
                     )
                     .child(

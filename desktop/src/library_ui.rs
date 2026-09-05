@@ -372,35 +372,7 @@ impl Desktop {
                         ),
                 ),
             );
-        } else if self.source_preview.is_some() {
-            view = view.child(
-                h_flex()
-                    .gap_3()
-                    .p_4()
-                    .bg(rgb(SURFACE))
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(rgb(LINE))
-                    .child(Icon::new(IconName::FolderOpen))
-                    .child(
-                        div().flex_1().min_w_0().text_ellipsis().child(
-                            PathBuf::from(self.value(Field::Source, cx))
-                                .file_name()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .into_owned(),
-                        ),
-                    )
-                    .child(
-                        Button::new("choose-video")
-                            .ghost()
-                            .label("更换视频")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.pick(false, window, cx)),
-                            ),
-                    ),
-            );
-        } else {
+        } else if self.source_preview.is_none() {
             view = view.child(
                 v_flex()
                     .gap_3()
@@ -506,6 +478,16 @@ impl Desktop {
                                         .child(source.title.clone()),
                                 )
                                 .child(div().text_color(rgb(MUTED)).child(source.detail()))
+                                .when(!self.online, |view| {
+                                    view.child(
+                                        Button::new("choose-video")
+                                            .ghost()
+                                            .label("更换视频")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.pick(false, window, cx)
+                                            })),
+                                    )
+                                })
                                 .when_some(source.cover_error.clone(), |view, error| {
                                     view.child(div().text_xs().text_color(rgb(MUTED)).child(error))
                                 }),
