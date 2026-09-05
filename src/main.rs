@@ -37,6 +37,19 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    if cli.logout.is_some() {
+        return course2md::auth::logout_bilibili();
+    }
+    if cli.login.is_some() {
+        anyhow::ensure!(
+            cli.source.as_deref().is_none_or(config::looks_like_source),
+            "--login bilibili 后只能跟视频链接或本地视频路径"
+        );
+        course2md::auth::login_bilibili()?;
+        if cli.source.is_none() {
+            return Ok(());
+        }
+    }
     match cli.command {
         Some(Command::Models { cmd }) => match cmd {
             ModelsCmd::Download { dir, json } => {

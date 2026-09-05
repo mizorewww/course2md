@@ -1,5 +1,6 @@
 pub mod apple;
 pub mod asr;
+pub mod auth;
 pub mod checkpoint;
 pub mod cli;
 pub mod config;

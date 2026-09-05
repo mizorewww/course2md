@@ -38,9 +38,45 @@ impl Source {
 }
 
 fn command(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Vec<u8>> {
+    let start = Instant::now();
+    let mut retries = 0;
+    loop {
+        let result = command_once(name, args, cancel, start);
+        let Err(error) = &result else { return result };
+        let message = error.to_string();
+        if name != "yt-dlp" || !course2md::fetch::is_bilibili_412(&message) {
+            return result;
+        }
+        let Some(delay) = course2md::fetch::bilibili_retry_delay(&message, retries) else {
+            return result.context(course2md::fetch::BILIBILI_412_HINT);
+        };
+        retries += 1;
+        let retry_at = Instant::now() + delay;
+        while Instant::now() < retry_at {
+            check_preview_deadline(cancel, start)?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+fn check_preview_deadline(cancel: &AtomicBool, start: Instant) -> Result<()> {
+    ensure!(
+        !cancel.load(Ordering::Relaxed) && start.elapsed() < Duration::from_secs(45),
+        "预览已取消或超时，请检查链接及网络后重试"
+    );
+    Ok(())
+}
+
+fn command_once(name: &str, args: &[&str], cancel: &AtomicBool, start: Instant) -> Result<Vec<u8>> {
+    check_preview_deadline(cancel, start)?;
     let stdout = tempfile::tempfile()?;
     let stderr = tempfile::tempfile()?;
     let mut command = Command::new(name);
+    let _cookies = if name == "yt-dlp" {
+        course2md::auth::configure_ytdlp(&mut command, args.last().copied().unwrap_or_default())?
+    } else {
+        None
+    };
     command
         .args(args)
         .env("PATH", crate::backend::tool_path())
@@ -60,7 +96,6 @@ fn command(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Vec<u8>> {
     let mut child = command
         .spawn()
         .with_context(|| format!("无法启动 {name}，请在设置中检查运行环境"))?;
-    let start = Instant::now();
     let status = loop {
         if cancel.load(Ordering::Relaxed) || start.elapsed() > Duration::from_secs(45) {
             crate::backend::terminate(&mut child);
@@ -86,15 +121,10 @@ fn command(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Vec<u8>> {
     };
     let error_bytes = read(stderr)?;
     let error_text = String::from_utf8_lossy(&error_bytes);
-    if !status.success() && error_text.contains("HTTP Error 412") {
-        anyhow::bail!(
-            "视频平台暂时限制了请求。请稍后重试，也可以导入已下载的本地视频。（HTTP 412）"
-        );
-    }
     ensure!(
         status.success(),
         "{}",
-        error_text.chars().take(700).collect::<String>()
+        course2md::error::cmd_error(name, status.code(), &error_text)
     );
     read(stdout)
 }
@@ -311,6 +341,42 @@ mod tests {
         std::fs::write(&text, "not a video").unwrap();
         assert!(inspect(text.display().to_string(), false, cancel).is_err());
     }
+    #[test]
+    fn cancelled_or_expired_preview_does_not_spawn() {
+        let cancel = AtomicBool::new(true);
+        assert!(
+            command("tool-that-does-not-exist", &[], &cancel)
+                .unwrap_err()
+                .to_string()
+                .contains("已取消")
+        );
+        assert!(
+            check_preview_deadline(
+                &AtomicBool::new(false),
+                Instant::now() - Duration::from_secs(46)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    #[ignore = "requires yt-dlp and Bilibili network access"]
+    fn bilibili_example_preview() {
+        let source = inspect(
+            "https://www.bilibili.com/video/BV1pb8o6yE8f".into(),
+            true,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+        assert!(source.title.contains("欢迎来到未来"));
+        assert!(source.duration > 0.);
+        let cover = source
+            .cover
+            .unwrap_or_else(|| panic!("{:?}", source.cover_error));
+        assert!(image::open(&cover).is_ok());
+        std::fs::remove_file(cover).unwrap();
+    }
+
     #[test]
     fn unsupported_source_is_rejected_before_running_tools() {
         assert!(
