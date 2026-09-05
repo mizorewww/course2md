@@ -44,3 +44,5 @@
 核心及 CLI 测试 82 + 11 项、集成测试 2 项通过；桌面测试 10 项通过、2 项忽略；桌面 Clippy（禁止警告）通过。本轮未添加脚手架测试。
 
 验收限制：实际桌面操作在 macOS 完成；跨平台构建结果不能代替 Windows / Linux 实机 UX 验收。自动化截图工具不能可靠量化逐帧曲线，动效由实际展开/收起/减少动态效果操作和曲线实现共同核查，不宣称已完成逐帧性能认证。
+
+最终源码 e41e1db6aa782bf88fe8824d592dc470b4b21ffe 的 [三平台 CI](https://github.com/mizorewww/course2md/actions/runs/33982482977) 已全部通过：macOS 26、Ubuntu 24.04、Windows 的桌面测试、构建及开发包生成成功。后续提交仅更新验收文档及截图。最终本机 macOS 包通过 codesign --verify --deep --strict 和 hdiutil verify。
