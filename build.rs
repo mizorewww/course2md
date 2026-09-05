@@ -299,11 +299,24 @@ fn emit_commit_hash() {
     let mut commit = None;
     // Source archives have no .git; do not accidentally use an enclosing repository.
     if root.join(".git").exists() {
-        println!("cargo:rerun-if-changed={}", root.join(".git").display());
-        for name in ["HEAD", "refs", "packed-refs"] {
+        // A worktree's .git is a pointer file. Watching the repository
+        // directory would also rebuild on index refreshes and unrelated refs.
+        if root.join(".git").is_file() {
+            println!("cargo:rerun-if-changed={}", root.join(".git").display());
+        }
+        let symbolic_ref = git(&["symbolic-ref", "--quiet", "HEAD"]);
+        for name in [
+            Some("HEAD"),
+            symbolic_ref.as_deref(),
+            Some("packed-refs"),
+            Some("logs/HEAD"),
+        ]
+        .into_iter()
+        .flatten()
+        {
             if let Some(path) = git(&["rev-parse", "--git-path", name]) {
                 let path = root.join(path);
-                if path.exists() {
+                if path.is_file() {
                     println!("cargo:rerun-if-changed={}", path.display());
                 }
             }
