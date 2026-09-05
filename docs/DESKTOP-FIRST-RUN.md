@@ -18,3 +18,24 @@
 依据 Apple HIG 的 Onboarding、Offering Help、Buttons、Layout、Accessibility，以及 WCAG 2 的文字/非文字对比度要求。项目使用 GPUI Component 原生对话框管理焦点与遮罩，不用手写覆盖层替代模态行为。尺寸是项目约定，不宣称通过完整 WCAG 或 VoiceOver 认证。
 
 验收包含全新配置启动、检测中/检测结果、完成/跳过/重启、缺失工具、设置重新打开、键盘焦点、对比度测量和小窗口排版。先实现后验证，不保留脚手架测试。
+
+## 实际验收（2026-09-06）
+
+源码提交 `b203bce`，macOS Apple M3 Max，使用独立配置目录和实际打包应用操作，未修改个人配置。
+
+- 全新配置启动立即显示引导。检测到 Apple 原生、GPU 的 Apple M3 Max 设备及 CPU 后端；云端 API 明确显示需要配置，字幕方式说明无需模型。未完成时配置文件尚未创建。
+- 通过 Tab / Space 选择 GPU，填写保存目录并完成，进入添加课程。重启后不重复弹窗；设置中的入口可以重新打开。
+- 填入未确认目录后按 Escape 跳过，只写入已看过引导的标记，丢弃未确认草稿；重启不会再次弹出。
+- 实机发现空 API Key 曾能完成设置，已修复为保留弹窗、显示具体错误并定位缺失字段。日常自动保存使用相同必填校验，保留上次有效配置。
+- 用仅作用于验收进程的失败可执行文件模拟 ffmpeg / ffprobe 不可运行。界面明确显示缺失条件，主操作变为「查看安装方法」，进入运行环境页；移除临时文件后重新检测可恢复正常。临时脚手架已删除。
+- 窗口缩小到约 900 × 634，弹窗表单可滚动到目录输入，底部操作始终可见。设置表单限制最大宽度，并统一起始对齐。
+- 添加页在输入阶段只显示预览操作；错误后只有一个在线重试入口，修改链接恢复正常预览按钮。视频链接有可见标签。
+- 使用真实 YouTube 链接读取到 Big Buck Bunny 封面、标题及 09:57 时长，预览完成后出现「生成笔记」；900 像素宽窗口下预览与文件夹操作完整可见。
+- 控件边界 `#7b8492` 对白底约 3.78:1，辅助文字 `#485363` 对背景 `#f8f8f6` 约 7.33:1，主按钮白字对 `#315bc5` 约 6.12:1。分隔线仍保持较轻颜色，不承担控件辨认功能。
+- 本地核心测试 79 项、桌面测试 10 项通过（2 项忽略）；核心和桌面 Clippy 通过。本机开发包通过严格签名校验与 DMG 校验和验证。
+- Windows / Linux 的 CI 开发包已下载并验证压缩包完整性，包含 GUI、CLI 和依赖源码记录；两者使用相同的 Zed `5a9b9558` / GPUI Component `d59d1a16` 主线源码。
+- 最终源码 `b203bce` 的 [三平台 CI](https://github.com/mizorewww/course2md/actions/runs/33978003858) 全部成功：macOS、Windows、Linux 均完成测试和开发包构建。
+
+GPU 状态代表真实枚举到设备，不宣称已验证所有模型推理；API 状态代表配置完整性，服务连接在转写时验证。Intel NPU 检测覆盖 Linux 设备厂商和 Windows 设备状态及 Python 环境，但本机没有 Intel NPU，未做硬件推理验收。Windows / Linux 的验证范围为 CI 构建、测试和打包，未冒充当地桌面的实际操作验收。
+
+参考：[Apple HIG Onboarding](https://developer.apple.com/design/human-interface-guidelines/onboarding)、[WCAG 文字对比度](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html)、[WCAG 非文字对比度](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html)。
