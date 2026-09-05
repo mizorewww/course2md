@@ -1,6 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 mod activity;
 mod backend;
+mod icons;
 mod library_ui;
 mod onboarding;
 mod organize;
@@ -932,7 +933,7 @@ impl Drop for Desktop {
 
 fn main() {
     gpui_platform::application()
-        .with_assets(gpui_kit_assets::Assets)
+        .with_assets(icons::Assets)
         .run(|cx| {
             gpui_component::init(cx);
             gpui_component::set_locale("zh-CN");

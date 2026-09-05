@@ -338,7 +338,7 @@ impl Desktop {
                 .child(
                     Button::new("refresh-library")
                         .ghost()
-                        .icon(IconName::Loader)
+                        .icon(icons::refresh())
                         .label("刷新")
                         .disabled(self.loading)
                         .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
@@ -696,7 +696,7 @@ impl Desktop {
                             .child(
                                 Button::new("refresh-environment")
                                     .label("重新检测")
-                                    .icon(IconName::Loader)
+                                    .icon(icons::refresh())
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.refresh_environment(cx);
                                         cx.notify();
@@ -1075,9 +1075,9 @@ impl Render for Desktop {
             .child(
                 v_flex().gap_1().children(
                     [
-                        (Page::Library, "全部课程", IconName::BookOpen),
-                        (Page::New, "添加课程", IconName::Plus),
-                        (Page::Task, "任务", IconName::Loader),
+                        (Page::Library, "全部课程", Icon::new(IconName::BookOpen)),
+                        (Page::New, "添加课程", Icon::new(IconName::Plus)),
+                        (Page::Task, "任务", icons::task()),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1095,7 +1095,7 @@ impl Render for Desktop {
                             h_flex()
                                 .w_full()
                                 .gap_2()
-                                .child(Icon::new(icon))
+                                .child(icon.size(px(20.)))
                                 .child(label),
                         )
                         .selected(
@@ -1139,7 +1139,7 @@ impl Render for Desktop {
                         h_flex()
                             .w_full()
                             .gap_2()
-                            .child(Icon::new(IconName::Settings))
+                            .child(Icon::new(IconName::Settings).size(px(20.)))
                             .child(if settings_problem {
                                 "设置 · 未保存"
                             } else {

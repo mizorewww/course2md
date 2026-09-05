@@ -252,7 +252,7 @@ impl Desktop {
                     h_flex()
                         .w_full()
                         .gap_2()
-                        .child(Icon::new(IconName::Folder))
+                        .child(Icon::new(IconName::Folder).size(px(20.)))
                         .child(div().flex_1().min_w_0().text_ellipsis().child(name))
                         .child(
                             div()

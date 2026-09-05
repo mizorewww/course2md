@@ -83,11 +83,13 @@ def main():
     shutil.copy2(PROJECT / "target" / profile / f"course2md{suffix}", binaries / f"course2md{suffix}")
     shutil.copy2(ROOT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
     shutil.copy2(PROJECT / "LICENSE", base / "LICENSE")
+    shutil.copy2(ROOT / "assets/material/LICENSE", base / "LICENSE-material-icons")
     shutil.copy2(ROOT / "README.md", base / "README.md")
     # A development archive follows main and must not claim the previous release
     # revisions. Release builds have already checked this snapshot against the lock.
     (base / "sources.lock.json").write_text(json.dumps(revisions, indent=2) + "\n")
     if system == "Darwin":
+        shutil.copy2(ROOT / "assets/material/LICENSE", resources / "LICENSE-material-icons")
         identity = os.environ.get("APPLE_SIGNING_IDENTITY", "-")
         signing = ["--force", "--sign", identity]
         if identity != "-":
