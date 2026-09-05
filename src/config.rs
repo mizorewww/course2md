@@ -435,6 +435,11 @@ pub fn default_provider_hint() -> AsrProvider {
     }
 }
 
+/// Whether this build includes the native Apple speech backend.
+pub fn apple_native_available() -> bool {
+    cfg!(apple_native)
+}
+
 /// 像 URL 或已存在的本地文件才当作输入；否则视为没传参数。
 /// `contains(...)` 三个分支是为 scheme-less 输入（如 `www.bilibili.com/video/BV...`）
 /// 兜底——用户粘贴域名时不一定带 http(s) 前缀。

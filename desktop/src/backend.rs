@@ -221,24 +221,114 @@ pub struct Environment {
     pub ffprobe: bool,
     pub ytdlp: bool,
     pub llama: bool,
+    pub apple: bool,
+    pub gpu: Option<String>,
+    pub npu: bool,
 }
 impl Environment {
     pub fn detect() -> Self {
-        let available = |name: &str| {
-            let name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-            std::env::split_paths(&tool_path()).any(|dir| dir.join(&name).is_file())
-        };
+        let cli = resolve_cli().ok();
+        let checks = std::thread::scope(|scope| {
+            let commands = [
+                (
+                    cli.as_deref().unwrap_or(Path::new("course2md")),
+                    "--version",
+                ),
+                (Path::new("ffmpeg"), "-version"),
+                (Path::new("ffprobe"), "-version"),
+                (Path::new("yt-dlp"), "--version"),
+                (Path::new("llama-server"), "--list-devices"),
+            ];
+            commands
+                .map(|(bin, arg)| scope.spawn(move || probe(bin, arg)))
+                .map(|task| task.join().unwrap_or(None))
+        });
+        let gpu = checks[4].as_deref().and_then(|output| {
+            output.lines().find_map(|line| {
+                let (id, description) = line.trim().split_once(':')?;
+                (id.starts_with("MTL")
+                    || id.starts_with("CUDA")
+                    || id.starts_with("Vulkan")
+                    || id.starts_with("SYCL")
+                    || id.starts_with("ROCm"))
+                .then(|| {
+                    description
+                        .split(" (")
+                        .next()
+                        .unwrap_or(description)
+                        .trim()
+                        .to_owned()
+                })
+            })
+        });
+        let apple = course2md::config::apple_native_available()
+            && cli
+                .as_ref()
+                .and_then(|path| path.parent())
+                .is_some_and(|dir| {
+                    ["mlx.metallib", "default.metallib"]
+                        .iter()
+                        .any(|name| dir.join(name).is_file())
+                });
+        let npu = cfg!(target_os = "linux")
+            && std::fs::read_to_string("/sys/class/accel/accel0/device/vendor")
+                .is_ok_and(|vendor| vendor.trim() == "0x8086")
+            && ["uv", "python3", "python"].iter().any(|name| {
+                std::env::split_paths(&tool_path()).any(|dir| dir.join(name).is_file())
+            });
         Self {
-            engine: resolve_cli().is_ok(),
-            ffmpeg: available("ffmpeg"),
-            ffprobe: available("ffprobe"),
-            ytdlp: available("yt-dlp"),
-            llama: available("llama-server"),
+            engine: cli.is_some() && checks[0].is_some(),
+            ffmpeg: checks[1].is_some(),
+            ffprobe: checks[2].is_some(),
+            ytdlp: checks[3].is_some(),
+            llama: checks[4].is_some(),
+            apple,
+            gpu,
+            npu,
         }
     }
     pub fn ready(&self) -> bool {
         self.engine && self.ffmpeg && self.ffprobe
     }
+}
+
+/// Bounded, executable checks. Redirect output to a file so a verbose tool cannot
+/// fill a pipe while the detector waits; timed-out children are always reaped.
+fn probe(bin: &Path, arg: &str) -> Option<String> {
+    use std::io::{Read, Seek};
+    let mut output = tempfile::tempfile().ok()?;
+    let mut command = Command::new(bin);
+    command
+        .arg(arg)
+        .env("PATH", tool_path())
+        .stdin(Stdio::null())
+        .stdout(output.try_clone().ok()?)
+        .stderr(output.try_clone().ok()?);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let mut child = command.spawn().ok()?;
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) => return None,
+            Ok(None) if started.elapsed() < Duration::from_secs(5) => {
+                thread::sleep(Duration::from_millis(25))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    output.rewind().ok()?;
+    let mut text = String::new();
+    output.take(32 * 1024).read_to_string(&mut text).ok()?;
+    Some(text)
 }
 
 #[derive(Clone)]
