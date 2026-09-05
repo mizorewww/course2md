@@ -17,18 +17,50 @@ pub fn fmt_ts(sec: f64) -> String {
     }
 }
 
-/// 指向源视频某时刻的 URL（bilibili/youtube 的 t 参数语义一致）。
+fn source_url(meta: &VideoMeta) -> String {
+    let source = meta.webpage_url.trim();
+    if meta.extractor == "local" {
+        let path = Path::new(source)
+            .canonicalize()
+            .unwrap_or_else(|_| source.into());
+        if let Ok(url) = url::Url::from_file_path(path) {
+            return url.into();
+        }
+    }
+    source.to_string()
+}
+
+/// Existing timestamps and fragments must not mask the requested seek time.
 pub fn ts_url(meta: &VideoMeta, sec: f64) -> String {
-    let base = meta.webpage_url.trim();
-    let sep = if base.contains('?') { '&' } else { '?' };
-    format!("{base}{sep}t={}", sec.floor() as u64)
+    let source = source_url(meta);
+    let Ok(mut url) = url::Url::parse(&source) else {
+        return source;
+    };
+    let seconds = (sec.max(0.0).floor() as u64).to_string();
+    if url.scheme() == "file" {
+        url.set_fragment(Some(&format!("t={seconds}")));
+    } else {
+        let pairs: Vec<_> = url
+            .query_pairs()
+            .filter(|(key, _)| key != "t")
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect();
+        url.set_query(None);
+        url.query_pairs_mut()
+            .extend_pairs(pairs)
+            .append_pair("t", &seconds);
+        url.set_fragment(None);
+    }
+    url.into()
 }
 
 /// md 侧的最小转义策略：标题/作者等内联元信息只 strip 换行（换行会截断 ATX
 /// 标题与列表行）与行首 `#`（防伪造标题）。其余 markdown 特殊字符不转义——
 /// 最坏是渲染偏差，不破坏文档结构；html 侧则由 esc 全量转义。
 fn md_inline(s: &str) -> String {
-    s.replace(['\n', '\r'], " ").trim_start_matches('#').to_string()
+    s.replace(['\n', '\r'], " ")
+        .trim_start_matches('#')
+        .to_string()
 }
 
 pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
@@ -46,7 +78,7 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
         "- 作者：{uploader}\n- 时长：{}\n- 来源：[{}]({})\n- 由 course2md 生成（{} 张截图 / {} 段语音）\n\n",
         fmt_ts(meta.duration),
         meta.webpage_url,
-        meta.webpage_url,
+        source_url(meta),
         sections.len(),
         sections.iter().map(|s| s.speech.len()).sum::<usize>(),
     )
@@ -81,7 +113,7 @@ pub fn render_html(meta: &VideoMeta, sections: &[Section]) -> String {
         esc(&meta.title),
         esc(if meta.uploader.is_empty() { "未知" } else { &meta.uploader }),
         fmt_ts(meta.duration),
-        esc(&meta.webpage_url),
+        esc(&source_url(meta)),
         sections.len(),
         sections.iter().map(|s| s.speech.len()).sum::<usize>(),
     )
@@ -170,6 +202,30 @@ pub async fn write_outputs(
 mod tests {
     use super::*;
     use crate::timeline::TranscriptEvent;
+
+    #[test]
+    fn timestamp_replaces_existing_seek_and_encodes_local_paths() {
+        let mut meta = VideoMeta {
+            title: "test".into(),
+            uploader: String::new(),
+            duration: 10.0,
+            webpage_url: "https://www.youtube.com/watch?v=abc&t=99#old".into(),
+            extractor: "youtube".into(),
+            id: "abc".into(),
+        };
+        assert_eq!(
+            ts_url(&meta, 4.0),
+            "https://www.youtube.com/watch?v=abc&t=4"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a lesson.mp4");
+        std::fs::write(&path, b"video").unwrap();
+        meta.webpage_url = path.display().to_string();
+        meta.extractor = "local".into();
+        let link = ts_url(&meta, 4.0);
+        assert!(link.starts_with("file://"));
+        assert!(link.ends_with("a%20lesson.mp4#t=4"));
+    }
 
     #[test]
     fn render_basics() {
