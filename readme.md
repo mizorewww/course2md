@@ -40,6 +40,20 @@ course2md ./lecture.mp4
 
 ---
 
+## Bilibili Login and Video Quality
+
+```bash
+course2md --login bilibili  # Scan and confirm with the Bilibili mobile app
+course2md https://www.bilibili.com/video/BV1pb8o6yE8f --max-height 1080
+course2md --logout bilibili # Remove the locally saved session
+```
+
+The CLI and desktop preview automatically reuse the session for metadata, subtitles, and downloads. Use `course2md --login bilibili <video URL>` to log in and then process a video. The default height limit is 1080p; use `--max-height 2160` for higher resolutions when available. Quality depends on the source and your account's existing permissions.
+
+Credentials are stored separately from course output at `auth/bilibili.cookies.txt` inside the configuration directory (0600 permissions on Unix). Do not share this file. Each yt-dlp process uses a private temporary copy to avoid concurrent writes. Log in again when the session expires. Logout removes the local session; it does not revoke downloads already running.
+
+Login may reduce Bilibili HTTP 412 rejections, but cannot guarantee their removal. Preview, metadata, and subtitle extraction retry these errors twice with a delay. Persistent failures show guidance to log in again, update yt-dlp, or retry later.
+
 ## Desktop App (GUI)
 
 The native desktop app in [`desktop/`](desktop/README.md) uses GPUI and GPUI Component. It includes a focused conversion form, progress and cancellation, a searchable library, document / screenshot / file views, and shared CLI settings. The Tauri client has been replaced.
@@ -103,6 +117,9 @@ yay -S course2md-bin
 ```bash
 # 1. Install dependencies
 sudo pacman -S ffmpeg yt-dlp llama-cpp
+# GPU ASR also needs a backend and GPU driver (Intel example)
+sudo pacman -S ggml-vulkan vulkan-intel
+llama-server --list-devices
 
 # 2. Install course2md
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash

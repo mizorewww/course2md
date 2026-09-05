@@ -55,6 +55,8 @@ public func c2mLastError() -> UnsafePointer<CChar> {
 @_cdecl("c2m_vad_detect")
 public func c2mVadDetect(
     wavPath: UnsafePointer<CChar>,
+    minSpeech: Double,
+    minSilence: Double,
     outStarts: UnsafeMutablePointer<UnsafeMutablePointer<Double>?>,
     outEnds: UnsafeMutablePointer<UnsafeMutablePointer<Double>?>,
     outN: UnsafeMutablePointer<Int32>
@@ -67,7 +69,10 @@ public func c2mVadDetect(
         let vad = try runSync {
             try await SileroVADModel.fromPretrained(engine: .coreml, progressHandler: progressLog)
         }
-        let segments = vad.detectSpeech(audio: samples, sampleRate: 16000, config: .sileroDefault)
+        var config = VADConfig.sileroDefault
+        config.minSpeechDuration = Float(minSpeech)
+        config.minSilenceDuration = Float(minSilence)
+        let segments = vad.detectSpeech(audio: samples, sampleRate: 16000, config: config)
         let n = segments.count
         guard n > 0 else { return 0 }
         let starts = malloc(MemoryLayout<Double>.stride * n)!.assumingMemoryBound(to: Double.self)
@@ -91,8 +96,11 @@ public func c2mFreeDoubles(_ p: UnsafeMutablePointer<Double>?) {
     if let p = p { free(p) }
 }
 
+@_silgen_name("c2m_model_progress")
+private func reportModelProgress(_ progress: Double, _ message: UnsafePointer<CChar>)
+
 private func progressLog(_ p: Double, _ msg: String) {
-    fputs("  [course2md] model \(Int(p * 100))% - \(msg)\n", __stderrp)
+    msg.withCString { reportModelProgress(p, $0) }
 }
 
 // MARK: - ASR：qwen3（CoreML 0.6B/ANE）| qwen3-1.7b（MLX/GPU）| whisper

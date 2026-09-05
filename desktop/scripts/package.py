@@ -25,14 +25,18 @@ def main():
     args = parser.parse_args()
     profile = "debug" if args.debug else "release"
     flags = [] if args.debug else ["--release", "--locked"]
-    if not args.debug and not (ROOT / "sources.lock.json").is_file():
-        raise SystemExit("Freeze the tested source revisions with scripts/sources.py --freeze before release")
+    revisions = {
+        name: subprocess.check_output(
+            ["git", "-C", str(ROOT / ".deps" / name), "rev-parse", "HEAD"], text=True
+        ).strip()
+        for name in ("zed", "component")
+    }
     if not args.debug:
-        revisions = json.loads((ROOT / "sources.lock.json").read_text())
-        for name, revision in revisions.items():
-            actual = subprocess.check_output(["git", "-C", str(ROOT / ".deps" / name), "rev-parse", "HEAD"], text=True).strip()
-            if actual != revision:
-                raise SystemExit(f"{name} differs from the tested release revision; prepare sources with --locked")
+        if not (ROOT / "sources.lock.json").is_file():
+            raise SystemExit("Freeze the tested source revisions with scripts/sources.py --freeze before release")
+        expected = json.loads((ROOT / "sources.lock.json").read_text())
+        if revisions != expected:
+            raise SystemExit("Prepared sources differ from the tested release revisions; prepare sources with --locked")
     if not args.no_build:
         run("cargo", "build", *flags)
         run("cargo", "build", "--manifest-path", str(ROOT / "Cargo.toml"), *flags)
@@ -80,8 +84,9 @@ def main():
     shutil.copy2(ROOT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
     shutil.copy2(PROJECT / "LICENSE", base / "LICENSE")
     shutil.copy2(ROOT / "README.md", base / "README.md")
-    if (ROOT / "sources.lock.json").exists():
-        shutil.copy2(ROOT / "sources.lock.json", base / "sources.lock.json")
+    # A development archive follows main and must not claim the previous release
+    # revisions. Release builds have already checked this snapshot against the lock.
+    (base / "sources.lock.json").write_text(json.dumps(revisions, indent=2) + "\n")
     if system == "Darwin":
         identity = os.environ.get("APPLE_SIGNING_IDENTITY", "-")
         signing = ["--force", "--sign", identity]
@@ -104,8 +109,15 @@ def main():
             dmg.unlink()
         applications = base / "Applications"
         applications.symlink_to("/Applications")
+        # Size the volume from logical file bytes, not host allocation/cloning.
+        # Reserve 64 MiB for filesystem metadata and block rounding. Empty space
+        # compresses in UDZO, so this does not inflate the download by 64 MiB.
+        payload_bytes = sum(path.stat().st_size for path in base.rglob("*")
+                            if not path.is_symlink() and path.is_file())
+        image_mib = (payload_bytes + 1024 * 1024 - 1) // (1024 * 1024) + 64
+        print(f"Creating {image_mib} MiB HFS+ image for {payload_bytes} bytes of files", flush=True)
         run("hdiutil", "create", "-volname", "course2md", "-srcfolder", str(base),
-            "-ov", "-format", "UDZO", str(dmg))
+            "-fs", "HFS+", "-size", f"{image_mib}m", "-ov", "-format", "UDZO", str(dmg))
         applications.unlink()
         if identity != "-":
             run("codesign", "--force", "--sign", identity, "--timestamp", str(dmg))

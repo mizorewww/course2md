@@ -17,8 +17,6 @@ pub struct Completed {
     pub title: String,
     pub slides: usize,
     pub segments: usize,
-    pub elapsed_secs: f64,
-    pub outputs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +34,10 @@ pub enum Event {
         current: u64,
         total: u64,
         message: Option<String>,
+    },
+    Workers {
+        stage: String,
+        workers: usize,
     },
     Done(Completed),
     Error {
@@ -155,7 +157,7 @@ fn reader(
         }
     })
 }
-fn terminate(child: &mut std::process::Child) {
+pub(crate) fn terminate(child: &mut std::process::Child) {
     #[cfg(unix)]
     unsafe {
         libc::killpg(child.id() as i32, libc::SIGKILL);
@@ -281,7 +283,11 @@ pub fn library(root: &Path) -> Result<Vec<Course>> {
             let modified = dir.join("run.json").metadata()?.modified()?;
             let run: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(dir.join("run.json"))?).unwrap_or_default();
-            let thumbnail = frame_paths(&dir).into_iter().next();
+            let thumbnail = if dir.join("cover.jpg").is_file() {
+                Some(dir.join("cover.jpg"))
+            } else {
+                frame_paths(&dir).into_iter().next()
+            };
             courses.push(Course {
                 slides: run["sections"].as_u64().unwrap_or(0) as usize,
                 segments: run["speech_segments"].as_u64().unwrap_or(0) as usize,

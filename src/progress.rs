@@ -75,26 +75,28 @@ fn progress_style(template: &str) -> ProgressStyle {
 /// 进度条包装：human 模式 = 可见 indicatif 进度条（样式与原来一致）；
 /// json 模式 = 隐藏 bar，inc/set_position/set_message 时发 progress 事件。
 pub struct Bar {
-    stage: &'static str,
+    stage: String,
     bar: ProgressBar,
     current: AtomicU64,
     total: u64,
     message: Mutex<String>,
+    last_emit: Mutex<std::time::Instant>,
 }
 
 impl Bar {
-    pub fn new(stage: &'static str, len: u64) -> Self {
+    pub fn new(stage: impl Into<String>, len: u64) -> Self {
         let bar = if is_json() {
             ProgressBar::hidden()
         } else {
             ProgressBar::new(len)
         };
         Self {
-            stage,
+            stage: stage.into(),
             bar,
             current: AtomicU64::new(0),
             total: len,
             message: Mutex::new(String::new()),
+            last_emit: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1)),
         }
     }
 
@@ -134,16 +136,23 @@ impl Bar {
     }
 
     pub fn finish(&self) {
+        if is_json() {
+            self.emit_progress(self.current.load(Ordering::Relaxed));
+        }
         self.bar.finish_and_clear();
     }
 
     fn emit_progress(&self, current: u64) {
-        let msg = self
-            .message
-            .lock()
-            .map(|m| m.clone())
-            .unwrap_or_default();
-        emit(progress_event(self.stage, current, self.total, &msg));
+        let mut last = self.last_emit.lock().unwrap();
+        if current != 0
+            && current != self.total
+            && last.elapsed() < std::time::Duration::from_millis(100)
+        {
+            return;
+        }
+        *last = std::time::Instant::now();
+        let msg = self.message.lock().map(|m| m.clone()).unwrap_or_default();
+        emit(progress_event(&self.stage, current, self.total, &msg));
     }
 }
 

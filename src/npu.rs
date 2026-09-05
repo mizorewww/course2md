@@ -172,6 +172,7 @@ pub fn run_npu(
 
     let port = crate::runtime::free_port()?;
     tracing::info!(model = %model_id, port, "starting npu worker");
+    crate::progress::stage("model-load", "start");
     let mut child = spawn_npu_worker(&script_path, model_id, port)?;
     let stderr_tail = child
         .take_stderr()
@@ -196,6 +197,7 @@ pub fn run_npu(
         "npu ready"
     );
 
+    crate::progress::stage("model-load", "done");
     let client = ureq::AgentBuilder::new()
         .timeout(NPU_HTTP_TIMEOUT)
         .build();

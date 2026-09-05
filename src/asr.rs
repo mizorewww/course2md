@@ -178,8 +178,18 @@ fn run_blocking(
     }
 
     let bin = find_llama_server()?;
+    if ngl > 0 {
+        let devices = gpu_devices(&bin)?;
+        anyhow::ensure!(
+            !devices.is_empty(),
+            "选择了 GPU 识别，但 llama-server 未检测到可用 GPU。{}",
+            GPU_SETUP_HINT
+        );
+        tracing::info!(devices = %devices.join(", "), "GPU backend detected");
+    }
     let port = crate::runtime::free_port()?;
     tracing::info!(bin = %bin.display(), port, ngl, "llama-server");
+    crate::progress::stage("model-load", "start");
     let mut child = spawn_server(&bin, model, mmproj, ngl, threads, port)?;
     let stderr_tail = child
         .take_stderr()
@@ -203,6 +213,8 @@ fn run_blocking(
         secs = format_args!("{:.1}", t0.elapsed().as_secs_f64()),
         "server ready"
     );
+
+    crate::progress::stage("model-load", "done");
 
     // 共享 agent（连接复用），不再每个 chunk 新建
     let client = ureq::AgentBuilder::new()
@@ -325,6 +337,7 @@ fn run_api(
         .filter(|&i| !cp.is_done(segs[i].start, segs[i].end))
         .collect();
     pb.set_position((segs.len() - pending.len()) as u64);
+    crate::progress::emit(serde_json::json!({"type":"workers", "stage":"transcribe", "workers": WORKERS.min(pending.len())}));
 
     // 有界并发（std::thread::scope + 借用，无需 Arc）：网络往返是主要瓶颈；
     // 结果经 channel 回收后记录。abort 后 in-flight 请求自然结束，无人 join 不到。
@@ -554,6 +567,60 @@ fn parse_chat_content(v: &serde_json::Value) -> String {
                 .join("")
         })
         .unwrap_or_default()
+}
+
+pub const GPU_SETUP_HINT: &str = "Arch/CachyOS 的 Intel/AMD 显卡可安装 ggml-vulkan 和对应 Vulkan 驱动；其他平台请安装支持显卡的 llama.cpp 构建及驱动。用 llama-server --list-devices 检查；如需 CPU 识别，请显式使用 --provider cpu。";
+
+/// A positive -ngl is only a request: CPU-only llama.cpp builds ignore it.
+/// Probe with a deadline and file-backed output so a failing driver cannot hang
+/// either the doctor command or fill a pipe while we wait for the child.
+pub fn gpu_devices(bin: &Path) -> Result<Vec<String>> {
+    use std::io::{Read, Seek};
+    let mut stdout = tempfile::tempfile()?;
+    let stderr = tempfile::tempfile()?;
+    let mut cmd = Command::new(bin);
+    cmd.arg("--list-devices")
+        .stdin(Stdio::null())
+        .stdout(stdout.try_clone()?)
+        .stderr(stderr);
+    let mut child = crate::runtime::ManagedChild::spawn("llama-server", &mut cmd)?;
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait() {
+            break status;
+        }
+        anyhow::ensure!(
+            start.elapsed() < Duration::from_secs(15),
+            "llama-server GPU 检测超时。{}",
+            GPU_SETUP_HINT
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    anyhow::ensure!(
+        status.success(),
+        "llama-server --list-devices 执行失败，请更新 llama.cpp 并检查驱动。{}",
+        GPU_SETUP_HINT
+    );
+    stdout.rewind()?;
+    let mut output = String::new();
+    stdout.take(1024 * 1024).read_to_string(&mut output)?;
+    parse_gpu_devices(&output)
+}
+
+fn parse_gpu_devices(output: &str) -> Result<Vec<String>> {
+    let (_, rows) = output.split_once("Available devices:").context(
+        "无法解析 llama-server GPU 列表，请更新 llama.cpp 后运行 llama-server --list-devices 检查",
+    )?;
+    Ok(rows
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            line.split_once(':').is_some_and(|(name, description)| {
+                !name.is_empty() && !description.trim().is_empty()
+            })
+        })
+        .map(str::to_owned)
+        .collect())
 }
 
 fn find_llama_server() -> Result<PathBuf> {
@@ -894,6 +961,19 @@ pub fn cut_wav(src: &Path, start: f64, end: f64, dest: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn gpu_probe_distinguishes_devices_from_cpu_only_and_unknown_output() {
+        assert!(
+            super::parse_gpu_devices("Available devices:\n  (none)\n")
+                .unwrap()
+                .is_empty()
+        );
+        let devices = super::parse_gpu_devices("Available devices:\n  Vulkan0: Intel Arc B390 (23719 MiB)\n  CUDA0: NVIDIA GPU (8192 MiB)\n").unwrap();
+        assert_eq!(devices.len(), 2);
+        assert!(devices[0].contains("Intel Arc B390"));
+        assert!(super::parse_gpu_devices("unknown option --list-devices").is_err());
+    }
+
     use super::*;
 
     #[test]

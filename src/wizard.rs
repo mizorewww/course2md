@@ -40,6 +40,7 @@ fn select(prompt: &str, items: &[String], default: usize) -> Result<usize> {
 
 fn run_wizard(mut cfg: crate::settings::ConfigFile) -> Result<crate::settings::ConfigFile> {
     println!("欢迎使用 course2md！首次使用，先配置语音转写方式。");
+    println!("{}", crate::auth::BILIBILI_SETUP_TIP);
     println!();
 
     let top = select(

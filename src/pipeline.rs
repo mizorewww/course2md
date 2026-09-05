@@ -181,18 +181,27 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         let audio_path = cfg.audio_path();
         progress::stage("scenes", "start");
         progress::stage("audio", "start");
-        let (frames_res, audio_res) = tokio::join!(
-            scene::run(&cfg, &media),
-            media::extract_audio(&media, &audio_path)
+        // Transcription depends on audio, not on scene extraction. Keep both branches
+        // alive until completion so subprocess cleanup still runs on either error.
+        let (frames_res, events_res) = tokio::join!(
+            async {
+                let result = scene::run(&cfg, &media).await;
+                if result.is_ok() {
+                    progress::stage("scenes", "done");
+                }
+                result
+            },
+            async {
+                media::extract_audio(&media, &audio_path).await?;
+                progress::stage("audio", "done");
+                progress::stage("transcribe", "start");
+                let events = asr::run(&cfg, &audio_path).await?;
+                progress::stage("transcribe", "done");
+                Ok::<_, anyhow::Error>(events)
+            }
         );
         let frames = frames_res?;
-        audio_res?;
-        progress::stage("scenes", "done");
-        progress::stage("audio", "done");
-        tracing::info!(device = %cfg.provider, "transcribe");
-        progress::stage("transcribe", "start");
-        let events = asr::run(&cfg, &cfg.audio_path()).await?;
-        progress::stage("transcribe", "done");
+        let events = events_res?;
         (frames, events)
     };
     anyhow::ensure!(!frames.is_empty(), "没有截到任何画面");

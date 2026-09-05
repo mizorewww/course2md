@@ -75,7 +75,15 @@ impl Default for AsrApi {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default, deny_unknown_fields)]
+pub struct DesktopSettings {
+    pub system_titlebar: bool,
+    pub reduce_motion: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default, deny_unknown_fields)]
 pub struct ConfigFile {
+    pub desktop: DesktopSettings,
     pub defaults: Defaults,
     pub llm: crate::llm::LlmSettings,
     pub asr_api: AsrApi,

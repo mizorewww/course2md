@@ -10,6 +10,8 @@ use std::path::PathBuf;
     args_conflicts_with_subcommands = true,
     after_help = "\
 Examples:
+  course2md --login bilibili  # 扫码登录，解锁账号可用的清晰度
+  course2md --logout bilibili # 清除本地登录状态
   course2md https://www.bilibili.com/video/BV1pb8o6yE8f
   course2md https://youtu.be/dQw4w9WgXcQ
   course2md ./lecture.mp4
@@ -24,6 +26,14 @@ Examples:
 "
 )]
 pub struct Cli {
+    /// Scan a QR code to log in; optionally continue with a video URL
+    #[arg(long, value_enum, conflicts_with_all = ["logout", "json"])]
+    pub login: Option<LoginPlatform>,
+
+    /// Remove saved login credentials
+    #[arg(long, value_enum, conflicts_with_all = ["login", "source", "json"])]
+    pub logout: Option<LoginPlatform>,
+
     /// Video URL or local file
     pub source: Option<String>,
 
@@ -32,6 +42,11 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Option<Command>,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum LoginPlatform {
+    Bilibili,
 }
 
 #[derive(Args, Clone, Debug, Default)]
