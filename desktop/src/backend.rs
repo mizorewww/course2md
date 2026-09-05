@@ -240,7 +240,7 @@ impl Environment {
                 (Path::new("llama-server"), "--list-devices"),
             ];
             commands
-                .map(|(bin, arg)| scope.spawn(move || probe(bin, arg)))
+                .map(|(bin, arg)| scope.spawn(move || probe(bin, &[arg])))
                 .map(|task| task.join().unwrap_or(None))
         });
         let gpu = checks[4].as_deref().and_then(|output| {
@@ -270,11 +270,20 @@ impl Environment {
                         .iter()
                         .any(|name| dir.join(name).is_file())
                 });
-        let npu = cfg!(target_os = "linux")
-            && std::fs::read_to_string("/sys/class/accel/accel0/device/vendor")
+        let npu_device = if cfg!(target_os = "linux") {
+            std::fs::read_to_string("/sys/class/accel/accel0/device/vendor")
                 .is_ok_and(|vendor| vendor.trim() == "0x8086")
+        } else if cfg!(target_os = "windows") {
+            probe(Path::new("powershell.exe"), &["-NoProfile", "-NonInteractive", "-Command",
+                "Get-CimInstance Win32_PnPEntity | Where-Object { $_.Name -match 'Intel.*(AI Boost|NPU)' -and $_.Status -eq 'OK' } | Select-Object -ExpandProperty Name"])
+                .is_some_and(|name| !name.trim().is_empty())
+        } else {
+            false
+        };
+        let npu = npu_device
             && ["uv", "python3", "python"].iter().any(|name| {
-                std::env::split_paths(&tool_path()).any(|dir| dir.join(name).is_file())
+                let executable = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+                std::env::split_paths(&tool_path()).any(|dir| dir.join(&executable).is_file())
             });
         Self {
             engine: cli.is_some() && checks[0].is_some(),
@@ -294,12 +303,12 @@ impl Environment {
 
 /// Bounded, executable checks. Redirect output to a file so a verbose tool cannot
 /// fill a pipe while the detector waits; timed-out children are always reaped.
-fn probe(bin: &Path, arg: &str) -> Option<String> {
+fn probe(bin: &Path, args: &[&str]) -> Option<String> {
     use std::io::{Read, Seek};
     let mut output = tempfile::tempfile().ok()?;
     let mut command = Command::new(bin);
     command
-        .arg(arg)
+        .args(args)
         .env("PATH", tool_path())
         .stdin(Stdio::null())
         .stdout(output.try_clone().ok()?)
