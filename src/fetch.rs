@@ -358,6 +358,26 @@ fn bilibili_part_number(url: &str) -> Option<u32> {
         .and_then(|(_, value)| value.parse().ok())
 }
 
+/// 候选条目的稳定身份：优先使用探测给出的身份；Bilibili 分 P 的 flat 探测
+/// 不带条目 id，从具体分集链接推导（与单集探测的 `BV…_pN` 身份一致），保证
+/// 批量任务与单独转换同一视频时去重、已有笔记判断命中同一身份。
+pub fn candidate_identity(candidate: &SourceCandidate) -> Option<String> {
+    if let Some(identity) = candidate
+        .identity
+        .as_deref()
+        .map(str::trim)
+        .filter(|identity| !identity.is_empty())
+    {
+        return Some(identity.to_owned());
+    }
+    let bvid = bilibili_bvid(&candidate.input)?;
+    let id = match bilibili_part_number(&candidate.input) {
+        Some(part) => format!("{bvid}_p{part}"),
+        None => bvid,
+    };
+    online_identity("bilibili", &id)
+}
+
 fn bilibili_view(bvid: &str) -> Result<BilibiliViewData> {
     let response = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(3))
@@ -1066,6 +1086,45 @@ mod tests {
             bilibili_part_number("https://www.bilibili.com/video/BV1CAxaeHEeH"),
             None
         );
+    }
+
+    #[test]
+    fn candidate_identity_prefers_probe_and_derives_bilibili_parts() {
+        let probed = SourceCandidate {
+            input: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=3".into(),
+            title: "t".into(),
+            identity: Some("online:bilibili:15:BV1CAxaeHEeH_p3".into()),
+            duration: None,
+            thumbnail: None,
+        };
+        assert_eq!(
+            candidate_identity(&probed).as_deref(),
+            Some("online:bilibili:15:BV1CAxaeHEeH_p3")
+        );
+        // 与单集探测（yt-dlp 对 ?p=N 返回 id `BV…_pN`）逐字节一致，批量去重才能命中
+        let part = SourceCandidate {
+            identity: None,
+            ..probed.clone()
+        };
+        assert_eq!(
+            candidate_identity(&part).as_deref(),
+            Some("online:bilibili:15:BV1CAxaeHEeH_p3")
+        );
+        let bare = SourceCandidate {
+            input: "https://www.bilibili.com/video/BV1CAxaeHEeH".into(),
+            identity: None,
+            ..probed.clone()
+        };
+        assert_eq!(
+            candidate_identity(&bare).as_deref(),
+            Some("online:bilibili:12:BV1CAxaeHEeH")
+        );
+        let unknown = SourceCandidate {
+            input: "https://example.com/watch?v=abc".into(),
+            identity: None,
+            ..probed.clone()
+        };
+        assert_eq!(candidate_identity(&unknown), None);
     }
 
     #[test]

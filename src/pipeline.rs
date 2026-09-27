@@ -148,7 +148,7 @@ pub async fn run_task(request: &execution::Request, cfg: &PipelineConfig) -> Res
     let _lock = crate::runtime::lock_file(&cfg.out_dir.join(".task.lock"))?;
     execution::bind_work_dir(&cfg.out_dir, &request.binding(cfg)?)?;
     let is_local = Path::new(&request.source).is_file();
-    let meta = VideoMeta {
+    let mut meta = VideoMeta {
         title: request.title.clone(),
         uploader: request.author.clone(),
         duration: request.duration,
@@ -190,12 +190,40 @@ pub async fn run_task(request: &execution::Request, cfg: &PipelineConfig) -> Res
     } else {
         None
     };
+    // 批量入队的任务不带预选字幕：Auto/强制字幕模式下在任务内探测一次并自行发现
+    // 字幕，语义与 CLI 一致；桌面单视频流程的 transcript_source 已被确定为
+    // Subtitle/Asr 且必带字幕内容，不会进入此分支。探测补齐笔记所需的 UP 主与时长，
+    // 标题保持入队时用户看到的候选标题。
+    let mut discovered = None;
+    if discovers_subtitles_at_runtime(&subtitle, cfg, is_local) {
+        progress::stage("fetch", "start");
+        match fetch::probe_video(&request.source).await {
+            Ok(video) => {
+                progress::stage("fetch", "done");
+                if meta.uploader.trim().is_empty() {
+                    meta.uploader = video.meta.uploader.clone();
+                }
+                if !meta.duration.is_finite() || meta.duration <= 0. {
+                    meta.duration = video.meta.duration;
+                }
+                discovered = Some(Box::new(video));
+            }
+            Err(error) => {
+                write_failure_run_json(cfg, is_local, &meta.extractor, &meta.id, &error, started);
+                return Err(error);
+            }
+        }
+    }
+    let subtitle_input = match discovered {
+        Some(video) => SubtitleInput::Discover(Some(video)),
+        None => SubtitleInput::Selected(subtitle),
+    };
     let result = run_prepared(
         cfg,
         &meta,
         &target,
         is_local,
-        SubtitleInput::Selected(subtitle),
+        subtitle_input,
         true,
         request.allow_unauthenticated_asr,
         started,
@@ -520,6 +548,15 @@ enum SubtitleInput {
     /// CLI path: the video probed once at fetch time; `None` for local files.
     Discover(Option<Box<fetch::OnlineVideo>>),
     Selected(Option<Vec<timeline::TranscriptEvent>>),
+}
+
+/// 批量任务不带预选字幕时：Auto/强制字幕模式在任务内探测并发现字幕。
+fn discovers_subtitles_at_runtime(
+    subtitle: &Option<Vec<timeline::TranscriptEvent>>,
+    cfg: &PipelineConfig,
+    is_local: bool,
+) -> bool {
+    subtitle.is_none() && cfg.transcript_source != config::TranscriptSource::Asr && !is_local
 }
 
 async fn subtitles(
@@ -1150,6 +1187,28 @@ fn should_delete_media(
 #[cfg(test)]
 mod tests {
     use super::{run, should_delete_media};
+
+    #[test]
+    fn batch_tasks_discover_subtitles_at_runtime_only_without_confirmed_text() {
+        let mut cfg = crate::options::resolve(
+            "https://example.invalid/video".into(),
+            &Default::default(),
+            &Default::default(),
+        )
+        .unwrap();
+        cfg.transcript_source = crate::config::TranscriptSource::Auto;
+        // 批量 Auto：无预选字幕 → 任务内探测并发现
+        assert!(super::discovers_subtitles_at_runtime(&None, &cfg, false));
+        // 强制字幕（无预选内容）→ 任务内发现，找不到字幕再报错
+        cfg.transcript_source = crate::config::TranscriptSource::Subtitle;
+        assert!(super::discovers_subtitles_at_runtime(&None, &cfg, false));
+        // 强制识别 / 已带字幕内容 / 本地文件：保持原路径（桌面单视频流程不变）
+        cfg.transcript_source = crate::config::TranscriptSource::Asr;
+        assert!(!super::discovers_subtitles_at_runtime(&None, &cfg, false));
+        cfg.transcript_source = crate::config::TranscriptSource::Auto;
+        assert!(!super::discovers_subtitles_at_runtime(&Some(Vec::new()), &cfg, false));
+        assert!(!super::discovers_subtitles_at_runtime(&None, &cfg, true));
+    }
 
     #[test]
     fn recovery_archives_unverified_media_and_reuses_only_matching_content() {
