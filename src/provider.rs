@@ -147,10 +147,13 @@ pub(crate) fn strip_structured_format(s: &LlmSettings, body: &mut Value) {
 
 /// Codex SSE 流聚合为 chat/completions 形状的 JSON，下游校验/提取逻辑不变。
 /// 流必须以 response.completed 收尾，否则视为中断（对照 codex-api/src/sse/responses.rs）。
+/// response.usage（input/output_tokens）归一为 chat 方言的 prompt/completion_tokens，
+/// 供 token 实时反馈统一提取。
 pub(crate) fn sse_to_chat_json(bytes: &[u8]) -> Result<Value> {
     let text = String::from_utf8_lossy(bytes);
     let mut out = String::new();
     let mut completed = false;
+    let mut usage = serde_json::Value::Null;
     let mut failed: Option<String> = None;
     for line in text.lines() {
         let Some(data) = line.strip_prefix("data:") else { continue };
@@ -165,7 +168,18 @@ pub(crate) fn sse_to_chat_json(bytes: &[u8]) -> Result<Value> {
             Some("response.output_text.delta") => {
                 out.push_str(event["delta"].as_str().unwrap_or(""));
             }
-            Some("response.completed") => completed = true,
+            Some("response.completed") => {
+                completed = true;
+                let u = &event["response"]["usage"];
+                if let (Some(input), Some(output)) =
+                    (u["input_tokens"].as_u64(), u["output_tokens"].as_u64())
+                {
+                    usage = serde_json::json!({
+                        "prompt_tokens": input,
+                        "completion_tokens": output,
+                    });
+                }
+            }
             Some("response.failed") | Some("response.incomplete") | Some("error") => {
                 failed = Some(
                     event["response"]["error"]["message"]
@@ -190,7 +204,7 @@ pub(crate) fn sse_to_chat_json(bytes: &[u8]) -> Result<Value> {
         !out.trim().is_empty(),
         "AI 服务响应缺少正文 / AI response is missing text"
     );
-    Ok(serde_json::json!({"choices": [{"message": {"content": out}}]}))
+    Ok(serde_json::json!({"choices": [{"message": {"content": out}}], "usage": usage}))
 }
 
 #[cfg(test)]
@@ -258,7 +272,7 @@ data: {"type":"response.output_text.delta","delta":"{\"segments\":"}
 
 data: {"type":"response.output_text.delta","delta":"[]}"}
 
-data: {"type":"response.completed","response":{}}
+data: {"type":"response.completed","response":{"usage":{"input_tokens":120,"output_tokens":36}}}
 
 data: [DONE]
 
@@ -268,6 +282,9 @@ data: [DONE]
             value["choices"][0]["message"]["content"].as_str().unwrap(),
             "{\"segments\":[]}"
         );
+        // usage 归一为 chat/completions 方言，供 token 实时反馈统一提取
+        assert_eq!(value["usage"]["prompt_tokens"].as_u64(), Some(120));
+        assert_eq!(value["usage"]["completion_tokens"].as_u64(), Some(36));
 
         let failed = br#"data: {"type":"response.failed","response":{"error":{"message":"rate limited"}}}
 "#;

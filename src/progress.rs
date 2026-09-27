@@ -4,6 +4,7 @@
 //! - `{"type":"log","level":..,"message":..}`        — tracing 日志转发
 //! - `{"type":"stage","stage":..,"status":"start"|"done"}`
 //! - `{"type":"progress","stage":..,"current":n,"total":n,"message":?}`
+//! - `{"type":"tokens","stage":..,"prompt":n,"completion":n}` — LLM 累计 token 用量
 //! - `{"type":"done", ...}` / `{"type":"error","message":..}` — 由 pipeline/main 直接 emit
 //!
 //! human 模式下 [`emit`]/[`stage`] 全是 no-op，[`Bar`] 退化为普通可见进度条，
@@ -48,8 +49,12 @@ fn emit_to(mut w: impl std::io::Write, ev: &serde_json::Value) -> std::io::Resul
     w.flush()
 }
 
-/// 阶段边界事件（json 模式才发）。
+/// 阶段边界事件（json 模式才发）。新阶段开始时清零 token 累计，
+/// 保证 GUI 看到的是当前阶段的实时用量。
 pub fn stage(name: &str, status: &str) {
+    if status == "start" {
+        reset_tokens();
+    }
     emit(stage_event(name, status));
     if !is_json() && !is_quiet() && status == "start" {
         let label = match name {
@@ -93,6 +98,43 @@ fn progress_event(stage: &str, current: u64, total: u64, message: &str) -> serde
 
 fn log_event(level: &str, message: &str) -> serde_json::Value {
     serde_json::json!({"type": "log", "level": level, "message": message})
+}
+
+/// LLM token 累计（当前阶段）：并发 worker 各自完成请求后累加，
+/// GUI 展示的是单调递增的实时用量。阶段开始时由 [`stage`] 清零。
+static TOKENS: Mutex<(u64, u64)> = Mutex::new((0, 0));
+
+fn reset_tokens() {
+    *TOKENS.lock().unwrap_or_else(|p| p.into_inner()) = (0, 0);
+}
+
+fn tokens_event(stage: &str, prompt: u64, completion: u64) -> serde_json::Value {
+    serde_json::json!({"type": "tokens", "stage": stage, "prompt": prompt, "completion": completion})
+}
+
+/// 记录一次 LLM 响应的 token 用量并发出累计值（json 模式才有事件）。
+pub fn note_tokens(stage: &str, prompt: u64, completion: u64) {
+    if prompt == 0 && completion == 0 {
+        return;
+    }
+    let mut guard = TOKENS.lock().unwrap_or_else(|p| p.into_inner());
+    guard.0 += prompt;
+    guard.1 += completion;
+    emit(tokens_event(stage, guard.0, guard.1));
+}
+
+/// 视频下载字节进度：yt-dlp 每次刷一行，这里限流后发给 GUI。
+pub fn download_progress(current: u64, total: u64) {
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
+    if current != total
+        && last.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(200))
+    {
+        return;
+    }
+    *last = Some(std::time::Instant::now());
+    drop(last);
+    emit(progress_event("download", current, total, ""));
 }
 
 /// 共享进度条样式：模板均为静态字符串，解析失败是编程错误。

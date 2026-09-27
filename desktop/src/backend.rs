@@ -38,6 +38,11 @@ pub enum Event {
         total: u64,
         message: Option<String>,
     },
+    Tokens {
+        stage: String,
+        prompt: u64,
+        completion: u64,
+    },
     Workers {
         stage: String,
         workers: usize,

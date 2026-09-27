@@ -1022,6 +1022,15 @@ impl Desktop {
                     .entry(stage)
                     .or_insert_with(activity::Activity::new)
                     .update(current, total, message),
+                Event::Tokens {
+                    stage,
+                    prompt,
+                    completion,
+                } => self
+                    .progress
+                    .entry(stage)
+                    .or_insert_with(activity::Activity::new)
+                    .note_tokens(prompt, completion),
                 Event::Workers { stage, workers } => {
                     self.progress
                         .entry(stage)

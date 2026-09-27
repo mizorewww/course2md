@@ -7,6 +7,9 @@ pub struct Activity {
     pub message: String,
     pub done: bool,
     pub workers: usize,
+    /// LLM 阶段累计 token 用量（上传=prompt，下载=completion），实时跳动
+    pub tokens_prompt: u64,
+    pub tokens_completion: u64,
     sampled: bool,
     started: Instant,
     baseline: u64,
@@ -21,6 +24,8 @@ impl Activity {
             message: String::new(),
             done: false,
             workers: 1,
+            tokens_prompt: 0,
+            tokens_completion: 0,
             sampled: false,
             started: now,
             baseline: 0,
@@ -42,6 +47,20 @@ impl Activity {
         if let Some(message) = message {
             self.message = message;
         }
+    }
+    pub fn note_tokens(&mut self, prompt: u64, completion: u64) {
+        self.tokens_prompt = prompt;
+        self.tokens_completion = completion;
+    }
+    /// AI 阶段的实时反馈：服务用量一到就替换「等待服务返回结果」的静态文案。
+    pub fn tokens_detail(&self) -> Option<String> {
+        (self.tokens_prompt > 0 || self.tokens_completion > 0).then(|| {
+            format!(
+                "上传 {} tokens · 下载 {} tokens",
+                count(self.tokens_prompt),
+                count(self.tokens_completion)
+            )
+        })
     }
     pub fn fraction(&self) -> Option<f32> {
         (self.total > 0).then(|| (self.current as f32 / self.total as f32).clamp(0., 1.))
@@ -173,7 +192,7 @@ impl TransferMetrics {
 }
 
 fn is_byte_download(stage: &str) -> bool {
-    stage.starts_with("model/") && stage != "model/apple"
+    stage == "download" || (stage.starts_with("model/") && stage != "model/apple")
 }
 
 pub fn quantity(stage: &str, current: u64, total: u64) -> String {
@@ -181,7 +200,7 @@ pub fn quantity(stage: &str, current: u64, total: u64) -> String {
         format!("已检查 {current} 张画面")
     } else if stage == "scenes/extract" && total > 0 {
         format!("已保存 {current} / {total} 张截图")
-    } else if stage.starts_with("model/") && stage != "model/apple" {
+    } else if is_byte_download(stage) {
         if total > 0 {
             format!("{} / {}", bytes(current), bytes(total))
         } else {
@@ -310,8 +329,7 @@ pub(crate) fn model_transfer_phase(stage: &str, message: &str) -> String {
     title(stage)
 }
 
-pub(crate) fn bytes(value: u64) -> String {
-    if value >= 1024 * 1024 * 1024 {
+pub(crate) fn bytes(value: u64) -> String {    if value >= 1024 * 1024 * 1024 {
         format!("{:.2} GB", value as f64 / (1024. * 1024. * 1024.))
     } else if value >= 1024 * 1024 {
         format!("{:.1} MB", value as f64 / (1024. * 1024.))
@@ -320,6 +338,19 @@ pub(crate) fn bytes(value: u64) -> String {
     } else {
         format!("{value} 字节")
     }
+}
+
+/// 千分位计数：跳动的 token 计数保持数位分组，宽度变化可预期。
+fn count(value: u64) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, character) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(character);
+    }
+    out
 }
 
 fn throughput(bytes_per_sec: f64) -> String {
@@ -484,5 +515,33 @@ mod tests {
         assert!(item.fraction().is_none());
         assert!(!item.detail("model/test", true).contains("预计剩余"));
         assert_eq!(item.detail("model/test", false), "已停止");
+    }
+
+    #[test]
+    fn video_download_reports_bytes_speed_and_remaining_time() {
+        let mut item = Activity::new();
+        item.update(0, 16 * 1024 * 1024, None);
+        item.started = Instant::now() - Duration::from_secs(10);
+        item.update(8 * 1024 * 1024, 16 * 1024 * 1024, None);
+        let detail = item.detail("download", true);
+        assert!(detail.contains("8.0 MB / 16.0 MB"), "{detail}");
+        assert!(detail.contains("速度") && detail.contains("预计剩余"), "{detail}");
+        assert!(item.fraction().is_some_and(|f| (f - 0.5).abs() < 0.01));
+        // 总字节未知：只有实时字节与速度，不编造 ETA
+        let mut unknown = Activity::new();
+        unknown.update(3 * 1024 * 1024, 0, None);
+        let detail = unknown.detail("download", true);
+        assert!(detail.contains("3.0 MB") && !detail.contains("预计剩余"), "{detail}");
+    }
+
+    #[test]
+    fn token_usage_replaces_the_waiting_placeholder() {
+        let mut item = Activity::new();
+        assert!(item.tokens_detail().is_none());
+        item.note_tokens(12345, 6789);
+        assert_eq!(
+            item.tokens_detail().as_deref(),
+            Some("上传 12,345 tokens · 下载 6,789 tokens")
+        );
     }
 }
