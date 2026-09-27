@@ -439,13 +439,18 @@ impl RenderOnce for SingleChoiceGroup {
             .min_w_0()
             .max_w_full()
             .p(px(inset))
-            .rounded_full()
             // 轨道用内嵌面色（与输入框同一 recessed 语义）：4.5% 混合在深色下与卡片底无法区分，
             // 导致「选中段跳出轨道」的错觉（system.md：角色映射失败应在共享层修正）。
             // 页面底色与 INSET 几乎相同，单靠填充在页面背景上轨道会消失（reader 页签、
             // 笔记库筛选、工作台高级选项），补一道发丝边让轨道在任何底上都有定义。
-            .border_1()
-            .border_color(super::color(super::HAIRLINE))
+            // 竖向导航没有轨道概念（settings.md：复用胶囊选中即可），轨道近乎方形时
+            // rounded_full 会把发丝边画成一个完整圆圈，因此竖向不画轨道外框。
+            .when(!vertical, |group| {
+                group
+                    .rounded_full()
+                    .border_1()
+                    .border_color(super::color(super::HAIRLINE))
+            })
             .bg(if vertical {
                 gpui::transparent_black()
             } else {
