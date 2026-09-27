@@ -213,7 +213,7 @@ dependencies = [
 
 [[package]]
 name = "course2md"
-version = "2.0.0-rc.5"
+version = "2.0.0-rc.6"
 dependencies = [
  "anyhow",
  "base64",
