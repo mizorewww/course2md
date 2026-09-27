@@ -386,13 +386,20 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
     let result = match metadata {
         course2md::fetch::OnlineProbe::Collection {
             title,
-            candidates,
+            mut candidates,
             unavailable_entries,
-        } => SourceProbe::Collection {
-            title,
-            candidates,
-            unavailable_entries,
-        },
+        } => {
+            // 分 P 视频的 flat 探测只有裸链接：补真实分集标题与首帧预览图。
+            // 辅助探测失败不影响候选（interaction.md：辅助探测失败不阻断任务）。
+            if !cancel.load(Ordering::Relaxed) {
+                course2md::fetch::enrich_bilibili_candidates(&mut candidates);
+            }
+            SourceProbe::Collection {
+                title,
+                candidates,
+                unavailable_entries,
+            }
+        }
         course2md::fetch::OnlineProbe::Unresolved { message } => {
             SourceProbe::Unresolved { message }
         }
@@ -458,7 +465,7 @@ fn online_metadata(
     command_output("yt-dlp", &args, cancel)
 }
 
-fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
+pub(crate) fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
     ensure!(!cancel.load(Ordering::Relaxed), "已取消读取");
     let response = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(3))

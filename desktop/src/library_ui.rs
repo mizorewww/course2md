@@ -61,12 +61,16 @@ impl Desktop {
         if let Some(cancel) = self.subtitle_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
+        if let Some(cancel) = self.source_covers_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
         self.preview_generation = self.preview_generation.wrapping_add(1);
         self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
         self.source_preview = None;
         self.source_editor_open = false;
         self.generation_options_open = false;
         self.source_candidates.clear();
+        self.source_candidate_covers.clear();
         self.source_collection_title = None;
         self.subtitle_loading = false;
         self.subtitle_error = None;
@@ -109,6 +113,7 @@ impl Desktop {
                         input,
                         identity: None,
                         duration: None,
+                        thumbnail: None,
                     })
                     .collect();
                 self.source_collection_title = Some("分享内容中有多个链接，请选择一个视频".into());
@@ -195,6 +200,7 @@ impl Desktop {
                         }
                         Ok(source::SourceProbe::Collection { title, candidates, unavailable_entries }) => {
                             this.source_collection_title = Some(if title.is_empty() { "请选择本次处理的视频".into() } else { title });
+                            this.start_source_cover_fetch(&candidates, generation, window, cx);
                             this.source_candidates = candidates;
                             if this.source_candidates.is_empty() {
                                 this.preview_error = Some("还无法确定要处理哪个视频。请复制具体视频的链接。".into());
@@ -211,6 +217,86 @@ impl Desktop {
             }
         }).detach();
         cx.notify();
+    }
+
+    /// 后台逐张下载候选行预览图：同一封面 URL 只下载一次（首帧缺失的分集共享
+    /// 视频封面），完成一张刷新一行。过期结果由 preview_generation 守卫丢弃，
+    /// 与探测结果同一纪律。
+    fn start_source_cover_fetch(
+        &mut self,
+        candidates: &[source::SourceCandidate],
+        generation: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut groups: Vec<(String, Arc<Vec<String>>)> = Vec::new();
+        for candidate in candidates {
+            let Some(url) = candidate.thumbnail.clone() else {
+                continue;
+            };
+            if let Some((_, inputs)) = groups.iter_mut().find(|(known, _)| *known == url) {
+                Arc::make_mut(inputs).push(candidate.input.clone());
+            } else {
+                groups.push((url, Arc::new(vec![candidate.input.clone()])));
+            }
+        }
+        if groups.is_empty() {
+            return;
+        }
+        if let Some(cancel) = self.source_covers_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.source_covers_cancel = Some(cancel.clone());
+        let queue = Arc::new(std::sync::Mutex::new(
+            groups.into_iter().collect::<std::collections::VecDeque<_>>(),
+        ));
+        let (tx, rx) = smol::channel::unbounded::<(Arc<Vec<String>>, PathBuf)>();
+        let workers = queue.lock().map(|queue| queue.len()).unwrap_or(1).min(4);
+        for _ in 0..workers.max(1) {
+            let queue = queue.clone();
+            let tx = tx.clone();
+            let cancel = cancel.clone();
+            // 阻塞网络下载不进 GPUI 执行器；见 crate::spawn_blocking_io 的说明
+            std::thread::spawn(move || loop {
+                let next = queue.lock().unwrap_or_else(|p| p.into_inner()).pop_front();
+                let Some((url, inputs)) = next else { break };
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                if let Ok(path) = source::cache_remote_cover(&url, &cancel) {
+                    let _ = tx.send_blocking((inputs, path));
+                }
+            });
+        }
+        drop(tx);
+        let handle = Some(window.window_handle());
+        cx.spawn(async move |this, cx| {
+            // 通道在所有工作线程结束后关闭，循环自然退出
+            while let Ok((inputs, path)) = rx.recv().await {
+                let Some(handle) = handle else { break };
+                let keep = cx
+                    .update_window(handle, |_, _window, cx| {
+                        this.update(cx, |this, cx| {
+                            if this.preview_generation != generation {
+                                return false;
+                            }
+                            for input in inputs.iter() {
+                                this.source_candidate_covers
+                                    .insert(input.clone(), path.clone());
+                            }
+                            cx.notify();
+                            true
+                        })
+                        .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if !keep {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
     fn folder_name(&self, id: Option<u64>) -> String {
         match id.filter(|id| *id != 0) {

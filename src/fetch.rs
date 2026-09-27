@@ -68,6 +68,9 @@ pub struct SourceCandidate {
     pub title: String,
     pub identity: Option<String>,
     pub duration: Option<f64>,
+    /// 预览图 URL（分集首帧或视频封面）；本地缓存由桌面端负责
+    #[serde(default)]
+    pub thumbnail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -238,6 +241,7 @@ pub fn parse_online_probe(bytes: &[u8], input: &str, diagnostics: &str) -> Resul
                 duration: entry
                     .duration
                     .filter(|value| value.is_finite() && *value > 0.),
+                thumbnail: entry.thumbnail.filter(|url| !url.trim().is_empty()),
             });
         }
         return Ok(OnlineProbe::Collection {
@@ -306,6 +310,136 @@ pub fn parse_online_probe(bytes: &[u8], input: &str, diagnostics: &str) -> Resul
             subtitles,
         },
     })
+}
+
+/// Bilibili 分 P 视频的 flat-playlist 探测只返回裸链接；真实分集标题、首帧预览
+/// 与时长来自公开的 web API。一个 BV 一次请求即可覆盖全部分集。
+#[derive(Debug, Deserialize)]
+struct BilibiliView {
+    data: Option<BilibiliViewData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BilibiliViewData {
+    title: Option<String>,
+    pic: Option<String>,
+    pages: Option<Vec<BilibiliPage>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BilibiliPage {
+    page: u32,
+    part: Option<String>,
+    duration: Option<f64>,
+    first_frame: Option<String>,
+}
+
+/// 单个探测最多补充的不同 BV 数：异常巨大的合集列表不放大请求量
+const BILIBILI_ENRICH_LIMIT: usize = 32;
+
+/// `/video/BVxxxxxxxxxx` 路径段中的 BV 号（"BV" + 10 位）。
+fn bilibili_bvid(url: &str) -> Option<String> {
+    let url = url::Url::parse(url).ok()?;
+    let host = url.host_str()?.to_ascii_lowercase();
+    if !host.ends_with("bilibili.com") {
+        return None;
+    }
+    url.path_segments()?.find_map(|segment| {
+        (segment.len() == 12 && segment.starts_with("BV")).then(|| segment.to_string())
+    })
+}
+
+/// 链接里的 `?p=N` 分集号；没有时按第 1 集处理。
+fn bilibili_part_number(url: &str) -> Option<u32> {
+    url::Url::parse(url)
+        .ok()?
+        .query_pairs()
+        .find(|(key, _)| key == "p")
+        .and_then(|(_, value)| value.parse().ok())
+}
+
+fn bilibili_view(bvid: &str) -> Result<BilibiliViewData> {
+    let response = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(3))
+        .timeout_read(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .get(&format!(
+            "https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+        ))
+        .set(
+            "User-Agent",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        )
+        .set("Referer", "https://www.bilibili.com")
+        .call()
+        .context("读取 Bilibili 分集信息失败")?;
+    let view: BilibiliView = serde_json::from_str(&response.into_string()?)?;
+    view.data.context("Bilibili 没有返回分集信息")
+}
+
+/// 把一个 BV 的分集信息填进候选：只补缺失字段，提取器已有信息保持权威。
+fn apply_bilibili_view(candidates: &mut [SourceCandidate], bvid: &str, view: &BilibiliViewData) {
+    let pages = view.pages.as_deref().unwrap_or_default();
+    for candidate in candidates
+        .iter_mut()
+        .filter(|candidate| bilibili_bvid(&candidate.input).as_deref() == Some(bvid))
+    {
+        let number = bilibili_part_number(&candidate.input).unwrap_or(1);
+        let Some(page) = pages.iter().find(|page| page.page == number) else {
+            continue;
+        };
+        let untitled =
+            candidate.title.trim().is_empty() || candidate.title.trim() == candidate.input.trim();
+        if untitled {
+            // 分集标题为空时回落到合集标题（同一 BV 只有一个标题）
+            let title = page
+                .part
+                .as_deref()
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .or_else(|| view.title.as_deref().map(str::trim).filter(|t| !t.is_empty()));
+            if let Some(title) = title {
+                candidate.title = title.to_string();
+            }
+        }
+        if candidate.thumbnail.is_none() {
+            candidate.thumbnail = page
+                .first_frame
+                .as_deref()
+                .map(str::trim)
+                .filter(|url| !url.is_empty())
+                .map(str::to_string)
+                .or_else(|| view.pic.clone());
+        }
+        if candidate.duration.is_none() {
+            candidate.duration = page
+                .duration
+                .filter(|value| value.is_finite() && *value > 0.);
+        }
+    }
+}
+
+/// 用 Bilibili web API 补全分 P 候选的分集标题、首帧预览图与时长。
+/// 辅助探测：任何失败都保留原候选，不阻断任务（见 interaction.md）。
+pub fn enrich_bilibili_candidates(candidates: &mut [SourceCandidate]) {
+    let mut bvids = Vec::new();
+    for candidate in candidates.iter() {
+        if let Some(bvid) = bilibili_bvid(&candidate.input)
+            && !bvids.contains(&bvid)
+        {
+            bvids.push(bvid);
+        }
+        if bvids.len() >= BILIBILI_ENRICH_LIMIT {
+            break;
+        }
+    }
+    for bvid in bvids {
+        match bilibili_view(&bvid) {
+            Ok(view) => apply_bilibili_view(candidates, &bvid, &view),
+            Err(error) => tracing::debug!(bvid, "分集信息补充失败：{error:#}"),
+        }
+    }
 }
 
 fn subtitle_evidence(
@@ -852,6 +986,100 @@ mod tests {
                 .iter()
                 .all(|candidate| candidate.identity.is_none())
         );
+    }
+
+    #[test]
+    fn bilibili_ids_come_from_video_paths_and_part_query() {
+        assert_eq!(
+            bilibili_bvid("https://www.bilibili.com/video/BV1CAxaeHEeH?p=3").as_deref(),
+            Some("BV1CAxaeHEeH")
+        );
+        assert_eq!(
+            bilibili_bvid("https://www.bilibili.com/video/BV1xx411c7mD/").as_deref(),
+            Some("BV1xx411c7mD")
+        );
+        assert!(bilibili_bvid("https://www.bilibili.com/bangumi/play/ep123").is_none());
+        assert!(bilibili_bvid("https://example.com/video/BV1CAxaeHEeH").is_none());
+        assert!(bilibili_bvid("not a url").is_none());
+        assert_eq!(
+            bilibili_part_number("https://www.bilibili.com/video/BV1CAxaeHEeH?p=12"),
+            Some(12)
+        );
+        assert_eq!(
+            bilibili_part_number("https://www.bilibili.com/video/BV1CAxaeHEeH"),
+            None
+        );
+    }
+
+    #[test]
+    fn bilibili_view_fills_only_missing_part_metadata() {
+        let view: BilibiliViewData = serde_json::from_value(serde_json::json!({
+            "title": "《高等数学》全程教学视频",
+            "pic": "https://i2.hdslb.com/bfs/archive/cover.jpg",
+            "pages": [
+                {"page": 1, "part": "1 映射", "duration": 2076, "first_frame": "https://i1.hdslb.com/bfs/storyff/p1.jpg"},
+                {"page": 2, "part": "", "duration": 307, "first_frame": null}
+            ]
+        }))
+        .unwrap();
+        let mut candidates = vec![
+            SourceCandidate {
+                input: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=1".into(),
+                title: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=1".into(),
+                identity: None,
+                duration: None,
+                thumbnail: None,
+            },
+            SourceCandidate {
+                input: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=2".into(),
+                title: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=2".into(),
+                identity: None,
+                duration: Some(42.),
+                thumbnail: Some("https://example.invalid/keep.jpg".into()),
+            },
+            SourceCandidate {
+                input: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=9".into(),
+                title: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=9".into(),
+                identity: None,
+                duration: None,
+                thumbnail: None,
+            },
+            SourceCandidate {
+                input: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=2".into(),
+                title: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=2".into(),
+                identity: None,
+                duration: None,
+                thumbnail: None,
+            },
+        ];
+        apply_bilibili_view(&mut candidates, "BV1CAxaeHEeH", &view);
+        // 裸链接候选：补真实分集标题与首帧
+        assert_eq!(candidates[0].title, "1 映射");
+        assert_eq!(
+            candidates[0].thumbnail.as_deref(),
+            Some("https://i1.hdslb.com/bfs/storyff/p1.jpg")
+        );
+        assert_eq!(candidates[0].duration, Some(2076.));
+        // 已有信息保持权威；空 part 回落到合集标题；已有时长/预览图不被改写
+        assert_eq!(candidates[1].title, "《高等数学》全程教学视频");
+        assert_eq!(candidates[1].duration, Some(42.));
+        assert_eq!(
+            candidates[1].thumbnail.as_deref(),
+            Some("https://example.invalid/keep.jpg")
+        );
+        // 没有对应分页的候选保持原样
+        assert_eq!(
+            candidates[2].title,
+            "https://www.bilibili.com/video/BV1CAxaeHEeH?p=9"
+        );
+        assert!(candidates[2].thumbnail.is_none());
+        // 首帧缺失时回落到视频封面
+        assert_eq!(candidates[3].title, "《高等数学》全程教学视频");
+        assert_eq!(
+            candidates[3].thumbnail.as_deref(),
+            Some("https://i2.hdslb.com/bfs/archive/cover.jpg")
+        );
+        assert_eq!(candidates[3].duration, Some(307.));
     }
 
     #[test]

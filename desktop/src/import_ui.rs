@@ -965,6 +965,7 @@ impl Desktop {
                             .into_owned(),
                         identity: None,
                         duration: None,
+                        thumbnail: None,
                     })
                     .collect();
                 cx.notify();
@@ -1235,15 +1236,50 @@ impl Desktop {
                                     } else {
                                         candidate.title.clone()
                                     };
+                                    let cover =
+                                        self.source_candidate_covers.get(&candidate.input).cloned();
                                     quiet(("source-candidate", index))
                                         .w_full()
                                         .h_auto()
                                         .py_3()
                                         .rounded(RADIUS_SMALL)
                                         .justify_start()
-                                        .icon(icons::movie())
                                         .tooltip(candidate.input.clone())
                                         .accessibility_label(format!("选择 {title}"))
+                                        // 统一的 leading 预览槽：已缓存的首帧/封面，
+                                        // 未就绪或无预览时回退到影片图标，保证每行文字起点对齐
+                                        .child(
+                                            div()
+                                                .w(rems(5.6))
+                                                .h(rems(3.15))
+                                                .flex_shrink_0()
+                                                .rounded(RADIUS_SMALL)
+                                                .overflow_hidden()
+                                                .bg(color(INSET))
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .when_some(cover, |slot, cover| {
+                                                    slot.child(
+                                                        img(cover)
+                                                            .w_full()
+                                                            .h_full()
+                                                            .object_fit(ObjectFit::Cover),
+                                                    )
+                                                })
+                                                .when(
+                                                    !self
+                                                        .source_candidate_covers
+                                                        .contains_key(&candidate.input),
+                                                    |slot| {
+                                                        slot.child(
+                                                            icons::movie()
+                                                                .size(px(18.))
+                                                                .text_color(color(MUTED)),
+                                                        )
+                                                    },
+                                                ),
+                                        )
                                         .child(
                                             v_flex()
                                                 .flex_1()
@@ -1270,7 +1306,25 @@ impl Desktop {
                                                             .text_ellipsis()
                                                             .child(candidate.input.clone()),
                                                     )
-                                                }),
+                                                })
+                                                .when_some(
+                                                    candidate.duration.filter(|value| {
+                                                        *value > 0. && value.is_finite() && !untitled
+                                                    }),
+                                                    |view, seconds| {
+                                                        view.child(
+                                                            div()
+                                                                .w_full()
+                                                                .min_w_0()
+                                                                .text_size(TEXT_AUX)
+                                                                .text_color(color(MUTED))
+                                                                .text_ellipsis()
+                                                                .child(course2md::render::fmt_ts(
+                                                                    seconds,
+                                                                )),
+                                                        )
+                                                    },
+                                                ),
                                         )
                                         .child(icons::arrow_forward().size(px(18.)).flex_shrink_0())
                                         .on_click(cx.listener(move |this, _, window, cx| {
