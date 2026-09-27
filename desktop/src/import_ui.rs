@@ -1221,8 +1221,11 @@ impl Desktop {
                     .child(
                         v_flex()
                             .id("source-candidates")
-                            .max_h(px(280.))
+                            // 视口按字号缩放（约 3 行 + 露出第 4 行一角）；内边距让
+                            // 行的 hover/press 涂层不贴容器发丝边（review#3/#4）
+                            .max_h(rems(20.))
                             .overflow_y_scroll()
+                            .p_1()
                             .rounded(RADIUS_CARD)
                             .border_1()
                             .border_color(color(CARD_LINE))
@@ -1294,6 +1297,9 @@ impl Desktop {
                                                         .text_ellipsis()
                                                         .line_clamp(2)
                                                         .font_weight(FontWeight::MEDIUM)
+                                                        // 标题是行的扫描锚点：主墨色，
+                                                        // 不被 quiet 按钮的灰色吞掉（review#1）
+                                                        .text_color(color(INK))
                                                         .child(title),
                                                 )
                                                 .when(untitled, |view| {

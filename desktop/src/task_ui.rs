@@ -452,7 +452,9 @@ impl RenderOnce for TaskStages {
                                 cx,
                             ),
                         )
-                        .w(rems(14.))
+                        // 与卡片内 detail_row 同一 160px 标签列：值/状态列共用一条
+                        // 起始尺（review#2；theme.rs settings detail row 的宽度）
+                        .w(rems(160. / 14.))
                         .max_w_full()
                         .flex_shrink_0(),
                     )

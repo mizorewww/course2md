@@ -432,6 +432,7 @@ fn group(id: &'static str, title: &'static str) -> Div {
         "ai-default-settings" | "ai-services-heading" => icons::science(),
         "export-default-settings" => icons::download(),
         "account-settings-heading" => icons::login(),
+        "ai-accounts-heading" => icons::shield(),
         "appearance-motion" => icons::tune(),
         "diagnostics-heading" => icons::settings(),
         _ => icons::info(),
@@ -2378,7 +2379,7 @@ impl Desktop {
             .unwrap_or_else(|| ServiceDraft::new(ServicePurpose::Ai));
         self.open_service_draft(draft, None, Some((task_id, components)), window, cx);
     }
-    fn open_settings_service_editor(
+    pub(crate) fn open_settings_service_editor(
         &mut self,
         purpose: ServicePurpose,
         version: Option<String>,
