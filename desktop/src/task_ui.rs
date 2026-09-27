@@ -936,6 +936,8 @@ impl Desktop {
         self.source_validation = None;
         self.source_candidates.clear();
         self.source_collection_title = None;
+        self.source_collection_name = None;
+        self.selected_candidates.clear();
         self.subtitle_error = draft.source.as_ref().and_then(|source| {
             source
                 .subtitle_read_error
@@ -1162,6 +1164,235 @@ impl Desktop {
             asr_service: refs.asr,
             ai_service: refs.llm,
         })
+    }
+
+    /// 候选多选的批量计划。环境、保存位置与配置解析同 build_plan；字幕确认留给
+    /// 任务运行时（pipeline 按 transcript_source 自行探测发现），因此不要求桌面
+    /// 端预先读取每个视频。标题用候选行里用户看到的分集标题。
+    fn build_batch_plan(
+        &self,
+        candidate: &source::SourceCandidate,
+        title: String,
+    ) -> Result<TaskPlan> {
+        self.ordinary_preferences_ready_for_submit()?;
+        ensure!(
+            !self.preference_defaults_pending,
+            "默认设置已保存，当前选项尚未同步。请重试。"
+        );
+        let workspace = self.workspace.as_ref().context("输入与任务记录尚未恢复")?;
+        let draft = workspace.state.draft().context("当前输入尚未准备好")?;
+        let identity = course2md::fetch::candidate_identity(candidate)
+            .context("还无法确认这个视频的身份，请单独打开后转换")?;
+        let environment = self
+            .environment
+            .as_ref()
+            .context("正在检查生成笔记需要的组件，请稍候")?;
+        ensure!(
+            environment.engine,
+            "生成引擎无法启动。请在设置的应用与诊断中检查应用组件。"
+        );
+        ensure!(
+            environment.ffmpeg && environment.ffprobe,
+            "视频读取组件不可用。请在设置的应用与诊断中查看 FFmpeg 的安装方法。"
+        );
+        ensure!(
+            environment.ytdlp,
+            "在线视频读取组件不可用。请在设置的应用与诊断中查看 yt-dlp 的安装方法。"
+        );
+        let library = workspace
+            .state
+            .library(&draft.library_id)
+            .context("保存位置已不在课程库中，请选择保存位置")?;
+        validate_plan_storage(
+            PlanValidation::Submission,
+            library,
+            draft.folder,
+            self.cached_location_check(library),
+            self.library_indexes.get(&library.root),
+        )?;
+        let mut config = draft
+            .base_config
+            .clone()
+            .unwrap_or_else(|| self.preferences.defaults_config());
+        draft.options.apply_to(&mut config);
+        config.defaults.model_dir = Some(course2md::config::model_dir_from(
+            config.defaults.model_dir.as_deref(),
+        ));
+        // 强制字幕（source_mode 1）不会走到语音识别；其余模式运行时可能退回 ASR，
+        // 与 build_plan 一样先确认本机识别能力并补默认模型。
+        if draft.options.source_mode != 1 {
+            use course2md::config::AsrProvider;
+            let environment = self
+                .environment
+                .as_ref()
+                .context("正在检查本机识别能力，请稍候")?;
+            let provider = config
+                .defaults
+                .provider
+                .unwrap_or_else(|| self.recommended_local_provider());
+            let capability = || -> Result<()> {
+                match provider {
+                    AsrProvider::Coreml => ensure!(
+                        environment.apple,
+                        "Apple 原生识别组件不可用。请选择其他本机识别方式，或在设置中检查应用组件。"
+                    ),
+                    AsrProvider::Gpu => ensure!(
+                        environment.llama && environment.gpu.is_some(),
+                        "没有检测到可用的 GPU 识别引擎。请选择 CPU 或其他本机识别方式。"
+                    ),
+                    AsrProvider::Cpu => ensure!(
+                        environment.llama,
+                        "CPU 识别引擎尚未安装。请在设置的应用与诊断中查看安装方法。"
+                    ),
+                    AsrProvider::Npu => ensure!(
+                        environment.npu,
+                        "没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。"
+                    ),
+                    AsrProvider::Api => (),
+                }
+                Ok(())
+            };
+            if draft.options.source_mode == 0 {
+                capability().context("部分视频可能没有字幕，需要语音识别能力作为后备")?;
+            } else {
+                capability()?;
+            }
+            config.defaults.provider = Some(provider);
+            if provider != AsrProvider::Api
+                && config
+                    .defaults
+                    .asr_model
+                    .as_deref()
+                    .is_none_or(|model| model.trim().is_empty())
+            {
+                config.defaults.asr_model = Some(if provider == AsrProvider::Npu {
+                    course2md::npu::resolve_npu_model(None)
+                } else {
+                    course2md::config::DEFAULT_ASR_MODEL.into()
+                });
+            }
+        }
+        let defaults = self.preferences.default_refs();
+        let refs = ServiceRefs {
+            asr: draft.asr_service.clone().or(defaults.asr),
+            llm: draft.ai_service.clone().or(defaults.llm),
+        };
+        let config = self.preferences.config_for_refs(&config, &refs)?;
+        let mut validation_config = config.clone();
+        validation_config
+            .defaults
+            .provider
+            .get_or_insert_with(|| self.recommended_local_provider());
+        validate_plan_config(&candidate.input, &validation_config)?;
+        Ok(TaskPlan {
+            operation: Default::default(),
+            source_id: identity.clone(),
+            source: source::Source {
+                input: candidate.input.clone(),
+                title: title.clone(),
+                duration: candidate
+                    .duration
+                    .filter(|value| value.is_finite() && *value > 0.)
+                    .unwrap_or_default(),
+                cover: self.source_candidate_covers.get(&candidate.input).cloned(),
+                identity,
+                online: true,
+                ..source::Source::default()
+            },
+            title,
+            library_id: draft.library_id.clone(),
+            folder: draft.folder,
+            options: draft.options.clone(),
+            subtitle: None,
+            config,
+            asr_service: refs.asr,
+            ai_service: refs.llm,
+        })
+    }
+
+    /// 把多选候选一次性加入队列：逐个复用既有去重（进行中的相同任务不重复创建），
+    /// 一次事务落盘，随后选中第一个任务并启动队列。
+    pub fn enqueue_selected_candidates(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let selected: Vec<(usize, source::SourceCandidate)> = self
+            .source_candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| self.selected_candidates.contains(&candidate.input))
+            .map(|(index, candidate)| (index, candidate.clone()))
+            .collect();
+        if selected.is_empty() {
+            return;
+        }
+        self.message = None;
+        let collection = self.source_collection_name.clone();
+        let mut plans = Vec::new();
+        let mut skipped = 0usize;
+        for (index, candidate) in selected {
+            if course2md::fetch::candidate_identity(&candidate).is_none() {
+                skipped += 1;
+                continue;
+            }
+            let title = batch_note_title(&candidate, collection.as_deref(), index);
+            match self.build_batch_plan(&candidate, title) {
+                Ok(plan) => plans.push(plan),
+                Err(error) => {
+                    self.message = Some(format!("选中的视频尚未加入队列：{error:#}"));
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+        if plans.is_empty() {
+            self.message = Some(if skipped > 0 {
+                "选中的视频还无法确认身份，请单独打开后转换".into()
+            } else {
+                "选中的视频尚未加入队列，请重试".into()
+            });
+            cx.notify();
+            return;
+        }
+        let total = plans.len();
+        let Some(workspace) = &mut self.workspace else {
+            return;
+        };
+        let result = workspace.transaction(|state| {
+            let mut first_id = None;
+            let mut duplicates = 0usize;
+            for plan in plans {
+                let (id, created) = state.enqueue(plan, None)?;
+                first_id.get_or_insert_with(|| id.clone());
+                if !created {
+                    duplicates += 1;
+                }
+            }
+            Ok((first_id, duplicates))
+        });
+        match result {
+            Ok((first_id, duplicates)) => {
+                self.selected_candidates.clear();
+                let created = total - duplicates;
+                let mut parts = Vec::new();
+                if created > 0 {
+                    parts.push(format!("已把 {created} 个视频加入队列"));
+                }
+                if duplicates > 0 {
+                    parts.push(format!("{duplicates} 个与进行中的任务相同，未重复加入"));
+                }
+                if skipped > 0 {
+                    parts.push(format!("{skipped} 个暂时无法确认身份，已跳过"));
+                }
+                self.message = Some(parts.join("；"));
+                if let Some(id) = first_id {
+                    self.select_task(&id, cx);
+                }
+                self.start_next_task(cx);
+            }
+            Err(error) => {
+                self.workspace_error =
+                    Some(format!("任务尚未加入队列：{error:#}。选中的视频仍保留。"))
+            }
+        }
+        cx.notify();
     }
 
     /// The form uses loaded snapshots. Submission rechecks live storage, local
@@ -3538,6 +3769,23 @@ impl ConversionOptions {
     }
 }
 
+/// 批量任务的笔记名称：候选行里展示的分集标题；裸链接候选回落到「合集 视频 N」
+/// （合集名来自探测，占位提示文案永远不会拼进笔记名）。
+fn batch_note_title(
+    candidate: &source::SourceCandidate,
+    collection: Option<&str>,
+    index: usize,
+) -> String {
+    let title = candidate.title.trim();
+    if !title.is_empty() && title != candidate.input.trim() {
+        return title.to_owned();
+    }
+    match collection.map(str::trim).filter(|title| !title.is_empty()) {
+        Some(collection) => format!("{collection} 视频 {}", index + 1),
+        None => format!("视频 {}", index + 1),
+    }
+}
+
 fn task_status_label(task: &TaskRecord) -> String {
     if task.handled_by.is_some() {
         return "已有后续处理任务".into();
@@ -3616,9 +3864,43 @@ fn validate_plan_config(source: &str, config: &course2md::settings::ConfigFile) 
 mod tests {
     use super::{
         PlanValidation, QueueItem, StageStatus, TaskFeedback, TaskGroup, WorkerWait,
-        ai_stage_outcome, task_feedback, task_stage_progress, update_draft_source_title,
-        update_input_form, validate_plan_config, validate_plan_storage, worker_wait_state,
+        ai_stage_outcome, batch_note_title, task_feedback, task_stage_progress,
+        update_draft_source_title, update_input_form, validate_plan_config,
+        validate_plan_storage, worker_wait_state,
     };
+
+    #[test]
+    fn batch_titles_come_from_candidate_rows() {
+        let candidate = crate::source::SourceCandidate {
+            input: "https://www.bilibili.com/video/BV1CAxaeHEeH?p=2".into(),
+            title: "视频与图书介绍".into(),
+            identity: None,
+            duration: None,
+            thumbnail: None,
+        };
+        assert_eq!(
+            batch_note_title(&candidate, Some("合集"), 1),
+            "视频与图书介绍"
+        );
+        // 裸链接候选：回落到「合集 视频 N」，与列表行的展示规则一致
+        let bare = crate::source::SourceCandidate {
+            title: candidate.input.clone(),
+            ..candidate.clone()
+        };
+        assert_eq!(
+            batch_note_title(&bare, Some("《高等数学》"), 1),
+            "《高等数学》 视频 2"
+        );
+        assert_eq!(batch_note_title(&bare, None, 0), "视频 1");
+        let blank = crate::source::SourceCandidate {
+            title: "  ".into(),
+            ..candidate.clone()
+        };
+        assert_eq!(
+            batch_note_title(&blank, Some("《高等数学》"), 4),
+            "《高等数学》 视频 5"
+        );
+    }
 
     #[gpui::test]
     fn queue_item_keys_track_identity_not_content(cx: &mut gpui::TestAppContext) {

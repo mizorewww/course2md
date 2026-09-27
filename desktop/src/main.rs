@@ -235,6 +235,10 @@ struct Desktop {
     source_preview: Option<source::Source>,
     source_candidates: Vec<source::SourceCandidate>,
     source_collection_title: Option<String>,
+    /// 探测得到的真实合集名（批量笔记名前缀）；占位提示文案不算，见 source_collection_title
+    source_collection_name: Option<String>,
+    /// 多选模式（在线列表）选中的候选 input 集合；候选变化时清空
+    selected_candidates: std::collections::BTreeSet<String>,
     /// 候选行预览图的本地缓存（candidate.input → 缓存文件）；后台按 URL 去重下载
     source_candidate_covers: std::collections::HashMap<String, PathBuf>,
     source_covers_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
@@ -588,6 +592,8 @@ impl Desktop {
             source_preview: None,
             source_candidates: Vec::new(),
             source_collection_title: None,
+            source_collection_name: None,
+            selected_candidates: std::collections::BTreeSet::new(),
             source_candidate_covers: std::collections::HashMap::new(),
             source_covers_cancel: None,
             subtitle_loading: false,

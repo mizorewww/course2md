@@ -72,6 +72,8 @@ impl Desktop {
         self.source_candidates.clear();
         self.source_candidate_covers.clear();
         self.source_collection_title = None;
+        self.source_collection_name = None;
+        self.selected_candidates.clear();
         self.subtitle_loading = false;
         self.subtitle_error = None;
         self.preview_error = None;
@@ -199,6 +201,7 @@ impl Desktop {
                             }
                         }
                         Ok(source::SourceProbe::Collection { title, candidates, unavailable_entries }) => {
+                            this.source_collection_name = (!title.is_empty()).then(|| title.clone());
                             this.source_collection_title = Some(if title.is_empty() { "请选择本次处理的视频".into() } else { title });
                             this.start_source_cover_fetch(&candidates, generation, window, cx);
                             this.source_candidates = candidates;
