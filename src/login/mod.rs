@@ -6,7 +6,7 @@
 
 mod bilibili;
 pub mod codex;
-mod ollama;
+pub mod ollama;
 
 use anyhow::Result;
 

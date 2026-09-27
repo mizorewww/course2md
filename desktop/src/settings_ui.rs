@@ -719,6 +719,7 @@ impl Desktop {
         self.sync_settings_tab_stops();
         self.hydrate_settings_inputs(window, cx);
         self.ensure_settings_model_diagnostic(cx);
+        self.ensure_account_cards(cx);
     }
 
     fn normalize_settings_tab(&mut self) {
@@ -741,7 +742,21 @@ impl Desktop {
         self.sync_settings_tab_stops();
         self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
         self.settings_ui.tab_focus[index].focus(window, cx);
+        self.ensure_account_cards(cx);
         cx.notify();
+    }
+
+    /// 服务与账号页：补齐两个账号卡片的状态（忙碌/已查守卫保证不重复发起）。
+    fn ensure_account_cards(&mut self, cx: &mut Context<Self>) {
+        if self.settings_tab != 1 {
+            return;
+        }
+        if self.codex.status.is_none() && !self.codex.busy() {
+            self.codex_refresh_status(crate::codex_ui::CodexSurface::Settings, cx);
+        }
+        if !self.ollama.checked() {
+            self.ollama_refresh(cx);
+        }
     }
 
     fn settings_navigation(
@@ -1588,6 +1603,41 @@ impl Desktop {
                     .child(self.account_settings_page(cx)),
             ),
         );
+        // AI 账号：Codex 订阅登录与 Ollama 本地发现的入口与状态（与服务列表平级可见，
+        // 不再只藏在服务编辑器里）。卡片与「来源账号」同一边界处理。
+        view = view.child(
+            group("ai-accounts-heading", "AI 账号").child(
+                v_flex()
+                    .w_full()
+                    .gap_3()
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .gap_3()
+                            .p_4()
+                            .bg(color(SURFACE))
+                            .border_1()
+                            .border_color(color(CARD_LINE))
+                            .rounded(RADIUS_CARD)
+                            .child(self.codex_account_section(
+                                crate::codex_ui::CodexSurface::Settings,
+                                false,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .gap_3()
+                            .p_4()
+                            .bg(color(SURFACE))
+                            .border_1()
+                            .border_color(color(CARD_LINE))
+                            .rounded(RADIUS_CARD)
+                            .child(self.ollama_account_section(cx)),
+                    ),
+            ),
+        );
         let latest = self.preferences.latest_versions();
         for (purpose, heading_id, heading, add_label) in [
             (
@@ -2342,7 +2392,7 @@ impl Desktop {
             .unwrap_or_else(|| ServiceDraft::new(purpose));
         self.open_service_draft(draft, None, None, window, cx)
     }
-    fn open_service_draft(
+    pub(crate) fn open_service_draft(
         &mut self,
         draft: ServiceDraft,
         target: Option<String>,

@@ -53,6 +53,14 @@ pub(super) fn models(host: &str) -> Result<Vec<String>> {
         .collect())
 }
 
+/// 桌面端服务发现：探测本机 Ollama 并返回（服务地址, 模型列表）。
+/// 只读探测，不读取也不写入任何配置；供 GUI 账号卡片与一键添加使用。
+pub fn discover_for_desktop() -> Result<(String, Vec<String>)> {
+    let host = host();
+    let names = models(&host)?;
+    Ok((host, names))
+}
+
 pub(super) struct OllamaLogin;
 impl LoginMethod for OllamaLogin {
     fn id(&self) -> &'static str {

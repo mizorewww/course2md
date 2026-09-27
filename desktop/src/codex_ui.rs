@@ -23,6 +23,8 @@ fn login_required(error: &anyhow::Error) -> bool {
 pub(crate) enum CodexSurface {
     Editor,
     Onboarding,
+    /// 设置「服务与账号」页的账号卡片：只呈现连接状态，不填任何模型输入
+    Settings,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -122,6 +124,7 @@ impl Desktop {
                     && match surface {
                         CodexSurface::Editor => this.editor_codex_needs_catalog(),
                         CodexSurface::Onboarding => this.onboarding_codex_needs_catalog(),
+                        CodexSurface::Settings => false,
                     };
                 if needs_catalog {
                     this.codex_refresh_models(surface, cx);
@@ -215,6 +218,8 @@ impl Desktop {
         let armed = match surface {
             CodexSurface::Editor => self.editor_codex_models_loading(),
             CodexSurface::Onboarding => self.onboarding_codex_models_loading(),
+            // 设置页账号卡片没有模型输入，无目录可刷新
+            CodexSurface::Settings => false,
         };
         if !armed {
             return;
@@ -224,6 +229,7 @@ impl Desktop {
             match surface {
                 CodexSurface::Editor => self.editor_codex_models_failed(message),
                 CodexSurface::Onboarding => self.onboarding_codex_models_failed(message),
+                CodexSurface::Settings => {}
             }
             cx.notify();
             return;
@@ -253,6 +259,7 @@ impl Desktop {
                             CodexSurface::Onboarding => {
                                 this.onboarding_codex_models_failed(message)
                             }
+                            CodexSurface::Settings => {}
                         }
                     }
                 }
@@ -324,6 +331,7 @@ impl Desktop {
         match surface {
             CodexSurface::Editor => self.editor_codex_catalog(models, suggested, cx),
             CodexSurface::Onboarding => self.onboarding_codex_catalog(models, suggested, cx),
+            CodexSurface::Settings => {}
         }
     }
 
@@ -337,6 +345,7 @@ impl Desktop {
         let id = match surface {
             CodexSurface::Editor => "codex-account",
             CodexSurface::Onboarding => "setup-codex-account",
+            CodexSurface::Settings => "settings-codex-account",
         };
         let working = self.codex.working;
         let busy = working.is_some();

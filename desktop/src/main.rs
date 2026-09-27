@@ -19,6 +19,7 @@ mod library_ui;
 mod model_discovery;
 mod motion;
 mod notes;
+mod ollama_ui;
 mod onboarding;
 mod organize;
 mod palettes;
@@ -606,6 +607,7 @@ impl Desktop {
             expanded_subtitle_issue: None,
             account: account_ui::AccountUi::default(),
             codex: codex_ui::CodexUi::default(),
+            ollama: ollama_ui::OllamaUi::default(),
             library: Default::default(),
             library_root: output,
             library_error: None,
