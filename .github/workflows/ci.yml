@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, test/self-hosted-runner]
     paths-ignore: ['**.md', 'docs/**', '.agents/**', 'desktop/**', 'packaging/**', 'install.sh']
   pull_request:
     paths-ignore: ['**.md', 'docs/**', '.agents/**', 'desktop/**', 'packaging/**', 'install.sh']
@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-26, windows-latest]
+        os: [[self-hosted, macos-arm64]]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
