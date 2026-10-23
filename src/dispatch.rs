@@ -322,7 +322,8 @@ pub fn check_control() -> Result<()> {
 }
 
 /// 轮询任务控制文件，意图不再是 run 时返回 Err。配合 `tokio::select!` 打断
-/// 长时间运行的分支（子进程句柄的 kill_on_drop 随分支 drop 生效）。
+/// 长时间运行的分支：子进程句柄的 kill_on_drop 随分支 drop 生效；spawn_blocking
+/// 里的工作不会因 drop 停止，要靠它自己在安全边界调用 check_control。
 /// 无活动任务账本时 check_control 恒 Ok，此 future 永不完成，不影响 CLI 独立调用。
 pub async fn watch_control() -> anyhow::Error {
     loop {
