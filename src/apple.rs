@@ -110,7 +110,7 @@ pub fn vad(wav: &Path, min_speech: f64, min_silence: f64) -> Result<Vec<(f64, f6
     }
     // FFI 契约防御：rc==0 且 n>0 时指针必须非空
     anyhow::ensure!(
-        n <= 0 || (!starts.is_null() && !ends.is_null()),
+        n >= 0 && (n == 0 || (!starts.is_null() && !ends.is_null())),
         crate::tr!("语音检测返回了空结果指针 / Speech detection returned null result pointers")
     );
     let mut out = Vec::with_capacity(n as usize);

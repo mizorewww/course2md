@@ -380,6 +380,8 @@ fn open_browser(url: &str) {
         .args(["url.dll,FileProtocolHandler", url])
         .spawn()
         .is_ok();
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    let opened = false;
     if !opened {
         println!("请手动在浏览器打开 / Open this URL in your browser:\n{url}");
     }
