@@ -412,55 +412,26 @@ pub(crate) struct State {
     toc_scroll: ScrollHandle,
     view_focus: [FocusHandle; 2],
     menu_focus: FocusHandle,
-    find: Entity<InputState>,
-    gallery_find: Entity<InputState>,
-    gallery_search_position: Option<workspace::ReadingPosition>,
+    find: FindState,
+    gallery: GalleryState,
+    restore: RestoreState,
     focus: FocusHandle,
-    find_open: bool,
     info_open: bool,
     processing_details_open: bool,
     // None follows the available reading width; an explicit choice survives resizing.
     toc_open: Option<bool>,
-    find_return_focus: Option<FocusHandle>,
-    matches: Rc<Vec<Match>>,
-    search_index: Vec<nav::PreparedText>,
-    match_index: usize,
     loaded: Option<PathBuf>,
     generation: u64,
     data_loading: bool,
     frames: Rc<Vec<Frame>>,
     frame_by_path: Rc<HashMap<PathBuf, usize>>,
     missing_by_block: Rc<HashMap<usize, Vec<usize>>>,
-    /// Screenshots matching the gallery search, in note order.
-    gallery_matches: Rc<Vec<usize>>,
-    /// Each matching screenshot's excerpt and the find ranges inside it.
-    gallery_excerpts: Rc<HashMap<usize, GalleryExcerpt>>,
-    // The screenshot tab is a variable-height `list` of grid rows, like the
-    // note tab: its items, per-row focus containers and the column count
-    // the rows were cut for.
-    gallery_list: ListState,
-    gallery_items: Rc<Vec<GalleryItem>>,
-    gallery_focus: Rc<Vec<FocusHandle>>,
-    gallery_columns: usize,
     /// The note's contents rail and the chapter titles its headings open.
     outline: Rc<Vec<(usize, String, Option<f64>)>>,
     chapter_starts: Rc<HashMap<usize, String>>,
     versions: Vec<Version>,
     issues: Vec<String>,
-    pending_restore: Option<workspace::ReadingPosition>,
-    pending_search: Option<Match>,
-    restoring: bool,
-    restore_generation: u64,
-    last_position: Option<(String, workspace::ReadingPosition)>,
-    /// The pending record of a settling scroll; replacing it restarts the wait.
-    position_save: Option<Task<()>>,
-    /// A note restore waiting for its target block's first measurement.
-    note_refine: Option<NoteRefine>,
-    restore_target: Rc<Cell<Option<usize>>>,
-    /// Window width, height and rem size the reading position was laid out at.
-    layout: (f32, f32, f32),
     note_layout: Rc<RefCell<nav::ReadingLayout>>,
-    gallery_layout: Rc<RefCell<nav::ReadingLayout>>,
     // The note tab's article flow is a variable-height `list`: persistent
     // state, the flattened item sequence it describes and per-item focus
     // containers that keep a focused control mounted while scrolled out.
@@ -482,6 +453,52 @@ pub(crate) struct State {
     _subscriptions: Vec<Subscription>,
 }
 
+/// In-note find: its input, the matches and the current one.
+struct FindState {
+    input: Entity<InputState>,
+    open: bool,
+    return_focus: Option<FocusHandle>,
+    matches: Rc<Vec<Match>>,
+    /// The note text prepared once per load for matching.
+    prepared: Vec<nav::PreparedText>,
+    current: usize,
+}
+
+/// The screenshot tab: its search, matching frames and virtualized rows.
+struct GalleryState {
+    find: Entity<InputState>,
+    search_position: Option<workspace::ReadingPosition>,
+    /// Screenshots matching the gallery search, in note order.
+    matches: Rc<Vec<usize>>,
+    /// Each matching screenshot's excerpt and the find ranges inside it.
+    excerpts: Rc<HashMap<usize, GalleryExcerpt>>,
+    // The screenshot tab is a variable-height `list` of grid rows, like the
+    // note tab: its items, per-row focus containers and the column count
+    // the rows were cut for.
+    list: ListState,
+    items: Rc<Vec<GalleryItem>>,
+    focus: Rc<Vec<FocusHandle>>,
+    columns: usize,
+    layout: Rc<RefCell<nav::ReadingLayout>>,
+}
+
+/// Returning to a saved reading position or search match after a load,
+/// a tab switch or a reflow, and recording the position while reading.
+struct RestoreState {
+    pending: Option<workspace::ReadingPosition>,
+    search: Option<Match>,
+    active: bool,
+    generation: u64,
+    last_position: Option<(String, workspace::ReadingPosition)>,
+    /// The pending record of a settling scroll; replacing it restarts the wait.
+    save: Option<Task<()>>,
+    /// A note restore waiting for its target block's first measurement.
+    note_refine: Option<NoteRefine>,
+    target: Rc<Cell<Option<usize>>>,
+    /// Window width, height and rem size the reading position was laid out at.
+    window_layout: (f32, f32, f32),
+}
+
 struct NoteRefine {
     position: workspace::ReadingPosition,
     search: Option<Match>,
@@ -495,7 +512,8 @@ impl State {
             .new(|cx| InputState::new(window, cx).placeholder(course2md::tr!("搜索截图对应文字")));
         let subscription = cx.subscribe(&find, |this, _, event, cx| match event {
             InputEvent::Change => {
-                this.reader_ui.find_open = !this.reader_ui.find.read(cx).value().trim().is_empty();
+                let query = this.reader_ui.find.input.read(cx).value();
+                this.reader_ui.find.open = !query.trim().is_empty();
                 this.update_reader_matches(cx);
                 if this.result_tab == 0 {
                     this.move_reader_match(0, cx);
@@ -514,21 +532,22 @@ impl State {
             if this.result_tab == 1 {
                 let searching = !this
                     .reader_ui
-                    .gallery_find
+                    .gallery
+                    .find
                     .read(cx)
                     .value()
                     .trim()
                     .is_empty();
                 if searching {
-                    if this.reader_ui.gallery_search_position.is_none() {
+                    if this.reader_ui.gallery.search_position.is_none() {
                         this.save_reading_position(cx);
-                        this.reader_ui.gallery_search_position = this.capture_reading_position();
+                        this.reader_ui.gallery.search_position = this.capture_reading_position();
                     }
-                    this.reader_ui.gallery_list.scroll_to(ListOffset::default());
-                } else if let Some(position) = this.reader_ui.gallery_search_position.take() {
-                    this.reader_ui.pending_restore = Some(position);
-                    this.reader_ui.restore_generation += 1;
-                    this.reader_ui.restoring = false;
+                    this.reader_ui.gallery.list.scroll_to(ListOffset::default());
+                } else if let Some(position) = this.reader_ui.gallery.search_position.take() {
+                    this.reader_ui.restore.pending = Some(position);
+                    this.reader_ui.restore.generation += 1;
+                    this.reader_ui.restore.active = false;
                 }
                 cx.notify();
             }
@@ -573,45 +592,51 @@ impl State {
             toc_scroll: ScrollHandle::new(),
             view_focus: std::array::from_fn(|_| cx.focus_handle()),
             menu_focus: cx.focus_handle(),
-            find,
-            gallery_find,
-            gallery_search_position: None,
+            find: FindState {
+                input: find,
+                open: false,
+                return_focus: None,
+                matches: Rc::new(Vec::new()),
+                prepared: Vec::new(),
+                current: 0,
+            },
+            gallery: GalleryState {
+                find: gallery_find,
+                search_position: None,
+                matches: Rc::default(),
+                excerpts: Rc::default(),
+                list: gallery_list,
+                items: Rc::new(vec![GalleryItem::Header]),
+                focus: Rc::new(vec![cx.focus_handle()]),
+                columns: 1,
+                layout: Rc::default(),
+            },
+            restore: RestoreState {
+                pending: None,
+                search: None,
+                active: false,
+                generation: 0,
+                last_position: None,
+                save: None,
+                note_refine: None,
+                target: Rc::default(),
+                window_layout: reader_window_layout(window),
+            },
             focus: cx.focus_handle(),
-            find_open: false,
             info_open: false,
             processing_details_open: false,
             toc_open: None,
-            find_return_focus: None,
-            matches: Rc::new(Vec::new()),
-            search_index: Vec::new(),
-            match_index: 0,
             loaded: None,
             generation: 0,
             data_loading: false,
             frames: Rc::default(),
             frame_by_path: Rc::default(),
             missing_by_block: Rc::default(),
-            gallery_matches: Rc::default(),
-            gallery_excerpts: Rc::default(),
-            gallery_list,
-            gallery_items: Rc::new(vec![GalleryItem::Header]),
-            gallery_focus: Rc::new(vec![cx.focus_handle()]),
-            gallery_columns: 1,
             outline: Rc::default(),
             chapter_starts: Rc::default(),
             versions: Vec::new(),
             issues: Vec::new(),
-            pending_restore: None,
-            pending_search: None,
-            restoring: false,
-            restore_generation: 0,
-            last_position: None,
-            position_save: None,
-            note_refine: None,
-            restore_target: Rc::default(),
-            layout: reader_window_layout(window),
             note_layout: Rc::default(),
-            gallery_layout: Rc::default(),
             note_list: ListState::new(0, ListAlignment::Top, px(1000.)),
             note_items: Rc::default(),
             note_focus: Rc::default(),
@@ -1893,7 +1918,7 @@ impl Desktop {
             let step = self.reader_ui.note_list.viewport_bounds().size.height * 0.85 * direction;
             self.reader_ui.note_list.scroll_by(-step);
         } else {
-            let list = &self.reader_ui.gallery_list;
+            let list = &self.reader_ui.gallery.list;
             let step = list.viewport_bounds().size.height * 0.85 * direction;
             list.scroll_by(-step);
         }
@@ -1933,10 +1958,10 @@ impl Desktop {
             );
         }
         gallery_capture_position(
-            &self.reader_ui.gallery_items,
-            &self.reader_ui.gallery_matches,
-            &self.reader_ui.gallery_list,
-            &self.reader_ui.gallery_layout.borrow(),
+            &self.reader_ui.gallery.items,
+            &self.reader_ui.gallery.matches,
+            &self.reader_ui.gallery.list,
+            &self.reader_ui.gallery.layout.borrow(),
             |index| {
                 self.reader_ui
                     .frames
@@ -1950,7 +1975,7 @@ impl Desktop {
     /// scrolling does not clone and rewrite the workspace for every step.
     /// Navigation and exit call `save_reading_position` to record at once.
     fn reading_position_moved(&mut self, cx: &mut Context<Self>) {
-        self.reader_ui.position_save = Some(cx.spawn(async move |this, cx| {
+        self.reader_ui.restore.save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(READING_POSITION_SETTLE)
                 .await;
@@ -1960,9 +1985,9 @@ impl Desktop {
     pub fn save_reading_position(&mut self, cx: &mut Context<Self>) {
         if self.page != Page::Result
             || self.reading
-            || (self.result_tab == 1 && self.reader_ui.gallery_search_position.is_some())
-            || self.reader_ui.restoring
-            || self.reader_ui.pending_restore.is_some()
+            || (self.result_tab == 1 && self.reader_ui.gallery.search_position.is_some())
+            || self.reader_ui.restore.active
+            || self.reader_ui.restore.pending.is_some()
         {
             return;
         }
@@ -1970,7 +1995,7 @@ impl Desktop {
         else {
             return;
         };
-        if self.reader_ui.last_position.as_ref() == Some(&(key.clone(), position.clone())) {
+        if self.reader_ui.restore.last_position.as_ref() == Some(&(key.clone(), position.clone())) {
             return;
         }
         if let Some(workspace) = &mut self.workspace
@@ -1984,20 +2009,20 @@ impl Desktop {
             cx.notify();
             return;
         }
-        self.reader_ui.last_position = Some((key, position));
+        self.reader_ui.restore.last_position = Some((key, position));
     }
     pub fn restore_reading_position(&mut self, cx: &mut Context<Self>) {
         self.ensure_reader_data(cx);
-        self.reader_ui.pending_search = None;
-        self.reader_ui.pending_restore = Some(
+        self.reader_ui.restore.search = None;
+        self.reader_ui.restore.pending = Some(
             self.reading_key()
                 .and_then(|key| self.workspace.as_ref()?.state.positions.get(&key))
                 .cloned()
                 .unwrap_or_default(),
         );
-        self.reader_ui.restore_generation += 1;
-        self.reader_ui.restoring = false;
-        self.reader_ui.last_position = None;
+        self.reader_ui.restore.generation += 1;
+        self.reader_ui.restore.active = false;
+        self.reader_ui.restore.last_position = None;
         cx.notify();
     }
     fn position_index(&self, position: &workspace::ReadingPosition) -> Option<usize> {
@@ -2032,15 +2057,15 @@ impl Desktop {
         if self.result_tab == 1 && self.reader_ui.data_loading {
             return;
         }
-        let Some(position) = self.reader_ui.pending_restore.take() else {
+        let Some(position) = self.reader_ui.restore.pending.take() else {
             return;
         };
-        self.reader_ui.restoring = true;
-        let search = self.reader_ui.pending_search.take();
-        let generation = self.reader_ui.restore_generation;
+        self.reader_ui.restore.active = true;
+        let search = self.reader_ui.restore.search.take();
+        let generation = self.reader_ui.restore.generation;
         let key = self.reading_key();
         cx.on_next_frame(window, move |this, _, cx| {
-            if this.reader_ui.restore_generation != generation || this.reading_key() != key {
+            if this.reader_ui.restore.generation != generation || this.reading_key() != key {
                 return;
             }
             if this.result_tab == 0 {
@@ -2048,20 +2073,20 @@ impl Desktop {
                 return;
             }
             let target = gallery_restore_offset(
-                &this.reader_ui.gallery_items,
-                &this.reader_ui.gallery_matches,
+                &this.reader_ui.gallery.items,
+                &this.reader_ui.gallery.matches,
                 this.position_index(&position),
                 &position,
-                &this.reader_ui.gallery_layout.borrow(),
+                &this.reader_ui.gallery.layout.borrow(),
             );
-            this.reader_ui.gallery_list.scroll_to(target);
+            this.reader_ui.gallery.list.scroll_to(target);
             this.finish_reader_restore(cx);
         });
     }
 
     fn finish_reader_restore(&mut self, cx: &mut Context<Self>) {
-        self.reader_ui.restoring = false;
-        self.reader_ui.last_position = None;
+        self.reader_ui.restore.active = false;
+        self.reader_ui.restore.last_position = None;
         cx.notify();
     }
 
@@ -2108,21 +2133,22 @@ impl Desktop {
             return;
         }
         self.reader_ui
-            .restore_target
+            .restore
+            .target
             .set(note_item_block(self.reader_ui.note_items[item_ix]));
-        self.reader_ui.note_refine = Some(NoteRefine {
+        self.reader_ui.restore.note_refine = Some(NoteRefine {
             position,
             search,
-            generation: self.reader_ui.restore_generation,
+            generation: self.reader_ui.restore.generation,
         });
         cx.notify();
     }
 
     fn refine_note_restore(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(refine) = self.reader_ui.note_refine.take() else {
+        let Some(refine) = self.reader_ui.restore.note_refine.take() else {
             return;
         };
-        if refine.generation == self.reader_ui.restore_generation && self.result_tab == 0 {
+        if refine.generation == self.reader_ui.restore.generation && self.result_tab == 0 {
             self.apply_note_restore(refine.position, refine.search, false, cx);
         }
     }
@@ -2131,19 +2157,19 @@ impl Desktop {
     /// reading position of the previous layout.
     fn reader_layout_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let layout = reader_window_layout(window);
-        if self.reader_ui.layout == layout {
+        if self.reader_ui.restore.window_layout == layout {
             return;
         }
-        self.reader_ui.layout = layout;
+        self.reader_ui.restore.window_layout = layout;
         if self.page != Page::Result || self.preview.is_none() {
             return;
         }
-        if self.reader_ui.pending_restore.is_none() && !self.reader_ui.restoring {
-            self.reader_ui.pending_restore = self.capture_reading_position();
-            self.reader_ui.restore_generation += 1;
+        if self.reader_ui.restore.pending.is_none() && !self.reader_ui.restore.active {
+            self.reader_ui.restore.pending = self.capture_reading_position();
+            self.reader_ui.restore.generation += 1;
         }
         self.reader_ui.note_layout.borrow_mut().clear();
-        self.reader_ui.gallery_layout.borrow_mut().clear();
+        self.reader_ui.gallery.layout.borrow_mut().clear();
         self.reader_ui.note_list.remeasure();
         cx.notify();
     }
@@ -2169,9 +2195,9 @@ impl Desktop {
         self.reader_ui.frames = Rc::default();
         self.reader_ui.frame_by_path = Rc::default();
         self.reader_ui.missing_by_block = Rc::default();
-        self.reader_ui.gallery_matches = Rc::default();
-        self.reader_ui.gallery_excerpts = Rc::default();
-        self.set_gallery_items(self.reader_ui.gallery_columns, cx);
+        self.reader_ui.gallery.matches = Rc::default();
+        self.reader_ui.gallery.excerpts = Rc::default();
+        self.set_gallery_items(self.reader_ui.gallery.columns, cx);
         self.reader_ui.versions.clear();
         self.reader_ui.issues.clear();
         self.reader_ui.source = None;
@@ -2184,17 +2210,17 @@ impl Desktop {
         self.reader_ui.export_folder = None;
         self.reader_ui.offline_video = OfflineVideo::NotRequested;
         self.reader_ui.offline_opening = false;
-        Rc::make_mut(&mut self.reader_ui.matches).clear();
-        self.reader_ui.gallery_search_position = None;
-        self.reader_ui.find_open = false;
+        Rc::make_mut(&mut self.reader_ui.find.matches).clear();
+        self.reader_ui.gallery.search_position = None;
+        self.reader_ui.find.open = false;
         self.reader_ui.info_open = false;
         self.reader_ui.processing_details_open = false;
         self.rebuild_note_flow(cx);
         // Clearing an input needs the window, which this entity is being
         // updated inside; clear both searches once the update ends.
         let inputs = [
-            self.reader_ui.find.clone(),
-            self.reader_ui.gallery_find.clone(),
+            self.reader_ui.find.input.clone(),
+            self.reader_ui.gallery.find.clone(),
         ];
         let window = self.reader_ui.window;
         cx.defer(move |cx| {
@@ -2224,7 +2250,7 @@ impl Desktop {
         self.reader_ui.chapter_starts =
             Rc::new(chapter_starts(&preview.blocks, &summary_outline(&preview)));
         self.reader_ui.note_layout.borrow_mut().clear();
-        self.reader_ui.gallery_layout.borrow_mut().clear();
+        self.reader_ui.gallery.layout.borrow_mut().clear();
         // Scrolling repaints the page only when what it shows from the
         // position changes: whether the article has left its top, and the
         // contents entry the text is in. GPUI calls the handler while it
@@ -2262,9 +2288,9 @@ impl Desktop {
     /// Search the screenshots once per query change: the matching frames,
     /// their excerpts and the find ranges inside each excerpt.
     fn update_gallery_matches(&mut self, cx: &App) {
-        let query = self.reader_ui.gallery_find.read(cx).value();
+        let query = self.reader_ui.gallery.find.read(cx).value();
         let matches = matching_frames(&self.reader_ui.frames, &query);
-        self.reader_ui.gallery_excerpts = Rc::new(
+        self.reader_ui.gallery.excerpts = Rc::new(
             matches
                 .iter()
                 .map(|index| {
@@ -2280,19 +2306,19 @@ impl Desktop {
                 })
                 .collect(),
         );
-        self.reader_ui.gallery_matches = Rc::new(matches);
-        self.set_gallery_items(self.reader_ui.gallery_columns, cx);
+        self.reader_ui.gallery.matches = Rc::new(matches);
+        self.set_gallery_items(self.reader_ui.gallery.columns, cx);
     }
 
     /// Cut the matching screenshots into rows of `columns`.
     fn set_gallery_items(&mut self, columns: usize, cx: &App) {
-        let items = gallery_items(self.reader_ui.gallery_matches.len(), columns);
-        self.reader_ui.gallery_columns = columns;
-        if *self.reader_ui.gallery_items == items {
+        let items = gallery_items(self.reader_ui.gallery.matches.len(), columns);
+        self.reader_ui.gallery.columns = columns;
+        if *self.reader_ui.gallery.items == items {
             return;
         }
         let focus: Vec<FocusHandle> = (0..items.len()).map(|_| cx.focus_handle()).collect();
-        let list = &self.reader_ui.gallery_list;
+        let list = &self.reader_ui.gallery.list;
         let top = list.logical_scroll_top();
         list.reset(items.len());
         list.splice_focusable(0..items.len(), focus.iter().cloned().map(Some));
@@ -2301,9 +2327,9 @@ impl Desktop {
             item_ix: top.item_ix.min(items.len().saturating_sub(1)),
             offset_in_item: top.offset_in_item,
         });
-        self.reader_ui.gallery_items = Rc::new(items);
-        self.reader_ui.gallery_focus = Rc::new(focus);
-        self.reader_ui.gallery_layout.borrow_mut().clear();
+        self.reader_ui.gallery.items = Rc::new(items);
+        self.reader_ui.gallery.focus = Rc::new(focus);
+        self.reader_ui.gallery.layout.borrow_mut().clear();
     }
     fn refresh_reader_data(&mut self, cx: &mut Context<Self>) {
         // The blocking closure below needs an owned, Send preview; data loads
@@ -2365,14 +2391,14 @@ impl Desktop {
                 {
                     return;
                 }
-                if this.reader_ui.pending_restore.is_none() && !this.reader_ui.restoring {
-                    this.reader_ui.pending_restore = this.capture_reading_position();
+                if this.reader_ui.restore.pending.is_none() && !this.reader_ui.restore.active {
+                    this.reader_ui.restore.pending = this.capture_reading_position();
                 }
                 this.reader_ui.frames = Rc::new(data.frames);
                 this.reader_ui.frame_by_path = Rc::new(data.frame_by_path);
                 this.reader_ui.missing_by_block = Rc::new(data.missing_by_block);
                 this.update_gallery_matches(cx);
-                this.reader_ui.gallery_layout.borrow_mut().clear();
+                this.reader_ui.gallery.layout.borrow_mut().clear();
                 this.reader_ui.versions = data.versions;
                 this.reader_ui.issues = data.issues;
                 this.reader_ui.export_folder = data.export_folder;
@@ -2380,8 +2406,8 @@ impl Desktop {
                 this.reader_ui.source_available = source_available;
                 this.reader_ui.offline_video = offline_video;
                 this.reader_ui.data_loading = false;
-                this.reader_ui.restore_generation += 1;
-                this.reader_ui.restoring = false;
+                this.reader_ui.restore.generation += 1;
+                this.reader_ui.restore.active = false;
                 cx.notify();
             });
         })
@@ -2573,14 +2599,14 @@ impl Desktop {
         if self.preview.is_none() {
             return;
         }
-        if !self.reader_ui.find_open {
-            self.reader_ui.find_return_focus = window.focused(cx);
+        if !self.reader_ui.find.open {
+            self.reader_ui.find.return_focus = window.focused(cx);
         }
         let input = if self.result_tab == 0 {
-            self.reader_ui.find_open = true;
-            self.reader_ui.find.clone()
+            self.reader_ui.find.open = true;
+            self.reader_ui.find.input.clone()
         } else {
-            self.reader_ui.gallery_find.clone()
+            self.reader_ui.gallery.find.clone()
         };
         input.update(cx, |input, cx| input.focus(window, cx));
         if self.result_tab == 0 {
@@ -2589,14 +2615,14 @@ impl Desktop {
         cx.notify();
     }
     fn close_reader_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.reader_ui.find_open = false;
+        self.reader_ui.find.open = false;
         let input = if self.result_tab == 0 {
-            self.reader_ui.find.clone()
+            self.reader_ui.find.input.clone()
         } else {
-            self.reader_ui.gallery_find.clone()
+            self.reader_ui.gallery.find.clone()
         };
         input.update(cx, |input, cx| input.set_value("", window, cx));
-        if let Some(focus) = self.reader_ui.find_return_focus.take() {
+        if let Some(focus) = self.reader_ui.find.return_focus.take() {
             focus.focus(window, cx);
         } else {
             self.reader_ui.focus.focus(window, cx);
@@ -2604,11 +2630,11 @@ impl Desktop {
         cx.notify();
     }
     fn update_reader_matches(&mut self, cx: &mut Context<Self>) {
-        let query = self.reader_ui.find.read(cx).value().to_string();
+        let query = self.reader_ui.find.input.read(cx).value().to_string();
         if let Some(preview) = &self.preview
-            && self.reader_ui.search_index.len() != preview.blocks.len()
+            && self.reader_ui.find.prepared.len() != preview.blocks.len()
         {
-            self.reader_ui.search_index = preview
+            self.reader_ui.find.prepared = preview
                 .blocks
                 .iter()
                 .map(|block| {
@@ -2618,7 +2644,7 @@ impl Desktop {
                 })
                 .collect();
         }
-        self.reader_ui.matches = self
+        self.reader_ui.find.matches = self
             .preview
             .as_ref()
             .map(|preview| {
@@ -2629,7 +2655,8 @@ impl Desktop {
                         .enumerate()
                         .flat_map(|(block, _)| {
                             self.reader_ui
-                                .search_index
+                                .find
+                                .prepared
                                 .get(block)
                                 .map(|prepared| nav::text_matches_prepared(prepared, &query))
                                 .unwrap_or_default()
@@ -2640,20 +2667,20 @@ impl Desktop {
                 )
             })
             .unwrap_or_default();
-        self.reader_ui.match_index = 0;
+        self.reader_ui.find.current = 0;
         cx.notify();
     }
     fn move_reader_match(&mut self, delta: isize, cx: &mut Context<Self>) {
         if self.result_tab != 0 {
             return;
         }
-        let count = self.reader_ui.matches.len();
+        let count = self.reader_ui.find.matches.len();
         if count == 0 {
             return;
         }
-        self.reader_ui.match_index =
-            (self.reader_ui.match_index as isize + delta).rem_euclid(count as isize) as usize;
-        let found = self.reader_ui.matches[self.reader_ui.match_index].clone();
+        self.reader_ui.find.current =
+            (self.reader_ui.find.current as isize + delta).rem_euclid(count as isize) as usize;
+        let found = self.reader_ui.find.matches[self.reader_ui.find.current].clone();
         let fraction = self
             .preview
             .as_ref()
@@ -2665,10 +2692,10 @@ impl Desktop {
             })
             .unwrap_or(0.);
         self.jump_reader_block(found.block, fraction, cx);
-        self.reader_ui.pending_search = Some(found);
+        self.reader_ui.restore.search = Some(found);
     }
     fn jump_reader_block(&mut self, index: usize, fraction: f32, cx: &mut Context<Self>) {
-        self.reader_ui.pending_search = None;
+        self.reader_ui.restore.search = None;
         if self.result_tab != 0 {
             self.save_reading_position(cx);
             self.result_tab = 0;
@@ -2680,14 +2707,14 @@ impl Desktop {
         let Some(block) = preview.blocks.get(index) else {
             return;
         };
-        self.reader_ui.pending_restore = Some(workspace::ReadingPosition {
+        self.reader_ui.restore.pending = Some(workspace::ReadingPosition {
             paragraph: Some(block_anchor(block, index)),
             seconds: block_time(&preview.blocks, index),
             fraction: Some(fraction),
             ..Default::default()
         });
-        self.reader_ui.restore_generation += 1;
-        self.reader_ui.restoring = false;
+        self.reader_ui.restore.generation += 1;
+        self.reader_ui.restore.active = false;
         cx.notify();
     }
     fn open_reader_version(&mut self, course: Course, cx: &mut Context<Self>) {
@@ -2738,7 +2765,7 @@ impl Desktop {
                         });
                         this.restore_reading_position(cx);
                         if refresh {
-                            this.reader_ui.pending_restore = position.clone();
+                            this.reader_ui.restore.pending = position.clone();
                         }
                         if !refresh
                             && !has_saved_position
@@ -2747,7 +2774,7 @@ impl Desktop {
                             let blocks = &this.preview.as_ref().unwrap().blocks;
                             let nearest = nav::nearest_time(heading_times(blocks), seconds);
                             if let Some((index, exact)) = nearest {
-                                this.reader_ui.pending_restore = Some(workspace::ReadingPosition {
+                                this.reader_ui.restore.pending = Some(workspace::ReadingPosition {
                                     seconds: Some(seconds),
                                     fraction: Some(0.),
                                     ..Default::default()
@@ -2762,7 +2789,7 @@ impl Desktop {
                                     ));
                                 }
                             } else {
-                                this.reader_ui.pending_restore = Some(Default::default());
+                                this.reader_ui.restore.pending = Some(Default::default());
                             }
                         }
                     }
@@ -3010,14 +3037,15 @@ impl Desktop {
             if index == 1
                 && !self
                     .reader_ui
-                    .gallery_find
+                    .gallery
+                    .find
                     .read(cx)
                     .value()
                     .trim()
                     .is_empty()
             {
-                self.reader_ui.pending_restore = None;
-                self.reader_ui.gallery_list.scroll_to(ListOffset::default());
+                self.reader_ui.restore.pending = None;
+                self.reader_ui.gallery.list.scroll_to(ListOffset::default());
             } else {
                 self.restore_reading_position(cx);
             }
@@ -3111,7 +3139,7 @@ impl Desktop {
                         offset_in_item: px(0.),
                     });
                 } else {
-                    this.reader_ui.gallery_list.scroll_to(ListOffset::default());
+                    this.reader_ui.gallery.list.scroll_to(ListOffset::default());
                 }
                 this.reading_position_moved(cx);
                 cx.notify();
@@ -3120,7 +3148,7 @@ impl Desktop {
                 if this.result_tab == 0 {
                     this.reader_ui.note_list.scroll_to_end();
                 } else {
-                    this.reader_ui.gallery_list.scroll_to_end();
+                    this.reader_ui.gallery.list.scroll_to_end();
                 }
                 this.reading_position_moved(cx);
                 cx.notify();
@@ -3129,9 +3157,9 @@ impl Desktop {
                 if !toc_fits_beside && this.reader_ui.toc_open == Some(true) {
                     this.reader_ui.toc_open = Some(false);
                     cx.notify();
-                } else if (this.result_tab == 0 && this.reader_ui.find_open)
+                } else if (this.result_tab == 0 && this.reader_ui.find.open)
                     || (this.result_tab == 1
-                        && !this.reader_ui.gallery_find.read(cx).value().is_empty())
+                        && !this.reader_ui.gallery.find.read(cx).value().is_empty())
                 {
                     this.close_reader_find(window, cx);
                 } else {
@@ -3282,15 +3310,15 @@ impl Desktop {
             missing_by_block: self.reader_ui.missing_by_block.clone(),
             chapter_starts: self.reader_ui.chapter_starts.clone(),
             source: self.reader_source(),
-            matches: self.reader_ui.matches.clone(),
-            match_index: self.reader_ui.match_index,
-            find_open: self.reader_ui.find_open,
+            matches: self.reader_ui.find.matches.clone(),
+            match_index: self.reader_ui.find.current,
+            find_open: self.reader_ui.find.open,
             data_loading: self.reader_ui.data_loading,
             compact: metrics.compact,
             short: metrics.short,
             wide,
             layout: self.reader_ui.note_layout.clone(),
-            restore_target: self.reader_ui.restore_target.clone(),
+            restore_target: self.reader_ui.restore.target.clone(),
             note_list: self.reader_ui.note_list.clone(),
             desktop: cx.weak_entity(),
         };
@@ -3730,7 +3758,7 @@ impl Desktop {
                             })),
                     )
                 });
-        let search_visible = !reading_note || self.reader_ui.find_open;
+        let search_visible = !reading_note || self.reader_ui.find.open;
         let mut search_row = h_flex()
             .min_w_0()
             .gap_2()
@@ -3770,8 +3798,8 @@ impl Desktop {
                         course2md::tr!("打开目录")
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.reader_ui.pending_restore = this.capture_reading_position();
-                        this.reader_ui.restore_generation += 1;
+                        this.reader_ui.restore.pending = this.capture_reading_position();
+                        this.reader_ui.restore.generation += 1;
                         this.reader_ui.toc_open = Some(!toc_on);
                         cx.notify();
                     })),
@@ -3839,9 +3867,9 @@ impl Desktop {
     ) -> (Div, Option<Div>) {
         let reading_note = self.result_tab == 0;
         let input = if reading_note {
-            self.reader_ui.find.clone()
+            self.reader_ui.find.input.clone()
         } else {
-            self.reader_ui.gallery_find.clone()
+            self.reader_ui.gallery.find.clone()
         };
         let mut search = h_flex()
             .min_w_0()
@@ -3863,15 +3891,15 @@ impl Desktop {
         let mut short_matches = None;
         if !input.read(cx).value().trim().is_empty() {
             let count = if reading_note {
-                self.reader_ui.matches.len()
+                self.reader_ui.find.matches.len()
             } else {
-                self.reader_ui.gallery_matches.len()
+                self.reader_ui.gallery.matches.len()
             };
             let mut matches = h_flex().gap_1().items_center().child(
                 theme::accessible_text(
                     "find-status",
                     if reading_note && count > 0 {
-                        format!("{}/{count}", self.reader_ui.match_index + 1)
+                        format!("{}/{count}", self.reader_ui.find.current + 1)
                     } else if count == 0 {
                         // 笔记与图片搜索的零结果用同一说法
                         course2md::tr!("无匹配").into()
@@ -4542,20 +4570,20 @@ impl Desktop {
         let columns = ((metrics.reader_width + GALLERY_GAP) / (metrics.rem * 20. + GALLERY_GAP))
             .floor()
             .clamp(1., 3.) as usize;
-        if columns != self.reader_ui.gallery_columns {
+        if columns != self.reader_ui.gallery.columns {
             self.set_gallery_items(columns, cx);
         }
         // GPUI rounds each rendered line to whole pixels. Reserve that same
         // three-line height so enlarged text cannot run into the action row.
         let excerpt_line_height =
             px((f32::from(TEXT_BODY.to_pixels(window.rem_size())) * 1.6).round());
-        let items = self.reader_ui.gallery_items.clone();
-        let focus = self.reader_ui.gallery_focus.clone();
-        let layout = self.reader_ui.gallery_layout.clone();
-        let matches = self.reader_ui.gallery_matches.clone();
+        let items = self.reader_ui.gallery.items.clone();
+        let focus = self.reader_ui.gallery.focus.clone();
+        let layout = self.reader_ui.gallery.layout.clone();
+        let matches = self.reader_ui.gallery.matches.clone();
         let preview_for_items = preview.clone();
         let desktop = cx.weak_entity();
-        let gallery = list(self.reader_ui.gallery_list.clone(), move |index, _, cx| {
+        let gallery = list(self.reader_ui.gallery.list.clone(), move |index, _, cx| {
             let Some(item) = items.get(index) else {
                 return div().into_any_element();
             };
@@ -4606,7 +4634,7 @@ impl Desktop {
             .h_full()
             .child(gallery.w_full().h_full().py_3())
             .child(crate::backend::vertical_scrollbar_for(
-                &self.reader_ui.gallery_list,
+                &self.reader_ui.gallery.list,
             ))
             .into_any_element()
     }
@@ -4626,7 +4654,7 @@ impl Desktop {
                 preview,
                 true,
                 metrics.short,
-                HeaderContainer::List(self.reader_ui.gallery_list.clone()),
+                HeaderContainer::List(self.reader_ui.gallery.list.clone()),
                 cx,
             );
             header = header.child(title);
@@ -4693,7 +4721,7 @@ impl Desktop {
                             })),
                     ),
             ));
-        } else if self.reader_ui.gallery_matches.is_empty() {
+        } else if self.reader_ui.gallery.matches.is_empty() {
             empty = false;
             header = header.child(
                 v_flex()
@@ -4712,14 +4740,15 @@ impl Desktop {
                             .label(course2md::tr!("清除搜索"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.reader_ui
-                                    .gallery_find
+                                    .gallery
+                                    .find
                                     .update(cx, |input, cx| input.set_value("", window, cx));
                             })),
                     ),
             );
         }
         // Spacing before the first row, as the grid's gap did inside one column.
-        header.when(!empty && !self.reader_ui.gallery_matches.is_empty(), |header| {
+        header.when(!empty && !self.reader_ui.gallery.matches.is_empty(), |header| {
             header.pb_3()
         })
     }
@@ -4759,7 +4788,7 @@ impl Desktop {
             crate::focus_scroll::RevealFocus::in_list(
                 id,
                 child,
-                self.reader_ui.gallery_list.clone(),
+                self.reader_ui.gallery.list.clone(),
             )
         };
         {
@@ -4856,7 +4885,7 @@ impl Desktop {
                         )
                     }),
             );
-            let (excerpt, marks) = match self.reader_ui.gallery_excerpts.get(&index) {
+            let (excerpt, marks) = match self.reader_ui.gallery.excerpts.get(&index) {
                 Some(found) => (found.text.clone(), found.marks.as_slice()),
                 None => (SharedString::default(), &[][..]),
             };
@@ -5038,13 +5067,14 @@ impl Desktop {
         let filtered = self.result_tab == 1
             && !self
                 .reader_ui
-                .gallery_find
+                .gallery
+                .find
                 .read(cx)
                 .value()
                 .trim()
                 .is_empty();
         let visible: Vec<usize> = if self.result_tab == 1 {
-            self.reader_ui.gallery_matches.to_vec()
+            self.reader_ui.gallery.matches.to_vec()
         } else {
             (0..self.reader_ui.frames.len()).collect()
         };
