@@ -893,15 +893,17 @@ fn request_chat_once(
     let headers = crate::provider::auth_headers(s).map_err(crate::dispatch::Failure::local)?;
     let sse = crate::provider::is_sse(s);
     crate::dispatch::json_request_described(
-        "llm",
-        purpose.ledger_name(),
-        description,
-        &url,
-        body,
-        if crate::provider::free_to_resend(s) {
-            crate::dispatch::Resend::Free
-        } else {
-            crate::dispatch::Resend::AskUser
+        &crate::dispatch::RequestSpec {
+            service: "llm",
+            purpose: purpose.ledger_name(),
+            description,
+            endpoint: &url,
+            identity: body,
+            resend: if crate::provider::free_to_resend(s) {
+                crate::dispatch::Resend::Free
+            } else {
+                crate::dispatch::Resend::AskUser
+            },
         },
         || {
             let mut request = agent.post(&url).set("Content-Type", "application/json");

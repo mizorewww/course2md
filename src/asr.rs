@@ -633,12 +633,14 @@ fn post_cloud(
             crate::dispatch::receive(request.send_bytes(body))
         };
         crate::dispatch::json_request_described(
-            "asr",
-            "transcription",
-            &description,
-            t.url,
-            identity,
-            crate::dispatch::Resend::AskUser,
+            &crate::dispatch::RequestSpec {
+                service: "asr",
+                purpose: "transcription",
+                description: &description,
+                endpoint: t.url,
+                identity,
+                resend: crate::dispatch::Resend::AskUser,
+            },
             send,
             |value| {
                 anyhow::ensure!(

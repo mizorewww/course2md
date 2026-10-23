@@ -116,6 +116,20 @@ impl Failure {
     }
 }
 
+/// What identifies one service request in the ledger, and how it may be resent.
+pub struct RequestSpec<'a> {
+    /// The configured service ("llm", "asr"), resolved to its version.
+    pub service: &'a str,
+    /// Ledger purpose, shared by retries of the same work.
+    pub purpose: &'a str,
+    /// Shown to the person when the request needs a decision.
+    pub description: &'a str,
+    pub endpoint: &'a str,
+    /// The request content that identifies a repeat of the same request.
+    pub identity: &'a Value,
+    pub resend: Resend,
+}
+
 /// A service response, and whether it was received now or replayed from a
 /// completed receipt (callers that report live usage skip replays).
 #[derive(Debug)]
@@ -556,29 +570,32 @@ impl Ledger {
         validate: impl FnOnce(&Value) -> Result<()>,
     ) -> std::result::Result<Reply, Failure> {
         self.send_described(
-            service,
-            purpose,
-            purpose,
-            endpoint,
-            identity,
-            Resend::AskUser,
+            &RequestSpec {
+                service,
+                purpose,
+                description: purpose,
+                endpoint,
+                identity,
+                resend: Resend::AskUser,
+            },
             send,
             validate,
         )
     }
-    // Keep the transport, validation and persisted request identity explicit at the call site.
-    #[allow(clippy::too_many_arguments)]
     fn send_described(
         &self,
-        service: &str,
-        purpose: &str,
-        description: &str,
-        endpoint: &str,
-        identity: &Value,
-        resend: Resend,
+        spec: &RequestSpec,
         send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
         validate: impl FnOnce(&Value) -> Result<()>,
     ) -> std::result::Result<Reply, Failure> {
+        let RequestSpec {
+            service,
+            purpose,
+            description,
+            endpoint,
+            identity,
+            resend,
+        } = *spec;
         let service_version = self
             .service_versions
             .get(service)
@@ -763,30 +780,15 @@ impl Ledger {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn json_request_described(
-    service: &str,
-    purpose: &str,
-    description: &str,
-    endpoint: &str,
-    identity: &Value,
-    resend: Resend,
+    spec: &RequestSpec,
     send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
     validate: impl FnOnce(&Value) -> Result<()>,
 ) -> std::result::Result<Reply, Failure> {
     // Outside a task there is no durable context, so one in-memory ledger per
     // request classifies the response by the same rules without keeping it.
     let ledger = active().unwrap_or_else(|| Arc::new(Ledger::ephemeral()));
-    ledger.send_described(
-        service,
-        purpose,
-        description,
-        endpoint,
-        identity,
-        resend,
-        send,
-        validate,
-    )
+    ledger.send_described(spec, send, validate)
 }
 
 /// Drain the HTTP body before recording completion; a body read error is still uncertain.
@@ -986,12 +988,14 @@ mod tests {
         let ledger = Ledger::new(dir.path(), Some(&control), &Default::default()).unwrap();
         let send = |payload: &Value, resend, ok: bool| {
             ledger.send_described(
-                "llm",
-                "proofreading",
-                "segment",
-                "https://example.test",
-                payload,
-                resend,
+                &RequestSpec {
+                    service: "llm",
+                    purpose: "proofreading",
+                    description: "segment",
+                    endpoint: "https://example.test",
+                    identity: payload,
+                    resend,
+                },
                 || {
                     if ok {
                         Ok(HttpResponse {
@@ -1212,12 +1216,14 @@ mod ephemeral_tests {
     fn request(status: u16, body: &[u8], resend: Resend) -> std::result::Result<Reply, Failure> {
         let body = body.to_vec();
         json_request_described(
-            "llm",
-            "summary",
-            "summary",
-            "https://example.test",
-            &serde_json::json!({"n":1}),
-            resend,
+            &RequestSpec {
+                service: "llm",
+                purpose: "summary",
+                description: "summary",
+                endpoint: "https://example.test",
+                identity: &serde_json::json!({"n":1}),
+                resend,
+            },
             move || Ok(HttpResponse { status, body }),
             |_| Ok(()),
         )
@@ -1241,12 +1247,14 @@ mod ephemeral_tests {
         // Nothing persists between calls: the same payload sends again.
         assert!(request(200, br#"{"ok":true}"#, Resend::AskUser).is_ok());
         let lost = json_request_described(
-            "llm",
-            "summary",
-            "summary",
-            "https://example.test",
-            &serde_json::json!({"n":2}),
-            Resend::Free,
+            &RequestSpec {
+                service: "llm",
+                purpose: "summary",
+                description: "summary",
+                endpoint: "https://example.test",
+                identity: &serde_json::json!({"n":2}),
+                resend: Resend::Free,
+            },
             || {
                 Err(NetworkFailure {
                     message: "stalled".into(),
