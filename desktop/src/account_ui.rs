@@ -565,7 +565,9 @@ impl Desktop {
                 return;
             }
             loop {
-                smol::Timer::after(Duration::from_secs(2)).await;
+                cx.background_executor()
+                    .timer(Duration::from_secs(2))
+                    .await;
                 if !this
                     .update(cx, |this, _| this.account.current(generation))
                     .unwrap_or(false)

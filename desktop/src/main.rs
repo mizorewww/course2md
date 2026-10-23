@@ -518,7 +518,7 @@ impl Desktop {
                     }
                     if matches!(field, Field::Source | Field::Title) {
                         this.draft_deadline = Some(Instant::now() + Duration::from_millis(350));
-                        this.schedule_wake(Duration::from_millis(350));
+                        this.schedule_wake(Duration::from_millis(350), cx);
                     }
                     if field == Field::Title
                         && !this.value(Field::Title, cx).is_empty()
@@ -575,10 +575,8 @@ impl Desktop {
                 let timeout = deadline
                     .map(|deadline| deadline.saturating_duration_since(Instant::now()))
                     .unwrap_or(Duration::from_secs(3600));
-                smol::future::or(wait, async {
-                    smol::Timer::after(timeout).await;
-                })
-                .await;
+                let timer = cx.background_executor().timer(timeout);
+                smol::future::or(wait, timer).await;
                 match this.update_in(cx, |this, _, cx| {
                     this.poll(cx);
                 }) {
@@ -938,12 +936,18 @@ impl Desktop {
     fn wake_poll(&self) {
         let _ = self.event_wake_tx.try_send(());
     }
-    fn schedule_wake(&self, after: Duration) {
+    /// Run `poll` after `after` even without a job event.
+    fn schedule_wake(&self, after: Duration, cx: &mut Context<Self>) {
         let wake = self.event_wake_tx.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(after);
-            let _ = wake.try_send(());
-        });
+        cx.background_executor()
+            .spawn({
+                let timer = cx.background_executor().timer(after);
+                async move {
+                    timer.await;
+                    let _ = wake.try_send(());
+                }
+            })
+            .detach();
     }
     /// The next instant the UI must run `poll` even without a job event.
     /// Returning `None` lets the loop sleep until an explicit wake.

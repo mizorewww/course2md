@@ -1154,8 +1154,9 @@ impl Desktop {
         let journal_dir = self.preferences.root().join("storage");
         cx.spawn_in(window, async move |this, cx| {
             if let Some(exited) = job_exit {
+                let timeout = cx.background_executor().timer(TASK_STOP_TIMEOUT);
                 let stopped = smol::future::or(async { exited.recv().await.is_ok() }, async {
-                    smol::Timer::after(TASK_STOP_TIMEOUT).await;
+                    timeout.await;
                     false
                 })
                 .await;
