@@ -126,10 +126,16 @@ pub(crate) fn spawn_blocking_io<T: Send + 'static>(
     rx
 }
 
+/// Choice id of a recognition engine, as in `providers()`; automatic
+/// selection is the empty id.
+pub(crate) fn provider_id(provider: Option<course2md::config::AsrProvider>) -> &'static str {
+    provider.map_or("", |provider| provider.as_str())
+}
+
 /// 识别引擎的规范展示名：全桌面唯一来源（选择与描述场景共用）。
-/// 与 PROVIDERS 表的 id 一一对应；None 表示「自动」。
+/// 与 providers() 表的 id 一一对应；None 表示「自动」。
 pub(crate) fn provider_label(provider: Option<course2md::config::AsrProvider>) -> &'static str {
-    let id = provider.map(|provider| provider.as_str()).unwrap_or("");
+    let id = provider_id(provider);
     providers()
         .iter()
         .find(|(provider_id, _)| *provider_id == id)
