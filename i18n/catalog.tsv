@@ -2456,3 +2456,8 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	Its {} subfolders are deleted too; notes are kept and move to Unfiled	其中的 {} 個子資料夾也會刪除；筆記會保留，移到未分類	中の {} 個のサブフォルダも削除されます。ノートは残り、未分類に移動します
 {} 项	{} 项	{} items	{} 項	{} 項目
 {} 个已暂停	{} 个已暂停	{} paused	{} 個已暫停	一時停止中 {} 件
+服务拒绝了 API Key	服务拒绝了 API Key	The service rejected the API Key	服務拒絕了 API Key	サービスが API キーを拒否しました
+服务地址或模型名称有误	服务地址或模型名称有误	The service address or model name is incorrect	服務地址或模型名稱有誤	サービスのアドレスまたはモデル名が間違っています
+服务不支持当前的模型设置	服务不支持当前的模型设置	The service does not support the current model settings	服務不支援當前的模型設定	サービスは現在のモデル設定をサポートしていません
+服务暂时限制了请求次数	服务暂时限制了请求次数	The service is limiting requests for now	服務暫時限制了請求次數	サービスが一時的にリクエスト数を制限しています
+服务暂时无法完成请求	服务暂时无法完成请求	The service could not complete the request for now	服務暫時無法完成請求	サービスは現在リクエストを完了できません

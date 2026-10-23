@@ -4024,7 +4024,7 @@ impl Desktop {
                 if unknown_component {
                     continue;
                 }
-                let reason = activity::component_failure_message(label, outcome.message.as_deref());
+                let reason = activity::outcome_failure_message(label, outcome);
                 let ai_component = ai_component(component).is_some();
                 if !(requires_repair && ai_component) {
                     details = details.child(
@@ -4531,10 +4531,7 @@ impl Desktop {
                     task_component_failures(task)
                         .into_iter()
                         .map(|(component, label, outcome)| {
-                            let reason = activity::component_failure_message(
-                                &label,
-                                outcome.message.as_deref(),
-                            );
+                            let reason = activity::outcome_failure_message(&label, &outcome);
                             (component, label, reason)
                         })
                         .collect()

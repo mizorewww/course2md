@@ -298,16 +298,42 @@ pub fn quantity(stage: &Stage, current: u64, total: u64) -> String {
     }
 }
 
-/// Older saved outcomes combined a stage label, retention message and English
-/// diagnostics. Keep these records readable without rewriting their evidence.
+/// The one term naming what is missing.
+fn missing_term(label: &str) -> String {
+    match label {
+        "截图" | "摘要" => course2md::tr!("{}未生成", label),
+        _ => course2md::tr!("{}未完成", label),
+    }
+}
+
+/// Why a component of a saved note is missing. A classified failure words its
+/// own cause. Local and unclassified failures carry their cause only as text,
+/// and records written before the engine classified failures have no kind;
+/// those fall back to [`legacy_outcome_message`].
 ///
 /// One term names what is missing; a cause follows only when it says more than
 /// the term (the retry button beside it already names the next step).
-pub fn component_failure_message(label: &str, message: Option<&str>) -> String {
-    let term = match label {
-        "截图" | "摘要" => course2md::tr!("{}未生成", label),
-        _ => course2md::tr!("{}未完成", label),
+pub fn outcome_failure_message(label: &str, outcome: &course2md::artifact::Outcome) -> String {
+    use course2md::artifact::FailureKind;
+    let cause = match outcome.kind {
+        Some(FailureKind::Authentication) => course2md::tr!("服务拒绝了 API Key"),
+        Some(FailureKind::Model) => course2md::tr!("服务地址或模型名称有误"),
+        Some(FailureKind::Parameters) => course2md::tr!("服务不支持当前的模型设置"),
+        Some(FailureKind::RateLimit) => course2md::tr!("服务暂时限制了请求次数"),
+        Some(FailureKind::Service) => course2md::tr!("服务暂时无法完成请求"),
+        Some(FailureKind::Uncertain) => course2md::tr!("请求结果未确认"),
+        Some(FailureKind::Local | FailureKind::Other) | None => {
+            return legacy_outcome_message(label, outcome.message.as_deref());
+        }
     };
+    course2md::tr!("{}：{}", missing_term(label), cause)
+}
+
+/// Older saved outcomes combined a stage label, retention message and English
+/// diagnostics as one bilingual text. This reads them by matching that text;
+/// delete it once saved records carry a failure kind and a plain cause.
+pub fn legacy_outcome_message(label: &str, message: Option<&str>) -> String {
+    let term = missing_term(label);
     let chinese = message
         .unwrap_or_default()
         .split(" / ")
@@ -581,35 +607,65 @@ mod tests {
     #[test]
     fn saved_component_failures_have_one_label_and_no_english_diagnostics() {
         assert_eq!(
-            component_failure_message(
+            legacy_outcome_message(
                 "摘要",
                 Some("摘要尚未完成，已保留正文 / Summary incomplete; body retained")
             ),
             "摘要未生成"
         );
         assert_eq!(
-            component_failure_message("摘要", Some("服务拒绝了请求（HTTP 400）。")),
+            legacy_outcome_message("摘要", Some("服务拒绝了请求（HTTP 400）。")),
             "摘要未生成：服务拒绝了请求（HTTP 400）"
         );
         // 截图失败只说一次：旧记录里的「无法提取截图」与术语重复，不再作为原因
         assert_eq!(
-            component_failure_message(
+            legacy_outcome_message(
                 "截图",
                 Some("无法提取截图 / Could not extract slide 2 (t=4.0s): ffmpeg")
             ),
             "截图未生成"
         );
         assert_eq!(
-            component_failure_message(
+            legacy_outcome_message(
                 "截图",
                 Some("第 2 张截图（0:04）提取失败 / Could not extract slide 2")
             ),
             "截图未生成：第 2 张截图（0:04）提取失败"
         );
         assert_eq!(
-            component_failure_message("校对", Some("校对未全部完成，原文已保留")),
+            legacy_outcome_message("校对", Some("校对未全部完成，原文已保留")),
             "校对未完成"
         );
+    }
+    #[test]
+    fn classified_failures_are_worded_from_their_kind() {
+        use course2md::artifact::{FailureKind, Outcome};
+        // The text is ignored when the kind already names the cause.
+        let rejected = Outcome::failed_kind(
+            "摘要尚未完成 / Summary incomplete: HTTP 401",
+            FailureKind::Authentication,
+        );
+        assert_eq!(
+            outcome_failure_message("摘要", &rejected),
+            "摘要未生成：服务拒绝了 API Key"
+        );
+        let limited = Outcome::failed_kind("anything", FailureKind::RateLimit);
+        assert_eq!(
+            outcome_failure_message("校对", &limited),
+            "校对未完成：服务暂时限制了请求次数"
+        );
+        // A local failure's cause exists only as its text.
+        let local = Outcome::failed("第 2 张截图（0:04）提取失败 / Could not extract slide 2");
+        assert_eq!(
+            outcome_failure_message("截图", &local),
+            "截图未生成：第 2 张截图（0:04）提取失败"
+        );
+        // Records from before classification have no kind.
+        let legacy = Outcome {
+            kind: None,
+            ..Outcome::failed("摘要尚未完成，已保留正文 / Summary incomplete; body retained")
+        };
+        assert_eq!(outcome_failure_message("摘要", &legacy), "摘要未生成");
     }
     #[test]
     fn retry_and_cached_work_do_not_inflate_eta() {
