@@ -1,32 +1,18 @@
 zh	zh_hans	en	zh_hant	ja
-\n### 内容大纲\n\n	\n### 内容大纲\n\n	### Content Outline	\n### 內容大綱\n\n	\n### コンテンツの概要\n\n
-\n### 核心要点\n\n	\n### 核心要点\n\n	### Core Points	\n### 核心要點\n\n	\n### コア ポイント\n\n
-\nimport http.server\nimport json\nimport sys\nimport os\nimport wave\nimport time\n\ntry:\n    import openvino_genai as ov_genai\n    import numpy as np\nexcept ImportError as e:\n    sys.stderr.write("Error: 缺少 openvino_genai 或 numpy: " + str(e) + "\n请安装: pip install openvino-genai numpy 或使用 uv\n")\n    sys.exit(1)\n\nmodel_arg = sys.argv[1] if len(sys.argv) > 1 else "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO"\nport = int(sys.argv[2])  # Rust 侧永远显式传参（free_port 动态分配），不留默认端口\ndevice = sys.argv[3] if len(sys.argv) > 3 else "NPU"\n# 会话令牌：本机任意进程不应能中断转写或占用推理（127.0.0.1 不等于可信）\ntoken = sys.argv[4] if len(sys.argv) > 4 else ""\n\nmodel_path = model_arg\nif not os.path.isdir(model_path):\n    try:\n        from huggingface_hub import snapshot_download\n        print("[NPU] 正在下载/加载 ASR 模型 " + model_arg + "...", flush=True)\n        model_path = snapshot_download(model_arg)\n    except Exception as e:\n        # 不静默更换模型：请求什么模型就报什么错（换模型须用户显式 --asr-model）\n        sys.stderr.write("Error: 模型下载失败 " + model_arg + ": " + str(e) + "\n（可显式指定 --asr-model whisper 使用 Whisper）\n")\n        sys.exit(1)\n\nprint("[NPU] 正在将模型加载/编译至 " + device + "（首次编译可能需要 1~2 分钟）...", flush=True)\nt0 = time.time()\nis_qwen = "qwen" in str(model_arg).lower() or "qwen" in str(model_path).lower()\n\nif is_qwen and hasattr(ov_genai, "ASRPipeline"):\n    try:\n        pipe = ov_genai.ASRPipeline(model_path, device)\n        gen_cfg = getattr(ov_genai, "ASRGenerationConfig", lambda: None)()\n    except Exception as e_qwen:\n        # 加载失败直接报错退出，不回退到 Whisper（静默换模型会让转写来源不可追溯）\n        sys.stderr.write("Error: Qwen3 ASR 加载失败: " + str(e_qwen) + "\n（如需 Whisper 请显式指定 --asr-model whisper）\n")\n        sys.exit(1)\nelse:\n    pipe = ov_genai.WhisperPipeline(model_path, device)\n    gen_cfg_path = os.path.join(model_path, "generation_config.json")\n    if os.path.isfile(gen_cfg_path):\n        gen_cfg = ov_genai.WhisperGenerationConfig(gen_cfg_path)\n    else:\n        gen_cfg = ov_genai.WhisperGenerationConfig()\n    # 语言由模型自动检测，不强制中文（硬编码 <|zh|> 会把英文课转成中文幻觉输出）\n\nprint("[NPU] 模型在 " + device + " 就绪（耗时 " + f"{time.time()-t0:.2f}" + "s）", flush=True)\n\nclass Handler(http.server.BaseHTTPRequestHandler):\n    def log_message(self, format, *args):\n        pass\n\n    def do_GET(self):\n        if self.path in ("/health", "/v1/health"):\n            self.send_response(200)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(b'{"status":"ok"}')\n        else:\n            self.send_response(404)\n            self.end_headers()\n\n    def do_POST(self):\n        if token and self.headers.get("X-Auth-Token") != token:\n            self.send_response(403)\n            self.end_headers()\n            return\n        if self.path in ("/shutdown", "/v1/shutdown", "/exit"):\n            self.send_response(200)\n            self.end_headers()\n            self.wfile.write(b'{"status":"bye"}')\n            import threading\n            threading.Thread(target=lambda: (time.sleep(0.05), os._exit(0))).start()\n            return\n\n        n = int(self.headers.get("Content-Length", 0))\n        body = self.rfile.read(n)\n        try:\n            req = json.loads(body)\n            # Rust 侧只走 path 分支（chunk 已切好落盘），不再支持 base64 内嵌\n            wav_path = req.get("path")\n            with wave.open(wav_path, "rb") as wf:\n                frames = wf.readframes(wf.getnframes())\n                samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0\n\n            res = pipe.generate(samples.tolist(), gen_cfg)\n            text = res.texts[0].strip() if res.texts else ""\n            resp = json.dumps({"text": text}).encode("utf-8")\n            self.send_response(200)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(resp)\n        except Exception as e:\n            err_resp = json.dumps({"error": str(e)}).encode("utf-8")\n            self.send_response(500)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(err_resp)\n\nserver = http.server.HTTPServer(("127.0.0.1", port), Handler)\nprint("[NPU] 监听 http://127.0.0.1:" + str(port), flush=True)\nserver.serve_forever()\n	\nimport http.server\nimport json\nimport sys\nimport os\nimport wave\nimport time\n\ntry:\n    import openvino_genai as ov_genai\n    import numpy as np\nexcept ImportError as e:\n    sys.stderr.write("Error: 缺少 openvino_genai 或 numpy: " + str(e) + "\n请安装: pip install openvino-genai numpy 或使用 uv\n")\n    sys.exit(1)\n\nmodel_arg = sys.argv[1] if len(sys.argv) > 1 else "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO"\nport = int(sys.argv[2])  # Rust 侧永远显式传参（free_port 动态分配），不留默认端口\ndevice = sys.argv[3] if len(sys.argv) > 3 else "NPU"\n# 会话令牌：本机任意进程不应能中断转写或占用推理（127.0.0.1 不等于可信）\ntoken = sys.argv[4] if len(sys.argv) > 4 else ""\n\nmodel_path = model_arg\nif not os.path.isdir(model_path):\n    try:\n        from huggingface_hub import snapshot_download\n        print("[NPU] 正在下载/加载 ASR 模型 " + model_arg + "...", flush=True)\n        model_path = snapshot_download(model_arg)\n    except Exception as e:\n        # 不静默更换模型：请求什么模型就报什么错（换模型须用户显式 --asr-model）\n        sys.stderr.write("Error: 模型下载失败 " + model_arg + ": " + str(e) + "\n（可显式指定 --asr-model whisper 使用 Whisper）\n")\n        sys.exit(1)\n\nprint("[NPU] 正在将模型加载/编译至 " + device + "（首次编译可能需要 1~2 分钟）...", flush=True)\nt0 = time.time()\nis_qwen = "qwen" in str(model_arg).lower() or "qwen" in str(model_path).lower()\n\nif is_qwen and hasattr(ov_genai, "ASRPipeline"):\n    try:\n        pipe = ov_genai.ASRPipeline(model_path, device)\n        gen_cfg = getattr(ov_genai, "ASRGenerationConfig", lambda: None)()\n    except Exception as e_qwen:\n        # 加载失败直接报错退出，不回退到 Whisper（静默换模型会让转写来源不可追溯）\n        sys.stderr.write("Error: Qwen3 ASR 加载失败: " + str(e_qwen) + "\n（如需 Whisper 请显式指定 --asr-model whisper）\n")\n        sys.exit(1)\nelse:\n    pipe = ov_genai.WhisperPipeline(model_path, device)\n    gen_cfg_path = os.path.join(model_path, "generation_config.json")\n    if os.path.isfile(gen_cfg_path):\n        gen_cfg = ov_genai.WhisperGenerationConfig(gen_cfg_path)\n    else:\n        gen_cfg = ov_genai.WhisperGenerationConfig()\n    # 语言由模型自动检测，不强制中文（硬编码 <|zh|> 会把英文课转成中文幻觉输出）\n\nprint("[NPU] 模型在 " + device + " 就绪（耗时 " + f"{time.time()-t0:.2f}" + "s）", flush=True)\n\nclass Handler(http.server.BaseHTTPRequestHandler):\n    def log_message(self, format, *args):\n        pass\n\n    def do_GET(self):\n        if self.path in ("/health", "/v1/health"):\n            self.send_response(200)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(b'{"status":"ok"}')\n        else:\n            self.send_response(404)\n            self.end_headers()\n\n    def do_POST(self):\n        if token and self.headers.get("X-Auth-Token") != token:\n            self.send_response(403)\n            self.end_headers()\n            return\n        if self.path in ("/shutdown", "/v1/shutdown", "/exit"):\n            self.send_response(200)\n            self.end_headers()\n            self.wfile.write(b'{"status":"bye"}')\n            import threading\n            threading.Thread(target=lambda: (time.sleep(0.05), os._exit(0))).start()\n            return\n\n        n = int(self.headers.get("Content-Length", 0))\n        body = self.rfile.read(n)\n        try:\n            req = json.loads(body)\n            # Rust 侧只走 path 分支（chunk 已切好落盘），不再支持 base64 内嵌\n            wav_path = req.get("path")\n            with wave.open(wav_path, "rb") as wf:\n                frames = wf.readframes(wf.getnframes())\n                samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0\n\n            res = pipe.generate(samples.tolist(), gen_cfg)\n            text = res.texts[0].strip() if res.texts else ""\n            resp = json.dumps({"text": text}).encode("utf-8")\n            self.send_response(200)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(resp)\n        except Exception as e:\n            err_resp = json.dumps({"error": str(e)}).encode("utf-8")\n            self.send_response(500)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(err_resp)\n\nserver = http.server.HTTPServer(("127.0.0.1", port), Handler)\nprint("[NPU] 监听 http://127.0.0.1:" + str(port), flush=True)\nserver.serve_forever()\n	import http.server\nimport json\nimportsys\nimport os\nimport wave\nimport time\n\ntry:\n    import openvino_genai as ov_genai\n    import numpy as np\nexcept ImportError as e:\n    sys.stderr.write("Error: missing openvino_genai or numpy: " + str(e) + "\nPlease install: pip install openvino-genai numpy or use uv\n")\n    sys.exit(1)\n\nmodel_arg = sys.argv[1] if len(sys.argv) > 1 else "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO"\nport = int(sys.argv[2]) # The Rust side always explicitly passes parameters (free_port dynamic allocation), leaving no default port\ndevice = sys.argv[3] if len(sys.argv) > 3 else "NPU"\n# Session token: Any process on this machine should not be able to interrupt transcoding or occupy inference (127.0.0.1 does not equal trust)\ntoken = sys.argv[4] if len(sys.argv) > 4 else ""\n\nmodel_path = model_arg\nif not os.path.isdir(model_path):\n    try:\n        from huggingface_hub import snapshot_download\n        print("[NPU] Downloading/loading ASR model " + model_arg + "...", flush=True)\n        model_path = snapshot_download(model_arg)\n    except Exception as e:\n        # Do not change the model silently: the error will be reported according to the requested model (the user must explicitly specify --asr-model to change the model)\n        sys.stderr.write("Error: Model download failed " + model_arg + ": " + str(e) + "\n(can be explicitly specified --asr-model whisper uses Whisper)\n")\n        sys.exit(1)\n\nprint("[NPU] is loading/compiling the model to " + device + " (the first compilation may take 1~2 minutes)...", flush=True)\nt0 = time.time()\nis_qwen = "qwen" in str(model_arg).lower() or "qwen" in str(model_path).lower()\n\nif is_qwen and hasattr(ov_genai, "ASRPipeline"):\n    try:\n        pipe = ov_genai.ASRPipeline(model_path, device)\n        gen_cfg = getattr(ov_genai, "ASRGenerationConfig", lambda: None)()\n    except Exception as e_qwen:\n        # If loading fails, an error will be reported and exited without falling back to Whisper (silent model change will make the source of the transcription untraceable)\n        sys.stderr.write("Error: Qwen3 ASR loading failed: " + str(e_qwen) + "\n (If Whisper is required, please specify --asr-model whisper explicitly)\n")\n        sys.exit(1)\nelse:\n    pipe = ov_genai.WhisperPipeline(model_path, device)\n    gen_cfg_path = os.path.join(model_path, "generation_config.json")\n    if os.path.isfile(gen_cfg_path):\n        gen_cfg = ov_genai.WhisperGenerationConfig(gen_cfg_path)\n    else:\n        gen_cfg = ov_genai.WhisperGenerationConfig()\n    # The language is automatically detected by the model, and Chinese is not mandatory (hardcoding <|zh|> will convert the English class into Chinese hallucination output)\n\nprint("[NPU] model is ready at " + device + " (taking time " + f"{time.time()-t0:.2f}" + "s)", flush=True)\n\nclass Handler(http.server.BaseHTTPRequestHandler):\n    def log_message(self, format, *args):\n        pass\n\n    def do_GET(self):\n        if self.path in ("/health", "/v1/health"):\n            self.send_response(200)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(b'{"status":"ok"}')\n        else:\n            self.send_response(404)\n            self.end_headers()\n\n    def do_POST(self):\n        if token and self.headers.get("X-Auth-Token") != token:\n            self.send_response(403)\n            self.end_headers()\n            return\n        if self.path in ("/shutdown", "/v1/shutdown", "/exit"):\n            self.send_response(200)\n            self.end_headers()\n            self.wfile.write(b'{"status":"bye"}')\n            import threading\n            threading.Thread(target=lambda: (time.sleep(0.05), os._exit(0))).start()\n            return\n\n        n = int(self.headers.get("Content-Length", 0))\n        body = self.rfile.read(n)\n        try:\n            req = json.loads(body)\n            #On the Rust side, only the path branch is used (the chunk has been cut and placed on the disk), and base64 embedding is no longer supported.\n            wav_path = req.get("path")\n            with wave.open(wav_path, "rb") as wf:\n                frames = wf.readframes(wf.getnframes())\n                samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0\n\n            res = pipe.generate(samples.tolist(), gen_cfg)\n            text = res.texts[0].strip() if res.texts else ""\n            resp = json.dumps({"text": text}).encode("utf-8")\n            self.send_response(200)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(resp)\n        except Exception as e:\n            err_resp = json.dumps({"error": str(e)}).encode("utf-8")\n            self.send_response(500)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(err_resp)\n\nserver = http.server.HTTPServer(("127.0.0.1", port), Handler)\nprint("[NPU] listening http://127.0.0.1:" + str(port), flush=True)\nserver.serve_forever()	\nimport http.server\nimport json\nimport sys\nimport os\nimport wave\nimport time\n\ntry:\n    import openvino_genai as ov_genai\n    import numpy as np\nexcept ImportError as e:\n    sys.stderr.write("Error: 缺少 openvino_genai 或 numpy: " + str(e) + "\n請安裝: pip install openvino-genai numpy 或使用 uv\n")\n    sys.exit(1)\n\nmodel_arg = sys.argv[1] if len(sys.argv) > 1 else "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO"\nport = int(sys.argv[2])  # Rust 側永遠顯式傳參（free_port 動態分配），不留預設埠\ndevice = sys.argv[3] if len(sys.argv) > 3 else "NPU"\n# 會話令牌：本機任意程序不應能中斷轉寫或佔用推理（127.0.0.1 不等於可信）\ntoken = sys.argv[4] if len(sys.argv) > 4 else ""\n\nmodel_path = model_arg\nif not os.path.isdir(model_path):\n    try:\n        from huggingface_hub import snapshot_download\n        print("[NPU] 正在下載/載入 ASR 模型 " + model_arg + "...", flush=True)\n        model_path = snapshot_download(model_arg)\n    except Exception as e:\n        # 不靜默更換模型：請求什麼模型就報什麼錯（換模型須使用者顯式 --asr-model）\n        sys.stderr.write("Error: 模型下載失敗 " + model_arg + ": " + str(e) + "\n（可顯式指定 --asr-model whisper 使用 Whisper）\n")\n        sys.exit(1)\n\nprint("[NPU] 正在將模型載入/編譯至 " + device + "（首次編譯可能需要 1~2 分鐘）...", flush=True)\nt0 = time.time()\nis_qwen = "qwen" in str(model_arg).lower() or "qwen" in str(model_path).lower()\n\nif is_qwen and hasattr(ov_genai, "ASRPipeline"):\n    try:\n        pipe = ov_genai.ASRPipeline(model_path, device)\n        gen_cfg = getattr(ov_genai, "ASRGenerationConfig", lambda: None)()\n    except Exception as e_qwen:\n        # 載入失敗直接報錯退出，不回退到 Whisper（靜默換模型會讓轉寫來源不可追溯）\n        sys.stderr.write("Error: Qwen3 ASR 載入失敗: " + str(e_qwen) + "\n（如需 Whisper 請顯式指定 --asr-model whisper）\n")\n        sys.exit(1)\nelse:\n    pipe = ov_genai.WhisperPipeline(model_path, device)\n    gen_cfg_path = os.path.join(model_path, "generation_config.json")\n    if os.path.isfile(gen_cfg_path):\n        gen_cfg = ov_genai.WhisperGenerationConfig(gen_cfg_path)\n    else:\n        gen_cfg = ov_genai.WhisperGenerationConfig()\n    # 語言由模型自動檢測，不強制中文（硬編碼 <|zh|> 會把英文課轉成中文幻覺輸出）\n\nprint("[NPU] 模型在 " + device + " 就緒（耗時 " + f"{time.time()-t0:.2f}" + "s）", flush=True)\n\nclass Handler(http.server.BaseHTTPRequestHandler):\n    def log_message(self, format, *args):\n        pass\n\n    def do_GET(self):\n        if self.path in ("/health", "/v1/health"):\n            self.send_response(200)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(b'{"status":"ok"}')\n        else:\n            self.send_response(404)\n            self.end_headers()\n\n    def do_POST(self):\n        if token and self.headers.get("X-Auth-Token") != token:\n            self.send_response(403)\n            self.end_headers()\n            return\n        if self.path in ("/shutdown", "/v1/shutdown", "/exit"):\n            self.send_response(200)\n            self.end_headers()\n            self.wfile.write(b'{"status":"bye"}')\n            import threading\n            threading.Thread(target=lambda: (time.sleep(0.05), os._exit(0))).start()\n            return\n\n        n = int(self.headers.get("Content-Length", 0))\n        body = self.rfile.read(n)\n        try:\n            req = json.loads(body)\n            # Rust 側只走 path 分支（chunk 已切好落盤），不再支援 base64 內嵌\n            wav_path = req.get("path")\n            with wave.open(wav_path, "rb") as wf:\n                frames = wf.readframes(wf.getnframes())\n                samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0\n\n            res = pipe.generate(samples.tolist(), gen_cfg)\n            text = res.texts[0].strip() if res.texts else ""\n            resp = json.dumps({"text": text}).encode("utf-8")\n            self.send_response(200)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(resp)\n        except Exception as e:\n            err_resp = json.dumps({"error": str(e)}).encode("utf-8")\n            self.send_response(500)\n            self.send_header("Content-Type", "application/json")\n            self.end_headers()\n            self.wfile.write(err_resp)\n\nserver = http.server.HTTPServer(("127.0.0.1", port), Handler)\nprint("[NPU] 監聽 http://127.0.0.1:" + str(port), flush=True)\nserver.serve_forever()\n	\nimport http.server\nimport json\nimport sys\nimport os\nimport wave\nimport time\n\ntry:\n import openvino_genai as ov_genai\n import numpy as np\n例外 ImportError as e:\n sys.stderr.write("エラー: openvino_genai または numpy がありません: " + str(e) + "\n以下をインストールしてください: pip install openvino-genai numpy または use uv\n")\n sys.exit(1)\n\nmodel_arg = sys.argv[1] if len(sys.argv) > 1 else "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO"\nport = int(sys.argv[2]) # Rust 常にパラメータを明示的に渡す(free_port は動的に割り当てられます)、デフォルト ポートは残しません\ndevice = sys.argv[3] if len(sys.argv) > 3 else "NPU"\n# セッション トークン: このマシン上のプロセスはトランスコーディングを中断したり、推論を占有したりすることはできません (127.0.0.1 は信頼に等しくありません)\ntoken = sys.argv[4] if len(sys.argv) > 4 else ""\n\nmodel_path = model_arg\nif not os.path.isdir(model_path):\n try:\n fromhuggingface_hub import snapshot_download\n print("[NPU] ASR モデルのダウンロード/ロード " + model_arg + "...", flash=True)\n model_path = snapshot_download(model_arg)\n e: の例外を除きます:\n # モデルを変更しないでくださいサイレント: 要求されたモデルに従ってエラーが報告されます (モデルを変更するには、ユーザーが --asr-model を明示的に指定する必要があります)\n sys.stderr.write("エラー: モデルのダウンロードに失敗しました " + model_arg + ": " + str(e) + "\n (Whisper を使用して --asr-model Whisper を明示的に指定できます)\n")\n sys.exit(1)\n\nprint("[NPU] は、モデルを " + device + "(最初のコンパイルには 1 ～ 2 分かかる場合があります)..."、flush=True)\nt0 = time.time()\nis_qwen = str(model_arg). lower() の "qwen" または str(model_path). lower() の "qwen"\n\nif is_qwen および hasattr(ov_genai, "ASRPipeline"):\n try:\n Pipe = ov_genai.ASRPipeline(model_path, device)\n gen_cfg = getattr(ov_genai, "ASRGenerationConfig", lambda: None)()\n e_qwen としての例外を除く:\n # ロードが失敗した場合、エラーが報告され、Whisper にフォールバックせずに終了します (サイレント モデル変更により、トランスクリプションのソースが追跡できなくなります)\n sys.stderr.write("エラー: Qwen3 ASR の読み込みに失敗しました: " + str(e_qwen) + "\n(Whisper が必要な場合は、 --asr-model Whisper を明示的に指定してください)\n")\n sys.exit(1)\nelse:\n Pipe = ov_genai.WhisperPipeline(model_path, device)\n gen_cfg_path = os.path.join(model_path, "世代構成.json")\n if os.path.isfile(gen_cfg_path):\n gen_cfg = ov_genai.WhisperGenerationConfig(gen_cfg_path)\n else:\n gen_cfg = ov_genai.WhisperGenerationConfig()\n # 言語はモデルによって自動的に検出され、中国語は強制されません (ハードコーディングされています) <|zh|> 英語のクラスを中国語の幻覚出力に変換します)\n\nprint("[NPU] モデルは " + device + " (時間がかかります " + f"{time.time()-t0:.2f}" + "s)" で準備ができています、flush=True)\n\nclass Handler(http.server.BaseHTTPRequestHandler):\n def log_message(self, format, *args):\n pass\n\n def do_GET(self):\n if ("/health", "/v1/health") の self.path:\n self.send_response(200)\n self.send_header("Content-Type", "application/json")\n self.end_headers()\n self.wfile.write(b'{"status":"ok"}')\n else:\n self.send_response(404)\n self.end_headers()\n\n def do_POST(self):\n if token and self.headers.get("X-Auth-Token") != token:\n self.send_response(403)\n self.end_headers()\n return\n if self.path in ("/shutdown", "/v1/shutdown", "/exit"):\n self.send_response(200)\n self.end_headers()\n self.wfile.write(b'{"status":"bye"}')\n インポート スレッド\n threading.Thread(target=lambda: (time.sleep(0.05), os._exit(0))).start()\n return\n\n n = int(self.headers.get("Content-Length", 0))\n body = self.rfile.read(n)\n try:\n req = json.loads(body)\n # Rust 側はパス ブランチのみを使用し (チャンクはカット アンド ドロップされています)、base64 埋め込みはサポートされなくなりました\n wav_path = req.get("path")\n with wave.open(wav_path, "rb") as wf:\n Frames = wf.readframes(wf.getnframes())\n サンプル = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0\n\n res = Pipe.generate(samples.tolist(), gen_cfg)\n text = res.texts[0].strip() if res.texts else ""\n resp = json.dumps({"text": text}).encode("utf-8")\n self.send_response(200)\n self.send_header("Content-Type", "application/json")\n self.end_headers()\n self.wfile.write(resp)\n e: の例外を除く\n err_resp = json.dumps({"error": str(e)}).encode("utf-8")\n self.send_response(500)\n self.send_header("Content-Type", "application/json")\n self.end_headers()\n self.wfile.write(err_resp)\n\nserver = http.server.HTTPServer(("127.0.0.1", port),ハンドラー)\nprint("[NPU] リッスン http://127.0.0.1:" + str(ポート)、flush=True)\nserver.serve_forever()\n
-\n{SUMMARY_BEGIN}\n\n## 📝 视频摘要\n\n	\n{SUMMARY_BEGIN}\n\n## 📝 视频摘要\n\n	{SUMMARY_BEGIN}\n\n## 📝 Video Summary	\n{SUMMARY_BEGIN}\n\n## 📝 影片摘要\n\n	\n{SUMMARY_BEGIN}\n\n## 📝 動画の概要\n\n
-\n✓ 可用 / available · - 可选或未设置 / optional or unset · ! 需要检查 / needs attention · ✗ 必须修复 / must fix	✓ 可用 / available · - 可选或未设置 / optional or unset · ! 需要检查 / needs attention · ✗ 必须修复	must fix	✓ 可用 / available · - 可選或未設定 / optional or unset · ! 需要檢查 / needs attention · ✗ 必須修復	✓ 利用可能 · オプションまたは未設定 · !注意が必要 · ✗ 修正する必要があります
 \n✓ 可用 · - 可选或未设置 · ! 需要检查 · ✗ 必须修复	\n✓ 可用 · - 可选或未设置 · ! 需要检查 · ✗ 必须修复	\n✓ available · - optional or unset · ! needs attention · ✗ must fix	\n✓ 可用 · - 可選或未設定 · ! 需要檢查 · ✗ 必須修復	\n✓ 利用可能 · - 任意または未設定 · ! 要確認 · ✗ 要修正
 \n以及另外 {} 份笔记。	\n以及另外 {} 份笔记。	\nand {} more notes.	\n以及另外 {} 份筆記。	\nほか {} 件のノート。
 \n当前识别方式	\n当前识别方式	\nConfigured speech backend	\n目前語音辨識方式	\n現在の音声認識方式
 \n必需工具	\n必需工具	\nRequired tools	\n必需工具	\n必須ツール
-\n必需工具 / Required tools	必需工具	Required tools	必需工具	必要なツール
 \n按用途选装	\n按用途选装	\nOptional tools by use	\n依用途選裝	\n用途別のオプション
-\n按用途选装 / Optional tools by use	按用途选装	Optional tools by use	按用途選裝	用途に合わせて選ぶ
 \n源文件：{}\n	\n源文件：{}\n	Source file: {}	\n原始檔：{}\n	\nソース ファイル: {}\n
 \n配置与模型	\n配置与模型	\nConfiguration and models	\n設定與模型	\n設定とモデル
-\n配置与模型 / Configuration and models	配置与模型	Configuration and models	配置與模型	構成とモデル
     缺失：{}	    缺失：{}	    Missing: {}	    缺失：{}	    欠落：{}
-  Apple 原生后端可用 / Apple native backend available	Apple 原生后端可用	Apple native backend available	Apple 原生後端可用	Apple ネイティブ バックエンドが利用可能
   仅 gpu/cpu 需要；下载约 2.4GB：course2md models download --dir "{}"	  仅 gpu/cpu 需要；下载约 2.4GB：course2md models download --dir "{}"	  Only needed for gpu/cpu (~2.4GB): course2md models download --dir "{}"	  僅 gpu/cpu 需要；下載約 2.4GB：course2md models download --dir "{}"	  gpu/cpu のみ必要です（約 2.4GB）：course2md models download --dir "{}"
-  可选配置 / Optional setup: course2md config init	可选配置	Optional setup: course2md config init	可選配置	オプションの構成
-  可选配置：course2md config init	  可选配置：course2md config init	  Optional setup: course2md config init	  可選設定：course2md config init	  任意の設定：course2md config init
-  找到但无法运行：{}	  找到但无法运行：{}	  found but failed to run: {}	  找到但無法執行：{}	  見つかったが実行できません：{}
-  缺失：{}	  缺失：{}	  Missing: {}	  缺失：{}	  欠落：{}
  · 当前使用修改前的配置	 · 当前使用修改前的配置	· Currently using the configuration before modification	 · 當前使用修改前的配置	・現在は変更前の構成を使用しています
  · 部分完成	 · 部分完成	 · Partially completed	 · 部分完成	 ・部分的に完成しました
  消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。	 消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。	 The message is accompanied by a screenshot of the courseware corresponding to the paragraph. It is only used to correct the spelling of terms and proper nouns. Do not describe or comment on the picture itself.	 訊息附帶該段對應的課件截圖，僅用於校正術語拼寫與專有名詞，不要描述或評論圖片本身。	 メッセージには、その段落に対応するコースウェアのスクリーンショットが添付されています。用語や固有名詞のスペルを修正するためにのみ使用されます。画像自体について説明したりコメントしたりしないでください。
 ! GPU  无法检查设备：{}	! GPU  无法检查设备：{}	! GPU failed to check device: {}	! GPU  無法檢查裝置：{}	！ GPU がデバイスをチェックできませんでした: {}
 ! coreml  缺少 Metal 着色器资源，请重新安装 / Metal shader resources missing; reinstall course2md	! coreml  缺少 Metal 着色器资源，请重新安装	Metal shader resources missing; reinstall course2md	! coreml  缺少 Metal 著色器資源，請重新安裝	！ coreml にメタル シェーダ リソースがありません。再インストールしてください。
-![视频 {} 的截图]({})\n\n	![视频 {} 的截图]({})\n\n	![Screenshot of video {}]({})	![影片 {} 的截圖]({})\n\n	![動画 {} のスクリーンショット]({})\n\n
 (已设置，隐藏 / set, hidden)	(已设置，隐藏	set, hidden)	(已設定，隱藏	(設定、非表示
 - GPU  未检测到 GPU。{}	- GPU  未检测到 GPU。{}	- GPU  No GPU detected. {}	- GPU  未偵測到 GPU。{}	- GPU  GPU が検出されません。{}
 - api  未设置密钥；仅云端识别需要 / API key not set; only required for cloud transcription: COURSE2MD_ASR_API_KEY	- api  未设置密钥；仅云端识别需要	API key not set; only required for cloud transcription: COURSE2MD_ASR_API_KEY	- api  未設定金鑰；僅雲端識別需要	- API はキーを設定しません。クラウドの識別にのみ必要
@@ -36,12 +22,6 @@ zh	zh_hans	en	zh_hant	ja
 - gpu/cpu models  未下载或不完整：{}	- gpu/cpu models  未下载或不完整：{}	- gpu/cpu models  Missing or incomplete: {}	- gpu/cpu models  未下載或不完整：{}	- gpu/cpu models  未ダウンロードまたは不完全：{}
 - npu  未检测到 Intel NPU 设备 / No Intel NPU device detected	- npu  未检测到 Intel NPU 设备	No Intel NPU device detected	- npu  未檢測到 Intel NPU 裝置	- npu Intel NPU デバイスが検出されない
 - npu  缺少 Python/uv / Python or uv is required for NPU transcription	- npu  缺少 Python/uv	Python or uv is required for NPU transcription	- npu  缺少 Python/uv	- npu に Python/uv がありません
-- yt-dlp  远程视频需要，本地文件不需要 / Required for URLs, optional for local files: brew install yt-dlp (macOS); pipx install yt-dlp；重跑 install.sh 会安装随包版本 / rerun install.sh for the bundled build	- yt-dlp  远程视频需要，本地文件不需要 / Required for URLs, optional for local files: brew install yt-dlp (macOS); pipx install yt-dlp；重跑 install.sh 会安装随包版本	rerun install.sh for the bundled build	- yt-dlp  遠端影片需要，本地檔案不需要 / Required for URLs, optional for local files: brew install yt-dlp (macOS); pipx install yt-dlp；重跑 install.sh 會安裝隨包版本	- yt-dlp はリモート 動画に必要ですが、ローカル ファイルには必要ありません / URL には必須ですが、ローカル ファイルにはオプションです: brew install yt-dlp (macOS); pipx yt-dlp をインストールします。 install.shを再実行するとパッケージ版がインストールされます
-- yt-dlp  远程视频需要，本地文件不需要；macOS 可用 brew install yt-dlp，其他平台可用 pipx install yt-dlp；重跑 install.sh 会安装随包版本	- yt-dlp  远程视频需要，本地文件不需要；macOS 可用 brew install yt-dlp，其他平台可用 pipx install yt-dlp；重跑 install.sh 会安装随包版本	- yt-dlp is required for remote video, but not for local files; brew install yt-dlp can be used on macOS, and pipx install yt-dlp can be used on other platforms; re-running install.sh will install the packaged version.	- yt-dlp  遠端影片需要，本地檔案不需要；macOS 可用 brew install yt-dlp，其他平臺可用 pipx install yt-dlp；重跑 install.sh 會安裝隨包版本	- yt-dlp はリモート 動画には必要ですが、ローカル ファイルには必要ありません。 brew install yt-dlp は macOS で使用でき、pipx install yt-dlp は他のプラットフォームで使用できます。 install.sh を再実行すると、パッケージ版がインストールされます。
-- 作者：{}\n	- 作者：{}\n	- Author: {}	- 作者：{}\n	- 作成者: {}\n
-- 时长：{}	- 时长：{}	- Duration: {}	- 時長：{}	- 期間: {}
-- 来源：[{}]({})	- 来源：[{}]({})	- Source: [{}]({})	- 來源：[{}]({})	- 出典: [{}]({})
-- 由 course2md 生成（{} 张截图 / {} 段文字）\n	- 由 course2md 生成（{} 张截图 / {} 段文字）\n	- Generated by course2md ({} screenshots / {} text)	- 由 course2md 生成（{} 張截圖 / {} 段文字）\n	- course2md によって生成 ({} スクリーンショット / {} テキスト)\n
 --login 后只能跟视频链接或本地视频路径 / After --login, provide only a video URL or local file path	--login 后只能跟视频链接或本地视频路径	After --login, provide only a video URL or local file path	--login 後只能跟影片連結或本地影片路徑	--login の後には動画 リンクまたはローカル 動画 パスのみを続けることができます
 <img loading="lazy" src="{}" alt="视频 {} 的截图">	<img loading="lazy" src="{}" alt="视频 {} 的截图">	<img loading="lazy" src="{}" alt="Screenshot of video {}">	<img loading="lazy" src="{}" alt="影片 {} 的截圖">	<imgloading="lazy" src="{}" alt="動画のスクリーンショット {}">
 <li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}: {}</li>	<li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}：{}</li>
@@ -58,7 +38,6 @@ AI 服务没有返回内容 / The AI service returned no content	AI 服务没有
 AI 服务返回了错误 / The AI service returned an error	AI 服务返回了错误	The AI service returned an error	AI 服務返回了錯誤	AI サービスがエラーを返しました
 AI 校对	AI 校对	AI proofreading	AI 校對	AI 校正
 AI 校对 / AI proofreading	AI 校对	AI proofreading	AI 校對	AI校正
-AI 校对密钥（建议通过 llm setup 设置，避免命令历史记录）/ AI API key (prefer llm setup)	AI 校对密钥（建议通过 llm setup 设置，避免命令历史记录）/ AI API key (prefer llm setup)	AI proofreading key (recommended to set through llm setup to avoid command history)/AI API key (prefer llm setup)	AI 校對金鑰（建議透過 llm setup 設定，避免命令歷史記錄）/ AI API key (prefer llm setup)	AI 校正キー (コマンド履歴を避けるために、llm セットアップを通じて設定することをお勧めします)/AI API キー (llm セットアップを推奨)
 AI 校对工作进程中断 / Proofreading worker interrupted	AI 校对工作进程中断	Proofreading worker interrupted	AI 校對工作程序中斷	AI校正プロセスが中断されました
 AI 校对并生成笔记	AI 校对并生成笔记	AI proofreads and generates notes	AI 校對並生成筆記	AI が校正してノートを生成
 AI 校对提示词 / AI proofreading instructions	AI 校对提示词	AI proofreading instructions	AI 校對提示詞	AI 校正プロンプト
@@ -66,15 +45,12 @@ AI 校对服务地址 / AI proofreading base URL (OpenAI-compatible)	AI 校对�
 AI 校对模型名称 / AI proofreading model name	AI 校对模型名称	AI proofreading model name	AI 校對模型名稱	AI校正機種名
 AI 校对结果未确认	AI 校对结果未确认	AI proofreading results not confirmed	AI 校對結果未確認	AI校正結果は未確認
 AI 模型	AI 模型	AI model	AI 模型	AIモデル
-AI 正在返回结果	AI 正在返回结果	AI is returning results	AI 正在返回結果	AI が結果を返しています
-AI 请求失败，稍后重试 / AI request failed; retrying shortly	AI 请求失败，稍后重试	AI request failed; retrying shortly	AI 請求失敗，稍後重試	AI リクエストが失敗しました。後でもう一度試してください
 API Key	API Key	API key	API 金鑰	APIキー
 API Key 含无效字符，请检查后重试	API Key 含无效字符，请检查后重试	API Key contains invalid characters, please check and try again	API Key 含無效字元，請檢查後重試	API キーに無効な文字が含まれています。確認してもう一度お試しください。
 API 密钥（输入不显示）/ API key (hidden)	API 密钥（输入不显示）/ API key (hidden)	API key (hidden)	API 金鑰（輸入不顯示）/ API key (hidden)	APIキー（非表示）
 Apple 原生后端可用 / Apple native backend available	Apple 原生后端可用	Apple native backend available	Apple 原生後端可用	Apple ネイティブバックエンドが利用可能
 Apple 和 NPU 模型由各自后端管理 / Apple and NPU models are managed by their backends.	Apple 和 NPU 模型由各自后端管理	Apple and NPU models are managed by their backends.	Apple 和 NPU 模型由各自後端管理	Apple モデルと NPU モデルはそれぞれのバックエンドによって管理されます
 Apple 平台	Apple 平台	Apple platform	Apple 平臺	アップルのプラットフォーム
-Apple 模型缓存准备失败 / Apple model cache preparation failed	Apple 模型缓存准备失败	Apple model cache preparation failed	Apple 模型快取準備失敗	Apple モデルのキャッシュの準備に失敗しました
 Apple 芯片	Apple 芯片	Apple chip	Apple 晶片	アップルチップ
 Apple 芯片 (arm64)	Apple 芯片 (arm64)	Apple chip (arm64)	Apple 晶片 (arm64)	Appleチップ(arm64)
 Apple 芯片本机识别	Apple 芯片本机识别	Apple chip native identification	Apple 晶片本機識別	Apple チップのネイティブ識別
@@ -98,7 +74,6 @@ Bilibili：{}	Bilibili：{}	Bilibili：{}	Bilibili：{}	Bilibili：{}
 COURSE2MD_BIN 指向的文件不存在：{}	COURSE2MD_BIN 指向的文件不存在：{}	The file pointed to by COURSE2MD_BIN does not exist: {}	COURSE2MD_BIN 指向的檔案不存在：{}	COURSE2MD_BIN が指すファイルが存在しません: {}
 CPU 架构	CPU 架构	CPU architecture	CPU 架構	CPUアーキテクチャ
 CPU 识别引擎尚未安装。请在设置的「应用」中查看安装方法。	CPU 识别引擎尚未安装。请在设置的「应用」中查看安装方法。	The CPU speech engine is not installed. See the installation steps in Settings → Application.	CPU 語音辨識引擎尚未安裝。請在設定的「應用」中查看安裝方式。	CPU 音声認識エンジンがインストールされていません。設定の「アプリ」でインストール方法を確認してください。
-CPU 识别引擎尚未安装。请在设置的应用与诊断中查看安装方法。	CPU 识别引擎尚未安装。请在设置的应用与诊断中查看安装方法。	The CPU identification engine has not been installed. Please check the installation method in Applications and Diagnostics of Settings.	CPU 識別引擎尚未安裝。請在設定的應用與診斷中檢視安裝方法。	CPU識別エンジンがインストールされていません。インストール方法は設定のアプリケーションと診断でご確認ください。
 CPU（较慢）	CPU（较慢）	CPU (slower)	CPU（較慢）	CPU (低速)
 Codex 模型目录无法解析 / Cannot parse the Codex model catalog	Codex 模型目录无法解析	Cannot parse the Codex model catalog	Codex 模型目錄無法解析	Codex モデル ディレクトリを解析できません
 Codex 模型目录缺少 models / Codex model catalog is missing models	Codex 模型目录缺少 models	Codex model catalog is missing models	Codex 模型目錄缺少 models	Codex モデル ディレクトリにモデルがありません
@@ -109,7 +84,6 @@ Codex 登录状态损坏，请重新登录 / Codex login state is damaged; log i
 Codex 登录缺失或已失效，请重新登录 / Codex login is missing or has expired; log in again	Codex 登录缺失或已失效，请重新登录	Codex login is missing or has expired; log in again	Codex 登入缺失或已失效，請重新登入	Codex ログインが見つからないか無効です。もう一度ログインしてください。
 CoreML 模型加载失败 / CoreML model loading failed	CoreML 模型加载失败	CoreML model loading failed	CoreML 模型載入失敗	CoreML モデルの読み込みに失敗しました
 Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}; Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {};アーチ: sudo pacman -S {}
-HTTP {status}；响应超过 128 KiB，未读取其余内容	HTTP {status}；响应超过 128 KiB，未读取其余内容	HTTP {status}; response exceeds 128 KiB, remainder not read	HTTP {status}；響應超過 128 KiB，未讀取其餘內容	HTTP {status};応答が 128 KiB を超えているため、残りは読み取られていません
 HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}; response exceeds 128 KiB, remainder not read	HTTP {}；響應超過 128 KiB，未讀取其餘內容	HTTP {};応答が 128 KiB を超えているため、残りは読み取られていません
 Intel NPU 加速	Intel NPU 加速	Intel NPU acceleration	Intel NPU 加速	インテル NPU アクセラレーション
 Intel NPU 识别需要 Python（uv），安装后重新检查	Intel NPU 识别需要 Python（uv），安装后重新检查	Intel NPU recognition requires Python (uv), recheck after installation	Intel NPU 識別需要 Python（uv），安裝後重新檢查	Intel NPU の認識には Python (uv) が必要です。インストール後に再確認してください
@@ -125,8 +99,6 @@ Ollama 本地服务	Ollama 本地服务	Ollama local service	Ollama 本地服務
 OpenAI Codex 订阅	OpenAI Codex 订阅	OpenAI Codex Subscription	OpenAI Codex 訂閱	OpenAI Codex サブスクリプション
 OpenAI 兼容服务	OpenAI 兼容服务	OpenAI Compatible Services	OpenAI 相容服務	OpenAI互換サービス
 OpenVINO 模型 XML 和权重 / OpenVINO model XML and weights	OpenVINO 模型 XML 和权重	OpenVINO model XML and weights	OpenVINO 模型 XML 和權重	OpenVINO モデルの XML と重み
-POST {base_url}/audio/transcriptions（OpenAI 兼容转录端点，如 OpenRouter 的 qwen3-asr）	POST {base_url}/audio/transcriptions（OpenAI 兼容转录端点，如 OpenRouter 的 qwen3-asr）	POST {base_url}/audio/transcriptions (OpenAI compatible transcription endpoint, such as OpenRouter's qwen3-asr)	POST {base_url}/audio/transcriptions（OpenAI 相容轉錄端點，如 OpenRouter 的 qwen3-asr）	POST {base_url}/audio/transcriptions (OpenRouter の qwen3-asr などの OpenAI 互換の文字起こしエンドポイント)
-POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）	POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）	POST {base_url}/chat/completions (multimodal LLM that supports audio input, such as gpt-4o-audio-preview, Gemini, Qwen2-Audio and other OpenAI compatible endpoints)	POST {base_url}/chat/completions（支援音訊輸入的多模態 LLM， 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 相容端點）	POST {base_url}/chat/completions (gpt-4o-audio-preview、Gemini、Qwen2-Audio、その他の OpenAI 互換エンドポイントなどの音声入力をサポートするマルチモーダル LLM)
 ROI 坐标必须为非负有限数值 / ROI coordinates must be finite, non-negative numbers	ROI 坐标必须为非负有限数值	ROI coordinates must be finite, non-negative numbers	ROI 座標必須為非負有限數值	ROI 座標は負でない有限値でなければなりません
 ROI 百分比必须在 0–100 / ROI percentages must be between 0 and 100	ROI 百分比必须在 0–100	ROI percentages must be between 0 and 100	ROI 百分比必須在 0–100	ROI パーセンテージは 0 ～ 100 の範囲にする必要があります
 UP主/作者：{}\n	UP主/作者：{}\n	UP owner/author: {}	UP主/作者：{}\n	UP 所有者/作成者: {}\n
@@ -140,52 +112,15 @@ codex CLI 登录态无法解析 / Cannot parse the codex CLI login state	codex C
 codex CLI 登录态缺少令牌，请在 codex 中重新登录 / The codex CLI login state is missing tokens; log in again in codex	codex CLI 登录态缺少令牌，请在 codex 中重新登录	The codex CLI login state is missing tokens; log in again in codex	codex CLI 登入態缺少令牌，請在 codex 中重新登入	Codex CLI ログイン状態にトークンがありません。Codexで再度ログインしてください。
 codex CLI 的登录已失效。改用浏览器授权登录（ChatGPT 账号）？/ The codex CLI login expired. Authorize in the browser instead?	codex CLI 的登录已失效。改用浏览器授权登录（ChatGPT 账号）？/ The codex CLI login expired. Authorize in the browser instead?	The login for the codex CLI has expired. Use browser authorization to log in instead (ChatGPT account)? / The codex CLI login expired. Authorize in the browser instead?	codex CLI 的登入已失效。改用瀏覽器授權登入（ChatGPT 賬號）？/ The codex CLI login expired. Authorize in the browser instead?	codex CLI のログインの有効期限が切れました。代わりにブラウザ認証を使用してログインしますか (ChatGPT アカウント)? / codex CLI ログインの有効期限が切れました。代わりにブラウザで認証しますか?
 course2md — 将视频转换为图文笔记	course2md — 将视频转换为图文笔记	course2md — Turn videos into illustrated notes	course2md — 將影片轉換為圖文筆記	course2md — 動画をグラフィックノートに変換する
-course2md — 将视频转换为图文笔记 / Turn videos into illustrated notes\n	course2md — 将视频转换为图文笔记	Turn videos into illustrated notes	course2md — 將影片轉換為圖文筆記	course2md — 動画をグラフィックノートに変換する
-course2md 工作台	course2md 工作台	course2md workbench	course2md 工作臺	コース2MDワークベンチ
 llama-server --help 探测失败，按旧版处理（仅 -ngl）	llama-server --help 探测失败，按旧版处理（仅 -ngl）	llama-server --help detection failed, processed according to the old version (only -ngl)	llama-server --help 探測失敗，按舊版處理（僅 -ngl）	llama-server --help 検出に失敗しました。古いバージョンに従って処理されました (-ngl のみ)
 llama-server flag 探测	llama-server flag 探测	llama-server flag detection	llama-server flag 探測	ラマサーバーフラグ検出
 stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame	stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame	The picture stabilization time in stable mode (seconds)/Seconds to wait for a stable frame	stable 模式的畫面穩定時間（秒）/ Seconds to wait for a stable frame	安定モードでの画像の安定化時間 (秒)/安定したフレームを待機する秒数
 stderr 管道已配置	stderr 管道已配置	The stderr pipe is configured	stderr 管道已配置	stderr パイプが構成されています
 stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdout 管道已配置	標準出力パイプが構成されています
-{SUMMARY_BEGIN}<section class="summary"><h2>📝 视频摘要</h2>	{SUMMARY_BEGIN}<section class="summary"><h2>📝 视频摘要</h2>	{SUMMARY_BEGIN}<section class="summary"><h2>📝 Video summary</h2>	{SUMMARY_BEGIN}<section class="summary"><h2>📝 影片摘要</h2>	{SUMMARY_BEGIN}<section class="summary"><h2>📝 動画の概要</h2>
-{collection} 视频 {}	{collection} 视频 {}	{collection} Video {}	{collection} 影片 {}	{collection} 動画 {}
-{count} 张	{count} 张	{count} screenshots	{count} 張	{count} 枚
-{current} / {total} 段	{current} / {total} 段	{current} / {total} segment	{current} / {total} 段	{current} / {total} セグメント
-{duplicates} 个与进行中的任务相同，未重复加入	{duplicates} 个与进行中的任务相同，未重复加入	{duplicates} are the same as the ongoing tasks and have not been added repeatedly.	{duplicates} 個與進行中的任務相同，未重複加入	{duplicates} は進行中のタスクと同じであり、繰り返し追加されていません。
-{error:#}。保存位置尚未切换，已复制的内容保留在目标位置。	{error:#}。保存位置尚未切换，已复制的内容保留在目标位置。	{error:#}. The save location has not been switched and the copied content remains at the target location.	{error:#}。儲存位置尚未切換，已複製的內容保留在目標位置。	{error:#}。保存場所は切り替えられておらず、コピーされたコンテンツはターゲットの場所に残ります。
-{error}。请备份后删除该文件再重试：{}	{error}。请备份后删除该文件再重试：{}	{error}. Please delete the file after backup and try again: {}	{error}。請備份後刪除該檔案再重試：{}	{error}。バックアップ後にファイルを削除して、再試行してください: {}
-{error}；尚未发送请求	{error}；尚未发送请求	{error}; Request not sent yet	{error}；尚未傳送請求	{error};リクエストはまだ送信されていません
-{host} · {} 个模型：{}	{host} · {} 个模型：{}	{host} · {} models: {}	{host} · {} 個模型：{}	{host} · {} モデル: {}
-{host} · {} 个模型：{} 等	{host} · {} 个模型：{} 等	{host} · {} models: {} etc.	{host} · {} 個模型：{} 等	{host}・{}モデル：{}など
-{host} · 还没有已下载的模型	{host} · 还没有已下载的模型	{host} · There are no downloaded models yet	{host} · 還沒有已下載的模型	{host} · ダウンロードされたモデルはまだありません
-{label}尚未完成	{label}尚未完成	{label} has not been completed yet	{label}尚未完成	{label}はまだ完了していません
-{label}未完成	{label}未完成	{label} is not completed	{label}未完成	{label} は完了していません
-{label}未生成	{label}未生成	{label} was not generated	{label}未生成	{label} は生成されませんでした
-{library_name} · 未分类	{library_name} · 未分类	{library_name} · Uncategorized	{library_name} · 未分類	{library_name} · 未分類
-{missing}尚未完成。{reason}	{missing}尚未完成。{reason}	{missing} is not completed yet. {reason}	{missing}尚未完成。{reason}	{missing} はまだ完了していません。 {reason}
-{name} 已准备完成	{name} 已准备完成	{name} is ready	{name} 已準備完成	{name} の準備ができました
-{name} 暂时无法访问	{name} 暂时无法访问	{name} is temporarily inaccessible	{name} 暫時無法訪問	{name} は一時的にアクセスできません
-{name} 的准备已停止	{name} 的准备已停止	Preparation for {name} has stopped	{name} 的準備已停止	{name} の準備が停止しました
-{name} 的准备未完成：{}	{name} 的准备未完成：{}	Preparation for {name} is not complete: {}	{name} 的準備未完成：{}	{name} の準備が完了していません: {}
-{name}未保存：{reason}	{name}未保存：{reason}	{name} not saved: {reason}	{name}未儲存：{reason}	{name} は保存されていません: {reason}
-{name}需要是有效的非负数	{name}需要是有效的非负数	{name} needs to be a valid non-negative number	{name}需要是有效的非負數	{name} は有効な非負の数値である必要があります
-{name}（具体内容未记录）	{name}（具体内容未记录）	{name} (specific content not recorded)	{name}（具體內容未記錄）	{name} (特定の内容は記録されません)
-{noted_selected} 个已有笔记，将生成新版	{noted_selected} 个已有笔记，将生成新版	{noted_selected} existing notes, a new version will be generated	{noted_selected} 個已有筆記，將生成新版	{noted_selected} 既存のノート、新しいバージョンが生成されます
-{seconds} 秒	{seconds} 秒	{seconds} seconds	{seconds} 秒	{seconds} 秒
-{skipped} 个无法识别，已跳过	{skipped} 个无法识别，已跳过	{skipped} unrecognized, skipped	{skipped} 個無法識別，已跳過	{skipped} は認識されず、スキップされました
-{test_label}未通过 · 重试	{test_label}未通过 · 重试	{test_label} failed · Try again	{test_label}未透過 · 重試	{test_label} が失敗しました · 再試行してください
-{test_label}结果未确认 · 重试	{test_label}结果未确认 · 重试	{test_label} result not confirmed · Try again	{test_label}結果未確認 · 重試	{test_label} 結果が確認されていません · もう一度お試しください
-{test_label}通过 · 重测	{test_label}通过 · 重测	{test_label} Pass · Retest	{test_label}透過 · 重測	{test_label} 合格 · 再テスト
-{value:.0} 字节	{value:.0} 字节	{value:.0} bytes	{value:.0} 位元組	{value:.0}バイト
-{value} 字节	{value} 字节	{value} bytes	{value} 位元組	{value}バイト
 {} / {} 段	{} / {} 段	{} / {} segment	{} / {} 段	{} / {} セグメント
-{} {name}，{} 篇笔记	{} {name}，{} 篇笔记	{} {name}, {} notes	{} {name}，{} 篇筆記	{} {name}、{} ノート
 {} {}，{} 篇笔记	{} {}，{} 篇笔记	{} {}, {} notes	{} {}，{} 篇筆記	{} {}、{} ノート
 {} · 待下载	{} · 待下载	{} · To be downloaded	{} · 待下載	{} · ダウンロード予定
-{} · 未分类	{} · 未分类	{} · Uncategorized	{} · 未分類	{} · 未分類
-{} · 构建 {commit}	{} · 构建 {commit}	{} · Build {commit}	{} · 構建 {commit}	{} · {commit} をビルドする
 {} · 构建 {}	{} · 构建 {}	{} · Build {}	{} · 構建 {}	{} · {} をビルドする
-{} 不支持“{}”，已改用 {}。	{} 不支持“{}”，已改用 {}。	{} does not support "{}" and has been replaced with {}.	{} 不支援“{}”，已改用 {}。	{} は「{}」をサポートしていないため、{} に置き換えられました。
 {} 不支持「{}」，已改用 {}。	{} 不支持「{}」，已改用 {}。	{} does not support “{}”; switched to {}.	{} 不支援「{}」，已改用 {}。	{} は「{}」に対応していないため、{} に切り替えました。
 {} 个与进行中的任务相同，未重复加入	{} 个与进行中的任务相同，未重复加入	{} are the same as the ongoing tasks and have not been added repeatedly.	{} 個與進行中的任務相同，未重複加入	{} は進行中のタスクと同じであり、繰り返し追加されていません。
 {} 个已有笔记，将生成新版	{} 个已有笔记，将生成新版	{} existing notes, a new version will be generated	{} 個已有筆記，將生成新版	{} 既存のノート、新しいバージョンが生成されます
@@ -198,7 +133,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 张截图 / {} 段文字	{} 张截图 / {} 段文字	{} screenshots / {} paragraphs of text	{} 張截圖 / {} 段文字	{} スクリーンショット / {} 段落のテキスト
 {} 暂时无法访问	{} 暂时无法访问	{} is temporarily inaccessible	{} 暫時無法訪問	{} は一時的にアクセスできません
 {} 的任务参数仍无法读取，材料已保留	{} 的任务参数仍无法读取，材料已保留	The task parameters of {} still cannot be read, and the material has been reserved.	{} 的任務引數仍無法讀取，材料已保留	{} のタスク パラメータはまだ読み取れず、マテリアルは予約されています。
-{} 的准备已停止	{} 的准备已停止	Preparation for {} has stopped	{} 的準備已停止	{} の準備が停止しました
 {} 的准备已暂停	{} 的准备已暂停	{} preparation is paused	{} 的準備已暫停	{} の準備は一時停止中です
 {} 的准备未完成：{}	{} 的准备未完成：{}	Preparation for {} is not complete: {}	{} 的準備未完成：{}	{} の準備が完了していません: {}
 {} 的截图	{} 的截图	Screenshot of {}	{} 的截圖	{} のスクリーンショット
@@ -208,7 +142,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 的笔记名称记录无法读取	{} 的笔记名称记录无法读取	The note name record for {} cannot be read.	{} 的筆記名稱記錄無法讀取	{} の音名レコードを読み取ることができません。
 {} 秒	{} 秒	{} s	{} 秒	{} 秒
 {} 视频 {}	{} 视频 {}	{} Video {}	{} 影片 {}	{} 動画 {}
-{} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{vision_note}	{} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{vision_note}	The output of {} is a JSON object {{"segments":[{{"id": serial number, "text": proofread text }}]}}, id must correspond to the input one-to-one; the text of the pure modal particle entry is an empty string. {vision_note}	{} 輸出為 JSON 物件 {{"segments":[{{"id":序號,"text":校對後的文字}}]}}，id 必須與輸入一一對應；純語氣詞條目的 text 為空字串。{vision_note}	{} の出力は、JSON オブジェクト {{"segments":[{{"id": シリアル番号、"text": 校正テキスト }}]}} です。id は入力と 1 対 1 で対応する必要があります。純粋なモーダル粒子エントリのテキストは空の文字列です。 {vision_note}
 {} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{}	{} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{}	The output of {} is a JSON object {{"segments":[{{"id": serial number, "text": proofread text }}]}}, id must correspond to the input one-to-one; the text of the pure modal particle entry is an empty string. {}	{} 輸出為 JSON 物件 {{"segments":[{{"id":序號,"text":校對後的文字}}]}}，id 必須與輸入一一對應；純語氣詞條目的 text 為空字串。{}	{} の出力は、JSON オブジェクト {{"segments":[{{"id": シリアル番号、"text": 校正テキスト }}]}} です。id は入力と 1 対 1 で対応する必要があります。純粋なモーダル粒子エントリのテキストは空の文字列です。 {}
 {}。保存位置尚未切换，已复制的内容保留在目标位置。	{}。保存位置尚未切换，已复制的内容保留在目标位置。	{}. The save location has not been switched and the copied content remains at the target location.	{}。儲存位置尚未切換，已複製的內容保留在目標位置。	{}。保存場所は切り替えられておらず、コピーされたコンテンツはターゲットの場所に残ります。
 {}。请备份后删除该文件再重试：{}	{}。请备份后删除该文件再重试：{}	{}. Please delete the file after backup and try again: {}	{}。請備份後刪除該檔案再重試：{}	{}。バックアップ後にファイルを削除して、再試行してください: {}
@@ -217,18 +150,14 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}尚未完成	{}尚未完成	{} has not been completed yet	{}尚未完成	{}はまだ完了していません
 {}尚未完成。{}	{}尚未完成。{}	{} is not completed yet. {}	{}尚未完成。{}	{} はまだ完了していません。 {}
 {}无法读取	{}无法读取	{} cannot be read	{}無法讀取	{} を読み取れません
-{}月{}日	{}月{}日	{}month{}day	{}月{}日	{}月{}日
 {}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{} は保存されていません: {}
 {}未完成	{}未完成	{} is not completed	{}未完成	{} は完了していません
 {}未生成	{}未生成	{} was not generated	{}未生成	{} は生成されませんでした
 {}未通过 · 重试	{}未通过 · 重试	{} failed · Try again	{}未透過 · 重試	{} が失敗しました · 再試行してください
 {}测试通过	{}测试通过	{} test passed	{}測試透過	{} テストに合格しました
-{}的文件夹信息已损坏：{error:#}	{}的文件夹信息已损坏：{error:#}	The folder information of {} is corrupted: {error:#}	{}的資料夾資訊已損壞：{error:#}	{} のフォルダー情報が壊れています: {error:#}
 {}的文件夹信息已损坏：{}	{}的文件夹信息已损坏：{}	The folder information of {} is corrupted: {}	{}的資料夾資訊已損壞：{}	{} のフォルダー情報が壊れています: {}
-{}的显示名称尚未读取：{error:#}	{}的显示名称尚未读取：{error:#}	The display name of {} has not been read yet: {error:#}	{}的顯示名稱尚未讀取：{error:#}	{} の表示名はまだ読み込まれていません: {error:#}
 {}的显示名称尚未读取：{}	{}的显示名称尚未读取：{}	The display name of {} has not been read yet: {}	{}的顯示名稱尚未讀取：{}	{} の表示名はまだ読み込まれていません: {}
 {}结果未确认 · 重试	{}结果未确认 · 重试	{} result not confirmed · Try again	{}結果未確認 · 重試	{} 結果が確認されていません · もう一度お試しください
-{}读取失败：{error:#}	{}读取失败：{error:#}	{} failed to read: {error:#}	{}讀取失敗：{error:#}	{} が読み取れませんでした: {error:#}
 {}读取失败：{}	{}读取失败：{}	{} failed to read: {}	{}讀取失敗：{}	{} が読み取れませんでした: {}
 {}通过 · 重测	{}通过 · 重测	{} Pass · Retest	{}透過 · 重測	{} 合格 · 再テスト
 {}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{} は有効な非負の数値である必要があります
@@ -252,9 +181,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 《{}》的位置或身份记录不完整，原记录已保留	《{}》的位置或身份记录不完整，原记录已保留	The location or identity record for "{}" is incomplete and the original record has been retained.	《{}》的位置或身份記錄不完整，原記錄已保留	「{}」の位置または身元記録は不完全であり、元の記録は保持されています。
 《{}》的笔记操作	《{}》的笔记操作	Note operation of "{}"	《{}》的筆記操作	「{}」の動作に注意してください
 《{}》：{}	《{}》：{}	“{}”: {}	《{}》：{}	「{}」：{}
-「{repair_submit_label}」会重新发送失败部分，可能计费	「{repair_submit_label}」会重新发送失败部分，可能计费	"{repair_submit_label}" will resend the failed part and may be charged.	「{repair_submit_label}」會重新傳送失敗部分，可能計費	「{repair_submit_label}」は障害が発生した部分を再送信し、料金が発生する場合があります。
 「{}」会重新发送失败部分，可能计费	「{}」会重新发送失败部分，可能计费	"{}" will resend the failed part and may be charged.	「{}」會重新傳送失敗部分，可能計費	「{}」は障害が発生した部分を再送信し、料金が発生する場合があります。
-「{}」已登记，可在该笔记库中“重新定位…”	「{}」已登记，可在该笔记库中“重新定位…”	"{}" has been registered and can be "repositioned..." in the note library	「{}」已登記，可在該筆記庫中“重新定位…”	「{}」は登録されており、ノートライブラリで「位置を変更」できます。
 「未分类」已被使用，请换一个文件夹名称	「未分类」已被使用，请换一个文件夹名称	"Uncategorized" has been used, please change the folder name	「未分類」已被使用，請換一個資料夾名稱	「未分類」が使用されているため、フォルダー名を変更してください
 このメッセージまたはサブコマンドのヘルプを表示	このメッセージまたはサブコマンドのヘルプを表示	このメッセージまたはサブコマンドのヘルプを represents	このメッセージまたはサブコマンドのヘルプを表示	このメッセージまたはサブコマンドのヘルプを表します
 オプション：	オプション：	オプション：	オプション：	オプション：
@@ -268,20 +195,14 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 上一张 · ←	上一张 · ←	Previous · ←	上一張 · ←	前へ · ←
 上一步	上一步	Previous step	上一步	前のステップ
 上次准备	上次准备	Prepared last time	上次準備	前回準備したもの
-上次准备记录：{error}	上次准备记录：{error}	Last prepared record: {error}	上次準備記錄：{error}	最後に準備されたレコード: {error}
 上次准备记录：{}	上次准备记录：{}	Last prepared record: {}	上次準備記錄：{}	最後に準備されたレコード: {}
 上次结果未确认；重测会再次发送，可能计费	上次结果未确认；重测会再次发送，可能计费	The last result is not confirmed; retest will be sent again and charges may apply	上次結果未確認；重測會再次傳送，可能計費	最後の結果は確認されていません。再テストは再度送信され、料金が適用される場合があります
-上次结果未确认；重测或「{repair_submit_label}」都会再次发送请求，可能计费	上次结果未确认；重测或「{repair_submit_label}」都会再次发送请求，可能计费	The last result is not confirmed; retest or "{repair_submit_label}" will send the request again and may be billed.	上次結果未確認；重測或「{repair_submit_label}」都會再次傳送請求，可能計費	最後の結果は確認されていません。再テストするか、「{repair_submit_label}」はリクエストを再度送信し、料金が請求される場合があります。
 上次结果未确认；重测或「{}」都会再次发送请求，可能计费	上次结果未确认；重测或「{}」都会再次发送请求，可能计费	The last result is not confirmed; retest or "{}" will send the request again and may be billed.	上次結果未確認；重測或「{}」都會再次傳送請求，可能計費	最後の結果は確認されていません。再テストするか、「{}」はリクエストを再度送信し、料金が請求される場合があります。
 下一处	下一处	Next match	下一處	次の一致
 下一张	下一张	Next	下一張	次へ
 下一张 · →	下一张 · →	Next · →	下一張 · →	次へ・→
-下一步	下一步	Next	下一步	次へ
 下一步 / Next step	下一步	Next step	下一步	次のステップ
-下载 Qwen3 模型文件	下载 Qwen3 模型文件	Download Qwen3 model files	下載 Qwen3 模型檔案	Qwen3 モデル ファイルをダウンロードする
-下载 Whisper 模型文件	下载 Whisper 模型文件	Download Whisper model files	下載 Whisper 模型檔案	ウィスパーモデルファイルをダウンロードする
 下载 gpu/cpu 模型（约 2.4GB）/ Download gpu/cpu models (~2.4GB)	下载 gpu/cpu 模型（约 2.4GB）/ Download gpu/cpu models (~2.4GB)	Download gpu/cpu models (~2.4GB)/ Download gpu/cpu models (~2.4GB)	下載 gpu/cpu 模型（約 2.4GB）/ Download gpu/cpu models (~2.4GB)	GPU/CPU モデルをダウンロード (~2.4GB)/ GPU/CPU モデルをダウンロード (~2.4GB)
-下载失败，稍后重试 / Download failed; retrying shortly	下载失败，稍后重试	Download failed; retrying shortly	下載失敗，稍後重試	ダウンロードに失敗しました。後でもう一度お試しください
 下载安装包	下载安装包	Download the installation package	下載安裝包	インストールパッケージをダウンロードする
 下载完整应用	下载完整应用	Download the full app	下載完整應用	アプリ全体をダウンロードする
 下载并准备模型	下载并准备模型	Download and prepare the model	下載並準備模型	モデルをダウンロードして準備する
@@ -289,10 +210,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 下载模型	下载模型	Download model	下載模型	モデルをダウンロード
 下载视频	下载视频	Download video	下載影片	動画をダウンロードする
 下载视频 / Downloading video	下载视频	Downloading video	下載影片	動画をダウンロードする
-下载视频最大高度 / Maximum download height (1080 recommended)	下载视频最大高度	Maximum download height (1080 recommended)	下載影片最大高度	ダウンロード動画の最大高さ
 下载识别模型	下载识别模型	Downloading speech model	下載語音辨識模型	音声認識モデルをダウンロード
 下载识别模型 / Downloading speech model	下载识别模型	Downloading speech model	下載識別模型	ダウンロード認識モデル
-下载语音检测文件	下载语音检测文件	Download speech detection file	下載語音檢測檔案	音声検出ファイルをダウンロードする
 下载语音模型	下载语音模型	Download speech model	下載語音模型	音声モデルをダウンロードする
 下载音频编码器	下载音频编码器	Download audio encoder	下載音訊編碼器	オーディオエンコーダをダウンロード
 不完整	不完整	Incomplete	不完整	不完全
@@ -306,19 +225,16 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 中文	中文	Chinese	中文	中国語
 为已有笔记生成 AI 摘要 / Add AI summaries to existing notes	为已有笔记生成 AI 摘要 / Add AI summaries to existing notes	Add AI summaries to existing notes	為既有筆記產生 AI 摘要	既存のノートに AI 要約を追加
 为这次笔记设置 AI 服务	为这次笔记设置 AI 服务	Set up AI service for this note	為這次筆記設定 AI 服務	このノートの AI サービスを設定する
-为这次笔记设置语音服务	为这次笔记设置语音服务	Set up voice service for this note	為這次筆記設定語音服務	このノートの音声サービスを設定します
 为这次笔记设置语音识别服务	为这次笔记设置语音识别服务	Set up speech recognition for this note	為這次筆記設定語音辨識服務	このノートの音声認識を設定
 主题	主题	Theme	主題	テーマ
 二维码响应缺少 key / QR code response is missing key	二维码响应缺少 key	QR code response is missing key	二維碼響應缺少 key	QR コード応答のキーがありません
 二维码响应缺少 url / QR code response is missing url	二维码响应缺少 url	QR code response is missing url	二維碼響應缺少 url	QR コード応答に URL がありません
 二维码已过期	二维码已过期	QR code has expired	二維碼已過期	QRコードの有効期限が切れています
 二维码已过期，请重新运行 course2md --login bilibili / QR code expired; run course2md --login bilibili again	二维码已过期，请重新运行 course2md --login bilibili	QR code expired; run course2md --login bilibili again	二維碼已過期，請重新執行 course2md --login bilibili	QR コードの有効期限が切れています。 course2md --login bilibili を再実行してください。
-二维码约 {seconds} 秒后过期	二维码约 {seconds} 秒后过期	QR code expires in approximately {seconds} seconds	二維碼約 {seconds} 秒後過期	QR コードの有効期限は約 {seconds} 秒後に切れます
 二维码约 {} 秒后过期	二维码约 {} 秒后过期	QR code expires in approximately {} seconds	二維碼約 {} 秒後過期	QR コードの有効期限は約 {} 秒後に切れます
 云端 API（需服务端点和 API Key，可能收费） / Cloud API (endpoint and API key required; charges may apply)	云端 API（需服务端点和 API Key，可能收费）	Cloud API (endpoint and API key required; charges may apply)	雲端 API（需服務端點和 API Key，可能收費）	クラウド API (サービス エンドポイントと API キーが必要、料金が適用される場合があります)
 云端服务	云端服务	Cloud services	雲端服務	クラウドサービス
 云端识别地址 / Cloud speech API base URL (OpenAI-compatible)	云端识别地址	Cloud speech API base URL (OpenAI-compatible)	雲端識別地址	クラウド識別アドレス
-云端识别密钥；建议用 COURSE2MD_ASR_API_KEY 环境变量 / Cloud API key; prefer the environment variable to avoid shell history	云端识别密钥；建议用 COURSE2MD_ASR_API_KEY 环境变量	Cloud API key; prefer the environment variable to avoid shell history	雲端識別金鑰；建議用 COURSE2MD_ASR_API_KEY 環境變數	クラウド識別キー。 COURSE2MD_ASR_API_KEY 環境変数を使用することをお勧めします。
 云端识别模型名称 / Cloud speech model name	云端识别模型名称	Cloud speech model name	雲端識別模型名稱	クラウド認識モデル名
 云端语音识别	云端语音识别	Cloud speech recognition	雲端語音識別	クラウド音声認識
 云端语音识别失败：{}	云端语音识别失败：{}	Cloud speech recognition failed: {}	雲端語音識別失敗：{}	クラウド音声認識が失敗しました: {}
@@ -330,14 +246,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 仅保存	仅保存	Save only	僅儲存	保存のみ
 仅发送文字 / Send text only	仅发送文字	Send text only	僅傳送文字	テキストのみを送信する
 仅字幕	仅字幕	Subtitles only	僅字幕	字幕のみ
-仅字幕；本地需同名 .srt/.vtt / Subtitles only; local files need a matching .srt/.vtt	仅字幕；本地需同名 .srt/.vtt	Subtitles only; local files need a matching .srt/.vtt	僅字幕；本地需同名 .srt/.vtt	字幕のみ。ローカル名は .srt/.vtt である必要があります
 仅对本次生效	仅对本次生效	Valid only for this time	僅對本次生效	今回のみ有効
 仅影响以后生成的笔记	仅影响以后生成的笔记	Only affects future notes generated	僅影響以後生成的筆記	今後生成されるノートにのみ影響します
 仅用于没有字幕的视频	仅用于没有字幕的视频	Only for videos without subtitles	僅用於沒有字幕的影片	字幕のない動画のみ
 仅用于这次笔记	仅用于这次笔记	Only for this note	僅用於這次筆記	このノートに限っては
-仅补{label}	仅补{label}	Only add {label}	僅補{label}	{label} のみを追加します
-仅补{}	仅补{}	Only add {}	僅補{}	{} のみを追加します
-仅补导出	仅补导出	Export only	僅補匯出	輸出のみ
 今天讲编译原理	今天讲编译原理	Let’s talk about compilation principles today	今天講編譯原理	今日はコンパイルの原則について話しましょう
 仍在处理	仍在处理	Still processing	仍在處理	静止処理中
 仍有请求结果尚未确认，请先查看请求范围	仍有请求结果尚未确认，请先查看请求范围	There are still request results that have not yet been confirmed. Please check the request scope first.	仍有請求結果尚未確認，請先檢視請求範圍	まだ確認されていないリクエスト結果がまだあります。まずリクエストのスコープを確認してください。
@@ -349,11 +261,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 令牌响应不完整 / The token response is incomplete	令牌响应不完整	The token response is incomplete	令牌響應不完整	トークン応答が不完全です
 以 JSON 输出 / Print JSON	以 JSON 输出	Print JSON	以 JSON 輸出	JSONとして出力
 以 NDJSON 输出进度，禁用交互 / Stream NDJSON progress without prompts	以 NDJSON 输出进度，禁用交互	Stream NDJSON progress without prompts	以 NDJSON 輸出進度，禁用互動	進行状況を NDJSON として出力し、インタラクションを無効にする
-以下是各分段的摘要（时间已按原视频绝对秒数标注）：\n\n{input}\n\n\n请合并为整个视频的最终摘要，输出 JSON：{{"tldr": "不超过150字的一句话概述", \n"key_points": [整个视频的3-8条要点], \n"outline": [{{"t":秒,"title":"章节标题","detail":"简述"}}]}}	以下是各分段的摘要（时间已按原视频绝对秒数标注）：\n\n{input}\n\n\n请合并为整个视频的最终摘要，输出 JSON：{{"tldr": "不超过150字的一句话概述", \n"key_points": [整个视频的3-8条要点], \n"outline": [{{"t":秒,"title":"章节标题","detail":"简述"}}]}}	The following is a summary of each segment (times are marked according to the absolute seconds of the original video):\n\n{input}\n\n\nPlease merge it into the final summary of the entire video and output JSON: {{"tldr": "A one-sentence summary of no more than 150 words",\n"key_points": [3-8 key points of the entire video],\n"outline": [{{"t":seconds,"title":"chapter title","detail":"brief description"}}]}}	以下是各分段的摘要（時間已按原影片絕對秒數標註）：\n\n{input}\n\n\n請合併為整個影片的最終摘要，輸出 JSON：{{"tldr": "不超過150字的一句話概述", \n"key_points": [整個影片的3-8條要點], \n"outline": [{{"t":秒,"title":"章節標題","detail":"簡述"}}]}}	以下は各セグメントの概要です (時間は元の動画の絶対秒数に従ってマークされています): \n\n{input}\n\n\n動画全体の最終的な概要にマージして JSON を出力してください: {{"tldr": "150 語以下の 1 文の概要"、\n"key_points": [動画全体の 3 ～ 8 個のキー ポイント]、\n"アウトライン": [{{"t":秒、"title":"章タイトル"、"detail":"簡単な説明"}}]}}
-以下是视频字幕（每行 [mm:ss] 为起始时间）：\n\n{transcript}\n\n\n请输出 JSON 对象：{{"tldr": "不超过120字的一句话概述", \n"key_points": [3-6条要点，每条不超过60字], \n"outline": [{{"t": 起始秒数(数字), "title": "章节标题", "detail": "该章节内容简述，不超过100字"}}]}}。\noutline 按时间顺序覆盖整个视频，3-8 节。	以下是视频字幕（每行 [mm:ss] 为起始时间）：\n\n{transcript}\n\n\n请输出 JSON 对象：{{"tldr": "不超过120字的一句话概述", \n"key_points": [3-6条要点，每条不超过60字], \n"outline": [{{"t": 起始秒数(数字), "title": "章节标题", "detail": "该章节内容简述，不超过100字"}}]}}。\noutline 按时间顺序覆盖整个视频，3-8 节。	The following are video subtitles (each line [mm:ss] is the starting time):\n\n{transcript}\n\n\nPlease output the JSON object: {{"tldr": "A one-sentence summary of no more than 120 words",\n"key_points": [3-6 key points, each not exceeding 60 words],\n"outline": [{{"t": starting seconds (number), "title": "Chapter title", "detail": "A brief description of the chapter content, no more than 100 words"}}]}}.\noutline covers the entire video in chronological order, sections 3-8.	以下是影片字幕（每行 [mm:ss] 為起始時間）：\n\n{transcript}\n\n\n請輸出 JSON 物件：{{"tldr": "不超過120字的一句話概述", \n"key_points": [3-6條要點，每條不超過60字], \n"outline": [{{"t": 起始秒數(數字), "title": "章節標題", "detail": "該章節內容簡述，不超過100字"}}]}}。\noutline 按時間順序覆蓋整個影片，3-8 節。	以下は動画の字幕です (各行 [mm:ss] は開始時間です): \n\n{transcript}\n\n\nJSON オブジェクトを出力してください: {{"tldr": "120 単語以内の 1 文の要約"、\n"key_points": [3 ～ 6 個のキー ポイント、それぞれ 60 単語以内]、\n"outline": [{{"t": 開始秒数 (数字)、 "title": "章のタイトル"、"detail": "この章の内容の簡単な説明。100 語以内"}}]}}。 \n概要動画全体を時系列順にセクション 3 ～ 8 で説明します。
 以后生成的笔记仍使用修改前的配置 · {}	以后生成的笔记仍使用修改前的配置 · {}	Notes generated in the future will still use the configuration before modification · {}	以後生成的筆記仍使用修改前的配置 · {}	今後生成されるノートでは、変更前の構成が引き続き使用されます · {}
 任务	任务	Tasks	任務	タスク
-任务 · {task_count}	任务 · {task_count}	Task · {task_count}	任務 · {task_count}	タスク · {task_count}
 任务 · {}	任务 · {}	Task · {}	任務 · {}	タスク · {}
 任务不存在	任务不存在	Task not found	找不到任務	タスクが見つかりません
 任务与笔记位置必须是绝对路径 / Task paths must be absolute	任务与笔记位置必须是绝对路径	Task paths must be absolute	任務與筆記位置必須是絕對路徑	タスクとノートの場所は絶対パスである必要があります
@@ -361,10 +270,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务保存位置尚未恢复	任务保存位置尚未恢复	The task save location has not been restored	任務儲存位置尚未恢復	タスクの保存場所が復元されていません
 任务保存位置暂时不可用	任务保存位置暂时不可用	The task save location is temporarily unavailable	任務儲存位置暫時不可用	タスクの保存場所が一時的に利用できなくなりました
 任务保存位置记录缺失	任务保存位置记录缺失	The task save location record is missing	任務儲存位置記錄缺失	タスクの保存場所レコードがありません
-任务参数过大 / Task input exceeds 16 MiB	任务参数过大	Task input exceeds 16 MiB	任務引數過大	タスクパラメータが大きすぎます
 任务参数过大（上限 {} MiB） / Task input exceeds {} MiB	任务参数过大（上限 {} MiB）	Task input exceeds {} MiB	工作參數過大（上限 {} MiB）	タスク入力が {} MiB を超えています
 任务只能指定一种已选字幕内容 / Specify subtitle file or parsed events, not both	任务只能指定一种已选字幕内容	Specify subtitle file or parsed events, not both	任務只能指定一種已選字幕內容	タスクでは選択した字幕コンテンツを 1 つだけ指定できます
-任务尚未加入队列：{error:#}	任务尚未加入队列：{error:#}	Task has not been queued yet: {error:#}	任務尚未加入佇列：{error:#}	タスクはまだキューに登録されていません: {error:#}
 任务尚未加入队列：{}	任务尚未加入队列：{}	Task has not been queued yet: {}	任務尚未加入佇列：{}	タスクはまだキューに登録されていません: {}
 任务工作目录与保存位置不匹配	任务工作目录与保存位置不匹配	Task working directory does not match save location	任務工作目錄與儲存位置不匹配	タスクの作業ディレクトリが保存場所と一致しません
 任务工作目录与记录的笔记库不匹配	任务工作目录与记录的笔记库不匹配	The task working directory does not match the recorded note library	任務工作目錄與記錄的筆記庫不匹配	タスクの作業ディレクトリが記録されたノート ライブラリと一致しません
@@ -372,13 +279,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务已取消	任务已取消	Task cancelled	任務已取消	タスクがキャンセルされました
 任务已取消，已有成果已保留 / Task cancelled; saved results retained	任务已取消，已有成果已保留	Task cancelled; saved results retained	任務已取消，已有成果已保留	タスクはキャンセルされ、既存の結果は保持されています。
 任务恢复副本未能保存，原任务记录仍保留	任务恢复副本未能保存，原任务记录仍保留	The task recovery copy failed to be saved, and the original task records are still retained.	任務恢復副本未能儲存，原任務記錄仍保留	タスク回復コピーの保存に失敗しました。元のタスク レコードはまだ保持されています。
-任务指令尚未保存：{error:#}	任务指令尚未保存：{error:#}	Task instructions have not been saved: {error:#}	任務指令尚未儲存：{error:#}	タスクの指示が保存されていません: {error:#}
 任务指令尚未保存：{}	任务指令尚未保存：{}	Task instructions have not been saved: {}	任務指令尚未儲存：{}	タスクの指示が保存されていません: {}
 任务控制文件必须位于工作目录 / Invalid control file location	任务控制文件必须位于工作目录	Invalid control file location	任務控制檔案必須位於工作目錄	タスク制御ファイルは作業ディレクトリに配置する必要があります
 任务材料位置越出笔记库，原记录已保留	任务材料位置越出笔记库，原记录已保留	The location of the task materials is outside the note library, and the original records have been retained.	任務材料位置越出筆記庫，原記錄已保留	タスク資料の場所はノート ライブラリの外にあり、元の記録は保持されています。
 任务来源或参数与已保存进度不一致，原进度已保留 / Task inputs changed; create a new task instead of reusing this work directory	任务来源或参数与已保存进度不一致，原进度已保留	Task inputs changed; create a new task instead of reusing this work directory	任務來源或引數與已儲存進度不一致，原進度已保留	タスクのソースまたはパラメータは保存された進行状況と矛盾しており、元の進行状況が保持されています。
 任务来源身份或名称记录缺失	任务来源身份或名称记录缺失	The task source identity or name record is missing	任務來源身份或名稱記錄缺失	タスク ソース ID または名前レコードがありません
-任务状态尚未保存：{error:#}	任务状态尚未保存：{error:#}	Task status has not been saved: {error:#}	任務狀態尚未儲存：{error:#}	タスクのステータスが保存されていません: {error:#}
 任务状态尚未保存：{}	任务状态尚未保存：{}	Task status has not been saved: {}	任務狀態尚未儲存：{}	タスクのステータスが保存されていません: {}
 任务状态异常，请重启应用 / Task state is unavailable; restart the app	任务状态异常，请重启应用	Task state is unavailable; restart the app	任務狀態異常，請重啟應用	タスクのステータスが異常です。アプリケーションを再起動してください
 任务状态无法识别，已暂停 / Task state is unreadable; paused	任务状态无法识别，已暂停	Task state is unreadable; paused	任務狀態無法識別，已暫停	タスクのステータスが認識できないため一時停止されています
@@ -396,28 +301,19 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。	任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。	The task record was created by a newer version, please use the corresponding version to open it. The original records and backups are retained, and the task has not been started yet.	任務記錄由較新版本建立，請使用對應版本開啟。原記錄和備份均保留，尚未啟動任務。	タスク レコードは新しいバージョンで作成されました。対応するバージョンを使用して開いてください。元のレコードとバックアップは保持されますが、タスクはまだ開始されていません。
 任务记录缺少保存目录	任务记录缺少保存目录	Task record lacks save directory	任務記錄缺少儲存目錄	タスクレコードに保存ディレクトリがありません
 任务记录被链接替代，原文件已保留	任务记录被链接替代，原文件已保留	The task record is replaced by a link and the original file is retained.	任務記錄被連結替代，原檔案已保留	タスク レコードはリンクに置き換えられ、元のファイルは保持されます。
-任务记录读取失败：{error:#}	任务记录读取失败：{error:#}	Task record reading failed: {error:#}	任務記錄讀取失敗：{error:#}	タスク レコードの読み取りに失敗しました: {error:#}
 任务记录读取失败：{}	任务记录读取失败：{}	Task record reading failed: {}	任務記錄讀取失敗：{}	タスク レコードの読み取りに失敗しました: {}
 任务记录超过可读取范围，原文件已保留	任务记录超过可读取范围，原文件已保留	The task record exceeds the readable range and the original file has been retained.	任務記錄超過可讀取範圍，原檔案已保留	タスクレコードが読み取り可能な範囲を超えており、元のファイルが保持されています。
 任务身份无效	任务身份无效	Invalid task identity	任務身份無效	無効なタスク ID
-任务进度尚未保存：{error:#}	任务进度尚未保存：{error:#}	Task progress has not been saved: {error:#}	任務進度尚未儲存：{error:#}	タスクの進行状況が保存されていません: {error:#}
 任务进度尚未保存：{}	任务进度尚未保存：{}	Task progress has not been saved: {}	任務進度尚未儲存：{}	タスクの進行状況が保存されていません: {}
 任务进度身份损坏，原文件已保留 / Task identity is damaged	任务进度身份损坏，原文件已保留	Task identity is damaged	任務進度身份損壞，原檔案已保留	タスク進行中の ID は破損していますが、元のファイルは保持されています。
-任务选择尚未保存：{error:#}	任务选择尚未保存：{error:#}	Task selection not saved yet: {error:#}	任務選擇尚未儲存：{error:#}	タスクの選択はまだ保存されていません: {error:#}
 任务选择尚未保存：{}	任务选择尚未保存：{}	Task selection not saved yet: {}	任務選擇尚未儲存：{}	タスクの選択はまだ保存されていません: {}
 任务镜像身份不匹配	任务镜像身份不匹配	Task image identity mismatch	任務映象身份不匹配	タスクイメージのアイデンティティの不一致
-优先字幕，无字幕时识别语音 / Prefer subtitles; transcribe speech if unavailable	优先字幕，无字幕时识别语音	Prefer subtitles; transcribe speech if unavailable	優先字幕，無字幕時識別語音	字幕を優先し、字幕がない場合でも音声を認識します
-传递任务参数失败	传递任务参数失败	Failed to pass task parameters	傳遞任務引數失敗	タスクパラメータを渡すことができませんでした
 作者	作者	Creator	作者	作成者
 作者 {}	作者 {}	Author {}	作者 {}	著者 {}
-你是视频内容摘要助手。根据提供的带时间戳字幕为视频生成结构化摘要。\n严格要求：1) 只依据字幕内容，严禁编造字幕中不存在的事实、数字、人名或观点；\n2) 对不确定的信息宁可省略也不要猜测；3) 使用视频原语言输出；\n4) 只输出一个合法 JSON 对象，不要代码围栏、不要任何多余文字。	你是视频内容摘要助手。根据提供的带时间戳字幕为视频生成结构化摘要。\n严格要求：1) 只依据字幕内容，严禁编造字幕中不存在的事实、数字、人名或观点；\n2) 对不确定的信息宁可省略也不要猜测；3) 使用视频原语言输出；\n4) 只输出一个合法 JSON 对象，不要代码围栏、不要任何多余文字。	You are a video content summary assistant. Generate structured summaries for videos based on provided timestamped subtitles.\nStrict requirements: 1) Only rely on the content of the subtitles, and it is strictly prohibited to make up facts, figures, names or opinions that do not exist in the subtitles;\n2) Rather omit uncertain information than guess; 3) Use the original language of the video for output;\n4) Only output a legal JSON object, without code fences or any extra text.	你是影片內容摘要助手。根據提供的帶時間戳字幕為影片生成結構化摘要。\n嚴格要求：1) 只依據字幕內容，嚴禁編造字幕中不存在的事實、數字、人名或觀點；\n2) 對不確定的資訊寧可省略也不要猜測；3) 使用影片原語言輸出；\n4) 只輸出一個合法 JSON 物件，不要程式碼圍欄、不要任何多餘文字。	あなたは動画 コンテンツ サマリー アシスタントです。提供されたタイムスタンプ付きの字幕に基づいて、動画の構造化された概要を生成します。 \n厳格な要件: 1) 字幕の内容のみに依存し、字幕に存在しない事実、数字、名前、意見をでっち上げることは固く禁じられています。\n2) 推測するよりも不確実な情報を省略することを好みます。 3) 動画の元の言語を使用して出力します。\n4) コード フェンスや余分なテキストを含まず、正当な JSON オブジェクトのみを出力します。
-你是视频逐字稿校对器。输入的每一项是一段已按自然停顿组织的连续讲解。\n修正明显的语音识别错误（错别字、同音字、专有名词拼写），删除不影响原意的冗余口头填充，\n并修复不自然的断句和标点，使文字自然、书面化。不得概括、扩写、翻译、增删实质内容或改变原意；\n保持原语言。若某条内容仅由语气词、口头禅或无实义片段构成（如单独的"啊"、"对吧"），\n该条的 text 返回空字符串 ""（系统会删除该条）；有实质内容的条目不得删除。\n输出与输入逐条对应的 JSON 对象 {"segments":[{"id":序号,"text":"校对后的文本"}]}，不要输出任何其他内容。	你是视频逐字稿校对器。输入的每一项是一段已按自然停顿组织的连续讲解。\n修正明显的语音识别错误（错别字、同音字、专有名词拼写），删除不影响原意的冗余口头填充，\n并修复不自然的断句和标点，使文字自然、书面化。不得概括、扩写、翻译、增删实质内容或改变原意；\n保持原语言。若某条内容仅由语气词、口头禅或无实义片段构成（如单独的"啊"、"对吧"），\n该条的 text 返回空字符串 ""（系统会删除该条）；有实质内容的条目不得删除。\n输出与输入逐条对应的 JSON 对象 {"segments":[{"id":序号,"text":"校对后的文本"}]}，不要输出任何其他内容。	You are a video verbatim proofreader. Each item entered is a continuous explanation organized into natural pauses.\nCorrect obvious speech recognition errors (typos, homophones, spelling of proper nouns), delete redundant verbal filling that does not affect the original meaning,\nAnd repair unnatural sentence breaks and punctuation to make the text natural and written. It is not allowed to summarize, expand, translate, add or delete substantive content or change the original meaning;\nKeep the original language. If a piece of content only consists of modal particles, catchphrases or fragments without real meaning (such as "ah" and "right" alone),\nThe article's text returns the empty string "" (the article will be deleted); entries with substantial content must not be deleted.\nOutput the JSON object {"segments":[{"id":序号,"text":"校对后的文本"}]} corresponding to the input one by one, and do not output any other content.	你是影片逐字稿校對器。輸入的每一項是一段已按自然停頓組織的連續講解。\n修正明顯的語音識別錯誤（錯別字、同音字、專有名詞拼寫），刪除不影響原意的冗餘口頭填充，\n並修復不自然的斷句和標點，使文字自然、書面化。不得概括、擴寫、翻譯、增刪實質內容或改變原意；\n保持原語言。若某條內容僅由語氣詞、口頭禪或無實義片段構成（如單獨的"啊"、"對吧"），\n該條的 text 返回空字串 ""（系統會刪除該條）；有實質內容的條目不得刪除。\n輸出與輸入逐條對應的 JSON 物件 {"segments":[{"id":序號,"text":"校對後的文字"}]}，不要輸出任何其他內容。	あなたは動画の逐語校正者です。入力された各項目は、自然なポーズで構成された連続した説明です。 \n明らかな音声認識エラー (タイプミス、同音異義語、固有名詞の綴り) を修正し、元の意味に影響を与えない冗長な言葉の補充を削除し、\n不自然な文の区切りや句読点を修復してテキストを自然で書かれたものにします。実質的な内容を要約、拡大、翻訳、追加または削除したり、元の意味を変更したりしないでください。\n元の言語を維持してください。コンテンツの一部が、実質的な意味を持たないモーダル助詞、キャッチフレーズ、または断片 (単一の「ああ」、「そうですね」など) のみで構成されている場合、\n記事のテキストは空の文字列「」を返します (システムは記事を削除します)。実質的な内容を含むエントリは削除してはなりません。 \n入力に対応するJSONオブジェクト{"segments":[{"id":序号,"text":"校对后的文本"}]}を一つずつ出力します。それ以外の内容は出力しないでください。
 使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。 / For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.	使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。	For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.	使用 Bilibili 影片時，推薦先執行 course2md --login bilibili 掃碼登入，可下載賬號許可權範圍內更高畫質晰度的影片。	Bilibili 動画を使用する場合は、course2md --login bilibili を実行し、QR コードをスキャンしてログインすることをお勧めします。アカウント権限の範囲内で、より高解像度の動画をダウンロードできます。
 使用你的 ChatGPT 订阅	使用你的 ChatGPT 订阅	Use your ChatGPT subscription	使用你的 ChatGPT 訂閱	ChatGPT サブスクリプションを使用する
-使用所选后端识别，不查字幕 / Transcribe with the selected backend; skip subtitles	使用所选后端识别，不查字幕	Transcribe with the selected backend; skip subtitles	使用所選後端識別，不查字幕	字幕をチェックせずに選択したバックエンド認識を使用します
 使用标准规则	使用标准规则	Use standard rules	使用標準規則	標準ルールを使用する
 使用法：	使用法：	Usage:	使用法：	使用法:
-使用环境变量 {name}	使用环境变量 {name}	Use environment variable {name}	使用環境變數 {name}	環境変数 {name} を使用する
 使用环境变量 {}	使用环境变量 {}	Use environment variable {}	使用環境變數 {}	環境変数 {} を使用する
 使用自定义校对规则	使用自定义校对规则	Use custom proofing rules	使用自定義校對規則	カスタム校正ルールを使用する
 使用语音服务识别	使用语音服务识别	Use speech service recognition	使用語音服務識別	音声サービス認識を使用する
@@ -434,9 +330,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	The save location has changed during confirmation and has not yet been re-associated. Please recheck this location.	儲存位置在確認期間已經變化，尚未重新關聯。請重新檢查這個位置。	保存場所は確認中に変更されており、まだ再関連付けされていません。この場所を再確認してください。
 保存位置在读取期间已经变化，请重新检查	保存位置在读取期间已经变化，请重新检查	The save location has changed during reading, please check again	儲存位置在讀取期間已經變化，請重新檢查	読み込み中に保存場所が変更されました。もう一度確認してください。
 保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	The save location corresponds to other note libraries. Please restore the original location or re-register in the storage settings.	儲存位置對應其他筆記庫，請恢復原位置或在儲存設定中重新登記	保存場所は他のノートライブラリに対応します。元の場所に戻すか、ストレージ設定で再登録してください。
-保存位置尚未准备好：{error:#}。可以在设置的存储中选择其他位置。	保存位置尚未准备好：{error:#}。可以在设置的存储中选择其他位置。	The save location is not ready yet: {error:#}. You can choose a different location in the settings' storage.	儲存位置尚未準備好：{error:#}。可以在設定的儲存中選擇其他位置。	保存場所はまだ準備ができていません: {error:#}。設定のストレージ内の別の場所を選択できます。
 保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	The save location is not ready yet: {}. You can choose a different location in the settings' storage.	儲存位置尚未準備好：{}。可以在設定的儲存中選擇其他位置。	保存場所はまだ準備ができていません: {}。設定のストレージ内の別の場所を選択できます。
-保存位置尚未更新：{error:#}	保存位置尚未更新：{error:#}	The save location has not been updated yet: {error:#}	儲存位置尚未更新：{error:#}	保存場所はまだ更新されていません: {error:#}
 保存位置尚未更新：{}	保存位置尚未更新：{}	The save location has not been updated yet: {}	儲存位置尚未更新：{}	保存場所はまだ更新されていません: {}
 保存位置已不在笔记库中，请选择保存位置	保存位置已不在笔记库中，请选择保存位置	The save location is no longer in the note library, please select a save location.	儲存位置已不在筆記庫中，請選擇儲存位置	保存場所はノート ライブラリにありません。保存場所を選択してください。
 保存位置暂时不可用	保存位置暂时不可用	The save location is temporarily unavailable	儲存位置暫時不可用	保存場所は一時的に利用できません
@@ -449,14 +343,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保存位置需要重新关联	保存位置需要重新关联	Save location needs to be re-associated	儲存位置需要重新關聯	保存場所を再度関連付ける必要があります
 保存位置：{}\n\n	保存位置：{}\n\n	Save location: {}\n\n	儲存位置：{}\n\n	保存先：{}\n\n
 保存到	保存到	Save to	儲存到	保存先
-保存到文件夹：{label}	保存到文件夹：{label}	Save to folder: {label}	儲存到資料夾：{label}	フォルダーに保存: {label}
-保存到：{label}	保存到：{label}	Save to: {label}	儲存到：{label}	保存先: {label}
 保存名称	保存名称	Save name	儲存名稱	名前を保存
 保存并继续	保存并继续	Save and continue	儲存並繼續	保存して続行
 保存并补做	保存并补做	Save and redo	儲存並補做	保存してやり直す
 保留下载的视频	保留下载的视频	Keep downloaded videos	保留下載的影片	ダウンロードした動画を保存しておく
 保留下载的视频 / Keep the downloaded video	保留下载的视频	Keep the downloaded video	保留下載的影片	ダウンロードした動画を保存しておく
-保留原文件并重置此组	保留原文件并重置此组	Keep original files and reset this group	保留原檔案並重置此組	元のファイルを保持し、このグループをリセットします
 保留原文件并重置这些设置	保留原文件并重置这些设置	Keep the original file and reset these settings	保留原檔案並重設這些設定	元のファイルを保持してこれらの設定をリセット
 保留原视频	保留原视频	Keep original video	保留原影片	元の動画を保存する
 保留原默认	保留原默认	Keep the original default	保留原預設	元のデフォルトのままにする
@@ -464,7 +355,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保留并继续	保留并继续	Keep and continue	保留並繼續	保持して続行
 保留文件夹	保留文件夹	Keep folder	保留資料夾	フォルダーを残す
 保留服务	保留服务	Keep service	保留服務	サービスを残す
-保留的视频	保留的视频	Kept video	保留的影片	保存した動画
 保留的视频已不在	保留的视频已不在	The reserved video is no longer available	保留的影片已不在	予約した動画は利用できなくなりました
 修复 AI 服务并补做	修复 AI 服务并补做	Fix AI service and make up for it	修復 AI 服務並補做	AIサービスを修正して補う
 修复方式	修复方式	How to fix it	修復方式	修正方法
@@ -472,7 +362,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 修改接口不能改变此服务的用途，请添加另一用途的服务	修改接口不能改变此服务的用途，请添加另一用途的服务	Modifying the interface cannot change the purpose of this service. Please add a service with another purpose.	修改介面不能改變此服務的用途，請新增另一用途的服務	インターフェイスを変更しても、このサービスの目的を変更することはできません。別の目的のサービスを追加してください。
 修改暂时无法保存，请重试	修改暂时无法保存，请重试	The modification cannot be saved temporarily, please try again	修改暫時無法儲存，請重試	変更を一時的に保存できません。もう一度お試しください。
 停止中	停止中	Stopping	停止中	停止中
-停止新请求的指令尚未保存：{error:#}	停止新请求的指令尚未保存：{error:#}	The instruction to stop new requests has not been saved: {error:#}	停止新請求的指令尚未儲存：{error:#}	新しいリクエストを停止する命令が保存されていません: {error:#}
 停止新请求的指令尚未保存：{}	停止新请求的指令尚未保存：{}	The instruction to stop new requests has not been saved: {}	停止新請求的指令尚未儲存：{}	新しいリクエストを停止する命令が保存されていません: {}
 停止检查	停止检查	Stop checking	停止檢查	チェックをやめる
 先粘贴视频链接	先粘贴视频链接	Paste a video link first	請先貼上影片連結	先に動画リンクを貼り付けてください
@@ -482,7 +371,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 全部	全部	All	全部	すべて
 全部参数 / All options: course2md --help	全部参数	All options: course2md --help	全部引數	すべてのパラメータ
 全部笔记	全部笔记	All notes	全部筆記	すべてのノート
-共 {} 项	共 {} 项	Total {} items	共 {} 項	合計 {} 個のアイテム
 关于	关于	About	關於	について
 关于 course2md	关于 course2md	About course2md	關於 course2md	course2mdについて
 关闭	关闭	Close	關閉	閉じる
@@ -494,11 +382,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 关闭过渡动画和进度条的流动效果	关闭过渡动画和进度条的流动效果	Turn off the transition animation and flow effect of the progress bar	關閉過渡動畫和進度條的流動效果	プログレスバーのトランジションアニメーションとフロー効果をオフにする
 关闭这份笔记的导出提示	关闭这份笔记的导出提示	Turn off the export prompt for this note	關閉這份筆記的匯出提示	このノートのエクスポート プロンプトをオフにする
 其中的笔记会移到未分类	其中的笔记会移到未分类	The notes there will be moved to Uncategorized	其中的筆記會移到未分類	そこにあるノートは未分類に移動されます
-其他版本暂时无法读取：{error}	其他版本暂时无法读取：{error}	Other versions are temporarily unreadable: {error}	其他版本暫時無法讀取：{error}	他のバージョンは一時的に読み取れません: {error}
 其他版本暂时无法读取：{}	其他版本暂时无法读取：{}	Other versions are temporarily unreadable: {}	其他版本暫時無法讀取：{}	他のバージョンは一時的に読み取れません: {}
 内容仍在处理中，请停止后重新定位	内容仍在处理中，请停止后重新定位	The content is still being processed, please stop and then relocate.	內容仍在處理中，請停止後重新定位	コンテンツはまだ処理中です。停止してから移動してください。
 内嵌字幕无法读取	内嵌字幕无法读取	Embedded subtitles cannot be read	內嵌字幕無法讀取	埋め込まれた字幕が読めない
-内嵌字幕（轨道 {stream_index}）	内嵌字幕（轨道 {stream_index}）	Embedded subtitles (track {stream_index})	內嵌字幕（軌道 {stream_index}）	埋め込み字幕 (トラック {stream_index})
 内嵌字幕（轨道 {}）	内嵌字幕（轨道 {}）	Embedded subtitles (track {})	內嵌字幕（軌道 {}）	埋め込み字幕 (トラック {})
 内置图片为蓝色卡片，校对后应将原文的 red 改为 blue	内置图片为蓝色卡片，校对后应将原文的 red 改为 blue	The built-in picture is a blue card. After proofreading, the red in the original text should be changed to blue.	內建圖片為藍色卡片，校對後應將原文的 red 改為 blue	内蔵ピクチャは青いカードです。校正後、原文の赤色を青色に変更する必要があります。
 内置音频：The blue notebook contains seven pages.；回应未保留其中的关键信息	内置音频：The blue notebook contains seven pages.；回应未保留其中的关键信息	Built-in audio: The blue notebook contains seven pages.; Response does not retain key information within it	內建音訊：The blue notebook contains seven pages.；回應未保留其中的關鍵資訊	内蔵オーディオ: 青いノートには 7 ページが含まれています。応答内に重要な情報が保持されない
@@ -509,19 +395,16 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 准备失败	准备失败	Preparation failed	準備失敗	失敗する準備をする
 准备就绪	准备就绪	Ready	準備就緒	準備完了
 准备已暂停	准备已暂停	Preparation is paused	準備已暫停	準備は一時停止中です
-准备已结束	准备已结束	Preparation is over	準備已結束	準備は終わりました
 准备日志	准备日志	Prepare log	準備日誌	ログの準備
 准备未完成	准备未完成	Preparation not completed	準備未完成	準備が完了していません
 准备未完成，原因见模型详情	准备未完成，原因见模型详情	Preparation is not complete. Please see the model details for the reason.	準備未完成，原因見模型詳情	準備が完了していません。その理由はモデル詳細をご覧ください。
 准备识别模型	准备识别模型	Prepare recognition model	準備識別模型	認識モデルの準備
 减少动态效果	减少动态效果	Reduce dynamic effects	減少動態效果	動的効果を軽減する
 凭据	凭据	Credentials	憑據	資格情報
-凭据尚未保存：{error:#}	凭据尚未保存：{error:#}	Credentials not saved yet: {error:#}	憑據尚未儲存：{error:#}	資格情報がまだ保存されていません: {error:#}
 凭据尚未保存：{}	凭据尚未保存：{}	Credentials not saved yet: {}	憑據尚未儲存：{}	資格情報がまだ保存されていません: {}
 凭据引用无效，请为此服务重新保存 API Key	凭据引用无效，请为此服务重新保存 API Key	Invalid credential reference, please resave the API Key for this service	憑據引用無效，請為此服務重新儲存 API Key	認証情報の参照が無効です。このサービスの API キーを再保存してください。
 凭据读取意外中断	凭据读取意外中断	Credential reading interrupted unexpectedly	憑據讀取意外中斷	資格情報の読み取りが予期せず中断されました
 分享内容中有多个链接，请选择一个视频	分享内容中有多个链接，请选择一个视频	There are multiple links in the shared content, please select a video	分享內容中有多個連結，請選擇一個影片	共有コンテンツには複数のリンクがあります。動画を選択してください
-分组展开状态尚未保存：{error:#}	分组展开状态尚未保存：{error:#}	Group expansion status has not been saved: {error:#}	分組展開狀態尚未儲存：{error:#}	グループ展開ステータスが保存されていません: {error:#}
 分组展开状态尚未保存：{}	分组展开状态尚未保存：{}	Group expansion status has not been saved: {}	分組展開狀態尚未儲存：{}	グループ展開ステータスが保存されていません: {}
 分集信息线程异常	分集信息线程异常	Diversity information thread exception	分集資訊執行緒異常	多様性情報スレッドの例外
 分集信息补充失败：{error:#}	分集信息补充失败：{error:#}	Failed to supplement episode information: {error:#}	分集資訊補充失敗：{error:#}	エピソード情報を補足できませんでした: {error:#}
@@ -530,7 +413,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 创建文件夹	创建文件夹	Create folder	建立資料夾	フォルダーの作成
 创建目录 {} / Failed to create directory {}	创建目录 {}	Failed to create directory {}	建立目錄 {}	ディレクトリ {} を作成します
 删除	删除	Delete	刪除	削除
-删除「{name}」文件夹？	删除「{name}」文件夹？	Delete the "{name}" folder?	刪除「{name}」資料夾？	「{name}」フォルダを削除しますか?
 删除「{}」文件夹？	删除「{}」文件夹？	Delete the "{}" folder?	刪除「{}」資料夾？	「{}」フォルダを削除しますか?
 删除文件夹	删除文件夹	Delete folder	刪除資料夾	フォルダーを削除
 删除文件夹…	删除文件夹…	Delete folder…	刪除資料夾…	フォルダを削除…
@@ -542,13 +424,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 前往「{}」	前往「{}」	Go to "{}"	前往「{}」	「{}」に移動します
 前往笔记库	前往笔记库	Go to note library	前往筆記庫	ノートライブラリに移動
 副本已核验，保存位置尚未切换	副本已核验，保存位置尚未切换	The copy has been verified, but the save location has not been switched.	副本已核驗，儲存位置尚未切換	コピーは確認されましたが、保存場所は切り替えられていません。
-副本已核验，保存位置尚未切换：{error:#}	副本已核验，保存位置尚未切换：{error:#}	The copy has been verified, but the save location has not been switched: {error:#}	副本已核驗，儲存位置尚未切換：{error:#}	コピーは確認されましたが、保存場所は切り替えられていません: {error:#}
 副本已核验，保存位置尚未切换：{}	副本已核验，保存位置尚未切换：{}	The copy has been verified, but the save location has not been switched: {}	副本已核驗，儲存位置尚未切換：{}	コピーは確認されましたが、保存場所は切り替えられていません: {}
-加载	加载	Load	載入	ロード
 加载识别模型	加载识别模型	Loading speech model	載入語音辨識模型	音声認識モデルを読み込む
 加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)	加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)	Loading recognition model (first use may need to download files) / Loading speech model (first use may download files)	載入識別模型（首次可能需要下載）/ Loading speech model (first use may download files)	認識モデルの読み込み (初回使用にはファイルのダウンロードが必要な場合があります) / 音声モデルの読み込み (初回使用にはファイルのダウンロードが必要な場合があります)
 匹配截图 {} / {}	匹配截图 {}	{}	匹配截圖 {}	スクリーンショット {} と一致
-协议	协议	Protocol	協議	プロトコル
 占用空间	占用空间	Disk usage	佔用空間	使用容量
 占用空间 {}	占用空间 {}	Occupies space {}	佔用空間 {}	スペース {} を占有します
 卡片	卡片	Cards	卡片	カード
@@ -561,12 +440,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 原保存位置	原保存位置	original save location	原儲存位置	元の保存場所
 原始记录备份未完成，尚未重建	原始记录备份未完成，尚未重建	The original record backup is not completed and has not been rebuilt.	原始記錄備份未完成，尚未重建	元のレコードのバックアップは完了しておらず、再構築されていません。
 原字幕无法重新读取	原字幕无法重新读取	The original subtitles cannot be reread	原字幕無法重新讀取	オリジナルの字幕は再読できません
-原文件已保留，此组设置已重置	原文件已保留，此组设置已重置	The original file has been retained and this group of settings has been reset.	原檔案已保留，此組設定已重置	元のファイルは保持され、この設定グループはリセットされました。
 原文件已保留，这些设置已重置	原文件已保留，这些设置已重置	The original file was kept; these settings were reset.	原檔案已保留，這些設定已重設	元のファイルは保持され、これらの設定はリセットされました
 原文进 raw 溯源	原文进 raw 溯源	Original text into raw traceability	原文進 raw 溯源	元のテキストを生のトレーサビリティに変換
 原来选择的字幕无法读取，请重新选择文字来源	原来选择的字幕无法读取，请重新选择文字来源	The originally selected subtitles cannot be read, please select a new text source.	原來選擇的字幕無法讀取，請重新選擇文字來源	元々選択されていた字幕は読めません。新しいテキスト ソースを選択してください。
 原生运行于 Apple 芯片	原生运行于 Apple 芯片	Runs natively on Apple silicon	原生執行於 Apple 晶片	Appleシリコン上でネイティブに動作
-原笔记已关闭；服务已保存，但未用于其他笔记	原笔记已关闭；服务已保存，但未用于其他笔记	The original note is closed; the service is saved but not used for other notes	原筆記已關閉；服務已儲存，但未用於其他筆記	元のノートは閉じられています。サービスは保存されますが、他のノートには使用されません
 原笔记库在上次移动后发生变化，尚未切换位置。请保留这份副本，并重新选择空文件夹移动。	原笔记库在上次移动后发生变化，尚未切换位置。请保留这份副本，并重新选择空文件夹移动。	The original note library has changed since the last move and has not yet switched locations. Please keep this copy and select an empty folder again to move.	原筆記庫在上次移動後發生變化，尚未切換位置。請保留這份副本，並重新選擇空資料夾移動。	元のノート ライブラリは最後の移動以降に変更されており、まだ場所は切り替わっていません。このコピーを保管し、空のフォルダーを再度選択して移動してください。
 原笔记库在复制期间发生变化，尚未切换保存位置	原笔记库在复制期间发生变化，尚未切换保存位置	The original note library changed during copying, and the save location has not been switched yet.	原筆記庫在複製期間發生變化，尚未切換儲存位置	コピー中に元のノートライブラリが変更され、保存場所はまだ切り替えられていません。
 原笔记库无法访问，请重新连接这个保存位置	原笔记库无法访问，请重新连接这个保存位置	The original note library cannot be accessed, please reconnect to this save location.	原筆記庫無法訪問，請重新連線這個儲存位置	元のノート ライブラリにアクセスできません。この保存場所に再接続してください。
@@ -582,7 +459,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 参数：	参数：	Parameters:	引數：	パラメータ:
 參數：	參數：	Parameters:	引數：	パラメータ:
 发布工作进程中断 / Publish worker interrupted	发布工作进程中断	Publish worker interrupted	釋出工作程序中斷	パブリッシングワーカープロセスが中断されました
-发布时间	发布时间	Published	發布時間	公開日
 发现 {} 项必需依赖或配置问题；请按上方提示修复	发现 {} 项必需依赖或配置问题；请按上方提示修复	Fix the {} required-tool or configuration issues listed above	發現 {} 項必需依賴或設定問題；請依上方提示修復	上記の必須ツールまたは設定の問題 {} 件を修正してください
 发送反馈	发送反馈	Send feedback	傳送反饋	フィードバックを送信する
 发送文字和截图 / Send text and slide images	发送文字和截图	Send text and slide images	傳送文字和截圖	テキストとスクリーンショットを送信する
@@ -597,8 +473,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 取消重新关联	取消重新关联	Cancel re-association	取消重新關聯	再関連付けをキャンセルする
 取消重新定位	取消重新定位	Cancel retargeting	取消重新定位	リターゲティングのキャンセル
 另存一份摘要（Markdown）到此目录 / Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目录	Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目錄	概要 (Markdown) をこのディレクトリに保存します
-另有 {unavailable_entries} 个条目无法确认	另有 {unavailable_entries} 个条目无法确认	There are {unavailable_entries} more entries that cannot be confirmed	另有 {unavailable_entries} 個條目無法確認	確認できないエントリがさらに {unavailable_entries} 件あります
-另有 {unreadable} 份笔记无法读取。\n	另有 {unreadable} 份笔记无法读取。\n	Another {unreadable} notes could not be read.	另有 {unreadable} 份筆記無法讀取。\n	別の {unreadable} ノートを読み取ることができませんでした。 \n
 另有 {} 个位置未纳入搜索	另有 {} 个位置未纳入搜索	There are {} locations not included in the search	另有 {} 個位置未納入搜尋	検索に含まれていない{}の場所があります
 另有 {} 个条目无法确认	另有 {} 个条目无法确认	There are {} more entries that cannot be confirmed	另有 {} 個條目無法確認	確認できないエントリがさらに {} 件あります
 另有 {} 份笔记无法读取。\n	另有 {} 份笔记无法读取。\n	{} more notes could not be read.\n	另有 {} 份筆記無法讀取。\n	{} 件のノートを読み込めませんでした。\n
@@ -615,7 +489,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 同时导出	同时导出	Also export	同時匯出	同時に書き出す
 同时清除云端语音识别密钥 / Also clear the cloud speech API key	同时清除云端语音识别密钥	Also clear the cloud speech API key	同時清除雲端語音識別金鑰	クラウド音声認識キーもクリア
 名称	名称	Name	名稱	名前
-名称尚未恢复：{error:#}	名称尚未恢复：{error:#}	Name not yet restored: {error:#}	名稱尚未恢復：{error:#}	名前はまだ復元されていません: {error:#}
 名称尚未恢复：{}	名称尚未恢复：{}	Name not yet restored: {}	名稱尚未恢復：{}	名前はまだ復元されていません: {}
 后台文件校验中断 / Background file check interrupted	后台文件校验中断	Background file check interrupted	後臺檔案校驗中斷	バックグラウンドでのファイル検証が中断されました
 后续任务记录缺失，请先恢复任务记录	后续任务记录缺失，请先恢复任务记录	Subsequent task records are missing, please restore the task records first	後續任務記錄缺失，請先恢復任務記錄	後続のタスク レコードが欠落しています。最初にタスク レコードを復元してください。
@@ -632,7 +505,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 嗯	嗯	Yeah	嗯	そうだね
 噢	噢	Oh	噢	ああ
 在 PowerShell 运行	在 PowerShell 运行	Run in PowerShell	在 PowerShell 執行	PowerShell で実行する
-在原视频打开这个位置	在原视频打开这个位置	Open this location in the original video	在原影片開啟這個位置	元の動画のこの場所を開きます
 在开头生成摘要	在开头生成摘要	Add a summary at the top	在開頭產生摘要	冒頭に要約を追加
 在笔记中查看	在笔记中查看	View in notes	在筆記中檢視	ノートで見る
 在线语音服务	在线语音服务	Online speech service	線上語音服務	オンライン音声サービス
@@ -646,7 +518,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 备份与核验记录不一致，未清理任何文件	备份与核验记录不一致，未清理任何文件	The backup and verification records are inconsistent and no files have been cleaned.	備份與核驗記錄不一致，未清理任何檔案	バックアップと検証のレコードは矛盾しており、ファイルはクリーンアップされていません。
 备份已删除，但列表尚未更新，请重启应用后检查	备份已删除，但列表尚未更新，请重启应用后检查	The backup has been deleted, but the list has not been updated, please restart the application and check	備份已刪除，但列表尚未更新，請重啟應用後檢查	バックアップは削除されましたが、リストは更新されていません。アプリケーションを再起動して確認してください。
 备份并重建任务记录	备份并重建任务记录	Back up and rebuild task records	備份並重建任務記錄	バックアップしてタスク記録を再構築
-复制	复制	Copy	複製	コピー
 复制与导出	复制与导出	Copy and export	複製與匯出	コピーしてエクスポートする
 复制内容未通过校验，尚未切换笔记库：{}	复制内容未通过校验，尚未切换笔记库：{}	The copied content failed the verification and the note library has not been switched yet: {}	複製內容未透過校驗，尚未切換筆記庫：{}	コピーされたコンテンツは検証に失敗し、ノート ライブラリはまだ切り替えられていません: {}
 复制安装命令	复制安装命令	Copy install command	複製安裝指令	インストールコマンドをコピー
@@ -667,7 +538,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 字幕缓存路径无法编码	字幕缓存路径无法编码	Subtitle cache path cannot be encoded	字幕快取路徑無法編碼	字幕キャッシュパスをエンコードできません
 字幕语言	字幕语言	Subtitle language	字幕語言	字幕言語
 字幕读取意外中断	字幕读取意外中断	Subtitle reading unexpectedly interrupted	字幕讀取意外中斷	字幕の読み取りが予期せず中断されました
-字幕还未确认。请读取字幕，或明确选择识别视频声音。	字幕还未确认。请读取字幕，或明确选择识别视频声音。	Subtitles have not yet been confirmed. Please read subtitles, or explicitly choose to recognize video sounds.	字幕還未確認。請讀取字幕，或明確選擇識別影片聲音。	字幕はまだ確認されていません。 Please read subtitles, or explicitly choose to recognize video sounds.
 字幕还未确认。请读取字幕，或明确选择语音识别。	字幕还未确认。请读取字幕，或明确选择语音识别。	Subtitles are not confirmed. Read them, or explicitly choose speech recognition.	字幕尚未確認。請讀取字幕，或明確選擇語音辨識。	字幕が未確認です。字幕を読み取るか、音声認識を明示的に選択してください。
 字幕还没读取完成	字幕还没读取完成	Subtitles are still loading	字幕尚未讀取完成	字幕を読み込み中です
 字幕还没读取完成，请重新读取，或改用语音识别	字幕还没读取完成，请重新读取，或改用语音识别	The subtitles have not been read yet. Please read them again or use speech recognition instead.	字幕還沒讀取完成，請重新讀取，或改用語音識別	字幕はまだ読んでいません。 Please read them again or use speech recognition instead.
@@ -675,20 +545,13 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 字幕链接暂时无法访问，请重新读取字幕，或选择其他文字来源。	字幕链接暂时无法访问，请重新读取字幕，或选择其他文字来源。	The subtitle link is temporarily inaccessible. Please read the subtitles again or choose another text source.	字幕連結暫時無法訪問，請重新讀取字幕，或選擇其他文字來源。	字幕リンクが一時的にアクセスできなくなりました。 Please read the subtitles again or choose another text source.
 字幕需要登录，或改用语音识别	字幕需要登录，或改用语音识别	Subtitles require logging in or using voice recognition instead	字幕需要登入，或改用語音識別	Subtitles require logging in or using voice recognition instead
 存储	存储	Storage	儲存	ストレージ
-存储位置尚未添加：{error:#}	存储位置尚未添加：{error:#}	Storage location not added yet: {error:#}	儲存位置尚未新增：{error:#}	保管場所がまだ追加されていません: {error:#}
-存储位置尚未添加：{}	存储位置尚未添加：{}	Storage location not added yet: {}	儲存位置尚未新增：{}	保管場所がまだ追加されていません: {}
 安装 llama.cpp，确保可在终端直接运行 llama-server，然后重新打开应用	安装 llama.cpp，确保可在终端直接运行 llama-server，然后重新打开应用	Install llama.cpp, make sure you can run llama-server directly in the terminal, and then reopen the application	安裝 llama.cpp，確保可在終端直接執行 llama-server，然後重新開啟應用	llama.cpp をインストールし、ターミナルで llama-server を直接実行できることを確認してから、アプリケーションを再度開きます
 完成	完成	Done	完成	完了
-完成状态尚未保存：{error:#}。已发布的笔记仍保留。	完成状态尚未保存：{error:#}。已发布的笔记仍保留。	Completion status has not been saved: {error:#}. Published notes remain.	完成狀態尚未儲存：{error:#}。已釋出的筆記仍保留。	完了ステータスは保存されていません: {error:#}。公開されたノートは残ります。
 完成状态尚未保存：{}。已发布的笔记仍保留。	完成状态尚未保存：{}。已发布的笔记仍保留。	Completion status has not been saved: {}. Published notes remain.	完成狀態尚未儲存：{}。已釋出的筆記仍保留。	完了ステータスは保存されていません: {}。公開されたノートは残ります。
 完整的 safetensors 权重文件 / a complete safetensors weight file	完整的 safetensors 权重文件	a complete safetensors weight file	完整的 safetensors 權重檔案	完全なセーフテンサー重量ファイル
-实际地址：{endpoint}	实际地址：{endpoint}	Actual address: {endpoint}	實際地址：{endpoint}	実際のアドレス: {endpoint}
 实际地址：{}	实际地址：{}	Actual address: {}	實際地址：{}	実際のアドレス: {}
-密钥来源：{source}	密钥来源：{source}	Key source: {source}	金鑰來源：{source}	キーソース: {source}
 密钥来源：{}	密钥来源：{}	Key source: {}	金鑰來源：{}	キーソース: {}
-导入	导入	Import	匯入	インポート
 导入 Codex 登录	导入 Codex 登录	Import Codex login	匯入 Codex 登入	Codexのログインをインポートする
-导入 Codex 登录未完成：{error:#}	导入 Codex 登录未完成：{error:#}	Import Codex login incomplete: {error:#}	匯入 Codex 登入未完成：{error:#}	インポート Codex ログインが不完全です: {error:#}
 导入 Codex 登录未完成：{}	导入 Codex 登录未完成：{}	Import Codex login incomplete: {}	匯入 Codex 登入未完成：{}	インポート Codex ログインが不完全です: {}
 导入视频	导入视频	Import video	匯入影片	動画をインポート
 导出	导出	Export	匯出	書き出し
@@ -699,16 +562,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 导出位置无效	导出位置无效	Invalid export location	匯出位置無效	エクスポート場所が無効です
 导出文件	导出文件	Export file	匯出檔案	エクスポートファイル
 导出文件已移动或无法读取，可以重新导出	导出文件已移动或无法读取，可以重新导出	The export file has been moved or cannot be read. It can be re-exported.	匯出檔案已移動或無法讀取，可以重新匯出	エクスポート ファイルが移動されているか、読み取れません。再輸出も可能です。
-导出文件已移动或无法读取，可打开笔记后从“导出”菜单重新保存。	导出文件已移动或无法读取，可打开笔记后从“导出”菜单重新保存。	The exported file has been moved or cannot be read. You can open the note and resave it from the "Export" menu.	匯出檔案已移動或無法讀取，可開啟筆記後從“匯出”選單重新儲存。	エクスポートされたファイルは移動されているか、読み取ることができません。 「エクスポート」メニューからノートを開いて再保存できます。
 导出文件已移动或无法读取，可打开笔记后从「导出」菜单重新保存。	导出文件已移动或无法读取，可打开笔记后从「导出」菜单重新保存。	The export was moved or cannot be read. Open the note and save it again from the Export menu.	匯出檔案已移動或無法讀取，可開啟筆記後從「匯出」選單重新儲存。	書き出したファイルが移動されたか読み取れません。ノートを開いて「書き出し」メニューから再保存してください。
 导出文件已被修改，原文件已保留 / Export file changed; original retained	导出文件已被修改，原文件已保留	Export file changed; original retained	匯出檔案已被修改，原檔案已保留	エクスポートされたファイルは変更されており、元のファイルは保持されています。
 导出时意外中断，请重试	导出时意外中断，请重试	Export interrupted unexpectedly, please try again	匯出時意外中斷，請重試	エクスポートが予期せず中断されました。もう一度お試しください。
 导出未完成	导出未完成	Export not completed	匯出未完成	エクスポートが完了していません
-导出结果记录不完整	导出结果记录不完整	Export result record is incomplete	匯出結果記錄不完整	エクスポート結果レコードが不完全です
 导出结果记录为空	导出结果记录为空	The export result record is empty	匯出結果記錄為空	エクスポート結果レコードが空です
 导出网页文件…	导出网页文件…	Export web page file…	匯出網頁檔案…	Web ページ ファイルをエクスポート…
-封面	封面	Cover	封面	カバー
-封面暂未保存：{error:#}	封面暂未保存：{error:#}	The cover has not been saved yet: {error:#}	封面暫未儲存：{error:#}	表紙はまだ保存されていません: {error:#}
 封面暂未保存：{}	封面暂未保存：{}	The cover has not been saved yet: {}	封面暫未儲存：{}	表紙はまだ保存されていません: {}
 封面格式无法识别	封面格式无法识别	Cover format cannot be recognized	封面格式無法識別	表紙のフォーマットが認識できません
 封面缓存位置无效	封面缓存位置无效	Cover cache location is invalid	封面快取位置無效	カバーのキャッシュの場所が無効です
@@ -718,13 +577,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 将删除 {} 中的旧位置备份。当前笔记库仍保留在 {}。	将删除 {} 中的旧位置备份。当前笔记库仍保留在 {}。	The old location backup in {} will be deleted. The current note library remains at {}.	將刪除 {} 中的舊位置備份。當前筆記庫仍保留在 {}。	{} の古い場所のバックアップは削除されます。現在のノート ライブラリは {} のままです。
 将删除此服务配置，已有笔记不受影响	将删除此服务配置，已有笔记不受影响	This service configuration will be deleted and existing notes will not be affected.	將刪除此服務配置，已有筆記不受影響	このサービス構成は削除され、既存のノートは影響を受けません。
 将排在当前任务之后	将排在当前任务之后	will be queued after the current task	將排在當前任務之後	現在のタスクの後にキューに入れられます
-将识别视频声音	将识别视频声音	Video sound will be recognized	將識別影片聲音	動画音声が認識されます
 将课程视频转换为图文笔记 / Turn course videos into illustrated notes	将课程视频转换为图文笔记 / Turn course videos into illustrated notes	Turn course videos into illustrated notes	將課程影片轉換為圖文筆記	コース動画を図解ノートに変換
 尚未删除此服务	尚未删除此服务	This service has not been deleted yet	尚未刪除此服務	このサービスは削除されていません
-尚未应用	尚未应用	Not applied yet	尚未應用	まだ適用されていません
-尚未打开任务调整选项：{error:#}	尚未打开任务调整选项：{error:#}	Task adjustment option has not been turned on: {error:#}	尚未開啟任務調整選項：{error:#}	タスク調整オプションがオンになっていません: {error:#}
 尚未打开任务调整选项：{}	尚未打开任务调整选项：{}	Task adjustment option has not been turned on: {}	尚未開啟任務調整選項：{}	タスク調整オプションがオンになっていません: {}
-尚未放弃这次移动：{error:#}	尚未放弃这次移动：{error:#}	Not given up on this move yet: {error:#}	尚未放棄這次移動：{error:#}	まだこの動きを諦めていません: {error:#}
 尚未放弃这次移动：{}	尚未放弃这次移动：{}	Not given up on this move yet: {}	尚未放棄這次移動：{}	まだこの動きを諦めていません: {}
 尚未检查字幕，请重新读取视频信息 / Subtitles not checked yet; probe the video info again	尚未检查字幕，请重新读取视频信息	Subtitles not checked yet; probe the video info again	尚未檢查字幕，請重新讀取影片資訊	字幕はまだチェックされていません。動画情報をもう一度読んでください。
 尚未检查识别模型	尚未检查识别模型	Recognition model has not been checked yet	尚未檢查識別模型	認識モデルはまだチェックされていません
@@ -735,20 +590,16 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 尚未登录 Codex。/ No Codex login saved.	尚未登录 Codex。/ No Codex login saved.	Not logged into Codex yet. / No Codex login saved.	尚未登入 Codex。/ No Codex login saved.	まだ Codex にログインしていません。 / Codex ログインは保存されません。
 尚未设置	尚未设置	Not set yet	尚未設定	まだ設定されていません
 尚未选择文字来源	尚未选择文字来源	No text source selected yet	尚未選擇文字來源	テキストソースがまだ選択されていません
-尚未重新关联：{error:#}	尚未重新关联：{error:#}	Not reassociated yet: {error:#}	尚未重新關聯：{error:#}	まだ再関連付けされていません: {error:#}
 尚未重新关联：{}	尚未重新关联：{}	Not reassociated yet: {}	尚未重新關聯：{}	まだ再関連付けされていません: {}
-尚未重新定位：{error:#}	尚未重新定位：{error:#}	Not yet retargeted: {error:#}	尚未重新定位：{error:#}	まだリターゲティングされていません: {error:#}
 尚未重新定位：{}	尚未重新定位：{}	Not yet retargeted: {}	尚未重新定位：{}	まだリターゲティングされていません: {}
 尚未验证	尚未验证	Not verified yet	尚未驗證	まだ検証されていません
 就绪 / Ready	就绪	Ready	就緒	準備完了
 展开	展开	Expand	展開	拡大する
-工作台	工作台	Workbench	工作臺	ワークベンチ
 工作目录不能位于已发布版本内 / Work directory overlaps published versions	工作目录不能位于已发布版本内	Work directory overlaps published versions	工作目錄不能位於已釋出版本內	作業ディレクトリを公開されたビルド内に置くことはできません
 已下载	已下载	Downloaded	已下載	ダウンロード済み
 已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	Inputs and tasks have been restored from backup. Unable to confirm the last operation, the unfinished task has been suspended.	已從備份恢復輸入和任務。無法確認最後一次操作，未完成任務已暫停。	入力とタスクはバックアップから復元されました。最後の操作を確認できず、未完了のタスクは中断されました。
 已使用环境变量中的密钥，点击保存后生效	已使用环境变量中的密钥，点击保存后生效	The key in the environment variable has been used and will take effect after clicking Save.	已使用環境變數中的金鑰，點選儲存後生效	環境変数のキーが使用されており、[保存] をクリックすると有効になります。
 已保存	已保存	Saved	已儲存	保存済み
-已保存 {current} / {total} 张截图	已保存 {current} / {total} 张截图	{current} / {total} screenshots saved	已儲存 {current} / {total} 張截圖	{current} / {total} のスクリーンショットが保存されました
 已保存 {} / {} 张截图	已保存 {} / {} 张截图	{} / {} screenshots saved	已儲存 {} / {} 張截圖	{} / {} のスクリーンショットが保存されました
 已保存密钥，留空则保留	已保存密钥，留空则保留	Key has been saved, leave blank to retain	已儲存金鑰，留空則保留	キーは保存されました。保持するには空白のままにしておきます
 已保存登录信息	已保存登录信息	Login information saved	已儲存登入資訊	ログイン情報が保存されました
@@ -760,13 +611,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已保存的服务请求记录已损坏；为避免重复扣费，没有重新发送 / A saved service request record is damaged; nothing was resent to avoid duplicate charges	已保存的服务请求记录已损坏；为避免重复扣费，没有重新发送	A saved service request record is damaged; nothing was resent to avoid duplicate charges	已儲存的服務請求記錄已損壞；為避免重複扣費，沒有重新傳送	保存されたサービス リクエスト レコードが破損しています。繰り返しの控除を避けるため、再送信されません。
 已保存的视频无法校验；需要重新下载才能继续 / Cached video cannot be verified; downloading is required	已保存的视频无法校验；需要重新下载才能继续	Cached video cannot be verified; downloading is required	已儲存的影片無法校驗；需要重新下載才能繼續	保存された動画は検証できません。続行するには、再度ダウンロードする必要があります。
 已保存进度，等待下次继续 / Progress saved; waiting to continue	已保存进度，等待下次继续	Progress saved; waiting to continue	已儲存進度，等待下次繼續	進行状況が保存されました。次回の続行を待っています
-已保留材料，结果记录尚未确认：{error:#}	已保留材料，结果记录尚未确认：{error:#}	Material withheld, result record not yet confirmed: {error:#}	已保留材料，結果記錄尚未確認：{error:#}	資料は保留され、結果記録はまだ確認されていません: {error:#}
 已保留材料，结果记录尚未确认：{}	已保留材料，结果记录尚未确认：{}	Material withheld, result record not yet confirmed: {}	已保留材料，結果記錄尚未確認：{}	資料は保留され、結果記録はまだ確認されていません: {}
 已保留正文	已保留正文	Text has been retained	已保留正文	テキストは保持されています
 已修改：{}	已修改：{}	Modified: {}	已修改：{}	変更日: {}
 已停止	已停止	Stopped	已停止	停止しました
 已停止使用此服务，但删除尚未完整保存	已停止使用此服务，但删除尚未完整保存	The service is no longer used, but the deletion was not fully saved.	已停止使用此服務，但刪除尚未完整儲存	このサービスの使用を停止しましたが、削除は完全には保存されていません
-已停止派发，删除记录尚未完整保存	已停止派发，删除记录尚未完整保存	Dispatch stopped; the deletion record was not fully saved	已停止派送，刪除記錄尚未完整儲存	配信が停止されており、削除記録が完全に保存されていません。
 已关闭 AI 校对并重置 LLM 配置。/ AI proofreading disabled and LLM settings reset.	已关闭 AI 校对并重置 LLM 配置。/ AI proofreading disabled and LLM settings reset.	AI proofreading turned off and LLM configuration reset. / AI proofreading disabled and LLM settings reset.	已關閉 AI 校對並重置 LLM 配置。/ AI proofreading disabled and LLM settings reset.	AI 校正がオフになり、LLM 構成がリセットされました。 / AI 校正が無効になり、LLM 設定がリセットされます。
 已关闭截图辅助校对（本地模型通常不支持图片输入）。/ Image-assisted proofreading disabled (local models usually do not accept images).	已关闭截图辅助校对（本地模型通常不支持图片输入）。/ Image-assisted proofreading disabled (local models usually do not accept images).	Screenshot-assisted proofing has been turned off (local models usually do not support image input). / Image-assisted proofreading disabled (local models usually do not accept images).	已關閉截圖輔助校對（本地模型通常不支援圖片輸入）。/ Image-assisted proofreading disabled (local models usually do not accept images).	スクリーンショットによる校正はオフになっています (ローカル モデルは通常、画像入力をサポートしていません)。 / 画像支援校正は無効です (ローカル モデルは通常、画像を受け入れません)。
 已准备完成	已准备完成	Ready	已準備完成	準備が完了しました
@@ -795,9 +644,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已完成	已完成	Completed	已完成	完了
 已完成请求缺少保存结果；没有重新发送 / Saved request result is missing	已完成请求缺少保存结果；没有重新发送	Saved request result is missing	已完成請求缺少儲存結果；沒有重新傳送	完了したリクエストに保存結果がありません。再送信されていない
 已定位原视频：{}	已定位原视频：{}	Original video located: {}	已定位原影片：{}	元の動画の場所: {}
-已导入 Codex 登录态并启用 AI 校对（模型 {0}）。/ Codex login imported and AI proofreading enabled (model {0}).	已导入 Codex 登录态并启用 AI 校对（模型 {0}）。/ Codex login imported and AI proofreading enabled (model {0}).	The Codex login state has been imported and AI proofreading enabled (model {0}). / Codex login imported and AI proofreading enabled (model {0}).	已匯入 Codex 登入態並啟用 AI 校對（模型 {0}）。/ Codex login imported and AI proofreading enabled (model {0}).	Codex のログイン状態がインポートされ、AI 校正が有効になりました (モデル {0})。 / Codex ログインがインポートされ、AI 校正が有効になりました (モデル {0})。
 已导入 Codex 登录态并启用 AI 校对（模型 {}）。	已导入 Codex 登录态并启用 AI 校对（模型 {}）。	Codex login imported and AI proofreading enabled (model {}).	已匯入 Codex 登入狀態並啟用 AI 校對（模型 {}）。	Codex のログインをインポートし、AI 校正を有効にしました（モデル {}）。
-已导出 · {name}	已导出 · {name}	Exported · {name}	已匯出 · {name}	エクスポート済み · {name}
 已导出 · {}	已导出 · {}	Exported · {}	已匯出 · {}	エクスポート済み · {}
 已就绪	已就绪	Ready	已就緒	準備完了
 已就绪 / Ready	已就绪	Ready	已就緒	準備完了
@@ -809,26 +656,20 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已找到 {} 张候选截图 / Found {} candidate slides	已找到 {} 张候选截图	Found {} candidate slides	已找到 {} 張候選截圖	{} 候補のスクリーンショットが見つかりました
 已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	The application settings that did not take effect last time have been retrieved. You can try saving again; the original valid options are still used.	已找回上次未生效的應用設定，可以重試儲存；當前仍使用原來的有效選項	前回有効にならなかったアプリケーション設定が取得されました。もう一度保存してみてください。元の有効なオプションは引き続き使用されます。
 已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	The last setting changes that did not take effect have been retrieved. You can try saving again; the original valid options are still used.	已找回上次未生效的設定變更，可以重試儲存；當前仍使用原來的有效選項	有効にならなかった最後の設定変更が取得されました。もう一度保存してみてください。元の有効なオプションは引き続き使用されます。
-已把 {created} 个视频加入队列	已把 {created} 个视频加入队列	{created} videos have been queued	已把 {created} 個影片加入佇列	{created} 動画がキューに追加されました
 已把 {} 个视频加入队列	已把 {} 个视频加入队列	{} videos have been queued	已把 {} 個影片加入佇列	{} 動画がキューに追加されました
 已收到回应，但服务未接受这项测试请求	已收到回应，但服务未接受这项测试请求	Response received, but the test request was not accepted by the service	已收到回應，但服務未接受這項測試請求	応答を受信しましたが、テスト要求はサービスによって受け入れられませんでした
 已暂停	已暂停	Paused	已暫停	一時停止中
 已暂存，点击「应用」后生效	已暂存，点击「应用」后生效	Staged. Applies after you click Apply.	已暫存，點擊「套用」後生效	一時保存しました。「適用」をクリックすると反映されます
 已更新默认服务	已更新默认服务	Default services updated	已更新預設服務	デフォルトのサービスが更新されました
-已有同名文件夹	已有同名文件夹	There is already a folder with the same name	已有同名資料夾	同名のフォルダーが既に存在します
 已有后续处理任务	已有后续处理任务	There are follow-up processing tasks	已有後續處理任務	フォローアップ処理タスクがあります
 已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	既存の抄録の形式が不完全です。元のテキストを保存してください。
 已有相同任务，未重复加入	已有相同任务，未重复加入	The same task already exists and has not been added repeatedly.	已有相同任務，未重複加入	同じタスクがすでに存在しており、繰り返し追加されていません。
-已有相同处理任务：《{title}》（{location}）	已有相同处理任务：《{title}》（{location}）	The same processing task already exists: "{title}" ({location})	已有相同處理任務：《{title}》（{location}）	同じ処理タスクがすでに存在します: "{title}" ({location})
 已有相同处理任务：《{}》（{}）	已有相同处理任务：《{}》（{}）	The same processing task already exists: "{}" ({})	已有相同處理任務：《{}》（{}）	同じ処理タスクがすでに存在します: "{}" ({})
 已有笔记	已有笔记	Already have notes	已有筆記	すでにノートがある
-已有笔记，保存在「{location}」	已有笔记，保存在「{location}」	Already have notes, saved in "{location}"	已有筆記，儲存在「{location}」	すでにノートがあり、「{location}」に保存されています
 已有笔记，保存在「{}」	已有笔记，保存在「{}」	Already have notes, saved in "{}"	已有筆記，儲存在「{}」	すでにノートがあり、「{}」に保存されています
-已检查 {current} 张画面	已检查 {current} 张画面	{current} frames checked	已檢查 {current} 張畫面	{current} フレームがチェックされました
 已检查 {} 张画面	已检查 {} 张画面	{} frames checked	已檢查 {} 張畫面	{} フレームがチェックされました
 已检测到	已检测到	Detected	已檢測到	検出されました
 已检测到设备	已检测到设备	Device detected	已檢測到裝置	デバイスが検出されました
-已添加存储位置	已添加存储位置	Storage location added	已新增儲存位置	保存場所が追加されました
 已添加笔记库位置	已添加笔记库位置	Note library location added	已新增筆記庫位置	ノートライブラリの場所を追加しました
 已清除 Bilibili 本地登录状态。/ Bilibili login removed.	已清除 Bilibili 本地登录状态。/ Bilibili login removed.	Bilibili local login status has been cleared. /Bilibili login removed.	已清除 Bilibili 本地登入狀態。/ Bilibili login removed.	Bilibili ローカル ログイン ステータスがクリアされました。 /Bilibili ログインが削除されました。
 已清除 Codex 登录状态。/ Codex login removed.	已清除 Codex 登录状态。/ Codex login removed.	Codex login status cleared. / Codex login removed.	已清除 Codex 登入狀態。/ Codex login removed.	Codexのログインステータスがクリアされました。 / Codex ログインが削除されました。
@@ -838,14 +679,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已登录 Bilibili	已登录 Bilibili	Login to Bilibili	已登入 Bilibili	Bilibiliにログイン
 已登录 Ollama（{}），模型 {}，配置已保存并启用：{}	已登录 Ollama（{}），模型 {}，配置已保存并启用：{}	Logged in to Ollama ({}), model {}, settings saved and enabled: {}	已登入 Ollama（{}），模型 {}，設定已儲存並啟用：{}	Ollama にログインしました（{}）。モデル {}、設定を保存して有効にしました：{}
 已登录 · {}	已登录 · {}	Login · {}	已登入 · {}	ログイン · {}
-已确认可用	已确认可用	Confirmed available	已確認可用	利用可能であることを確認しました
 已结束	已结束	Ended	已結束	終了
 已缓存（未验证加载）/ Cached (load not verified)	已缓存（未验证加载）/ Cached (load not verified)	Cached (load not verified) / Cached (load not verified)	已快取（未驗證載入）/ Cached (load not verified)	キャッシュ済み (負荷は検証されていない) / キャッシュ済み (負荷は検証されていない)
 已自定义	已自定义	Customized	已自定義	カスタマイズされた
 已设为默认保存位置	已设为默认保存位置	Set as default save location	已設為預設儲存位置	デフォルトの保存場所として設定
 已设置（隐藏） / set (hidden)	已设置（隐藏）	set (hidden)	已設定（隱藏）	設定（非表示）
 已连接	已连接	Connected	已連線	接続済み
-已退出 Codex 登录，默认 AI 服务尚未解除绑定：{error:#}	已退出 Codex 登录，默认 AI 服务尚未解除绑定：{error:#}	Codex login has been logged out, the default AI service has not been unbound: {error:#}	已退出 Codex 登入，預設 AI 服務尚未解除繫結：{error:#}	Codex ログインはログアウトされました。デフォルトの AI サービスはバインド解除されていません: {error:#}
 已退出 Codex 登录，默认 AI 服务尚未解除绑定：{}	已退出 Codex 登录，默认 AI 服务尚未解除绑定：{}	Codex login has been logged out, the default AI service has not been unbound: {}	已退出 Codex 登入，預設 AI 服務尚未解除繫結：{}	Codex ログインはログアウトされました。デフォルトの AI サービスはバインド解除されていません: {}
 已退出 Codex 登录；默认 AI 服务已解除绑定	已退出 Codex 登录；默认 AI 服务已解除绑定	Codex login has been logged out; the default AI service has been unbound	已退出 Codex 登入；預設 AI 服務已解除繫結	Codex ログインがログアウトされました。デフォルトの AI サービスはバインドされていません
 已退出首次使用向导 / Exited the first-run wizard	已退出首次使用向导	Exited the first-run wizard	已退出首次使用嚮導	初回ウィザードを終了しました
@@ -887,18 +726,15 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 当前任务还在处理，请等候当前操作结束。	当前任务还在处理，请等候当前操作结束。	The current task is still being processed, please wait for the current operation to end.	當前任務還在處理，請等候當前操作結束。	現在のタスクはまだ処理中です。現在の操作が終了するまでお待ちください。
 当前尚未设置默认服务	当前尚未设置默认服务	No default service is currently set	當前尚未設定預設服務	現在デフォルトのサービスは設定されていません
 当前平台不适用	当前平台不适用	Not applicable to the current platform	當前平臺不適用	現在のプラットフォームには適用されません
-当前服务暂不可用：{error:#}	当前服务暂不可用：{error:#}	The current service is temporarily unavailable: {error:#}	當前服務暫不可用：{error:#}	現在のサービスは一時的に利用できません: {error:#}
 当前服务暂不可用：{}	当前服务暂不可用：{}	The current service is temporarily unavailable: {}	當前服務暫不可用：{}	現在のサービスは一時的に利用できません: {}
 当前服务编辑已结束，请重新打开服务后再试	当前服务编辑已结束，请重新打开服务后再试	The current service editing has ended, please reopen the service and try again	當前服務編輯已結束，請重新開啟服務後再試	現在のサービスの編集は終了しました。サービスを再度開いて、もう一度お試しください。
 当前未使用	当前未使用	Not currently in use	當前未使用	現在は使用されていません
 当前没有默认语音服务，请返回第一步完成配置。	当前没有默认语音服务，请返回第一步完成配置。	There is currently no default voice service, please return to the first step to complete the configuration.	當前沒有預設語音服務，請返回第一步完成配置。	現在デフォルトの音声サービスはありません。最初のステップに戻って設定を完了してください。
-当前章节：{label}	当前章节：{label}	Current chapter: {label}	當前章節：{label}	現在の章: {label}
 当前章节：{}	当前章节：{}	Current chapter: {}	當前章節：{}	現在の章: {}
 当前笔记信息暂时不可用	当前笔记信息暂时不可用	The current note information is temporarily unavailable	當前筆記資訊暫時不可用	現在のノート情報は一時的に利用できなくなります
 当前系统不支持 Apple 芯片识别，请改用其他方式	当前系统不支持 Apple 芯片识别，请改用其他方式	The current system does not support Apple chip identification, please use other methods.	當前系統不支援 Apple 晶片識別，請改用其他方式	現在のシステムは Apple チップの識別をサポートしていません。他の方法を使用してください。
 当前视频输入暂时不可用	当前视频输入暂时不可用	The current video input is temporarily unavailable	當前影片輸入暫時不可用	現在の動画入力は一時的に利用できません
 当前识别方式不支持所选模型，请选择其他模型	当前识别方式不支持所选模型，请选择其他模型	The current recognition method does not support the selected model, please choose another model	當前識別方式不支援所選模型，請選擇其他模型	現在の認識方法は選択したモデルをサポートしていません。別のモデルを選択してください
-当前输入尚未保存：{error:#}	当前输入尚未保存：{error:#}	The current input has not been saved: {error:#}	當前輸入尚未儲存：{error:#}	現在の入力は保存されていません: {error:#}
 当前输入尚未保存：{}	当前输入尚未保存：{}	The current input has not been saved: {}	當前輸入尚未儲存：{}	現在の入力は保存されていません: {}
 当前输入尚未准备好	当前输入尚未准备好	The current input is not ready yet	當前輸入尚未準備好	現在の入力はまだ準備ができていません
 当前输入记录暂时不可用	当前输入记录暂时不可用	The current input record is temporarily unavailable	當前輸入記錄暫時不可用	現在の入力レコードは一時的に利用できません
@@ -906,7 +742,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 当前还有处理或文件移动在进行，请等候停止后再重建记录。	当前还有处理或文件移动在进行，请等候停止后再重建记录。	There is still processing or file movement in progress, please wait until it stops before rebuilding the record.	當前還有處理或檔案移動在進行，請等候停止後再重建記錄。	まだ処理中またはファイル移動中です。レコードを再構築する前に、処理が停止するまで待ってください。
 当前配置	当前配置	Current configuration	當前配置	現在の構成
 当前默认：{} · v{} · {}	当前默认：{} · v{} · {}	Current default: {} · v{} · {}	當前預設：{} · v{} · {}	現在のデフォルト: {} · v{} · {}
-待下载	待下载	To be downloaded	待下載	ダウンロード予定
 待修复	待修复	To be fixed	待修復	修正予定
 待确认	待确认	Needs confirmation	待確認	確認待ち
 待确认的请求已变化，请查看最新范围后再选择是否重新发送	待确认的请求已变化，请查看最新范围后再选择是否重新发送	The request to be confirmed has changed. Please check the latest range before choosing whether to resend it.	待確認的請求已變化，請檢視最新範圍後再選擇是否重新傳送	確認要求が変更されました。再送信するかどうかを選択する前に、最新の範囲を確認してください。
@@ -921,14 +756,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 恢复默认	恢复默认	Restore default	恢復預設	デフォルトに戻す
 意大利语	意大利语	Italian	義大利語	イタリア語
 成功后删除本次下载的视频 / Delete newly downloaded video after success	成功后删除本次下载的视频	Delete newly downloaded video after success	成功後刪除本次下載的影片	成功したらダウンロードした動画を削除します
-我的笔记	我的笔记	My notes	我的筆記	マイノート
 或把本地视频拖进窗口	或把本地视频拖进窗口	Or drag the local video into the window	或把本地影片拖進視窗	または、ローカル動画をウィンドウにドラッグします
 截图	截图	Screenshots	截圖	スクリーンショット
 截图 / Slides	截图	Slides	截圖	スクリーンショット
-截图 · {time}	截图 · {time}	Screenshot · {time}	截圖 · {time}	スクリーンショット · {time}
 截图 · {}	截图 · {}	Screenshot · {}	截圖 · {}	スクリーンショット · {}
 截图不是可识别的图片，原文件已保留 / Screenshot is not a recognized image; original file kept	截图不是可识别的图片，原文件已保留	Screenshot is not a recognized image; original file kept	截圖不是可識別的圖片，原檔案已保留	スクリーンショットは認識可能な画像ではなく、元のファイルは保持されています
-截图任务	截图任务	Screenshot task	截圖任務	スクリーンショット処理
 截图任务异常终止 / Slide extraction stopped unexpectedly	截图任务异常终止	Screenshot extraction stopped unexpectedly	截圖任務異常終止	スクリーンショットタスクが異常終了しました
 截图失败，原笔记不受影响 / Screenshot extraction failed; the original note is unaffected	截图失败，原笔记不受影响	Screenshot extraction failed; the original note is unaffected	截圖失敗，原筆記不受影響	スクリーンショットは失敗しました。元のノートは影響を受けません
 截图无法读取	截图无法读取	Screenshot can't be read	無法讀取截圖	スクリーンショットを読み込めません
@@ -956,7 +788,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 所选字幕的内容已丢失，请重新读取字幕后再试	所选字幕的内容已丢失，请重新读取字幕后再试	The content of the selected subtitles has been lost. Please re-read the subtitles and try again.	所選字幕的內容已丟失，請重新讀取字幕後再試	選択した字幕の内容が失われています。字幕をもう一度読んで、もう一度試してください。
 所选字幕还未确认，请继续读取或明确选择其他文字来源。	所选字幕还未确认，请继续读取或明确选择其他文字来源。	The selected subtitles have not been confirmed. Please continue reading or explicitly select another text source.	所選字幕還未確認，請繼續讀取或明確選擇其他文字來源。	選択された字幕は確認されていません。読み続けるか、別のテキスト ソースを明示的に選択してください。
 所选字幕还未读取完成，请继续读取或选择其他文字来源。	所选字幕还未读取完成，请继续读取或选择其他文字来源。	The selected subtitles have not been read yet. Please continue reading or choose another text source.	所選字幕還未讀取完成，請繼續讀取或選擇其他文字來源。	選択した字幕はまだ読まれていません。読み続けるか、別のテキスト ソースを選択してください。
-所选接口类型不支持这项测试，尚未发送请求	所选接口类型不支持这项测试，尚未发送请求	The selected interface type does not support this test and the request has not been sent yet	所選介面型別不支援這項測試，尚未傳送請求	選択したインターフェイス タイプはこのテストをサポートしていないため、リクエストはまだ送信されていません
 所选文件不包含视频画面	所选文件不包含视频画面	The selected file does not contain video footage	所選檔案不包含影片畫面	選択したファイルには動画映像が含まれていません
 所选文件夹属于另一个笔记库，请选择这个笔记库移动后的文件夹	所选文件夹属于另一个笔记库，请选择这个笔记库移动后的文件夹	The selected folder belongs to another note library. Please select the moved folder of this note library.	所選資料夾屬於另一個筆記庫，請選擇這個筆記庫移動後的資料夾	選択したフォルダーは別のノート ライブラリに属しています。このノートライブラリの移動したフォルダーを選択してください。
 所选文件夹已变化，请重新选择	所选文件夹已变化，请重新选择	The selected folder has changed, please select again	所選資料夾已變化，請重新選擇	選択したフォルダーが変更されました。もう一度選択してください
@@ -975,7 +806,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 打开位置	打开位置	Open location	開啟位置	場所を開く
 打开保存位置	打开保存位置	Open save location	開啟儲存位置	保存場所を開く
 打开原视频	打开原视频	Open original video	開啟原影片	元の動画を開く
-打开原视频：{url}	打开原视频：{url}	Open the original video: {url}	開啟原影片：{url}	元の動画を開きます: {url}
 打开原视频：{}	打开原视频：{}	Open the original video: {}	開啟原影片：{}	元の動画を開きます: {}
 打开备份位置	打开备份位置	Open backup location	開啟備份位置	バックアップ場所を開く
 打开导出位置	打开导出位置	Open export location	開啟匯出位置	書き出し先を開く
@@ -1014,13 +844,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 授权回调请求无效 / Invalid authorization callback request	授权回调请求无效	Invalid authorization callback request	授權回撥請求無效	認可コールバックリクエストが無効です
 授权回调路径不受支持 / Unsupported authorization callback path	授权回调路径不受支持	Unsupported authorization callback path	授權回撥路徑不受支援	認可コールバックパスはサポートされていません
 排队中	排队中	Queued	排隊中	待機中
-接口类型	接口类型	Service type	服務類型	サービスの種類
 推荐 · 音频不离开本机	推荐 · 音频不离开本机	Recommended · Audio does not leave the unit	推薦 · 音訊不離開本機	推奨 · 音声がユニットから出ない
-提取截图 / Extracting slides	提取截图	Extracting slides	提取截圖	スクリーンショットの抽出
 提取画面	提取画面	Extract screen	提取畫面	抽出画面
 提取音频	提取音频	Extract audio	提取音訊	音声を抽出する
 提取音频 / Extracting audio	提取音频	Extracting audio	提取音訊	音声を抽出する
-提示关闭状态未能保存：{error:#}	提示关闭状态未能保存：{error:#}	Prompt that the closed status cannot be saved: {error:#}	提示關閉狀態未能儲存：{error:#}	クローズ状態を保存できないことを示すプロンプト: {error:#}
 提示关闭状态未能保存：{}	提示关闭状态未能保存：{}	Prompt that the closed status cannot be saved: {}	提示關閉狀態未能儲存：{}	クローズ状態を保存できないことを示すプロンプト: {}
 提示：运行 course2md llm setup 可开启 AI 校对与摘要 / Tip: run course2md llm setup to enable AI proofreading and summaries	提示：运行 course2md llm setup 可开启 AI 校对与摘要	Tip: run course2md llm setup to enable AI proofreading and summaries	提示：執行 course2md llm setup 可開啟 AI 校對與摘要	ヒント: course2md llm セットアップを実行して AI 校正と要約を有効にします
 搜索截图对应文字	搜索截图对应文字	Search screenshot text	搜尋截圖文字	スクリーンショットの文字を検索
@@ -1031,7 +858,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 摘要合并未完成，已保存各段已确认结果 / Summary merge failed; completed parts retained	摘要合并未完成，已保存各段已确认结果	Summary merge failed; completed parts retained	摘要合併未完成，已儲存各段已確認結果	概要の結合は完了していません。各段落の結果は保存され、確認されています。
 摘要工作进程中断 / Summary worker interrupted	摘要工作进程中断	Summary worker interrupted	摘要工作程序中斷	要約作業プロセスが中断されました
 摘要结果未确认	摘要结果未确认	Summary result not confirmed	摘要結果未確認	集計結果は未確認
-播放保留的视频	播放保留的视频	Play reserved video	播放保留的影片	予約した動画を再生する
 操作已完成	操作已完成	Operation completed	操作已完成	操作が完了しました
 操作意外中断，请重试	操作意外中断，请重试	The operation was unexpectedly interrupted, please try again	操作意外中斷，請重試	操作が予期せず中断されました。もう一度お試しください。
 操作未完成	操作未完成	Operation not completed	操作未完成	操作が完了していません
@@ -1057,11 +883,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 放到 GPU 上运行的层数（0–99，默认全部）；核显不稳定时调低 / Layers run on the GPU (0–99, all by default); lower on unstable integrated GPUs	放到 GPU 上运行的层数（0–99，默认全部）；核显不稳定时调低	Layers run on the GPU (0–99, all by default); lower on unstable integrated GPUs	放到 GPU 上執行的層數（0–99，預設全部）；核顯不穩定時調低	GPU で実行するレイヤーの数 (0 ～ 99、デフォルトはすべて)。コアディスプレイが不安定な場合は低くなります
 放大	放大	Zoom in	放大	ズームイン
 放大 · +	放大 · +	Enlarge · +	放大 · +	拡大・+
-放大{label}	放大{label}	Enlarge{label}	放大{label}	拡大{label}
 放大{}	放大{}	Enlarge{}	放大{}	拡大{}
 放弃移动，保留副本	放弃移动，保留副本	Abandon move, keep copy	放棄移動，保留副本	移動を放棄し、コピーを保持する
 整理好的笔记会出现在这里	整理好的笔记会出现在这里	Organized notes will appear here	整理好的筆記會出現在這裡	整理されたノートがここに表示されます
-整理选中的 {selected_count} 个视频	整理选中的 {selected_count} 个视频	Organize selected {selected_count} videos	整理選中的 {selected_count} 個影片	選択した{selected_count}動画を整理する
 整理选中的 {} 个视频	整理选中的 {} 个视频	Organize selected {} videos	整理選中的 {} 個影片	選択した{}動画を整理する
 整理选中的视频	整理选中的视频	Organize selected videos	整理選中的影片	選択した動画を整理する
 文件	文件	File	檔案	ファイル
@@ -1072,20 +896,16 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 文件夹信息需要恢复	文件夹信息需要恢复	Folder information needs to be restored	資料夾資訊需要恢復	フォルダー情報を復元する必要があります
 文件夹名称	文件夹名称	Folder name	資料夾名稱	フォルダ名
 文件夹名称最多 60 个字符	文件夹名称最多 60 个字符	Folder name can be up to 60 characters	資料夾名稱最多 60 個字元	フォルダー名は最大60文字です
-文件夹尚未恢复：{error:#}	文件夹尚未恢复：{error:#}	Folder has not been restored: {error:#}	資料夾尚未恢復：{error:#}	フォルダーは復元されていません: {error:#}
 文件夹尚未恢复：{}	文件夹尚未恢复：{}	Folder has not been restored: {}	資料夾尚未恢復：{}	フォルダーは復元されていません: {}
 文件夹已不存在，请选择其他文件夹	文件夹已不存在，请选择其他文件夹	The folder no longer exists, please choose another folder	資料夾已不存在，請選擇其他資料夾	フォルダーはもう存在しません。別のフォルダーを選択してください
 文件夹已不存在，请重新扫描笔记库	文件夹已不存在，请重新扫描笔记库	The folder no longer exists, please scan the note library again	資料夾已不存在，請重新掃描筆記庫	フォルダーはもう存在しません。ノート ライブラリをもう一度スキャンしてください
-文件夹已创建，保存位置尚未更新：{error:#}	文件夹已创建，保存位置尚未更新：{error:#}	The folder has been created, but the save location has not been updated: {error:#}	資料夾已建立，儲存位置尚未更新：{error:#}	フォルダーは作成されましたが、保存場所は更新されていません: {error:#}
 文件夹已创建，保存位置尚未更新：{}	文件夹已创建，保存位置尚未更新：{}	The folder has been created, but the save location has not been updated: {}	資料夾已建立，儲存位置尚未更新：{}	フォルダーは作成されましたが、保存場所は更新されていません: {}
 文件夹已删除。请选择其他文件夹，或保存到未分类。	文件夹已删除。请选择其他文件夹，或保存到未分类。	The folder has been deleted. Please choose another folder or save to Uncategorized.	資料夾已刪除。請選擇其他資料夾，或儲存到未分類。	フォルダが削除されました。別のフォルダーを選択するか、未分類に保存してください。
 文件夹已删除，请重新选择	文件夹已删除，请重新选择	The folder has been deleted, please select again	資料夾已刪除，請重新選擇	フォルダが削除されました。もう一度選択してください
 文件夹已恢复，原损坏文件已另存	文件夹已恢复，原损坏文件已另存	The folder has been restored and the original damaged files have been saved.	資料夾已恢復，原損壞檔案已另存	フォルダーは復元され、元の破損したファイルは保存されました。
-文件夹归属暂未更新：{error:#}	文件夹归属暂未更新：{error:#}	Folder ownership has not been updated yet: {error:#}	資料夾歸屬暫未更新：{error:#}	フォルダーの所有権がまだ更新されていません: {error:#}
 文件夹归属暂未更新：{}	文件夹归属暂未更新：{}	Folder ownership has not been updated yet: {}	資料夾歸屬暫未更新：{}	フォルダーの所有権がまだ更新されていません: {}
 文件夹暂不可用	文件夹暂不可用	The folder is temporarily unavailable	資料夾暫不可用	フォルダーが一時的に利用できなくなっています
 文件夹暂不可用，请重新扫描笔记库。	文件夹暂不可用，请重新扫描笔记库。	The folder is temporarily unavailable, please scan the note library again.	資料夾暫不可用，請重新掃描筆記庫。	フォルダーは一時的に利用できません。ノート ライブラリを再度スキャンしてください。
-文件夹筛选	文件夹筛选	Folder filtering	資料夾篩選	フォルダーのフィルタリング
 文件夹编号已耗尽	文件夹编号已耗尽	Folder number exhausted	資料夾編號已耗盡	フォルダ番号がなくなりました
 文件夹记录未更新	文件夹记录未更新	Folder records not updated	資料夾記錄未更新	フォルダーレコードが更新されない
 文件已导出	文件已导出	File exported	檔案已匯出	エクスポートされたファイル
@@ -1093,7 +913,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 文件的字符编码无法读取，请重新导出为 UTF-8 / The file's character encoding is unreadable; re-export as UTF-8	文件的字符编码无法读取，请重新导出为 UTF-8	The file's character encoding is unreadable; re-export as UTF-8	檔案的字元編碼無法讀取，請重新匯出為 UTF-8	ファイルの文字エンコーディングを読み取ることができません。UTF-8 として再エクスポートしてください。
 文件设置与内置默认值；不含本次命令行或环境变量覆盖 / File settings and built-in defaults, before CLI and environment overrides	文件设置与内置默认值；不含本次命令行或环境变量覆盖	File settings and built-in defaults, before CLI and environment overrides	檔案設定與內建預設值；不含本次命令列或環境變數覆蓋	ファイル設定と組み込みのデフォルト値。このコマンドラインまたは環境変数のオーバーライドを含めないでください。
 文字	文字	Text	文字	テキスト
-文字 · {time}	文字 · {time}	Text · {time}	文字 · {time}	テキスト · {time}
 文字 · {}	文字 · {}	Text · {}	文字 · {}	テキスト · {}
 文字与截图	文字与截图	Text and screenshots	文字與截圖	テキストとスクリーンショット
 文字及对应截图	文字及对应截图	Text and corresponding screenshots	文字及對應截圖	テキストと対応するスクリーンショット
@@ -1106,10 +925,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 文字笔记	文字笔记	Text notes	文字筆記	テキストノート
 文字转写	文字转写	Transcript	文字轉寫	文字起こし
 新建文件夹	新建文件夹	New folder	新增資料夾	新しいフォルダ
-新的视频输入尚未建立：{error:#}	新的视频输入尚未建立：{error:#}	The new video input has not been created yet: {error:#}	新的影片輸入尚未建立：{error:#}	新しい動画入力はまだ作成されていません: {error:#}
 新的视频输入尚未建立：{}	新的视频输入尚未建立：{}	The new video input has not been created yet: {}	新的影片輸入尚未建立：{}	新しい動画入力はまだ作成されていません: {}
 新笔记	新笔记	New note	新增筆記	新しいノート
-新链接未能保存：{error:#}	新链接未能保存：{error:#}	New link failed to save: {error:#}	新連結未能儲存：{error:#}	新しいリンクを保存できませんでした: {error:#}
 新链接未能保存：{}	新链接未能保存：{}	New link failed to save: {}	新連結未能儲存：{}	新しいリンクを保存できませんでした: {}
 无匹配	无匹配	No match	無匹配	一致しません
 无权读取这份笔记，请检查保存位置的访问权限	无权读取这份笔记，请检查保存位置的访问权限	No permission to read this note, please check the access permissions of the save location	無權讀取這份筆記，請檢查儲存位置的訪問許可權	このノートを読む権限がありません。保存場所のアクセス権限を確認してください。
@@ -1118,20 +935,16 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法保存此组设置	无法保存此组设置	Unable to save this set of settings	無法儲存此組設定	この設定セットを保存できません
 无法保存此组设置的恢复副本	无法保存此组设置的恢复副本	Unable to save recovery copy of this set of settings	無法儲存此組設定的恢復副本	この設定セットのリカバリ コピーを保存できません
 无法保存移动副本 {}	无法保存移动副本 {}	Unable to save move copy {}	無法儲存移動副本 {}	移動コピー {} を保存できません
-无法保存退出前的状态，窗口暂不关闭：{error:#}	无法保存退出前的状态，窗口暂不关闭：{error:#}	Unable to save the status before exit, the window will not be closed yet: {error:#}	無法儲存退出前的狀態，視窗暫不關閉：{error:#}	終了する前にステータスを保存できません。ウィンドウはまだ閉じられていません: {error:#}
 无法保存退出前的状态，窗口暂不关闭：{}	无法保存退出前的状态，窗口暂不关闭：{}	Unable to save the status before exit, the window will not be closed yet: {}	無法儲存退出前的狀態，視窗暫不關閉：{}	終了する前にステータスを保存できません。ウィンドウはまだ閉じられていません: {}
 无法保留原记录	无法保留原记录	Unable to retain original record	無法保留原記錄	元の記録を保持できません
 无法保留损坏的任务记录	无法保留损坏的任务记录	Unable to retain corrupted task records	無法保留損壞的任務記錄	破損したタスクレコードを保持できません
 无法保留旧识别进度 {} / Cannot preserve previous transcription progress {}	无法保留旧识别进度 {}	Cannot preserve previous transcription progress {}	無法保留舊識別進度 {}	古い認識の進行状況を保持できません {}
 无法切分音频 / Could not split audio	无法切分音频	Could not split audio	無法切分音訊	音声を分割できません
 无法切分音频 / ffmpeg could not split audio	无法切分音频	ffmpeg could not split audio	無法切分音訊	音声を分割できません
-无法切换来源：{error:#}	无法切换来源：{error:#}	Unable to switch source: {error:#}	無法切換來源：{error:#}	ソースを切り替えられません: {error:#}
 无法切换来源：{}	无法切换来源：{}	Unable to switch source: {}	無法切換來源：{}	ソースを切り替えられません: {}
 无法创建 course2md 窗口	无法创建 course2md 窗口	Unable to create course2md window	無法建立 course2md 視窗	course2md ウィンドウを作成できません
 无法创建临时工作目录 / Could not create a temporary working directory	无法创建临时工作目录	Could not create a temporary working directory	無法建立臨時工作目錄	一時作業ディレクトリを作成できません
-无法创建默认保存位置 {}：{error}。可以在设置的存储中选择其他位置。	无法创建默认保存位置 {}：{error}。可以在设置的存储中选择其他位置。	Unable to create default save location {}:{error}. You can choose a different location in the settings' storage.	無法建立預設儲存位置 {}：{error}。可以在設定的儲存中選擇其他位置。	デフォルトの保存場所 {}:{error} を作成できません。設定のストレージ内の別の場所を選択できます。
 无法创建默认保存位置 {}：{}。可以在设置的存储中选择其他位置。	无法创建默认保存位置 {}：{}。可以在设置的存储中选择其他位置。	Unable to create default save location {}:{}. You can choose a different location in the settings' storage.	無法建立預設儲存位置 {}：{}。可以在設定的儲存中選擇其他位置。	デフォルトの保存場所 {}:{} を作成できません。設定のストレージ内の別の場所を選択できます。
-无法删除文件夹：{error:#}	无法删除文件夹：{error:#}	Unable to delete folder: {error:#}	無法刪除資料夾：{error:#}	フォルダーを削除できません: {error:#}
 无法删除文件夹：{}	无法删除文件夹：{}	Unable to delete folder: {}	無法刪除資料夾：{}	フォルダーを削除できません: {}
 无法发布笔记版本；旧笔记已保留 / Could not publish note version	无法发布笔记版本；旧笔记已保留	Could not publish note version	無法釋出筆記版本；舊筆記已保留	ノートのバージョンを公開できません。古いノートは保存されています
 无法同步笔记文件：{}	无法同步笔记文件：{}	Unable to sync note file: {}	無法同步筆記檔案：{}	ノート ファイルを同期できません: {}
@@ -1141,13 +954,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法将 API Key 保存到系统凭据库	无法将 API Key 保存到系统凭据库	Unable to save API Key to system credentials store	無法將 API Key 儲存到系統憑據庫	API キーをシステム認証情報ストアに保存できません
 无法将 API Key 保存到钥匙串（系统代码 {}）	无法将 API Key 保存到钥匙串（系统代码 {}）	Unable to save API Key to keychain (system code {})	無法將 API Key 儲存到鑰匙串（系統程式碼 {}）	API キーをキーチェーンに保存できません (システム コード {})
 无法建立原始记录备份，尚未重建	无法建立原始记录备份，尚未重建	Unable to create original record backup, has not been rebuilt	無法建立原始記錄備份，尚未重建	元のレコードのバックアップを作成できません。再構築されていません
-无法打开字幕选择器：{error:#}	无法打开字幕选择器：{error:#}	Unable to open subtitle selector: {error:#}	無法開啟字幕選擇器：{error:#}	字幕セレクターを開けません: {error:#}
 无法打开字幕选择器：{}	无法打开字幕选择器：{}	Unable to open subtitle selector: {}	無法開啟字幕選擇器：{}	字幕セレクターを開けません: {}
-无法打开导出位置：{error:#}	无法打开导出位置：{error:#}	Unable to open export location: {error:#}	無法開啟匯出位置：{error:#}	エクスポート場所を開けません: {error:#}
 无法打开导出位置：{}	无法打开导出位置：{}	Unable to open export location: {}	無法開啟匯出位置：{}	エクスポート場所を開けません: {}
 无法打开文件选择器	无法打开文件选择器	Unable to open file picker	無法開啟檔案選擇器	ファイルピッカーを開けません
 无法打开文件选择器，请重试。	无法打开文件选择器，请重试。	Unable to open file selector, please try again.	無法開啟檔案選擇器，請重試。	ファイル セレクターを開けません。もう一度お試しください。
-无法打开文件选择器：{error}	无法打开文件选择器：{error}	Unable to open file picker: {error}	無法開啟檔案選擇器：{error}	ファイルピッカーを開けません: {error}
 无法打开文件选择器：{}	无法打开文件选择器：{}	Unable to open file picker: {}	無法開啟檔案選擇器：{}	ファイルピッカーを開けません: {}
 无法找到这个视频，请检查链接或确认视频仍可访问。	无法找到这个视频，请检查链接或确认视频仍可访问。	This video cannot be found, please check the link or make sure the video is still accessible.	無法找到這個影片，請檢查連結或確認影片仍可訪問。	この動画は見つかりません。リンクをチェックするか、動画にまだアクセスできることを確認してください。
 无法探测本地视频时长 / Could not probe the local video duration	无法探测本地视频时长	Could not probe the local video duration	無法探測本地影片時長	ローカル動画の長さを検出できません
@@ -1159,15 +969,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法确认字幕对应的视频，请重新读取	无法确认字幕对应的视频，请重新读取	Unable to confirm the video corresponding to the subtitles, please read again	無法確認字幕對應的影片，請重新讀取	字幕に該当する動画が確認できませんでした、もう一度お読みください
 无法确认字幕对应的视频，请重新读取 / Cannot confirm the video for the subtitle; probe again	无法确认字幕对应的视频，请重新读取	Cannot confirm the video for the subtitle; probe again	無法確認字幕對應的影片，請重新讀取	字幕に該当する動画が確認できませんでした、もう一度お読みください
 无法确认所选文件夹是这个笔记库，请选择移动后的完整笔记库文件夹	无法确认所选文件夹是这个笔记库，请选择移动后的完整笔记库文件夹	Unable to confirm that the selected folder is this note library, please select the moved complete note library folder	無法確認所選資料夾是這個筆記庫，請選擇移動後的完整筆記庫資料夾	選択したフォルダーがこのノート ライブラリであることを確認できません。移動された完全なノート ライブラリ フォルダーを選択してください
-无法确认这个文件夹是否属于本笔记库：{error}	无法确认这个文件夹是否属于本笔记库：{error}	Unable to confirm whether this folder belongs to this notebook library: {error}	無法確認這個資料夾是否屬於本筆記庫：{error}	このフォルダーがこのノートブック ライブラリに属しているかどうかを確認できません: {error}
 无法确认这个文件夹是否属于本笔记库：{}	无法确认这个文件夹是否属于本笔记库：{}	Unable to confirm whether this folder belongs to this notebook library: {}	無法確認這個資料夾是否屬於本筆記庫：{}	このフォルダーがこのノートブック ライブラリに属しているかどうかを確認できません: {}
 无法确认这是原来的笔记库，请检查后重新关联	无法确认这是原来的笔记库，请检查后重新关联	Unable to confirm that this is the original note library, please check and re-associate	無法確認這是原來的筆記庫，請檢查後重新關聯	これが元のノート ライブラリであることを確認できません。確認して再度関連付けてください。
-无法移动笔记：{error:#}	无法移动笔记：{error:#}	Unable to move note: {error:#}	無法移動筆記：{error:#}	ノートを移動できません: {error:#}
 无法移动笔记：{}	无法移动笔记：{}	Unable to move note: {}	無法移動筆記：{}	ノートを移動できません: {}
 无法移除此服务的钥匙串凭据（系统代码 {}）	无法移除此服务的钥匙串凭据（系统代码 {}）	Unable to remove keychain credentials for this service (system code {})	無法移除此服務的鑰匙串憑據（系統程式碼 {}）	このサービスのキーチェーン資格情報を削除できません (システム コード {})
 无法移除系统凭据库中此服务的凭据	无法移除系统凭据库中此服务的凭据	Unable to remove credentials for this service from the system credential store	無法移除系統憑據庫中此服務的憑據	このサービスの資格情報をシステム資格情報ストアから削除できません
 无法获取 Codex 模型目录 / Cannot fetch the Codex model catalog	无法获取 Codex 模型目录	Cannot fetch the Codex model catalog	無法獲取 Codex 模型目錄	Codex モデル ディレクトリを取得できません
-无法获取账号可用的模型列表，已使用默认模型 {DEFAULT_MODEL}。/ Could not fetch the account's models; using {DEFAULT_MODEL}.	无法获取账号可用的模型列表，已使用默认模型 {DEFAULT_MODEL}。/ Could not fetch the account's models; using {DEFAULT_MODEL}.	Unable to obtain the list of models available for the account, the default model {DEFAULT_MODEL} has been used. / Could not fetch the account's models; using {DEFAULT_MODEL}.	無法獲取賬號可用的模型列表，已使用預設模型 {DEFAULT_MODEL}。/ Could not fetch the account's models; using {DEFAULT_MODEL}.	アカウントで使用可能なモデルのリストを取得できません。デフォルトのモデル {DEFAULT_MODEL} が使用されています。 / アカウントのモデルを取得できませんでした。 {DEFAULT_MODEL} を使用します。
 无法获取账号可用的模型列表，已使用默认模型 {}。	无法获取账号可用的模型列表，已使用默认模型 {}。	Could not fetch the account's models; using {}.	無法取得帳號可用的模型清單，已使用預設模型 {}。	アカウントで利用可能なモデル一覧を取得できません。デフォルトモデル {} を使用します。
 无法解析 Bilibili 登录响应 / Cannot parse Bilibili login response	无法解析 Bilibili 登录响应	Cannot parse Bilibili login response	無法解析 Bilibili 登入響應	Bilibili のログイン応答を解析できません
 无法解析 wav PCM 数据 / Cannot parse wav PCM data	无法解析 wav PCM 数据	Cannot parse wav PCM data	無法解析 wav PCM 資料	wav PCM データを解析できません
@@ -1201,14 +1008,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法读取音频时长 / Could not read the audio duration	无法读取音频时长	Could not read the audio duration	無法讀取音訊時長	音声の長さを読み取れません
 无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later	无法连接 OpenAI 认证服务，稍后重试	Cannot reach the OpenAI auth service; retry later	無法連線 OpenAI 認證服務，稍後重試	OpenAI 認証サービスに接続できません。後でもう一度試してください。
 无法连接服务，尚未提交内容 / Could not connect; request content was not submitted	无法连接服务，尚未提交内容	Could not connect; request content was not submitted	無法連線服務，尚未提交內容	サービスに接続できません。コンテンツはまだ送信されていません
-无法选择保存位置：{error:#}	无法选择保存位置：{error:#}	Unable to select save location: {error:#}	無法選擇儲存位置：{error:#}	保存場所を選択できません: {error:#}
 无法选择保存位置：{}	无法选择保存位置：{}	Unable to select save location: {}	無法選擇儲存位置：{}	保存場所を選択できません: {}
-无法选择存储位置：{error:#}	无法选择存储位置：{error:#}	Unable to select storage location: {error:#}	無法選擇儲存位置：{error:#}	保存場所を選択できません: {error:#}
-无法选择存储位置：{}	无法选择存储位置：{}	Unable to select storage location: {}	無法選擇儲存位置：{}	保存場所を選択できません: {}
-无法选择文件夹：{error:#}	无法选择文件夹：{error:#}	Unable to select folder: {error:#}	無法選擇資料夾：{error:#}	フォルダーを選択できません: {error:#}
 无法选择文件夹：{}	无法选择文件夹：{}	Unable to select folder: {}	無法選擇資料夾：{}	フォルダーを選択できません: {}
 无法验证账号状态，请稍后重试 / Cannot verify account status; retry later	无法验证账号状态，请稍后重试	Cannot verify account status; retry later	無法驗證賬號狀態，請稍後重試	アカウントのステータスを確認できません。後でもう一度お試しください。
-无错误时所有槽位均已写入	无错误时所有槽位均已写入	All slots have been written when there are no errors	無錯誤時所有槽位均已寫入	エラーがない場合はすべてのスロットが書き込まれています
 日本語	日本語	Japanese	日本語	日本語
 日语	日语	Japanese	日語	日本語
 旧位置备份	旧位置备份	Old location backup	舊位置備份	古い場所のバックアップ
@@ -1219,7 +1021,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 旧位置现在指向其他位置，未清理任何文件	旧位置现在指向其他位置，未清理任何文件	The old location now points to a different location, no files were cleaned	舊位置現在指向其他位置，未清理任何檔案	古い場所は別の場所を指すようになりました。ファイルはクリーンアップされませんでした
 旧进度与原笔记任务不符 / Prior work belongs to another task	旧进度与原笔记任务不符	Prior work belongs to another task	舊進度與原筆記任務不符	古い進行状況は元のノートタスクと一致しません
 旧进度与此视频来源不符 / Prior work belongs to another source	旧进度与此视频来源不符	Prior work belongs to another source	舊進度與此影片來源不符	古い進行状況はこの動画のソースと一致しません
-时长	时长	Duration	長度	長さ
 时长 {}	时长 {}	Duration {}	時長 {}	期間 {}
 时间未知	时间未知	Time unknown	時間未知	時間不明
 显卡加速	显卡加速	Graphics card acceleration	顯示卡加速	グラフィックカードの加速
@@ -1243,14 +1044,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 暂时无法检查登录状态	暂时无法检查登录状态	Unable to check login status at the moment	暫時無法檢查登入狀態	現在ログイン状況を確認できません
 暂时无法确认此服务是否已删除，尚未发送新的请求	暂时无法确认此服务是否已删除，尚未发送新的请求	It is temporarily impossible to confirm whether this service has been deleted, and a new request has not been sent yet.	暫時無法確認此服務是否已刪除，尚未傳送新的請求	このサービスが削除されたかどうかは一時的に確認できず、新しいリクエストはまだ送信されていません。
 暂时无法移除凭据	暂时无法移除凭据	Credentials cannot be removed at this time	暫時無法移除憑據	現時点では資格情報を削除できません
-暂时无法获取模型（HTTP {status}），可重试	暂时无法获取模型（HTTP {status}），可重试	Temporarily unable to obtain the model (HTTP {status}), please try again	暫時無法獲取模型（HTTP {status}），可重試	一時的にモデルを取得できません (HTTP {status})。もう一度お試しください。
 暂时无法获取模型（HTTP {}），可重试	暂时无法获取模型（HTTP {}），可重试	Temporarily unable to obtain the model (HTTP {}), please try again	暫時無法獲取模型（HTTP {}），可重試	一時的にモデルを取得できません (HTTP {})。もう一度お試しください。
 暂时无法获取模型，请检查地址或网络	暂时无法获取模型，请检查地址或网络	The model cannot be obtained at the moment, please check the address or network	暫時無法獲取模型，請檢查地址或網路	現在このモデルを取得できません。アドレスまたはネットワークを確認してください。
-暂时无法读取 Codex 登录状态：{error}	暂时无法读取 Codex 登录状态：{error}	Temporarily unable to read Codex login status: {error}	暫時無法讀取 Codex 登入狀態：{error}	一時的に Codex のログイン ステータスを読み取れません: {error}
 暂时无法读取 Codex 登录状态：{}	暂时无法读取 Codex 登录状态：{}	Temporarily unable to read Codex login status: {}	暫時無法讀取 Codex 登入狀態：{}	一時的に Codex のログイン ステータスを読み取れません: {}
 暂时无法读取凭据	暂时无法读取凭据	Temporarily unable to read credentials	暫時無法讀取憑據	一時的に資格情報を読み取ることができません
 暂时无法读取已保存的 API Key，可重新填写后重试	暂时无法读取已保存的 API Key，可重新填写后重试	The saved API Key cannot be read temporarily. You can refill it and try again.	暫時無法讀取已儲存的 API Key，可重新填寫後重試	保存されたAPI Keyは一時的に読み取れなくなります。補充してもう一度試すことができます。
-暂时无法读取此服务的钥匙串凭据（系统代码 {code}）	暂时无法读取此服务的钥匙串凭据（系统代码 {code}）	The keychain credentials for this service cannot be read at the moment (system code {code})	暫時無法讀取此服務的鑰匙串憑據（系統程式碼 {code}）	このサービスのキーチェーン資格情報は現時点では読み取れません (システム コード {code})
 暂时无法读取此服务的钥匙串凭据（系统代码 {}）	暂时无法读取此服务的钥匙串凭据（系统代码 {}）	The keychain credentials for this service cannot be read at the moment (system code {})	暫時無法讀取此服務的鑰匙串憑據（系統程式碼 {}）	このサービスのキーチェーン資格情報は現時点では読み取れません (システム コード {})
 暂时无法读取笔记库	暂时无法读取笔记库	Temporarily unable to read the note library	暫時無法讀取筆記庫	一時的にノートライブラリを読み取れません
 暂时无法读取系统凭据库中此服务的凭据	暂时无法读取系统凭据库中此服务的凭据	The credentials for this service in the system credential store cannot be read at the moment.	暫時無法讀取系統憑據庫中此服務的憑據	現在、システム資格情報ストア内のこのサービスの資格情報を読み取ることができません。
@@ -1259,7 +1057,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 暂时无法验证，已保存登录信息	暂时无法验证，已保存登录信息	Unable to verify temporarily, login information has been saved	暫時無法驗證，已儲存登入資訊	一時的に認証できませんでした。ログイン情報は保存されました
 暂时进入不会保存未完成的选择	暂时进入不会保存未完成的选择	Entering temporarily will not save unfinished selections	暫時進入不會儲存未完成的選擇	一時的に入力すると、未完成の選択内容は保存されません
 暂时进入应用	暂时进入应用	Enter the application temporarily	暫時進入應用	アプリケーションを一時的に入力します
-更多	更多	More	更多	その他
 更多信息请运行 --help。	更多信息请运行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を実行してください。
 更多笔记操作	更多笔记操作	More note-taking operations	更多筆記操作	より多くのノートを取る操作
 更多資訊請執行 --help。	更多資訊請執行 --help。	For more information, execute --help.	更多資訊請執行 --help。	詳細については、--help を実行してください。
@@ -1277,14 +1074,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 最近备份也无法读取，原记录已保留	最近备份也无法读取，原记录已保留	The latest backup cannot be read, and the original record has been retained.	最近備份也無法讀取，原記錄已保留	最新のバックアップを読み取ることができず、元のレコードが保持されています。
 最近备份无法读取，原记录已保留	最近备份无法读取，原记录已保留	The latest backup cannot be read, the original record has been retained	最近備份無法讀取，原記錄已保留	最新のバックアップを読み取ることができません。元の記録は保持されています。
 最近的笔记	最近的笔记	Recent notes	最近的筆記	最近のノート
-最近笔记	最近笔记	Recent notes	最近筆記	最近のノート
-有 {affected} 个未完成任务引用此服务；相关后续请求会停止派发	有 {affected} 个未完成任务引用此服务；相关后续请求会停止派发	There are {affected} unfinished tasks referencing this service; related subsequent requests will stop being dispatched	有 {affected} 個未完成任務引用此服務；相關後續請求會停止派發	このサービスを参照している未完了のタスクが {affected} 個あります。関連する後続のリクエストのディスパッチが停止されます
-有 {} 个未完成任务引用此服务；相关后续请求会停止派发	有 {} 个未完成任务引用此服务；相关后续请求会停止派发	There are {} unfinished tasks referencing this service; related subsequent requests will stop being dispatched	有 {} 個未完成任務引用此服務；相關後續請求會停止派發	このサービスを参照している未完了のタスクが {} 個あります。関連する後続のリクエストのディスパッチが停止されます
 有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续	有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续	{} unfinished tasks use this service; their steps that need it will not continue.	有 {} 個未完成任務引用此服務；這些任務中用到此服務的步驟將不再繼續	{} 件の未完了タスクがこのサービスを使用しています。このサービスが必要な手順は続行されません。
 有 {} 次未完成的移动记录已损坏，相关文件均已保留	有 {} 次未完成的移动记录已损坏，相关文件均已保留	{} unfinished move records are corrupted and related files have been retained	有 {} 次未完成的移動記錄已損壞，相關檔案均已保留	{} 未完了の移動レコードが破損しており、関連ファイルが保持されています
 有一个旧版本无法读取	有一个旧版本无法读取	There is an older version that cannot be read	有一箇舊版本無法讀取	読み込めない古いバージョンがあります
 有字幕时直接用字幕，没有字幕时使用语音识别	有字幕时直接用字幕，没有字幕时使用语音识别	Use subtitles when available; otherwise use speech recognition	有字幕時直接使用字幕，沒有字幕時使用語音辨識	字幕があれば字幕を使用し、なければ音声認識を使用します
-有字幕时直接用字幕，没有字幕时识别视频声音	有字幕时直接用字幕，没有字幕时识别视频声音	Use subtitles directly when there are subtitles, and identify the video sound when there are no subtitles.	有字幕時直接用字幕，沒有字幕時識別影片聲音	字幕がある場合は字幕を直接使用し、字幕がない場合は動画音声を識別します。
 有字幕，将直接使用	有字幕，将直接使用	Subtitles will be used directly	有字幕，將直接使用	字幕があり、そのまま使用されます
 有效服务版本记录不完整	有效服务版本记录不完整	The effective service version record is incomplete	有效服務版本記錄不完整	有効なサービス バージョン レコードが不完全です
 有效的模型分片索引 / a valid model shard index	有效的模型分片索引	a valid model shard index	有效的模型分片索引	有効なモデルシャードインデックス
@@ -1298,25 +1091,17 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 服务响应超过接收上限 / Service response exceeds the receiving limit	服务响应超过接收上限	Service response exceeds the receiving limit	服務響應超過接收上限	サービスレスポンスが受信制限を超えています
 服务地址	服务地址	Service address	服務地址	サービスアドレス
 服务地址 / Base URL (OpenAI-compatible, e.g. https://api.deepseek.com/v1)	服务地址	Base URL (OpenAI-compatible, e.g. https://api.deepseek.com/v1)	服務地址	サービスアドレス
-服务地址与所选接口类型不一致 / Service endpoint and protocol do not match	服务地址与所选接口类型不一致	Service endpoint and protocol do not match	服務地址與所選介面型別不一致	サービス アドレスが、選択したインターフェイス タイプと一致しません。
 服务地址与所选服务类型不一致 / Service endpoint and protocol do not match	服务地址与所选服务类型不一致	Service endpoint and protocol do not match	服務位址與所選服務類型不一致	サービスのアドレスと選択した種類が一致しません
 服务地址已变更或不正确，请核对	服务地址已变更或不正确，请核对	The service address has changed or is incorrect, please check	服務地址已變更或不正確，請核對	サービスアドレスが変更されているか、間違っています。確認してください。
 服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid service URL; use a complete HTTP(S) URL.	服务地址无效，请使用完整的 HTTP(S) URL。	Invalid service URL; use a complete HTTP(S) URL.	服務地址無效，請使用完整的 HTTP(S) URL。	サービス アドレスが無効です。完全な HTTP(S) URL を使用してください。
 服务地址（兼容 OpenAI 接口）/ Service URL (OpenAI-compatible)	服务地址（兼容 OpenAI 接口）/ Service URL (OpenAI-compatible)	Service address (compatible with OpenAI interface) / Service URL (OpenAI-compatible)	服務地址（相容 OpenAI 介面）/ Service URL (OpenAI-compatible)	サービスアドレス（OpenAIインターフェース互換）／サービスURL（OpenAI互換）
-服务尚未保存：{error:#}	服务尚未保存：{error:#}	Service not saved yet: {error:#}	服務尚未儲存：{error:#}	サービスはまだ保存されていません: {error:#}
 服务尚未保存：{}	服务尚未保存：{}	Service not saved yet: {}	服務尚未儲存：{}	サービスはまだ保存されていません: {}
 服务已保存	服务已保存	Service saved	服務已儲存	サービスが保存されました
-服务已保存，本次选择尚未保存：{error:#}	服务已保存，本次选择尚未保存：{error:#}	The service has been saved, this selection has not yet been saved: {error:#}	服務已儲存，本次選擇尚未儲存：{error:#}	サービスは保存されましたが、この選択はまだ保存されていません: {error:#}
-服务已保存，本次选择尚未保存：{}	服务已保存，本次选择尚未保存：{}	The service has been saved, this selection has not yet been saved: {}	服務已儲存，本次選擇尚未儲存：{}	サービスは保存されましたが、この選択はまだ保存されていません: {}
-服务已保存，补做任务尚未创建。请重试补做。	服务已保存，补做任务尚未创建。请重试补做。	The service has been saved, but the make-up task has not been created yet. Please try again.	服務已儲存，補做任務尚未建立。請重試補做。	サービスは保存されましたが、メイクアップ タスクはまだ作成されていません。もう一度試してください。
-服务已保存，补做任务尚未建立：{error:#}	服务已保存，补做任务尚未建立：{error:#}	The service has been saved, but the make-up task has not yet been created: {error:#}	服務已儲存，補做任務尚未建立：{error:#}	サービスは保存されましたが、メイクアップ タスクはまだ作成されていません: {error:#}
 服务已保存，补做任务尚未建立：{}	服务已保存，补做任务尚未建立：{}	The service has been saved, but the make-up task has not yet been created: {}	服務已儲存，補做任務尚未建立：{}	サービスは保存されましたが、メイクアップ タスクはまだ作成されていません: {}
 服务拒绝了此请求 / Service rejected this request	服务拒绝了此请求	Service rejected this request	服務拒絕了此請求	サービスがリクエストを拒否しました
-服务拒绝了请求参数	服务拒绝了请求参数	The service rejected the request parameters	服務拒絕了請求引數	サービスはリクエストパラメータを拒否しました
 服务拒绝了请求参数（HTTP {}），请检查此任务使用的模型与服务设置。 / The service rejected the request parameters (HTTP {}); check the model and service settings for this task.	服务拒绝了请求参数（HTTP {}），请检查此任务使用的模型与服务设置。	The service rejected the request parameters (HTTP {}); check the model and service settings for this task.	服務拒絕了請求引數（HTTP {}），請檢查此任務使用的模型與服務設定。	サービスはリクエスト パラメーター (HTTP {}) を拒否しました。このタスクで使用されるモデルとサービスの設定を確認してください。
 服务拒绝凭据，请检查 API Key 或此模型的使用权限	服务拒绝凭据，请检查 API Key 或此模型的使用权限	Service denied credentials, please check the API Key or permissions to use this model	服務拒絕憑據，請檢查 API Key 或此模型的使用許可權	サービスが認証情報を拒否しました。API キーまたはこのモデルを使用する権限を確認してください。
 服务拒绝访问模型列表，请检查认证设置	服务拒绝访问模型列表，请检查认证设置	Service denies access to model list, please check authentication settings	服務拒絕訪問模型列表，請檢查認證設定	サービスがモデル リストへのアクセスを拒否しました。認証設定を確認してください。
-服务接口类型	服务接口类型	Service interface type	服務介面型別	サービスインターフェースの種類
 服务暂时无法接受测试请求，请查看服务的额度或速率限制	服务暂时无法接受测试请求，请查看服务的额度或速率限制	The service is temporarily unable to accept test requests. Please check the quota or rate limit of the service.	服務暫時無法接受測試請求，請檢視服務的額度或速率限制	サービスは一時的にテストリクエストを受け付けることができません。サービスの割り当てまたはレート制限を確認してください。
 服务有回应但内容为空，请确认模型支持此用途	服务有回应但内容为空，请确认模型支持此用途	The service responded but the content was empty. Please confirm that the model supports this purpose.	服務有回應但內容為空，請確認模型支援此用途	サービスは応答しましたが、コンテンツは空でした。モデルがこの目的をサポートしていることを確認してください。
 服务有回应但未通过检查，请确认模型支持此用途	服务有回应但未通过检查，请确认模型支持此用途	The service responded but failed the check, please confirm that the model supports this purpose	服務有回應但未透過檢查，請確認模型支援此用途	サービスは応答しましたが、チェックに失敗しました。モデルがこの目的をサポートしていることを確認してください
@@ -1334,7 +1119,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 服务请求次数达到限制，请稍后重试。 / The service rate limit was reached; try again later.	服务请求次数达到限制，请稍后重试。	The service rate limit was reached; try again later.	服務請求次數達到限制，請稍後重試。	The number of service requests has reached the limit, please try again later.
 服务返回的内容异常，请核对服务地址	服务返回的内容异常，请核对服务地址	The content returned by the service is abnormal. Please check the service address.	服務返回的內容異常，請核對服務地址	サービスから返されたコンテンツが異常です。サービスアドレスをご確認ください。
 服务返回的内容无法读取 / The service response could not be read	服务返回的内容无法读取	The service response could not be read	服務返回的內容無法讀取	The content returned by the service cannot be read
-服务返回的内容格式不对，请确认接口类型和地址	服务返回的内容格式不对，请确认接口类型和地址	The format of the content returned by the service is incorrect. Please confirm the interface type and address.	服務返回的內容格式不對，請確認介面型別和地址	The format of the content returned by the service is incorrect.インターフェースの種類とアドレスを確認してください。
 服务返回的内容格式不对，请确认服务类型和地址	服务返回的内容格式不对，请确认服务类型和地址	The service returned an unexpected format. Check the service type and address.	服務傳回的內容格式不正確，請確認服務類型與位址	サービスの応答形式が正しくありません。サービスの種類とアドレスを確認してください
 服务返回的摘要结构无效 / Invalid summary response	服务返回的摘要结构无效	Invalid summary response	服務返回的摘要結構無效	The summary structure returned by the service is invalid
 服务返回的摘要结构无效 / Invalid summary structure	服务返回的摘要结构无效	Invalid summary structure	服務返回的摘要結構無效	The summary structure returned by the service is invalid
@@ -1343,7 +1127,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 服务返回空响应；请确认模型可用 / The service returned an empty response; make sure the model works	服务返回空响应；请确认模型可用	The service returned an empty response; make sure the model works	服務返回空響應；請確認模型可用	サービスは空の応答を返しました。モデルが利用可能であることを確認してください
 服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain	服务返回错误，无法确认是否已处理。再次提交可能产生额外费用	Service processing is uncertain	服務返回錯誤，無法確認是否已處理。再次提交可能產生額外費用	サービスはエラーを返し、処理されたかどうかを確認できませんでした。再度提出すると追加料金が発生する場合があります
 服务返回错误，未收到确定结果，测试可能已产生费用	服务返回错误，未收到确定结果，测试可能已产生费用	The service returned an error, no confirmed results were received, and testing may have incurred charges.	服務返回錯誤，未收到確定結果，測試可能已產生費用	サービスからエラーが返され、確認された結果が受信されず、テストに料金が発生した可能性があります。
-服务选择尚未保存：{error:#}	服务选择尚未保存：{error:#}	Service selection not saved yet: {error:#}	服務選擇尚未儲存：{error:#}	サービスの選択はまだ保存されていません: {error:#}
 服务选择尚未保存：{}	服务选择尚未保存：{}	Service selection not saved yet: {}	服務選擇尚未儲存：{}	サービスの選択はまだ保存されていません: {}
 服务选择已保存	服务选择已保存	Service selection saved	服務選擇已儲存	サービスの選択が保存されました
 服务配置	服务配置	Service configuration	服務配置	サービス構成
@@ -1354,21 +1137,16 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 未安装	未安装	Not installed	未安裝	インストールされていません
 未完成	未完成	Incomplete	未完成	未完了
 未完成的移动	未完成的移动	Unfinished move	未完成的移動	未完了の移動
-未完成：{error}	未完成：{error}	Not completed: {error}	未完成：{error}	未完了: {error}
 未完成：{}	未完成：{}	Not completed: {}	未完成：{}	未完了: {}
 未完整收到服务响应 / Did not receive a complete service response	未完整收到服务响应	Did not receive a complete service response	未完整收到服務響應	不完全なサービス応答を受信しました
 未找到 Python/uv，无法启动 NPU 识别 / Install Python or uv to use Intel NPU transcription	未找到 Python/uv，无法启动 NPU 识别	Install Python or uv to use Intel NPU transcription	未找到 Python/uv，無法啟動 NPU 識別	Python/uv が見つからないため、NPU 認識を開始できません
-未找到 llama-server / llama-server not found. 安装 llama.cpp 并加入 PATH / Install llama.cpp and add it to PATH.	未找到 llama-server / llama-server not found. 安装 llama.cpp 并加入 PATH	Install llama.cpp and add it to PATH.	未找到 llama-server / llama-server not found. 安裝 llama.cpp 並加入 PATH	ラマサーバーが見つかりません / ラマサーバーが見つかりません。 llama.cppをインストールし、PATHに追加します。
 未找到 llama-server。请安装 llama.cpp 并加入 PATH	未找到 llama-server。请安装 llama.cpp 并加入 PATH	llama-server not found. Install llama.cpp and add it to PATH.	找不到 llama-server。請安裝 llama.cpp 並加入 PATH	ラマサーバーが見つかりません。 llama.cppをインストールしてPATHに追加してください
 未找到 uv 或 Python	未找到 uv 或 Python	uv or Python not found	未找到 uv 或 Python	UV または Python が見つかりません
 未找到下载的视频（期望 {} 或 {}） / Downloaded video missing (expected {} or {})	未找到下载的视频（期望 {} 或 {}）	Downloaded video missing (expected {} or {})	找不到下載的影片（預期 {} 或 {}）	ダウンロードした動画が見つかりません（{} または {} を想定）
-未找到匹配的笔记	未找到匹配的笔记	No matching notes	找不到符合的筆記	一致するノートはありません
 未找到字幕	未找到字幕	Subtitles not found	未找到字幕	字幕が見つかりません
-未找到字幕 / No subtitles found. 请选择已有字幕，或改用语音识别 / Select subtitles or use speech recognition.	未找到字幕 / No subtitles found. 请选择已有字幕，或改用语音识别	Select subtitles or use speech recognition.	未找到字幕 / No subtitles found. 請選擇已有字幕，或改用語音識別	字幕が見つかりませんでした。既存の字幕を選択するか、代わりに音声認識を使用してください。
 未找到字幕。请选择已有字幕，或改用语音识别	未找到字幕。请选择已有字幕，或改用语音识别	No subtitles found. Select existing subtitles, or use speech recognition.	找不到字幕。請選擇現有字幕，或改用語音辨識	字幕が見つかりません。既存の字幕を選択するか、代わりに音声認識を使用してください
 未提供 API 密钥。请在向导中输入，或设置环境变量 COURSE2MD_ASR_API_KEY 后重试。 / No API key provided. Enter one in setup, or set COURSE2MD_ASR_API_KEY and retry.	未提供 API 密钥。请在向导中输入，或设置环境变量 COURSE2MD_ASR_API_KEY 后重试。	No API key provided. Enter one in setup, or set COURSE2MD_ASR_API_KEY and retry.	未提供 API 金鑰。請在嚮導中輸入，或設定環境變數 COURSE2MD_ASR_API_KEY 後重試。	API キーが提供されていません。ウィザードに入力するか、環境変数 COURSE2MD_ASR_API_KEY を設定して再試行してください。
 未提取到截图	未提取到截图	Screenshot not retrieved	未提取到截圖	スクリーンショットが取得できませんでした
-未提取到截图 / No screenshots were captured	未提取到截图	No screenshots were captured	未提取到截圖	スクリーンショットが取得できませんでした
 未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges	未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用	Service result is uncertain; resending may incur additional charges	未收到服務的確定結果。服務可能已處理這部分，再次提交可能產生額外費用	サービスからの確認は受信されませんでした。サービスはこの部分をすでに処理している可能性があり、再送信には追加料金が発生する可能性があります。
 未收到确定结果，测试可能已产生费用	未收到确定结果，测试可能已产生费用	Confirmative results not received, testing may have incurred charges	未收到確定結果，測試可能已產生費用	確認結果が届かない、検査に料金が発生した可能性がある
 未改动的条目不记 raw	未改动的条目不记 raw	Unmodified entries are not recorded as raw	未改動的條目不記 raw	変更されていないエントリは生として記録されません
@@ -1391,7 +1169,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 未连接	未连接	Not connected	未連線	接続されていません
 未采样到任何帧 / No frames sampled	未采样到任何帧	No frames sampled	未取樣到任何幀	フレームがサンプリングされていません
 本地文件	本地文件	Local file	本地檔案	ローカルファイル
-本地模型目录 / Local model directory (default: platform cache)	本地模型目录	Local model directory (default: platform cache)	本地模型目錄	ローカルモデルディレクトリ
 本地视频	本地视频	Local video	本地影片	ローカル動画
 本地识别方式 / Local transcription engine	本地识别方式	Local transcription engine	本地識別方式	ローカル識別方法
 本地识别（首次下载模型） / Local transcription (requires a model download)	本地识别（首次下载模型）	Local transcription (requires a model download)	本地識別（首次下載模型）	ローカル識別 (初めてモデルをダウンロードする場合)
@@ -1405,12 +1182,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 本机识别环境	本机识别环境	Native recognition environment	本機識別環境	ネイティブ認識環境
 本机识别请求失败（HTTP {}） / Local transcription request failed (HTTP {})	本机识别请求失败（HTTP {}）	Local transcription request failed (HTTP {})	本機識別請求失敗（HTTP {}）	ネイティブ認識リクエストが失敗しました (HTTP {})
 本次启用 AI 校对 / Enable AI proofreading for this run	本次启用 AI 校对	Enable AI proofreading for this run	本次啟用 AI 校對	今回はAI校正が有効になりました
-本次生成视频摘要并写入笔记 / Generate video summary (TL;DR, key points, outline)	本次生成视频摘要并写入笔记	Generate video summary (TL;DR, key points, outline)	本次生成影片摘要並寫入筆記	今回は、動画の概要を生成し、ノートに書き込みます
 本次禁用 AI 校对 / Disable AI proofreading for this run	本次禁用 AI 校对	Disable AI proofreading for this run	本次禁用 AI 校對	今回はAI校正を無効にしました
 本次禁用截图辅助校对 / Disable image-assisted proofreading	本次禁用截图辅助校对	Disable image-assisted proofreading	本次禁用截圖輔助校對	今回はスクリーンショットによる校正は無効になっています
 本次禁用视频摘要 / Disable video summary for this run	本次禁用视频摘要	Disable video summary for this run	本次禁用影片摘要	今回は動画概要が無効になりました
 本次笔记的选择尚未保存	本次笔记的选择尚未保存	The selection for this note has not been saved yet	本次筆記的選擇尚未儲存	このノートの選択内容はまだ保存されていません
-本次选项尚未恢复默认：{error:#}	本次选项尚未恢复默认：{error:#}	This option has not been restored to default: {error:#}	本次選項尚未恢復預設：{error:#}	このオプションはデフォルトに復元されていません: {error:#}
 本次选项尚未恢复默认：{}	本次选项尚未恢复默认：{}	This option has not been restored to default: {}	本次選項尚未恢復預設：{}	このオプションはデフォルトに復元されていません: {}
 权重偏移无效 / Invalid weight offsets	权重偏移无效	Invalid weight offsets	權重偏移無效	ウェイトオフセットが無効です
 权重头不完整 / Incomplete weight header	权重头不完整	Incomplete weight header	權重頭不完整	ウェイトヘッダーが不完全です
@@ -1424,10 +1199,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 查找	查找	Find	查詢	探す
 查找字幕 / Looking for subtitles	查找字幕	Looking for subtitles	查詢字幕	字幕を探す
 查找笔记内容	查找笔记内容	Search note content	搜尋筆記內容	ノート内を検索
-查找笔记内容 ⌘F	查找笔记内容 ⌘F	Find note content ⌘F	查詢筆記內容 ⌘F	ノートの内容を検索 ⌘F
 查看 llama.cpp 安装说明	查看 llama.cpp 安装说明	View the llama.cpp installation instructions	檢視 llama.cpp 安裝說明	llama.cpp のインストール手順を表示する
 查看 uv 安装说明	查看 uv 安装说明	View uv installation instructions	檢視 uv 安裝說明	UV のインストール手順を表示する
-查看{label}	查看{label}	View {label}	檢視{label}	{label} を見る
 查看{}	查看{}	View {}	檢視{}	{} を見る
 查看任务	查看任务	View task	檢視任務	タスクを表示
 查看任务详情	查看任务详情	View task details	檢視任務詳情	タスクの詳細を表示する
@@ -1465,7 +1238,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 检查依赖、识别后端和配置 / Check tools, speech backends and settings	检查依赖、识别后端和配置 / Check tools, speech backends and settings	Check tools, speech backends and settings	檢查依賴、語音辨識後端與設定	依存関係・音声認識バックエンド・設定を確認
 检查保存位置	检查保存位置	Check save location	檢查儲存位置	保存場所を確認する
 检查保存位置后，即可继续查看已有笔记	检查保存位置后，即可继续查看已有笔记	After checking the save location, you can continue to view existing notes	檢查儲存位置後，即可繼續檢視已有筆記	保存場所を確認した後、既存のノートを引き続き表示できます
-检查失败：{error}	检查失败：{error}	Check failed: {error}	檢查失敗：{error}	チェックが失敗しました: {error}
 检查失败：{}	检查失败：{}	Check failed: {}	檢查失敗：{}	チェックが失敗しました: {}
 检查所需组件	检查所需组件	Check required components	檢查所需元件	必要なコンポーネントを確認する
 检查服务	检查服务	Test service	測試服務	サービスをテスト
@@ -1483,15 +1255,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型	模型	Model	模型	モデル
 模型 ID	模型 ID	Model ID	模型 ID	モデルID
 模型 ID 不能包含换行或控制字符	模型 ID 不能包含换行或控制字符	Model ID cannot contain newlines or control characters	模型 ID 不能包含換行或控制字元	モデル ID には改行や制御文字を含めることはできません
-模型 ID，{error}	模型 ID，{error}	Model ID, {error}	模型 ID，{error}	モデルID、{error}
 模型 ID，{}	模型 ID，{}	Model ID, {}	模型 ID，{}	モデルID、{}
 模型 {}% · {}	模型 {}% · {}	Model {}% · {}	模型 {}% · {}	モデル {}% · {}
 模型下载任务失败 / Model download task failed	模型下载任务失败	Model download task failed	模型下載任務失敗	モデルのダウンロード タスクが失敗しました
 模型下载完成或停止后再移动笔记库	模型下载完成或停止后再移动笔记库	Move the note library after the model download is completed or stopped.	模型下載完成或停止後再移動筆記庫	モデルのダウンロードが完了または停止した後で、ノート ライブラリを移動します。
-模型仍在使用旧位置，请先在“生成笔记”中保存模型位置，再清理备份	模型仍在使用旧位置，请先在“生成笔记”中保存模型位置，再清理备份	The model is still using the old location. Please save the model location in "Generate Notes" before cleaning the backup.	模型仍在使用舊位置，請先在“生成筆記”中儲存模型位置，再清理備份	モデルはまだ古い場所を使用しています。バックアップを消去する前に、「ノートの生成」でモデルの場所を保存してください。
 模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	The model still uses the old location. Save the model location in “Create note” before cleaning backups.	模型仍在使用舊位置，請先在「產生筆記」中儲存模型位置，再清理備份	モデルはまだ古い場所を使用しています。「ノートを作成」でモデルの場所を保存してからバックアップを整理してください
 模型会继续在后台准备	模型会继续在后台准备	The model will continue to be prepared in the background	模型會繼續在後臺準備	モデルはバックグラウンドで引き続き準備されます
-模型位置尚未更新，修改已保留，可重试保存：{error:#}	模型位置尚未更新，修改已保留，可重试保存：{error:#}	The model position has not been updated, the modification has been retained, you can try saving again: {error:#}	模型位置尚未更新，修改已保留，可重試儲存：{error:#}	モデルの位置は更新されておらず、変更は保持されています。再度保存してみてください: {error:#}
 模型位置尚未更新，修改已保留，可重试保存：{}	模型位置尚未更新，修改已保留，可重试保存：{}	The model position has not been updated, the modification has been retained, you can try saving again: {}	模型位置尚未更新，修改已保留，可重試儲存：{}	モデルの位置は更新されておらず、変更は保持されています。再度保存してみてください: {}
 模型准备	模型准备	Model preparation	模型準備	モデルの準備
 模型准备完成 / Model preparation finished.	模型准备完成	Model preparation finished.	模型準備完成	モデルの準備ができました
@@ -1500,13 +1269,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型名 / Model name	模型名	Model name	模型名	機種名
 模型名 / Model name (e.g. deepseek-chat)	模型名	Model name (e.g. deepseek-chat)	模型名	機種名
 模型名称或 Hugging Face 仓库（如 org/model）	模型名称或 Hugging Face 仓库（如 org/model）	Model name or Hugging Face repository (e.g. org/model)	模型名稱或 Hugging Face 倉庫（如 org/model）	モデル名またはハグフェイスリポジトリ (例: 組織/モデル)
-模型尚未下载	模型尚未下载	The model has not been downloaded yet	模型尚未下載	モデルはまだダウンロードされていません
 模型已下载	模型已下载	Model downloaded	模型已下載	モデルをダウンロードしました
 模型已下载 · {}	模型已下载 · {}	Model has been downloaded · {}	模型已下載 · {}	モデルはダウンロードされました · {}
 模型已就绪	模型已就绪	Model ready	模型已就緒	モデルの準備が完了
 模型文件下载不完整，请重新运行 course2md models download / Model download incomplete; run course2md models download again	模型文件下载不完整，请重新运行 course2md models download	Model download incomplete; run course2md models download again	模型檔案下載不完整，請重新執行 course2md models download	モデル ファイルのダウンロードが不完全です。course2md モデルのダウンロードを再実行してください。
 模型文件不完整，正在重新下载 / Model file incomplete; downloading again	模型文件不完整，正在重新下载	Model file incomplete; downloading again	模型檔案不完整，正在重新下載	モデル ファイルが不完全なため、再度ダウンロード中です。
-模型文件已下载	模型文件已下载	Model file downloaded	模型檔案已下載	ダウンロードしたモデルファイル
 模型检查与设置	模型检查与设置	Model checking and setup	模型檢查與設定	モデルの確認とセットアップ
 模型检查未完成	模型检查未完成	Model check not completed	模型檢查未完成	モデルチェックが完了していません
 模型检查未完成，可在模型管理中查看原因并重试	模型检查未完成，可在模型管理中查看原因并重试	The model check is not completed. You can check the reason in model management and try again.	模型檢查未完成，可在模型管理中檢視原因並重試	機種チェックが完了していません。モデル管理で理由を確認し、再試行できます。
@@ -1528,7 +1295,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在保存进度	正在保存进度	Saving progress	正在儲存進度	進行状況の保存
 正在保存进度…	正在保存进度…	Saving progress...	正在儲存進度…	進行状況を保存しています...
 正在保存进度并退出…	正在保存进度并退出…	Saving progress and quitting…	正在儲存進度並結束…	進行状況を保存して終了しています…
-正在停止…	正在停止…	Stopping…	正在停止…	停止中…
 正在停止检查	正在停止检查	Stopping check	正在停止檢查	停止チェック
 正在准备	正在准备	Preparing	正在準備	準備中
 正在准备 {}	正在准备 {}	Preparing {}	正在準備 {}	{}を準備しています
@@ -1549,7 +1315,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在完成笔记…	正在完成笔记…	Completing notes…	正在完成筆記…	ノートを完成中…
 正在导出…	正在导出…	Exporting…	正在匯出…	エクスポート中…
 正在打开…	正在打开…	Opening…	正在開啟…	オープニング…
-正在打开浏览器完成 ChatGPT 授权（{0} 分钟内有效，Ctrl+C 取消）/ Opening the browser for ChatGPT authorization ({0} minutes; Ctrl+C to cancel)…	正在打开浏览器完成 ChatGPT 授权（{0} 分钟内有效，Ctrl+C 取消）/ Opening the browser for ChatGPT authorization ({0} minutes; Ctrl+C to cancel)…	Opening the browser for ChatGPT authorization (valid within {0} minutes; Ctrl+C to cancel)/ Opening the browser for ChatGPT authorization ({0} minutes; Ctrl+C to cancel)…	正在開啟瀏覽器完成 ChatGPT 授權（{0} 分鐘內有效，Ctrl+C 取消）/ Opening the browser for ChatGPT authorization ({0} minutes; Ctrl+C to cancel)…	ChatGPT 認証のためにブラウザを開く ({0} 分以内に有効; キャンセルするには Ctrl+C)/ ChatGPT 認証のためにブラウザを開く ({0} 分; キャンセルするには Ctrl+C)…
 正在打开浏览器完成 ChatGPT 授权（{} 分钟内有效，Ctrl+C 取消）…	正在打开浏览器完成 ChatGPT 授权（{} 分钟内有效，Ctrl+C 取消）…	Opening the browser for ChatGPT authorization ({} minutes; Ctrl+C to cancel)…	正在開啟瀏覽器完成 ChatGPT 授權（{} 分鐘內有效，Ctrl+C 取消）…	ChatGPT の認証のためブラウザを開きます（{} 分間有効、Ctrl+C でキャンセル）…
 正在打开笔记…	正在打开笔记…	Opening note…	正在開啟筆記…	ノートを開いています…
 正在暂停	正在暂停	Pausing	正在暫停	一時停止
@@ -1570,7 +1335,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在检查识别模型…	正在检查识别模型…	Checking recognition model...	正在檢查識別模型…	認識モデルを確認しています...
 正在检查配置	正在检查配置	Checking configuration	正在檢查配置	構成の確認
 正在检测	正在检测	Detecting	正在檢測	検出中
-正在测试{test_label}…	正在测试{test_label}…	Testing {test_label}…	正在測試{test_label}…	{test_label}をテスト中…
 正在测试{}…	正在测试{}…	Testing {}…	正在測試{}…	{}をテスト中…
 正在测试服务…	正在测试服务…	Testing service…	正在測試服務…	テストサービス…
 正在测量速度	正在测量速度	Measuring speed	正在測量速度	速度の測定
@@ -1600,7 +1364,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 此任务尚无可补做的笔记正文	此任务尚无可补做的笔记正文	There is no additional note text for this task yet	此任務尚無可補做的筆記正文	このタスクにはまだ追加のノートテキストがありません
 此任务已有后续处理，请打开对应任务继续	此任务已有后续处理，请打开对应任务继续	This task has been processed later, please open the corresponding task to continue.	此任務已有後續處理，請開啟對應任務繼續	このタスクは後で処理されました。続行するには、対応するタスクを開いてください。
 此前处理记录	此前处理记录	Earlier tasks	先前處理記錄	以前の処理記録
-此前处理记录 · {count}	此前处理记录 · {count}	Previous processing records · {count}	此前處理記錄 · {count}	以前の処理レコード · {count}
 此前处理记录 · {}	此前处理记录 · {}	Previous processing records · {}	此前處理記錄 · {}	以前の処理レコード · {}
 此文件夹里有无法确认来源的旧进度，请换一个位置 / This folder contains earlier progress of unknown origin; choose another location	此文件夹里有无法确认来源的旧进度，请换一个位置	This folder contains earlier progress of unknown origin; choose another location	此資料夾裡有無法確認來源的舊進度，請換一個位置	このフォルダにはソースが確認できない古い進捗状況が存在します。場所を変更してください。
 此服务不支持所选用途	此服务不支持所选用途	This service does not support the selected usage	此服務不支援所選用途	このサービスは選択された使用法をサポートしていません
@@ -1621,13 +1384,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 此请求未完成 / Request failed	此请求未完成	Request failed	此請求未完成	このリクエストは完了していません
 每段语音最长秒数 (1–600) / Maximum speech segment length in seconds	每段语音最长秒数 (1–600)	Maximum speech segment length in seconds	每段語音最長秒數 (1–600)	音声セグメントごとの最大秒数 (1 ～ 600)
 没有 JSON	没有 JSON	No JSON	沒有 JSON	JSONなし
-没有匹配的截图	没有匹配的截图	No matching screenshots	沒有符合的截圖	一致するスクリーンショットはありません
 没有匹配的笔记	没有匹配的笔记	No matching notes	沒有匹配的筆記	一致するノートがありません
 没有可保存的输入	没有可保存的输入	No input to save	沒有可儲存的輸入	保存する入力がありません
 没有字幕时会提示选择字幕文件或改用语音识别	没有字幕时会提示选择字幕文件或改用语音识别	If there are no subtitles, you will be prompted to select a subtitle file or use speech recognition instead.	沒有字幕時會提示選擇字幕檔案或改用語音識別	字幕がない場合は、字幕ファイルを選択するか、代わりに音声認識を使用するように求められます。
 没有对应的截图	没有对应的截图	There is no corresponding screenshot	沒有對應的截圖	対応するスクリーンショットはありません
 没有提取到截图	没有提取到截图	No screenshots were extracted	沒有提取到截圖	スクリーンショットは抽出されませんでした
-没有提取到截图 / No screenshots captured	没有提取到截图	No screenshots captured	沒有提取到截圖	スクリーンショットは抽出されませんでした
 没有数组	没有数组	no array	沒有陣列	配列がありません
 没有检测到可用的 GPU 识别引擎。请选择 CPU 或其他本机识别方式。	没有检测到可用的 GPU 识别引擎。请选择 CPU 或其他本机识别方式。	No available GPU recognition engine detected. Please select CPU or other native identification method.	沒有檢測到可用的 GPU 識別引擎。請選擇 CPU 或其他本機識別方式。	利用可能な GPU 認識エンジンが検出されませんでした。 CPU またはその他のネイティブ識別方法を選択してください。
 没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。	没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。	No available Intel NPU aware environment detected. Please choose another local identification method.	沒有檢測到可用的 Intel NPU 識別環境。請選擇其他本機識別方式。	利用可能なインテル NPU 対応環境が検出されませんでした。別のローカル識別方法を選択してください。
@@ -1636,30 +1397,24 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 法语	法语	French	法語	フランス語
 浅色	浅色	Light	淺色	明るい色
 浅色主题	浅色主题	Light theme	淺色主題	ライトテーマ
-测试{test_label}	测试{test_label}	Test{test_label}	測試{test_label}	テスト{test_label}
-测试{}	测试{}	Test{}	測試{}	テスト{}
 测试已取消，尚未发送请求	测试已取消，尚未发送请求	Test cancelled, request not sent yet	測試已取消，尚未傳送請求	テストはキャンセルされましたが、リクエストはまだ送信されていません
 测试时间：{}	测试时间：{}	Test time: {}	測試時間：{}	テスト時間: {}
-测试服务	测试服务	Test service	測試服務	サービスをテスト
 测试未发送	测试未发送	Test not sent	測試未傳送	テストは送信されませんでした
 测试未通过	测试未通过	Test failed	測試未透過	テスト失敗
 测试结果尚未保存	测试结果尚未保存	Test results have not been saved yet	測試結果尚未儲存	テスト結果はまだ保存されていません
 浏览全部笔记	浏览全部笔记	View all notes	瀏覽全部筆記	すべてのノートを表示
-浏览器授权未完成：{error:#}	浏览器授权未完成：{error:#}	Browser authorization not completed: {error:#}	瀏覽器授權未完成：{error:#}	ブラウザの認証が完了していません: {error:#}
 浏览器授权未完成：{}	浏览器授权未完成：{}	Browser authorization not completed: {}	瀏覽器授權未完成：{}	ブラウザの認証が完了していません: {}
 浏览器授权超时，请重试 / Browser authorization timed out; please retry	浏览器授权超时，请重试	Browser authorization timed out; please retry	瀏覽器授權超時，請重試	ブラウザの認証がタイムアウトしました。もう一度お試しください。
 深色	深色	Dark	深色	暗い
 深色主题	深色主题	Dark theme	深色主題	ダークテーマ
 添加	添加	Add	新增	追加
 添加 AI 服务	添加 AI 服务	Add AI service	新增 AI 服務	AIサービスを追加する
-添加存储位置	添加存储位置	Add storage location	新增儲存位置	保管場所を追加する
 添加笔记库位置	添加笔记库位置	Add note library location	新增筆記庫位置	ノートライブラリの場所を追加
 添加语音服务	添加语音服务	Add speech service	新增語音服務	音声サービスを追加
 清理备份	清理备份	Clean backup	清理備份	クリーンバックアップ
 清理旧位置备份	清理旧位置备份	Clean old location backups	清理舊位置備份	古い場所のバックアップをクリーンアップする
 清理旧位置备份…	清理旧位置备份…	Clean old location backups…	清理舊位置備份…	古い場所のバックアップをクリーンアップします…
 清理旧位置备份？	清理旧位置备份？	Clean old location backup?	清理舊位置備份？	古い場所のバックアップをクリーンアップしますか?
-清空搜索	清空搜索	Clear search	清除搜尋	検索をクリア
 清除 AI 校对的地址、密钥、模型和 Codex 登录 / Clear the AI proofreading endpoint, key, model and Codex login	清除 AI 校对的地址、密钥、模型和 Codex 登录 / Clear the AI proofreading endpoint, key, model and Codex login	Clear the AI proofreading endpoint, key, model and Codex login	清除 AI 校對的位址、金鑰、模型與 Codex 登入	AI 校正のアドレス・キー・モデル・Codex ログインを消去
 清除 Bilibili 登录状态失败 / Could not remove Bilibili login	清除 Bilibili 登录状态失败	Could not remove Bilibili login	清除 Bilibili 登入狀態失敗	Bilibiliのログインステータスをクリアできませんでした
 清除 Codex 登录状态失败 / Could not remove Codex login	清除 Codex 登录状态失败	Could not remove Codex login	清除 Codex 登入狀態失敗	Codex ログイン ステータスのクリアに失敗しました
@@ -1667,7 +1422,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 清除搜索	清除搜索	Clear search	清除搜尋	検索をクリア
 源码构建：把 native/apple-asr/.build 下的 mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib 复制为 {}	源码构建：把 native/apple-asr/.build 下的 mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib 复制为 {}	Source code build: Copy mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib under native/apple-asr/.build to {}	原始碼構建：把 native/apple-asr/.build 下的 mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib 複製為 {}	ソースコードのビルド:native/apple-asr/.build の下にある mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib を {} にコピーします。
 版本	版本	Version	版本	バージョン
-环境变量 {name}	环境变量 {name}	Environment variable {name}	環境變數 {name}	環境変数 {name}
 环境变量 {}	环境变量 {}	Environment variable {}	環境變數 {}	環境変数 {}
 现在下载 / Download now	现在下载	Download now	現在下載	今すぐダウンロード
 生成中断	生成中断	Generate interrupt	生成中斷	割り込みの生成
@@ -1699,7 +1453,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 画面相似度阈值 (0,1]，越高截图越多 / Similarity threshold; higher captures more slides	画面相似度阈值 (0,1]，越高截图越多	Similarity threshold; higher captures more slides	畫面相似度閾值 (0,1]，越高截圖越多	画面類似性のしきい値 (0,1]、値が高いほど、より多くのスクリーンショットが撮影されます
 画面相似度需要在 0 到 1 之间	画面相似度需要在 0 到 1 之间	Frame similarity needs to be between 0 and 1	畫面相似度需要在 0 到 1 之間	画像の類似性は 0 から 1 の間である必要があります
 画面采样间隔	画面采样间隔	Frame sampling interval	畫面取樣間隔	フレームサンプリング間隔
-画面采样间隔至少为 0.2 秒 / Frame sampling interval must be at least 0.2 seconds	画面采样间隔至少为 0.2 秒	Frame sampling interval must be at least 0.2 seconds	畫面取樣間隔至少為 0.2 秒	画像のサンプリング間隔は0.2秒以上
 画面采样间隔（秒）/ Frame sampling interval in seconds	画面采样间隔（秒）/ Frame sampling interval in seconds	Frame sampling interval in seconds	畫面取樣間隔（秒）/ Frame sampling interval in seconds	フレームサンプリング間隔（秒）
 画面间隔	画面间隔	Frame interval	畫面間隔	フレーム間隔
 界面偏好	界面偏好	Interface preferences	介面偏好	表示設定
@@ -1714,7 +1467,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 登录失败，请回终端重试。/ Login failed; return to the terminal and retry.	登录失败，请回终端重试。/ Login failed; return to the terminal and retry.	Login failed, please go back to the terminal and try again. / Login failed; return to the terminal and retry.	登入失敗，請回終端重試。/ Login failed; return to the terminal and retry.	ログインに失敗しました。ターミナルに戻って再試行してください。 / ログインに失敗しました;ターミナルに戻って再試行してください。
 登录已失效	登录已失效	Login expired	登入已失效	ログインの有効期限切れ
 登录未完成	登录未完成	Login not completed	登入未完成	ログインが完了していません
-登录状态	登录状态	Login status	登入狀態	ログイン状態
 登录请求失败，请检查网络后重新获取二维码	登录请求失败，请检查网络后重新获取二维码	Login request failed, please check the network and obtain the QR code again	登入請求失敗，請檢查網路後重新獲取二維碼	ログイン要求に失敗しました。ネットワークを確認して QR コードを再度取得してください。
 登录跳转地址无效 / Invalid login redirect URL	登录跳转地址无效	Invalid login redirect URL	登入跳轉地址無效	ログインリダイレクトアドレスが無効です
 登录跳转缺少地址 / Login redirect is missing an address	登录跳转缺少地址	Login redirect is missing an address	登入跳轉缺少地址	ログインジャンプにアドレスがありません
@@ -1776,9 +1528,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记库包含无法复制的特殊文件：{}	笔记库包含无法复制的特殊文件：{}	The note library contains special files that cannot be copied: {}	筆記庫包含無法複製的特殊檔案：{}	ノート ライブラリにはコピーできない特殊なファイルが含まれています: {}
 笔记库包含符号链接，尚未移动：{}。请先把需要的实际文件放入笔记库。	笔记库包含符号链接，尚未移动：{}。请先把需要的实际文件放入笔记库。	The notes library contains a symbolic link that has not been moved: {}. Please put the actual files you need into the note library first.	筆記庫包含符號連結，尚未移動：{}。請先把需要的實際檔案放入筆記庫。	ノート ライブラリには、移動されていないシンボリック リンク {} が含まれています。最初に必要な実際のファイルをノート ライブラリに配置してください。
 笔记库已移动到 {}。旧位置保留为已核验备份。	笔记库已移动到 {}。旧位置保留为已核验备份。	The notes library has been moved to {}. The old location remains as a verified backup.	筆記庫已移動到 {}。舊位置保留為已核驗備份。	ノート ライブラリは {} に移動されました。古い場所は検証済みのバックアップとして残ります。
-笔记库已移动，模型位置尚未保存。旧位置备份已保留：{error:#}	笔记库已移动，模型位置尚未保存。旧位置备份已保留：{error:#}	The note library has been moved and the model location has not been saved. Old location backup retained: {error:#}	筆記庫已移動，模型位置尚未儲存。舊位置備份已保留：{error:#}	ノートライブラリは移動されており、モデルの場所は保存されていません。古い場所のバックアップが保持されています: {error:#}
 笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}	笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}	The note library has been moved and the model location has not been saved. Old location backup retained: {}	筆記庫已移動，模型位置尚未儲存。舊位置備份已保留：{}	ノートライブラリは移動されており、モデルの場所は保存されていません。古い場所のバックアップが保持されています: {}
-笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{error:#}	笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{error:#}	The note library has been relocated and the model location has not been saved. Please try saving again in the generated note settings: {error:#}	筆記庫已重新定位，模型位置尚未儲存。請在生成筆記設定中重試儲存：{error:#}	ノートライブラリは再配置されており、モデルの場所は保存されていません。生成されたノート設定で再度保存してください: {error:#}
 笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}	笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}	The note library has been relocated and the model location has not been saved. Please try saving again in the generated note settings: {}	筆記庫已重新定位，模型位置尚未儲存。請在生成筆記設定中重試儲存：{}	ノートライブラリは再配置されており、モデルの場所は保存されていません。生成されたノート設定で再度保存してください: {}
 笔记库文件夹暂时无法访问	笔记库文件夹暂时无法访问	The note library folder is temporarily inaccessible	筆記庫資料夾暫時無法訪問	ノート ライブラリ フォルダーに一時的にアクセスできなくなりました
 笔记库文件夹暂时无法访问，请重新连接磁盘后再试	笔记库文件夹暂时无法访问，请重新连接磁盘后再试	The note library folder is temporarily inaccessible, please reconnect the disk and try again.	筆記庫資料夾暫時無法訪問，請重新連線磁碟後再試	ノート ライブラリ フォルダーに一時的にアクセスできません。ディスクを再接続して、もう一度試してください。
@@ -1802,19 +1552,15 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记目录，或存放多份笔记的上级目录 / A note directory or a folder of notes	笔记目录，或存放多份笔记的上级目录	A note directory or a folder of notes	筆記目錄，或存放多份筆記的上級目錄	ノート ディレクトリ、または複数のノートが保存される親ディレクトリ
 笔记详情	笔记详情	Note details	筆記詳情	注意事項の詳細
 第 {} 版	第 {} 版	Version {}	第 {} 版	バージョン {}
-第 {} 版 · {date} 生成	第 {} 版 · {date} 生成	Version {} · {date} generated	第 {} 版 · {date} 生成	バージョン {} · {date} が生成されました
 第 {} 版 · {} 生成	第 {} 版 · {} 生成	Version {} · {} generated	第 {} 版 · {} 生成	バージョン {} · {} が生成されました
 第 {} 版 · {}{}	第 {} 版 · {}{}	Version {} · {}{}	第 {} 版 · {}{}	バージョン {} · {}{}
 第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	The first paragraph should correct the grammar of have / book; the second paragraph should retain the original meaning of water freezing at zero degrees Celsius	第一段應糾正 have / book 的語法；第二段應保留水在零攝氏度結冰的原意	最初の段落では、have / book の文法を修正する必要があります。 2 番目の段落は、摂氏 0 度で水が凍るという本来の意味を保持する必要があります。
-等待 AI 服务返回结果	等待 AI 服务返回结果	Wait for the AI service to return results	等待 AI 服務返回結果	AI サービスが結果を返すまで待ちます
-等待 yt-dlp 结束失败	等待 yt-dlp 结束失败	Waiting for yt-dlp to finish failed	等待 yt-dlp 結束失敗	yt-dlp が完了するのを待機できませんでした
 等待 yt-dlp 结束失败 / Failed waiting for yt-dlp to exit	等待 yt-dlp 结束失败	Failed waiting for yt-dlp to exit	等待 yt-dlp 結束失敗	yt-dlp の終了待ちに失敗しました
 等待准备进度	等待准备进度	Waiting for preparation progress	等待準備進度	準備の進行を待っています
 等待响应	等待响应	Waiting for response	等待響應	応答を待っています
 等待处理	等待处理	Waiting for processing	等待處理	処理を待っています
 等待继续	等待继续	Waiting to continue	等待繼續	続行待ち
 简体中文	简体中文	Simplified Chinese	簡體中文	簡体字中国語
-管理文件夹	管理文件夹	Manage folders	管理資料夾	フォルダーを管理する
 管理本地识别模型 / Manage local speech models	管理本地识别模型 / Manage local speech models	Manage local speech models	管理本機語音辨識模型	ローカル音声認識モデルを管理
 管理模型与下载	管理模型与下载	Manage models and downloads	管理模型與下載	モデルとダウンロードを管理する
 管理配置文件 / Manage the configuration file	管理配置文件 / Manage the configuration file	Manage the configuration file	管理設定檔案	設定ファイルを管理
@@ -1830,16 +1576,13 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 结果尚未确认	结果尚未确认	Results are not yet confirmed	結果尚未確認	結果はまだ確認されていません
 继续	继续	Continue	繼續	続行
 继续上次中断的识别（默认开启）/ Continue interrupted transcription (on by default)	继续上次中断的识别（默认开启）/ Continue interrupted transcription (on by default)	Continue interrupted transcription (on by default)/Continue interrupted transcription (on by default)	繼續上次中斷的識別（預設開啟）/ Continue interrupted transcription (on by default)	中断された文字起こしを続行 (デフォルトでオン)/中断された文字起こしを続行 (デフォルトでオン)
-继续任务	继续任务	Continue task	繼續任務	タスクを続行
 继续使用	继续使用	Keep using	繼續使用	引き続き使用
 继续使用之前的字幕	继续使用之前的字幕	Continue to use previous subtitles	繼續使用之前的字幕	以前の字幕を引き続き使用する
 继续准备	继续准备	Continue to prepare	繼續準備	準備を続ける
 继续准备模型	继续准备模型	Continue to prepare the model	繼續準備模型	モデルの準備を続けます
-继续处理	继续处理	Continue processing	繼續處理	処理を続行
 继续生成	继续生成	Continue	繼續產生	続行
 继续移动	继续移动	Continue moving	繼續移動	移動を続行
 继续阅读	继续阅读	Continue reading	繼續閱讀	続きを読む
-编译识别模型	编译识别模型	Compile recognition model	編譯識別模型	認識モデルをコンパイルする
 编辑 AI 服务	编辑 AI 服务	Edit AI service	編輯 AI 服務	AIサービスの編集
 编辑语音服务	编辑语音服务	Edit voice service	編輯語音服務	音声サービスの編集
 缩小	缩小	Zoom out	縮小	縮小
@@ -1859,7 +1602,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 缺少或尚未验证：{}	缺少或尚未验证：{}	Missing or not yet verified: {}	缺少或尚未驗證：{}	欠落しているか、まだ検証されていません: {}
 缺少视频信息，请重新读取 / Missing video info; please probe again	缺少视频信息，请重新读取	Missing video info; please probe again	缺少影片資訊，請重新讀取	動画情報が不足しています。もう一度読んでください。
 缺少视频处理组件，请在设置中查看	缺少视频处理组件，请在设置中查看	Missing video processing component, please check in settings	缺少影片處理元件，請在設定中檢視	動画処理コンポーネントがありません。設定を確認してください。
-缺少视频来源 / Missing video source. 示例 / Example: course2md ./lecture.mp4	缺少视频来源 / Missing video source. 示例	Example: course2md ./lecture.mp4	缺少影片來源 / Missing video source. 示例	動画ソースがありません。例
 缺少视频来源。示例：course2md ./lecture.mp4	缺少视频来源。示例：course2md ./lecture.mp4	Missing video source. Example: course2md ./lecture.mp4	缺少影片來源。範例：course2md ./lecture.mp4	動画ソースがありません。例: course2md ./lecture.mp4
 缺少识别组件	缺少识别组件	Missing recognition component	缺少識別元件	認識コンポーネントが欠落しています
 缺少读取视频所需的组件，请在设置中检查运行环境	缺少读取视频所需的组件，请在设置中检查运行环境	The components required to read the video are missing, please check the running environment in the settings	缺少讀取影片所需的元件，請在設定中檢查執行環境	動画を読み取るために必要なコンポーネントがありません。設定で実行環境を確認してください。
@@ -1879,13 +1621,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 获取模型超时，可重试	获取模型超时，可重试	Obtaining the model timed out, you can try again	獲取模型超時，可重試	モデルの取得がタイムアウトしました。再試行できます
 葡萄牙语	葡萄牙语	Portuguese	葡萄牙語	ポルトガル語
 补做任务与原笔记来源不一致 / Reprocessing source does not match the base note	补做任务与原笔记来源不一致	Reprocessing source does not match the base note	補做任務與原筆記來源不一致	メイクアップタスクは元のノートの出典と一致しません
-补做任务尚未建立：{error:#}	补做任务尚未建立：{error:#}	The make-up task has not been created yet: {error:#}	補做任務尚未建立：{error:#}	メイクアップ タスクはまだ作成されていません: {error:#}
 补做任务尚未建立：{}	补做任务尚未建立：{}	The make-up task has not been created yet: {}	補做任務尚未建立：{}	メイクアップ タスクはまだ作成されていません: {}
 补做内容无效 / Invalid requested components	补做内容无效	Invalid requested components	補做內容無效	メイク内容が不正です
 补全未完成部分	补全未完成部分	Complete the unfinished parts	補全未完成部分	未完成部分を完成させます
 补换行 {} / Failed to append newline to {}	补换行 {}	Failed to append newline to {}	補換行 {}	改行を追加 {}
-补生成截图	补生成截图	Generate screenshots	補生成截圖	スクリーンショットの生成
-补生成摘要	补生成摘要	Generate summary	補生成摘要	概要の生成
 西班牙语	西班牙语	Spanish	西班牙語	スペイン語
 要测试的服务能力	要测试的服务能力	Service capabilities to be tested	要測試的服務能力	テストされるサービス機能
 观看	观看	Watch	觀看	視聴
@@ -1918,13 +1657,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 詳細は --help を参照してください。	詳細は --help を参照してください。	For details, please refer to --help.	詳細は --help を參照してください。	詳細については、--help を参照してください。
 计算中	计算中	Calculating	計算中	計算中
 认证	认证	Certification	認證	認証
-认证失败	认证失败	Authentication failed	認證失敗	認証に失敗しました
-认证被拒绝	认证被拒绝	Authentication denied	認證被拒絕	認証が拒否されました
-记录仍无法读取，原件已保留：{error:#}	记录仍无法读取，原件已保留：{error:#}	The record still cannot be read, the original has been retained: {error:#}	記錄仍無法讀取，原件已保留：{error:#}	レコードはまだ読み取れません。オリジナルは保持されています: {error:#}
 记录仍无法读取，原件已保留：{}	记录仍无法读取，原件已保留：{}	The record still cannot be read, the original has been retained: {}	記錄仍無法讀取，原件已保留：{}	レコードはまだ読み取れません。オリジナルは保持されています: {}
-记录仍未保存：{error:#}	记录仍未保存：{error:#}	The record remains unsaved: {error:#}	記錄仍未儲存：{error:#}	レコードは保存されないままです: {error:#}
 记录仍未保存：{}	记录仍未保存：{}	The record remains unsaved: {}	記錄仍未儲存：{}	レコードは保存されないままです: {}
-记录尚未重建，原件仍保留：{error:#}	记录尚未重建，原件仍保留：{error:#}	The record has not been reconstructed and the original remains: {error:#}	記錄尚未重建，原件仍保留：{error:#}	レコードは再構築されておらず、オリジナルのままです: {error:#}
 记录尚未重建，原件仍保留：{}	记录尚未重建，原件仍保留：{}	The record has not been reconstructed and the original remains: {}	記錄尚未重建，原件仍保留：{}	レコードは再構築されておらず、オリジナルのままです: {}
 记录已恢复，请重新扫描笔记库	记录已恢复，请重新扫描笔记库	The record has been restored, please scan the note library again	記錄已恢復，請重新掃描筆記庫	記録が復元されました。ノート ライブラリをもう一度スキャンしてください
 设备与运行时	设备与运行时	Devices and runtime	裝置與執行時	デバイスとランタイム
@@ -1938,24 +1672,16 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 设置文件暂时无法写入	设置文件暂时无法写入	The settings file cannot be written temporarily.	設定檔案暫時無法寫入	設定ファイルを一時的に書き込むことができません。
 设置目录暂时无法写入	设置目录暂时无法写入	The settings directory cannot be written to at the moment	設定目錄暫時無法寫入	現在設定ディレクトリに書き込むことができません
 设置目录：{}	设置目录：{}	Setup directory: {}	設定目錄：{}	セットアップディレクトリ: {}
-设置目录：{}\n{error:#}	设置目录：{}\n{error:#}	Setup directory: {}\n{error:#}	設定目錄：{}\n{error:#}	ディレクトリを設定: {}\n{error:#}
 设置目录：{}\n{}	设置目录：{}\n{}	Settings directory: {}\n{}	設定目錄：{}\n{}	設定ディレクトリ：{}\n{}
 设置记录无法解析	设置记录无法解析	Settings record cannot be parsed	設定記錄無法解析	設定レコードを解析できません
-设置语音服务	设置语音服务	Set up speech recognition	設定語音辨識	音声認識を設定
 设置语音识别服务	设置语音识别服务	Set up speech recognition	設定語音辨識服務	音声認識を設定
-设计	设计	Design	設計	デザイン
-识别后端 / Speech backend: coreml (Apple Silicon), gpu, cpu, npu (Intel), api (cloud)	识别后端	Speech backend: coreml (Apple Silicon), gpu, cpu, npu (Intel), api (cloud)	識別後端	バックエンドの識別
 识别方式	识别方式	Identification method	識別方式	識別方法
 识别方式 / Speech backend	识别方式	Speech backend	識別方式	識別方法
 识别时使用 {} · {}	识别时使用 {} · {}	Use {} · {} when identifying	識別時使用 {} · {}	識別する場合は {} · {} を使用してください
-识别服务	识别服务	identification service	識別服務	本人確認サービス
 识别服务错误详情 / llama-server error details	识别服务错误详情	llama-server error details	識別服務錯誤詳情	サービスエラーの詳細を特定する
 识别模型	识别模型	Identify model	識別模型	モデルの識別
-识别模型已就绪	识别模型已就绪	The recognition model is ready	識別模型已就緒	認識モデルの準備が完了しました
 识别模型（需与后端兼容）/ Speech model (must match the backend) gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 仓库名 / or a Hugging Face repository	识别模型（需与后端兼容）/ Speech model (must match the backend) gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 仓库名	or a Hugging Face repository	識別模型（需與後端相容）/ Speech model (must match the backend) gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 倉庫名	認識モデル (バックエンドと一致する必要があります) gpu/cpu: qwen3-1.7b; coreml: qwen3-1.7b、qwen3-0.6b、ささやきます。 npu: ささやきまたはハグフェイスの倉庫名
 识别视频 {}–{} 的声音 / Transcribe video audio {}–{}	识别视频 {}–{} 的声音	Transcribe video audio {}–{}	識別影片 {}–{} 的聲音	動画の音声を識別する {}–{}
-识别视频声音	识别视频声音	Identify video sounds	識別影片聲音	動画サウンドを識別する
-识别视频声音，不使用现有字幕	识别视频声音，不使用现有字幕	Recognize video sounds without using existing subtitles	識別影片聲音，不使用現有字幕	既存の字幕を使用せずに動画音声を認識します
 识别设备	识别设备	Identify device	識別裝置	デバイスの識別
 识别语音 / Transcribing speech	识别语音	Transcribing speech	識別語音	音声を認識する
 识别进度记录已损坏 / The transcription progress record is damaged	识别进度记录已损坏	The transcription progress record is damaged	識別進度記錄已損壞	認識進行状況記録が破損しています
@@ -1965,7 +1691,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 语言优先级	语言优先级	Language priority	語言優先順序	言語の優先順位
 语音	语音	Voice	語音	声
 语音分段长度需要大于 0	语音分段长度需要大于 0	Voice segment length needs to be greater than 0	語音分段長度需要大於 0	音声セグメントの長さは 0 より大きくする必要があります
-语音接口类型	语音接口类型	Voice interface type	語音介面型別	音声インターフェースの種類
 语音服务	语音服务	Speech service	語音服務	音声サービス
 语音服务没有返回文字 / The speech service returned no text	语音服务没有返回文字	The speech service returned no text	語音服務沒有返回文字	音声サービスがテキストを返さない
 语音服务返回了错误 / The speech service returned an error	语音服务返回了错误	The speech service returned an error	語音服務返回了錯誤	音声サービスがエラーを返しました
@@ -1983,7 +1708,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 诶	诶	Hey	誒	ねえ
 请为浅色和深色外观分别选择对应的主题	请为浅色和深色外观分别选择对应的主题	Please select separate themes for light and dark looks	請為淺色和深色外觀分別選擇對應的主題	明るい外観と暗い外観に別々のテーマを選択してください
 请为这次笔记设置 AI 服务	请为这次笔记设置 AI 服务	Please set up AI service for this note	請為這次筆記設定 AI 服務	このノートに AI サービスを設定してください
-请为这次笔记设置语音服务	请为这次笔记设置语音服务	Please set up voice service for this note	請為這次筆記設定語音服務	このノートに対して音声サービスを設定してください
 请为这次笔记设置语音识别服务	请为这次笔记设置语音识别服务	Set up speech recognition for this note	請為這次筆記設定語音辨識服務	このノートの音声認識を設定してください
 请使用 Bilibili App 扫码	请使用 Bilibili App 扫码	Please use Bilibili App to scan the code	請使用 Bilibili App 掃碼	Bilibiliアプリを使用してコードをスキャンしてください
 请先填写 API Key，再获取模型	请先填写 API Key，再获取模型	Please fill in the API Key first and then obtain the model	請先填寫 API Key，再獲取模型	最初に API キーを入力してからモデルを取得してください
@@ -1993,21 +1717,17 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 请先读取并确认视频	请先读取并确认视频	Please read and confirm the video first	請先讀取並確認影片	まずは動画を読んで確認してください
 请先重新读取视频，确认字幕对应的来源	请先重新读取视频，确认字幕对应的来源	Please re-read the video first to confirm the source of the subtitles.	請先重新讀取影片，確認字幕對應的來源	まず動画をもう一度読んで、字幕の出典を確認してください。
 请在浏览器中完成授权（约 3 分钟内）	请在浏览器中完成授权（约 3 分钟内）	Please complete the authorization in the browser (within about 3 minutes)	請在瀏覽器中完成授權（約 3 分鐘內）	ブラウザ上で認証を完了してください（3分程度以内）
-请在约 {seconds} 秒内确认	请在约 {seconds} 秒内确认	Please confirm in approximately {seconds} seconds	請在約 {seconds} 秒內確認	約{seconds}秒後に確認してください
 请在约 {} 秒内确认	请在约 {} 秒内确认	Please confirm in approximately {} seconds	請在約 {} 秒內確認	約{}秒後に確認してください
 请填写笔记名称	请填写笔记名称	Please fill in the note name	請填寫筆記名稱	ノート名を入力してください
 请安装支持显卡的 llama.cpp 和驱动，或改用 CPU 识别。 / Install a GPU-capable llama.cpp and driver, or use CPU transcription.	请安装支持显卡的 llama.cpp 和驱动，或改用 CPU 识别。	Install a GPU-capable llama.cpp and driver, or use CPU transcription.	請安裝支援顯示卡的 llama.cpp 和驅動，或改用 CPU 識別。	llama.cpp とグラフィックス カードをサポートするドライバーをインストールするか、代わりに CPU ID を使用してください。
-请将这段音频转录为文字。只输出转录内容本身（保留自然标点），\n不要添加任何解释、概括或格式标记。若没有语音内容，输出空字符串。	请将这段音频转录为文字。只输出转录内容本身（保留自然标点），\n不要添加任何解释、概括或格式标记。若没有语音内容，输出空字符串。	Please transcribe this audio into text. Only output the transcribed content itself (retaining natural punctuation),\nDo not add any explanations, generalizations, or formatting marks. If there is no voice content, an empty string is output.	請將這段音訊轉錄為文字。只輸出轉錄內容本身（保留自然標點），\n不要新增任何解釋、概括或格式標記。若沒有語音內容，輸出空字串。	この音声をテキストに書き起こしてください。トランスクリプト自体のみを出力します (自然な句読点は保持します)。\n説明、要約、または書式設定マークは追加しないでください。音声コンテンツがない場合は空文字列が出力されます。
 请检查路径；含空格的路径需加引号	请检查路径；含空格的路径需加引号	Check the path and quote paths containing spaces.	請檢查路徑；包含空格的路徑需加上引號	パスを確認してください。スペースを含むパスは引用符で囲む必要があります。
 请求已发送，结果未确认	请求已发送，结果未确认	Request sent, result not confirmed	請求已傳送，結果未確認	リクエストは送信されましたが、結果は未確認です
 请求模型：{}	请求模型：{}	Request model: {}	請求模型：{}	リクエストモデル: {}
 请求结果未确认	请求结果未确认	The request result is not confirmed	請求結果未確認	リクエスト結果は未確認です
-请求记录暂时无法读取，尚未发送新请求：{error:#}	请求记录暂时无法读取，尚未发送新请求：{error:#}	The request record cannot be read temporarily and no new request has been sent: {error:#}	請求記錄暫時無法讀取，尚未傳送新請求：{error:#}	リクエスト レコードを一時的に読み取ることができず、新しいリクエストは送信されていません: {error:#}
 请求记录暂时无法读取，尚未发送新请求：{}	请求记录暂时无法读取，尚未发送新请求：{}	The request record cannot be read temporarily and no new request has been sent: {}	請求記錄暫時無法讀取，尚未傳送新請求：{}	リクエスト レコードを一時的に読み取ることができず、新しいリクエストは送信されていません: {}
 请用哔哩哔哩 App 扫描二维码，并在手机上确认登录（Ctrl+C 取消）：/ Scan with the Bilibili app and confirm the login on your phone (Ctrl+C to cancel):	请用哔哩哔哩 App 扫描二维码，并在手机上确认登录（Ctrl+C 取消）：/ Scan with the Bilibili app and confirm the login on your phone (Ctrl+C to cancel):	Scan with the Bilibili app and confirm the login on your phone (Ctrl+C to cancel):	請用嗶哩嗶哩 App 掃描二維碼，並在手機上確認登入（Ctrl+C 取消）：/ Scan with the Bilibili app and confirm the login on your phone (Ctrl+C to cancel):	Bilibili アプリでスキャンし、携帯電話でログインを確認します (キャンセルするには Ctrl+C):
 请输入 API Key	请输入 API Key	Enter an API key	請輸入 API 金鑰	APIキーを入力してください
 请输入包含 http:// 或 https:// 的服务地址	请输入包含 http:// 或 https:// 的服务地址	Please enter the service address containing http:// or https://	請輸入包含 http:// 或 https:// 的服務地址	http:// または https:// を含むサービス アドレスを入力してください
-请输入完整的 HTTP(S) 服务地址。 / Enter a valid HTTP(S) base URL.	请输入完整的 HTTP(S) 服务地址。	Enter a valid HTTP(S) base URL.	請輸入完整的 HTTP(S) 服務地址。	完全な HTTP(S) サービス アドレスを入力してください。
 请输入完整的视频链接，以 https:// 或 http:// 开头	请输入完整的视频链接，以 https:// 或 http:// 开头	Please enter the complete video link, starting with https:// or http://	請輸入完整的影片連結，以 https:// 或 http:// 開頭	https:// または http:// で始まる完全な動画 リンクを入力してください。
 请输入文件夹名称	请输入文件夹名称	Please enter a folder name	請輸入資料夾名稱	フォルダ名を入力してください
 请输入服务提供的模型 ID	请输入服务提供的模型 ID	Please enter the model ID provided by the service	請輸入服務提供的模型 ID	サービスから提供されたモデルIDを入力してください
@@ -2026,7 +1746,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 读取 Bilibili 分集信息失败	读取 Bilibili 分集信息失败	Failed to read Bilibili episode information	讀取 Bilibili 分集資訊失敗	Bilibili エピソード情報の読み取りに失敗しました
 读取 {}	读取 {}	Read {}	讀取 {}	{} を読む
 读取 {} / Failed to read {}	读取 {}	Failed to read {}	讀取 {}	{} を読む
-读取任务输出失败：{error}	读取任务输出失败：{error}	Failed to read task output: {error}	讀取任務輸出失敗：{error}	タスク出力の読み取りに失敗しました: {error}
 读取任务输出失败：{}	读取任务输出失败：{}	Failed to read task output: {}	讀取任務輸出失敗：{}	タスク出力の読み取りに失敗しました: {}
 读取在线视频	读取在线视频	Read online videos	讀取線上影片	オンライン動画を読む
 读取失败，请重试	读取失败，请重试	Failed to read, please try again	讀取失敗，請重試	読み取れませんでした。もう一度お試しください
@@ -2051,7 +1770,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 跟随系统	跟随系统	Follow system	跟隨系統	システムに従う
 跳过登录	跳过登录	Skip login	跳過登入	ログインをスキップする
 转写为空，无法摘要 / Transcript is empty; cannot summarize	转写为空，无法摘要	Transcript is empty; cannot summarize	轉寫為空，無法摘要	文字起こしが空のため要約できません
-转到 {label}	转到 {label}	Go to {label}	轉到 {label}	{label} に移動
 转到 {}	转到 {}	Go to {}	轉到 {}	{} に移動
 转换未完成	转换未完成	Conversion not completed	轉換未完成	変換が完了していません
 转换程序	转换程序	Conversion program	轉換程式	変換プログラム
@@ -2065,8 +1783,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 迁移副本中的任务身份已经变化，未覆盖 / Copied task identity changed; not overwritten	迁移副本中的任务身份已经变化，未覆盖	Copied task identity changed; not overwritten	遷移副本中的任務身份已經變化，未覆蓋	移行されたコピーのタスク ID は変更されており、上書きされません。
 运行检查	运行检查	Run checks	執行檢查	チェックを実行
 返回	返回	Back	返回	戻る
-返回{return_label}	返回{return_label}	Return {return_label}	返回{return_label}	{return_label} を返す
-返回{}	返回{}	Return {}	返回{}	{} を返す
 返回图片	返回图片	Return to picture	返回圖片	画像に戻る
 返回应用	返回应用	Return to application	返回應用	アプリケーションに戻る
 返回格式不符合要求	返回格式不符合要求	The return format does not meet the requirements	返回格式不符合要求	戻り値の形式が要件を満たしていません
@@ -2080,12 +1796,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 还没有笔记	还没有笔记	No notes yet	還沒有筆記	まだノートはありません
 还没读取到视频信息，请重新预览	还没读取到视频信息，请重新预览	The video information has not been read yet, please preview again	還沒讀取到影片資訊，請重新預覽	動画情報がまだ読み込まれていません。もう一度プレビューしてください。
 这个位置仍被笔记库使用，不能作为备份清理	这个位置仍被笔记库使用，不能作为备份清理	This location is still used by the note library and cannot be cleaned as a backup.	這個位置仍被筆記庫使用，不能作為備份清理	この場所はノート ライブラリによって引き続き使用されているため、バックアップとして消去することはできません。
-这个地址和所选接口类型不匹配，请更换其中之一	这个地址和所选接口类型不匹配，请更换其中之一	This address does not match the selected interface type. Please replace one of them.	這個地址和所選介面型別不匹配，請更換其中之一	このアドレスは、選択したインターフェイス タイプと一致しません。どちらかを交換してください。
 这个地址和所选服务类型不匹配，请更换其中之一	这个地址和所选服务类型不匹配，请更换其中之一	This address and the selected service type do not match. Change one of them.	這個位址與所選服務類型不符，請更換其中之一	このアドレスと選択したサービスの種類が一致しません。どちらかを変更してください
-这个存储位置已经在笔记库中	这个存储位置已经在笔记库中	This storage location is already in the note library	這個儲存位置已經在筆記庫中	この保存場所はすでにノート ライブラリにあります
 这个库已经登记在另一个位置，请使用移动笔记库操作	这个库已经登记在另一个位置，请使用移动笔记库操作	This library has been registered in another location, please use the mobile note library operation	這個庫已經登記在另一個位置，請使用移動筆記庫操作	このライブラリは別の場所に登録されています。モバイル ノート ライブラリ操作を使用してください。
 这个文件与生成笔记时的视频内容不同，请选择同一个原视频	这个文件与生成笔记时的视频内容不同，请选择同一个原视频	This file is different from the video content when generating notes. Please select the same original video.	這個檔案與生成筆記時的影片內容不同，請選擇同一個原影片	このファイルは、ノートを生成するときの動画 コンテンツとは異なります。同じ元の動画を選択してください。
-这个文件夹属于另一个笔记库，请用“重新定位…”选择正确的文件夹	这个文件夹属于另一个笔记库，请用“重新定位…”选择正确的文件夹	This folder belongs to another note library, please use "Relocate..." to select the correct folder	這個資料夾屬於另一個筆記庫，請用“重新定位…”選擇正確的資料夾	このフォルダーは別のノート ライブラリに属しています。「再配置...」を使用して正しいフォルダーを選択してください。
 这个文件夹属于另一个笔记库，请用「重新定位…」选择正确的文件夹	这个文件夹属于另一个笔记库，请用「重新定位…」选择正确的文件夹	This folder belongs to another note library. Use “Relocate…” to choose the correct folder.	這個資料夾屬於另一個筆記庫，請用「重新定位…」選擇正確的資料夾	このフォルダは別のノートライブラリに属しています。「再配置…」で正しいフォルダを選択してください
 这个文件夹已是笔记库位置	这个文件夹已是笔记库位置	This folder is already a note library location	這個資料夾已是筆記庫位置	このフォルダはすでにノートライブラリの場所です
 这个文件夹暂时不能写入，请重新连接磁盘或检查访问权限	这个文件夹暂时不能写入，请重新连接磁盘或检查访问权限	This folder cannot be written to temporarily, please reconnect the disk or check access permissions	這個資料夾暫時不能寫入，請重新連線磁碟或檢查訪問許可權	このフォルダーには一時的に書き込むことができません。ディスクを再接続するか、アクセス許可を確認してください。
@@ -2098,7 +1811,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 这个视频被分成了多段，暂不支持。请下载完整视频后导入。 / This video is split into several parts and is not supported yet. Download the full video and import it.	这个视频被分成了多段，暂不支持。请下载完整视频后导入。	This video is split into several parts and is not supported yet. Download the full video and import it.	這個影片被分成了多段，暫不支援。請下載完整影片後匯入。	この動画は複数のセグメントに分割されているため、現時点ではサポートされていません。完全な動画をダウンロードしてインポートしてください。
 这个链接包含多个视频，请选择具体单集后生成笔记 / This link contains multiple videos; choose a specific episode before generating notes	这个链接包含多个视频，请选择具体单集后生成笔记	This link contains multiple videos; choose a specific episode before generating notes	這個連結包含多個影片，請選擇具體單集後生成筆記	このリンクには複数の動画が含まれています。ノートを生成するには特定のエピソードを選択してください
 这些任务由较新版本创建，请使用对应版本恢复，原文件已保留	这些任务由较新版本创建，请使用对应版本恢复，原文件已保留	These tasks were created by a newer version. Please use the corresponding version to restore. The original files have been retained.	這些任務由較新版本建立，請使用對應版本恢復，原檔案已保留	これらのタスクは新しいバージョンで作成されました。対応するバージョンを使用して復元してください。元のファイルは保持されています。
-这些修改尚未保存：{error:#}	这些修改尚未保存：{error:#}	These changes have not been saved: {error:#}	這些修改尚未儲存：{error:#}	これらの変更は保存されていません: {error:#}
 这些修改尚未保存：{}	这些修改尚未保存：{}	These changes have not been saved: {}	這些修改尚未儲存：{}	これらの変更は保存されていません: {}
 这些请求已获得重新发送授权，请等待对应任务处理	这些请求已获得重新发送授权，请等待对应任务处理	These requests have been authorized to be resent, please wait for the corresponding tasks to be processed	這些請求已獲得重新傳送授權，請等待對應任務處理	これらのリクエストは再送信が許可されています。対応するタスクが処理されるまでお待ちください。
 这份备份尚未核验，不能清理	这份备份尚未核验，不能清理	This backup has not been verified and cannot be cleaned.	這份備份尚未核驗，不能清理	このバックアップは検証されていないため、クリーンアップできません。
@@ -2121,10 +1833,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 这项任务已结束，可在任务卡中补做或生成新版	这项任务已结束，可在任务卡中补做或生成新版	This task has ended. You can make up for it in the task card or generate a new version.	這項任務已結束，可在任務卡中補做或生成新版	このタスクは終了しました。タスク カードで補うことも、新しいバージョンを生成することもできます。
 这项任务正在处理当前操作	这项任务正在处理当前操作	This task is processing the current operation	這項任務正在處理當前操作	このタスクは現在の操作を処理しています
 这项任务的状态已变化，请查看最新状态	这项任务的状态已变化，请查看最新状态	The status of this task has changed, please check the latest status	這項任務的狀態已變化，請檢視最新狀態	このタスクのステータスが変更されました。最新のステータスを確認してください
-进行中	进行中	In progress	進行中	進行中
 连接 AI 服务	连接 AI 服务	Connect to AI services	連線 AI 服務	AIサービスに接続する
 连接 Bilibili	连接 Bilibili	Connect with Bilibili	連線 Bilibili	Bilibiliに接続する
-连接信息	连接信息	connection information	連線資訊	接続情報
 连接失败。请检查服务地址、密钥和模型。 / Connection failed. Check the URL, API key, and model.	连接失败。请检查服务地址、密钥和模型。	Connection failed. Check the URL, API key, and model.	連線失敗。請檢查服務地址、金鑰和模型。	接続に失敗しました。サービスアドレス、キー、モデルを確認してください。
 连接失败。请确认服务地址、密钥及模型，并检查图片输入支持。 / Connection failed. Check the URL, API key, model, and image input support.	连接失败。请确认服务地址、密钥及模型，并检查图片输入支持。	Connection failed. Check the URL, API key, model, and image input support.	連線失敗。請確認服務地址、金鑰及模型，並檢查圖片輸入支援。	接続に失敗しました。サービスアドレス、キー、機種を確認し、画像入力対応を確認してください。
 连接测试通过 / Connection test passed.	连接测试通过	Connection test passed.	連線測試透過	接続テストに合格しました
@@ -2133,18 +1843,15 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 退出登录	退出登录	Sign out	登出	ログアウト
 退出登录不会删除笔记	退出登录不会删除笔记	Logging out will not delete notes	退出登入不會刪除筆記	ログアウトしてもノートは削除されません
 退出登录尚未完成，原登录状态已保留	退出登录尚未完成，原登录状态已保留	Logout has not been completed and the original login status has been retained.	退出登入尚未完成，原登入狀態已保留	ログアウトが完了しておらず、元のログイン状態が保持されています。
-退出登录尚未完成：{error:#}	退出登录尚未完成：{error:#}	Logout not yet completed: {error:#}	退出登入尚未完成：{error:#}	ログアウトがまだ完了していません: {error:#}
 退出登录尚未完成：{}	退出登录尚未完成：{}	Logout not yet completed: {}	退出登入尚未完成：{}	ログアウトがまだ完了していません: {}
 退出，稍后下载 / Exit and download later	退出，稍后下载	Exit and download later	退出，稍後下載	終了して後でダウンロードする
 适合窗口	适合窗口	Fit to window	適合視窗	ウィンドウに合わせる
 适合窗口 · 0	适合窗口 · 0	Fit to window · 0	適合視窗 · 0	窓に合わせる · 0
 选中的视频尚未加入队列，请重试	选中的视频尚未加入队列，请重试	The selected video has not been added to the queue, please try again	選中的影片尚未加入佇列，請重試	選択した動画はキューに追加されていません。もう一度お試しください。
-选中的视频尚未加入队列：{error:#}	选中的视频尚未加入队列：{error:#}	The selected video has not been queued yet: {error:#}	選中的影片尚未加入佇列：{error:#}	選択した動画はまだキューに登録されていません: {error:#}
 选中的视频尚未加入队列：{}	选中的视频尚未加入队列：{}	The selected video has not been queued yet: {}	選中的影片尚未加入佇列：{}	選択した動画はまだキューに登録されていません: {}
 选中的视频无法识别，请单独打开后转换	选中的视频无法识别，请单独打开后转换	The selected video cannot be recognized, please open it separately and convert it.	選中的影片無法識別，請單獨開啟後轉換	選択した動画は認識できません。別途開いて変換してください。
 选择 Codex 模型 / Choose a Codex model	选择 Codex 模型	Choose a Codex model	選擇 Codex 模型	Codexモデルの選択
 选择 SRT 或 VTT 字幕	选择 SRT 或 VTT 字幕	Choose SRT or VTT subtitles	選擇 SRT 或 VTT 字幕	SRT または VTT 字幕を選択します
-选择 {title}	选择 {title}	Select {title}	選擇 {title}	{title}を選択してください
 选择 {}	选择 {}	Select {}	選擇 {}	{}を選択してください
 选择保存位置	选择保存位置	Select save location	選擇儲存位置	保存場所を選択
 选择原视频	选择原视频	Select original video	選擇原影片	元の動画を選択してください
@@ -2162,30 +1869,25 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 选择这个笔记库移动后的文件夹	选择这个笔记库移动后的文件夹	Select the folder to which this note library is moved	選擇這個筆記庫移動後的資料夾	このノートライブラリの移動先フォルダーを選択してください
 选项：	选项：	Options:	選項：	オプション:
 速度	速度	Speed	速度	速度
-速度 {speed}	速度 {speed}	Speed {speed}	速度 {speed}	速度 {speed}
 速度 {}	速度 {}	Speed {}	速度 {}	速度 {}
 選項：	選項：	Options:	選項：	オプション:
 部分内容待补全	部分内容待补全	Some content needs to be completed	部分內容待補全	一部のコンテンツを完了する必要があります
 部分内容暂未读取	部分内容暂未读取	Some content has not been read yet	部分內容暫未讀取	一部のコンテンツはまだ読まれていません
 部分处理结果未确认	部分处理结果未确认	Some processing results are not confirmed	部分處理結果未確認	一部の処理結果が未確認
-部分字幕无法读取：{message}	部分字幕无法读取：{message}	Some subtitles cannot be read: {message}	部分字幕無法讀取：{message}	一部の字幕が読めません: {message}
 部分字幕无法读取：{}	部分字幕无法读取：{}	Some subtitles cannot be read: {}	部分字幕無法讀取：{}	一部の字幕が読めません: {}
 部分截图无法读取	部分截图无法读取	Some screenshots cannot be read	部分截圖無法讀取	一部のスクリーンショットが読み取れない
-部分摘要尚未完成，没有生成不完整的整篇摘要 / Summary parts are incomplete	部分摘要尚未完成，没有生成不完整的整篇摘要	Summary parts are incomplete	部分摘要尚未完成，沒有生成不完整的整篇摘要	部分要約はまだ完全ではなく、不完全な完全要約は生成されません。
 部分未完成	部分未完成	Partially unfinished	部分未完成	部分的に未完成
 部分校对未完成，原始文字已保留	部分校对未完成，原始文字已保留	Some proofreading has not been completed and the original text has been retained.	部分校對未完成，原始文字已保留	一部の校正が完了していないため、原文が保存されています。
 部分笔记文件缺失或已改动，先显示能读到的内容。	部分笔记文件缺失或已改动，先显示能读到的内容。	Some note files are missing or have been modified. The readable content will be displayed first.	部分筆記檔案缺失或已改動，先顯示能讀到的內容。	一部のノート ファイルが見つからないか、変更されています。読み取り可能なコンテンツが最初に表示されます。
 部分视频可能没有字幕，需要语音识别能力作为后备	部分视频可能没有字幕，需要语音识别能力作为后备	Some videos may not have subtitles and require speech recognition capabilities as backup	部分影片可能沒有字幕，需要語音識別能力作為後備	一部の動画には字幕がなく、バックアップとして音声認識機能が必要な場合があります。
 配置云端 API / Configure cloud API	配置云端 API	Configure cloud API	配置雲端 API	クラウドAPIの構成
 配置值	配置值	Settings values	設定值	設定値
-配置值 / settings values	配置值	settings values	配置值	設定値
 配置内容相同	配置内容相同	The configuration content is the same	配置內容相同	設定内容は同じです
 配置可选的 AI 校对 / Configure optional AI proofreading	配置可选的 AI 校对 / Configure optional AI proofreading	Configure optional AI proofreading	設定可選的 AI 校對	任意の AI 校正を設定
 配置已存在：{}。使用 --force 替换	配置已存在：{}。使用 --force 替换	Configuration already exists: {}. Use --force instead	配置已存在：{}。使用 --force 替換	構成はすでに存在します: {}。代わりに --force を使用してください
 配置已改变，请检查当前填写的配置。	配置已改变，请检查当前填写的配置。	The configuration has changed, please check the currently filled configuration.	配置已改變，請檢查當前填寫的配置。	構成が変更されました。現在入力されている構成を確認してください。
 配置并启用 AI 校对（终端内询问缺失项）/ Set up AI proofreading; prompts in a terminal	配置并启用 AI 校对（终端内询问缺失项）/ Set up AI proofreading; prompts in a terminal	Configure and enable AI proofreading (ask for missing items in the terminal) / Set up AI proofreading; prompts in a terminal	配置並啟用 AI 校對（終端內詢問缺失項）/ Set up AI proofreading; prompts in a terminal	AI 校正を設定して有効にする (端末で不足している項目を尋ねる) / AI 校正を設定する;ターミナルのプロンプト
 配置预检失败 / Invalid settings	配置预检失败	Invalid settings	配置預檢失敗	設定のプリフライトに失敗しました
-重命名	重命名	Rename	重新命名	名前の変更
 重命名文件夹	重命名文件夹	Rename folder	重新命名資料夾	フォルダーの名前を変更する
 重命名笔记	重命名笔记	Rename note	重新命名筆記	ノートの名前を変更する
 重命名笔记…	重命名笔记…	Rename note…	重新命名筆記…	ノートの名前を変更…
@@ -2196,7 +1898,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 重新关联此保存位置？	重新关联此保存位置？	Reassociate this save location?	重新關聯此儲存位置？	この保存場所を再度関連付けますか?
 重新关联笔记库	重新关联笔记库	Reconnect the note library	重新關聯筆記庫	ノートライブラリを再接続する
 重新发送以上内容	重新发送以上内容	Resend the above	重新傳送以上內容	上記を再送します
-重新发送的选择尚未保存：{error:#}	重新发送的选择尚未保存：{error:#}	Resend selection not saved: {error:#}	重新傳送的選擇尚未儲存：{error:#}	再送信選択が保存されていません: {error:#}
 重新发送的选择尚未保存：{}	重新发送的选择尚未保存：{}	Resend selection not saved: {}	重新傳送的選擇尚未儲存：{}	再送信選択が保存されていません: {}
 重新定位…	重新定位…	Reposition…	重新定位…	位置を変更…
 重新定位笔记库	重新定位笔记库	Relocate note library	重新定位筆記庫	ノートライブラリを再配置する
@@ -2215,7 +1916,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 重新读取	重新读取	Read again	重新讀取	再読み込み
 重新读取字幕	重新读取字幕	Reread subtitles	重新讀取字幕	字幕を読み直す
 重新运行	重新运行	Run again	重新執行	再実行
-重新运行首次设置	重新运行首次设置	Rerun first time setup	重新執行首次設定	初回セットアップを再実行する
 重新选择文件夹…	重新选择文件夹…	Reselect folder…	重新選擇資料夾…	フォルダを再選択してください…
 重新预览	重新预览	Re-preview	重新預覽	再プレビュー
 重置处理选项	重置处理选项	Reset processing options	重置處理選項	リセット処理オプション
@@ -2224,27 +1924,22 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 重试保存	重试保存	Retry save	重試儲存	保存を再試行
 重试保存处理选项	重试保存处理选项	Retry saving processing options	重試儲存處理選項	処理オプションの保存を再試行
 重试保存本次选择	重试保存本次选择	Try again to save this selection	重試儲存本次選擇	この選択内容を保存するためにもう一度試してください
-重试保存生成选项	重试保存生成选项	Retry saving build options	重試儲存生成選項	ビルド オプションの保存を再試行します
 重试导出	重试导出	Retry export	重試匯出	エクスポートを再試行します
 重试打开	重试打开	Try opening again	重試開啟	もう一度開いてみてください
 重试补做	重试补做	Try again and make up	重試補做	もう一度やり直して補ってください
 重试转换	重试转换	Retry conversion	重試轉換	変換を再試行する
 重试预览	重试预览	Retry preview	重試預覽	プレビューを再試行する
 重跑 install.sh 可安装随包版本	重跑 install.sh 可安装随包版本	Rerun install.sh for the bundled build	重跑 install.sh 可安裝隨包版本	install.sh を再実行すると同梱版をインストールできます
-鉴权失败	鉴权失败	Authentication failed	鑑權失敗	認証に失敗しました
 钥匙串中找不到此服务的凭据，请重新保存 API Key	钥匙串中找不到此服务的凭据，请重新保存 API Key	The credentials for this service were not found in the keychain, please save the API Key again	鑰匙串中找不到此服務的憑據，請重新儲存 API Key	このサービスの認証情報がキーチェーンに見つかりませんでした。API キーを再度保存してください。
 链接无效；请提供完整的视频链接 / Invalid URL; provide a complete video URL	链接无效；请提供完整的视频链接	Invalid URL; provide a complete video URL	連結無效；請提供完整的影片連結	無効なリンクです。完全な動画リンクを提供してください
 链接缺少主机名 / URL is missing a host	链接缺少主机名	URL is missing a host	連結缺少主機名	リンクにホスト名がありません
 错误：{}	错误：{}	Error: {}	錯誤：{}	エラー: {}
 阅读 {}	阅读 {}	Read {}	閱讀 {}	{} を読む
-阅读{label}对应文字	阅读{label}对应文字	Read the text corresponding to {label}	閱讀{label}對應文字	{label} に対応するテキストを読みます
 阅读{}对应文字	阅读{}对应文字	Read the text corresponding to {}	閱讀{}對應文字	{} に対応するテキストを読みます
-阅读位置尚未保存：{error:#}	阅读位置尚未保存：{error:#}	Reading position not saved yet: {error:#}	閱讀位置尚未儲存：{error:#}	読み取り位置がまだ保存されていません: {error:#}
 阅读位置尚未保存：{}	阅读位置尚未保存：{}	Reading position not saved yet: {}	閱讀位置尚未儲存：{}	読み取り位置がまだ保存されていません: {}
 阅读笔记	阅读笔记	Read note	閱讀筆記	ノートを読む
 阅读视图	阅读视图	Reading view	閱讀檢視	閲覧ビュー
 阅读视图与笔记操作	阅读视图与笔记操作	Reading view and note operations	閱讀檢視與筆記操作	閲覧ビューとノート操作
-阅读进度未能保存：{error:#}	阅读进度未能保存：{error:#}	Reading progress failed to save: {error:#}	閱讀進度未能儲存：{error:#}	読み取りの進行状況を保存できませんでした: {error:#}
 阅读进度未能保存：{}	阅读进度未能保存：{}	Reading progress failed to save: {}	閱讀進度未能儲存：{}	読み取りの進行状況を保存できませんでした: {}
 阿拉伯语	阿拉伯语	Arabic	阿拉伯語	アラビア語
 附截图辅助校对（需要视觉模型）/ Attach slides for proofreading (requires image support)	附截图辅助校对（需要视觉模型）/ Attach slides for proofreading (requires image support)	Attach slides for proofreading (requires image support)	附截圖輔助校對（需要視覺模型）/ Attach slides for proofreading (requires image support)	校正用のスクリーンショットを添付します (画像のサポートが必要です)
@@ -2265,7 +1960,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 静默模式，仅报告错误 / Quiet mode: report errors only	静默模式，仅报告错误	Quiet mode: report errors only	靜默模式，僅報告錯誤	サイレント モード、エラーのみが報告されます
 韩语	韩语	Korean	韓語	韓国人
 音频会发送到所选服务	音频会发送到所选服务	Audio is sent to the selected service	音訊會傳送到所選服務	音声は選択したサービスに送信されます
-音频会发送到所选识别服务	音频会发送到所选识别服务	Audio is sent to the selected recognition service	音訊會傳送到所選識別服務	音声は選択した認識サービスに送信されます
 音频会发送到所选语音识别服务	音频会发送到所选语音识别服务	Audio is sent to the selected speech recognition service	音訊會傳送到所選語音辨識服務	音声は選択した音声認識サービスに送信されます
 音频切分线程异常终止 / Audio split thread terminated unexpectedly	音频切分线程异常终止	Audio split thread terminated unexpectedly	音訊切分執行緒異常終止	オーディオ分割スレッドが異常終了する
 音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)	音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)	Also run the audio encoder on the GPU (default)	音訊編碼部分也用 GPU（預設）/ Also run the audio encoder on the GPU (default)	GPU 上でオーディオ エンコーダも実行します (デフォルト)
@@ -2277,7 +1971,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 预切游标与当前 chunk 对齐	预切游标与当前 chunk 对齐	The precut cursor is aligned with the current chunk	預切遊標與當前 chunk 對齊	プレカット カーソルは現在のチャンクと位置合わせされます
 预览视频	预览视频	Preview video	預覽影片	プレビュー動画
 预计剩余	预计剩余	Estimated remaining	預計剩餘	推定残量
-预计剩余 {value}	预计剩余 {value}	Estimated remaining {value}	預計剩餘 {value}	推定残り {value}
 预计剩余 {}	预计剩余 {}	{} remaining	預計剩餘 {}	推定残り {}
 额	额	Um	額	えーっと
 首次设置	首次设置	First-time setup	首次設定	初回設定
@@ -2286,7 +1979,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 验证中	验证中	Verifying	驗證中	検証中
 高级识别设置	高级识别设置	Advanced recognition settings	高階識別設定	高度な認識設定
 默认 · 更准确，占内存较多	默认 · 更准确，占内存较多	Default · More accurate, takes up more memory	預設 · 更準確，佔記憶體較多	デフォルト · より正確で、より多くのノートリを消費します
-默认位置尚未更改：{error:#}	默认位置尚未更改：{error:#}	The default location has not been changed: {error:#}	預設位置尚未更改：{error:#}	デフォルトの場所は変更されていません: {error:#}
 默认位置尚未更改：{}	默认位置尚未更改：{}	The default location has not been changed: {}	預設位置尚未更改：{}	デフォルトの場所は変更されていません: {}
 默认保存位置	默认保存位置	Default save location	預設儲存位置	デフォルトの保存場所
 默认保存位置记录缺失	默认保存位置记录缺失	The default save location record is missing	預設儲存位置記錄缺失	デフォルトの保存場所レコードがありません
@@ -2295,8 +1987,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 默认服务版本不存在	默认服务版本不存在	Default service version does not exist	預設服務版本不存在	デフォルトのサービスバージョンが存在しません
 默认服务用途不匹配	默认服务用途不匹配	Default service purpose does not match	預設服務用途不匹配	デフォルトのサービス目的が一致しません
 默认设置已保存，当前视频的选项尚未同步。请重试。	默认设置已保存，当前视频的选项尚未同步。请重试。	Default settings saved. The current video's options were not synced; try again.	預設設定已儲存，目前影片的選項尚未同步。請重試。	デフォルト設定を保存しました。現在の動画のオプションは同期されていません。再試行してください。
-默认设置已保存，当前视频的选项尚未同步。请重试保存输入记录。	默认设置已保存，当前视频的选项尚未同步。请重试保存输入记录。	The default settings have been saved and the options for the current video have not yet been synced. Please try again to save the input record.	預設設定已儲存，當前影片的選項尚未同步。請重試儲存輸入記錄。	デフォルト設定は保存されていますが、現在の動画のオプションはまだ同期されていません。入力レコードの保存を再試行してください。
-默认设置已保存，当前视频的选项尚未同步：{error:#}	默认设置已保存，当前视频的选项尚未同步：{error:#}	Default settings saved, options for current video not yet synced: {error:#}	預設設定已儲存，當前影片的選項尚未同步：{error:#}	デフォルト設定が保存されました。現在の動画のオプションはまだ同期されていません: {error:#}
 默认设置已保存，当前视频的选项尚未同步：{}	默认设置已保存，当前视频的选项尚未同步：{}	Default settings saved, options for current video not yet synced: {}	預設設定已儲存，當前影片的選項尚未同步：{}	デフォルト設定が保存されました。現在の動画のオプションはまだ同期されていません: {}
 默认设置已保存，当前选项尚未同步。请重试。	默认设置已保存，当前选项尚未同步。请重试。	The default settings have been saved and the current options have not yet been synced. Please try again.	預設設定已儲存，當前選項尚未同步。請重試。	デフォルト設定は保存されていますが、現在のオプションはまだ同期されていません。もう一度試してください。
 默认识别方式	默认识别方式	Default recognition method	預設識別方式	デフォルトの認識方法
@@ -2433,18 +2123,14 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 更多操作	更多操作	More actions	更多操作	その他の操作
 保存到 {}	保存到 {}	Saved to {}	儲存到 {}	保存先: {}
 这次的设置	这次的设置	Settings for this task	這次的設定	このタスクの設定
-文字和截图会发送到这个服务	文字和截图会发送到这个服务	Text and screenshots are sent to this service	文字和截圖會傳送到這個服務	テキストとスクリーンショットがこのサービスに送信されます
-文字会发送到这个服务	文字会发送到这个服务	Text is sent to this service	文字會傳送到這個服務	テキストがこのサービスに送信されます
 只能调整排队中的任务	只能调整排队中的任务	Only queued tasks can be reordered	只能調整排隊中的任務	並べ替えられるのは待機中のタスクだけです
 第 {} 步 · {}	第 {} 步 · {}	Step {} · {}	第 {} 步 · {}	ステップ {} · {}
 笔记只能移到它所在保存位置里的文件夹	笔记只能移到它所在保存位置里的文件夹	A note can only move to folders in its own storage location	筆記只能移到它所在儲存位置裡的資料夾	ノートは保存場所内のフォルダにのみ移動できます
 无法移动文件夹：{}	无法移动文件夹：{}	Could not move the folder: {}	無法移動資料夾：{}	フォルダを移動できません: {}
-顶层	顶层	Top level	頂層	最上位
 新建子文件夹…	新建子文件夹…	New subfolder…	新增子資料夾…	新しいサブフォルダ…
 重命名…	重命名…	Rename…	重新命名…	名前を変更…
 新建文件夹…	新建文件夹…	New folder…	新增資料夾…	新しいフォルダ…
 文件夹只能在同一个保存位置里移动	文件夹只能在同一个保存位置里移动	Folders can only move within the same storage location	資料夾只能在同一個儲存位置裡移動	フォルダは同じ保存場所の中でのみ移動できます
-{} 篇笔记	{} 篇笔记	{} notes	{} 篇筆記	{} 件のノート
 文件夹操作	文件夹操作	Folder actions	資料夾操作	フォルダの操作
 新建子文件夹	新建子文件夹	New subfolder	新增子資料夾	新しいサブフォルダ
 这里已有同名文件夹	这里已有同名文件夹	A folder with this name already exists here	這裡已有同名資料夾	ここには同じ名前のフォルダがすでにあります
@@ -2467,3 +2153,5 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 服务暂时限制了请求次数	服务暂时限制了请求次数	The service is limiting requests for now	服務暫時限制了請求次數	サービスが一時的にリクエスト数を制限しています
 服务暂时无法完成请求	服务暂时无法完成请求	The service could not complete the request for now	服務暫時無法完成請求	サービスは現在リクエストを完了できません
 在浏览器中打开	在浏览器中打开	Open in Browser	在瀏覽器中開啟	ブラウザで開く
+传递任务参数失败：{}	传递任务参数失败：{}	Could not pass the task input: {}	傳遞任務參數失敗：{}	タスク入力を渡せませんでした：{}
+正在保存密钥…	正在保存密钥…	Saving key…	正在儲存金鑰…	キーを保存中…

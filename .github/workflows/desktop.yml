@@ -11,6 +11,8 @@ on:
       - 'build_support/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'i18n/**'
+      - 'tests/i18n_catalog.rs'
       - '.github/actions/**'
       - '.github/workflows/desktop.yml'
       - '!**.md'
@@ -23,6 +25,8 @@ on:
       - 'build_support/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'i18n/**'
+      - 'tests/i18n_catalog.rs'
       - '.github/actions/**'
       - '.github/workflows/desktop.yml'
       - '!**.md'
@@ -56,6 +60,8 @@ jobs:
         run: cargo clippy --manifest-path desktop/Cargo.toml --all-targets --no-deps -- -D warnings
       - name: Check and test desktop
         run: cargo test --manifest-path desktop/Cargo.toml
+      - name: Catalog matches the strings the app looks up
+        run: cargo test --test i18n_catalog
       - name: Build development binaries
         run: |
           cargo build
