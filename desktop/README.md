@@ -42,6 +42,19 @@ python3 desktop/scripts/ux_fixture.py serve &   # fake OpenAI-compatible service
 python3 desktop/scripts/ux_fixture.py bundle --label check1
 ```
 
+The fake service answers from [`tests/fixtures/fake_ai.json`](../tests/fixtures/fake_ai.json), which the engine's task tests also use. It recognizes the service-test requests by phrases quoted from `desktop/src/service_test.rs`; keep the two in step.
+
+Test-only environment variables read by the desktop binary (the validation bundle sets the first three):
+
+| Variable | Effect |
+| --- | --- |
+| `COURSE2MD_VALIDATION_WINDOW` | Debug builds: initial window size `WIDTHxHEIGHT`, at least 720×620. |
+| `COURSE2MD_VALIDATION_PANIC_LOG` | Debug builds on Unix: append panics to this file. |
+| `COURSE2MD_TOOL_PATH` | Search path for ffmpeg, yt-dlp and other tools, replacing the bundled directory and PATH. |
+| `COURSE2MD_PERFORMANCE_LOG` | Builds with `--features performance`: write per-second frame and input-latency histograms to this file. |
+| `COURSE2MD_FRAME_TRACE` | With the performance log: also record GPUI's per-frame trace. |
+| `COURSE2MD_MOTION_TRACE=1` | With the performance log: also record animation events. |
+
 ## Package
 
 ```sh

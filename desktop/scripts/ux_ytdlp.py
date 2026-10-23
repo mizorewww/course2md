@@ -12,14 +12,7 @@ import sys
 import time
 from urllib.parse import urlsplit, parse_qs
 
-
-
-def real_tool(name):
-    """The installed tool on PATH, skipping the fixture directory that holds this wrapper."""
-    here = Path(__file__).resolve().parent
-    path = os.pathsep.join(d for d in os.environ.get("PATH", "").split(os.pathsep)
-                           if d and Path(d).resolve() != here)
-    return shutil.which(name, path=path)
+from ux_common import fixture_root, real_tool
 
 
 args = sys.argv[1:]
@@ -30,7 +23,7 @@ if source is None:
         sys.exit("Real yt-dlp is unavailable")
     os.execv(binary, [binary, *args])
 
-root = Path(os.environ.get("COURSE2MD_UX_FIXTURE_ROOT", "/tmp/course2md-ux-validation"))
+root = fixture_root()
 case = urlsplit(source).path.rsplit("/", 1)[-1]
 part = parse_qs(urlsplit(source).query).get("p", [None])[0]
 with (root / "extractor-requests.jsonl").open("a") as log:
