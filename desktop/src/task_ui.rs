@@ -24,6 +24,7 @@ use crate::{
 use anyhow::{Context as _, Result, ensure};
 use course2md::config::TranscriptSource;
 use course2md::execution::Component;
+use course2md::progress::{BlockReason, Stage, StageStatus as EngineStageStatus};
 use gpui_component::{
     button::*,
     menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
@@ -196,7 +197,7 @@ pub(super) fn actionable_task_count(tasks: &[TaskRecord]) -> usize {
 /// source of the card while the newly published version is already readable.
 fn update_published_course(
     courses: &mut Vec<Course>,
-    done: &Completed,
+    done: &Done,
     manifest: &course2md::artifact::Manifest,
     thumbnail: Option<PathBuf>,
 ) {
@@ -254,7 +255,7 @@ fn worker_wait_state<'a>(
     active: bool,
     result_received: bool,
     intent: Intent,
-    stages: impl IntoIterator<Item = (&'a str, bool)>,
+    stages: impl IntoIterator<Item = (&'a Stage, bool)>,
 ) -> Option<WorkerWait> {
     if !active || intent != Intent::Run {
         return None;
@@ -266,7 +267,7 @@ fn worker_wait_state<'a>(
         if !done {
             return None;
         }
-        render_done |= stage == "render";
+        render_done |= *stage == Stage::Render;
     }
     Some(if render_done || result_received {
         WorkerWait::Finishing
@@ -346,7 +347,7 @@ struct TaskStage {
 /// Only the worker's stage result can move these stages into completed history.
 /// A returned response is the live signal instead, without inventing a fraction.
 fn task_stage_progress(
-    name: &str,
+    name: &Stage,
     done: bool,
     live: Option<&activity::Activity>,
     current: u64,
@@ -354,7 +355,7 @@ fn task_stage_progress(
 ) -> (String, Option<f32>) {
     // AI requests have no measurable fraction; their clock and returned
     // tokens show them moving, and stay as the record once they finish.
-    if matches!(name, "llm" | "translate" | "summary") {
+    if name.is_ai() {
         return (
             live.map(|live| live.live_counter()).unwrap_or_default(),
             None,
@@ -363,9 +364,11 @@ fn task_stage_progress(
     let detail = if !done && let Some(live) = live {
         live.detail(name, true)
     } else if !done
-        || name.starts_with("scenes/")
-        || name == "transcribe"
-        || name.starts_with("model/")
+        || matches!(
+            name,
+            Stage::ScenesScan | Stage::ScenesExtract | Stage::Transcribe
+        )
+        || name.is_model_transfer()
     {
         activity::quantity(name, current, total)
     } else {
@@ -397,13 +400,13 @@ pub(crate) fn ai_component(name: &str) -> Option<Component> {
 /// A proofreading stage can close after failed requests. Published component
 /// outcomes distinguish an ended attempt from a successfully completed step.
 fn ai_stage_outcome(
-    name: &str,
+    name: &Stage,
     outcomes: Option<&course2md::artifact::Outcomes>,
 ) -> Option<StageStatus> {
     let outcome = match name {
-        "llm" => &outcomes?.proofreading,
-        "translate" => &outcomes?.translation,
-        "summary" => &outcomes?.summary,
+        Stage::Llm => &outcomes?.proofreading,
+        Stage::Translate => &outcomes?.translation,
+        Stage::Summary => &outcomes?.summary,
         _ => return None,
     };
     match outcome.status {
@@ -2268,7 +2271,7 @@ impl Desktop {
         .detach();
     }
 
-    pub fn record_task_event(&mut self, event: &Event) {
+    pub fn record_task_event(&mut self, event: &EngineEvent) {
         let Some(id) = &self.active_task else {
             return;
         };
@@ -2278,30 +2281,29 @@ impl Desktop {
         // High-frequency log/progress events keep the persisted timestamp;
         // only state the user would act on moves it (and rewrites the mirror).
         match event {
-            Event::Log { message } => {
+            EngineEvent::Log { message, .. } => {
                 task.logs.push(message.clone());
                 if task.logs.len() > 200 {
                     task.logs.drain(..task.logs.len() - 200);
                 }
             }
-            Event::Stage { stage, status } => {
+            EngineEvent::Stage { stage, status } => {
                 task.updated = workspace::now();
-                if stage.starts_with("scenes/") {
+                if matches!(stage, Stage::ScenesScan | Stage::ScenesExtract) {
                     // Old workers combined scanning and extraction under this
                     // key. Do not retain its completed counter on continuation.
-                    task.stages.remove("scenes");
-                    if stage == "scenes/scan" && status == "start" {
-                        task.stages.remove("scenes/extract");
+                    task.stages.remove(&Stage::Scenes);
+                    if *stage == Stage::ScenesScan && *status == EngineStageStatus::Start {
+                        task.stages.remove(&Stage::ScenesExtract);
                     }
                 }
                 let value = task.stages.entry(stage.clone()).or_default();
-                if status == "start" {
-                    value.begin();
-                } else {
-                    value.status = status.clone();
+                match status {
+                    EngineStageStatus::Start => value.begin(),
+                    EngineStageStatus::Done => value.status = EngineStageStatus::Done,
                 }
             }
-            Event::Progress {
+            EngineEvent::Progress {
                 stage,
                 current,
                 total,
@@ -2312,16 +2314,14 @@ impl Desktop {
                 value.current = *current;
                 value.total = *total;
                 value.detail = message.clone().or_else(|| {
-                    phase
-                        .as_deref()
-                        .map(|phase| crate::activity::model_transfer_phase(stage, Some(phase)))
+                    phase.map(|phase| crate::activity::model_transfer_phase(stage, Some(phase)))
                 });
             }
-            Event::Error { message } => {
+            EngineEvent::Error { message } => {
                 task.updated = workspace::now();
                 task.error = Some(message.clone());
             }
-            Event::Blocked {
+            EngineEvent::Blocked {
                 reason,
                 request_id,
                 purpose,
@@ -2330,15 +2330,15 @@ impl Desktop {
                 message,
             } => {
                 task.updated = workspace::now();
-                if reason == course2md::dispatch::REASON_UNCERTAIN {
+                if *reason == BlockReason::Uncertain {
                     task.state = TaskState::Uncertain;
                 }
                 let blocked = workspace::BlockedRequest {
-                    reason: reason.clone(),
+                    reason: *reason,
                     request_id: request_id.clone(),
                     purpose: purpose.clone(),
                     description: description.clone().unwrap_or_default(),
-                    kind: *kind,
+                    kind: Some(*kind),
                     message: message.clone(),
                 };
                 if !task.blocked.contains(&blocked) {
@@ -3044,7 +3044,7 @@ impl Desktop {
                     .find(|course| &course.dir == dir)
                     .cloned()
                     .unwrap_or_else(|| {
-                        Course::from_completed(&Completed {
+                        Course::from_completed(&Done {
                             out_dir: dir.clone(),
                             title: task.plan.title.clone(),
                             ..Default::default()
@@ -3509,7 +3509,7 @@ impl Desktop {
                     .label(course2md::tr!("阅读笔记"))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_course(
-                            Course::from_completed(&Completed {
+                            Course::from_completed(&Done {
                                 out_dir: path.clone(),
                                 title: title.clone(),
                                 ..Default::default()
@@ -3683,9 +3683,7 @@ impl Desktop {
             active,
             self.pending_done.is_some(),
             task.intent,
-            self.progress
-                .iter()
-                .map(|(name, item)| (name.as_str(), item.done)),
+            self.progress.iter().map(|(name, item)| (name, item.done)),
         );
         let step = current.or_else(|| waiting.map(|waiting| waiting.label().to_owned()));
         let clock = self
@@ -4206,20 +4204,19 @@ impl Desktop {
     /// Live and retained stages use the same labels, status column and icon slot.
     fn task_stage_rows(&self, task: &TaskRecord) -> Vec<TaskStage> {
         let active = self.is_running_task(&task.id);
+        // `Stage` orders by pipeline position, so the set is already sorted.
         let mut names: std::collections::BTreeSet<_> = task.stages.keys().cloned().collect();
         if active {
             names.extend(self.progress.keys().cloned());
         }
-        let mut names: Vec<_> = names.into_iter().collect();
-        names.sort_by_key(|name| activity::stage_order(name));
         names
             .into_iter()
             .map(|name| {
                 let stored = task.stages.get(&name);
                 let live = active.then(|| self.progress.get(&name)).flatten();
-                let done = live
-                    .map(|stage| stage.done)
-                    .unwrap_or_else(|| stored.is_some_and(|stage| stage.status == "done"));
+                let done = live.map(|stage| stage.done).unwrap_or_else(|| {
+                    stored.is_some_and(|stage| stage.status == EngineStageStatus::Done)
+                });
                 let outcomes = if active {
                     self.pending_done
                         .as_ref()
@@ -4311,9 +4308,7 @@ impl Desktop {
             active,
             self.pending_done.is_some(),
             task.intent,
-            self.progress
-                .iter()
-                .map(|(name, item)| (name.as_str(), item.done)),
+            self.progress.iter().map(|(name, item)| (name, item.done)),
         );
         let progress = if current.is_empty() && waiting.is_none() {
             None
@@ -4608,7 +4603,7 @@ impl Desktop {
                         .label(course2md::tr!("阅读笔记"))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_course(
-                                Course::from_completed(&Completed {
+                                Course::from_completed(&Done {
                                     out_dir: path.clone(),
                                     title: title.clone(),
                                     ..Default::default()
@@ -4998,6 +4993,7 @@ mod tests {
         batch_note_title, task_failure_summary, task_stage_progress, update_draft_source_title,
         update_input_form, validate_plan_config, validate_plan_storage, worker_wait_state,
     };
+    use course2md::progress::Stage;
 
     #[test]
     fn batch_titles_come_from_candidate_rows() {
@@ -5106,7 +5102,7 @@ mod tests {
 
     #[test]
     fn a_published_repair_replaces_the_stale_card_before_a_library_scan() {
-        use crate::{backend::Completed, notes::Course};
+        use crate::{backend::Done as Completed, notes::Course};
         use course2md::artifact::{Manifest, Outcome, Outcomes};
         use std::{
             path::PathBuf,
@@ -5188,7 +5184,12 @@ mod tests {
             Some(WorkerWait::Starting)
         );
         assert_eq!(
-            worker_wait_state(true, false, Intent::Run, [("subtitle", true)]),
+            worker_wait_state(
+                true,
+                false,
+                Intent::Run,
+                [(&Stage::parse("subtitle"), true)]
+            ),
             Some(WorkerWait::BetweenStages),
         );
         assert_eq!(
@@ -5196,7 +5197,10 @@ mod tests {
                 true,
                 false,
                 Intent::Run,
-                [("subtitle", true), ("download", false)]
+                [
+                    (&Stage::parse("subtitle"), true),
+                    (&Stage::parse("download"), false)
+                ]
             ),
             None,
         );
@@ -5205,7 +5209,10 @@ mod tests {
                 true,
                 false,
                 Intent::Run,
-                [("subtitle", true), ("download", true)]
+                [
+                    (&Stage::parse("subtitle"), true),
+                    (&Stage::parse("download"), true)
+                ]
             ),
             Some(WorkerWait::BetweenStages),
         );
@@ -5213,7 +5220,10 @@ mod tests {
 
     #[test]
     fn finishing_uses_worker_evidence_and_stops_with_the_process() {
-        let stages = [("subtitle", true), ("render", true)];
+        let stages = [
+            (&Stage::parse("subtitle"), true),
+            (&Stage::parse("render"), true),
+        ];
         assert_eq!(
             worker_wait_state(true, false, Intent::Run, stages),
             Some(WorkerWait::Finishing),
@@ -5229,7 +5239,10 @@ mod tests {
                 true,
                 false,
                 Intent::Run,
-                [("render", true), ("summary", false)]
+                [
+                    (&Stage::parse("render"), true),
+                    (&Stage::parse("summary"), false)
+                ]
             ),
             None,
         );
@@ -5239,7 +5252,7 @@ mod tests {
 
     #[test]
     fn ai_dispatch_counts_do_not_claim_received_results() {
-        for name in ["llm", "summary"] {
+        for name in [&Stage::Llm, &Stage::Summary] {
             let mut activity = crate::activity::Activity::new();
             for (current, total) in [(0, 3), (1, 3), (3, 3), (1, 1)] {
                 activity.update(current, total, None);
@@ -5259,8 +5272,13 @@ mod tests {
         // Quantities that measure completed work keep their determinate progress.
         let mut screenshots = crate::activity::Activity::new();
         screenshots.update(2, 6, None);
-        let (detail, fraction) =
-            task_stage_progress("scenes/extract", false, Some(&screenshots), 2, 6);
+        let (detail, fraction) = task_stage_progress(
+            &Stage::parse("scenes/extract"),
+            false,
+            Some(&screenshots),
+            2,
+            6,
+        );
         assert!(detail.contains("2 / 6"));
         assert_eq!(fraction, Some(2. / 6.));
     }
@@ -5270,11 +5288,11 @@ mod tests {
         for intent in [Intent::Pause, Intent::Quit, Intent::Cancel] {
             assert_eq!(worker_wait_state(true, false, intent, []), None);
             assert_eq!(
-                worker_wait_state(true, false, intent, [("llm", true)]),
+                worker_wait_state(true, false, intent, [(&Stage::parse("llm"), true)]),
                 None
             );
             assert_eq!(
-                worker_wait_state(true, true, intent, [("render", true)]),
+                worker_wait_state(true, true, intent, [(&Stage::parse("render"), true)]),
                 None
             );
             assert_eq!(worker_wait_state(false, false, intent, []), None);
@@ -5291,27 +5309,30 @@ mod tests {
         };
         let value = outcomes.clone();
         assert_eq!(
-            ai_stage_outcome("llm", Some(&value)),
+            ai_stage_outcome(&Stage::parse("llm"), Some(&value)),
             Some(StageStatus::Failed)
         );
         assert_eq!(
-            ai_stage_outcome("summary", Some(&value)),
+            ai_stage_outcome(&Stage::parse("summary"), Some(&value)),
             Some(StageStatus::Complete)
         );
         outcomes.proofreading.status = Status::Partial;
         let value = outcomes.clone();
         assert_eq!(
-            ai_stage_outcome("llm", Some(&value)),
+            ai_stage_outcome(&Stage::parse("llm"), Some(&value)),
             Some(StageStatus::Failed)
         );
         outcomes.proofreading = Outcome::succeeded();
         let value = outcomes.clone();
         assert_eq!(
-            ai_stage_outcome("llm", Some(&value)),
+            ai_stage_outcome(&Stage::parse("llm"), Some(&value)),
             Some(StageStatus::Complete)
         );
-        assert_eq!(ai_stage_outcome("llm", None), None);
-        assert_eq!(ai_stage_outcome("scenes/extract", Some(&value)), None);
+        assert_eq!(ai_stage_outcome(&Stage::parse("llm"), None), None);
+        assert_eq!(
+            ai_stage_outcome(&Stage::parse("scenes/extract"), Some(&value)),
+            None
+        );
     }
 
     #[test]
@@ -5748,7 +5769,7 @@ mod tests {
         outcomes.proofreading.kind = Some(course2md::artifact::FailureKind::Authentication);
         task.outcomes = Some(outcomes.clone());
         task.blocked.push(crate::workspace::BlockedRequest {
-            reason: course2md::dispatch::REASON_UNCERTAIN.into(),
+            reason: course2md::progress::BlockReason::Uncertain,
             request_id: Some("pending".into()),
             purpose: Some("summary".into()),
             description: "摘要".into(),

@@ -1,5 +1,6 @@
 //! Convert a fixed task into a separately published, immutable note version.
 
+use crate::progress::Stage;
 use crate::{
     artifact::{self, Outcome, Outcomes, Status, Target},
     asr,
@@ -36,7 +37,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     if !is_local {
         crate::error::require_ytdlp()?;
     }
-    progress::stage("fetch", "start");
+    progress::start(Stage::Fetch);
     let probed = if is_local {
         None
     } else {
@@ -70,7 +71,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         }
     };
     let local_duration_error = local_duration.and_then(|probe| probe.err());
-    progress::stage("fetch", "done");
+    progress::done(Stage::Fetch);
     let platform = config::platform_from(&cfg.url, &meta.extractor);
     let source_id = if is_local {
         format!("local:sha256:{}", meta.id)
@@ -223,9 +224,9 @@ async fn run_task_inner(
     // 批量入队的任务不带预选字幕：Auto/强制字幕模式下在任务内探测一次并自行发现
     // 字幕，语义与 CLI 一致。探测补齐笔记所需的 UP 主与时长，标题保持入队时的候选标题。
     let subtitle_input = if discovers_subtitles_at_runtime(&subtitle, cfg, is_local) {
-        progress::stage("fetch", "start");
+        progress::start(Stage::Fetch);
         let video = fetch::probe_video(&request.source).await?;
-        progress::stage("fetch", "done");
+        progress::done(Stage::Fetch);
         if meta.uploader.trim().is_empty() {
             meta.uploader = video.meta.uploader.clone();
         }
@@ -410,10 +411,10 @@ async fn reprocess(
                 // 与主路径同一纪律：无法校验的现存文件已由 prepare_cached_media 归档，
                 // 此处只会真正下载新内容，不会把未校验文件标记为已校验
                 crate::error::require_ytdlp()?;
-                progress::stage("download", "start");
+                progress::start(Stage::Download);
                 fetch::download(&cfg.url, &cfg.media_path(), cfg.max_height, false).await?;
                 save_file_digest_async(cfg.media_path(), cfg.out_dir.join("media.sha256")).await?;
-                progress::stage("download", "done");
+                progress::done(Stage::Download);
             }
             cfg.media_path()
         };
@@ -437,7 +438,7 @@ async fn reprocess(
         }
     }
     if has(Component::Proofreading) {
-        progress::stage("llm", "start");
+        progress::start(Stage::Llm);
         crate::dispatch::check_control()?;
         // The original complete transcript is an immutable version asset. Rebuild the
         // original batches (including entries an earlier successful polish removed).
@@ -478,7 +479,7 @@ async fn reprocess(
             polish_with_rollback(std::mem::take(&mut document.sections), cfg).await?;
         document.sections = sections;
         outcomes.proofreading = Outcome::from_report(&report);
-        progress::stage("llm", "done");
+        progress::done(Stage::Llm);
         // Proofreading rebuilt the paragraphs from the original transcript.
         if let Some(target) = cfg.llm.translation_target() {
             document.sections = translate_step(
@@ -557,9 +558,25 @@ fn export_only(
         )?,
     )?;
     let (segments, chars) = done_stats(&document.sections);
-    progress::emit(
-        serde_json::json!({"type":"done","operation":"exports","task_id":request.task_id,"course_id":base.course_id,"version_id":base.version_id,"out_dir":base_dir,"manifest":base_dir.join("manifest.json"),"title":document.meta.title,"slides":base.frames.len(),"segments":segments,"chars":chars,"outputs":outputs,"partial":partial,"outcomes":{"exports":exports},"elapsed_secs":started.elapsed().as_secs_f64()}),
-    );
+    progress::emit(&progress::Event::Done(Box::new(progress::Done {
+        operation: Some("exports".into()),
+        task_id: request.task_id.clone(),
+        course_id: base.course_id.clone(),
+        version_id: base.version_id.clone(),
+        out_dir: base_dir.to_path_buf(),
+        manifest: Some(base_dir.join("manifest.json")),
+        title: document.meta.title.clone(),
+        slides: base.frames.len(),
+        segments,
+        chars,
+        outputs,
+        partial: Some(partial),
+        outcomes: Some(Outcomes {
+            exports,
+            ..Default::default()
+        }),
+        elapsed_secs: started.elapsed().as_secs_f64(),
+    })));
     Ok(())
 }
 
@@ -723,9 +740,9 @@ async fn run_prepared(
         crate::llm::validate(&cfg.llm)?;
     }
     // Subtitle evidence and cloud static validation precede any full media download.
-    progress::stage("subtitle", "start");
+    progress::start(Stage::Subtitle);
     let selected = subtitles(cfg, is_local, input).await?;
-    progress::stage("subtitle", "done");
+    progress::done(Stage::Subtitle);
     if selected.is_none() {
         let (require_key, allow_environment) = match credentials {
             Credentials::Cli => (true, true),
@@ -747,7 +764,7 @@ async fn run_prepared(
         crate::error::require_ytdlp()?;
     }
     if selected.is_none() && cfg.provider != config::AsrProvider::Api {
-        progress::stage("model/prepare", "start");
+        progress::start(Stage::ModelPrepare);
         crate::models::ensure_cache(
             cfg.provider,
             cfg.asr_model
@@ -756,7 +773,7 @@ async fn run_prepared(
             &cfg.model_dir,
         )
         .await?;
-        progress::stage("model/prepare", "done");
+        progress::done(Stage::ModelPrepare);
     }
     meta.save(&cfg.meta_path())?;
     let media_path = if is_local {
@@ -773,7 +790,7 @@ async fn run_prepared(
                 "找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again"
             )
         );
-        progress::stage("download", "start");
+        progress::start(Stage::Download);
         fetch::download(
             &cfg.url,
             &media_path,
@@ -782,7 +799,7 @@ async fn run_prepared(
         )
         .await?;
         save_file_digest_async(media_path.clone(), cfg.out_dir.join("media.sha256")).await?;
-        progress::stage("download", "done");
+        progress::done(Stage::Download);
     }
     crate::dispatch::check_control()?;
     let mut outcomes = Outcomes::default();
@@ -803,7 +820,7 @@ async fn run_prepared(
                 {
                     Some(cache) => cache,
                     None => {
-                        progress::stage("audio", "start");
+                        progress::start(Stage::Audio);
                         let audio = cfg.audio_path();
                         // A verified marker proves audio extraction completed; a bare WAV may be truncated.
                         let marker = cfg.out_dir.join("audio.sha256");
@@ -815,11 +832,11 @@ async fn run_prepared(
                             media::extract_audio(&media_path, &audio).await?;
                             save_file_digest_async(audio.clone(), marker).await?;
                         }
-                        progress::stage("audio", "done");
+                        progress::done(Stage::Audio);
                         crate::dispatch::check_control()?;
-                        progress::stage("transcribe", "start");
+                        progress::start(Stage::Transcribe);
                         let events = asr::run(cfg, &audio).await?;
-                        progress::stage("transcribe", "done");
+                        progress::done(Stage::Transcribe);
                         TranscriptCache {
                             source: "asr".into(),
                             events,
@@ -913,11 +930,11 @@ async fn run_prepared(
     )?;
     crate::dispatch::check_control()?;
     if cfg.llm.enabled {
-        progress::stage("llm", "start");
+        progress::start(Stage::Llm);
         let (polished, report) = polish_with_rollback(sections, cfg).await?;
         sections = polished;
         outcomes.proofreading = Outcome::from_report(&report);
-        progress::stage("llm", "done");
+        progress::done(Stage::Llm);
     }
     crate::dispatch::check_control()?;
     if let Some(target) = cfg.llm.translation_target() {
@@ -930,7 +947,7 @@ async fn run_prepared(
         None
     };
     crate::dispatch::check_control()?;
-    progress::stage("render", "start");
+    progress::start(Stage::Render);
     let manifest = artifact::publish(
         target,
         &cfg.out_dir,
@@ -941,7 +958,7 @@ async fn run_prepared(
         outcomes.clone(),
     )
     .await?;
-    progress::stage("render", "done");
+    progress::done(Stage::Render);
     // Diagnostics remain in work space; a failure record can never become a library entry.
     crate::checkpoint::atomic_write(
         &cfg.out_dir.join("run.json"),
@@ -1093,9 +1110,22 @@ fn emit_done(
     started: Instant,
 ) {
     let (segments, chars) = done_stats(sections);
-    progress::emit(
-        serde_json::json!({"type":"done","task_id":target.task_id,"course_id":target.course_id,"version_id":target.version_id,"out_dir":target.version_dir(),"manifest":target.version_dir().join("manifest.json"),"title":manifest.title,"slides":manifest.frames.len(),"segments":segments,"chars":chars,"outputs":manifest.outputs,"partial":manifest.partial,"outcomes":manifest.outcomes,"elapsed_secs":started.elapsed().as_secs_f64()}),
-    );
+    progress::emit(&progress::Event::Done(Box::new(progress::Done {
+        operation: None,
+        task_id: target.task_id.clone(),
+        course_id: target.course_id.clone(),
+        version_id: target.version_id.clone(),
+        out_dir: target.version_dir(),
+        manifest: Some(target.version_dir().join("manifest.json")),
+        title: manifest.title.clone(),
+        slides: manifest.frames.len(),
+        segments,
+        chars,
+        outputs: manifest.outputs.iter().map(PathBuf::from).collect(),
+        partial: Some(manifest.partial),
+        outcomes: Some(manifest.outcomes.clone()),
+        elapsed_secs: started.elapsed().as_secs_f64(),
+    })));
 }
 
 /// Every transcript event in document order.
@@ -1240,7 +1270,7 @@ async fn translate_step(
         outcomes.translation = Outcome::not_requested();
         return Ok(sections);
     }
-    progress::stage("translate", "start");
+    progress::start(Stage::Translate);
     let llm = cfg.llm.clone();
     let (sections, report) = tokio::task::spawn_blocking(move || {
         crate::llm::translate_sections_report(&mut sections, &llm, target)
@@ -1264,7 +1294,7 @@ async fn translate_step(
         }),
         ..Outcome::from_report(&report)
     };
-    progress::stage("translate", "done");
+    progress::done(Stage::Translate);
     Ok(sections)
 }
 
@@ -1275,12 +1305,12 @@ async fn summarize_step(
     outcomes: &mut Outcomes,
 ) -> Result<Option<crate::summarize::Summary>> {
     crate::dispatch::check_control()?;
-    progress::stage("summary", "start");
+    progress::start(Stage::Summary);
     let speech = all_speech(sections);
     match crate::summarize::summarize(&cfg.llm, &speech, meta).await {
         Ok(summary) => {
             outcomes.summary = Outcome::succeeded();
-            progress::stage("summary", "done");
+            progress::done(Stage::Summary);
             Ok(Some(summary))
         }
         Err(error) => {

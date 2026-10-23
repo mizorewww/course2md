@@ -7,6 +7,7 @@
 //! 视觉校对（`vision = true`）：按 Section 分批，每个请求附该节幻灯片截图，
 //! 供模型校正技术词汇拼写；请求失败时该批保留原文，不改发纯文本请求。
 
+use crate::progress::Stage;
 use crate::timeline::{Section, TranscriptEvent};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -119,11 +120,11 @@ impl Purpose {
             Self::Translation => "translation",
         }
     }
-    fn usage_stage(self) -> &'static str {
+    fn usage_stage(self) -> Stage {
         match self {
-            Self::Proofreading => "llm",
-            Self::Summary => "summary",
-            Self::Translation => "translate",
+            Self::Proofreading => Stage::Llm,
+            Self::Summary => Stage::Summary,
+            Self::Translation => Stage::Translate,
         }
     }
 }
@@ -276,7 +277,7 @@ pub fn polish_sections_report(
             chunks.push((None, std::mem::replace(&mut refs, rest)));
         }
     }
-    let pb = crate::progress::Bar::new("llm", chunks.len() as u64)
+    let pb = crate::progress::Bar::new(Stage::Llm, chunks.len() as u64)
         .with_template("{spinner:.green} llm {pos}/{len} [{bar:32.cyan/blue}] {msg}");
     let agent = chat_agent();
     let succeeded = std::sync::atomic::AtomicUsize::new(0);
@@ -352,7 +353,7 @@ pub fn translate_sections_report(
         let rest = refs.split_off(refs.len().min(BATCH));
         chunks.push(std::mem::replace(&mut refs, rest));
     }
-    let pb = crate::progress::Bar::new("translate", chunks.len() as u64)
+    let pb = crate::progress::Bar::new(Stage::Translate, chunks.len() as u64)
         .with_template("{spinner:.green} translate {pos}/{len} [{bar:32.cyan/blue}] {msg}");
     let agent = chat_agent();
     let warned = std::sync::atomic::AtomicBool::new(false);

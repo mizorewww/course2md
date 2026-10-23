@@ -5,6 +5,7 @@
 #![cfg(apple_native)]
 
 use crate::config::{AsrProvider, DEFAULT_ASR_MODEL, canonical_model};
+use crate::progress::Stage;
 use crate::timeline::TranscriptEvent;
 use anyhow::{Context, Result};
 use std::ffi::{CStr, CString};
@@ -50,15 +51,23 @@ extern "C" fn c2m_model_progress(
     }
     let message = unsafe { CStr::from_ptr(message) }.to_string_lossy();
     let phase = if phase.is_null() {
-        "load"
+        None
     } else {
-        unsafe { CStr::from_ptr(phase) }.to_str().unwrap_or("load")
+        unsafe { CStr::from_ptr(phase) }.to_str().ok()
+    };
+    let phase = match phase {
+        Some("download") => crate::progress::Phase::Download,
+        _ => crate::progress::Phase::Load,
     };
     let fraction = fraction.clamp(0.0, 1.0);
     if crate::progress::is_json() {
-        crate::progress::emit(serde_json::json!({"type":"progress", "stage":"model/apple",
-            "current": (fraction * 10000.0) as u64, "total":10000,
-            "phase": phase, "message":message}));
+        crate::progress::emit(&crate::progress::Event::Progress {
+            stage: Stage::ModelApple,
+            current: (fraction * 10000.0) as u64,
+            total: 10000,
+            message: Some(message.into_owned()),
+            phase: Some(phase),
+        });
     } else if !crate::progress::is_quiet() {
         // 终端只在整百分比变化时打印一行，避免下载回调刷屏
         static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
@@ -348,11 +357,11 @@ pub fn run_coreml(
 
     ensure_metallib()?;
     tracing::info!(model, "loading cached Apple native ASR");
-    crate::progress::stage("model/apple", "start");
+    crate::progress::start(Stage::ModelApple);
     let asr = CoremlAsr::load(model).context(crate::tr!(
         "CoreML 模型加载失败 / CoreML model loading failed"
     ))?;
-    crate::progress::stage("model/apple", "done");
+    crate::progress::done(Stage::ModelApple);
     tracing::info!(
         secs = format_args!("{:.1}", t0.elapsed().as_secs_f64()),
         "coreml ready"

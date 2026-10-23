@@ -4037,7 +4037,7 @@ mod tests {
         draft = unchanged;
         assert!(super::retired_input_task(&draft, &tasks, "新视频").is_none());
         tasks[1].blocked.push(workspace::BlockedRequest {
-            reason: course2md::dispatch::REASON_UNCERTAIN.into(),
+            reason: course2md::progress::BlockReason::Uncertain,
             request_id: Some("pending-summary".into()),
             purpose: Some("summary".into()),
             description: "摘要".into(),

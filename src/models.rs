@@ -9,6 +9,7 @@
 //!     mmproj-Qwen3-ASR-1.7B-Q8_0.gguf
 //! ```
 
+use crate::progress::Stage;
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::Read;
@@ -122,7 +123,7 @@ pub async fn prepare(
     if !before.can_prepare {
         return Err(unsupported_model(&before));
     }
-    crate::progress::stage("model/prepare", "start");
+    crate::progress::start(Stage::ModelPrepare);
     let cached = matches!(
         before.state,
         status::CacheState::Cached | status::CacheState::Loaded
@@ -146,7 +147,7 @@ pub async fn prepare(
         );
     }
     result?;
-    crate::progress::stage("model/prepare", "done");
+    crate::progress::done(Stage::ModelPrepare);
     Ok(status::with_receipt(after))
 }
 

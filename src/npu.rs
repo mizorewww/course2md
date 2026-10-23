@@ -6,6 +6,7 @@
 //! course2md 逐 chunk 提交并保存 checkpoint。
 
 use crate::checkpoint::Checkpoint;
+use crate::progress::Stage;
 use crate::timeline::TranscriptEvent;
 use anyhow::Result;
 
@@ -252,7 +253,7 @@ impl NpuWorker {
         // 每次会话一个随机令牌：worker 的 127.0.0.1 服务不应被本机其他进程驱使
         let token = crate::random_b64url(32)?;
         tracing::info!(model = %model_id, port, "starting npu worker");
-        crate::progress::stage("model/load", "start");
+        crate::progress::start(Stage::ModelLoad);
         let mut child = spawn_npu_worker(&script_path, model_id, port, npu_kind(model_id), &token)?;
         let stderr = child
             .take_stderr()
@@ -276,7 +277,7 @@ impl NpuWorker {
             secs = format_args!("{:.1}", t0.elapsed().as_secs_f64()),
             "npu ready"
         );
-        crate::progress::stage("model/load", "done");
+        crate::progress::done(Stage::ModelLoad);
         Ok(Self {
             tmp,
             child,

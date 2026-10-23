@@ -1,5 +1,5 @@
 //! Read published versions and isolate damaged library entries.
-use crate::backend::Completed;
+use crate::backend::Done;
 use anyhow::{Context, Result};
 use course2md::artifact;
 use gpui::SharedString;
@@ -29,7 +29,7 @@ pub struct Course {
 impl Course {
     /// A just-published version. `read_preview` reads its manifest on open and
     /// reports a failure there instead of opening an empty note.
-    pub fn from_completed(done: &Completed) -> Self {
+    pub fn from_completed(done: &Done) -> Self {
         Self {
             dir: done.out_dir.clone(),
             title: done.title.clone(),
@@ -640,14 +640,14 @@ mod tests {
         assert_eq!(course.dir, old.dir);
         assert!(course.warning.is_some());
         // A completed task's course reads its manifest on open.
-        let opened = read_preview(Course::from_completed(&Completed {
+        let opened = read_preview(Course::from_completed(&Done {
             out_dir: old.dir.clone(),
             ..Default::default()
         }))
         .unwrap();
         assert_eq!(opened.course.storage_dir(), old.storage_dir());
         assert!(
-            read_preview(Course::from_completed(&Completed {
+            read_preview(Course::from_completed(&Done {
                 out_dir: root.path().join("missing"),
                 ..Default::default()
             }))

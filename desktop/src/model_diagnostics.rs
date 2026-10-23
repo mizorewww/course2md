@@ -890,16 +890,14 @@ impl Desktop {
                 .progress
                 .iter()
                 .filter(|(stage, progress)| {
-                    crate::activity::is_model_transfer_stage(stage)
-                        && progress.has_samples()
-                        && !progress.done
+                    stage.is_model_transfer() && progress.has_samples() && !progress.done
                 })
                 .enumerate()
             {
                 extras.push(
                     crate::motion::transfer_status(
                         ("model-download-progress", index),
-                        crate::activity::model_transfer_phase(stage, progress.phase.as_deref()),
+                        crate::activity::model_transfer_phase(stage, progress.phase),
                         &progress.transfer_metrics(stage, true),
                         progress.fraction(),
                         window,

@@ -4,6 +4,7 @@
 //! 跨平台只依赖 PATH 上的 llama.cpp。
 
 use crate::config::PipelineConfig;
+use crate::progress::Stage;
 use crate::timeline::TranscriptEvent;
 use anyhow::{Context, Result};
 
@@ -296,7 +297,7 @@ fn run_blocking(
         "llama-server"
     );
     tracing::debug!(args = %args.join(" "), "llama-server spawn");
-    crate::progress::stage("model/load", "start");
+    crate::progress::start(Stage::ModelLoad);
     let mut child = spawn_server(&bin, &args)?;
     let stderr_tail = child
         .take_stderr()
@@ -325,7 +326,7 @@ fn run_blocking(
         "server ready"
     );
 
-    crate::progress::stage("model/load", "done");
+    crate::progress::done(Stage::ModelLoad);
 
     // 共享 agent：各 chunk 复用连接
     let client = ureq::AgentBuilder::new()
@@ -386,7 +387,7 @@ pub(crate) fn run_chunks(
     label: &str,
     mut transcribe: impl FnMut(&Path) -> Result<Option<String>>,
 ) -> Result<Vec<TranscriptEvent>> {
-    let pb = crate::progress::Bar::new("transcribe", segs.len() as u64).with_template(&format!(
+    let pb = crate::progress::Bar::new(Stage::Transcribe, segs.len() as u64).with_template(&format!(
         "{{spinner:.green}} {label} {{pos}}/{{len}} [{{bar:32.cyan/blue}}] {{elapsed}} {{eta}} {{msg}}"
     ));
 
@@ -481,7 +482,7 @@ fn run_api(
 
     let tmp = crate::runtime::TempWorkDir::new("asr")?;
     let url = crate::config::asr_endpoint(api)?;
-    let pb = crate::progress::Bar::new("transcribe", segs.len() as u64).with_template(
+    let pb = crate::progress::Bar::new(Stage::Transcribe, segs.len() as u64).with_template(
         "{spinner:.green} asr {pos}/{len} [{bar:32.cyan/blue}] {elapsed} {eta} {msg}",
     );
 
@@ -491,9 +492,10 @@ fn run_api(
         .filter(|&i| !cp.is_done(segs[i].start, segs[i].end))
         .collect();
     pb.set_position((segs.len() - pending.len()) as u64);
-    crate::progress::emit(
-        serde_json::json!({"type":"workers", "stage":"transcribe", "workers": WORKERS.min(pending.len())}),
-    );
+    crate::progress::emit(&crate::progress::Event::Workers {
+        stage: Stage::Transcribe,
+        workers: WORKERS.min(pending.len()),
+    });
 
     // 有界并发（std::thread::scope + 借用，无需 Arc）：网络往返是主要瓶颈；
     // 结果经 channel 回收后记录。abort 后 in-flight 请求自然结束，无人 join 不到。

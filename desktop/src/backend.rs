@@ -1,6 +1,5 @@
 //! UI-independent process lifecycle and course library access.
 use anyhow::{Context, Result};
-use serde::Deserialize;
 use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -10,71 +9,25 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Debug, Default, Deserialize)]
-pub struct Completed {
-    pub out_dir: PathBuf,
-    pub title: String,
-    pub slides: usize,
-    #[serde(default)]
-    pub partial: Option<bool>,
-    #[serde(default)]
-    pub outcomes: Option<course2md::artifact::Outcomes>,
+pub use course2md::progress::{Done, Event as EngineEvent, LogLevel};
+
+/// One line of engine output, or the end of the process.
+#[derive(Debug)]
+pub enum Event {
+    Engine(EngineEvent),
+    Exit { success: bool, cancelled: bool },
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-#[allow(clippy::large_enum_variant)]
-pub enum Event {
-    Log {
-        message: String,
-    },
-    Stage {
-        stage: String,
-        status: String,
-    },
-    Progress {
-        stage: String,
-        current: u64,
-        total: u64,
-        #[serde(default)]
-        message: Option<String>,
-        #[serde(default)]
-        phase: Option<String>,
-    },
-    Tokens {
-        stage: String,
-        prompt: u64,
-        completion: u64,
-    },
-    Workers {
-        stage: String,
-        workers: usize,
-    },
-    Done(Completed),
-    #[serde(rename = "model_ready")]
-    ModelReady {
-        operation: String,
-        #[serde(default)]
-        model: Option<String>,
-    },
-    Error {
-        message: String,
-    },
-    Blocked {
-        reason: String,
-        request_id: Option<String>,
-        purpose: Option<String>,
-        #[serde(default)]
-        description: Option<String>,
-        #[serde(default)]
-        kind: Option<course2md::artifact::FailureKind>,
-        message: String,
-    },
-    #[serde(skip)]
-    Exit {
-        success: bool,
-        cancelled: bool,
-    },
+impl Event {
+    fn log(message: String) -> Self {
+        Self::Engine(EngineEvent::Log {
+            level: LogLevel::Info,
+            message,
+        })
+    }
+    fn error(message: String) -> Self {
+        Self::Engine(EngineEvent::Error { message })
+    }
 }
 
 pub struct Job {
@@ -187,9 +140,7 @@ impl Job {
                 match child.try_wait() {
                     Ok(Some(status)) => break status.success(),
                     Err(error) => {
-                        let _ = tx.send(Event::Error {
-                            message: error.to_string(),
-                        });
+                        let _ = tx.send(Event::error(error.to_string()));
                         terminate(&mut child);
                         let _ = child.wait();
                         break false;
@@ -328,14 +279,22 @@ fn reader(
                 Ok(line) => {
                     let line = redactions.line(&line);
                     if json {
-                        serde_json::from_str(&line).unwrap_or(Event::Log { message: line })
+                        match serde_json::from_str(&line) {
+                            Ok(event) => Event::Engine(event),
+                            // A JSON object this build does not recognize is a
+                            // protocol drift, not a log line; keep it visible.
+                            Err(error) if line.starts_with('{') => Event::log(course2md::tr!(
+                                "无法识别的任务事件（{}）：{}",
+                                error,
+                                line
+                            )),
+                            Err(_) => Event::log(line),
+                        }
                     } else {
-                        Event::Log { message: line }
+                        Event::log(line)
                     }
                 }
-                Err(error) => Event::Error {
-                    message: course2md::tr!("读取任务输出失败：{}", error),
-                },
+                Err(error) => Event::error(course2md::tr!("读取任务输出失败：{}", error)),
             };
             if tx.send(event).is_err() {
                 break;
@@ -638,15 +597,36 @@ mod tests {
 
     #[test]
     fn done_event_uses_the_cli_protocol() {
-        let event: Event = serde_json::from_str(r#"{"type":"done","out_dir":"out/test","title":"课程","slides":3,"segments":4,"chars":50,"elapsed_secs":1.5,"outputs":["course.md"]}"#).unwrap();
-        assert!(matches!(event, Event::Done(Completed { slides: 3, .. })));
-        let event: Event = serde_json::from_str(
+        let event: EngineEvent = serde_json::from_str(r#"{"type":"done","out_dir":"out/test","title":"课程","slides":3,"segments":4,"chars":50,"elapsed_secs":1.5,"outputs":["course.md"]}"#).unwrap();
+        assert!(matches!(event, EngineEvent::Done(done) if done.slides == 3));
+        let event: EngineEvent = serde_json::from_str(
             r#"{"type":"model_ready","operation":"prepare","dir":"/tmp/models","model":"qwen3-1.7b"}"#,
         )
         .unwrap();
         assert!(matches!(
             event,
-            Event::ModelReady { model, .. } if model.as_deref() == Some("qwen3-1.7b")
+            EngineEvent::ModelReady { model, .. } if model.as_deref() == Some("qwen3-1.7b")
+        ));
+        let (tx, rx) = mpsc::sync_channel(8);
+        let (wake, _) = smol::channel::bounded(1);
+        reader(
+            std::io::Cursor::new("{\"type\":\"from_the_future\"}\nplain text\n"),
+            tx,
+            true,
+            std::sync::Arc::new(Redactions(vec![])),
+            wake,
+        )
+        .join()
+        .unwrap();
+        match rx.recv().unwrap() {
+            Event::Engine(EngineEvent::Log { message, .. }) => {
+                assert!(message.contains("from_the_future") && message.contains("无法识别"))
+            }
+            _ => panic!("unknown events must stay visible"),
+        }
+        assert!(matches!(
+            rx.recv().unwrap(),
+            Event::Engine(EngineEvent::Log { message, .. }) if message == "plain text"
         ));
     }
 
@@ -660,7 +640,7 @@ mod tests {
             .collect();
         let source = format!(
             "{{\"type\":\"error\",\"message\":\"failed {escaped}\"}}\n\
-             {{\"type\":\"blocked\",\"reason\":\"paused\",\"request_id\":null,\"purpose\":null,\"description\":null,\"message\":\"paused\"}}\n"
+             {{\"type\":\"blocked\",\"reason\":\"paused\",\"request_id\":null,\"purpose\":null,\"description\":null,\"kind\":\"other\",\"message\":\"paused\"}}\n"
         );
         let (tx, rx) = mpsc::sync_channel(8);
         let (wake, _) = smol::channel::bounded(1);
@@ -673,10 +653,15 @@ mod tests {
         );
         handle.join().unwrap();
         match rx.recv().unwrap() {
-            Event::Error { message } => assert_eq!(message, "failed [已隐藏密钥]"),
+            Event::Engine(EngineEvent::Error { message }) => {
+                assert_eq!(message, "failed [已隐藏密钥]")
+            }
             _ => panic!("protocol was lost during redaction"),
         }
-        assert!(matches!(rx.recv().unwrap(), Event::Blocked { .. }));
+        assert!(matches!(
+            rx.recv().unwrap(),
+            Event::Engine(EngineEvent::Blocked { .. })
+        ));
         let stderr = format!("HTTP response: {{\"echo\":\"{escaped}\"}}");
         let clean = redactions.line(&stderr);
         assert!(clean.contains("[已隐藏密钥]"));
@@ -836,7 +821,7 @@ mod tests {
         let mut lines = 0;
         loop {
             match job.events.recv_timeout(Duration::from_secs(10)).unwrap() {
-                Event::Log { .. } => lines += 1,
+                Event::Engine(EngineEvent::Log { .. }) => lines += 1,
                 Event::Exit { success, cancelled } => {
                     assert!(success && !cancelled);
                     break;
@@ -857,7 +842,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             job.events.recv_timeout(Duration::from_secs(5)).unwrap(),
-            Event::Log { .. }
+            Event::Engine(EngineEvent::Log { .. })
         ));
         job.cancel();
         // Exit waits up to 3s for both inherited pipes to close; arriving sooner

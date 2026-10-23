@@ -310,7 +310,7 @@ impl Desktop {
             task.state,
             workspace::TaskState::Complete | workspace::TaskState::Partial
         ) {
-            task.artifact.clone().map(|out_dir| Completed {
+            task.artifact.clone().map(|out_dir| crate::backend::Done {
                 out_dir,
                 title: task.plan.title.clone(),
                 ..Default::default()

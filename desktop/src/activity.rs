@@ -1,12 +1,13 @@
 //! Progress samples, independent of rendering. ETA excludes cached work and resets on retries.
+use course2md::progress::{Phase, Stage};
 use std::time::{Duration, Instant};
 
 pub struct Activity {
     pub current: u64,
     pub total: u64,
     pub message: String,
-    /// Structured phase from the engine (Apple model preparation).
-    pub phase: Option<String>,
+    /// Structured phase from the engine (model transfers).
+    pub phase: Option<Phase>,
     pub done: bool,
     pub workers: usize,
     /// Tokens the AI service reported for this stage, sent and received.
@@ -93,7 +94,7 @@ impl Activity {
         (elapsed >= 1. && processed > 0 && self.updated.elapsed() < Duration::from_secs(30))
             .then(|| processed as f64 / elapsed)
     }
-    pub fn transfer_metrics(&self, stage: &str, running: bool) -> TransferMetrics {
+    pub fn transfer_metrics(&self, stage: &Stage, running: bool) -> TransferMetrics {
         if self.done {
             return TransferMetrics {
                 note: Some(course2md::tr!("已完成").into()),
@@ -109,7 +110,7 @@ impl Activity {
         let quantity = quantity(stage, self.current, self.total);
         // Apple reports weighted preparation stages, not byte throughput. Loading,
         // downloads and compilation do not advance those stages at a constant rate.
-        if stage == "model/apple" {
+        if *stage == Stage::ModelApple {
             return TransferMetrics {
                 quantity,
                 note: Some(course2md::tr!(
@@ -121,25 +122,25 @@ impl Activity {
         }
         // Model files name their host, and whether the engine is connecting,
         // resuming after a dropped connection or checking the finished file.
-        let host = (stage.starts_with("model/") && !self.message.is_empty())
+        let host = (matches!(stage, Stage::ModelFile(_)) && !self.message.is_empty())
             .then_some(self.message.as_str());
         let source = host.map(|host| course2md::tr!("来源 {}", host));
-        match (self.phase.as_deref(), host) {
-            (Some("connect"), Some(host)) => {
+        match (self.phase, host) {
+            (Some(Phase::Connect), Some(host)) => {
                 return TransferMetrics {
                     quantity,
                     note: Some(course2md::tr!("正在连接 {}", host)),
                     ..TransferMetrics::default()
                 };
             }
-            (Some("retry"), Some(host)) => {
+            (Some(Phase::Retry), Some(host)) => {
                 return TransferMetrics {
                     quantity,
                     note: Some(course2md::tr!("连接中断，正在重新连接 {}", host)),
                     ..TransferMetrics::default()
                 };
             }
-            (Some("verify"), _) => {
+            (Some(Phase::Verify), _) => {
                 return TransferMetrics {
                     note: Some(course2md::tr!("正在校验文件完整性").into()),
                     ..TransferMetrics::default()
@@ -155,7 +156,7 @@ impl Activity {
                 source,
                 speed: byte_download.then(|| "—".into()),
                 note: Some(
-                    if stage.starts_with("scenes/") {
+                    if matches!(stage, Stage::ScenesScan | Stage::ScenesExtract) {
                         course2md::tr!("仍在处理")
                     } else {
                         course2md::tr!("等待响应")
@@ -197,7 +198,7 @@ impl Activity {
             source,
         }
     }
-    pub fn detail(&self, stage: &str, running: bool) -> String {
+    pub fn detail(&self, stage: &Stage, running: bool) -> String {
         self.transfer_metrics(stage, running).summary()
     }
 }
@@ -268,14 +269,14 @@ fn compact_count(count: u64) -> String {
     }
 }
 
-fn is_byte_download(stage: &str) -> bool {
-    stage == "download" || (stage.starts_with("model/") && stage != "model/apple")
+fn is_byte_download(stage: &Stage) -> bool {
+    matches!(stage, Stage::Download | Stage::ModelFile(_))
 }
 
-pub fn quantity(stage: &str, current: u64, total: u64) -> String {
-    if stage == "scenes/scan" {
+pub fn quantity(stage: &Stage, current: u64, total: u64) -> String {
+    if *stage == Stage::ScenesScan {
         course2md::tr!("已检查 {} 张画面", current)
-    } else if stage == "scenes/extract" && total > 0 {
+    } else if *stage == Stage::ScenesExtract && total > 0 {
         course2md::tr!("已保存 {} / {} 张截图", current, total)
     } else if is_byte_download(stage) {
         if total > 0 {
@@ -284,7 +285,7 @@ pub fn quantity(stage: &str, current: u64, total: u64) -> String {
             bytes(current)
         }
     } else if total > 0 {
-        if stage == "transcribe" {
+        if *stage == Stage::Transcribe {
             course2md::tr!("{} / {} 段", current, total)
         } else {
             format!(
@@ -345,67 +346,42 @@ pub fn component_failure_message(label: &str, message: Option<&str>) -> String {
     }
 }
 
-pub fn stage_order(stage: &str) -> usize {
+pub fn title(stage: &Stage) -> String {
     match stage {
-        "fetch" => 0,
-        "subtitle" => 1,
-        "download" => 2,
-        "scenes/scan" => 3,
-        "scenes/extract" => 4,
-        "audio" => 5,
-        s if s.starts_with("model/") => 6,
-        "model/load" => 7,
-        "transcribe" => 8,
-        "llm" => 9,
-        "translate" => 10,
-        "summary" => 11,
-        "render" => 12,
-        "export" | "exports" => 13,
-        _ => 14,
-    }
-}
-
-pub fn title(stage: &str) -> String {
-    if let Some(file) = stage.strip_prefix("model/") {
-        return if file == "apple" {
-            course2md::tr!("准备 Apple 识别模型").into()
-        } else if file.starts_with("mmproj") {
-            course2md::tr!("下载音频编码器").into()
-        } else {
-            course2md::tr!("下载语音模型").into()
-        };
-    }
-    match stage {
-        "model/load" => course2md::tr!("加载识别模型"),
-        "fetch" => course2md::tr!("读取课程"),
-        "download" => course2md::tr!("下载视频"),
-        "scenes" => course2md::tr!("提取画面"),
-        "scenes/scan" => course2md::tr!("扫描画面"),
-        "scenes/extract" => course2md::tr!("生成截图"),
-        "audio" => course2md::tr!("提取音频"),
-        "transcribe" => course2md::tr!("语音转写"),
-        "subtitle" => course2md::tr!("读取字幕"),
-        "llm" => course2md::tr!("AI 校对"),
-        "translate" => course2md::tr!("AI 翻译"),
-        "summary" => course2md::tr!("生成摘要"),
-        "export" | "exports" => course2md::tr!("导出文件"),
-        "render" => course2md::tr!("生成笔记"),
-        _ => stage,
+        Stage::ModelApple => course2md::tr!("准备 Apple 识别模型"),
+        Stage::ModelFile(file) if file.starts_with("mmproj") => {
+            course2md::tr!("下载音频编码器")
+        }
+        Stage::ModelFile(_) => course2md::tr!("下载语音模型"),
+        Stage::ModelPrepare => course2md::tr!("检查识别模型"),
+        Stage::ModelLoad => course2md::tr!("加载识别模型"),
+        Stage::Fetch => course2md::tr!("读取课程"),
+        Stage::Download => course2md::tr!("下载视频"),
+        Stage::Scenes => course2md::tr!("提取画面"),
+        Stage::ScenesScan => course2md::tr!("扫描画面"),
+        Stage::ScenesExtract => course2md::tr!("生成截图"),
+        Stage::Audio => course2md::tr!("提取音频"),
+        Stage::Transcribe => course2md::tr!("语音转写"),
+        Stage::Subtitle => course2md::tr!("读取字幕"),
+        Stage::Llm => course2md::tr!("AI 校对"),
+        Stage::Translate => course2md::tr!("AI 翻译"),
+        Stage::Summary => course2md::tr!("生成摘要"),
+        Stage::Exports => course2md::tr!("导出文件"),
+        Stage::Render => course2md::tr!("生成笔记"),
+        Stage::Other(name) => return name.clone(),
     }
     .into()
 }
-/// 模型下载/准备类阶段：诊断面板与引导页共用同一过滤器（此前三处复制）。
-pub(crate) fn is_model_transfer_stage(stage: &str) -> bool {
-    stage.starts_with("model") || stage.contains("download")
-}
 
 /// 准备阶段文案：结构化 phase 来自引擎，缺失时退化为阶段标题。
-pub(crate) fn model_transfer_phase(stage: &str, phase: Option<&str>) -> String {
+pub(crate) fn model_transfer_phase(stage: &Stage, phase: Option<Phase>) -> String {
     // Only Apple preparation names its phase in the title; model files keep
     // their own title and word their phase in the detail.
     match phase {
-        Some("load") if stage == "model/apple" => course2md::tr!("加载识别模型").into(),
-        Some("download") if stage == "model/apple" => course2md::tr!("下载识别模型").into(),
+        Some(Phase::Load) if *stage == Stage::ModelApple => course2md::tr!("加载识别模型").into(),
+        Some(Phase::Download) if *stage == Stage::ModelApple => {
+            course2md::tr!("下载识别模型").into()
+        }
         _ => title(stage),
     }
 }
@@ -471,7 +447,7 @@ mod tests {
         activity.update(1000, 10000, None);
         activity.started = Instant::now() - Duration::from_secs(180);
         activity.update(1700, 10000, None);
-        let detail = activity.detail("model/apple", true);
+        let detail = activity.detail(&Stage::parse("model/apple"), true);
         assert!(
             detail.contains("17%") && detail.contains("已用 3 分"),
             "{detail}"
@@ -482,14 +458,20 @@ mod tests {
         );
 
         activity.updated = Instant::now() - Duration::from_secs(60);
-        let waiting = activity.detail("model/apple", true);
+        let waiting = activity.detail(&Stage::parse("model/apple"), true);
         assert!(
             waiting.contains("已用") && !waiting.contains("等待响应"),
             "{waiting}"
         );
-        assert_eq!(activity.detail("model/apple", false), "已停止");
+        assert_eq!(
+            activity.detail(&Stage::parse("model/apple"), false),
+            "已停止"
+        );
         activity.done = true;
-        assert_eq!(activity.detail("model/apple", true), "已完成");
+        assert_eq!(
+            activity.detail(&Stage::parse("model/apple"), true),
+            "已完成"
+        );
     }
 
     #[test]
@@ -498,7 +480,7 @@ mod tests {
         activity.update(0, 8 * 1024 * 1024, None);
         activity.started = Instant::now() - Duration::from_secs(10);
         activity.update(4 * 1024 * 1024, 8 * 1024 * 1024, None);
-        let metrics = activity.transfer_metrics("model/model.gguf", true);
+        let metrics = activity.transfer_metrics(&Stage::parse("model/model.gguf"), true);
         assert_eq!(metrics.quantity, "4.0 MB / 8.0 MB");
         assert!(
             metrics
@@ -511,7 +493,7 @@ mod tests {
             matches!(&metrics.eta, Some(TransferEta::Remaining(value)) if value.ends_with("秒")),
             "{metrics:?}"
         );
-        let detail = activity.detail("model/model.gguf", true);
+        let detail = activity.detail(&Stage::parse("model/model.gguf"), true);
         assert!(detail.contains("4.0 MB / 8.0 MB"), "{detail}");
         assert!(
             detail.contains("速度 ") && detail.contains("预计剩余"),
@@ -523,7 +505,7 @@ mod tests {
     fn model_download_metrics_stay_labeled_while_speed_is_measured() {
         let mut activity = Activity::new();
         activity.update(1_048_576, 8 * 1024 * 1024, None);
-        let metrics = activity.transfer_metrics("model/model.gguf", true);
+        let metrics = activity.transfer_metrics(&Stage::parse("model/model.gguf"), true);
         assert!(metrics.speed.is_none() && metrics.note.is_some());
         assert_eq!(metrics.eta, Some(TransferEta::Remaining("计算中".into())));
     }
@@ -531,32 +513,32 @@ mod tests {
     fn model_files_show_their_host_and_phase() {
         let mut activity = Activity::new();
         activity.update(0, 8 * 1024 * 1024, Some("modelscope.cn".into()));
-        activity.phase = Some("connect".into());
-        let metrics = activity.transfer_metrics("model/model.gguf", true);
+        activity.phase = Some(Phase::Connect);
+        let metrics = activity.transfer_metrics(&Stage::parse("model/model.gguf"), true);
         assert_eq!(metrics.note.as_deref(), Some("正在连接 modelscope.cn"));
         assert!(metrics.speed.is_none() && metrics.eta.is_none());
 
-        activity.phase = Some("download".into());
+        activity.phase = Some(Phase::Download);
         activity.started = Instant::now() - Duration::from_secs(10);
         activity.update(4 * 1024 * 1024, 8 * 1024 * 1024, None);
-        let metrics = activity.transfer_metrics("model/model.gguf", true);
+        let metrics = activity.transfer_metrics(&Stage::parse("model/model.gguf"), true);
         assert_eq!(metrics.source.as_deref(), Some("来源 modelscope.cn"));
         assert!(metrics.speed.is_some(), "{metrics:?}");
 
-        activity.phase = Some("retry".into());
-        let detail = activity.detail("model/model.gguf", true);
+        activity.phase = Some(Phase::Retry);
+        let detail = activity.detail(&Stage::parse("model/model.gguf"), true);
         assert!(detail.contains("正在重新连接 modelscope.cn"), "{detail}");
 
-        activity.phase = Some("verify".into());
-        let metrics = activity.transfer_metrics("model/model.gguf", true);
+        activity.phase = Some(Phase::Verify);
+        let metrics = activity.transfer_metrics(&Stage::parse("model/model.gguf"), true);
         assert_eq!(metrics.note.as_deref(), Some("正在校验文件完整性"));
         assert!(metrics.quantity.is_empty());
         assert_eq!(
-            model_transfer_phase("model/model.gguf", Some("download")),
+            model_transfer_phase(&Stage::parse("model/model.gguf"), Some(Phase::Download)),
             "下载语音模型"
         );
         assert_eq!(
-            model_transfer_phase("model/apple", Some("download")),
+            model_transfer_phase(&Stage::parse("model/apple"), Some(Phase::Download)),
             "下载识别模型"
         );
     }
@@ -567,14 +549,14 @@ mod tests {
         scan.update(18, 0, Some("已找到 1 张候选截图".into()));
         assert!(scan.fraction().is_none());
         assert!(
-            scan.detail("scenes/scan", true)
+            scan.detail(&Stage::parse("scenes/scan"), true)
                 .contains("已检查 18 张画面")
         );
         scan.done = true;
         let mut extract = Activity::new();
         extract.update(0, 1, None);
         extract.started = Instant::now() - Duration::from_secs(25);
-        let detail = extract.detail("scenes/extract", true);
+        let detail = extract.detail(&Stage::parse("scenes/extract"), true);
         assert!(detail.contains("已保存 0 / 1 张截图"), "{detail}");
         assert!(
             !detail.contains("100%") && !detail.contains("收尾") && !detail.contains("预计剩余")
@@ -582,9 +564,12 @@ mod tests {
         assert_eq!(extract.fraction(), Some(0.));
         extract.update(1, 1, None);
         extract.done = true;
-        assert_eq!(extract.detail("scenes/extract", true), "已完成");
-        let mut persisted = crate::workspace::Stage {
-            status: "done".into(),
+        assert_eq!(
+            extract.detail(&Stage::parse("scenes/extract"), true),
+            "已完成"
+        );
+        let mut persisted = crate::workspace::StageRecord {
+            status: course2md::progress::StageStatus::Done,
             current: 18,
             total: 18,
             detail: Some("old sample".into()),
@@ -638,15 +623,22 @@ mod tests {
         assert!(item.rate().is_none());
         item.started = Instant::now() - Duration::from_secs(60);
         item.updated = Instant::now() - Duration::from_secs(31);
-        assert!(item.detail("model/test", true).contains("等待响应"));
+        assert!(
+            item.detail(&Stage::parse("model/test"), true)
+                .contains("等待响应")
+        );
     }
     #[test]
     fn unknown_total_never_invents_a_percentage_or_eta() {
         let mut item = Activity::new();
         item.update(8192, 0, None);
         assert!(item.fraction().is_none());
-        assert!(!item.detail("model/test", true).contains("预计剩余"));
-        assert_eq!(item.detail("model/test", false), "已停止");
+        assert!(
+            !item
+                .detail(&Stage::parse("model/test"), true)
+                .contains("预计剩余")
+        );
+        assert_eq!(item.detail(&Stage::parse("model/test"), false), "已停止");
     }
 
     #[test]
@@ -655,7 +647,7 @@ mod tests {
         item.update(0, 16 * 1024 * 1024, None);
         item.started = Instant::now() - Duration::from_secs(10);
         item.update(8 * 1024 * 1024, 16 * 1024 * 1024, None);
-        let detail = item.detail("download", true);
+        let detail = item.detail(&Stage::parse("download"), true);
         assert!(detail.contains("8.0 MB / 16.0 MB"), "{detail}");
         assert!(
             detail.contains("速度") && detail.contains("预计剩余"),
@@ -665,7 +657,7 @@ mod tests {
         // 总字节未知：只有实时字节与速度，不编造 ETA
         let mut unknown = Activity::new();
         unknown.update(3 * 1024 * 1024, 0, None);
-        let detail = unknown.detail("download", true);
+        let detail = unknown.detail(&Stage::parse("download"), true);
         assert!(
             detail.contains("3.0 MB") && !detail.contains("预计剩余"),
             "{detail}"

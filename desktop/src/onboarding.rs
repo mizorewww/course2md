@@ -1986,14 +1986,12 @@ impl Desktop {
             .progress
             .iter()
             .filter(|(stage, progress)| {
-                crate::activity::is_model_transfer_stage(stage)
-                    && progress.has_samples()
-                    && !progress.done
+                stage.is_model_transfer() && progress.has_samples() && !progress.done
             })
             .enumerate()
         {
             has_phase = true;
-            let phase = activity::model_transfer_phase(stage, progress.phase.as_deref());
+            let phase = activity::model_transfer_phase(stage, progress.phase);
             view = view.child(motion::transfer_status(
                 ("setup-model-progress", index),
                 phase,
@@ -2234,13 +2232,10 @@ impl Desktop {
                 self.progress
                     .iter()
                     .find(|(stage, progress)| {
-                        crate::activity::is_model_transfer_stage(stage)
-                            && progress.has_samples()
-                            && !progress.done
+                        stage.is_model_transfer() && progress.has_samples() && !progress.done
                     })
                     .map(|(stage, progress)| {
-                        let phase =
-                            activity::model_transfer_phase(stage, progress.phase.as_deref());
+                        let phase = activity::model_transfer_phase(stage, progress.phase);
                         progress
                             .fraction()
                             .map(|fraction| {

@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::hub::Host;
-use crate::progress::Bar;
+use crate::progress::{Bar, Phase, Stage};
 
 /// A file published in a model repository, with its size and SHA-256.
 pub struct Remote {
@@ -70,8 +70,8 @@ pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
     let part = dest.with_extension("part");
-    let stage = format!("model/{}", remote.file);
-    crate::progress::stage(&stage, "start");
+    let stage = Stage::ModelFile(remote.file.to_owned());
+    crate::progress::start(stage.clone());
     let bar = Bar::new(stage.clone(), remote.size)
         .with_template("{spinner:.green} {msg} [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})");
     let mut failures = Vec::new();
@@ -97,7 +97,7 @@ pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
             fs::rename(&part, dest)?;
             write_manifest(dest, remote);
             bar.finish();
-            crate::progress::stage(&stage, "done");
+            crate::progress::done(stage);
             tracing::info!(file = remote.file, host = %host.name(), "downloaded");
             return Ok(());
         }
@@ -132,16 +132,16 @@ fn transfer(url: &str, host: &Host, part: &Path, remote: &Remote, bar: &Bar) -> 
 }
 
 /// "下载 Qwen3-ASR-1.7B-Q8_0.gguf · modelscope.cn" for the terminal bar.
-fn human(remote: &Remote, host: &Host, phase: &str) -> String {
+fn human(remote: &Remote, host: &Host, phase: Phase) -> String {
     match phase {
-        "connect" => crate::tr!("连接 {} · {}", host.name(), remote.file),
-        "retry" => crate::tr!("重新连接 {} · {}", host.name(), remote.file),
-        "verify" => crate::tr!("校验 {}", remote.file),
-        _ => format!("{} · {}", remote.file, host.name()),
+        Phase::Connect => crate::tr!("连接 {} · {}", host.name(), remote.file),
+        Phase::Retry => crate::tr!("重新连接 {} · {}", host.name(), remote.file),
+        Phase::Verify => crate::tr!("校验 {}", remote.file),
+        Phase::Download | Phase::Load => format!("{} · {}", remote.file, host.name()),
     }
 }
 
-fn set_phase(bar: &Bar, remote: &Remote, host: &Host, phase: &str) {
+fn set_phase(bar: &Bar, remote: &Remote, host: &Host, phase: Phase) {
     bar.set_phase(phase, &host.name(), human(remote, host, phase));
 }
 
@@ -159,7 +159,7 @@ fn native(url: &str, host: &Host, part: &Path, remote: &Remote, bar: &Bar) -> Re
         .timeout_read(STALL)
         .build();
     let mut idle = 0;
-    let mut phase = "connect";
+    let mut phase = Phase::Connect;
     loop {
         crate::dispatch::check_control()?;
         let have = fs::metadata(part).map(|m| m.len()).unwrap_or(0);
@@ -194,7 +194,7 @@ fn native(url: &str, host: &Host, part: &Path, remote: &Remote, bar: &Bar) -> Re
                     received = after,
                     "下载中断，正在续传 / Download interrupted; resuming: {error:#}"
                 );
-                phase = "retry";
+                phase = Phase::Retry;
                 std::thread::sleep(Duration::from_secs(2 * u64::from(idle.max(1))));
             }
         }
@@ -245,7 +245,7 @@ fn native_attempt(
     } else {
         fs::File::create(part)?
     };
-    set_phase(bar, remote, host, "download");
+    set_phase(bar, remote, host, Phase::Download);
     bar.set_position(done);
     let mut reader = response.into_reader();
     let mut buffer = vec![0u8; 512 * 1024];
@@ -385,7 +385,7 @@ fn aria2(
             .cloned()
             .with_context(|| response.to_string())
     };
-    set_phase(bar, remote, host, "connect");
+    set_phase(bar, remote, host, Phase::Connect);
     let started = Instant::now();
     let mut answered = false;
     let mut downloading = false;
@@ -427,7 +427,7 @@ fn aria2(
             last = (completed, Instant::now());
             if !downloading && completed > 0 {
                 downloading = true;
-                set_phase(bar, remote, host, "download");
+                set_phase(bar, remote, host, Phase::Download);
             }
         }
         bar.set_position(completed);
@@ -463,7 +463,7 @@ fn verify(part: &Path, remote: &Remote, bar: &Bar) -> Result<bool> {
     if fs::metadata(part).map(|m| m.len()).unwrap_or(0) != remote.size {
         return Ok(false);
     }
-    bar.set_phase("verify", "", crate::tr!("校验 {}", remote.file));
+    bar.set_phase(Phase::Verify, "", crate::tr!("校验 {}", remote.file));
     bar.set_position(0);
     let mut file = fs::File::open(part)?;
     let mut hash = Sha256::new();
@@ -555,7 +555,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let part = root.path().join("synthetic.part");
         let host = Host::Hub("http://127.0.0.1".into());
-        let bar = Bar::new("model/synthetic.bin", remote.size);
+        let bar = Bar::new(Stage::ModelFile("synthetic.bin".into()), remote.size);
         native(&url, &host, &part, &remote, &bar).unwrap();
         let requests = server.join().unwrap();
         assert!(!requests[0].to_ascii_lowercase().contains("range:"));
@@ -574,7 +574,7 @@ mod tests {
         let part = root.path().join("synthetic.part");
         fs::write(&part, b"xx").unwrap();
         let host = Host::Hub("http://127.0.0.1".into());
-        let bar = Bar::new("model/synthetic.bin", remote.size);
+        let bar = Bar::new(Stage::ModelFile("synthetic.bin".into()), remote.size);
         native(&url, &host, &part, &remote, &bar).unwrap();
         server.join().unwrap();
         assert_eq!(fs::read(&part).unwrap(), b"12345");
@@ -590,7 +590,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let part = root.path().join("synthetic.part");
         let host = Host::Hub("http://127.0.0.1".into());
-        let bar = Bar::new("model/synthetic.bin", remote.size);
+        let bar = Bar::new(Stage::ModelFile("synthetic.bin".into()), remote.size);
         let error = native(&url, &host, &part, &remote, &bar).unwrap_err();
         assert!(error.downcast_ref::<PermanentHttp>().is_some());
         server.join().unwrap();
@@ -601,7 +601,7 @@ mod tests {
         let remote = remote(b"12345");
         let root = tempfile::tempdir().unwrap();
         let part = root.path().join("synthetic.part");
-        let bar = Bar::new("model/synthetic.bin", remote.size);
+        let bar = Bar::new(Stage::ModelFile("synthetic.bin".into()), remote.size);
         fs::write(&part, b"12346").unwrap();
         assert!(!verify(&part, &remote, &bar).unwrap());
         fs::write(&part, b"1234").unwrap();

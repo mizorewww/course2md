@@ -2,6 +2,7 @@
 use super::ConversionOptions;
 use anyhow::{Context, Result, bail, ensure};
 use course2md::execution::Component;
+use course2md::progress::{BlockReason, Stage, StageStatus};
 use course2md::settings::ConfigFile;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -343,20 +344,29 @@ impl TaskState {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct Stage {
-    pub status: String,
+/// What a task record keeps of one pipeline stage.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct StageRecord {
+    pub status: StageStatus,
     pub current: u64,
     pub total: u64,
     pub detail: Option<String>,
 }
 
-impl Stage {
+impl Default for StageRecord {
+    fn default() -> Self {
+        Self {
+            status: StageStatus::Start,
+            current: 0,
+            total: 0,
+            detail: None,
+        }
+    }
+}
+
+impl StageRecord {
     pub fn begin(&mut self) {
-        *self = Self {
-            status: "start".into(),
-            ..Default::default()
-        };
+        *self = Self::default();
     }
 }
 
@@ -373,7 +383,7 @@ pub struct TaskRecord {
     pub handled_by: Option<String>,
     pub work_dir: PathBuf,
     #[serde(default)]
-    pub stages: BTreeMap<String, Stage>,
+    pub stages: BTreeMap<Stage, StageRecord>,
     #[serde(default)]
     pub error: Option<String>,
     #[serde(default)]
@@ -494,7 +504,7 @@ pub(crate) fn available_task_export(
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BlockedRequest {
-    pub reason: String,
+    pub reason: BlockReason,
     pub request_id: Option<String>,
     pub purpose: Option<String>,
     #[serde(default)]
@@ -505,9 +515,8 @@ pub struct BlockedRequest {
 }
 
 impl BlockedRequest {
-    /// 结果尚未确认的请求：reason 与 dispatch::REASON_UNCERTAIN 对齐的唯一判断点。
     pub fn is_uncertain(&self) -> bool {
-        self.reason == course2md::dispatch::REASON_UNCERTAIN
+        self.reason == BlockReason::Uncertain
     }
 }
 
@@ -1541,7 +1550,7 @@ pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
         )
     }) {
         task.blocked.push(BlockedRequest {
-            reason: course2md::dispatch::REASON_UNCERTAIN.into(),
+            reason: BlockReason::Uncertain,
             request_id: Some(receipt.request_id),
             purpose: Some(receipt.purpose),
             description: receipt.description.clone(),

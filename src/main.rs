@@ -77,9 +77,9 @@ fn main() -> std::process::ExitCode {
         Err(error) => {
             if error.use_stderr() && json_requested {
                 progress::set_json_mode();
-                progress::emit(
-                    serde_json::json!({"type": "error", "message": course2md::tr!("参数无效：{}", error)}),
-                );
+                progress::emit(&progress::Event::Error {
+                    message: course2md::tr!("参数无效：{}", error),
+                });
             } else if course2md::i18n::lang() == course2md::i18n::Lang::En {
                 let _ = error.print();
             } else {
@@ -144,7 +144,7 @@ fn main() -> std::process::ExitCode {
             }
             let message = format!("{error:#}");
             if json {
-                progress::emit(serde_json::json!({"type": "error", "message": message}));
+                progress::emit(&progress::Event::Error { message });
             } else {
                 course2md::eprintln_tr!("错误：{}", message);
             }
@@ -195,14 +195,13 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                     &target.model,
                     &root,
                 ))??;
-                progress::emit(serde_json::json!({
-                    "type": "model_ready",
-                    "operation": "prepare",
-                    "dir": root,
-                    "provider": target.provider,
-                    "model": status.model,
-                    "status": status,
-                }));
+                progress::emit(&progress::Event::ModelReady {
+                    operation: progress::ModelOperation::Prepare,
+                    dir: root.clone(),
+                    provider: Some(target.provider),
+                    model: Some(status.model.clone()),
+                    status: Some(Box::new(status.clone())),
+                });
                 if !json {
                     course2md::println_tr!("模型准备完成 / Model preparation finished.");
                     print_model_status(&status);
@@ -212,11 +211,13 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             ModelsCmd::Download { dir, json } => {
                 let root = configured_model_dir(dir.as_deref())?;
                 course2md::runtime::block_on(models::download_models(&root))??;
-                progress::emit(serde_json::json!({
-                    "type": "model_ready",
-                    "operation": "download",
-                    "dir": root,
-                }));
+                progress::emit(&progress::Event::ModelReady {
+                    operation: progress::ModelOperation::Download,
+                    dir: root.clone(),
+                    provider: None,
+                    model: None,
+                    status: None,
+                });
                 if !json {
                     println!("模型已就绪 / Models ready: {}", root.display());
                 }

@@ -4371,10 +4371,7 @@ impl Desktop {
                                 | workspace::TaskState::Queued
                                 | workspace::TaskState::Uncertain
                         )
-                        && !task
-                            .blocked
-                            .iter()
-                            .any(|blocked| blocked.reason == course2md::dispatch::REASON_UNCERTAIN)
+                        && !task.blocked.iter().any(|blocked| blocked.is_uncertain())
                         && task.artifact.as_ref() == Some(&preview.course.dir)
                 });
                 let components = preview

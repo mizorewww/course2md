@@ -2672,10 +2672,7 @@ impl Desktop {
         for task in attention {
             let id = task.id.clone();
             let uncertain = task.state == crate::workspace::TaskState::Uncertain
-                || task
-                    .blocked
-                    .iter()
-                    .any(|request| request.reason == course2md::dispatch::REASON_UNCERTAIN);
+                || task.blocked.iter().any(|request| request.is_uncertain());
             let requires_repair = !uncertain && crate::task_ui::task_requires_service_repair(&task);
             let partial_components = if task.state == crate::workspace::TaskState::Partial {
                 task.artifact

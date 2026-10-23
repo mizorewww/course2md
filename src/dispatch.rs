@@ -1,10 +1,10 @@
 //! Durable external-request receipts. A lost response is never permission to resend.
 
-/// 「结果不确定」阻断原因：block() 写入的 reason 与 Failure.uncertain 的判定
-/// 共用此常量，桌面端续跑 UI 亦引用它。
-pub const REASON_UNCERTAIN: &str = "uncertain";
-
-use crate::{checkpoint::atomic_write, execution};
+use crate::{
+    checkpoint::atomic_write,
+    execution,
+    progress::{BlockReason, Event},
+};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -358,30 +358,37 @@ impl Ledger {
             _ => Ok(Control::default()),
         }
     }
-    fn block(&self, reason: &str, request: Option<&Receipt>, message: &str) -> Failure {
+    fn block(&self, reason: BlockReason, request: Option<&Receipt>, message: &str) -> Failure {
         let request_id = request.map(|r| r.request_id.clone());
         let message = request.filter(|r| !r.description.is_empty()).map_or_else(
             || message.to_string(),
             |r| crate::tr!("{}：{}", r.description, message),
         );
-        let signature = format!("{reason}:{request_id:?}:{message}");
+        let uncertain = reason == BlockReason::Uncertain;
+        let kind = if uncertain {
+            crate::artifact::FailureKind::Uncertain
+        } else {
+            crate::artifact::FailureKind::Other
+        };
+        let signature = format!("{reason:?}:{request_id:?}:{message}");
         if self
             .emitted
             .lock()
             .map(|mut seen| seen.insert(signature))
             .unwrap_or(true)
         {
-            crate::progress::emit(
-                serde_json::json!({"type":"blocked","reason":reason,"request_id":request_id,"purpose":request.map(|r|&r.purpose),"kind":"uncertain","message":message,"description":request.map(|r|&r.description)}),
-            );
+            crate::progress::emit(&Event::Blocked {
+                reason,
+                request_id: request_id.clone(),
+                purpose: request.map(|r| r.purpose.clone()),
+                description: request.map(|r| r.description.clone()),
+                kind,
+                message: message.clone(),
+            });
         }
         Failure {
-            uncertain: reason == REASON_UNCERTAIN,
-            kind: Some(if reason == REASON_UNCERTAIN {
-                crate::artifact::FailureKind::Uncertain
-            } else {
-                crate::artifact::FailureKind::Other
-            }),
+            uncertain,
+            kind: Some(kind),
             ..Failure::local(message)
         }
     }
@@ -395,15 +402,15 @@ impl Ledger {
         let reason = match intent {
             Intent::Run => None,
             Intent::Pause => Some((
-                "paused",
+                BlockReason::Paused,
                 crate::tr!("生成已暂停，进度已保留 / Generation paused; progress retained"),
             )),
             Intent::Cancel => Some((
-                "cancelled",
+                BlockReason::Cancelled,
                 crate::tr!("任务已取消，已有成果已保留 / Task cancelled; saved results retained"),
             )),
             Intent::Quit => Some((
-                "quit",
+                BlockReason::Quit,
                 crate::tr!("已保存进度，等待下次继续 / Progress saved; waiting to continue"),
             )),
         };
@@ -414,7 +421,7 @@ impl Ledger {
             .is_some_and(|version| control.stopped_services.iter().any(|v| v == version))
         {
             return Err(self.block(
-                "service_stopped",
+                BlockReason::ServiceStopped,
                 None,
                 crate::tr!("此服务已删除，没有发送新请求 / Service deleted; no new request sent"),
             ));
@@ -537,7 +544,7 @@ impl Ledger {
                 let mut uncertain = old.clone();
                 uncertain.state = State::Uncertain;
                 self.save(&uncertain)?;
-                return Err(self.block(REASON_UNCERTAIN, Some(old), crate::tr!("未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges")));
+                return Err(self.block(BlockReason::Uncertain, Some(old), crate::tr!("未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges")));
             }
             let settled = match old.state {
                 State::Failed => Some(crate::tr!("此请求未完成 / Request failed")),
@@ -579,7 +586,7 @@ impl Ledger {
                     .cloned()
                     .is_some_and(|lock| lock.try_lock().is_err());
                 if unresolved.state == State::Uncertain || !live {
-                    return Err(self.block(REASON_UNCERTAIN, Some(&unresolved), crate::tr!("前一步请求结果尚不确定；已保留进度，没有继续发送 / A previous request is unresolved; progress retained")));
+                    return Err(self.block(BlockReason::Uncertain, Some(&unresolved), crate::tr!("前一步请求结果尚不确定；已保留进度，没有继续发送 / A previous request is unresolved; progress retained")));
                 }
             }
         }
@@ -613,7 +620,7 @@ impl Ledger {
                 receipt.state = State::Uncertain;
                 receipt.message = Some(error.message);
                 self.save(&receipt)?;
-                return Err(self.block(REASON_UNCERTAIN, Some(&receipt), crate::tr!("未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges")));
+                return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("未收到服务的确定结果。服务可能已处理这部分，再次提交可能产生额外费用 / Service result is uncertain; resending may incur additional charges")));
             }
         };
         receipt.http_status = Some(response.status);
@@ -640,7 +647,7 @@ impl Ledger {
         if !(200..300).contains(&response.status) {
             receipt.state = State::Uncertain;
             self.save(&receipt)?;
-            return Err(self.block(REASON_UNCERTAIN, Some(&receipt), crate::tr!("服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain")));
+            return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain")));
         }
         let value = match value {
             Ok(value) => value,

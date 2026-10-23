@@ -38,7 +38,8 @@ mod task_ui;
 mod theme;
 mod views;
 mod workspace;
-use backend::{Completed, Course, Event, Job};
+use backend::{Course, Done, EngineEvent, Event, Job};
+use course2md::progress::{ModelOperation, Stage, StageStatus};
 use gpui::{prelude::*, *};
 use gpui_component::{
     input::{InputEvent, InputState},
@@ -294,7 +295,7 @@ struct Desktop {
     start_pending: bool,
     task_status: String,
     task_error: Option<String>,
-    progress: BTreeMap<String, activity::Activity>,
+    progress: BTreeMap<Stage, activity::Activity>,
     /// The engine's running token totals for the current job.
     token_totals: (u64, u64),
     /// When the current job started, for its elapsed time before any stage.
@@ -302,8 +303,8 @@ struct Desktop {
     desktop_settings: course2md::settings::DesktopSettings,
     last_tick: Instant,
     logs: VecDeque<String>,
-    pending_done: Option<Completed>,
-    completed: Option<Completed>,
+    pending_done: Option<Done>,
+    completed: Option<Done>,
     courses: Vec<Course>,
     cover_by_source: BTreeMap<String, PathBuf>,
     loading: bool,
@@ -1015,88 +1016,7 @@ impl Desktop {
         let mut immediate = false;
         for event in events {
             let recording = self.active_task.is_some();
-            if recording {
-                self.record_task_event(&event);
-                save = true;
-            }
-            match event {
-                Event::Log { message } => self.logs.push_back(message),
-                Event::Stage { stage, status } => {
-                    if status == "start" {
-                        self.progress.insert(stage, activity::Activity::new());
-                    } else if status == "done" {
-                        self.progress
-                            .entry(stage)
-                            .or_insert_with(activity::Activity::new)
-                            .finish();
-                    }
-                    flush = recording;
-                    immediate = true;
-                }
-                Event::Progress {
-                    stage,
-                    current,
-                    total,
-                    message,
-                    phase,
-                } => {
-                    let activity = self
-                        .progress
-                        .entry(stage)
-                        .or_insert_with(activity::Activity::new);
-                    activity.update(current, total, message);
-                    activity.phase = phase;
-                }
-                Event::Tokens {
-                    stage,
-                    prompt,
-                    completion,
-                } => {
-                    // The engine reports running totals for the whole task;
-                    // each stage keeps the part that arrived while it ran.
-                    let (sent, received) = self.token_totals;
-                    self.token_totals = (prompt, completion);
-                    self.progress
-                        .entry(stage)
-                        .or_insert_with(activity::Activity::new)
-                        .note_tokens(
-                            prompt.saturating_sub(sent),
-                            completion.saturating_sub(received),
-                        )
-                }
-                Event::Workers { stage, workers } => {
-                    self.progress
-                        .entry(stage)
-                        .or_insert_with(activity::Activity::new)
-                        .workers = workers
-                }
-                Event::Error { message } => {
-                    self.task_error = Some(message.clone());
-                    self.logs.push_back(message);
-                    flush = recording;
-                    immediate = true;
-                }
-                Event::Blocked { message, .. } => {
-                    self.task_error = Some(message);
-                    flush = recording;
-                    immediate = true;
-                }
-                Event::Done(done) => {
-                    self.pending_done = Some(done);
-                    immediate = true;
-                }
-                Event::ModelReady { operation, model } => {
-                    let name = model.map(|model| format!("{model} · ")).unwrap_or_default();
-                    self.task_status = format!(
-                        "{name}{}",
-                        if operation == "prepare" {
-                            course2md::tr!("模型已就绪")
-                        } else {
-                            course2md::tr!("模型已下载")
-                        }
-                    );
-                    immediate = true;
-                }
+            let event = match event {
                 Event::Exit { success, cancelled } => {
                     immediate = true;
                     self.job = None;
@@ -1116,6 +1036,95 @@ impl Desktop {
                         .into();
                         self.model_preparation_finished(success, cancelled, cx);
                     }
+                    continue;
+                }
+                Event::Engine(event) => event,
+            };
+            if recording {
+                self.record_task_event(&event);
+                save = true;
+            }
+            match event {
+                EngineEvent::Log { message, .. } => self.logs.push_back(message),
+                EngineEvent::Stage { stage, status } => {
+                    match status {
+                        StageStatus::Start => {
+                            self.progress.insert(stage, activity::Activity::new());
+                        }
+                        StageStatus::Done => {
+                            self.progress
+                                .entry(stage)
+                                .or_insert_with(activity::Activity::new)
+                                .finish();
+                        }
+                    }
+                    flush = recording;
+                    immediate = true;
+                }
+                EngineEvent::Progress {
+                    stage,
+                    current,
+                    total,
+                    message,
+                    phase,
+                } => {
+                    let activity = self
+                        .progress
+                        .entry(stage)
+                        .or_insert_with(activity::Activity::new);
+                    activity.update(current, total, message);
+                    activity.phase = phase;
+                }
+                EngineEvent::Tokens {
+                    stage,
+                    prompt,
+                    completion,
+                } => {
+                    // The engine reports running totals for the whole task;
+                    // each stage keeps the part that arrived while it ran.
+                    let (sent, received) = self.token_totals;
+                    self.token_totals = (prompt, completion);
+                    self.progress
+                        .entry(stage)
+                        .or_insert_with(activity::Activity::new)
+                        .note_tokens(
+                            prompt.saturating_sub(sent),
+                            completion.saturating_sub(received),
+                        )
+                }
+                EngineEvent::Workers { stage, workers } => {
+                    self.progress
+                        .entry(stage)
+                        .or_insert_with(activity::Activity::new)
+                        .workers = workers
+                }
+                EngineEvent::Error { message } => {
+                    self.task_error = Some(message.clone());
+                    self.logs.push_back(message);
+                    flush = recording;
+                    immediate = true;
+                }
+                EngineEvent::Blocked { message, .. } => {
+                    self.task_error = Some(message);
+                    flush = recording;
+                    immediate = true;
+                }
+                EngineEvent::Done(done) => {
+                    self.pending_done = Some(*done);
+                    immediate = true;
+                }
+                EngineEvent::ModelReady {
+                    operation, model, ..
+                } => {
+                    let name = model.map(|model| format!("{model} · ")).unwrap_or_default();
+                    self.task_status = format!(
+                        "{name}{}",
+                        match operation {
+                            ModelOperation::Prepare => course2md::tr!("模型已就绪"),
+                            ModelOperation::Download => course2md::tr!("模型已下载"),
+                        }
+                    );
+                    immediate = true;
                 }
             }
             while self.logs.len() > 400 {
