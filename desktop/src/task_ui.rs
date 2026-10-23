@@ -77,6 +77,15 @@ struct RowPlace {
     last: bool,
 }
 
+/// What one virtualized queue item is drawn from: the frame's task snapshot,
+/// the item's position in the list and its focus container.
+struct QueueFrame<'a> {
+    tasks: &'a [TaskRecord],
+    index: usize,
+    last: bool,
+    focus: Option<&'a FocusHandle>,
+}
+
 /// Queued rows shown before the rest of the queue folds.
 const QUEUE_PREVIEW: usize = 5;
 
@@ -802,7 +811,13 @@ impl Desktop {
             let last = index + 1 == items.len();
             desktop
                 .update(cx, |this, cx| {
-                    this.queue_item(item, index, &tasks, last, focus.get(index), cx)
+                    let frame = QueueFrame {
+                        tasks: &tasks,
+                        index,
+                        last,
+                        focus: focus.get(index),
+                    };
+                    this.queue_item(item, frame, cx)
                 })
                 .unwrap_or_else(|_| div().into_any_element())
         })
@@ -963,16 +978,18 @@ impl Desktop {
 
     /// One item of the virtualized queue. Rows of a group share one surface;
     /// the wrapper's padding only separates surfaces and headings.
-    #[allow(clippy::too_many_arguments)]
     fn queue_item(
         &mut self,
         item: &QueueItem,
-        index: usize,
-        tasks: &[TaskRecord],
-        last: bool,
-        focus: Option<&FocusHandle>,
+        frame: QueueFrame,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let QueueFrame {
+            tasks,
+            index,
+            last,
+            focus,
+        } = frame;
         let mut gap = !last;
         let content = match item {
             QueueItem::Unavailable => v_flex()
@@ -1468,64 +1485,48 @@ impl Desktop {
         }
     }
 
-    /// 任务卡共享的暂停/取消动作组。队列卡与工作台卡仅按钮构造器、暂停文案与
-    /// 元素 id 前缀不同；是否展示由调用点按各自的状态语义决定。
-    #[allow(clippy::too_many_arguments)]
-    fn task_stop_actions(
+    /// Pause and cancel for unfinished work, on bases the caller has placed
+    /// and styled. A queued task has produced nothing to keep, so it offers
+    /// only cancel.
+    fn task_stop_buttons(
         &self,
-        mut actions: Div,
         task: &TaskRecord,
-        visible: bool,
-        id_prefix: &'static str,
-        primary: fn(SharedString) -> Button,
-        secondary: fn(SharedString) -> Button,
+        pause: Button,
+        cancel: Button,
         cx: &mut Context<Self>,
-    ) -> Div {
-        if visible {
-            let id = task.id.clone();
-            let cancelling = task.state == TaskState::Pausing && task.intent == Intent::Cancel;
-            // 排队中的任务还没有生成任何内容，暂停没有可保留的进度；只提供取消
-            let queued = task.state == TaskState::Queued && !self.is_running_task(&task.id);
-            actions = actions
-                .when(!cancelling && !queued, |actions| {
-                    actions.child(
-                        primary(SharedString::from(format!("{id_prefix}pause-{id}")))
-                            .label(if task.state == TaskState::Pausing {
-                                course2md::tr!("正在暂停…")
-                            } else {
-                                course2md::tr!("暂停")
-                            })
-                            .icon(icons::pause())
-                            .loading(task.state == TaskState::Pausing)
-                            .disabled(task.state == TaskState::Pausing)
-                            .on_click(cx.listener({
-                                let id = id.clone();
-                                move |this, _, _, cx| {
-                                    this.set_task_intent(id.clone(), Intent::Pause, cx)
-                                }
-                            })),
-                    )
+    ) -> (Option<Button>, Button) {
+        let id = task.id.clone();
+        let cancelling = task.state == TaskState::Pausing && task.intent == Intent::Cancel;
+        let pausing = task.state == TaskState::Pausing && !cancelling;
+        let queued = task.state == TaskState::Queued && !self.is_running_task(&task.id);
+        let pause = (!cancelling && !queued).then(|| {
+            pause
+                .icon(icons::pause())
+                .label(if pausing {
+                    course2md::tr!("正在暂停…")
+                } else {
+                    course2md::tr!("暂停")
                 })
-                .child(
-                    // 排队时取消是唯一的操作，沿用主操作的按钮形式
-                    (if queued { primary } else { secondary })(SharedString::from(format!(
-                        "{id_prefix}cancel-{id}"
-                    )))
-                    .icon(icons::close())
-                    .label(if cancelling {
-                        course2md::tr!("正在取消…")
-                    } else {
-                        course2md::tr!("取消任务")
-                    })
-                    .loading(cancelling)
-                    .disabled(cancelling)
-                    .on_click(cx.listener({
-                        let id = id.clone();
-                        move |this, _, _, cx| this.set_task_intent(id.clone(), Intent::Cancel, cx)
-                    })),
-                );
-        }
-        actions
+                .loading(pausing)
+                .disabled(pausing)
+                .on_click(cx.listener({
+                    let id = id.clone();
+                    move |this, _, _, cx| this.set_task_intent(id.clone(), Intent::Pause, cx)
+                }))
+        });
+        let cancel = cancel
+            .icon(icons::close())
+            .label(if cancelling {
+                course2md::tr!("正在取消…")
+            } else {
+                course2md::tr!("取消任务")
+            })
+            .loading(cancelling)
+            .disabled(cancelling)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.set_task_intent(id.clone(), Intent::Cancel, cx)
+            }));
+        (pause, cancel)
     }
 
     /// A row of a group's surface: identity, status and the row's commands.
@@ -1745,8 +1746,6 @@ impl Desktop {
     ) -> AnyElement {
         let id = task.id.clone();
         let active = self.is_running_task(&id);
-        let cancelling = task.state == TaskState::Pausing && task.intent == Intent::Cancel;
-        let pausing = task.state == TaskState::Pausing && !cancelling;
         let library: SharedString = self
             .task_library(task)
             .map(|location| location.name.clone().into())
@@ -1880,23 +1879,13 @@ impl Desktop {
             .flex_wrap()
             .border_t_1()
             .border_color(color(HAIRLINE));
-        if !cancelling {
-            footer = footer.child(
-                tonal_pill(SharedString::from(format!("pause-{id}")), cx)
-                    .icon(icons::pause())
-                    .label(if pausing {
-                        course2md::tr!("正在暂停…")
-                    } else {
-                        course2md::tr!("暂停")
-                    })
-                    .loading(pausing)
-                    .disabled(pausing)
-                    .on_click(cx.listener({
-                        let id = id.clone();
-                        move |this, _, _, cx| this.set_task_intent(id.clone(), Intent::Pause, cx)
-                    })),
-            );
-        }
+        let (pause, cancel) = self.task_stop_buttons(
+            task,
+            tonal_pill(SharedString::from(format!("pause-{id}")), cx),
+            quiet(SharedString::from(format!("cancel-{id}"))).text_color(color(DANGER)),
+            cx,
+        );
+        footer = footer.children(pause);
         if log.is_some() {
             footer = footer.child(
                 quiet(SharedString::from(format!("task-log-toggle-{id}")))
@@ -1916,22 +1905,7 @@ impl Desktop {
                     })),
             );
         }
-        footer = footer.child(div().flex_1()).child(
-            quiet(SharedString::from(format!("cancel-{id}")))
-                .text_color(color(DANGER))
-                .icon(icons::close())
-                .label(if cancelling {
-                    course2md::tr!("正在取消…")
-                } else {
-                    course2md::tr!("取消任务")
-                })
-                .loading(cancelling)
-                .disabled(cancelling)
-                .on_click(cx.listener({
-                    let id = id.clone();
-                    move |this, _, _, cx| this.set_task_intent(id.clone(), Intent::Cancel, cx)
-                })),
-        );
+        footer = footer.child(div().flex_1()).child(cancel);
         v_flex()
             .w_full()
             .min_w_0()
@@ -1951,9 +1925,8 @@ impl Desktop {
             .into_any_element()
     }
 
-    /// What the task was submitted with: where it saves, where its text comes
-    /// from, and which service receives its content.
-    /// The running card's side panel: the choices this task was started with.
+    /// The running card's side panel: where the task saves, where its text
+    /// comes from, and which service receives its content.
     fn task_settings_panel(&self, task: &TaskRecord, library: &SharedString) -> Div {
         v_flex()
             .flex_1()
@@ -2040,15 +2013,16 @@ impl Desktop {
                     .on_click(cx.listener(move |this, _, _, cx| this.select_task(&next, cx))),
             );
         }
-        actions = self.task_stop_actions(
-            actions,
-            task,
-            task.state == TaskState::Queued,
-            "",
-            control,
-            control,
-            cx,
-        );
+        if task.state == TaskState::Queued {
+            let id = &task.id;
+            let (pause, cancel) = self.task_stop_buttons(
+                task,
+                control(SharedString::from(format!("pause-{id}"))),
+                control(SharedString::from(format!("cancel-{id}"))),
+                cx,
+            );
+            actions = actions.children(pause).child(cancel);
+        }
         if task.handled_by.is_none()
             && matches!(task.state, TaskState::Paused | TaskState::NeedsAttention)
             && uncertain.is_empty()
