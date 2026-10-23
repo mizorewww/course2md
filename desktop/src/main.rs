@@ -245,6 +245,8 @@ struct Desktop {
     pending_conversion: Option<u64>,
     following_conversion: Option<import_ui::ConversionFollow>,
     preview_workers: usize,
+    /// A startup reconciliation of the task record is running.
+    workspace_reconciling: bool,
     preview_error: Option<String>,
     source_validation: Option<String>,
     /// The current validation error is the missing-title case (typed, not text-matched).
@@ -647,6 +649,7 @@ impl Desktop {
             pending_conversion: None,
             following_conversion: None,
             preview_workers: 0,
+            workspace_reconciling: false,
             preview_error: None,
             source_validation: None,
             title_required: false,
@@ -747,21 +750,53 @@ impl Desktop {
         this.refresh_account(cx);
         this.refresh_environment(cx);
         this.refresh_library(cx);
+        this.poll_workspace(cx);
         if !this.preferences.application().desktop.setup_completed {
             this.start_onboarding(window, cx);
         }
         this
     }
-    /// Reports record writes that failed after the event loop moved on.
+    /// Reports record writes that failed after the event loop moved on, and
+    /// reconciles a freshly opened record with the libraries off the UI thread.
     fn poll_workspace(&mut self, cx: &mut Context<Self>) {
-        if let Some(error) = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.take_write_error())
-        {
+        let Some(workspace) = &self.workspace else {
+            return;
+        };
+        if let Some(error) = workspace.take_write_error() {
             self.workspace_error = Some(course2md::tr!("任务进度尚未保存：{}", error));
             cx.notify();
         }
+        if self.workspace_reconciling {
+            return;
+        }
+        let Some(reconciliation) = workspace.reconciliation() else {
+            return;
+        };
+        // A record reopened elsewhere needs the wake sender too.
+        workspace.set_wake_sender(self.event_wake_tx.clone());
+        self.workspace_reconciling = true;
+        let task = spawn_blocking_io(move || reconciliation.run());
+        cx.spawn(async move |this, cx| {
+            let reconciled = task.recv().await;
+            let _ = this.update(cx, |this, cx| {
+                let Ok(reconciled) = reconciled else {
+                    // Leave dispatch held: the checks did not finish.
+                    this.workspace_error = Some(interrupted().into());
+                    cx.notify();
+                    return;
+                };
+                this.workspace_reconciling = false;
+                if let Some(workspace) = &mut this.workspace
+                    && let Err(error) = workspace.apply_reconciliation(reconciled)
+                {
+                    this.workspace_error =
+                        Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
+                }
+                this.start_next_task(cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
     fn refresh_environment(&mut self, cx: &mut Context<Self>) {
         self.environment = None;

@@ -547,6 +547,9 @@ pub struct State {
     pub reader_sources: BTreeMap<String, PathBuf>,
     pub collapsed: BTreeSet<String>,
     pub storage_backups: Vec<crate::storage::BackupRecord>,
+    /// Startup reconciliation has not been applied yet; nothing is dispatched.
+    #[serde(skip)]
+    pub reconciling: bool,
 }
 
 impl State {
@@ -571,6 +574,7 @@ impl State {
             reader_sources: BTreeMap::new(),
             collapsed: BTreeSet::new(),
             storage_backups: Vec::new(),
+            reconciling: false,
         }
     }
 
@@ -603,6 +607,9 @@ impl State {
         self.tasks.iter_mut().find(|t| t.id == id)
     }
     pub fn next_task(&self) -> Option<&TaskRecord> {
+        if self.reconciling {
+            return None;
+        }
         self.tasks.iter().find(|t| {
             t.state == TaskState::Queued && t.intent == Intent::Run && t.handled_by.is_none()
         })
@@ -1154,6 +1161,9 @@ pub struct Workspace {
     /// ages past their interval.
     last_write: Cell<Option<Instant>>,
     writer: Box<dyn Writer>,
+    /// Identifies this opened record, so findings for a record that was
+    /// replaced meanwhile are not applied to its successor.
+    identity: u64,
 }
 
 /// The current state, shared with the record writer without copying. Reads go
@@ -1508,9 +1518,26 @@ fn create_library_marker(location: &LibraryLocation) -> Result<()> {
     check_library(location)
 }
 
-fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Result<()> {
+/// What the library holds for a task, read without changing the record.
+#[derive(Clone)]
+enum ArtifactFact {
+    Nothing,
+    Published {
+        version: PathBuf,
+        outcomes: Box<course2md::artifact::Outcomes>,
+        partial: bool,
+    },
+    Exports {
+        base: PathBuf,
+        outcomes: BTreeMap<String, course2md::artifact::Outcome>,
+    },
+}
+
+/// The published result of a task, if any. Reads and hashes files; the
+/// result is applied by `apply_artifact`.
+fn probe_artifact(task: &TaskRecord, location: &LibraryLocation) -> Result<ArtifactFact> {
     if task.artifact.is_some() && !task.exports_only() {
-        return Ok(());
+        return Ok(ArtifactFact::Nothing);
     }
     let course = course_dir_name(&task.plan.source_id);
     let version = location.root.join(&course).join("versions").join(&task.id);
@@ -1521,16 +1548,11 @@ fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Resu
             course2md::tr!("已发布笔记与任务身份不匹配，原文件已保留")
         );
         course2md::artifact::validate_version(&version, &manifest)?;
-        task.artifact = Some(version);
-        task.outcomes = Some(manifest.outcomes);
-        task.state = if manifest.partial {
-            TaskState::Partial
-        } else {
-            TaskState::Complete
-        };
-        task.error = None;
-        task.unread = true;
-        return Ok(());
+        return Ok(ArtifactFact::Published {
+            version,
+            outcomes: Box::new(manifest.outcomes),
+            partial: manifest.partial,
+        });
     }
     if let course2md::execution::Operation::Reprocess {
         base_version_dir,
@@ -1571,33 +1593,70 @@ fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Resu
                 }
             }
         }
-        let next_state = if record.outcomes.values().any(failed_outcome) {
-            TaskState::Partial
-        } else {
-            TaskState::Complete
-        };
-        let previous = task.outcomes.clone();
-        task.artifact = Some(base_version_dir.clone());
-        task.outcomes
-            .get_or_insert_with(course2md::artifact::Outcomes::default)
-            .exports = record.outcomes;
-        task.unread |=
-            task.artifact.is_none() || task.outcomes != previous || task.state != next_state;
-        task.state = next_state;
+        return Ok(ArtifactFact::Exports {
+            base: base_version_dir.clone(),
+            outcomes: record.outcomes,
+        });
     }
+    Ok(ArtifactFact::Nothing)
+}
+
+fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
+    match fact {
+        ArtifactFact::Nothing => {}
+        // A result recorded meanwhile is newer than what startup found.
+        ArtifactFact::Published { .. } if task.artifact.is_some() && !task.exports_only() => {}
+        ArtifactFact::Published {
+            version,
+            outcomes,
+            partial,
+        } => {
+            task.artifact = Some(version);
+            task.outcomes = Some(*outcomes);
+            task.state = if partial {
+                TaskState::Partial
+            } else {
+                TaskState::Complete
+            };
+            task.error = None;
+            task.unread = true;
+        }
+        ArtifactFact::Exports { base, outcomes } => {
+            let next_state = if outcomes.values().any(failed_outcome) {
+                TaskState::Partial
+            } else {
+                TaskState::Complete
+            };
+            let previous = task.outcomes.clone();
+            task.artifact = Some(base);
+            task.outcomes
+                .get_or_insert_with(course2md::artifact::Outcomes::default)
+                .exports = outcomes;
+            task.unread |=
+                task.artifact.is_none() || task.outcomes != previous || task.state != next_state;
+            task.state = next_state;
+        }
+    }
+}
+
+fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Result<()> {
+    let fact = probe_artifact(task, location)?;
+    apply_artifact(task, fact);
     Ok(())
 }
 
-pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
+/// Requests whose result is unknown, read from the task's receipts.
+fn uncertain_requests(task: &TaskRecord) -> Result<Vec<BlockedRequest>> {
     let receipts = course2md::dispatch::receipts(&task.work_dir)?;
-    task.blocked.retain(|request| !request.is_uncertain());
-    for receipt in receipts.into_iter().filter(|r| {
-        matches!(
-            r.state,
-            course2md::dispatch::State::Sending | course2md::dispatch::State::Uncertain
-        )
-    }) {
-        task.blocked.push(BlockedRequest {
+    Ok(receipts
+        .into_iter()
+        .filter(|r| {
+            matches!(
+                r.state,
+                course2md::dispatch::State::Sending | course2md::dispatch::State::Uncertain
+            )
+        })
+        .map(|receipt| BlockedRequest {
             reason: BlockReason::Uncertain,
             request_id: Some(receipt.request_id),
             purpose: Some(receipt.purpose),
@@ -1616,13 +1675,87 @@ pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
                         .unwrap_or_else(|| { course2md::tr!("请求结果未确认").into() })
                 )
             },
-        });
-    }
+        })
+        .collect())
+}
+
+fn apply_receipts(task: &mut TaskRecord, uncertain: Vec<BlockedRequest>) {
+    task.blocked.retain(|request| !request.is_uncertain());
+    task.blocked.extend(uncertain);
     if !task.blocked.is_empty() && task.has_uncertain() && task.intent == Intent::Run {
         task.state = TaskState::Uncertain;
         task.unread = true;
     }
+}
+
+pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
+    let uncertain = uncertain_requests(task)?;
+    apply_receipts(task, uncertain);
     Ok(())
+}
+
+/// What startup found on disk for one task.
+struct TaskFacts {
+    task_id: String,
+    found: Result<(ArtifactFact, Vec<BlockedRequest>), String>,
+}
+
+impl TaskFacts {
+    fn apply(self, task: &mut TaskRecord) {
+        match self.found {
+            Ok((artifact, uncertain)) => {
+                apply_artifact(task, artifact);
+                apply_receipts(task, uncertain);
+            }
+            Err(error) => {
+                task.state = TaskState::NeedsAttention;
+                task.error = Some(course2md::tr!(
+                    "请求记录暂时无法读取，尚未发送新请求：{}",
+                    error
+                ));
+            }
+        }
+    }
+}
+
+/// Startup checks of published results and request receipts. They read and
+/// hash every published asset, so they run on a blocking thread after the
+/// window opens; meanwhile the UI shows the last persisted state and no task
+/// is dispatched (`State::next_task` waits for them).
+pub struct Reconciliation {
+    workspace: u64,
+    tasks: Vec<(TaskRecord, Option<LibraryLocation>)>,
+}
+
+/// The findings of a [`Reconciliation`], applied by `Workspace::apply_reconciliation`.
+pub struct Reconciled {
+    workspace: u64,
+    facts: Vec<TaskFacts>,
+}
+
+impl Reconciliation {
+    /// Blocking: run through `crate::spawn_blocking_io`.
+    pub fn run(self) -> Reconciled {
+        Reconciled {
+            workspace: self.workspace,
+            facts: self
+                .tasks
+                .into_iter()
+                .map(|(task, location)| {
+                    let found = location
+                        .map_or(Ok(ArtifactFact::Nothing), |location| {
+                            probe_artifact(&task, &location)
+                        })
+                        .and_then(|artifact| Ok((artifact, uncertain_requests(&task)?)))
+                        .map_err(|error| format!("{error:#}"));
+                    TaskFacts {
+                        task_id: task.id,
+                        found,
+                    }
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Move inline subtitle events of submitted tasks into their work directories.
@@ -2046,6 +2179,10 @@ impl Workspace {
             mirror_snapshots,
             last_write: Cell::new(None),
             writer: Box::new(writer),
+            identity: {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
         }
     }
 
@@ -2056,6 +2193,8 @@ impl Workspace {
             options,
         )
     }
+    /// Opens the record without reconciling it with the libraries; call
+    /// `reconciliation` and `apply_reconciliation` before work is dispatched.
     pub fn open_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
         Self::open_with::<ThreadWriter>(path, root, options)
     }
@@ -2152,33 +2291,73 @@ impl Workspace {
         }
         hydrate_draft_subtitles(&mut state, &path);
         store_task_subtitles(&mut state);
-        for task in &mut state.tasks {
-            let result = state
-                .libraries
-                .iter()
-                .find(|location| location.id == task.plan.library_id)
-                .map(|location| reconcile_artifact(task, location))
-                .unwrap_or(Ok(()))
-                .and_then(|_| reconcile_receipts(task));
-            if let Err(error) = result {
-                task.state = TaskState::NeedsAttention;
-                task.error = Some(course2md::tr!(
-                    "请求记录暂时无法读取，尚未发送新请求：{}",
-                    format!("{error:#}")
-                ));
-            }
-        }
+        state.reconciling = !state.tasks.is_empty();
         Ok(Self::assemble::<W>(state, recovery, path))
     }
 
-    /// `open_at` for tests: writes finish before each call returns.
+    /// The startup checks still owed, to run on a blocking thread.
+    pub fn reconciliation(&self) -> Option<Reconciliation> {
+        self.state.reconciling.then(|| Reconciliation {
+            workspace: self.identity,
+            tasks: self
+                .state
+                .tasks
+                .iter()
+                .map(|task| {
+                    (
+                        task.clone(),
+                        self.state.library(&task.plan.library_id).cloned(),
+                    )
+                })
+                .collect(),
+        })
+    }
+
+    /// Applies startup findings to the current records (which may have
+    /// changed meanwhile) and allows dispatch again. When the record cannot be
+    /// saved the findings still apply in memory, so the error is reported
+    /// without holding every task back.
+    pub fn apply_reconciliation(&mut self, reconciled: Reconciled) -> Result<()> {
+        if reconciled.workspace != self.identity {
+            return Ok(());
+        }
+        fn apply(state: &mut State, facts: Vec<TaskFacts>) {
+            for facts in facts {
+                if let Some(task) = state.task_mut(&facts.task_id) {
+                    facts.apply(task);
+                }
+            }
+            state.reconciling = false;
+        }
+        let mut facts = Some(reconciled.facts);
+        let result = self.transaction(|state| {
+            apply(state, facts.take().unwrap_or_default());
+            Ok(())
+        });
+        if let Some(facts) = facts.take().filter(|_| result.is_err()) {
+            apply(&mut self.state, facts);
+        }
+        result
+    }
+
+    /// `open_at` for tests: writes finish before each call returns and the
+    /// startup reconciliation has been applied.
     #[cfg(test)]
     pub(crate) fn open_at_inline(
         path: PathBuf,
         root: PathBuf,
         options: ConversionOptions,
     ) -> Result<Self> {
-        Self::open_with::<InlineWriter>(path, root, options)
+        let mut workspace = Self::open_with::<InlineWriter>(path, root, options)?;
+        workspace.reconcile_now();
+        Ok(workspace)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reconcile_now(&mut self) {
+        if let Some(reconciliation) = self.reconciliation() {
+            self.apply_reconciliation(reconciliation.run()).unwrap();
+        }
     }
 
     fn read(path: &Path) -> Result<State> {
@@ -3559,6 +3738,46 @@ mod tests {
         assert_eq!(task.state, TaskState::Complete);
         assert_eq!(task.artifact.as_ref(), Some(&version));
         assert!(restored.state.next_task().is_none());
+    }
+
+    #[test]
+    fn startup_checks_run_later_and_hold_dispatch_until_applied() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let published = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let mut other = plan(&library);
+        other.source_id = "video-b".into();
+        other.title = "课程 B".into();
+        let queued = ws.state.enqueue(other, None).unwrap().0;
+        ws.state.task_mut(&published).unwrap().state = TaskState::Running;
+        ws.save().unwrap();
+        let version = publish_note(&ws.state, &published, false);
+        let open = || {
+            Workspace::open_with::<InlineWriter>(
+                dir.path().join("workspace.json"),
+                dir.path().join("library"),
+                Default::default(),
+            )
+            .unwrap()
+        };
+        let mut reopened = open();
+        // Opening does not hash the library; it dispatches nothing meanwhile.
+        assert!(reopened.state.task(&published).unwrap().artifact.is_none());
+        assert!(reopened.state.next_task().is_none());
+        let reconciliation = reopened.reconciliation().unwrap();
+        // Findings for a record that was replaced meanwhile are not applied.
+        let mut replaced = open();
+        let stale = replaced.reconciliation().unwrap();
+        reopened.apply_reconciliation(stale.run()).unwrap();
+        assert!(reopened.state.reconciling);
+        reopened.apply_reconciliation(reconciliation.run()).unwrap();
+        let task = reopened.state.task(&published).unwrap();
+        assert_eq!(task.state, TaskState::Complete);
+        assert_eq!(task.artifact.as_ref(), Some(&version));
+        assert_eq!(reopened.state.next_task().unwrap().id, queued);
+        replaced.reconcile_now();
+        assert!(!replaced.state.reconciling);
     }
 
     #[test]
