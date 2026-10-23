@@ -1579,11 +1579,8 @@ fn probe_artifact(task: &TaskRecord, location: &LibraryLocation) -> Result<Artif
             .context(course2md::tr!("导出位置与任务记录不匹配"))?;
         for (format, outcome) in &mut record.outcomes {
             if outcome.status == course2md::artifact::Status::Succeeded {
-                let format = match format.as_str() {
-                    "md" => course2md::config::OutputFormat::Md,
-                    "html" => course2md::config::OutputFormat::Html,
-                    "json" => course2md::config::OutputFormat::Json,
-                    _ => continue,
+                let Some(format) = output_format(format) else {
+                    continue;
                 };
                 let expected = export_directory.join(course2md::portable::file_name(format));
                 if !expected.is_file() {
@@ -1643,6 +1640,16 @@ fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Resu
     let fact = probe_artifact(task, location)?;
     apply_artifact(task, fact);
     Ok(())
+}
+
+/// The output format a saved export outcome is keyed by, parsed with the
+/// engine's own serialized spelling.
+fn output_format(key: &str) -> Option<course2md::config::OutputFormat> {
+    use serde::de::IntoDeserializer;
+    course2md::config::OutputFormat::deserialize(
+        IntoDeserializer::<serde::de::value::Error>::into_deserializer(key),
+    )
+    .ok()
 }
 
 /// Requests whose result is unknown, read from the task's receipts.
@@ -3738,6 +3745,16 @@ mod tests {
         assert_eq!(task.state, TaskState::Complete);
         assert_eq!(task.artifact.as_ref(), Some(&version));
         assert!(restored.state.next_task().is_none());
+    }
+
+    #[test]
+    fn export_keys_parse_as_the_engine_spells_them() {
+        use course2md::config::OutputFormat;
+        for format in [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json] {
+            assert_eq!(output_format(&format.to_string()), Some(format));
+        }
+        assert_eq!(output_format("pdf"), None);
+        assert_eq!(output_format("MD"), None);
     }
 
     #[test]
