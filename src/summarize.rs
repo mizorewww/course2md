@@ -348,16 +348,16 @@ pub async fn summarize(
 /// 生成插入 course.md 的摘要区块（markdown，哨兵注释包裹）。
 /// 有意信任 LLM 输出（markdown 语义直通），不做转义。
 pub fn render_md_block(sm: &Summary) -> String {
-    let mut out = format!("\n{SUMMARY_BEGIN}\n\n## 📝 视频摘要\n\n");
+    let mut out = format!("\n{SUMMARY_BEGIN}\n\n## 📝 {}\n\n", crate::tr!("视频摘要"));
     out.push_str(&format!("> {}\n", sm.tldr));
     if !sm.key_points.is_empty() {
-        out.push_str("\n### 核心要点\n\n");
+        out.push_str(&format!("\n### {}\n\n", crate::tr!("核心要点")));
         for p in &sm.key_points {
             out.push_str(&format!("- {p}\n"));
         }
     }
     if !sm.outline.is_empty() {
-        out.push_str("\n### 内容大纲\n\n");
+        out.push_str(&format!("\n### {}\n\n", crate::tr!("内容大纲")));
         for o in &sm.outline {
             out.push_str(&format!(
                 "- **{}** {}：{}\n",
@@ -373,23 +373,29 @@ pub fn render_md_block(sm: &Summary) -> String {
 
 /// 生成插入 course.html 的摘要区块（HTML，哨兵注释包裹）。
 pub fn render_html_block(sm: &Summary) -> String {
-    let mut out = crate::tr!(
-        "{}<section class=\"summary\"><h2>📝 视频摘要</h2>",
-        SUMMARY_BEGIN
+    let mut out = format!(
+        "{SUMMARY_BEGIN}<section class=\"summary\"><h2>📝 {}</h2>",
+        crate::render::esc(crate::tr!("视频摘要"))
     );
     out.push_str(&format!(
         "<p class=\"mute\">{}</p>",
         crate::render::rich(&sm.tldr)
     ));
     if !sm.key_points.is_empty() {
-        out.push_str(crate::tr!("<h3>核心要点</h3><ul>"));
+        out.push_str(&format!(
+            "<h3>{}</h3><ul>",
+            crate::render::esc(crate::tr!("核心要点"))
+        ));
         for p in &sm.key_points {
             out.push_str(&format!("<li>{}</li>", crate::render::rich(p)));
         }
         out.push_str("</ul>");
     }
     if !sm.outline.is_empty() {
-        out.push_str(crate::tr!("<h3>内容大纲</h3><ul>"));
+        out.push_str(&format!(
+            "<h3>{}</h3><ul>",
+            crate::render::esc(crate::tr!("内容大纲"))
+        ));
         for o in &sm.outline {
             out.push_str(&crate::tr!(
                 "<li><b>{}</b> {}：{}</li>",
