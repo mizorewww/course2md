@@ -60,6 +60,9 @@ impl VideoMeta {
     pub fn is_local(&self) -> bool {
         self.extractor == "local"
     }
+    pub fn save(&self, path: &Path) -> Result<()> {
+        crate::checkpoint::atomic_write_shared(path, serde_json::to_string_pretty(self)?.as_bytes())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -604,12 +607,6 @@ pub fn local_content_identity(
     Ok(format!("local:sha256:{digest}"))
 }
 
-impl VideoMeta {
-    pub fn save(&self, path: &Path) -> Result<()> {
-        crate::checkpoint::atomic_write_shared(path, serde_json::to_string_pretty(self)?.as_bytes())
-    }
-}
-
 /// Probe once and return the single video; collection/unresolved links are errors.
 pub async fn probe_video(url: &str) -> Result<OnlineVideo> {
     match probe_online(url).await? {
@@ -954,12 +951,6 @@ pub const BILIBILI_412_DESKTOP_HINT: &str =
 
 pub const BILIBILI_412_HINT: &str = "B 站暂时限制了访问。请稍后重试；若持续失败，运行 course2md --login bilibili 重新登录，或导入本地视频。 / Bilibili is temporarily limiting access. Retry later; if it keeps failing, run course2md --login bilibili to log in again, or import a local video.";
 
-#[cfg(all(test, unix))]
-async fn run(cmd: &mut Command) -> Result<String> {
-    let out = run_output(cmd).await?;
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
 async fn run_output(cmd: &mut Command) -> Result<std::process::Output> {
     let mut retries = 0;
     loop {
@@ -1075,6 +1066,12 @@ async fn run_download(cmd: &mut Command) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    async fn run(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {
+        let out = super::run_output(cmd).await?;
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
     use super::*;
 
     #[test]
