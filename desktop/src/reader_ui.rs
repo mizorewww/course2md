@@ -3326,6 +3326,12 @@ impl Desktop {
             .child(crate::backend::vertical_scrollbar_for(
                 &self.reader_ui.note_list,
             ))
+            // Dragging the scrollbar moves the list without its scroll handler;
+            // the release records the settled position (unchanged ones are skipped).
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.reading_position_moved(cx)),
+            )
             .into_any_element()
     }
 
@@ -4609,6 +4615,10 @@ impl Desktop {
             .child(crate::backend::vertical_scrollbar_for(
                 &self.reader_ui.gallery.list,
             ))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.reading_position_moved(cx)),
+            )
             .into_any_element()
     }
 
