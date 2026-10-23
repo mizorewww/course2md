@@ -186,48 +186,21 @@ pub struct PolishReport {
     pub note: Option<String>,
 }
 
-/// 校对 worker 池骨架：
-/// `Mutex` 队列 + `std::thread::scope` workers 抢占式取活，每轮先 `check_control`，
-/// 中止（或锁中毒）记 `aborted` 并由首个错误胜出；队列取走即计进度，
-/// `work` 返回本批成功条数（0 = 该批被跳过/失败，与成功语义一致地不累加）。
-/// Err = 任务被中止，携带首个 check_control 错误。
+/// Runs the AI batches on the shared worker pool. A batch counts toward
+/// progress once taken, even if it is skipped; `work` returns how many items
+/// it improved (0 for a skipped or failed batch, which keeps the original).
+/// Err = the task was stopped.
 fn run_pool<T: Send>(
-    queue: &std::sync::Mutex<impl Iterator<Item = T> + Send>,
+    chunks: Vec<T>,
     workers: usize,
-    succeeded: &std::sync::atomic::AtomicUsize,
     pb: &crate::progress::Bar,
     work: &(dyn Fn(T) -> usize + Sync),
-) -> Result<()> {
-    let aborted = std::sync::Mutex::new(None::<anyhow::Error>);
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    if let Err(e) = crate::dispatch::check_control() {
-                        let mut guard = crate::runtime::lock_recover(&aborted);
-                        if guard.is_none() {
-                            *guard = Some(e);
-                        }
-                        break;
-                    }
-                    let next = queue.lock().map(|mut it| it.next());
-                    match next {
-                        Ok(Some(item)) => {
-                            // 从队列取走即计入进度：被跳过的批次也不再卡住进度条
-                            pb.inc(1);
-                            let count = work(item);
-                            succeeded.fetch_add(count, std::sync::atomic::Ordering::Relaxed);
-                        }
-                        Ok(None) | Err(_) => break,
-                    }
-                }
-            });
-        }
-    });
-    if let Some(e) = crate::runtime::lock_recover(&aborted).take() {
-        return Err(e);
-    }
-    Ok(())
+) -> Result<usize> {
+    let counts = crate::runtime::map_pool(chunks, workers, |item| {
+        pb.inc(1);
+        Ok(work(item))
+    })?;
+    Ok(counts.into_iter().sum())
 }
 
 /// 对已合并的 Section 做校对（在 merge 之后调用；配置已由调用方校验）。
@@ -276,13 +249,10 @@ pub fn polish_sections_report(
     let pb = crate::progress::Bar::new(Stage::Llm, chunks.len() as u64)
         .with_template("{spinner:.green} llm {pos}/{len} [{bar:32.cyan/blue}] {msg}");
     let agent = chat_agent();
-    let succeeded = std::sync::atomic::AtomicUsize::new(0);
     let first_error = std::sync::Mutex::new(None::<String>);
-    let queue = std::sync::Mutex::new(chunks.into_iter());
-    run_pool(
-        &queue,
+    let succeeded = run_pool(
+        chunks,
         s.concurrency.clamp(1, MAX_CONCURRENCY),
-        &succeeded,
         &pb,
         &|(image_path, mut chunk)| {
             let image = image_path
@@ -307,7 +277,6 @@ pub fn polish_sections_report(
     for sec in sections.iter_mut() {
         sec.speech.retain(|e| !e.text.trim().is_empty());
     }
-    let succeeded = succeeded.load(std::sync::atomic::Ordering::Relaxed);
     Ok(PolishReport {
         attempted,
         succeeded,
@@ -353,18 +322,14 @@ pub fn translate_sections_report(
         .with_template("{spinner:.green} translate {pos}/{len} [{bar:32.cyan/blue}] {msg}");
     let agent = chat_agent();
     let warned = std::sync::atomic::AtomicBool::new(false);
-    let succeeded = std::sync::atomic::AtomicUsize::new(0);
     let first_error = std::sync::Mutex::new(None::<String>);
-    let queue = std::sync::Mutex::new(chunks.into_iter());
-    run_pool(
-        &queue,
+    let succeeded = run_pool(
+        chunks,
         s.concurrency.clamp(1, MAX_CONCURRENCY),
-        &succeeded,
         &pb,
         &|mut chunk| translate_chunk(&agent, s, target, &mut chunk, &warned, &first_error),
     )?;
     pb.finish();
-    let succeeded = succeeded.load(std::sync::atomic::Ordering::Relaxed);
     Ok(PolishReport {
         attempted,
         succeeded,

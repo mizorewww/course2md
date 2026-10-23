@@ -1324,28 +1324,20 @@ async fn summarize_step(
     }
 }
 
-/// Screenshot checkpoints are verified by full-content digests. Spread the files
-/// over parallel lanes so resuming a large cache is not a serial wait.
+/// Screenshot checkpoints are verified by full-content digests, in parallel so
+/// resuming a large cache is not a serial wait.
 fn verified_cache_files(out_dir: &Path, files: &[(String, String)]) -> bool {
-    if files.is_empty() {
-        return true;
-    }
-    let lanes = FRAME_DIGEST_LANES.min(files.len());
-    let chunk_size = files.len().div_ceil(lanes);
-    std::thread::scope(|scope| {
-        files
-            .chunks(chunk_size)
-            .map(|chunk| {
-                scope.spawn(move || {
-                    chunk.iter().all(|(path, digest)| {
-                        artifact::safe_asset_path(out_dir, path)
-                            .and_then(|p| execution::file_digest(&p))
-                            .is_ok_and(|actual| actual == *digest)
-                    })
-                })
-            })
-            .all(|handle| handle.join().unwrap_or(false))
-    })
+    crate::runtime::map_pool(
+        files.iter().collect(),
+        FRAME_DIGEST_LANES,
+        |(path, digest)| {
+            let actual = artifact::safe_asset_path(out_dir, path)
+                .and_then(|p| execution::file_digest(&p))?;
+            anyhow::ensure!(actual == *digest, "digest mismatch");
+            Ok(())
+        },
+    )
+    .is_ok()
 }
 
 /// 失败诊断 run.json 的上下文：任何在工作目录确定后失败的路径都写一份。

@@ -177,51 +177,11 @@ pub struct CurrentVersion {
 /// 小文件居多，8 路即可吃满磁盘/CPU，又不至于进程风暴。
 const IO_PARALLELISM: usize = 8;
 
-/// std::thread::scope 并行执行 `f`（最多 IO_PARALLELISM 路），结果按原顺序写回。
-/// 多个项失败时返回索引最小的错误（与串行版的首个失败一致，结果可复现）。
 fn parallel_map<T: Sync, R: Send>(
     items: &[T],
     f: impl Fn(&T) -> Result<R> + Sync,
 ) -> Result<Vec<R>> {
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let slots: Vec<std::sync::Mutex<Option<R>>> =
-        items.iter().map(|_| std::sync::Mutex::new(None)).collect();
-    let first_err: std::sync::Mutex<Option<(usize, anyhow::Error)>> = std::sync::Mutex::new(None);
-    std::thread::scope(|scope| {
-        for _ in 0..IO_PARALLELISM.min(items.len()) {
-            scope.spawn(|| {
-                loop {
-                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let Some(item) = items.get(i) else { break };
-                    match f(item) {
-                        Ok(r) => {
-                            if let Ok(mut slot) = slots[i].lock() {
-                                *slot = Some(r);
-                            }
-                        }
-                        Err(e) => {
-                            if let Ok(mut g) = first_err.lock()
-                                && g.as_ref().is_none_or(|(j, _)| i < *j)
-                            {
-                                *g = Some((i, e));
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    });
-    if let Some((_, e)) = first_err.into_inner().unwrap_or_default() {
-        return Err(e);
-    }
-    Ok(slots
-        .into_iter()
-        .map(|slot| {
-            slot.into_inner()
-                .unwrap_or_default()
-                .expect(crate::tr!("无错误时所有槽位均已写入"))
-        })
-        .collect())
+    crate::runtime::map_pool(items.iter().collect(), IO_PARALLELISM, f)
 }
 
 #[derive(Debug, Clone)]
