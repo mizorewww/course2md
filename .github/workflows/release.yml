@@ -90,6 +90,7 @@ jobs:
           codesign --verify --verbose=2 "${{ matrix.asset }}"
 
       # MLX Metal kernels for Apple speech recognition, installed beside the CLI.
+      # build.rs copies them beside the executable; see the note there.
       - name: Collect mlx.metallib
         if: matrix.target == 'aarch64-apple-darwin'
         run: cp target/aarch64-apple-darwin/release/mlx.metallib mlx-macos-arm64.metallib

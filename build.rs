@@ -43,36 +43,17 @@ fn main() {
     // 关闭 swift-syntax 预编译包：新工具链首次构建会从 download.swift.org
     // 下载预编译宏库，SwiftPM 的下载没有超时，网络慢时整个 cargo build
     // 无限挂起；从源码构建宏库只慢在首次。不认识该参数的旧工具链本就不下载
-    // 预编译包，依次回退到不带该参数、再到默认构建系统。
-    // 只在全部尝试都失败时才打印输出，回退成功不留误导性的警告。
-    let attempts: [&[&str]; 4] = [
-        &[
-            "--build-system",
-            "swiftbuild",
-            "--disable-experimental-prebuilts",
-        ],
-        &["--build-system", "swiftbuild"],
-        &["--disable-experimental-prebuilts"],
-        &[],
-    ];
-    let mut reports = Vec::new();
-    let ok = attempts.iter().any(|extra| {
-        match run(Command::new("swift")
-            .args(["build", "-c", "release"])
-            .args(*extra)
-            .current_dir(&pkg))
-        {
-            Ok(()) => true,
-            Err(report) => {
-                reports.push(report);
-                false
-            }
-        }
-    });
-    if !ok {
-        for report in reports {
-            println!("cargo:warning={report}");
-        }
+    // 预编译包。
+    //
+    // 两个参数是否可用由 `swift build --help` 探测一次，按工具链版本缓存在
+    // OUT_DIR，之后只跑一次 swift build，不再串行试错。
+    let extra = swift_build_args();
+    if let Err(report) = run(Command::new("swift")
+        .args(["build", "-c", "release"])
+        .args(&extra)
+        .current_dir(&pkg))
+    {
+        println!("cargo:warning={report}");
         println!(
             "cargo:warning=swift build 失败（见上方输出），跳过 Apple 原生模块；coreml 后端不可用"
         );
@@ -159,7 +140,11 @@ fn main() {
     };
     if let Some(bundle) = bundle {
         if let Ok(out_dir) = std::env::var("OUT_DIR") {
-            // OUT_DIR = <target>/<profile>/build/<pkg>-<hash>/out
+            // OUT_DIR = <target>/[<triple>/]<profile>/build/<pkg>-<hash>/out, so
+            // this is the executable's directory. Cargo has no stable way to
+            // name it; the layout is also hard-coded by the consumers of this
+            // copy: release.yml ("Collect mlx.metallib"),
+            // desktop/scripts/package.py and desktop/scripts/ux_fixture.py.
             let exe_dir = PathBuf::from(out_dir).join("../../../");
             let dest = exe_dir.join("mlx.metallib");
             if std::fs::copy(&bundle, &dest).is_err() {
@@ -185,6 +170,40 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", rt.display());
         println!("cargo:rustc-link-lib=static=clang_rt.osx");
     }
+}
+
+/// Extra `swift build` arguments this toolchain supports, probed from its help
+/// text once and cached in OUT_DIR under the `swift --version` it came from.
+fn swift_build_args() -> Vec<String> {
+    let version = Command::new("swift")
+        .arg("--version")
+        .output()
+        .map(|out| {
+            let text = String::from_utf8_lossy(&out.stdout);
+            text.lines().next().unwrap_or_default().trim().to_owned()
+        })
+        .unwrap_or_default();
+    let cache = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("swift-build-args");
+    if let Ok(cached) = std::fs::read_to_string(&cache) {
+        let mut lines = cached.lines();
+        if lines.next() == Some(version.as_str()) {
+            return lines.map(str::to_owned).collect();
+        }
+    }
+    let help = Command::new("swift")
+        .args(["build", "--help"])
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default();
+    let mut args = vec![];
+    if help.contains("swiftbuild") {
+        args.extend(["--build-system", "swiftbuild"].map(String::from));
+    }
+    if help.contains("--disable-experimental-prebuilts") {
+        args.push("--disable-experimental-prebuilts".into());
+    }
+    let _ = std::fs::write(&cache, [version, args.join("\n")].join("\n"));
+    args
 }
 
 fn xcode_devdir() -> Option<PathBuf> {

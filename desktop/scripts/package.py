@@ -206,6 +206,7 @@ def main():
         # MLX first searches beside the executable for mlx.metallib. Keeping
         # that layout avoids changing the CLI's working directory and breaking
         # user-supplied relative source, output, and model paths.
+        # build.rs copies it beside the CLI executable; see the note there.
         metal = PROJECT / "target" / profile / "mlx.metallib"
         if metal.is_file():
             shutil.copy2(metal, resources / "mlx.metallib")
