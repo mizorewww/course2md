@@ -29,6 +29,7 @@ mod preferences;
 mod provider_serde;
 mod reader_navigation;
 mod reader_ui;
+mod scroll;
 mod service_test;
 mod settings_ui;
 mod source;
@@ -38,13 +39,14 @@ mod task_ui;
 mod theme;
 mod views;
 mod workspace;
-use backend::{Course, Done, EngineEvent, Event, Job};
+use backend::{Done, EngineEvent, Event, Job};
 use course2md::progress::{ModelOperation, Stage, StageStatus};
 use gpui::{prelude::*, *};
 use gpui_component::{
     input::{InputEvent, InputState},
     *,
 };
+use notes::Course;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     path::PathBuf,
@@ -308,7 +310,7 @@ struct Desktop {
     courses: Vec<Course>,
     cover_by_source: BTreeMap<String, PathBuf>,
     loading: bool,
-    preview: Option<Rc<backend::Preview>>,
+    preview: Option<Rc<notes::Preview>>,
     read_generation: u64,
     reading: bool,
     opening_course: Option<PathBuf>,
@@ -1183,7 +1185,7 @@ impl Desktop {
             .begin_location_checks(generation, &locations);
         self.loading = true;
         let task = storage_ui::scan_locations(locations, move |location| {
-            let scan = backend::scan_library(&location.root);
+            let scan = notes::scan_library(&location.root);
             let organization = organize::Library::load(&location.root);
             let cache = course_library::LibraryViewCache::inspect(location, scan.as_ref().ok());
             (scan, organization, cache)
@@ -1353,7 +1355,7 @@ impl Desktop {
         } else {
             origin
         };
-        let task = spawn_blocking_io(move || backend::read_preview(course));
+        let task = spawn_blocking_io(move || notes::read_preview(course));
         cx.spawn(async move |this, cx| {
             let result = task
                 .recv()
