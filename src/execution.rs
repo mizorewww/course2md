@@ -480,6 +480,9 @@ pub fn relocate_work_bindings(root_old: &Path, root_new: &Path) -> Result<usize>
 }
 
 #[cfg(test)]
+mod identity_snapshot;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
