@@ -23,8 +23,8 @@ const STEM_MAX_CHARS: usize = 40;
 /// Screenshot checkpoint files are digest-verified across this many parallel lanes.
 const FRAME_DIGEST_LANES: usize = 4;
 
-/// One message for an empty screenshot result; the desktop matches this value.
-pub const NO_SCREENSHOTS: &str = "未提取到截图";
+/// One message for an empty screenshot result.
+const NO_SCREENSHOTS: &str = "未提取到截图";
 
 /// Traditional CLI entry. Its generated task directory is stable for compatible recovery.
 /// New settings or --no-resume use another work directory and never overwrite old notes.
@@ -640,12 +640,12 @@ async fn subtitles(
     cfg: &PipelineConfig,
     local: bool,
     input: SubtitleInput,
-) -> Result<Option<(Vec<timeline::TranscriptEvent>, String)>> {
+) -> Result<Option<(Vec<timeline::TranscriptEvent>, TranscriptOrigin)>> {
     let probed = match input {
         SubtitleInput::Selected(selected) => {
             if let Some(events) = selected {
                 execution::validate_events(&events)?;
-                return Ok(Some((events, "selected-subtitle".into())));
+                return Ok(Some((events, TranscriptOrigin::SelectedSubtitle)));
             }
             anyhow::ensure!(
                 cfg.transcript_source != config::TranscriptSource::Subtitle,
@@ -679,11 +679,10 @@ async fn subtitles(
             Ok(Some((
                 events,
                 if file.auto {
-                    "auto-caption"
+                    TranscriptOrigin::AutoCaption
                 } else {
-                    "subtitle"
-                }
-                .into(),
+                    TranscriptOrigin::Subtitle
+                },
             )))
         }
         None if cfg.transcript_source == config::TranscriptSource::Subtitle => {
@@ -693,9 +692,19 @@ async fn subtitles(
     }
 }
 
+/// Where a note's transcript came from; recorded in run.json and the cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum TranscriptOrigin {
+    SelectedSubtitle,
+    AutoCaption,
+    Subtitle,
+    Asr,
+}
+
 #[derive(Serialize, Deserialize)]
 struct TranscriptCache {
-    source: String,
+    source: TranscriptOrigin,
     events: Vec<timeline::TranscriptEvent>,
 }
 
@@ -838,7 +847,7 @@ async fn run_prepared(
                         let events = asr::run(cfg, &audio).await?;
                         progress::done(Stage::Transcribe);
                         TranscriptCache {
-                            source: "asr".into(),
+                            source: TranscriptOrigin::Asr,
                             events,
                         }
                     }
@@ -1588,7 +1597,7 @@ mod tests {
 
         // 全空缓存（上次端点故障的残留）→ 丢弃并删除文件，ASR 得以重跑
         let empty = super::TranscriptCache {
-            source: "asr".into(),
+            source: super::TranscriptOrigin::Asr,
             events: vec![ev(""), ev("  ")],
         };
         std::fs::write(&path, serde_json::to_vec(&empty).unwrap()).unwrap();
@@ -1597,7 +1606,7 @@ mod tests {
 
         // 有可读文字的缓存 → 正常复用
         let good = super::TranscriptCache {
-            source: "asr".into(),
+            source: super::TranscriptOrigin::Asr,
             events: vec![ev("你好")],
         };
         std::fs::write(&path, serde_json::to_vec(&good).unwrap()).unwrap();
