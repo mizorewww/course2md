@@ -17,7 +17,7 @@ use std::{
 /// Durable receipts describe a service snapshot without a stored configuration.
 pub const SNAPSHOT_PREFIX: &str = "snapshot:";
 
-pub fn snapshot_id(digest: &str) -> String {
+fn snapshot_id(digest: &str) -> String {
     format!("{SNAPSHOT_PREFIX}{digest}")
 }
 

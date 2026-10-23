@@ -633,7 +633,6 @@ mod i18n_tests {
         assert!(localized.contains("用法："));
         assert!(localized.contains("选项："));
         assert!(localized.contains("显示帮助"));
-        crate::i18n::set_lang(Lang::ZhHans);
     }
 
     #[test]
@@ -641,7 +640,6 @@ mod i18n_tests {
         crate::i18n::set_lang(Lang::ZhHans);
         let mut command = localize_command(Cli::command());
         let rendered = command.render_help().to_string();
-        assert!(rendered.contains("用法") || rendered.contains("Usage"));
-        crate::i18n::set_lang(Lang::ZhHans);
+        assert!(rendered.contains("快速开始"), "{rendered}");
     }
 }

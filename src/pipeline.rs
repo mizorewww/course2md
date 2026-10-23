@@ -1510,13 +1510,14 @@ mod tests {
     /// 失败也写诊断 run.json（success:false + 错误全文）。
     /// 用损坏的本地视频让 pipeline 在 out_dir 确定之后（场景检测阶段）必然失败。
     #[test]
+    #[ignore = "needs ffmpeg, ffprobe and llama-server on PATH; run with --ignored"]
     fn failure_writes_diagnostic_run_json() {
-        // 缺任何一个工具都会在 out_dir 确定之前的预检失败（不写 run.json），跳过
+        // 缺任何一个工具都会在 out_dir 确定之前的预检失败（不写 run.json）
         for tool in ["ffmpeg", "ffprobe", "llama-server"] {
-            if crate::runtime::which(tool).is_none() {
-                eprintln!("skip: {tool} not found");
-                return;
-            }
+            assert!(
+                crate::runtime::which(tool).is_some(),
+                "{tool} is required by this test"
+            );
         }
         let dir = std::env::temp_dir().join(format!("c2md-failrun-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

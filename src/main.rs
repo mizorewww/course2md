@@ -89,11 +89,7 @@ fn main() -> std::process::ExitCode {
             return std::process::ExitCode::from(error.exit_code() as u8);
         }
     };
-    // Machine protocol messages stay in the source language for stable consumers;
-    // the desktop pins this command to Simplified Chinese.
-    if matches!(cli.command, Some(Command::RunTask)) {
-        course2md::i18n::set_lang(course2md::i18n::Lang::ZhHans);
-    } else if let Some(value) = &cli.lang {
+    if let Some(value) = &cli.lang {
         match course2md::i18n::Lang::from_code(value) {
             Some(lang) => course2md::i18n::set_lang(lang),
             None if value == "auto" => {
@@ -123,8 +119,9 @@ fn main() -> std::process::ExitCode {
         );
     let quiet =
         cli.opts.quiet || matches!(&cli.command, Some(Command::Summarize(args)) if args.quiet);
-    if json || matches!(cli.command, Some(Command::RunTask)) {
-        // Machine consumers parse message text; keep the protocol's source language.
+    if json {
+        // Machine consumers (--json, run-task) parse message text; keep the
+        // protocol's source language whatever --lang says.
         course2md::i18n::set_lang(course2md::i18n::Lang::ZhHans);
     }
     if json {
