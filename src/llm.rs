@@ -172,10 +172,6 @@ pub(crate) fn chat_agent() -> ureq::Agent {
 
 const STALL_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// Times a request to a service without per-request billing is sent when its
-/// result stays unconfirmed (a stalled or unfinished response).
-const FREE_RESEND_ATTEMPTS: u32 = 3;
-
 const ERROR_BODY_LIMIT: u64 = 4 * 1024 * 1024;
 /// 单次请求输出 token 上限（校对与摘要共用）。
 pub(crate) const CHAT_MAX_TOKENS: u32 = 16384;
@@ -885,7 +881,7 @@ pub(crate) fn send_chat_described(
     description: &str,
     validate: &dyn Fn(&str) -> Result<()>,
 ) -> Result<String> {
-    let resp = match request_chat(agent, s, body, purpose, description, validate) {
+    let reply = match request_chat(agent, s, body, purpose, description, validate) {
         Ok(r) => r,
         Err(first) => {
             let degradable = first
@@ -897,15 +893,16 @@ pub(crate) fn send_chat_described(
             let mut relaxed = body.clone();
             crate::provider::strip_structured_format(s, &mut relaxed);
             // 降级请求只试一次：原请求已按 MAX_ATTEMPTS 重试过，这里只验证兼容性
-            let response = request_chat_once(agent, s, &relaxed, purpose, description, validate)?;
+            let reply = request_chat_once(agent, s, &relaxed, purpose, description, validate)?;
             tracing::debug!("端点不支持 response_format，降级重试成功");
-            response
+            reply
         }
     };
+    let resp = reply.value;
     // token 用量实时反馈：GUI 阶段行据此跳动（上传=prompt，下载=completion）。
     // Codex SSE 已在 provider::sse_to_chat_json 归一成 chat/completions 同一形状。
     let usage = &resp["usage"];
-    if resp[crate::dispatch::REPLAYED] != true {
+    if !reply.replayed {
         crate::progress::note_tokens(
             purpose.usage_stage(),
             usage["prompt_tokens"].as_u64().unwrap_or(0),
@@ -927,7 +924,7 @@ fn request_chat_once(
     purpose: Purpose,
     description: &str,
     validate: &dyn Fn(&str) -> Result<()>,
-) -> std::result::Result<serde_json::Value, crate::dispatch::Failure> {
+) -> std::result::Result<crate::dispatch::Reply, crate::dispatch::Failure> {
     let url = crate::provider::endpoint(s);
     let headers = crate::provider::auth_headers(s).map_err(crate::dispatch::Failure::local)?;
     let sse = crate::provider::is_sse(s);
@@ -943,61 +940,26 @@ fn request_chat_once(
             crate::dispatch::Resend::AskUser
         },
         || {
-            let send = || -> std::result::Result<
-                crate::dispatch::HttpResponse,
-                crate::dispatch::NetworkFailure,
-            > {
-                let mut request = agent.post(&url).set("Content-Type", "application/json");
-                for (name, value) in &headers {
-                    request = request.set(name, value);
-                }
-                let response = crate::dispatch::receive(request.send_json(body))?;
-                // Codex Responses API 只提供 SSE 流：聚合为 chat/completions 形状，
-                // 下游校验与解析不变；非 2xx 原样上交（重试/降级逻辑要看状态码）
-                if sse && (200..300).contains(&response.status) {
-                    let canonical =
-                        crate::provider::sse_to_chat_json(&response.body).map_err(|e| {
-                            crate::dispatch::NetworkFailure {
-                                message: format!("{e:#}"),
-                                definitely_unsent: false,
-                            }
-                        })?;
-                    return Ok(crate::dispatch::HttpResponse {
-                        status: response.status,
-                        body: serde_json::to_vec(&canonical).unwrap_or_default(),
-                    });
-                }
-                Ok(response)
-            };
-            // A response that stalls or ends unfinished returns nothing usable.
-            // Without per-request billing (a ChatGPT plan, a local server)
-            // sending it again costs nothing, so it is resent here instead of
-            // becoming an uncertain result that stops every later request.
-            // Billed APIs keep asking the user before a resend.
-            let free = crate::provider::free_to_resend(s);
-            let mut attempt = 1;
-            loop {
-                match send() {
-                    Err(failure)
-                        if free
-                            && !failure.definitely_unsent
-                            && attempt < FREE_RESEND_ATTEMPTS
-                            && crate::dispatch::check_control().is_ok() =>
-                    {
-                        tracing::warn!(
-                            attempt,
-                            "AI 响应中断，重新发送 / AI response was interrupted; sending again"
-                        );
-                        crate::runtime::interruptible_sleep(crate::runtime::retry_backoff(attempt))
-                            .map_err(|e| crate::dispatch::NetworkFailure {
-                                message: format!("{e:#}"),
-                                definitely_unsent: false,
-                            })?;
-                        attempt += 1;
-                    }
-                    result => return result,
-                }
+            let mut request = agent.post(&url).set("Content-Type", "application/json");
+            for (name, value) in &headers {
+                request = request.set(name, value);
             }
+            let response = crate::dispatch::receive(request.send_json(body))?;
+            // Codex Responses API 只提供 SSE 流：聚合为 chat/completions 形状，
+            // 下游校验与解析不变；非 2xx 原样上交（重试/降级逻辑要看状态码）
+            if sse && (200..300).contains(&response.status) {
+                let canonical = crate::provider::sse_to_chat_json(&response.body).map_err(|e| {
+                    crate::dispatch::NetworkFailure {
+                        message: format!("{e:#}"),
+                        definitely_unsent: false,
+                    }
+                })?;
+                return Ok(crate::dispatch::HttpResponse {
+                    status: response.status,
+                    body: serde_json::to_vec(&canonical).unwrap_or_default(),
+                });
+            }
+            Ok(response)
         },
         |value| {
             // A gateway may return HTTP 200 with an error object. Missing content is a
@@ -1025,25 +987,10 @@ fn request_chat(
     purpose: Purpose,
     description: &str,
     validate: &dyn Fn(&str) -> Result<()>,
-) -> Result<serde_json::Value> {
-    let mut attempt = 1;
-    loop {
-        match request_chat_once(agent, s, body, purpose, description, validate) {
-            Ok(resp) => return Ok(resp),
-            Err(f) if f.retryable && attempt < MAX_ATTEMPTS => {
-                let wait = crate::runtime::retry_backoff(attempt);
-                tracing::warn!(
-                    attempt,
-                    of = MAX_ATTEMPTS,
-                    ?wait,
-                    "AI 请求失败，稍后重试 / AI request failed; retrying shortly"
-                );
-                crate::runtime::interruptible_sleep(wait)?;
-                attempt += 1;
-            }
-            Err(f) => return Err(f.into()),
-        }
-    }
+) -> Result<crate::dispatch::Reply> {
+    crate::runtime::retry(MAX_ATTEMPTS, || {
+        request_chat_once(agent, s, body, purpose, description, validate)
+    })
 }
 
 /// 用户自定义校对指令；空白视为未设置，回落到内置提示词。

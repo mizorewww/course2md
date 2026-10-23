@@ -252,6 +252,35 @@ pub fn retry_backoff(attempt: u32) -> Duration {
     Duration::from_nanos(base * 1_000_000_000 + jitter_ns)
 }
 
+/// Bounded retry for one service request. Retryable failures (confirmed unsent,
+/// rate limited, a free service's lost response) back off between attempts and
+/// the wait can be cancelled; every other failure returns at once.
+pub fn retry<T>(
+    max_attempts: u32,
+    mut attempt_once: impl FnMut() -> std::result::Result<T, crate::dispatch::Failure>,
+) -> Result<T> {
+    let mut attempt = 1;
+    loop {
+        crate::dispatch::check_control()?;
+        match attempt_once() {
+            Ok(value) => return Ok(value),
+            Err(failure) if failure.retryable && attempt < max_attempts => {
+                let wait = retry_backoff(attempt);
+                tracing::warn!(
+                    attempt,
+                    of = max_attempts,
+                    ?wait,
+                    "请求失败，稍后重试 / Request failed; retrying shortly: {}",
+                    failure.message
+                );
+                interruptible_sleep(wait)?;
+                attempt += 1;
+            }
+            Err(failure) => return Err(failure.into()),
+        }
+    }
+}
+
 /// 可取消的等待：分段小睡并轮询任务控制文件，暂停/取消立即返回其错误。
 pub fn interruptible_sleep(wait: Duration) -> Result<()> {
     let deadline = Instant::now() + wait;

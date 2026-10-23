@@ -906,8 +906,7 @@ async fn run_prepared(
                     kind: Some(
                         error
                             .downcast_ref::<crate::dispatch::Failure>()
-                            .and_then(|failure| failure.kind)
-                            .unwrap_or(crate::artifact::FailureKind::Local),
+                            .map_or(crate::artifact::FailureKind::Local, |failure| failure.kind),
                     ),
                 }
             };

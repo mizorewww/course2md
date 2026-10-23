@@ -575,25 +575,6 @@ fn run_api(
     Ok(events)
 }
 
-/// 有界重试：可重试错误按 [`crate::runtime::retry_backoff`] 退避（退避期间可取消），
-/// 共尝试 MAX_ATTEMPTS 次；确定性错误（鉴权/参数）直接返回。
-fn with_retry<T>(
-    mut attempt_once: impl FnMut() -> std::result::Result<T, crate::dispatch::Failure>,
-) -> Result<T> {
-    let mut attempt = 1;
-    loop {
-        crate::dispatch::check_control()?;
-        match attempt_once() {
-            Ok(value) => return Ok(value),
-            Err(error) if error.retryable && attempt < MAX_ATTEMPTS => {
-                crate::runtime::interruptible_sleep(crate::runtime::retry_backoff(attempt))?;
-                attempt += 1;
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-}
-
 /// 本机 llama-server：私有本地服务，不计费，不走请求账本。
 fn post_local_json(
     agent: &ureq::Agent,
@@ -602,7 +583,7 @@ fn post_local_json(
 ) -> Result<serde_json::Value> {
     use crate::dispatch::Failure;
     let bytes = serde_json::to_vec(body)?;
-    with_retry(|| {
+    crate::runtime::retry(MAX_ATTEMPTS, || {
         let request = agent.post(url).set("Content-Type", "application/json");
         match crate::dispatch::receive(request.send_bytes(&bytes)) {
             Ok(response) if (200..300).contains(&response.status) => {
@@ -641,7 +622,7 @@ fn post_cloud(
         crate::render::fmt_ts(seg.start),
         crate::render::fmt_ts(seg.end)
     );
-    with_retry(|| {
+    crate::runtime::retry(MAX_ATTEMPTS, || {
         let send = || {
             let request = t.client.post(t.url).set("Content-Type", content_type);
             let request = if t.key.is_empty() {
@@ -676,6 +657,7 @@ fn post_cloud(
             },
         )
     })
+    .map(|reply| reply.value)
 }
 
 /// chat 模式下让多模态 LLM 转录的指令（保持与本地 ASR 输出风格一致：忠实、带自然标点）。

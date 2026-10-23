@@ -99,7 +99,7 @@ impl Outcome {
         Self {
             status: Status::Failed,
             message: Some(message.into()),
-            kind: Some(failure.and_then(|f| f.kind).unwrap_or(FailureKind::Local)),
+            kind: Some(failure.map_or(FailureKind::Local, |f| f.kind)),
             ..Self::succeeded()
         }
     }
