@@ -29,6 +29,12 @@ fn sources() -> Vec<PathBuf> {
     files
 }
 
+/// Reads a source file the way rustc does: a Windows checkout's CRLF line
+/// endings become LF, so multi-line literals match the strings at run time.
+fn source(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap().replace("\r\n", "\n")
+}
+
 /// Parses a Rust string literal (plain or raw) at the start of `text`.
 fn string_literal(text: &str) -> Option<String> {
     let text = text.trim_start();
@@ -238,7 +244,7 @@ fn every_literal_key_has_a_catalog_row() {
     let rows: BTreeSet<String> = catalog().into_iter().collect();
     let mut keys = BTreeSet::new();
     for file in sources() {
-        literal_keys(&std::fs::read_to_string(file).unwrap(), &mut keys);
+        literal_keys(&source(&file), &mut keys);
     }
     let missing: Vec<_> = keys
         .iter()
@@ -257,7 +263,7 @@ fn every_catalog_row_is_looked_up() {
     let mut keys = BTreeSet::new();
     let mut cli = String::new();
     for file in sources() {
-        let text = std::fs::read_to_string(&file).unwrap();
+        let text = source(&file);
         all_literals(&text, &mut keys);
         if file.ends_with("src/cli.rs") {
             cli = collapse(&cli_texts(&text));
