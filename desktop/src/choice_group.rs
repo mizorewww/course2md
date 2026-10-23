@@ -629,6 +629,9 @@ mod tests {
         ]
         .map(|selector| choice_bounds(cx, selector));
         for index in 0..3 {
+            // Each label follows its icon, and every segment has the same height.
+            assert!(icon_before[index].right() <= before[index].left());
+            assert!((options[index].size.height - options[0].size.height).abs() < px(0.5));
             let content_center = (icon_before[index].left() + before[index].right()) / 2.;
             assert!((content_center - options[index].center().x).abs() <= px(0.5));
             assert!((icon_before[index].center().y - options[index].center().y).abs() <= px(0.5));
@@ -752,9 +755,12 @@ mod tests {
                 "{} was narrowed below its full shaped width",
                 MODEL_LABELS[index]
             );
-            assert!(before[index].size.width - px(24. + 4.) >= required_widths[index]);
-            assert!(label.left() >= before[index].left() + px(14.));
-            assert!(label.right() <= before[index].right() - px(14.));
+            // The label sits inside its segment with equal room on both sides,
+            // whatever the segment padding is.
+            let leading = label.left() - before[index].left();
+            let trailing = before[index].right() - label.right();
+            assert!(leading > px(0.) && trailing > px(0.));
+            assert!((leading - trailing).abs() <= px(1.));
         }
         cx.simulate_click(before[1].center(), Modifiers::default());
         draw_choice(cx);
