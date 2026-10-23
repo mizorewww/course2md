@@ -62,6 +62,8 @@ python3 -m pip install -r desktop/scripts/requirements-packaging.txt
 python3 desktop/scripts/package.py --debug
 ```
 
+`package.py --help` lists the switches for bundled tools, the Apple speech module, signing and notarization; each defaults to the environment variable named there, which the release workflow sets.
+
 Output goes to `desktop/target/packages/`: on macOS a `.app` with the CLI and `mlx.metallib`, plus a DMG and ZIP; on Windows and Linux an archive holding both executables, which must stay in the same folder. Local builds are signed ad hoc; the release workflow signs, notarizes and adds licenses. The DMG layout is described in [`assets/dmg/`](assets/dmg/README.md) and the app icon source in [`assets/icon-design/`](assets/icon-design/README.md). On Windows, packaging fails if the `.exe` does not embed every size of `assets/icon.ico`.
 
 Releases are described in [docs/PACKAGING.md](../docs/PACKAGING.md).

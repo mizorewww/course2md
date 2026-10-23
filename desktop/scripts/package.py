@@ -2,6 +2,7 @@
 """Build and package the native app and its matching CLI on the current platform."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,6 @@ import platform
 import plistlib
 import shutil
 import subprocess
-import sys
 import tomllib
 import urllib.request
 import zipfile
@@ -18,8 +18,17 @@ from dmg import build_install_dmg
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT.parent
-sys.path.insert(0, str(PROJECT / "packaging"))
-from versioning import RELEASE  # noqa: E402
+
+
+def _load_versioning():
+    """packaging/versioning.py: the release version grammar shared by every channel."""
+    spec = importlib.util.spec_from_file_location("versioning", PROJECT / "packaging/versioning.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+RELEASE = _load_versioning().RELEASE
 
 
 def macos_versions(version):
@@ -37,8 +46,8 @@ def macos_versions(version):
             "Course2mdVersion": version}
 
 
-def run(*args):
-    subprocess.run(args, cwd=PROJECT, check=True)
+def run(*args, env=None):
+    subprocess.run(args, cwd=PROJECT, check=True, env=env)
 
 
 def copy_licenses(dest):
@@ -76,14 +85,13 @@ def ytdlp_asset(system, machine):
     return None
 
 
-def bundle_ytdlp(dest, required):
+def bundle_ytdlp(dest, required, local=None):
     """Place the pinned standalone yt-dlp beside the app binaries.
 
-    COURSE2MD_YTDLP points at a local build to bundle instead of downloading.
+    `local` is a yt-dlp build to bundle instead of downloading (--ytdlp).
     Release builds fail without it; development builds fall back to PATH.
     """
     try:
-        local = os.environ.get("COURSE2MD_YTDLP")
         if local:
             shutil.copy2(local, dest)
         else:
@@ -142,14 +150,38 @@ def bundle_aria2(binaries, licenses, required):
         tmp.unlink(missing_ok=True)
 
 
-def main():
+def parse_args(argv=None, environ=os.environ):
+    """Command-line options; each environment variable named in its help is the default."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--app-only", action="store_true",
                         help="macOS: assemble and ad-hoc sign the release .app for local use, "
                              "without the source lock, notarization or archives")
-    args = parser.parse_args()
+    flag = lambda name: bool(environ.get(name))
+    parser.add_argument("--ytdlp", default=environ.get("COURSE2MD_YTDLP") or None, metavar="PATH",
+                        help="bundle this yt-dlp instead of downloading the pinned release "
+                             "(COURSE2MD_YTDLP)")
+    parser.add_argument("--no-ytdlp", action="store_true", default=flag("COURSE2MD_NO_YTDLP"),
+                        help="do not bundle yt-dlp (COURSE2MD_NO_YTDLP)")
+    parser.add_argument("--no-aria2", action="store_true", default=flag("COURSE2MD_NO_ARIA2"),
+                        help="Windows: do not bundle aria2 (COURSE2MD_NO_ARIA2)")
+    parser.add_argument("--no-apple", action="store_true", default=flag("COURSE2MD_NO_APPLE"),
+                        help="build without the Apple speech module and mlx.metallib "
+                             "(COURSE2MD_NO_APPLE)")
+    parser.add_argument("--signing-identity", default=environ.get("APPLE_SIGNING_IDENTITY") or "-",
+                        help="macOS codesign identity; '-' signs ad hoc (APPLE_SIGNING_IDENTITY)")
+    parser.add_argument("--notary-key", default=environ.get("APPLE_API_KEY_PATH"), metavar="PATH",
+                        help="App Store Connect API key file for notarization (APPLE_API_KEY_PATH)")
+    parser.add_argument("--notary-key-id", default=environ.get("APPLE_API_KEY_ID"),
+                        help="(APPLE_API_KEY_ID)")
+    parser.add_argument("--notary-issuer", default=environ.get("APPLE_API_ISSUER"),
+                        help="(APPLE_API_ISSUER)")
+    return parser.parse_args(argv)
+
+
+def main():
+    args = parse_args()
     system = platform.system()
     if args.app_only and system != "Darwin":
         raise SystemExit("--app-only builds a macOS .app")
@@ -178,8 +210,10 @@ def main():
         if revisions != expected:
             raise SystemExit("Prepared sources differ from the tested release revisions; prepare sources with --locked")
     if not args.no_build:
-        run("cargo", "build", *flags)
-        run("cargo", "build", "--manifest-path", str(ROOT / "Cargo.toml"), *flags)
+        # build.rs reads COURSE2MD_NO_APPLE; pass the flag on to it.
+        env = {**os.environ, "COURSE2MD_NO_APPLE": "1"} if args.no_apple else None
+        run("cargo", "build", *flags, env=env)
+        run("cargo", "build", "--manifest-path", str(ROOT / "Cargo.toml"), *flags, env=env)
     version = tomllib.loads((PROJECT / "Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
     suffix = ".exe" if system == "Windows" else ""
     package_name = f"course2md-desktop-{system.lower()}-{platform.machine()}"
@@ -211,7 +245,7 @@ def main():
         if metal.is_file():
             shutil.copy2(metal, resources / "mlx.metallib")
             (binaries / "mlx.metallib").symlink_to("../Resources/mlx.metallib")
-        elif platform.machine() == "arm64" and not os.environ.get("COURSE2MD_NO_APPLE"):
+        elif platform.machine() == "arm64" and not args.no_apple:
             raise SystemExit("Apple speech library was built without mlx.metallib; inspect the core build output")
     else:
         binaries = base
@@ -222,12 +256,12 @@ def main():
             shutil.copy2(ROOT / "assets/icon.png", base / "course2md.png")
     shutil.copy2(PROJECT / "target" / profile / f"course2md{suffix}", binaries / f"course2md{suffix}")
     shutil.copy2(ROOT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
-    # The runtime searches beside the executable for yt-dlp; COURSE2MD_NO_YTDLP=1 skips bundling.
-    if not os.environ.get("COURSE2MD_NO_YTDLP"):
-        bundled = bundle_ytdlp(binaries / f"yt-dlp{suffix}", required=distribution)
+    # The runtime searches beside the executable for yt-dlp; --no-ytdlp skips bundling.
+    if not args.no_ytdlp:
+        bundled = bundle_ytdlp(binaries / f"yt-dlp{suffix}", required=distribution, local=args.ytdlp)
         if bundled:
             print(f"bundled {bundled.name}")
-    if system == "Windows" and not os.environ.get("COURSE2MD_NO_ARIA2"):
+    if system == "Windows" and not args.no_aria2:
         if bundle_aria2(binaries, base, required=distribution):
             print("bundled aria2c.exe")
     if system == "Windows":
@@ -240,7 +274,7 @@ def main():
     if system == "Darwin":
         copy_licenses(resources)
         shutil.copy2(base / "sources.lock.json", resources / "sources.lock.json")
-        identity = "-" if args.app_only else os.environ.get("APPLE_SIGNING_IDENTITY", "-")
+        identity = "-" if args.app_only else args.signing_identity
         signed = identity != "-"
         signing = ["--force", "--sign", identity]
         if signed:
@@ -264,12 +298,12 @@ def main():
         if args.app_only:
             print(bundle)
             return
-        notarization = [os.environ.get(key) for key in ("APPLE_API_KEY_PATH", "APPLE_API_KEY_ID", "APPLE_API_ISSUER")]
+        notarization = [args.notary_key, args.notary_key_id, args.notary_issuer]
         if signed and not all(notarization):
             raise SystemExit(
                 "Signing identity is set but notarization credentials are incomplete "
-                "(APPLE_API_KEY_PATH/APPLE_API_KEY_ID/APPLE_API_ISSUER); the DMG would be "
-                "blocked by Gatekeeper. Provide them or set APPLE_SIGNING_IDENTITY to '-'."
+                "(--notary-key/--notary-key-id/--notary-issuer); the DMG would be "
+                "blocked by Gatekeeper. Provide them or sign ad hoc with --signing-identity -."
             )
         if signed:
             upload = base.parent / "notarization.zip"
