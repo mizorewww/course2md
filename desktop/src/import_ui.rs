@@ -546,11 +546,7 @@ impl Desktop {
         if generation == self.preview_generation
             && !reading
             && let Some(source) = &mut self.source_preview
-            && automatic_subtitle_fallback(
-                source,
-                source_mode,
-                self.subtitle_error.as_deref(),
-            )
+            && automatic_subtitle_fallback(source, source_mode, self.subtitle_error.as_deref())
         {
             self.subtitle_error = None;
             if !self.save_current_draft(cx) {
@@ -1337,7 +1333,8 @@ impl Desktop {
                         row.child(badge(BadgeKind::Success).child(course2md::tr!("已有笔记")))
                     });
                 } else {
-                    content = content.child(icons::arrow_forward().size(rems(18. / 14.)).flex_shrink_0());
+                    content =
+                        content.child(icons::arrow_forward().size(rems(18. / 14.)).flex_shrink_0());
                 }
                 let mut row = h_flex()
                     .id(("source-candidate", index))
@@ -1943,7 +1940,8 @@ impl Desktop {
             }
         });
         let needs_text_choice =
-            subtitle_needs_confirmation(source, self.task_options().source_mode) || failure.is_some();
+            subtitle_needs_confirmation(source, self.task_options().source_mode)
+                || failure.is_some();
         let description = if self.subtitle_loading {
             course2md::tr!("正在读取字幕…").to_owned()
         } else if !speech
@@ -2753,22 +2751,18 @@ impl Desktop {
             ))
             .when(self.online(), |view| {
                 view.child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .pt(SECTION_GAP)
-                        .child(switch_row(
-                            course2md::tr!("保留原视频"),
-                            course2md::tr!("供离线播放，会占用更多磁盘空间"),
-                            processing_switch(Switch::new("import-keep-video"))
-                                .checked(self.task_options().keep_video)
-                                .on_click(cx.listener(|this, value, _, cx| {
-                                    let value = *value;
-                                    this.update_task_options(|o| o.keep_video = value, cx);
-                                    cx.notify();
-                                })),
-                            RowScale::Panel,
-                        )),
+                    div().w_full().min_w_0().pt(SECTION_GAP).child(switch_row(
+                        course2md::tr!("保留原视频"),
+                        course2md::tr!("供离线播放，会占用更多磁盘空间"),
+                        processing_switch(Switch::new("import-keep-video"))
+                            .checked(self.task_options().keep_video)
+                            .on_click(cx.listener(|this, value, _, cx| {
+                                let value = *value;
+                                this.update_task_options(|o| o.keep_video = value, cx);
+                                cx.notify();
+                            })),
+                        RowScale::Panel,
+                    )),
                 )
             })
     }
@@ -2954,7 +2948,9 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .gap_4()
-            .when(!self.online(), |input| input.child(self.source_kind_tabs(cx)))
+            .when(!self.online(), |input| {
+                input.child(self.source_kind_tabs(cx))
+            })
             .child(self.box_source_input(window, cx));
         let mut view = v_flex()
             .gap(SECTION_GAP)

@@ -327,11 +327,12 @@ impl Desktop {
     fn open_palette_picker(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
         let desktop = cx.entity();
         let scroll = ScrollHandle::new();
-        let content = crate::views::DesktopView::observing(desktop, cx, move |desktop, window, cx| {
-            desktop
-                .palette_picker_content(dark, scroll.clone(), window, cx)
-                .into_any_element()
-        });
+        let content =
+            crate::views::DesktopView::observing(desktop, cx, move |desktop, window, cx| {
+                desktop
+                    .palette_picker_content(dark, scroll.clone(), window, cx)
+                    .into_any_element()
+            });
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
                 .title(

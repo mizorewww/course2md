@@ -1743,11 +1743,7 @@ impl Desktop {
 
     /// The task being processed: its identity, the step it is on, every step
     /// so far, the settings it was submitted with, and its controls.
-    fn running_task_card(
-        &mut self,
-        task: &TaskRecord,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn running_task_card(&mut self, task: &TaskRecord, cx: &mut Context<Self>) -> AnyElement {
         let id = task.id.clone();
         let active = self.is_running_task(&id);
         let library: SharedString = self
@@ -2501,12 +2497,8 @@ impl Desktop {
     /// running card and the expanded record.
     fn task_facts(&self, task: &TaskRecord, destination: impl Into<SharedString>) -> Div {
         let source = task_text_source(task);
-        let fact_value = |value: SharedString| {
-            div()
-                .text_size(TEXT_BODY)
-                .whitespace_normal()
-                .child(value)
-        };
+        let fact_value =
+            |value: SharedString| div().text_size(TEXT_BODY).whitespace_normal().child(value);
         let mut facts = v_flex()
             .w_full()
             .min_w_0()
@@ -2520,13 +2512,13 @@ impl Desktop {
                 fact_value(destination.into()),
             ))
             .child(detail_row(
-            SharedString::from(format!("task-text-source-{}", task.id)),
-            course2md::tr!("文字来源"),
-            icons::subtitles()
-                .size(rems(20. / 14.))
-                .text_color(color(GRAY)),
-            fact_value(source.into()),
-        ));
+                SharedString::from(format!("task-text-source-{}", task.id)),
+                course2md::tr!("文字来源"),
+                icons::subtitles()
+                    .size(rems(20. / 14.))
+                    .text_color(color(GRAY)),
+                fact_value(source.into()),
+            ));
         if task.plan.config.llm.uses_service()
             && let Some(version) = task
                 .plan

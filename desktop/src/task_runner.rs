@@ -2075,8 +2075,7 @@ fn validate_plan_config(source: &str, config: &course2md::settings::ConfigFile) 
 pub(crate) mod tests {
     use super::{
         PlanValidation, apply_draft_options, batch_note_title, edit_current_draft,
-        update_draft_source_title, update_input_form, validate_plan_config,
-        validate_plan_storage,
+        update_draft_source_title, update_input_form, validate_plan_config, validate_plan_storage,
     };
 
     #[test]
@@ -2190,7 +2189,10 @@ pub(crate) mod tests {
         };
         let mut other_library = old.clone();
         other_library.dir = "/other-library/course/versions/old".into();
-        let mut courses = vec![std::rc::Rc::new(old.clone()), std::rc::Rc::new(other_library.clone())];
+        let mut courses = vec![
+            std::rc::Rc::new(old.clone()),
+            std::rc::Rc::new(other_library.clone()),
+        ];
         let mut repaired = old_manifest;
         repaired.task_id = "repair".into();
         repaired.version_id = "repair".into();
@@ -2453,7 +2455,8 @@ pub(crate) mod tests {
                 })
                 .unwrap();
         }
-        workspace = Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
+        workspace =
+            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
         assert!(!workspace.state.draft().unwrap().custom_title);
         assert!(workspace.state.draft().unwrap().source.is_none());
         workspace

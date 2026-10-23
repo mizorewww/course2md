@@ -240,8 +240,8 @@ impl ImageDialogMetrics {
     fn new(window: &Window) -> Self {
         let rem = f32::from(window.rem_size());
         let size = window.bounds().size;
-        let width = f32::from(size.width - IMAGE_DIALOG_MARGIN * 2.)
-            .min(f32::from(IMAGE_DIALOG_MAX_WIDTH));
+        let width =
+            f32::from(size.width - IMAGE_DIALOG_MARGIN * 2.).min(f32::from(IMAGE_DIALOG_MAX_WIDTH));
         let available = f32::from(size.height - task_dialog_top(window) - IMAGE_DIALOG_MARGIN);
         Self {
             width: width.max(f32::from(IMAGE_DIALOG_MIN_WIDTH)),
@@ -771,10 +771,13 @@ fn gallery_restore_offset(
 ) -> ListOffset {
     let found = frame.and_then(|frame| {
         let at = matches.iter().position(|index| *index == frame)?;
-        items.iter().enumerate().find_map(|(item_ix, item)| match item {
-            GalleryItem::Row(row) if row.contains(&at) => Some((item_ix, matches[row.start])),
-            _ => None,
-        })
+        items
+            .iter()
+            .enumerate()
+            .find_map(|(item_ix, item)| match item {
+                GalleryItem::Row(row) if row.contains(&at) => Some((item_ix, matches[row.start])),
+                _ => None,
+            })
     });
     let Some((item_ix, first)) = found else {
         return ListOffset::default();
@@ -1182,7 +1185,13 @@ fn paragraph(
     if crate::math::has_math(&text) {
         return view.child(math_paragraph(&text, TEXT_READER, color(INK).into()));
     }
-    view.child(reader_text(id, text, order as u64, highlights, search_target))
+    view.child(reader_text(
+        id,
+        text,
+        order as u64,
+        highlights,
+        search_target,
+    ))
 }
 
 /// Prose with formulas. GPUI text cannot hold inline elements, so the prose is
@@ -1729,15 +1738,13 @@ fn render_note_heading(
                 .aria_label(text.clone())
                 .text_size(TEXT_TITLE)
                 .font_weight(FontWeight::SEMIBOLD)
-                .child(
-                    reader_text(
-                        ("reader-heading-marks", index),
-                        text.clone(),
-                        index as u64,
-                        marks,
-                        flow.search_target(index),
-                    ),
-                )
+                .child(reader_text(
+                    ("reader-heading-marks", index),
+                    text.clone(),
+                    index as u64,
+                    marks,
+                    flow.search_target(index),
+                ))
                 .into_any_element(),
         )
     } else if bare_timestamp {
@@ -3045,8 +3052,7 @@ impl Desktop {
             self.reader_ui.toc_open == Some(true),
             !outline.is_empty(),
         );
-        let (controls, tools) =
-            self.reader_controls(&preview, &outline, metrics, window, cx);
+        let (controls, tools) = self.reader_controls(&preview, &outline, metrics, window, cx);
         let article = if self.result_tab == 0 {
             self.reader_note_article(&preview, metrics, cx)
         } else {
@@ -4724,9 +4730,10 @@ impl Desktop {
             );
         }
         // Spacing before the first row, as the grid's gap did inside one column.
-        header.when(!empty && !self.reader_ui.gallery.matches.is_empty(), |header| {
-            header.pb_3()
-        })
+        header.when(
+            !empty && !self.reader_ui.gallery.matches.is_empty(),
+            |header| header.pb_3(),
+        )
     }
 
     /// One grid row of screenshot cards with equal column widths.
@@ -4744,11 +4751,11 @@ impl Desktop {
             .min_w_0()
             .gap(px(GALLERY_GAP))
             .children(frames.iter().map(|&index| {
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .h_full()
-                    .child(self.gallery_card(index, excerpt_line_height, cx))
+                div().w_full().min_w_0().h_full().child(self.gallery_card(
+                    index,
+                    excerpt_line_height,
+                    cx,
+                ))
             }))
     }
 
@@ -5063,15 +5070,12 @@ impl Desktop {
         let desktop = cx.entity();
         // The viewer's two halves render from its state and are notified only
         // when that state changes.
-        let content = crate::views::DesktopView::notified(desktop.clone(), cx, |desktop, window, cx| {
-            desktop
-                .reader_image_content(window, cx)
-                .into_any_element()
-        });
+        let content =
+            crate::views::DesktopView::notified(desktop.clone(), cx, |desktop, window, cx| {
+                desktop.reader_image_content(window, cx).into_any_element()
+            });
         let footer = crate::views::DesktopView::notified(desktop, cx, |desktop, window, cx| {
-            desktop
-                .reader_image_actions(window, cx)
-                .into_any_element()
+            desktop.reader_image_actions(window, cx).into_any_element()
         });
         let focus = cx.focus_handle();
         self.reader_ui.viewer = Some(ImageViewer {
@@ -5804,8 +5808,8 @@ fn image_zoom_offset(viewport: f32, old_extent: f32, new_extent: f32, offset: f3
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportFeedback, ExportState, Frame, OfflineVideo, OfflineVideoRequest, PreviewBlock,
-        GalleryItem, block_time, existing_export_folder, files_need_reload, frame_excerpt,
+        ExportFeedback, ExportState, Frame, GalleryItem, OfflineVideo, OfflineVideoRequest,
+        PreviewBlock, block_time, existing_export_folder, files_need_reload, frame_excerpt,
         gallery_capture_position, gallery_items, gallery_restore_offset, image_zoom_offset,
         load_reader_data, matching_frames, nav, processing_notice,
     };
@@ -5904,8 +5908,7 @@ mod tests {
         let list = ListState::new(items.len(), ListAlignment::Top, px(1000.));
         let layout = nav::ReadingLayout::default();
         let position =
-            gallery_capture_position(&items, &matches, &list, &layout, |_| unreachable!())
-                .unwrap();
+            gallery_capture_position(&items, &matches, &list, &layout, |_| unreachable!()).unwrap();
         assert_eq!(position, workspace::ReadingPosition::default());
         let narrow = gallery_items(matches.len(), 1);
         let target = gallery_restore_offset(&narrow, &matches, None, &position, &layout);

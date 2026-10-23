@@ -1501,11 +1501,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.validate_service_editor(
-            AfterDraftSaved::Publish { continue_repair },
-            window,
-            cx,
-        ) {
+        if !self.validate_service_editor(AfterDraftSaved::Publish { continue_repair }, window, cx) {
             return;
         }
         let Some(editor) = &self.settings_ui.editor else {
@@ -1550,14 +1546,12 @@ impl Desktop {
             }
         };
         if reference.is_none() {
-            let result = preferences::Store::verify_credential(
-                self.preferences.vault().as_ref(),
-                None,
-            )
-            .and_then(|verified| {
-                self.preferences
-                    .commit_publication(&plan.draft_id, plan.scope, verified)
-            });
+            let result =
+                preferences::Store::verify_credential(self.preferences.vault().as_ref(), None)
+                    .and_then(|verified| {
+                        self.preferences
+                            .commit_publication(&plan.draft_id, plan.scope, verified)
+                    });
             self.finish_service_publish(result, plan, window, cx);
             return;
         }
@@ -2063,7 +2057,8 @@ mod tests {
 
     #[test]
     fn a_repair_binds_only_its_task_whatever_the_default_choice() {
-        for (from_input, also_default) in [(false, false), (false, true), (true, false), (true, true)]
+        for (from_input, also_default) in
+            [(false, false), (false, true), (true, false), (true, true)]
         {
             assert_eq!(
                 publish_scope(true, from_input, also_default),

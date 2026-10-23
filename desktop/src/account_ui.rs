@@ -462,9 +462,12 @@ impl Desktop {
         self.account.return_focus = window.focused(cx);
         self.start_account_qr(cx);
         let desktop = cx.entity();
-        let content = crate::views::DesktopView::observing(desktop.clone(), cx, |desktop, window, cx| {
-            desktop.account_dialog_content(window, cx).into_any_element()
-        });
+        let content =
+            crate::views::DesktopView::observing(desktop.clone(), cx, |desktop, window, cx| {
+                desktop
+                    .account_dialog_content(window, cx)
+                    .into_any_element()
+            });
         let footer = crate::views::DesktopView::observing(desktop, cx, |desktop, _, cx| {
             desktop.account_dialog_actions(cx).into_any_element()
         });
@@ -544,9 +547,7 @@ impl Desktop {
                 return;
             }
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_secs(2))
-                    .await;
+                cx.background_executor().timer(Duration::from_secs(2)).await;
                 if !this
                     .update(cx, |this, _| this.account.current(generation))
                     .unwrap_or(false)

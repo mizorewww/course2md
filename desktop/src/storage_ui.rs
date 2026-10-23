@@ -1775,57 +1775,54 @@ impl Desktop {
                             menu(popup, window, cx)
                         }),
                 );
-                locations =
-                    locations.child(
-                        crate::settings_ui::setting_surface()
-                            .id(("storage-location", index))
-                            .min_w_0()
-                            .context_menu(move |popup, window, cx| row_menu(popup, window, cx))
-                            .child(crate::settings_ui::resource_layout(
-                                crate::settings_ui::settings_resource_icon(icons::folder_open())
-                                    .rounded(RADIUS_SMALL),
-                                v_flex()
-                                            .child(
-                                                accessible_text(
-                                                    ("storage-location-name", index),
-                                                    library.name.clone(),
-                                                )
-                                                .text_size(TEXT_SETTINGS_BODY)
-                                                .font_weight(FontWeight::NORMAL),
-                                            )
-                                            .child(
-                                                accessible_text(
-                                                    ("storage-location-path", index),
-                                                    root.display().to_string(),
-                                                )
-                                                .font_family(
-                                                    gpui_component::Theme::global(cx)
-                                                        .mono_font_family
-                                                        .clone(),
-                                                )
-                                                .text_size(TEXT_SETTINGS_AUX)
-                                                .text_color(color(GRAY)),
-                                            ),
-                                trailing,
-                            ))
-                            .when_some(
-                                check.and_then(|check| check.problem.clone()),
-                                |card, problem| {
-                                    card.child(theme::item_detail(
-                                        ("storage-location-problem", index),
-                                        problem,
-                                        DANGER,
-                                    ))
-                                },
-                            )
-                            .when(needs_reassociation, |card| {
+                locations = locations.child(
+                    crate::settings_ui::setting_surface()
+                        .id(("storage-location", index))
+                        .min_w_0()
+                        .context_menu(move |popup, window, cx| row_menu(popup, window, cx))
+                        .child(crate::settings_ui::resource_layout(
+                            crate::settings_ui::settings_resource_icon(icons::folder_open())
+                                .rounded(RADIUS_SMALL),
+                            v_flex()
+                                .child(
+                                    accessible_text(
+                                        ("storage-location-name", index),
+                                        library.name.clone(),
+                                    )
+                                    .text_size(TEXT_SETTINGS_BODY)
+                                    .font_weight(FontWeight::NORMAL),
+                                )
+                                .child(
+                                    accessible_text(
+                                        ("storage-location-path", index),
+                                        root.display().to_string(),
+                                    )
+                                    .font_family(
+                                        gpui_component::Theme::global(cx).mono_font_family.clone(),
+                                    )
+                                    .text_size(TEXT_SETTINGS_AUX)
+                                    .text_color(color(GRAY)),
+                                ),
+                            trailing,
+                        ))
+                        .when_some(
+                            check.and_then(|check| check.problem.clone()),
+                            |card, problem| {
                                 card.child(theme::item_detail(
-                                    ("storage-association-needed", index),
-                                    course2md::tr!("无法确认这是原来的笔记库，请检查后重新关联"),
-                                    WARNING,
+                                    ("storage-location-problem", index),
+                                    problem,
+                                    DANGER,
                                 ))
-                            }),
-                    );
+                            },
+                        )
+                        .when(needs_reassociation, |card| {
+                            card.child(theme::item_detail(
+                                ("storage-association-needed", index),
+                                course2md::tr!("无法确认这是原来的笔记库，请检查后重新关联"),
+                                WARNING,
+                            ))
+                        }),
+                );
             }
         }
         locations = locations.child(

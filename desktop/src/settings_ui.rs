@@ -299,10 +299,14 @@ pub(super) fn settings_outlined_row(
     control: impl IntoElement,
 ) -> Div {
     let id = id.into();
-    setting_surface().child(v_flex().w_full().min_w_0().gap_2().child(control).when(
-        !hint.is_empty(),
-        |view| view.child(setting_hint(&id, hint)),
-    ))
+    setting_surface().child(
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap_2()
+            .child(control)
+            .when(!hint.is_empty(), |view| view.child(setting_hint(&id, hint))),
+    )
 }
 
 pub(super) fn settings_switch_row(label: &'static str, hint: &'static str, control: Switch) -> Div {
@@ -514,9 +518,9 @@ impl AccountCard {
             settings_resource_icon(self.icon),
             v_flex()
                 .child(identity)
-                    .when_some(self.detail, |view, detail| {
-                        view.child(line("detail", detail, false))
-                    })
+                .when_some(self.detail, |view, detail| {
+                    view.child(line("detail", detail, false))
+                })
                 .children(
                     self.lines
                         .into_iter()
@@ -3122,14 +3126,20 @@ mod tests {
     #[test]
     fn a_success_notice_expires_only_while_it_is_still_shown() {
         let shown = "已保存".to_owned();
-        assert!(success_notice_current(Some(&(shown.clone(), false)), &shown));
+        assert!(success_notice_current(
+            Some(&(shown.clone(), false)),
+            &shown
+        ));
         // Cleared already, or replaced by a newer notice or by an error.
         assert!(!success_notice_current(None, &shown));
         assert!(!success_notice_current(
             Some(&("服务已保存".to_owned(), false)),
             &shown
         ));
-        assert!(!success_notice_current(Some(&(shown.clone(), true)), &shown));
+        assert!(!success_notice_current(
+            Some(&(shown.clone(), true)),
+            &shown
+        ));
     }
 
     #[test]

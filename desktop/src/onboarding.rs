@@ -806,8 +806,11 @@ impl Desktop {
                     move |this, verified, window, cx| {
                         this.onboarding.service_mut(purpose).vault_busy = false;
                         let published = verified.and_then(|verified| {
-                            this.preferences
-                                .commit_publication(&id, BindingScope::Defaults, verified)
+                            this.preferences.commit_publication(
+                                &id,
+                                BindingScope::Defaults,
+                                verified,
+                            )
                         });
                         match published {
                             Ok(version) => {
@@ -823,14 +826,12 @@ impl Desktop {
                 cx.notify();
                 return false;
             }
-            let published = preferences::Store::verify_credential(
-                self.preferences.vault().as_ref(),
-                None,
-            )
-            .and_then(|verified| {
-                self.preferences
-                    .commit_publication(&id, BindingScope::Defaults, verified)
-            });
+            let published =
+                preferences::Store::verify_credential(self.preferences.vault().as_ref(), None)
+                    .and_then(|verified| {
+                        self.preferences
+                            .commit_publication(&id, BindingScope::Defaults, verified)
+                    });
             match published {
                 Ok(version) => {
                     self.onboarding.service_mut(purpose).pending_version = Some(version.clone());
