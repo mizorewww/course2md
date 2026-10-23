@@ -315,7 +315,7 @@ fn exported_file_label(path: &std::path::Path) -> String {
 fn reader_export_items(
     mut menu: PopupMenu,
     desktop: WeakEntity<Desktop>,
-    course: Course,
+    version: PathBuf,
     folder: Option<PathBuf>,
     exporting: bool,
 ) -> PopupMenu {
@@ -345,7 +345,7 @@ fn reader_export_items(
         ),
     ] {
         let weak = desktop.clone();
-        let version = course.dir.clone();
+        let version = version.clone();
         menu = menu.item(
             PopupMenuItem::new(label)
                 .icon(icon)
@@ -392,14 +392,16 @@ fn reader_export_items(
         ),
     ] {
         let weak = desktop.clone();
-        let source = course.clone();
+        let version = version.clone();
         menu = menu.item(
             PopupMenuItem::new(label)
                 .icon(icons::download())
                 .disabled(exporting)
                 .on_click(move |_, window, cx| {
                     let _ = weak.update(cx, |this, cx| {
-                        this.export_course(source.clone(), format, window, cx);
+                        if let Some(course) = this.note_at(&version) {
+                            this.export_course(course, format, window, cx);
+                        }
                     });
                 }),
         );
@@ -2788,9 +2790,24 @@ impl Desktop {
         })
         .detach();
     }
+    /// The note version at `dir`: the library's shared copy, or the open note
+    /// when the library has not listed it yet. Copies only when it must.
+    pub(crate) fn note_at(&self, dir: &std::path::Path) -> Option<Rc<Course>> {
+        self.courses
+            .iter()
+            .find(|course| course.dir == dir)
+            .cloned()
+            .or_else(|| {
+                self.preview
+                    .as_ref()
+                    .filter(|preview| preview.course.dir == dir)
+                    .map(|preview| Rc::new(preview.course.clone()))
+            })
+    }
+
     pub fn export_course(
         &mut self,
-        course: Course,
+        course: Rc<Course>,
         format: course2md::config::OutputFormat,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2968,7 +2985,7 @@ impl Desktop {
                     .child(dismiss)
             }
             Err(error) => {
-                let retry = course.clone();
+                let retry = course.dir.clone();
                 v_flex()
                     .w_full()
                     .min_w_0()
@@ -2998,12 +3015,9 @@ impl Desktop {
                                     .label(course2md::tr!("重试导出"))
                                     .disabled(self.reader_exporting())
                                     .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.export_course(
-                                            retry.clone(),
-                                            feedback.format,
-                                            window,
-                                            cx,
-                                        );
+                                        if let Some(course) = this.note_at(&retry) {
+                                            this.export_course(course, feedback.format, window, cx);
+                                        }
                                     })),
                             )
                             .child(dismiss),
@@ -3823,7 +3837,7 @@ impl Desktop {
             .pending
             .as_ref()
             .is_some_and(|(_, source)| *source == preview.course.dir);
-        let export_course = preview.course.clone();
+        let export_version = preview.course.dir.clone();
         let export_folder = self.reader_ui.export_folder.clone();
         if !short_reader {
             toolbar = toolbar.child(
@@ -3843,7 +3857,7 @@ impl Desktop {
                         reader_export_items(
                             menu,
                             output_weak.clone(),
-                            export_course.clone(),
+                            export_version.clone(),
                             export_folder.clone(),
                             exporting,
                         )
@@ -3973,7 +3987,7 @@ impl Desktop {
         let missing_local = matches!(original, Some(nav::SourceTarget::Local(_)))
             && !self.reader_ui.source_available;
         let exported = self.reader_ui.exports.get(&preview.course.dir).cloned();
-        let short_export_course = preview.course.clone();
+        let short_export_version = preview.course.dir.clone();
         let short_export_folder = self.reader_ui.export_folder.clone();
         quiet("reader-more")
             .when(short_reader, |button| {
@@ -4027,7 +4041,7 @@ impl Desktop {
                         );
                     }
                     let output = more_weak.clone();
-                    let course = short_export_course.clone();
+                    let version = short_export_version.clone();
                     let folder = short_export_folder.clone();
                     menu = menu
                         .separator()
@@ -4040,7 +4054,7 @@ impl Desktop {
                                 reader_export_items(
                                     menu,
                                     output.clone(),
-                                    course.clone(),
+                                    version.clone(),
                                     folder.clone(),
                                     exporting,
                                 )

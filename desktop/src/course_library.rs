@@ -874,7 +874,7 @@ impl Desktop {
                         let course = course.clone();
                         menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
                             let _ = entity.update(cx, |this, cx| {
-                                this.export_course(Course::clone(&course), format, window, cx)
+                                this.export_course(course.clone(), format, window, cx)
                             });
                         }))
                     })
