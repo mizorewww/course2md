@@ -62,6 +62,8 @@ struct ServiceEditor {
     saved_configuration: Option<ServiceVersion>,
     test_details_open: bool,
     save_failed: bool,
+    /// A credential is being written to or checked in the system vault.
+    vault_busy: bool,
     /// The settings category the inline editor was opened from (e.g. 生成笔记);
     /// closing it returns there instead of leaving the user on 服务与账号.
     origin_tab: Option<SettingsTab>,
@@ -71,6 +73,13 @@ pub struct OrdinaryPreferenceIssue {
     pub group: PreferenceGroup,
     pub message: String,
     pub can_retry: bool,
+}
+
+/// What continues once a typed key has been stored and the draft committed.
+#[derive(Clone, Copy)]
+pub(crate) enum AfterDraftSaved {
+    Test,
+    Publish { continue_repair: bool },
 }
 
 /// How long a success notice such as 已保存 stays.
@@ -1799,15 +1808,57 @@ impl Desktop {
         }
         cx.notify();
     }
+    /// Runs a blocking credential step off the UI thread, then continues in
+    /// this window with its result. The system vault can block on a prompt or
+    /// a locked keychain, so the interface never waits on it.
+    pub(crate) fn run_vault_step<T: Send + 'static>(
+        &self,
+        cx: &mut Context<Self>,
+        work: impl FnOnce(&dyn crate::credentials::CredentialVault) -> T + Send + 'static,
+        then: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let vault = self.preferences.vault();
+        let task = crate::spawn_blocking_io(move || work(vault.as_ref()));
+        let handle = self.window;
+        cx.spawn(async move |this, cx| {
+            let Ok(result) = task.recv().await else {
+                return;
+            };
+            let _ = cx.update_window(handle, |_, window, cx| {
+                let _ = this.update(cx, |this, cx| then(this, result, window, cx));
+            });
+        })
+        .detach();
+    }
+
+    /// Forgets credentials no configuration uses, off the UI thread. A
+    /// failure leaves an orphaned entry that no configuration refers to.
+    pub(crate) fn forget_credentials(&self, references: Vec<crate::credentials::CredentialRef>) {
+        if references.is_empty() {
+            return;
+        }
+        let vault = self.preferences.vault();
+        drop(crate::spawn_blocking_io(move || {
+            preferences::Store::remove_credentials(vault.as_ref(), &references)
+        }));
+    }
+
+    /// Records the open editor's fields. A typed key is first stored in the
+    /// vault off the UI thread; the call then returns false and `after`
+    /// continues once the draft has been committed with it.
     fn save_open_service_draft(
         &mut self,
         include_key: bool,
+        after: AfterDraftSaved,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(editor) = &self.settings_ui.editor else {
             return true;
         };
+        if editor.vault_busy {
+            return false;
+        }
         if editor.pending_binding.is_some() || editor.saved_configuration.is_some() {
             return true;
         }
@@ -1827,10 +1878,23 @@ impl Desktop {
         if key.is_none() && self.preferences.draft(&draft.id) == Some(&draft) {
             return true;
         }
-        match self
-            .preferences
-            .save_service_draft(draft, key.map(Secret::new))
-        {
+        if let Some(key) = key {
+            if let Some(editor) = &mut self.settings_ui.editor {
+                editor.vault_busy = true;
+                editor.status = Some(course2md::tr!("正在保存密钥…").into());
+            }
+            let secret = Secret::new(key);
+            self.run_vault_step(
+                cx,
+                move |vault| preferences::Store::insert_credential(vault, secret),
+                move |this, stored, window, cx| {
+                    this.finish_service_key(draft, stored, after, window, cx)
+                },
+            );
+            cx.notify();
+            return false;
+        }
+        match self.preferences.save_service_draft(draft, None) {
             Ok(draft) => {
                 if let Some(editor) = &mut self.settings_ui.editor {
                     editor.form.draft = draft;
@@ -1853,6 +1917,56 @@ impl Desktop {
                 false
             }
         }
+    }
+    /// The commit step after a typed key reached the vault.
+    fn finish_service_key(
+        &mut self,
+        draft: ServiceDraft,
+        stored: Result<crate::credentials::CredentialRef>,
+        after: AfterDraftSaved,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open = self
+            .settings_ui
+            .editor
+            .as_mut()
+            .filter(|editor| editor.form.draft.id == draft.id);
+        let Some(editor) = open else {
+            // The editor closed meanwhile; nothing refers to the stored key.
+            if let Ok(reference) = stored {
+                self.forget_credentials(vec![reference]);
+            }
+            return;
+        };
+        editor.vault_busy = false;
+        let committed = stored.and_then(|reference| {
+            self.preferences
+                .commit_service_draft(draft, Some(reference.clone()))
+                .inspect_err(|_| self.forget_credentials(vec![reference]))
+        });
+        let Some(editor) = &mut self.settings_ui.editor else {
+            return;
+        };
+        match committed {
+            Ok(draft) => {
+                editor.form.draft = draft;
+                editor.save_failed = false;
+                editor.status = None;
+                editor.form.clear_key(window, cx);
+                match after {
+                    AfterDraftSaved::Test => self.start_service_test(window, cx),
+                    AfterDraftSaved::Publish { continue_repair } => {
+                        self.publish_service_editor(continue_repair, window, cx)
+                    }
+                }
+            }
+            Err(error) => {
+                editor.status = Some(course2md::tr!("这些修改尚未保存：{}", format!("{error:#}")));
+                editor.save_failed = true;
+            }
+        }
+        cx.notify();
     }
     fn apply_language_preferences(&mut self, cx: &mut Context<Self>) {
         let raw = self.setting_value(EditField::Languages, cx);

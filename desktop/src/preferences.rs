@@ -1201,22 +1201,6 @@ impl Store {
         self.commit_service_draft(draft, None)
     }
 
-    /// The user selects a named environment value explicitly. Capture it into a new vault
-    /// entry now; queued tasks never consult the later process environment.
-    ///
-    /// Blocks on the vault: call only from a blocking context. UI code uses
-    /// `environment_secret` → `insert_credential` (blocking) →
-    /// `commit_environment_credential`.
-    pub fn capture_environment_credential(
-        &mut self,
-        draft: ServiceDraft,
-        name: &str,
-    ) -> Result<ServiceDraft> {
-        let secret = Self::environment_secret(draft.protocol.purpose(), name)?;
-        let reference = Self::insert_credential(self.vault.as_ref(), secret)?;
-        self.commit_environment_credential(draft, name, reference.clone())
-            .inspect_err(|_| Self::remove_credentials(self.vault.as_ref(), &[reference]))
-    }
     pub fn generation(&self) -> &GenerationPreferences {
         &self.generation
     }
@@ -1617,6 +1601,7 @@ impl Store {
     /// Blocks on the vault: call only from a blocking context. UI code uses
     /// `publication_credential` → `verify_credential` (blocking) →
     /// `commit_publication`.
+    #[cfg(test)]
     pub fn publish_service(
         &mut self,
         draft_id: &str,
@@ -1698,6 +1683,7 @@ impl Store {
     ///
     /// Blocks on the vault: call only from a blocking context. UI code uses
     /// `retire_service` and then `remove_credentials` (blocking).
+    #[cfg(test)]
     pub fn delete_service(&mut self, service_id: &str) -> Result<()> {
         let credentials = self.retire_service(service_id)?;
         Self::remove_credentials(self.vault.as_ref(), &credentials);

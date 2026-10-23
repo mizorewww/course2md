@@ -614,6 +614,7 @@ impl Desktop {
             saved_configuration: None,
             test_details_open: false,
             save_failed: false,
+            vault_busy: false,
             origin_tab,
         });
         match draft_protocol {
@@ -681,7 +682,7 @@ impl Desktop {
             return div().into_any_element();
         };
         let protocol = editor.form.draft.protocol;
-        let busy = editor.test_running.is_some();
+        let busy = editor.test_running.is_some() || editor.vault_busy;
         let awaiting_binding = editor.pending_binding.is_some();
         let configuration_saved = editor.saved_configuration.is_some() || awaiting_binding;
         let repair_submit_label = if awaiting_binding {
@@ -844,9 +845,9 @@ impl Desktop {
                         .settings_text()
                         .icon(icons::content_copy())
                         .label(course2md::tr!("使用环境变量 {}", name))
-                        .disabled(awaiting_binding)
+                        .disabled(awaiting_binding || editor.vault_busy)
                         .self_start()
-                        .on_click(cx.listener(move |this, _, window, cx| {
+                        .on_click(cx.listener(move |this, _, _, cx| {
                             let Some(draft) = this
                                 .settings_ui
                                 .editor
@@ -855,23 +856,11 @@ impl Desktop {
                             else {
                                 return;
                             };
-                            match this.preferences.capture_environment_credential(draft, name) {
-                                Ok(draft) => {
-                                    if let Some(editor) = &mut this.settings_ui.editor {
-                                        editor.form.draft = draft;
-                                        editor.form.models.invalidate();
-                                        editor.form.clear_key(window, cx);
-                                        editor.evidence = None;
-                                        editor.saved_configuration = None;
-                                        editor.save_failed = false;
-                                        editor.status = Some(
-                                            course2md::tr!(
-                                                "已使用环境变量中的密钥，点击保存后生效"
-                                            )
-                                            .into(),
-                                        );
-                                    }
-                                }
+                            let secret = match preferences::Store::environment_secret(
+                                draft.protocol.purpose(),
+                                name,
+                            ) {
+                                Ok(secret) => secret,
                                 Err(error) => {
                                     if let Some(editor) = &mut this.settings_ui.editor {
                                         editor.status = Some(course2md::tr!(
@@ -879,8 +868,22 @@ impl Desktop {
                                             format!("{error:#}")
                                         ));
                                     }
+                                    cx.notify();
+                                    return;
                                 }
+                            };
+                            if let Some(editor) = &mut this.settings_ui.editor {
+                                editor.vault_busy = true;
                             }
+                            this.run_vault_step(
+                                cx,
+                                move |vault| preferences::Store::insert_credential(vault, secret),
+                                move |this, stored, window, cx| {
+                                    this.finish_environment_credential(
+                                        draft, name, stored, window, cx,
+                                    )
+                                },
+                            );
                             cx.notify();
                         })),
                 );
@@ -1038,7 +1041,11 @@ impl Desktop {
                     } else {
                         course2md::tr!("保存")
                     })
-                    .disabled(editor.repair_task.is_some() && (busy || repair_refusal.is_some()))
+                    .loading(editor.vault_busy)
+                    .disabled(
+                        editor.vault_busy
+                            || editor.repair_task.is_some() && (busy || repair_refusal.is_some()),
+                    )
                     .on_click(
                         cx.listener(|this, _, window, cx| this.publish_open_service(window, cx)),
                     ),
@@ -1085,7 +1092,7 @@ impl Desktop {
     fn service_test_section(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editor = self.settings_ui.editor.as_ref()?;
         let protocol = editor.form.draft.protocol;
-        let busy = editor.test_running.is_some();
+        let busy = editor.test_running.is_some() || editor.vault_busy;
         let awaiting_binding = editor.pending_binding.is_some();
         if protocol.purpose() != ServicePurpose::Ai && !busy && editor.evidence.is_none() {
             return None;
@@ -1355,8 +1362,15 @@ impl Desktop {
             .child(actions)
     }
 
-    fn validate_service_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if !self.save_open_service_draft(true, window, cx) {
+    /// Records the editor and validates it. False while a typed key is still
+    /// being stored; `after` then continues once it is.
+    fn validate_service_editor(
+        &mut self,
+        after: AfterDraftSaved,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.save_open_service_draft(true, after, window, cx) {
             return false;
         }
         let Some(editor) = &mut self.settings_ui.editor else {
@@ -1375,7 +1389,7 @@ impl Desktop {
         {
             return;
         }
-        if !self.validate_service_editor(window, cx) {
+        if !self.validate_service_editor(AfterDraftSaved::Test, window, cx) {
             return;
         }
         let Some(editor) = &mut self.settings_ui.editor else {
@@ -1481,13 +1495,17 @@ impl Desktop {
             })
             .max_by_key(|(_, evidence)| evidence.tested_at)
     }
-    fn publish_service_editor(
+    pub(super) fn publish_service_editor(
         &mut self,
         continue_repair: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.validate_service_editor(window, cx) {
+        if !self.validate_service_editor(
+            AfterDraftSaved::Publish { continue_repair },
+            window,
+            cx,
+        ) {
             return;
         }
         let Some(editor) = &self.settings_ui.editor else {
@@ -1505,16 +1523,135 @@ impl Desktop {
         }
         let inline = target.is_none() && !repairing;
         let scope = publish_scope(repairing, target.is_some(), editor.also_default);
-        let result = if let Some(version) = editor
+        let plan = PublishPlan {
+            draft_id: editor.form.draft.id.clone(),
+            continue_repair,
+            target,
+            repair_task,
+            scope,
+            inline,
+        };
+        if let Some(version) = editor
             .pending_binding
             .as_ref()
             .or(editor.saved_configuration.as_ref())
         {
-            Ok(version.clone())
-        } else {
-            self.preferences
-                .publish_service(&editor.form.draft.id, scope)
+            let version = version.clone();
+            self.finish_service_publish(Ok(version), plan, window, cx);
+            return;
+        }
+        // Publication first confirms the draft's credential is in the vault,
+        // which can block; only that check leaves the UI thread.
+        let reference = match self.preferences.publication_credential(&plan.draft_id) {
+            Ok(reference) => reference,
+            Err(error) => {
+                self.finish_service_publish(Err(error), plan, window, cx);
+                return;
+            }
         };
+        if reference.is_none() {
+            let result = preferences::Store::verify_credential(
+                self.preferences.vault().as_ref(),
+                None,
+            )
+            .and_then(|verified| {
+                self.preferences
+                    .commit_publication(&plan.draft_id, plan.scope, verified)
+            });
+            self.finish_service_publish(result, plan, window, cx);
+            return;
+        }
+        if let Some(editor) = &mut self.settings_ui.editor {
+            editor.vault_busy = true;
+        }
+        self.run_vault_step(
+            cx,
+            move |vault| preferences::Store::verify_credential(vault, reference),
+            move |this, verified, window, cx| {
+                let open = this
+                    .settings_ui
+                    .editor
+                    .as_mut()
+                    .filter(|editor| editor.form.draft.id == plan.draft_id);
+                let Some(editor) = open else {
+                    return;
+                };
+                editor.vault_busy = false;
+                let result = verified.and_then(|verified| {
+                    this.preferences
+                        .commit_publication(&plan.draft_id, plan.scope, verified)
+                });
+                this.finish_service_publish(result, plan, window, cx);
+            },
+        );
+        cx.notify();
+    }
+
+    /// The commit step after an environment credential reached the vault.
+    fn finish_environment_credential(
+        &mut self,
+        draft: ServiceDraft,
+        name: &'static str,
+        stored: Result<crate::credentials::CredentialRef>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open = self
+            .settings_ui
+            .editor
+            .as_mut()
+            .filter(|editor| editor.form.draft.id == draft.id);
+        let Some(editor) = open else {
+            if let Ok(reference) = stored {
+                self.forget_credentials(vec![reference]);
+            }
+            return;
+        };
+        editor.vault_busy = false;
+        let committed = stored.and_then(|reference| {
+            self.preferences
+                .commit_environment_credential(draft, name, reference.clone())
+                .inspect_err(|_| self.forget_credentials(vec![reference]))
+        });
+        let Some(editor) = &mut self.settings_ui.editor else {
+            return;
+        };
+        match committed {
+            Ok(draft) => {
+                editor.form.draft = draft;
+                editor.form.models.invalidate();
+                editor.form.clear_key(window, cx);
+                editor.evidence = None;
+                editor.saved_configuration = None;
+                editor.save_failed = false;
+                editor.status =
+                    Some(course2md::tr!("已使用环境变量中的密钥，点击保存后生效").into());
+            }
+            Err(error) => {
+                editor.status = Some(course2md::tr!("凭据尚未保存：{}", format!("{error:#}")));
+            }
+        }
+        cx.notify();
+    }
+
+    /// Publication's commit continues here: bind the version where the
+    /// editor was opened from, start a repair, report and close.
+    fn finish_service_publish(
+        &mut self,
+        result: Result<ServiceVersion>,
+        plan: PublishPlan,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let PublishPlan {
+            continue_repair,
+            target,
+            repair_task,
+            scope,
+            inline,
+            ..
+        } = plan;
+        let repairing = repair_task.is_some();
         let version = match result {
             Ok(version) => version,
             Err(error) => {
@@ -1776,8 +1913,9 @@ impl Desktop {
                         .show_cancel(true),
                 )
                 .on_ok(move |_, _, cx| {
-                    weak.update(cx, |this, cx| match this.preferences.delete_service(&id) {
-                        Ok(()) => {
+                    weak.update(cx, |this, cx| match this.preferences.retire_service(&id) {
+                        Ok(released) => {
+                            this.forget_credentials(released);
                             this.refresh_dispatch_controls(cx);
                             this.set_settings_feedback(
                                 PreferenceGroup::Services,
@@ -1888,6 +2026,16 @@ impl Desktop {
         }
         cx.notify();
     }
+}
+
+/// What a service publication continues with once its credential is checked.
+struct PublishPlan {
+    draft_id: String,
+    continue_repair: bool,
+    target: Option<String>,
+    repair_task: Option<(String, Vec<Component>)>,
+    scope: BindingScope,
+    inline: bool,
 }
 
 /// Where a published service applies. A repair, or a service chosen while
