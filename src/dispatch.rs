@@ -11,7 +11,7 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
 };
 
 /// Durable receipts describe a service snapshot without a stored configuration.
@@ -244,12 +244,12 @@ struct Ledger {
     /// safe boundary must not parse the same bytes again.
     control: Mutex<Option<(std::fs::Metadata, Control)>>,
     service_versions: BTreeMap<String, String>,
+    parent: Option<ParentProcess>,
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     emitted: Mutex<HashSet<String>>,
     /// Sending/Uncertain receipts by stable id: read from disk once, then kept in step by `save`.
     unresolved: Mutex<Option<HashMap<String, Receipt>>>,
 }
-static ACTIVE: OnceLock<Mutex<Option<Arc<Ledger>>>> = OnceLock::new();
 
 /// How often safe boundaries re-read the task control file.
 pub const CONTROL_POLL: std::time::Duration = std::time::Duration::from_millis(500);
@@ -262,88 +262,99 @@ pub enum Resend {
     Free,
 }
 
-/// The process that started this task. If it goes away (the app was killed
+/// The process that started a task. If it goes away (the app was killed
 /// rather than quit), the task stops at its next safe boundary as on quit, so
 /// no orphaned worker keeps changing a task the next app instance shows.
-#[cfg(unix)]
-static PARENT: OnceLock<u32> = OnceLock::new();
-
-pub fn watch_parent() {
+#[derive(Clone, Copy, Debug)]
+pub struct ParentProcess {
     #[cfg(unix)]
-    let _ = PARENT.set(std::os::unix::process::parent_id());
+    pid: u32,
 }
 
-fn parent_gone() -> bool {
-    #[cfg(unix)]
-    {
-        PARENT
-            .get()
-            .is_some_and(|parent| std::os::unix::process::parent_id() != *parent)
+impl ParentProcess {
+    /// The current parent. Record it when the command starts, before the parent
+    /// has had a chance to go away.
+    pub fn current() -> Self {
+        Self {
+            #[cfg(unix)]
+            pid: std::os::unix::process::parent_id(),
+        }
     }
-    #[cfg(not(unix))]
-    {
-        false
-    }
-}
-fn active() -> Option<Arc<Ledger>> {
-    ACTIVE.get_or_init(|| Mutex::new(None)).lock().ok()?.clone()
-}
-pub struct Guard(Arc<Ledger>);
-impl Drop for Guard {
-    fn drop(&mut self) {
-        // 锁中毒也要清掉当前 guard：否则 install 会一直报「同一进程不能同时执行两个任务」
-        let mut current = ACTIVE
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if current
-            .as_ref()
-            .is_some_and(|value| Arc::ptr_eq(value, &self.0))
+
+    fn gone(&self) -> bool {
+        #[cfg(unix)]
         {
-            *current = None;
+            std::os::unix::process::parent_id() != self.pid
+        }
+        #[cfg(not(unix))]
+        {
+            false
         }
     }
 }
 
-pub fn install(
-    work_dir: &Path,
-    control_path: Option<&Path>,
-    service_versions: &BTreeMap<String, String>,
-) -> Result<Guard> {
-    let ledger = Arc::new(Ledger::new(work_dir, control_path, service_versions)?);
-    let mut current = ACTIVE
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| {
-            anyhow::anyhow!(crate::tr!(
-                "任务状态异常，请重启应用 / Task state is unavailable; restart the app"
-            ))
-        })?;
-    anyhow::ensure!(
-        current.is_none(),
-        crate::tr!("同一进程不能同时执行两个任务 / Another task is already active")
-    );
-    *current = Some(ledger.clone());
-    Ok(Guard(ledger))
+/// What a task's control handle answers to, besides its work directory.
+#[derive(Clone, Debug, Default)]
+pub struct ControlSource {
+    /// The control file the desktop app writes; without one the task always runs.
+    pub control_path: Option<PathBuf>,
+    /// Configured services by name, resolved to the versions this task uses.
+    pub service_versions: BTreeMap<String, String>,
+    /// Stop as on quit once this process is gone.
+    pub parent: Option<ParentProcess>,
 }
 
-/// Safe boundaries for local work. Unknown cloud receipts do not prevent saving local work.
-pub fn check_control() -> Result<()> {
-    if let Some(ledger) = active() {
-        ledger.check_intent(None).map_err(anyhow::Error::new)?;
+/// A task's request ledger and control file, passed to every safe boundary.
+/// The default handle has no task context: checks always pass, and each
+/// request is classified through its own in-memory ledger.
+#[derive(Clone, Default)]
+pub struct TaskControl(Option<Arc<Ledger>>);
+
+impl TaskControl {
+    /// The control of a task whose receipts live in `work_dir/requests`.
+    pub fn open(work_dir: &Path, source: ControlSource) -> Result<Self> {
+        let mut ledger = Ledger::new(
+            work_dir,
+            source.control_path.as_deref(),
+            &source.service_versions,
+        )?;
+        ledger.parent = source.parent;
+        Ok(Self(Some(Arc::new(ledger))))
     }
-    Ok(())
-}
 
-/// 轮询任务控制文件，意图不再是 run 时返回 Err。配合 `tokio::select!` 打断
-/// 长时间运行的分支：子进程句柄的 kill_on_drop 随分支 drop 生效；spawn_blocking
-/// 里的工作不会因 drop 停止，要靠它自己在安全边界调用 check_control。
-/// 无活动任务账本时 check_control 恒 Ok，此 future 永不完成，不影响 CLI 独立调用。
-pub async fn watch_control() -> anyhow::Error {
-    loop {
-        tokio::time::sleep(CONTROL_POLL).await;
-        if let Err(e) = check_control() {
-            return e;
+    /// Safe boundaries for local work. Unknown cloud receipts do not prevent saving local work.
+    pub fn check(&self) -> Result<()> {
+        if let Some(ledger) = &self.0 {
+            ledger.check_intent(None).map_err(anyhow::Error::new)?;
+        }
+        Ok(())
+    }
+
+    /// 轮询任务控制文件，意图不再是 run 时返回 Err。配合 `tokio::select!` 打断
+    /// 长时间运行的分支：子进程句柄的 kill_on_drop 随分支 drop 生效；spawn_blocking
+    /// 里的工作不会因 drop 停止，要靠它自己在安全边界调用 check。
+    /// 没有任务上下文时 check 恒 Ok，此 future 永不完成，不影响 CLI 独立调用。
+    pub async fn watch(&self) -> anyhow::Error {
+        loop {
+            tokio::time::sleep(CONTROL_POLL).await;
+            if let Err(e) = self.check() {
+                return e;
+            }
+        }
+    }
+
+    /// Sends one service request through this task's ledger.
+    pub fn request(
+        &self,
+        spec: &RequestSpec,
+        send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
+        validate: impl FnOnce(&Value) -> Result<()>,
+    ) -> std::result::Result<Reply, Failure> {
+        match &self.0 {
+            Some(ledger) => ledger.send_described(spec, send, validate),
+            // Outside a task there is no durable context, so one in-memory ledger per
+            // request classifies the response by the same rules without keeping it.
+            None => Ledger::ephemeral().send_described(spec, send, validate),
         }
     }
 }
@@ -401,6 +412,7 @@ impl Ledger {
             control_path: control_path.map(Path::to_path_buf),
             control: Mutex::new(None),
             service_versions: versions.clone(),
+            parent: None,
             locks: Mutex::new(HashMap::new()),
             emitted: Mutex::new(HashSet::new()),
             unresolved: Mutex::new(None),
@@ -480,7 +492,7 @@ impl Ledger {
     }
     fn check_intent(&self, service_version: Option<&str>) -> std::result::Result<Control, Failure> {
         let control = self.control().map_err(Failure::local)?;
-        let intent = if parent_gone() {
+        let intent = if self.parent.is_some_and(|parent| parent.gone()) {
             &Intent::Quit
         } else {
             &control.intent
@@ -778,17 +790,6 @@ impl Ledger {
             replayed: false,
         })
     }
-}
-
-pub fn json_request_described(
-    spec: &RequestSpec,
-    send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
-    validate: impl FnOnce(&Value) -> Result<()>,
-) -> std::result::Result<Reply, Failure> {
-    // Outside a task there is no durable context, so one in-memory ledger per
-    // request classifies the response by the same rules without keeping it.
-    let ledger = active().unwrap_or_else(|| Arc::new(Ledger::ephemeral()));
-    ledger.send_described(spec, send, validate)
 }
 
 /// Drain the HTTP body before recording completion; a body read error is still uncertain.
@@ -1207,6 +1208,35 @@ mod tests {
         }
         assert!(receipts(dir.path()).unwrap().is_empty());
     }
+
+    #[test]
+    fn each_task_answers_only_to_its_own_control_file() {
+        let (paused, running) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let open = |dir: &Path| {
+            TaskControl::open(
+                dir,
+                ControlSource {
+                    control_path: Some(dir.join("control.json")),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let (first, second) = (open(paused.path()), open(running.path()));
+        atomic_write(
+            &paused.path().join("control.json"),
+            &serde_json::to_vec(&Control {
+                intent: Intent::Pause,
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(first.check().is_err());
+        assert!(first.clone().check().is_err());
+        second.check().unwrap();
+        TaskControl::default().check().unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -1215,7 +1245,7 @@ mod ephemeral_tests {
 
     fn request(status: u16, body: &[u8], resend: Resend) -> std::result::Result<Reply, Failure> {
         let body = body.to_vec();
-        json_request_described(
+        TaskControl::default().request(
             &RequestSpec {
                 service: "llm",
                 purpose: "summary",
@@ -1231,7 +1261,6 @@ mod ephemeral_tests {
 
     #[test]
     fn requests_outside_a_task_are_classified_by_the_same_rules() {
-        assert!(active().is_none());
         assert_eq!(
             request(200, br#"{"ok":true}"#, Resend::AskUser)
                 .unwrap()
@@ -1246,24 +1275,25 @@ mod ephemeral_tests {
         assert!(unknown.uncertain() && !unknown.retryable);
         // Nothing persists between calls: the same payload sends again.
         assert!(request(200, br#"{"ok":true}"#, Resend::AskUser).is_ok());
-        let lost = json_request_described(
-            &RequestSpec {
-                service: "llm",
-                purpose: "summary",
-                description: "summary",
-                endpoint: "https://example.test",
-                identity: &serde_json::json!({"n":2}),
-                resend: Resend::Free,
-            },
-            || {
-                Err(NetworkFailure {
-                    message: "stalled".into(),
-                    definitely_unsent: false,
-                })
-            },
-            |_| Ok(()),
-        )
-        .unwrap_err();
+        let lost = TaskControl::default()
+            .request(
+                &RequestSpec {
+                    service: "llm",
+                    purpose: "summary",
+                    description: "summary",
+                    endpoint: "https://example.test",
+                    identity: &serde_json::json!({"n":2}),
+                    resend: Resend::Free,
+                },
+                || {
+                    Err(NetworkFailure {
+                        message: "stalled".into(),
+                        definitely_unsent: false,
+                    })
+                },
+                |_| Ok(()),
+            )
+            .unwrap_err();
         assert!(lost.retryable && !lost.uncertain());
     }
 }

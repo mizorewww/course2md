@@ -286,7 +286,7 @@ fn cache_manifest(model: &str) -> Result<String> {
     Ok(serde_json::to_string(&items)?)
 }
 
-pub fn prepare_cache(model: &str) -> Result<()> {
+pub fn prepare_cache(model: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
     ensure_metallib()?;
     let name = CString::new(model)?;
     let manifest = CString::new(cache_manifest(model)?)?;
@@ -311,7 +311,7 @@ pub fn prepare_cache(model: &str) -> Result<()> {
     unsafe { std::env::set_var("HF_ENDPOINT", mirror) };
     let mut result = attempt();
     if let Err(error) = &result
-        && crate::dispatch::check_control().is_ok()
+        && control.check().is_ok()
     {
         tracing::warn!(
             "Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download from the mirror failed; trying Hugging Face: {error:#}"
@@ -340,6 +340,7 @@ pub fn run_coreml(
     model: &str,
     tmp_dir: &Path,
     cp: &mut crate::checkpoint::Checkpoint,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<Vec<TranscriptEvent>> {
     let t0 = Instant::now();
     let raw = vad(wav, 0.25, 0.35)?;
@@ -367,7 +368,7 @@ pub fn run_coreml(
         "coreml ready"
     );
 
-    let r = crate::asr::run_chunks(wav, &segs, cp, tmp_dir, "asr", |chunk| {
+    let r = crate::asr::run_chunks(wav, &segs, cp, tmp_dir, "asr", control, |chunk| {
         asr.transcribe(chunk).map(|t| {
             let t = t.map(|s| crate::asr::sanitize_qwen_text(&s));
             t.filter(|s| !s.is_empty())

@@ -352,27 +352,33 @@ pub fn file_digest_cancellable(
     Ok(format!("{:x}", hash.finalize()))
 }
 
-/// Holds a task's work directory: the process lock and the request ledger.
+/// Holds a task's work directory: the process lock and the task's control.
 pub struct WorkDir {
-    _dispatch: crate::dispatch::Guard,
+    control: crate::dispatch::TaskControl,
     _lock: crate::runtime::FileLock,
 }
 
+impl WorkDir {
+    /// The request ledger and control file every safe boundary of this task checks.
+    pub fn control(&self) -> &crate::dispatch::TaskControl {
+        &self.control
+    }
+}
+
 /// Enters a task's work directory in one order for every entry point: create
-/// it, take the task lock, check the identity it was bound to, then install the
+/// it, take the task lock, check the identity it was bound to, then open the
 /// request ledger.
 pub fn enter_work_dir(
     work_dir: &Path,
     binding: &serde_json::Value,
-    control_path: Option<&Path>,
-    service_versions: &BTreeMap<String, String>,
+    source: crate::dispatch::ControlSource,
 ) -> Result<WorkDir> {
     std::fs::create_dir_all(work_dir)?;
     let lock = crate::runtime::lock_file(&work_dir.join(".task.lock"))?;
     bind_work_dir(work_dir, binding)?;
-    let dispatch = crate::dispatch::install(work_dir, control_path, service_versions)?;
+    let control = crate::dispatch::TaskControl::open(work_dir, source)?;
     Ok(WorkDir {
-        _dispatch: dispatch,
+        control,
         _lock: lock,
     })
 }
@@ -403,11 +409,12 @@ pub fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()>
     Ok(())
 }
 
-/// Runs a request obtained from [`Request::read`], which validated it.
-pub async fn run(request: Request) -> Result<()> {
+/// Runs a request obtained from [`Request::read`], which validated it. The task
+/// stops as on quit once `parent`, recorded when the command started, is gone.
+pub async fn run(request: Request, parent: crate::dispatch::ParentProcess) -> Result<()> {
     let cfg = request.resolve()?;
     // No settings::load, environment credential resolution or wizard on this path.
-    crate::pipeline::run_task(&request, &cfg).await
+    crate::pipeline::run_task(&request, &cfg, parent).await
 }
 
 /// Call only while all writers are paused and the library copy has been verified.

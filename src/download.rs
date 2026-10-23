@@ -59,13 +59,9 @@ impl std::fmt::Display for Aria2Unavailable {
 
 impl std::error::Error for Aria2Unavailable {}
 
-fn cancelled() -> bool {
-    crate::dispatch::check_control().is_err()
-}
-
 /// Downloads `remote` to `dest` unless a complete copy is already there.
 /// `.part` keeps the bytes received so far, so a later run resumes.
-pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
+pub fn fetch(remote: &Remote, dest: &Path, control: &crate::dispatch::TaskControl) -> Result<()> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -76,7 +72,7 @@ pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
         .with_template("{spinner:.green} {msg} [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})");
     let mut failures = Vec::new();
     for host in &crate::hub::endpoints().hosts {
-        crate::dispatch::check_control()?;
+        control.check()?;
         let url = host.file_url(remote.repo, remote.file);
         let t = Transfer {
             url: &url,
@@ -84,11 +80,12 @@ pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
             part: &part,
             remote,
             bar: &bar,
+            control,
         };
         match transfer(&t) {
             Ok(()) => {}
             Err(error) => {
-                if cancelled() {
+                if control.check().is_err() {
                     return Err(error);
                 }
                 tracing::warn!(
@@ -100,7 +97,7 @@ pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
                 continue;
             }
         }
-        if verify(&part, remote, &bar)? {
+        if verify(&part, remote, &bar, control)? {
             fs::rename(&part, dest)?;
             write_manifest(dest, remote);
             bar.finish();
@@ -131,6 +128,7 @@ struct Transfer<'a> {
     part: &'a Path,
     remote: &'a Remote,
     bar: &'a Bar,
+    control: &'a crate::dispatch::TaskControl,
 }
 
 fn transfer(t: &Transfer) -> Result<()> {
@@ -170,13 +168,14 @@ fn native(t: &Transfer) -> Result<()> {
         part,
         remote,
         bar,
+        control,
         ..
     } = *t;
     // An aria2 partial file is sparse; its length is not a contiguous prefix.
-    let control = aria2_control(part);
-    if control.exists() {
+    let aria2_file = aria2_control(part);
+    if aria2_file.exists() {
         let _ = fs::remove_file(part);
-        let _ = fs::remove_file(control);
+        let _ = fs::remove_file(aria2_file);
     }
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(15))
@@ -185,7 +184,7 @@ fn native(t: &Transfer) -> Result<()> {
     let mut idle = 0;
     let mut phase = Phase::Connect;
     loop {
-        crate::dispatch::check_control()?;
+        control.check()?;
         let have = fs::metadata(part).map(|m| m.len()).unwrap_or(0);
         if have == remote.size {
             return Ok(());
@@ -201,7 +200,7 @@ fn native(t: &Transfer) -> Result<()> {
         match result {
             Ok(()) => idle = 0,
             Err(error) => {
-                if error.downcast_ref::<PermanentHttp>().is_some() || cancelled() {
+                if error.downcast_ref::<PermanentHttp>().is_some() || control.check().is_err() {
                     return Err(error);
                 }
                 if after > have {
@@ -219,9 +218,10 @@ fn native(t: &Transfer) -> Result<()> {
                     "下载中断，正在续传 / Download interrupted; resuming: {error:#}"
                 );
                 phase = Phase::Retry;
-                crate::runtime::interruptible_sleep(Duration::from_secs(
-                    2 * u64::from(idle.max(1)),
-                ))?;
+                crate::runtime::interruptible_sleep(
+                    control,
+                    Duration::from_secs(2 * u64::from(idle.max(1))),
+                )?;
             }
         }
     }
@@ -235,6 +235,7 @@ fn native_attempt(agent: &ureq::Agent, t: &Transfer, have: u64) -> Result<()> {
         part,
         remote,
         bar,
+        control,
     } = *t;
     tracing::info!(url, from = have, "download");
     let mut request = agent.get(url);
@@ -278,7 +279,7 @@ fn native_attempt(agent: &ureq::Agent, t: &Transfer, have: u64) -> Result<()> {
     loop {
         // Checking every 32MB lets the desktop cancel without waiting for 2GB.
         if since_check >= 32 << 20 {
-            crate::dispatch::check_control()?;
+            control.check()?;
             since_check = 0;
         }
         let n = reader.read(&mut buffer)?;
@@ -342,6 +343,7 @@ fn aria2(program: &Path, t: &Transfer) -> Result<()> {
         part,
         remote,
         bar,
+        control,
     } = *t;
     let unavailable = |message: String| anyhow::Error::new(Aria2Unavailable(message));
     let dir = part.parent().context("part path")?;
@@ -418,7 +420,7 @@ fn aria2(program: &Path, t: &Transfer) -> Result<()> {
     loop {
         std::thread::sleep(Duration::from_millis(500));
         // Dropping the child stops aria2; its control file keeps the progress.
-        crate::dispatch::check_control()?;
+        control.check()?;
         if let Some(status) = child.try_wait() {
             let tail = stderr.as_ref().map(|tail| tail.tail()).unwrap_or_default();
             let message = format!("aria2c {status}: {tail}");
@@ -483,7 +485,12 @@ fn aria2(program: &Path, t: &Transfer) -> Result<()> {
 // ── verification ────────────────────────────────────────────────────────
 
 /// Whether `part` has the published size and SHA-256; reports hashing progress.
-fn verify(part: &Path, remote: &Remote, bar: &Bar) -> Result<bool> {
+fn verify(
+    part: &Path,
+    remote: &Remote,
+    bar: &Bar,
+    control: &crate::dispatch::TaskControl,
+) -> Result<bool> {
     use sha2::{Digest, Sha256};
     if fs::metadata(part).map(|m| m.len()).unwrap_or(0) != remote.size {
         return Ok(false);
@@ -496,7 +503,7 @@ fn verify(part: &Path, remote: &Remote, bar: &Bar) -> Result<bool> {
     let mut done = 0u64;
     loop {
         if done.is_multiple_of(64 << 20) {
-            crate::dispatch::check_control()?;
+            control.check()?;
         }
         let n = file.read(&mut buffer)?;
         if n == 0 {
@@ -574,13 +581,14 @@ mod tests {
             part: &part,
             remote: &remote,
             bar: &bar,
+            control: &Default::default(),
         })
         .unwrap();
         let requests = server.join().unwrap();
         assert!(!requests[0].to_ascii_lowercase().contains("range:"));
         assert!(requests[1].to_ascii_lowercase().contains("range: bytes=3-"));
         assert_eq!(fs::read(&part).unwrap(), body);
-        assert!(verify(&part, &remote, &bar).unwrap());
+        assert!(verify(&part, &remote, &bar, &Default::default()).unwrap());
     }
 
     #[test]
@@ -600,6 +608,7 @@ mod tests {
             part: &part,
             remote: &remote,
             bar: &bar,
+            control: &Default::default(),
         })
         .unwrap();
         server.join().unwrap();
@@ -623,6 +632,7 @@ mod tests {
             part: &part,
             remote: &remote,
             bar: &bar,
+            control: &Default::default(),
         })
         .unwrap_err();
         assert!(error.downcast_ref::<PermanentHttp>().is_some());
@@ -636,9 +646,9 @@ mod tests {
         let part = root.path().join("synthetic.part");
         let bar = Bar::new(Stage::ModelFile("synthetic.bin".into()), remote.size);
         fs::write(&part, b"12346").unwrap();
-        assert!(!verify(&part, &remote, &bar).unwrap());
+        assert!(!verify(&part, &remote, &bar, &Default::default()).unwrap());
         fs::write(&part, b"1234").unwrap();
-        assert!(!verify(&part, &remote, &bar).unwrap());
+        assert!(!verify(&part, &remote, &bar, &Default::default()).unwrap());
     }
 
     #[test]

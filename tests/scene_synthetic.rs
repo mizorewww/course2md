@@ -69,7 +69,11 @@ fn test_cfg(video: &Path, dir: &Path) -> course2md::config::PipelineConfig {
 fn onsets(cfg: &course2md::config::PipelineConfig, video: &Path) -> Vec<f64> {
     tokio::runtime::Runtime::new()
         .unwrap()
-        .block_on(course2md::scene::run(cfg, video))
+        .block_on(course2md::scene::run(
+            cfg,
+            video,
+            &course2md::dispatch::TaskControl::default(),
+        ))
         .expect("scene run")
         .iter()
         .map(|frame| frame.t)

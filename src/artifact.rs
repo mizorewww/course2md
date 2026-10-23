@@ -2,6 +2,7 @@
 
 use crate::{
     checkpoint::{atomic_write, atomic_write_shared},
+    dispatch::TaskControl,
     execution,
     fetch::VideoMeta,
     render,
@@ -179,9 +180,10 @@ const IO_PARALLELISM: usize = 8;
 
 fn parallel_map<T: Sync, R: Send>(
     items: &[T],
+    control: &TaskControl,
     f: impl Fn(&T) -> Result<R> + Sync,
 ) -> Result<Vec<R>> {
-    crate::runtime::map_pool(items.iter().collect(), IO_PARALLELISM, f)
+    crate::runtime::map_pool(items.iter().collect(), IO_PARALLELISM, control, f)
 }
 
 #[derive(Debug, Clone)]
@@ -280,14 +282,24 @@ fn verified_digest(path: &Path) -> Result<String> {
     Ok(digest)
 }
 
+/// Verifies a published version outside a task.
 pub fn validate_version(dir: &Path, manifest: &Manifest) -> Result<()> {
+    validate_version_in_task(dir, manifest, &TaskControl::default())
+}
+
+/// [`validate_version`] that stops at the task's safe boundaries.
+pub(crate) fn validate_version_in_task(
+    dir: &Path,
+    manifest: &Manifest,
+    control: &TaskControl,
+) -> Result<()> {
     let required: Vec<&Asset> = manifest
         .assets
         .iter()
         // Optional exports are independent files; their loss never invalidates the body.
         .filter(|asset| !asset.path.starts_with("exports/"))
         .collect();
-    parallel_map(&required, |asset| {
+    parallel_map(&required, control, |asset| {
         let path = safe_asset_path(dir, &asset.path)?;
         anyhow::ensure!(
             std::fs::metadata(&path)?.len() == asset.bytes
@@ -321,6 +333,7 @@ pub fn has_readable_body(sections: &[Section]) -> bool {
 ///
 /// 重阻塞 IO（逐图复制、SHA-256、fsync）不占 tokio worker 线程：
 /// 克隆输入后整个发布在 spawn_blocking 中执行。
+#[allow(clippy::too_many_arguments)]
 pub async fn publish(
     target: &Target,
     work_dir: &Path,
@@ -329,15 +342,17 @@ pub async fn publish(
     summary: Option<&Summary>,
     formats: &[crate::config::OutputFormat],
     outcomes: Outcomes,
+    control: &TaskControl,
 ) -> Result<Manifest> {
     let target = target.clone();
+    let control = control.clone();
     let work_dir = work_dir.to_path_buf();
     let meta = meta.clone();
     let sections = sections.to_vec();
     let summary = summary.cloned();
     let formats = formats.to_vec();
     let publish = move || {
-        publish_blocking(
+        publish_in_task(
             &target,
             &work_dir,
             &meta,
@@ -345,6 +360,7 @@ pub async fn publish(
             summary.as_ref(),
             &formats,
             outcomes,
+            &control,
         )
     };
     tokio::task::spawn_blocking(publish)
@@ -352,7 +368,7 @@ pub async fn publish(
         .context(crate::tr!("发布工作进程中断 / Publish worker interrupted"))?
 }
 
-/// publish 的同步实现（见 publish 的 spawn_blocking 纪律说明）。
+/// publish 的同步实现（见 publish 的 spawn_blocking 纪律说明），用于任务之外。
 pub fn publish_blocking(
     target: &Target,
     work_dir: &Path,
@@ -360,7 +376,30 @@ pub fn publish_blocking(
     sections: &[Section],
     summary: Option<&Summary>,
     formats: &[crate::config::OutputFormat],
+    outcomes: Outcomes,
+) -> Result<Manifest> {
+    publish_in_task(
+        target,
+        work_dir,
+        meta,
+        sections,
+        summary,
+        formats,
+        outcomes,
+        &TaskControl::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_in_task(
+    target: &Target,
+    work_dir: &Path,
+    meta: &VideoMeta,
+    sections: &[Section],
+    summary: Option<&Summary>,
+    formats: &[crate::config::OutputFormat],
     mut outcomes: Outcomes,
+    control: &TaskControl,
 ) -> Result<Manifest> {
     anyhow::ensure!(
         has_readable_body(sections),
@@ -395,7 +434,7 @@ pub fn publish_blocking(
         let dest = staging.path().join(image.as_str());
         std::fs::create_dir_all(dest.parent().unwrap())?;
     }
-    parallel_map(&images, |image| {
+    parallel_map(&images, control, |image| {
         let source = safe_asset_path(work_dir, image.as_str())?;
         std::fs::copy(source, staging.path().join(image.as_str()))?;
         Ok(())
@@ -454,7 +493,7 @@ pub fn publish_blocking(
     paths.sort();
     paths.dedup();
     // 逐文件 fsync + SHA-256 并行，结果按 paths 顺序写回
-    let assets = parallel_map(&paths, |path| {
+    let assets = parallel_map(&paths, control, |path| {
         let full = staging.path().join(path);
         // Windows FlushFileBuffers requires a writable handle. These are
         // newly staged assets; opening them must not truncate their contents.
@@ -598,6 +637,7 @@ mod tests {
             None,
             &[crate::config::OutputFormat::Html],
             Outcomes::default(),
+            &TaskControl::default(),
         )
         .await
         .unwrap();
@@ -619,6 +659,7 @@ mod tests {
             None,
             &[],
             Outcomes::default(),
+            &TaskControl::default(),
         )
         .await;
         std::fs::set_permissions(&target.course_dir, std::fs::Permissions::from_mode(0o755))
@@ -637,6 +678,7 @@ mod tests {
                 None,
                 &[],
                 Outcomes::default(),
+                &TaskControl::default(),
             )
             .await
             .unwrap();
@@ -660,6 +702,7 @@ mod tests {
             None,
             &[],
             Outcomes::default(),
+            &TaskControl::default(),
         )
         .await
         .unwrap();
@@ -708,6 +751,7 @@ mod tests {
             None,
             &[],
             Outcomes::default(),
+            &TaskControl::default(),
         )
         .await
         .unwrap();
@@ -726,7 +770,8 @@ mod tests {
                 &broken,
                 None,
                 &[],
-                Outcomes::default()
+                Outcomes::default(),
+                &TaskControl::default()
             )
             .await
             .is_err()
@@ -743,9 +788,18 @@ mod tests {
         );
         assert!(!target.version_dir().exists());
         assert!(
-            publish(&target, &work, &meta, &[], None, &[], Outcomes::default())
-                .await
-                .is_err()
+            publish(
+                &target,
+                &work,
+                &meta,
+                &[],
+                None,
+                &[],
+                Outcomes::default(),
+                &TaskControl::default()
+            )
+            .await
+            .is_err()
         );
     }
 }

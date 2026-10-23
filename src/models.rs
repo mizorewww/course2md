@@ -47,20 +47,22 @@ async fn fetch_model(
     model: &str,
     root: &Path,
     coreml: CoremlMode,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<()> {
     use crate::config::AsrProvider;
     match provider {
-        AsrProvider::Cpu | AsrProvider::Gpu => download_models(root).await,
+        AsrProvider::Cpu | AsrProvider::Gpu => download_models(root, control).await,
         AsrProvider::Coreml => {
             #[cfg(apple_native)]
             {
                 let model = model.to_owned();
+                let control = control.clone();
                 tokio::task::spawn_blocking(move || {
                     match coreml {
-                        CoremlMode::Cache => crate::apple::prepare_cache(&model)?,
+                        CoremlMode::Cache => crate::apple::prepare_cache(&model, &control)?,
                         CoremlMode::Prepare { cached } => {
                             if !cached {
-                                crate::apple::prepare_cache(&model)?;
+                                crate::apple::prepare_cache(&model, &control)?;
                             }
                             crate::apple::prepare_model(&model)?;
                         }
@@ -74,7 +76,7 @@ async fn fetch_model(
             }
             #[cfg(not(apple_native))]
             {
-                let _ = (model, coreml);
+                let _ = (model, coreml, control);
                 Err(anyhow::anyhow!(crate::tr!(
                     "此程序未包含 Apple 原生识别运行时 / This build does not include the Apple native transcription runtime"
                 )))
@@ -82,7 +84,8 @@ async fn fetch_model(
         }
         AsrProvider::Npu => {
             let model = crate::npu::resolve_npu_model(Some(model));
-            tokio::task::spawn_blocking(move || crate::npu::prepare_npu_model(&model))
+            let control = control.clone();
+            tokio::task::spawn_blocking(move || crate::npu::prepare_npu_model(&model, &control))
                 .await
                 .context(crate::tr!(
                     "NPU 模型准备未完成 / NPU model preparation did not complete"
@@ -98,6 +101,7 @@ pub async fn ensure_cache(
     provider: crate::config::AsrProvider,
     model: &str,
     root: &Path,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<()> {
     let status = status::inspect(provider, model, root)?;
     if !status.can_prepare {
@@ -109,7 +113,7 @@ pub async fn ensure_cache(
     ) {
         return Ok(());
     }
-    fetch_model(provider, &status.model, root, CoremlMode::Cache).await
+    fetch_model(provider, &status.model, root, CoremlMode::Cache, control).await
 }
 
 /// Prepare the exact selected backend without sending course content or changing settings.
@@ -133,6 +137,7 @@ pub async fn prepare(
         &before.model,
         root,
         CoremlMode::Prepare { cached },
+        &crate::dispatch::TaskControl::default(),
     )
     .await;
     let after = status::inspect(provider, model, root).unwrap_or_else(|error| {
@@ -223,7 +228,10 @@ fn file_complete(path: &Path) -> bool {
 }
 
 /// 没有模型就下载；下载过程请保持进程运行。
-pub async fn ensure_llama_or_download(root: &Path) -> Result<LlamaAsr> {
+pub async fn ensure_llama_or_download(
+    root: &Path,
+    control: &crate::dispatch::TaskControl,
+) -> Result<LlamaAsr> {
     if !llama_ready(root) {
         if !crate::progress::is_json() && !crate::progress::is_quiet() {
             crate::eprintln_tr!(
@@ -231,13 +239,13 @@ pub async fn ensure_llama_or_download(root: &Path) -> Result<LlamaAsr> {
                 root.display()
             );
         }
-        download_models(root).await?;
+        download_models(root, control).await?;
     }
     Ok(llama_paths(root))
 }
 
 /// 下载 llama.cpp Qwen3-ASR GGUF。
-pub async fn download_models(root: &Path) -> Result<()> {
+pub async fn download_models(root: &Path, control: &crate::dispatch::TaskControl) -> Result<()> {
     fs::create_dir_all(root)?;
     let _download_lock = crate::runtime::lock_file(&root.join(".download.lock"))?;
     let p = llama_paths(root);
@@ -255,6 +263,7 @@ pub async fn download_models(root: &Path) -> Result<()> {
     let tasks: Vec<_> = missing
         .into_iter()
         .map(|(remote, path)| {
+            let control = control.clone();
             tokio::task::spawn_blocking(move || {
                 if path.is_file() {
                     tracing::warn!(
@@ -264,7 +273,7 @@ pub async fn download_models(root: &Path) -> Result<()> {
                     let _ = fs::remove_file(&path);
                     let _ = fs::remove_file(path.with_extension("manifest.json"));
                 }
-                crate::download::fetch(&remote, &path)
+                crate::download::fetch(&remote, &path, &control)
             })
         })
         .collect();

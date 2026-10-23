@@ -166,7 +166,11 @@ where
     ))?
 }
 
-pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<TranscriptEvent>> {
+pub async fn run(
+    cfg: &PipelineConfig,
+    wav: &std::path::Path,
+    control: &crate::dispatch::TaskControl,
+) -> Result<Vec<TranscriptEvent>> {
     use crate::checkpoint::AsrIdentity;
     use crate::config::AsrProvider;
 
@@ -182,15 +186,20 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
         let api = cfg.asr_api.clone();
         let max_speech = cfg.max_speech as f64;
         let wav = wav.to_path_buf();
-        return run_with_cp(cfg, &id, move |cp| run_api(&api, &wav, max_speech, cp)).await;
+        let control = control.clone();
+        return run_with_cp(cfg, &id, move |cp| {
+            run_api(&api, &wav, max_speech, cp, &control)
+        })
+        .await;
     }
     if cfg.provider == AsrProvider::Npu {
         let model = crate::npu::resolve_npu_model(cfg.asr_model.as_deref());
         let id = AsrIdentity::new("npu", &model, cfg.max_speech);
         let max_speech = cfg.max_speech as f64;
         let wav = wav.to_path_buf();
+        let control = control.clone();
         return run_with_cp(cfg, &id, move |cp| {
-            crate::npu::run_npu(&model, &wav, max_speech, cp)
+            crate::npu::run_npu(&model, &wav, max_speech, cp, &control)
         })
         .await;
     }
@@ -203,9 +212,10 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
                 cfg.asr_model.as_deref().filter(|s| !s.trim().is_empty()),
             )?;
             let id = AsrIdentity::new("coreml", &model, cfg.max_speech);
+            let control = control.clone();
             let joined = run_with_cp(cfg, &id, move |cp| {
                 let tmp = crate::runtime::TempWorkDir::new("asr")?;
-                crate::apple::run_coreml(&wav, max_speech, &model, tmp.path(), cp)
+                crate::apple::run_coreml(&wav, max_speech, &model, tmp.path(), cp, &control)
             })
             .await;
             return joined.context(crate::tr!("已选的 Apple 识别方式未完成；任务参数和进度已保留 / Selected Apple transcription failed; task settings retained"));
@@ -225,7 +235,7 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
     };
     let threads = cfg.threads;
     let max_speech = cfg.max_speech;
-    let llama = crate::models::ensure_llama_or_download(&cfg.model_dir).await?;
+    let llama = crate::models::ensure_llama_or_download(&cfg.model_dir, control).await?;
     // CPU/GPU paths share the same concrete GGUF model identity.
     let id = AsrIdentity::new(
         "llama",
@@ -239,8 +249,9 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
         threads,
     };
     let wav = wav.to_path_buf();
+    let control = control.clone();
     run_with_cp(cfg, &id, move |cp| {
-        run_blocking(&wav, &server, max_speech, cp)
+        run_blocking(&wav, &server, max_speech, cp, &control)
     })
     .await
 }
@@ -258,6 +269,7 @@ fn run_blocking(
     server: &LlamaServer,
     max_speech: f32,
     cp: &mut crate::checkpoint::Checkpoint,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<Vec<TranscriptEvent>> {
     let offload = server.offload;
     let t0 = Instant::now();
@@ -321,7 +333,7 @@ fn run_blocking(
         SERVER_READY_TIMEOUT,
         &mut child,
         Some("ok"),
-        Some(&crate::dispatch::check_control),
+        Some(&|| control.check()),
     ) {
         if e.downcast_ref::<crate::dispatch::Failure>().is_some() {
             return Err(e); // 暂停/取消不是启动故障
@@ -343,8 +355,8 @@ fn run_blocking(
         .timeout(LLAMA_HTTP_TIMEOUT)
         .build();
     let tmp = crate::runtime::TempWorkDir::new("asr")?;
-    let r = run_chunks(wav, &segs, cp, tmp.path(), "asr", |chunk| {
-        transcribe_file(&client, &base, chunk).map(|t| {
+    let r = run_chunks(wav, &segs, cp, tmp.path(), "asr", control, |chunk| {
+        transcribe_file(&client, &base, chunk, control).map(|t| {
             let t = sanitize_qwen_text(&t);
             (!t.is_empty()).then_some(t)
         })
@@ -395,6 +407,7 @@ pub(crate) fn run_chunks(
     cp: &mut crate::checkpoint::Checkpoint,
     tmp_dir: &Path,
     label: &str,
+    control: &crate::dispatch::TaskControl,
     mut transcribe: impl FnMut(&Path) -> Result<Option<String>>,
 ) -> Result<Vec<TranscriptEvent>> {
     let pb = crate::progress::Bar::new(Stage::Transcribe, segs.len() as u64).with_template(&format!(
@@ -406,7 +419,7 @@ pub(crate) fn run_chunks(
     std::thread::scope(|scope| {
         let mut prefetch: Option<(usize, std::thread::ScopedJoinHandle<'_, Result<()>>)> = None;
         for (i, seg) in segs.iter().copied().enumerate() {
-            crate::dispatch::check_control()?;
+            control.check()?;
             let (start, end) = (seg.start, seg.end);
             if cp.is_done(start, end) {
                 pb.inc(1);
@@ -480,6 +493,7 @@ fn run_api(
     wav: &Path,
     max_speech: f64,
     cp: &mut crate::checkpoint::Checkpoint,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<Vec<TranscriptEvent>> {
     let t0 = Instant::now();
     // 凭据已在任务预检时解析（含环境变量）；空 key = 明确选择的无鉴权服务
@@ -522,6 +536,7 @@ fn run_api(
                 model: &api.model,
                 key: &api_key,
                 mode: api.mode,
+                control,
             };
             let (tmp_dir, wav) = (tmp.path(), wav);
             let (segs, pending, next, abort) = (&segs, &pending, &next, &abort);
@@ -590,10 +605,11 @@ fn post_local_json(
     agent: &ureq::Agent,
     url: &str,
     body: &serde_json::Value,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<serde_json::Value> {
     use crate::dispatch::Failure;
     let bytes = serde_json::to_vec(body)?;
-    crate::runtime::retry(MAX_ATTEMPTS, || {
+    crate::runtime::retry(control, MAX_ATTEMPTS, || {
         let request = agent.post(url).set("Content-Type", "application/json");
         match crate::dispatch::receive(request.send_bytes(&bytes)) {
             Ok(response) if (200..300).contains(&response.status) => {
@@ -632,7 +648,7 @@ fn post_cloud(
         crate::render::fmt_ts(seg.start),
         crate::render::fmt_ts(seg.end)
     );
-    crate::runtime::retry(MAX_ATTEMPTS, || {
+    crate::runtime::retry(t.control, MAX_ATTEMPTS, || {
         let send = || {
             let request = t.client.post(t.url).set("Content-Type", content_type);
             let request = if t.key.is_empty() {
@@ -642,7 +658,7 @@ fn post_cloud(
             };
             crate::dispatch::receive(request.send_bytes(body))
         };
-        crate::dispatch::json_request_described(
+        t.control.request(
             &crate::dispatch::RequestSpec {
                 service: "asr",
                 purpose: "transcription",
@@ -683,6 +699,7 @@ struct ApiTarget<'a> {
     model: &'a str,
     key: &'a str,
     mode: crate::settings::AsrApiMode,
+    control: &'a crate::dispatch::TaskControl,
 }
 
 /// 转写单个 chunk；Ok(None) = 无语音内容。
@@ -954,7 +971,12 @@ fn spawn_server(bin: &Path, args: &[String]) -> Result<crate::runtime::ManagedCh
     crate::runtime::ManagedChild::spawn("llama-server", &mut cmd)
 }
 
-fn transcribe_file(client: &ureq::Agent, base: &str, wav: &Path) -> Result<String> {
+fn transcribe_file(
+    client: &ureq::Agent,
+    base: &str,
+    wav: &Path,
+    control: &crate::dispatch::TaskControl,
+) -> Result<String> {
     let bytes = std::fs::read(wav)?;
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
@@ -969,9 +991,15 @@ fn transcribe_file(client: &ureq::Agent, base: &str, wav: &Path) -> Result<Strin
             ]
         }]
     });
-    let v = post_local_json(client, &format!("{base}/v1/chat/completions"), &body).context(
-        crate::tr!("本地语音识别请求失败 / Local transcription request failed"),
-    )?;
+    let v = post_local_json(
+        client,
+        &format!("{base}/v1/chat/completions"),
+        &body,
+        control,
+    )
+    .context(crate::tr!(
+        "本地语音识别请求失败 / Local transcription request failed"
+    ))?;
     let choice = &v["choices"][0];
     anyhow::ensure!(
         !choice.is_null(),

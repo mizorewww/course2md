@@ -70,7 +70,11 @@ fn slide_name(n: usize) -> String {
 }
 
 /// 1fps（或 sample_interval）灰度流 + SSIM，得到新幻灯片时间点。
-async fn sample_timestamps(cfg: &PipelineConfig, media: &Path) -> Result<Vec<(f64, f64)>> {
+async fn sample_timestamps(
+    cfg: &PipelineConfig,
+    media: &Path,
+    control: &crate::dispatch::TaskControl,
+) -> Result<Vec<(f64, f64)>> {
     let info = media::probe_video(media)
         .await
         .context(crate::tr!("无法读取视频尺寸，请检查文件是否可播放 / Could not read video dimensions; check that the file plays correctly"))?;
@@ -140,7 +144,7 @@ async fn sample_timestamps(cfg: &PipelineConfig, media: &Path) -> Result<Vec<(f6
     let mut last_emit_t: f64 = -f64::INFINITY;
     let mut i: u64 = 0;
     loop {
-        crate::dispatch::check_control()?;
+        control.check()?;
         match stdout.read_exact(&mut buf).await {
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
@@ -227,12 +231,16 @@ async fn sample_timestamps(cfg: &PipelineConfig, media: &Path) -> Result<Vec<(f6
 }
 
 /// 场景阶段入口。
-pub async fn run(cfg: &PipelineConfig, media: &Path) -> Result<Vec<FrameEvent>> {
+pub async fn run(
+    cfg: &PipelineConfig,
+    media: &Path,
+    control: &crate::dispatch::TaskControl,
+) -> Result<Vec<FrameEvent>> {
     let frames_dir = cfg.frames_dir();
     tokio::fs::create_dir_all(&frames_dir).await?;
     let t0 = std::time::Instant::now();
     crate::progress::start(Stage::ScenesScan);
-    let times = sample_timestamps(cfg, media).await?;
+    let times = sample_timestamps(cfg, media, control).await?;
     crate::progress::done(Stage::ScenesScan);
     anyhow::ensure!(
         !times.is_empty(),
@@ -250,7 +258,7 @@ pub async fn run(cfg: &PipelineConfig, media: &Path) -> Result<Vec<FrameEvent>> 
     let mut pending = times.iter().copied().enumerate();
     let mut results: Vec<(usize, Result<()>)> = Vec::with_capacity(times.len());
     loop {
-        crate::dispatch::check_control()?;
+        control.check()?;
         while set.len() < EXTRACT_CONCURRENCY {
             let Some((i, (_, capture_t))) = pending.next() else {
                 break;

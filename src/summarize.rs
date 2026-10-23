@@ -140,6 +140,7 @@ pub(crate) fn parse_summary(content: &str) -> Option<Summary> {
 
 fn chat_once(
     agent: &ureq::Agent,
+    control: &crate::dispatch::TaskControl,
     s: &LlmSettings,
     sys: &str,
     user: &str,
@@ -148,6 +149,7 @@ fn chat_once(
     let body = crate::provider::chat_body(s, sys, user, llm::CHAT_MAX_TOKENS);
     llm::send_chat_described(
         agent,
+        control,
         s,
         &body,
         llm::Purpose::Summary,
@@ -166,12 +168,14 @@ fn chat_once(
 /// One requested summary scope. A protocol failure is retained, never hidden by another paid request.
 fn summarize_text(
     agent: &ureq::Agent,
+    control: &crate::dispatch::TaskControl,
     s: &LlmSettings,
     transcript: &str,
     description: &str,
 ) -> Result<Summary> {
     let content = chat_once(
         agent,
+        control,
         s,
         &system_prompt(),
         &user_prompt(transcript),
@@ -229,6 +233,7 @@ pub async fn summarize(
     s: &LlmSettings,
     events: &[TranscriptEvent],
     meta: &VideoMeta,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<Summary> {
     let total_chars: usize = events
         .iter()
@@ -254,11 +259,14 @@ pub async fn summarize(
             crate::render::fmt_ts(events.first().unwrap().start),
             crate::render::fmt_ts(events.last().unwrap().end)
         );
-        return tokio::task::spawn_blocking(move || summarize_text(&agent, &s2, &t, &description))
-            .await
-            .context(crate::tr!(
-                "生成摘要时意外中断 / Summary generation was interrupted"
-            ))?;
+        let control = control.clone();
+        return tokio::task::spawn_blocking(move || {
+            summarize_text(&agent, &control, &s2, &t, &description)
+        })
+        .await
+        .context(crate::tr!(
+            "生成摘要时意外中断 / Summary generation was interrupted"
+        ))?;
     }
     // ---- map-reduce：分段按 SUMMARIZE_CONCURRENCY 分批并发 ----
     let chunks = split_chunks(events, CHUNK_CHAR_LIMIT);
@@ -271,10 +279,12 @@ pub async fn summarize(
     let settings = s.clone();
     let map_agent = agent.clone();
     let map_ctx = ctx.clone();
+    let map_control = control.clone();
     let partials = tokio::task::spawn_blocking(move || {
         crate::runtime::map_pool(
             chunks.into_iter().enumerate().collect(),
             SUMMARIZE_CONCURRENCY,
+            &map_control,
             |(index, chunk)| {
                 let first = chunk
                     .first()
@@ -296,7 +306,13 @@ pub async fn summarize(
                     first,
                     last
                 );
-                summarize_text(&map_agent, &settings, &transcript, &description)
+                summarize_text(
+                    &map_agent,
+                    &map_control,
+                    &settings,
+                    &transcript,
+                    &description,
+                )
             },
         )
     })
@@ -319,9 +335,11 @@ pub async fn summarize(
     }
     let input = combiner_input;
     let s2 = s.clone();
+    let control = control.clone();
     let combined = tokio::task::spawn_blocking(move || {
         chat_once(
             &agent,
+            &control,
             &s2,
             &system_prompt(),
             &format!(
@@ -598,7 +616,9 @@ mod tests {
             extractor: String::new(),
             id: String::new(),
         };
-        let err = summarize(&s, &[], &meta).await.unwrap_err();
+        let err = summarize(&s, &[], &meta, &Default::default())
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("转写为空"));
     }
 }

@@ -24,8 +24,23 @@ pub fn file_name(format: OutputFormat) -> &'static str {
 /// Exact destination, with no overwrite. UI may explicitly confirm replacing a separate
 /// exported file, but must never mutate the immutable note version itself.
 pub fn export(version_dir: &Path, format: OutputFormat, destination: &Path) -> Result<PathBuf> {
+    export_in_task(
+        version_dir,
+        format,
+        destination,
+        &crate::dispatch::TaskControl::default(),
+    )
+}
+
+/// [`export`] that stops at the task's safe boundaries.
+pub(crate) fn export_in_task(
+    version_dir: &Path,
+    format: OutputFormat,
+    destination: &Path,
+    control: &crate::dispatch::TaskControl,
+) -> Result<PathBuf> {
     let manifest = artifact::read_manifest(&version_dir.join("manifest.json"))?;
-    artifact::validate_version(version_dir, &manifest)?;
+    artifact::validate_version_in_task(version_dir, &manifest, control)?;
     let document: Document = serde_json::from_slice(&std::fs::read(artifact::safe_asset_path(
         version_dir,
         &manifest.document,

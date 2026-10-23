@@ -262,12 +262,13 @@ pub fn retry_backoff(attempt: u32) -> Duration {
 /// rate limited, a free service's lost response) back off between attempts and
 /// the wait can be cancelled; every other failure returns at once.
 pub fn retry<T>(
+    control: &crate::dispatch::TaskControl,
     max_attempts: u32,
     mut attempt_once: impl FnMut() -> std::result::Result<T, crate::dispatch::Failure>,
 ) -> Result<T> {
     let mut attempt = 1;
     loop {
-        crate::dispatch::check_control()?;
+        control.check()?;
         match attempt_once() {
             Ok(value) => return Ok(value),
             Err(failure) if failure.retryable && attempt < max_attempts => {
@@ -279,7 +280,7 @@ pub fn retry<T>(
                     "请求失败，稍后重试 / Request failed; retrying shortly: {}",
                     failure.message
                 );
-                interruptible_sleep(wait)?;
+                interruptible_sleep(control, wait)?;
                 attempt += 1;
             }
             Err(failure) => return Err(failure.into()),
@@ -288,10 +289,10 @@ pub fn retry<T>(
 }
 
 /// 可取消的等待：分段小睡并轮询任务控制文件，暂停/取消立即返回其错误。
-pub fn interruptible_sleep(wait: Duration) -> Result<()> {
+pub fn interruptible_sleep(control: &crate::dispatch::TaskControl, wait: Duration) -> Result<()> {
     let deadline = Instant::now() + wait;
     loop {
-        crate::dispatch::check_control()?;
+        control.check()?;
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
             return Ok(());
@@ -385,6 +386,7 @@ impl TempWorkDir {
 pub fn map_pool<T, R>(
     items: Vec<T>,
     workers: usize,
+    control: &crate::dispatch::TaskControl,
     work: impl Fn(T) -> Result<R> + Sync,
 ) -> Result<Vec<R>>
 where
@@ -400,7 +402,7 @@ where
         for _ in 0..workers.max(1).min(total.max(1)) {
             scope.spawn(|| {
                 loop {
-                    if let Err(error) = crate::dispatch::check_control() {
+                    if let Err(error) = control.check() {
                         let mut guard = lock_recover(&first_error);
                         if guard.is_none() {
                             *guard = Some(error);

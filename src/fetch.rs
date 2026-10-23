@@ -608,8 +608,8 @@ pub fn local_content_identity(
 }
 
 /// Probe once and return the single video; collection/unresolved links are errors.
-pub async fn probe_video(url: &str) -> Result<OnlineVideo> {
-    match probe_online(url).await? {
+pub async fn probe_video(url: &str, control: &crate::dispatch::TaskControl) -> Result<OnlineVideo> {
+    match probe_online(url, control).await? {
         OnlineProbe::Video { video } => Ok(video),
         OnlineProbe::Collection { .. } => {
             anyhow::bail!(crate::tr!(
@@ -621,7 +621,10 @@ pub async fn probe_video(url: &str) -> Result<OnlineVideo> {
 }
 
 /// Metadata and all available subtitle channels only; no media/AI requests.
-pub async fn probe_online(url: &str) -> Result<OnlineProbe> {
+pub async fn probe_online(
+    url: &str,
+    control: &crate::dispatch::TaskControl,
+) -> Result<OnlineProbe> {
     let mut cmd = Command::new(crate::ytdlp::program());
     let _cookies = crate::auth::configure_ytdlp(cmd.as_std_mut(), url)?;
     ytdlp_base(&mut cmd).args([
@@ -635,7 +638,7 @@ pub async fn probe_online(url: &str) -> Result<OnlineProbe> {
         "--retries",
         "1",
     ]);
-    let out = run_output(ytdlp_url(&mut cmd, url))
+    let out = run_output(ytdlp_url(&mut cmd, url), control)
         .await
         .map_err(|e| crate::auth::with_bilibili_login_tip(url, e))?;
     parse_online_probe(&out.stdout, url, &String::from_utf8_lossy(&out.stderr))
@@ -651,7 +654,11 @@ pub struct SubtitleFetch {
 /// CLI compatibility path. `video` comes from the run's single probe so discovery
 /// stays consistent; select from every language, then fetch that exact track
 /// without silent fallback.
-pub async fn fetch_subtitle(video: &OnlineVideo, out_dir: &Path) -> Result<Option<SubtitleFetch>> {
+pub async fn fetch_subtitle(
+    video: &OnlineVideo,
+    out_dir: &Path,
+    control: &crate::dispatch::TaskControl,
+) -> Result<Option<SubtitleFetch>> {
     use crate::subtitle::SubtitleEvidence;
     match &video.subtitles {
         SubtitleEvidence::Found { tracks, .. } => {
@@ -665,9 +672,15 @@ pub async fn fetch_subtitle(video: &OnlineVideo, out_dir: &Path) -> Result<Optio
             let track = tracks.first().context(crate::tr!(
                 "字幕列表为空，请重新读取字幕 / Subtitle list is empty; probe subtitles again"
             ))?;
-            fetch_selected_subtitle(&video.meta.webpage_url, &video.identity, track, out_dir)
-                .await
-                .map(Some)
+            fetch_selected_subtitle(
+                &video.meta.webpage_url,
+                &video.identity,
+                track,
+                out_dir,
+                control,
+            )
+            .await
+            .map(Some)
         }
         SubtitleEvidence::Failed { message } => {
             anyhow::bail!("读取字幕失败 / Could not read subtitles: {message}")
@@ -701,6 +714,7 @@ pub async fn fetch_selected_subtitle(
     source_identity: &str,
     track: &crate::subtitle::SubtitleTrack,
     out_dir: &Path,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<SubtitleFetch> {
     use crate::subtitle::SubtitleOrigin;
     let SubtitleOrigin::Online {
@@ -754,7 +768,7 @@ pub async fn fetch_selected_subtitle(
         } else {
             "--write-subs"
         });
-        let out = run_output(ytdlp_url(&mut cmd, url))
+        let out = run_output(ytdlp_url(&mut cmd, url), control)
             .await
             .map_err(|error| crate::auth::with_bilibili_login_tip(url, error))?;
         match parse_online_probe(&out.stdout, url, &String::from_utf8_lossy(&out.stderr))? {
@@ -795,7 +809,13 @@ pub fn sidecar_subtitle(video: &Path) -> Option<SubtitleFetch> {
 
 /// 下载视频到 `dest`（默认 1080p 上限，mp4 合并）。
 /// 调用方先处理已有文件（校验或归档）：这里绝不把未校验的旧文件当作下载结果。
-pub async fn download(url: &str, dest: &Path, max_height: u32, verbose: bool) -> Result<()> {
+pub async fn download(
+    url: &str,
+    dest: &Path,
+    max_height: u32,
+    verbose: bool,
+    control: &crate::dispatch::TaskControl,
+) -> Result<()> {
     ensure!(
         !dest.exists(),
         crate::tr!(
@@ -812,13 +832,13 @@ pub async fn download(url: &str, dest: &Path, max_height: u32, verbose: bool) ->
     let mut next_delay = None;
     let mut bilibili_412_retries = 0;
     for attempt in 0..DOWNLOAD_ATTEMPTS {
-        crate::dispatch::check_control()?;
+        control.check()?;
         if attempt > 0 {
             tracing::warn!(attempt, "视频下载失败，正在重试 / Retrying video download");
             let delay = next_delay.unwrap_or(DOWNLOAD_RETRY_DELAY);
             tokio::select! {
                 _ = tokio::time::sleep(delay) => {}
-                e = crate::dispatch::watch_control() => return Err(e),
+                e = control.watch() => return Err(e),
             }
         }
         let mut cmd = Command::new(crate::ytdlp::program());
@@ -848,7 +868,7 @@ pub async fn download(url: &str, dest: &Path, max_height: u32, verbose: bool) ->
                 status.map_err(|e| crate::auth::with_bilibili_login_tip(url, e))
             }
             // 取消/暂停：drop run_download 分支即 kill_on_drop 终止当前 yt-dlp
-            e = crate::dispatch::watch_control() => return Err(e),
+            e = control.watch() => return Err(e),
         };
         match outcome {
             Ok(()) => {
@@ -951,7 +971,10 @@ pub const BILIBILI_412_DESKTOP_HINT: &str =
 
 pub const BILIBILI_412_HINT: &str = "B 站暂时限制了访问。请稍后重试；若持续失败，运行 course2md --login bilibili 重新登录，或导入本地视频。 / Bilibili is temporarily limiting access. Retry later; if it keeps failing, run course2md --login bilibili to log in again, or import a local video.";
 
-async fn run_output(cmd: &mut Command) -> Result<std::process::Output> {
+async fn run_output(
+    cmd: &mut Command,
+    control: &crate::dispatch::TaskControl,
+) -> Result<std::process::Output> {
     let mut retries = 0;
     loop {
         let out = cmd
@@ -971,7 +994,7 @@ async fn run_output(cmd: &mut Command) -> Result<std::process::Output> {
             );
             tokio::select! {
                 _ = tokio::time::sleep(delay) => {}
-                e = crate::dispatch::watch_control() => return Err(e),
+                e = control.watch() => return Err(e),
             }
             continue;
         }
@@ -1068,7 +1091,7 @@ async fn run_download(cmd: &mut Command) -> Result<()> {
 mod tests {
     #[cfg(unix)]
     async fn run(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {
-        let out = super::run_output(cmd).await?;
+        let out = super::run_output(cmd, &crate::dispatch::TaskControl::default()).await?;
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
@@ -1378,10 +1401,13 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires yt-dlp and Bilibili network access"]
     async fn live_example_metadata() {
-        let meta = probe_video("https://www.bilibili.com/video/BV1pb8o6yE8f")
-            .await
-            .unwrap()
-            .meta;
+        let meta = probe_video(
+            "https://www.bilibili.com/video/BV1pb8o6yE8f",
+            &crate::dispatch::TaskControl::default(),
+        )
+        .await
+        .unwrap()
+        .meta;
         assert!(meta.title.contains("欢迎来到未来"));
         assert!(meta.duration > 0.);
         assert!(!meta.uploader.is_empty());

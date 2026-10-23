@@ -168,10 +168,10 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
     }
     match cli.command {
         Some(Command::RunTask) => {
-            course2md::dispatch::watch_parent();
+            let parent = course2md::dispatch::ParentProcess::current();
             let request = course2md::execution::Request::read(std::io::stdin().lock())?;
             Ok(course2md::runtime::block_on(course2md::execution::run(
-                request,
+                request, parent,
             ))??)
         }
         Some(Command::Models { cmd }) => match cmd {
@@ -207,7 +207,10 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             }
             ModelsCmd::Download { dir, json } => {
                 let root = configured_model_dir(dir.as_deref())?;
-                course2md::runtime::block_on(models::download_models(&root))??;
+                course2md::runtime::block_on(models::download_models(
+                    &root,
+                    &course2md::dispatch::TaskControl::default(),
+                ))??;
                 progress::emit(&progress::Event::ModelReady {
                     operation: progress::ModelOperation::Download,
                     dir: root.clone(),
@@ -498,12 +501,12 @@ fn summarize_note(
         ))?
         .to_path_buf();
     let work = course_dir.join(".work").join(&task_id);
-    let _work = execution::enter_work_dir(
+    let work_dir = execution::enter_work_dir(
         &work,
         &serde_json::json!({"source_id":base.source_id,"task_id":task_id,"settings":settings,"base_version":base.version_id}),
-        None,
-        &Default::default(),
+        Default::default(),
     )?;
+    let control = work_dir.control();
     let target = artifact::Target {
         task_id: task_id.clone(),
         course_id: base.course_id.clone(),
@@ -525,6 +528,7 @@ fn summarize_note(
         &file.llm,
         &speech,
         &document.meta,
+        control,
     ))??;
     let mut outcomes = base.outcomes;
     outcomes.summary = artifact::Outcome::succeeded();
@@ -537,6 +541,7 @@ fn summarize_note(
         Some(&summary),
         &[],
         outcomes,
+        control,
     ))??;
     if let Some(out) = out {
         let file = out.join(format!(
