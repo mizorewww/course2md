@@ -285,9 +285,12 @@ pub fn save_journal(path: &Path, journal: &Journal) -> Result<()> {
     )
 }
 
+/// Makes a directory entry durable; Windows has no directory fsync.
 fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     std::fs::File::open(path)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
