@@ -11,6 +11,7 @@
 | `component-switch-geometry.patch` | Optional absolute/rem switch track height with proportional thumb and inset, plus the opt-in `reference_geometry()` (52×32 track). Default sizes are unchanged. |
 | `component-button-text-size.patch` | Opt-in `label_text_size` for button labels. |
 | `component-menu-style.patch` | Opt-in global `MenuStyle` for popup, dropdown and context menus: container and row geometry, one highlight layer, tonal checked rows with a trailing check, danger items, hairline separators, group labels and a fade-in entrance. Without the global, menus are unchanged. |
+| `component-selectable-text-highlights.patch` | Opt-in `highlights` style runs and an `on_layout` measurement callback for `SelectableText`, used by reader find; runs outside the current selection skip collecting the selected text. |
 | `zed-metal-frame-lifetime.patch` | One autorelease pool per Metal frame so drawables are returned promptly. |
 | `zed-metal-present-stages.patch` | Opt-in profiler spans for each Metal presentation stage; compiled out of non-profiler builds. |
 

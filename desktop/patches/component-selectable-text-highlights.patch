@@ -1,0 +1,90 @@
+diff --git a/crates/base/src/selectable_text.rs b/crates/base/src/selectable_text.rs
+index 0a2a4319..7f68dfee 100644
+--- a/crates/base/src/selectable_text.rs
++++ b/crates/base/src/selectable_text.rs
+@@ -1,9 +1,10 @@
+ use std::ops::Range;
+ 
+ use gpui::{
+-    App, BorderStyle, Bounds, Corners, Edges, Element, ElementId, GlobalElementId, Hitbox,
+-    HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, Point,
+-    SharedString, StyledText, TextStyleRefinement, Window, transparent_black,
++    App, BorderStyle, Bounds, Corners, Edges, Element, ElementId, GlobalElementId,
++    HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId,
++    PaintQuad, Pixels, Point, SharedString, StyledText, TextLayout, TextStyleRefinement, Window,
++    transparent_black,
+ };
+ 
+ use crate::{TextSelection, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
+@@ -24,6 +25,7 @@ pub struct SelectableText {
+     document_order: u64,
+     text_style: Option<TextStyleRefinement>,
+     selection_color: Option<Hsla>,
++    on_layout: Option<Box<dyn FnOnce(&TextLayout)>>,
+ }
+ 
+ impl SelectableText {
+@@ -50,6 +52,7 @@ impl SelectableText {
+             document_order: 0,
+             text_style: None,
+             selection_color: None,
++            on_layout: None,
+         }
+     }
+ 
+@@ -72,6 +75,21 @@ impl SelectableText {
+         self
+     }
+ 
++    /// Paints style runs, such as find matches, over byte ranges of the text.
++    pub fn highlights(mut self, highlights: Vec<(Range<usize>, HighlightStyle)>) -> Self {
++        if !highlights.is_empty() {
++            self.styled_text = StyledText::new(self.text.clone()).with_highlights(highlights);
++        }
++        self
++    }
++
++    /// Runs `callback` with the laid-out text once its bounds are known, so a
++    /// caller can measure positions inside the run during prepaint.
++    pub fn on_layout(mut self, callback: impl FnOnce(&TextLayout) + 'static) -> Self {
++        self.on_layout = Some(Box::new(callback));
++        self
++    }
++
+     fn paint_selection(
+         layout: &gpui::TextLayout,
+         range: Range<usize>,
+@@ -187,6 +205,9 @@ impl Element for SelectableText {
+     ) -> Self::PrepaintState {
+         self.styled_text
+             .prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
++        if let Some(callback) = self.on_layout.take() {
++            callback(self.styled_text.layout());
++        }
+         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+         handle.register(
+             TextSelectionRegistration::new(hitbox.clone(), bounds)
+@@ -209,7 +230,11 @@ impl Element for SelectableText {
+         cx: &mut App,
+     ) {
+         let layout = self.styled_text.layout().clone();
+-        let selected_text_before = TextSelection::selected_text(window, cx);
++        // Only a participant in the current selection can change its copied
++        // text; long documents skip collecting it for every other run.
++        let participating = handle.snapshot(cx).is_some() || handle.has_local_selection(cx);
++        let selected_text_before =
++            participating.then(|| TextSelection::selected_text(window, cx));
+         let projection = handle.update_runs(
+             &[
+                 TextSelectionRun::new(self.text.clone(), layout.clone(), bounds)
+@@ -217,7 +242,9 @@ impl Element for SelectableText {
+             ],
+             cx,
+         );
+-        if selected_text_before != TextSelection::selected_text(window, cx) {
++        if let Some(before) = selected_text_before
++            && before != TextSelection::selected_text(window, cx)
++        {
+             window.refresh();
+         }
+         let color = self

@@ -1017,101 +1017,21 @@ fn reader_outline(preview: &notes::Preview) -> Vec<(usize, String, Option<f64>)>
         .collect::<Vec<_>>();
     nav::content_outline(&headings, &summary_outline(preview))
 }
-/// Selectable paragraph text with word-level find highlights. Selection plumbing
-/// mirrors gpui_base::SelectableText (which accepts no highlight runs).
-struct ReaderText {
-    id: ElementId,
-    handle: Option<gpui_base::TextSelectionHandle>,
-    text: SharedString,
-    styled_text: StyledText,
+/// Selectable note text with find highlights. A search target also records
+/// the current match's line while the run is laid out, so find can scroll to it.
+fn reader_text(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
     document_order: u64,
+    highlights: Vec<(Range<usize>, HighlightStyle)>,
     search_target: Option<ReaderSearchTarget>,
-}
-
-struct ReaderSearchTarget {
-    block: usize,
-    byte: usize,
-    positions: Rc<RefCell<nav::ReadingLayout>>,
-}
-impl ReaderText {
-    fn new(
-        id: impl Into<ElementId>,
-        text: impl Into<SharedString>,
-        document_order: u64,
-        highlights: Vec<(Range<usize>, HighlightStyle)>,
-    ) -> Self {
-        let text = text.into();
-        let styled = StyledText::new(text.clone());
-        ReaderText {
-            id: id.into(),
-            handle: None,
-            styled_text: if highlights.is_empty() {
-                styled
-            } else {
-                styled.with_highlights(highlights)
-            },
-            text,
-            document_order,
-            search_target: None,
-        }
-    }
-
-    fn with_search_target(mut self, target: Option<ReaderSearchTarget>) -> Self {
-        self.search_target = target;
-        self
-    }
-}
-impl IntoElement for ReaderText {
-    type Element = Self;
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-impl Element for ReaderText {
-    type RequestLayoutState = gpui_base::TextSelectionHandle;
-    type PrepaintState = Hitbox;
-    fn id(&self) -> Option<ElementId> {
-        Some(self.id.clone())
-    }
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-    fn request_layout(
-        &mut self,
-        global_id: Option<&GlobalElementId>,
-        inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let handle = self.handle.clone().unwrap_or_else(|| {
-            window.with_element_state(
-                global_id.expect("ReaderText must have a stable element id"),
-                |retained: Option<gpui_base::TextSelectionHandle>, _| {
-                    let handle = retained.unwrap_or_else(|| {
-                        gpui_base::TextSelectionHandle::new(self.text.clone(), cx)
-                    });
-                    (handle.clone(), handle)
-                },
-            )
-        });
-        let (layout_id, ()) = self
-            .styled_text
-            .request_layout(global_id, inspector_id, window, cx);
-        (layout_id, handle)
-    }
-    fn prepaint(
-        &mut self,
-        global_id: Option<&GlobalElementId>,
-        inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        handle: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        self.styled_text
-            .prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
-        if let Some(target) = &self.search_target {
-            let layout = self.styled_text.layout();
+) -> gpui_base::SelectableText {
+    let text = gpui_base::SelectableText::new(id, text)
+        .document_order(document_order)
+        .selection_color(color(SELECTION).into())
+        .highlights(highlights);
+    match search_target {
+        Some(target) => text.on_layout(move |layout| {
             if let Some(position) = layout.position_for_index(target.byte) {
                 // Window coordinates: see `ReadingLayout`.
                 target.positions.borrow_mut().record_search_line(
@@ -1121,100 +1041,15 @@ impl Element for ReaderText {
                     f32::from(layout.line_height()),
                 );
             }
-        }
-        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        handle.register(
-            gpui_base::TextSelectionRegistration::new(hitbox.clone(), bounds)
-                .with_document_order(self.document_order)
-                .with_text_bounds(vec![bounds]),
-            window,
-            cx,
-        );
-        hitbox
-    }
-    fn paint(
-        &mut self,
-        global_id: Option<&GlobalElementId>,
-        inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        handle: &mut Self::RequestLayoutState,
-        _: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let layout = self.styled_text.layout().clone();
-        // Only a participant in the current selection can change its copied text.
-        let participating = handle.snapshot(cx).is_some() || handle.has_local_selection(cx);
-        let selected_text_before =
-            participating.then(|| gpui_base::TextSelection::selected_text(window, cx));
-        let projection = handle.update_runs(
-            &[
-                gpui_base::TextSelectionRun::new(self.text.clone(), layout.clone(), bounds)
-                    .with_document_order(self.document_order),
-            ],
-            cx,
-        );
-        if let Some(before) = selected_text_before
-            && before != gpui_base::TextSelection::selected_text(window, cx)
-        {
-            window.refresh();
-        }
-        for range in projection.ranges().iter().flatten().cloned() {
-            paint_text_selection(&layout, range, window);
-        }
-        self.styled_text.paint(
-            global_id,
-            inspector_id,
-            bounds,
-            &mut (),
-            &mut (),
-            window,
-            cx,
-        );
+        }),
+        None => text,
     }
 }
-/// Quad painting identical to gpui_base::SelectableText's selection pass.
-fn paint_text_selection(layout: &gpui::TextLayout, range: Range<usize>, window: &mut Window) {
-    let (Some(start), Some(end)) = (
-        layout.position_for_index(range.start),
-        layout.position_for_index(range.end),
-    ) else {
-        return;
-    };
-    let line_height = layout.line_height();
-    let bounds = layout.bounds();
-    let quads = if start.y == end.y {
-        vec![Bounds::from_corners(
-            start,
-            Point::new(end.x, end.y + line_height),
-        )]
-    } else {
-        let mut quads = vec![Bounds::from_corners(
-            start,
-            Point::new(bounds.right(), start.y + line_height),
-        )];
-        if end.y > start.y + line_height {
-            quads.push(Bounds::from_corners(
-                Point::new(bounds.left(), start.y + line_height),
-                Point::new(bounds.right(), end.y),
-            ));
-        }
-        quads.push(Bounds::from_corners(
-            Point::new(bounds.left(), end.y),
-            Point::new(end.x, end.y + line_height),
-        ));
-        quads
-    };
-    for quad in quads {
-        window.paint_quad(PaintQuad {
-            bounds: quad,
-            background: color(SELECTION).into(),
-            corner_radii: gpui::Corners::default(),
-            border_widths: gpui::Edges::default(),
-            border_color: transparent_black(),
-            border_style: gpui::BorderStyle::default(),
-        });
-    }
+
+struct ReaderSearchTarget {
+    block: usize,
+    byte: usize,
+    positions: Rc<RefCell<nav::ReadingLayout>>,
 }
 fn paragraph(
     id: impl Into<ElementId>,
@@ -1235,9 +1070,7 @@ fn paragraph(
     if crate::math::has_math(&text) {
         return view.child(math_paragraph(&text, TEXT_READER, color(INK).into()));
     }
-    view.child(
-        ReaderText::new(id, text, order as u64, highlights).with_search_target(search_target),
-    )
+    view.child(reader_text(id, text, order as u64, highlights, search_target))
 }
 
 /// Prose with formulas. GPUI text cannot hold inline elements, so the prose is
@@ -1708,13 +1541,13 @@ fn render_note_section(flow: &NoteFlow, heading: usize, end: usize, ordinal: usi
                 .child(if marks.is_empty() {
                     time.into_any_element()
                 } else {
-                    ReaderText::new(
+                    reader_text(
                         ("reader-heading-marks", heading),
                         SharedString::from(time),
                         heading as u64,
                         marks,
+                        flow.search_target(heading),
                     )
-                    .with_search_target(flow.search_target(heading))
                     .into_any_element()
                 })
         }))
@@ -1781,13 +1614,13 @@ fn render_note_heading(
                 .text_size(TEXT_TITLE)
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(
-                    ReaderText::new(
+                    reader_text(
                         ("reader-heading-marks", index),
                         text.clone(),
                         index as u64,
                         marks,
-                    )
-                    .with_search_target(flow.search_target(index)),
+                        flow.search_target(index),
+                    ),
                 )
                 .into_any_element(),
         )
