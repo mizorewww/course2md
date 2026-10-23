@@ -311,63 +311,7 @@ async fn reprocess(
         crate::llm::validate(&cfg.llm)?;
     }
     if let Some(prior) = prior_work {
-        let identity: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(prior.join("task-identity.json"))?)?;
-        anyhow::ensure!(
-            identity["source_id"].as_str() == Some(request.source_id.as_str()),
-            crate::tr!("旧进度与此视频来源不符 / Prior work belongs to another source")
-        );
-        anyhow::ensure!(
-            identity["task_id"]
-                .as_str()
-                .is_none_or(|id| id == base.task_id),
-            crate::tr!("旧进度与原笔记任务不符 / Prior work belongs to another task")
-        );
-        let ledger_dir = cfg.out_dir.join("requests");
-        std::fs::create_dir_all(&ledger_dir)?;
-        for mut receipt in crate::dispatch::receipts(prior)? {
-            let needed = Component::parse(&receipt.purpose).is_some_and(|c| {
-                matches!(c, Component::Proofreading | Component::Summary) && has(c)
-            });
-            let matching_service = request.service_versions.get("llm").map_or(
-                receipt
-                    .service_version
-                    .starts_with(crate::dispatch::SNAPSHOT_PREFIX),
-                |version| version == &receipt.service_version,
-            );
-            if needed && matching_service && execution::valid_id(&receipt.stable_id) {
-                let destination = ledger_dir.join(format!("{}.json", receipt.stable_id));
-                if !destination.exists() {
-                    // This new task explicitly requests another attempt at selected
-                    // failed components. Persist authorization only while importing;
-                    // restarting this task must never refresh a consumed authorization.
-                    receipt.retry_authorized = matches!(
-                        receipt.state,
-                        crate::dispatch::State::Failed | crate::dispatch::State::Rejected
-                    )
-                    .then(|| receipt.request_id.clone());
-                    crate::checkpoint::atomic_write(
-                        &destination,
-                        &serde_json::to_vec_pretty(&receipt)?,
-                    )?;
-                }
-            }
-        }
-        if !cfg.media_path().exists() {
-            let (prior, media, marker) = (
-                prior.to_path_buf(),
-                cfg.media_path(),
-                cfg.out_dir.join("media.sha256"),
-            );
-            blocking(move || {
-                if verified_file(&prior.join("media.mp4"), &prior.join("media.sha256"))? {
-                    std::fs::copy(prior.join("media.mp4"), &media)?;
-                    save_file_digest(&media, &marker)?;
-                }
-                Ok(())
-            })
-            .await?;
-        }
+        import_prior_work(request, cfg, &base, components, prior).await?;
     }
     // Copy verified base images into a separate namespace; a failed new screenshot pass
     // cannot mix old and new frames or mutate the old version through shared hard links.
@@ -894,6 +838,77 @@ async fn run_prepared(
                 "提示：运行 course2md llm setup 可开启 AI 校对与摘要 / Tip: run course2md llm setup to enable AI proofreading and summaries"
             );
         }
+    }
+    Ok(())
+}
+
+/// Reuses what an earlier task for the same note already paid for: its
+/// receipts for the requested AI components (each failed one authorized for
+/// one more attempt) and its verified video download.
+async fn import_prior_work(
+    request: &execution::Request,
+    cfg: &PipelineConfig,
+    base: &artifact::Manifest,
+    components: &[execution::Component],
+    prior: &Path,
+) -> Result<()> {
+    use execution::Component;
+    let has = |component: Component| components.contains(&component);
+    let identity: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(prior.join("task-identity.json"))?)?;
+    anyhow::ensure!(
+        identity["source_id"].as_str() == Some(request.source_id.as_str()),
+        crate::tr!("旧进度与此视频来源不符 / Prior work belongs to another source")
+    );
+    anyhow::ensure!(
+        identity["task_id"]
+            .as_str()
+            .is_none_or(|id| id == base.task_id),
+        crate::tr!("旧进度与原笔记任务不符 / Prior work belongs to another task")
+    );
+    let ledger_dir = cfg.out_dir.join("requests");
+    std::fs::create_dir_all(&ledger_dir)?;
+    for mut receipt in crate::dispatch::receipts(prior)? {
+        let needed = Component::parse(&receipt.purpose)
+            .is_some_and(|c| matches!(c, Component::Proofreading | Component::Summary) && has(c));
+        let matching_service = request.service_versions.get("llm").map_or(
+            receipt
+                .service_version
+                .starts_with(crate::dispatch::SNAPSHOT_PREFIX),
+            |version| version == &receipt.service_version,
+        );
+        if needed && matching_service && execution::valid_id(&receipt.stable_id) {
+            let destination = ledger_dir.join(format!("{}.json", receipt.stable_id));
+            if !destination.exists() {
+                // This new task explicitly requests another attempt at selected
+                // failed components. Persist authorization only while importing;
+                // restarting this task must never refresh a consumed authorization.
+                receipt.retry_authorized = matches!(
+                    receipt.state,
+                    crate::dispatch::State::Failed | crate::dispatch::State::Rejected
+                )
+                .then(|| receipt.request_id.clone());
+                crate::checkpoint::atomic_write(
+                    &destination,
+                    &serde_json::to_vec_pretty(&receipt)?,
+                )?;
+            }
+        }
+    }
+    if !cfg.media_path().exists() {
+        let (prior, media, marker) = (
+            prior.to_path_buf(),
+            cfg.media_path(),
+            cfg.out_dir.join("media.sha256"),
+        );
+        blocking(move || {
+            if verified_file(&prior.join("media.mp4"), &prior.join("media.sha256"))? {
+                std::fs::copy(prior.join("media.mp4"), &media)?;
+                save_file_digest(&media, &marker)?;
+            }
+            Ok(())
+        })
+        .await?;
     }
     Ok(())
 }
