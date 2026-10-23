@@ -1,7 +1,6 @@
 //! Model evidence is loaded in the background; preparation uses the existing model job.
 use super::{
     DetailGroup, settings_detail_group, settings_detail_row, settings_status_row, settings_value,
-    text,
 };
 use crate::theme::*;
 use crate::*;
@@ -1148,7 +1147,7 @@ impl Desktop {
                 group.row(
                     SharedString::from(format!("{id}-label")),
                     label,
-                    text(id, value),
+                    accessible_text(id, value),
                 )
             },
         );

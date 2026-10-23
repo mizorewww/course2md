@@ -39,12 +39,12 @@ impl Desktop {
                 v_flex()
                     .min_w_0()
                     .child(
-                        text("service-editor-parent", parent)
+                        accessible_text("service-editor-parent", parent)
                             .text_size(TEXT_AUX)
                             .text_color(color(GRAY)),
                     )
                     .child(
-                        text("service-editor-inline-title", title)
+                        accessible_text("service-editor-inline-title", title)
                             .role(Role::Heading)
                             .text_size(rems(24. / 14.))
                             .line_height(rems(32. / 14.)),
@@ -298,7 +298,7 @@ impl Desktop {
                     .gap_2()
                     .items_center()
                     .child(
-                        text(
+                        accessible_text(
                             ("service-only-this-note", purpose as usize),
                             course2md::tr!("仅用于这次笔记"),
                         )
@@ -319,7 +319,7 @@ impl Desktop {
         }
         if let Some((message, true)) = self.settings_ui.feedback.get(&PreferenceGroup::Services) {
             view = view.child(
-                text(("task-service-error", purpose as usize), message.clone())
+                accessible_text(("task-service-error", purpose as usize), message.clone())
                     .text_sm()
                     .text_color(color(DANGER)),
             );
@@ -338,7 +338,7 @@ impl Desktop {
                             .flex_1()
                             .min_w_0()
                             .gap_1()
-                            .child(text(
+                            .child(accessible_text(
                                 ("default-service-label", purpose as usize),
                                 if purpose == ServicePurpose::Ai {
                                     course2md::tr!("AI 服务")
@@ -347,7 +347,7 @@ impl Desktop {
                                 },
                             ))
                             .child(
-                                text(
+                                accessible_text(
                                     ("default-service-missing", purpose as usize),
                                     if purpose == ServicePurpose::Ai {
                                         course2md::tr!("尚未添加，校对和摘要需要先添加一个服务")
@@ -740,7 +740,7 @@ impl Desktop {
         // One card as on the canvas: the type select, the fields that type
         // needs, then whether new notes use this service.
         let hint = |id: &'static str, message: String| {
-            text(id, message)
+            accessible_text(id, message)
                 .px(rems(16. / 14.))
                 .text_size(TEXT_SETTINGS_AUX)
                 .text_color(color(GRAY))
@@ -959,7 +959,7 @@ impl Desktop {
         if let Some(status) = &editor.status
             && !busy
         {
-            view = view.child(text("service-editor-status", status.clone()).text_sm());
+            view = view.child(accessible_text("service-editor-status", status.clone()).text_sm());
         }
         // As on the canvas: the form's actions sit together at its trailing edge.
         let adding = inline && editor.form.draft.based_on.is_none();
@@ -1156,7 +1156,7 @@ impl Desktop {
                     .items_center()
                     .child(crate::motion::spinner("service-test-busy", cx))
                     .child(
-                        text(
+                        accessible_text(
                             "service-test-busy-label",
                             editor
                                 .status
@@ -1196,7 +1196,10 @@ impl Desktop {
                 .when(
                     evidence.outcome != preferences::TestOutcome::Passed,
                     |view| {
-                        view.child(text("service-test-result", evidence.message.clone()).text_sm())
+                        view.child(
+                            accessible_text("service-test-result", evidence.message.clone())
+                                .text_sm(),
+                        )
                     },
                 );
             if evidence.outcome == preferences::TestOutcome::Passed
@@ -1204,7 +1207,7 @@ impl Desktop {
                 && awaiting_binding
             {
                 result = result.child(
-                    text(
+                    accessible_text(
                         "service-tested-save-state",
                         course2md::tr!("本次笔记的选择尚未保存"),
                     )
@@ -1212,7 +1215,7 @@ impl Desktop {
                 );
             }
             result = result.child(
-                text(
+                accessible_text(
                     "service-test-time",
                     course2md::tr!(
                         "测试时间：{}",
@@ -1243,7 +1246,7 @@ impl Desktop {
                 let details = v_flex()
                     .gap_2()
                     .children(evidence.details.iter().enumerate().map(|(index, detail)| {
-                        text(("service-test-detail", index), detail.clone())
+                        accessible_text(("service-test-detail", index), detail.clone())
                             .text_sm()
                             .text_color(color(GRAY))
                     }));
@@ -1303,7 +1306,7 @@ impl Desktop {
             .border_color(color(CARD_LINE))
             .when_some(fixed_test_failure, |footer, (kind, evidence)| {
                 footer.child(
-                    text(
+                    accessible_text(
                         "service-test-fixed-reason",
                         course2md::tr!(
                             "{}：{}{}",
@@ -1333,7 +1336,7 @@ impl Desktop {
             })
             .when(configuration_saved && repair_task, |footer| {
                 footer.child(
-                    text(
+                    accessible_text(
                         "service-config-saved-only",
                         course2md::tr!("服务配置已保存，尚未开始补做"),
                     )
@@ -1802,10 +1805,13 @@ impl Desktop {
             let id = version_id.clone();
             dialog
                 .title(course2md::tr!("更新默认服务"))
-                .child(text("default-service-previous", previous.clone()))
-                .child(text("default-service-next", next.clone()))
+                .child(accessible_text(
+                    "default-service-previous",
+                    previous.clone(),
+                ))
+                .child(accessible_text("default-service-next", next.clone()))
                 .child(
-                    text(
+                    accessible_text(
                         "default-service-consequence",
                         course2md::tr!("仅影响以后生成的笔记"),
                     )
@@ -1887,12 +1893,12 @@ impl Desktop {
             let id = service_id.clone();
             dialog
                 .title(course2md::tr!("删除此服务"))
-                .child(text(
+                .child(accessible_text(
                     "delete-service-consequence",
                     course2md::tr!("将删除此服务配置，已有笔记不受影响"),
                 ))
                 .when(affected > 0, |dialog| {
-                    dialog.child(text(
+                    dialog.child(accessible_text(
                         "delete-service-affected",
                         course2md::tr!(
                             "有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续",

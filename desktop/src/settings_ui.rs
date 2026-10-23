@@ -181,14 +181,11 @@ impl State {
     }
 }
 
-pub(crate) fn text(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Stateful<Div> {
-    theme::accessible_text(id, value)
-}
 pub(super) fn field_label(
     id: impl Into<ElementId>,
     value: impl Into<SharedString>,
 ) -> Stateful<Div> {
-    text(id, value)
+    accessible_text(id, value)
         .text_size(TEXT_SETTINGS_BODY)
         .font_weight(FontWeight::SEMIBOLD)
 }
@@ -204,7 +201,7 @@ fn setting_hint(id: &ElementId, hint: &'static str) -> Stateful<Div> {
 
 fn setting_label(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Div {
     div().child(
-        text(id, value)
+        accessible_text(id, value)
             .text_size(TEXT_SETTINGS_BODY)
             .text_color(color(GRAY)),
     )
@@ -283,7 +280,7 @@ pub(super) fn settings_stacked_row(
             .w_full()
             .min_w_0()
             .gap_3()
-            .child(text(id.clone(), label).text_size(TEXT_SETTINGS_BODY))
+            .child(accessible_text(id.clone(), label).text_size(TEXT_SETTINGS_BODY))
             .child(control)
             .when(!hint.is_empty(), |view| {
                 view.child(setting_hint(&id, hint).px(rems(12. / 14.)))
@@ -408,7 +405,7 @@ impl DetailGroup {
                 .gap_x_4()
                 .gap_y_1()
                 .child(
-                    text(id, label)
+                    accessible_text(id, label)
                         .flex_basis(rems(180. / 14.))
                         .flex_shrink_0()
                         .text_size(TEXT_SETTINGS_AUX)
@@ -498,7 +495,7 @@ impl AccountCard {
             .items_center()
             .flex_wrap()
             .child(
-                text(SharedString::from(format!("{id}-heading")), self.title)
+                accessible_text(SharedString::from(format!("{id}-heading")), self.title)
                     .text_size(TEXT_SETTINGS_BODY)
                     .font_weight(FontWeight::SEMIBOLD),
             )
@@ -510,7 +507,7 @@ impl AccountCard {
             })
             .child(badge(kind).text_size(TEXT_SETTINGS_AUX).child(label));
         let line = move |suffix: &str, message: String, error: bool| {
-            text(SharedString::from(format!("{id}-{suffix}")), message)
+            accessible_text(SharedString::from(format!("{id}-{suffix}")), message)
                 .text_size(TEXT_SETTINGS_AUX)
                 .text_color(color(if error { DANGER } else { GRAY }))
         };
@@ -611,7 +608,7 @@ pub(super) fn settings_value(
     id: impl Into<ElementId>,
     value: impl Into<SharedString>,
 ) -> Stateful<Div> {
-    text(id, value)
+    accessible_text(id, value)
         .w_full()
         .min_w_0()
         .whitespace_normal()
@@ -909,7 +906,7 @@ impl Desktop {
                 })
                 .when_some(error, |view, error| {
                     view.child(
-                        text(("setting-error", index), error)
+                        accessible_text(("setting-error", index), error)
                             .px(rems(16. / 14.))
                             .text_size(TEXT_SETTINGS_AUX)
                             .text_color(color(DANGER)),
@@ -957,7 +954,7 @@ impl Desktop {
                     })
                     .when_some(error, |view, error| {
                         view.child(
-                            text(("setting-error", index), error)
+                            accessible_text(("setting-error", index), error)
                                 .text_size(TEXT_SETTINGS_AUX)
                                 .text_color(color(DANGER)),
                         )
@@ -1228,7 +1225,7 @@ impl Desktop {
                         .rounded(RADIUS_SMALL)
                         .bg(color(DANGER_BG))
                         .child(
-                            text(("settings-failed-group", target.index()), message)
+                            accessible_text(("settings-failed-group", target.index()), message)
                                 .role(Role::Alert)
                                 .flex_1()
                                 .min_w_0()
@@ -1300,7 +1297,7 @@ impl Desktop {
                                                     self.settings_tab == SettingsTab::Generation,
                                                     |view| {
                                                         view.child(
-                                                            text(
+                                                            accessible_text(
                                                                 "generation-default-explanation",
                                                                 course2md::tr!(
                                                                     "这里是长期默认值，主页的「处理选项」可以只对单次生效"
@@ -1490,7 +1487,7 @@ impl Desktop {
                             .gap_2()
                             .items_center()
                             .flex_wrap()
-                            .child(text(
+                            .child(accessible_text(
                                 SharedString::from(format!("saved-service-title-{id}")),
                                 version.config.name.clone(),
                             ))
@@ -1503,7 +1500,7 @@ impl Desktop {
                             }),
                     )
                     .child(
-                        text(
+                        accessible_text(
                             SharedString::from(format!("saved-service-description-{id}")),
                             detail.join(" · "),
                         )
@@ -1513,7 +1510,7 @@ impl Desktop {
                     )
                     .when_some(outdated_default, |column, default| {
                         column.child(
-                            text(
+                            accessible_text(
                                 SharedString::from(format!("saved-service-old-default-{id}")),
                                 course2md::tr!(
                                     "以后生成的笔记仍使用修改前的配置 · {}",
@@ -1527,7 +1524,7 @@ impl Desktop {
                     })
                     .when_some(notice, |column, (message, failed)| {
                         column.child(
-                            text(
+                            accessible_text(
                                 SharedString::from(format!("saved-service-notice-{id}")),
                                 message,
                             )
@@ -1542,7 +1539,7 @@ impl Desktop {
                     })
                     .when(!failures.is_empty(), |column| {
                         column.child(
-                            text(
+                            accessible_text(
                                 SharedString::from(format!("saved-service-test-status-{id}")),
                                 failures.join("\n"),
                             )
@@ -2136,11 +2133,18 @@ impl Desktop {
                         })),
                     )
                     .child(
-                        text(("settings-group-feedback", group as usize), message.clone())
-                            .flex_1()
-                            .min_w_0()
-                            .text_size(TEXT_SETTINGS_BODY)
-                            .text_color(color(if error { DANGER } else { GRAY })),
+                        accessible_text(
+                            ("settings-group-feedback", group as usize),
+                            message.clone(),
+                        )
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(TEXT_SETTINGS_BODY)
+                        .text_color(color(if error {
+                            DANGER
+                        } else {
+                            GRAY
+                        })),
                     ),
             ));
             let has_pending = match group {
@@ -2208,12 +2212,15 @@ impl Desktop {
                             .overflow_y_scroll()
                             .p_2()
                             .child(
-                                text(("settings-feedback-technical", group as usize), detail)
-                                    .w_full()
-                                    .min_w_0()
-                                    .whitespace_normal()
-                                    .text_size(TEXT_SETTINGS_AUX)
-                                    .text_color(color(GRAY)),
+                                accessible_text(
+                                    ("settings-feedback-technical", group as usize),
+                                    detail,
+                                )
+                                .w_full()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .text_size(TEXT_SETTINGS_AUX)
+                                .text_color(color(GRAY)),
                             ),
                     );
                 }
@@ -2484,7 +2491,7 @@ impl Desktop {
                                 .min_w_0()
                                 .gap_4()
                                 .items_center()
-                                .child(v_flex().flex_1().min_w_0().gap_1().child(text(
+                                .child(v_flex().flex_1().min_w_0().gap_1().child(accessible_text(
                                     "restart-onboarding-label",
                                     course2md::tr!("首次设置"),
                                 )))
@@ -2645,11 +2652,14 @@ impl Desktop {
                                     .min_w_0()
                                     .gap(rems(2. / 14.))
                                     .child(
-                                        text("diagnostic-summary", course2md::tr!("一切正常"))
-                                            .font_weight(FontWeight::MEDIUM),
+                                        accessible_text(
+                                            "diagnostic-summary",
+                                            course2md::tr!("一切正常"),
+                                        )
+                                        .font_weight(FontWeight::MEDIUM),
                                     )
                                     .child(
-                                        text(
+                                        accessible_text(
                                             "diagnostic-summary-detail",
                                             course2md::tr!("{} 项检查全部通过", checked),
                                         )
@@ -2804,7 +2814,7 @@ impl Desktop {
                         .items_center()
                         .text_color(color(tone))
                         .child(icon.size(px(16.)))
-                        .child(text(("diagnostic-tool", index), state)),
+                        .child(accessible_text(("diagnostic-tool", index), state)),
                 )
             },
         );

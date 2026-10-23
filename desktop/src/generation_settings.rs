@@ -236,7 +236,7 @@ impl Desktop {
                             )
                             .when(custom_language, |row| {
                                 row.child(
-                                    text(
+                                    accessible_text(
                                         "subtitle-custom-summary",
                                         value.preferred_subtitle_languages.join(" → "),
                                     )
@@ -535,12 +535,12 @@ impl Desktop {
                                         .flex_1()
                                         .min_w_0()
                                         .gap_1()
-                                        .child(text(
+                                        .child(accessible_text(
                                             "settings-save-location",
                                             course2md::tr!("保存位置"),
                                         ))
                                         .child(
-                                            text(
+                                            accessible_text(
                                                 "settings-current-location",
                                                 self.workspace
                                                     .as_ref()
@@ -729,7 +729,7 @@ impl Desktop {
                         )
                     })
                     .child(
-                        text("model-readiness-conclusion", conclusion)
+                        accessible_text("model-readiness-conclusion", conclusion)
                             .text_size(TEXT_SETTINGS_AUX)
                             .text_color(color(if settled { GRAY } else { WARNING })),
                     ),
@@ -780,7 +780,7 @@ impl Desktop {
         ));
         if !model_supported(provider, selected) {
             view = view.child(
-                text("unavailable-fixed-model", unsupported_model())
+                accessible_text("unavailable-fixed-model", unsupported_model())
                     .text_size(TEXT_SETTINGS_AUX)
                     .text_color(color(DANGER)),
             );
