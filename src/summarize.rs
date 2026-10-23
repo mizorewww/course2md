@@ -86,15 +86,7 @@ fn parse_time(v: Option<&serde_json::Value>) -> f64 {
 }
 
 pub(crate) fn parse_summary(content: &str) -> Option<Summary> {
-    let start = content.find('{')?;
-    let end = content.rfind('}')?;
-    if end <= start {
-        return None;
-    }
-    let slice = &content[start..=end];
-    let parsed = serde_json::from_str::<serde_json::Value>(slice)
-        .or_else(|_| serde_json::from_str::<serde_json::Value>(&llm::clean_trailing_commas(slice)))
-        .ok()?;
+    let parsed = llm::extract_json_object(content)?;
     let tldr = parsed
         .get("tldr")
         .and_then(|x| x.as_str())

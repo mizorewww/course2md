@@ -172,7 +172,8 @@ pub(crate) fn chat_agent() -> ureq::Agent {
 
 const STALL_TIMEOUT: Duration = Duration::from_secs(90);
 
-const ERROR_BODY_LIMIT: u64 = 4 * 1024 * 1024;
+/// Upper bound on a streamed (SSE) response body read in one connection test.
+const SSE_BODY_LIMIT: u64 = 4 * 1024 * 1024;
 /// 单次请求输出 token 上限（校对与摘要共用）。
 pub(crate) const CHAT_MAX_TOKENS: u32 = 16384;
 
@@ -466,15 +467,14 @@ fn unfinished_tail_formula(text: &str) -> Option<String> {
 /// 读取本节校对截图的 base64；None = 截图不可用（已告警）。
 fn section_image_b64(path: &Path, warned: &std::sync::atomic::AtomicBool) -> Option<String> {
     use base64::Engine as _;
-    let p = path;
-    match std::fs::read(p) {
+    match std::fs::read(path) {
         Ok(bytes) => Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
         Err(e) => {
             warn_once(
                 warned,
                 &format!(
                     "无法读取校对所需截图，已保留原文 / Required image could not be read; original text retained: {}: {e:#}",
-                    p.display()
+                    path.display()
                 ),
             );
             None
@@ -660,7 +660,7 @@ pub fn parse_segments(content: &str) -> Option<Vec<(usize, String)>> {
 }
 
 /// 截取首个 { 到末个 } 解析为 JSON 对象；容忍尾逗号。
-fn extract_json_object(content: &str) -> Option<serde_json::Value> {
+pub(crate) fn extract_json_object(content: &str) -> Option<serde_json::Value> {
     let start = content.find('{')?;
     let end = content.rfind('}')?;
     if end <= start {
@@ -1005,7 +1005,7 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
         let mut bytes = Vec::new();
         use std::io::Read as _;
         resp.into_reader()
-            .take(ERROR_BODY_LIMIT + 1)
+            .take(SSE_BODY_LIMIT + 1)
             .read_to_end(&mut bytes)
             .context(crate::tr!(
                 "服务响应接收中断 / Service response was interrupted"
