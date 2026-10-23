@@ -249,23 +249,7 @@ fn remote_download_output_does_not_leak_into_json_or_quiet_mode() {
     let cli = CliTest::new();
     // Use real ffmpeg/ffprobe, with an offline yt-dlp fixture that emits noisy output.
     let video = cli.dir.path().join("fixture.mp4");
-    let generated = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=blue:s=320x180:d=3",
-            "-c:v",
-            "libx264",
-            "-y",
-        ])
-        .arg(&video)
-        .output()
-        .unwrap();
-    assert!(generated.status.success(), "{}", stderr(&generated));
+    common::fixture_video(&video, 3);
     let bin = cli.dir.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let script = bin.join("yt-dlp");

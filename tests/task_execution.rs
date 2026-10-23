@@ -12,7 +12,7 @@ use course2md::{
 use std::{
     io::Write,
     path::Path,
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
 };
 
 fn request(root: &Path, source: &Path) -> Request {
@@ -51,11 +51,16 @@ fn request(root: &Path, source: &Path) -> Request {
         service_versions: Default::default(),
     }
 }
-fn run(root: &Path, request: &Request) -> Output {
+/// Start `course2md run-task` with the request on stdin, isolated from the
+/// developer's configuration, cache and environment credentials. A broken user
+/// config file proves the task never reads it; the environment key must never
+/// reach a task. `configure` adjusts the command before it starts.
+fn spawn_task(root: &Path, request: &Request, configure: impl FnOnce(&mut Command)) -> Child {
     let config = root.join("config/course2md");
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(config.join("config.toml"), "[broken").unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_course2md"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_course2md"));
+    command
         .env("COURSE2MD_LANG", "zh-Hans")
         .arg("run-task")
         .current_dir(root)
@@ -65,16 +70,19 @@ fn run(root: &Path, request: &Request) -> Output {
         .env_remove("RUST_LOG")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::piped());
+    configure(&mut command);
+    let mut child = command.spawn().unwrap();
     child
         .stdin
         .take()
         .unwrap()
         .write_all(&serde_json::to_vec(request).unwrap())
         .unwrap();
-    child.wait_with_output().unwrap()
+    child
+}
+fn run(root: &Path, request: &Request) -> Output {
+    spawn_task(root, request, |_| {}).wait_with_output().unwrap()
 }
 fn events(output: &Output) -> Vec<serde_json::Value> {
     assert!(
@@ -104,28 +112,7 @@ fn scanning_finishes_before_a_slow_screenshot_reports_progress_with_estimated_to
     let python = course2md::runtime::which("python3").unwrap();
     let root = tempfile::tempdir().unwrap();
     let video = root.path().join("flat-video.mp4");
-    let generated = Command::new(&ffmpeg)
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=blue:s=64x32:r=1",
-            "-t",
-            "18",
-            "-pix_fmt",
-            "yuv420p",
-        ])
-        .arg(&video)
-        .output()
-        .unwrap();
-    assert!(
-        generated.status.success(),
-        "{}",
-        String::from_utf8_lossy(&generated.stderr)
-    );
+    common::fixture_video(&video, 18);
     let bin = root.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     let gate = root.path().join("extract-started");
@@ -141,22 +128,9 @@ fn scanning_finishes_before_a_slow_screenshot_reports_progress_with_estimated_to
     let mut request = request(root.path(), &video);
     request.duration = 18.;
     request.config.defaults.sample_interval = Some(1.);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_course2md"))
-        .env("COURSE2MD_LANG", "zh-Hans")
-        .arg("run-task")
-        .env("PATH", std::env::join_paths(paths).unwrap())
-        .env("XDG_CONFIG_HOME", root.path().join("config"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(&serde_json::to_vec(&request).unwrap())
-        .unwrap();
+    let mut child = spawn_task(root.path(), &request, |command| {
+        command.env("PATH", std::env::join_paths(paths).unwrap());
+    });
     let stdout = child.stdout.take().unwrap();
     let (tx, rx) = mpsc::channel();
     let reader = std::thread::spawn(move || {
@@ -197,6 +171,9 @@ fn scanning_finishes_before_a_slow_screenshot_reports_progress_with_estimated_to
         scan["total"], 18,
         "total is the duration/interval estimate; CFR fixtures match exactly"
     );
+    // The gate is the synchronization point: once the wrapper has written it,
+    // the real screenshot ffmpeg is blocked and cannot have produced a file, so
+    // every event received so far was emitted while no screenshot existed.
     let deadline = Instant::now() + Duration::from_secs(3);
     while !gate.exists() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
@@ -205,15 +182,8 @@ fn scanning_finishes_before_a_slow_screenshot_reports_progress_with_estimated_to
         gate.exists(),
         "real screenshot subprocess should now be blocked at the gate"
     );
-    std::thread::sleep(Duration::from_millis(150));
-    for event in rx.try_iter() {
-        assert!(
-            !(event["stage"] == "scenes/extract"
-                && (event["current"] == 1 || event["status"] == "done")),
-            "unfinished ffmpeg output must not count as a saved screenshot"
-        );
-        observed.push(event);
-    }
+    observed.extend(rx.try_iter());
+    let released_at = observed.len();
     std::fs::write(&release, b"continue").unwrap();
     let output = child.wait_with_output().unwrap();
     reader.join().unwrap();
@@ -223,12 +193,17 @@ fn scanning_finishes_before_a_slow_screenshot_reports_progress_with_estimated_to
         "{observed:#?}\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let extract_finished = |event: &serde_json::Value| {
+        event["stage"] == "scenes/extract"
+            && ((event["current"] == 1 && event["total"] == 1) || event["status"] == "done")
+    };
+    let saved = observed
+        .iter()
+        .position(extract_finished)
+        .expect("the screenshot is reported saved");
     assert!(
-        observed
-            .iter()
-            .any(|event| event["stage"] == "scenes/extract"
-                && event["current"] == 1
-                && event["total"] == 1)
+        saved >= released_at,
+        "unfinished ffmpeg output must not count as a saved screenshot: {observed:#?}"
     );
     assert!(
         observed
@@ -245,28 +220,7 @@ fn explicit_subtitles_zero_exports_and_confirmed_title_survive_real_conversion_a
     }
     let root = tempfile::tempdir().unwrap();
     let video = root.path().join("different-original-name.mp4");
-    let make = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=blue:s=320x240:r=1",
-            "-t",
-            "1",
-            "-pix_fmt",
-            "yuv420p",
-        ])
-        .arg(&video)
-        .output()
-        .unwrap();
-    assert!(
-        make.status.success(),
-        "{}",
-        String::from_utf8_lossy(&make.stderr)
-    );
+    common::fixture_video(&video, 1);
     let mut request = request(root.path(), &video);
     let first = run(root.path(), &request);
     let first_events = events(&first);
@@ -528,24 +482,7 @@ fn proofreading_images_and_custom_rules_match_the_requested_outputs() {
     });
     let root = tempfile::tempdir().unwrap();
     let video = root.path().join("slides.mp4");
-    let generated = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=blue:s=320x240:r=1",
-            "-t",
-            "1",
-            "-pix_fmt",
-            "yuv420p",
-        ])
-        .arg(&video)
-        .output()
-        .unwrap();
-    assert!(generated.status.success());
+    common::fixture_video(&video, 1);
     let mut initial = request(root.path(), &video);
     initial.config.llm.enabled = true;
     initial.config.llm.summarize = true;

@@ -1,6 +1,9 @@
 //! Scaffolding shared by the integration test binaries (`mod common;`).
 #![allow(dead_code)]
 
+use std::path::Path;
+use std::process::Command;
+
 /// Whether every named tool is on PATH. Locally a missing tool skips the test
 /// with a note; in CI (`CI` is set) it fails, so a green run means the test ran.
 pub fn tools_available(names: &[&str]) -> bool {
@@ -24,4 +27,21 @@ pub fn tools_available(names: &[&str]) -> bool {
 /// Whether ffmpeg and ffprobe are available (see [`tools_available`]).
 pub fn ffmpeg_available() -> bool {
     tools_available(&["ffmpeg", "ffprobe"])
+}
+
+/// Write a `secs`-second flat blue 320x240 1 fps video with lavfi, so no media
+/// fixture is committed. Requires ffmpeg; call [`ffmpeg_available`] first.
+pub fn fixture_video(path: &Path, secs: u32) {
+    let generated = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"])
+        .args(["-i", "color=c=blue:s=320x240:r=1", "-t", &secs.to_string()])
+        .args(["-pix_fmt", "yuv420p"])
+        .arg(path)
+        .output()
+        .expect("spawn ffmpeg");
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
 }
