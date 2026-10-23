@@ -4149,22 +4149,9 @@ impl Desktop {
         }
         if !details.is_empty() || compact_metadata.is_some() {
             let information_scroll = self.reader_ui.information_scroll.clone();
-            // The panel is at most 16rem tall; its scrolling viewport is what
-            // remains after the header row, the padding, the row gap and the
-            // 1px border on each edge.
+            // The panel is at most 16rem tall; its body scrolls in what is left.
             let rem_size = f32::from(window.rem_size());
             let frame_height = (available_height * 0.42).min(rem_size * 16.);
-            let padding = if compact {
-                rem_size * 0.5
-            } else {
-                rem_size * 0.75
-            };
-            let viewport_height = (frame_height
-                - f32::from(CONTROL_HEIGHT.to_pixels(window.rem_size()))
-                - padding * 2.
-                - rem_size * 0.5
-                - 2.)
-                .max(rem_size * 2.);
             let mut content =
                 v_flex()
                     .w_full()
@@ -4201,58 +4188,49 @@ impl Desktop {
                 crate::motion::disclosure(
                     "reader-information-panel",
                     self.reader_ui.info_open,
-                    v_flex()
-                        .w_full()
-                        .min_w_0()
-                        .flex_shrink_0()
-                        .gap_2()
-                        .p_3()
-                        .when(compact, |panel| panel.p_2())
-                        .bg(color(INSET))
-                        .border_1()
-                        .border_color(color(HAIRLINE))
-                        .rounded(RADIUS_CARD)
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .items_center()
-                                .gap_2()
-                                .child(semantic_label(
-                                    "reader-information-title",
-                                    course2md::tr!("笔记详情"),
-                                    crate::icons::info(),
-                                ))
-                                .child(div().flex_1())
-                                .child(
-                                    quiet("collapse-reader-information")
-                                        .icon(crate::icons::chevron_up())
-                                        .label(course2md::tr!("收起"))
-                                        .accessibility_label(course2md::tr!("收起笔记详情"))
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.reader_ui.info_open = false;
-                                            this.reader_ui.focus.focus(window, cx);
-                                            cx.notify();
-                                        })),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .relative()
-                                .w_full()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .id("reader-information-scroll")
-                                        .w_full()
-                                        .min_w_0()
-                                        .max_h(px(viewport_height))
-                                        .overflow_y_scroll()
-                                        .track_scroll(&information_scroll)
-                                        .child(content),
-                                )
-                                .child(crate::backend::vertical_scrollbar(&information_scroll)),
-                        ),
+                    bounded_scroll_panel(
+                        px(frame_height),
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .items_center()
+                            .gap_2()
+                            .child(semantic_label(
+                                "reader-information-title",
+                                course2md::tr!("笔记详情"),
+                                crate::icons::info(),
+                            ))
+                            .child(div().flex_1())
+                            .child(
+                                quiet("collapse-reader-information")
+                                    .icon(crate::icons::chevron_up())
+                                    .label(course2md::tr!("收起"))
+                                    .accessibility_label(course2md::tr!("收起笔记详情"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.reader_ui.info_open = false;
+                                        this.reader_ui.focus.focus(window, cx);
+                                        cx.notify();
+                                    })),
+                            ),
+                        div()
+                            .id("reader-information-scroll")
+                            .w_full()
+                            .min_w_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&information_scroll)
+                            .child(content),
+                        crate::backend::vertical_scrollbar(&information_scroll),
+                    )
+                    .w_full()
+                    .min_w_0()
+                    .flex_shrink_0()
+                    .gap_2()
+                    .p_3()
+                    .when(compact, |panel| panel.p_2())
+                    .bg(color(INSET))
+                    .border_1()
+                    .border_color(color(HAIRLINE))
+                    .rounded(RADIUS_CARD),
                 )
                 .into_any_element(),
             )
@@ -5799,6 +5777,29 @@ fn image_zoom_offset(viewport: f32, old_extent: f32, new_extent: f32, offset: f3
         .clamp(-(new_extent - viewport).max(0.), 0.)
 }
 
+/// A panel whose header stays put and whose body scrolls once the panel
+/// reaches `max_height`. Flex layout gives the body the rest of the height,
+/// so no caller subtracts header, padding or border sizes by hand.
+fn bounded_scroll_panel(
+    max_height: Pixels,
+    header: impl IntoElement,
+    body: Stateful<Div>,
+    scrollbar: impl IntoElement,
+) -> Div {
+    v_flex().max_h(max_height).child(header).child(
+        div()
+            .relative()
+            .flex()
+            .flex_col()
+            .w_full()
+            .min_w_0()
+            .flex_shrink(1.)
+            .min_h_0()
+            .child(body.flex_shrink(1.).min_h_0())
+            .child(scrollbar),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -6187,10 +6188,67 @@ mod flow_tests {
     use crate::notes::PreviewBlock;
     use gpui::{
         Context, InteractiveElement as _, IntoElement, ListAlignment, ListOffset, ListState,
-        ParentElement as _, Render, Styled as _, TestAppContext, Window, div, list, px,
+        ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, TestAppContext,
+        Window, div, list, px,
     };
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    struct PanelHarness {
+        rows: usize,
+    }
+
+    impl Render for PanelHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                super::bounded_scroll_panel(
+                    px(200.),
+                    div().h(px(40.)).debug_selector(|| "panel-header".into()),
+                    div()
+                        .id("panel-body")
+                        .w_full()
+                        .overflow_y_scroll()
+                        .debug_selector(|| "panel-body".into())
+                        .children((0..self.rows).map(|_| div().h(px(30.)))),
+                    div(),
+                )
+                .p(px(12.))
+                .border_1()
+                .debug_selector(|| "panel".into()),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn the_information_panel_scrolls_its_body_inside_its_maximum_height(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| PanelHarness { rows: 40 });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let panel = cx.debug_bounds("panel").unwrap();
+        let header = cx.debug_bounds("panel-header").unwrap();
+        let body = cx.debug_bounds("panel-body").unwrap();
+        assert_eq!(panel.size.height, px(200.));
+        assert!(body.top() >= header.bottom());
+        assert!(
+            body.bottom() <= panel.bottom() - px(12.) + px(0.5),
+            "{body:?} {panel:?}"
+        );
+        assert!(
+            body.size.height > px(100.),
+            "the body takes the remaining height: {body:?}"
+        );
+        // Short content keeps its natural height instead of filling the maximum.
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.rows = 2;
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        let panel = cx.debug_bounds("panel").unwrap();
+        let body = cx.debug_bounds("panel-body").unwrap();
+        assert_eq!(body.size.height, px(60.));
+        assert!(panel.size.height < px(200.));
+    }
 
     fn blocks(count: usize) -> Vec<PreviewBlock> {
         (0..count)
