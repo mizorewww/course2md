@@ -120,7 +120,10 @@ fn run_wizard(
                     )?;
                     match dl {
                         0 => {
-                            crate::runtime::block_on(crate::models::download_models(&root))??;
+                            crate::runtime::block_on(crate::models::download_models(
+                                &root,
+                                &crate::dispatch::TaskControl::default(),
+                            ))??;
                             provider = Some(p);
                         }
                         1 => use_cloud = true,

@@ -334,7 +334,6 @@ impl std::str::FromStr for OutputFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
     pub url: String,
-    pub out_dir: PathBuf,
     pub similarity: f64,
     pub sample_interval: f64,
     pub cooldown: f64,
@@ -352,7 +351,7 @@ pub struct PipelineConfig {
     pub model_dir: PathBuf,
     pub keep_video: bool,
     pub no_download: bool,
-    /// 断点续跑：跳过输出目录中已完成的 ASR chunk
+    /// 断点续跑：命令行任务沿用同一设置下的工作目录；关闭时每次换新的工作目录
     pub resume: bool,
     /// LLM 字幕校对（已合并 CLI 覆盖后的生效配置）
     pub llm: crate::llm::LlmSettings,
@@ -439,15 +438,21 @@ fn parse_coord(s: &str) -> anyhow::Result<f64> {
 }
 
 impl PipelineConfig {
-    /// 身份文件用的脱敏副本：clone 并清空 llm.api_key 与 asr_api.api_key。
+    /// 身份文件用的脱敏配置：清空 llm.api_key 与 asr_api.api_key 后的 JSON。
     ///
     /// 安全不变量：身份/binding JSON 会落盘进输出目录，任何情况下不得携带
     /// 凭据；所有身份序列化路径都必须经过这里。
-    pub fn redacted_for_identity(&self) -> Self {
+    ///
+    /// Saved identities also record an `out_dir` field, which predates the work
+    /// directory leaving the settings. Each entry point passes the value it has
+    /// always recorded, so existing tasks keep matching their identity.
+    pub fn redacted_for_identity(&self, out_dir: &Path) -> serde_json::Value {
         let mut cfg = self.clone();
         cfg.llm.api_key.clear();
         cfg.asr_api.api_key.clear();
-        cfg
+        let mut value = serde_json::json!(cfg);
+        value["out_dir"] = serde_json::json!(out_dir);
+        value
     }
 
     /// 全量预检：所有配置错误必须在任何昂贵操作（下载/抽帧/模型加载）之前暴露。
@@ -545,22 +550,6 @@ impl PipelineConfig {
         }
 
         Ok(())
-    }
-
-    pub fn media_path(&self) -> PathBuf {
-        self.out_dir.join("media.mp4")
-    }
-    pub fn audio_path(&self) -> PathBuf {
-        self.out_dir.join("audio.wav")
-    }
-    pub fn frames_dir(&self) -> PathBuf {
-        self.out_dir.join("frames")
-    }
-    pub fn timeline_path(&self) -> PathBuf {
-        self.out_dir.join("timeline.jsonl")
-    }
-    pub fn meta_path(&self) -> PathBuf {
-        self.out_dir.join("meta.json")
     }
 }
 
@@ -840,7 +829,6 @@ mod tests {
     fn valid_cfg() -> PipelineConfig {
         PipelineConfig {
             url: "https://youtu.be/x".into(),
-            out_dir: "out".into(),
             out_root: "out".into(),
             similarity: DEFAULT_SIMILARITY,
             sample_interval: DEFAULT_SAMPLE_INTERVAL,

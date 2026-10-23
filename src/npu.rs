@@ -175,6 +175,7 @@ pub fn run_npu(
     wav: &Path,
     max_speech: f64,
     cp: &mut Checkpoint,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<Vec<TranscriptEvent>> {
     let t0 = Instant::now();
     let segs = crate::asr::ffmpeg_vad(wav, max_speech as f32)?;
@@ -183,31 +184,41 @@ pub fn run_npu(
         return Ok(crate::asr::no_speech_events());
     }
 
-    let mut worker = NpuWorker::start(model_id)?;
+    let mut worker = NpuWorker::start(model_id, control)?;
     let (base, token) = (worker.base.clone(), worker.token.clone());
     let client = ureq::AgentBuilder::new().timeout(NPU_HTTP_TIMEOUT).build();
 
-    let r = crate::asr::run_chunks(wav, &segs, cp, worker.tmp.path(), "npu asr", |chunk| {
-        let req_body = serde_json::json!({
-            "path": chunk.to_string_lossy(),
-        });
-        let resp = client
-            .post(&format!("{base}/audio/transcriptions"))
-            .set("X-Auth-Token", &token)
-            .send_json(req_body)
-            .map_err(|e| {
-                anyhow::anyhow!("Intel NPU 识别进程无响应 / Intel NPU worker did not respond: {e}")
+    let r = crate::asr::run_chunks(
+        wav,
+        &segs,
+        cp,
+        worker.tmp.path(),
+        "npu asr",
+        control,
+        |chunk| {
+            let req_body = serde_json::json!({
+                "path": chunk.to_string_lossy(),
+            });
+            let resp = client
+                .post(&format!("{base}/audio/transcriptions"))
+                .set("X-Auth-Token", &token)
+                .send_json(req_body)
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Intel NPU 识别进程无响应 / Intel NPU worker did not respond: {e}"
+                    )
+                })?;
+            let v: serde_json::Value = resp.into_json().map_err(|e| {
+                anyhow::anyhow!("NPU 无法解析服务响应 / Could not parse the service response: {e}")
             })?;
-        let v: serde_json::Value = resp.into_json().map_err(|e| {
-            anyhow::anyhow!("NPU 无法解析服务响应 / Could not parse the service response: {e}")
-        })?;
-        if let Some(e) = v.get("error").and_then(|e| e.as_str()) {
-            anyhow::bail!("NPU 识别失败 / NPU transcription failed: {e}");
-        }
-        let text = v["text"].as_str().unwrap_or("").trim().to_string();
-        let sanitized = crate::asr::sanitize_qwen_text(&text);
-        Ok((!sanitized.is_empty()).then_some(sanitized))
-    });
+            if let Some(e) = v.get("error").and_then(|e| e.as_str()) {
+                anyhow::bail!("NPU 识别失败 / NPU transcription failed: {e}");
+            }
+            let text = v["text"].as_str().unwrap_or("").trim().to_string();
+            let sanitized = crate::asr::sanitize_qwen_text(&text);
+            Ok((!sanitized.is_empty()).then_some(sanitized))
+        },
+    );
 
     worker.stop();
 
@@ -243,7 +254,7 @@ fn npu_kind(model_id: &str) -> &'static str {
 }
 
 impl NpuWorker {
-    fn start(model_id: &str) -> Result<Self> {
+    fn start(model_id: &str, control: &crate::dispatch::TaskControl) -> Result<Self> {
         let t0 = Instant::now();
         let tmp = crate::runtime::TempWorkDir::new("npu")?;
         let script_path = tmp.path().join("npu_worker.py");
@@ -266,7 +277,7 @@ impl NpuWorker {
             NPU_READY_TIMEOUT,
             &mut child,
             Some("ok"),
-            Some(&crate::dispatch::check_control),
+            Some(&|| control.check()),
         ) {
             return Err(e.context(format!(
                 "Intel NPU 服务启动失败/超时（首次模型编译可能需要更多时间） / Intel NPU service failed to start or timed out (the first model compilation may take longer); stderr tail:\n{}",
@@ -309,8 +320,8 @@ impl NpuWorker {
 }
 
 /// Prepare the exact NPU model through the normal worker; no media is sent.
-pub fn prepare_npu_model(model_id: &str) -> Result<()> {
-    NpuWorker::start(model_id)?.stop();
+pub fn prepare_npu_model(model_id: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
+    NpuWorker::start(model_id, control)?.stop();
     Ok(())
 }
 

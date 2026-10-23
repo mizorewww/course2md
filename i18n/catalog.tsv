@@ -285,7 +285,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务来源或参数与已保存进度不一致，原进度已保留 / Task inputs changed; create a new task instead of reusing this work directory	任务来源或参数与已保存进度不一致，原进度已保留	Task inputs changed; create a new task instead of reusing this work directory	任務來源或引數與已儲存進度不一致，原進度已保留	タスクのソースまたはパラメータは保存された進行状況と矛盾しており、元の進行状況が保持されています。
 任务来源身份或名称记录缺失	任务来源身份或名称记录缺失	The task source identity or name record is missing	任務來源身份或名稱記錄缺失	タスク ソース ID または名前レコードがありません
 任务状态尚未保存：{}	任务状态尚未保存：{}	Task status has not been saved: {}	任務狀態尚未儲存：{}	タスクのステータスが保存されていません: {}
-任务状态异常，请重启应用 / Task state is unavailable; restart the app	任务状态异常，请重启应用	Task state is unavailable; restart the app	任務狀態異常，請重啟應用	タスクのステータスが異常です。アプリケーションを再起動してください
 任务状态无法识别，已暂停 / Task state is unreadable; paused	任务状态无法识别，已暂停	Task state is unreadable; paused	任務狀態無法識別，已暫停	タスクのステータスが認識できないため一時停止されています
 任务缺少已确认的笔记名称 / Confirmed title is missing	任务缺少已确认的笔记名称	Confirmed title is missing	任務缺少已確認的筆記名稱	タスクに確認済みのノート名がありません
 任务缺少已选字幕 / Selected subtitles are missing from this task	任务缺少已选字幕	Selected subtitles are missing from this task	任務缺少已選字幕	タスクに選択した字幕がありません
@@ -485,7 +484,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 可返回第一步更换引擎	可返回第一步更换引擎	You can return to the first step to replace the engine.	可返回第一步更換引擎	最初のステップに戻ってエンジンを交換できます。
 可返回第一步更换模型	可返回第一步更换模型	You can return to the first step to change the model	可返回第一步更換模型	最初のステップに戻ってモデルを変更できます
 可选配置：course2md config init	可选配置：course2md config init	Optional setup: course2md config init	可選設定：course2md config init	任意の設定：course2md config init
-同一进程不能同时执行两个任务 / Another task is already active	同一进程不能同时执行两个任务	Another task is already active	同一程序不能同時執行兩個任務	同じプロセスで 2 つのタスクを同時に実行することはできません
 同时导出	同时导出	Also export	同時匯出	同時に書き出す
 同时清除云端语音识别密钥 / Also clear the cloud speech API key	同时清除云端语音识别密钥	Also clear the cloud speech API key	同時清除雲端語音識別金鑰	クラウド音声認識キーもクリア
 名称	名称	Name	名稱	名前

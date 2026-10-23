@@ -195,9 +195,10 @@ fn run_pool<T: Send>(
     chunks: Vec<T>,
     workers: usize,
     pb: &crate::progress::Bar,
+    control: &crate::dispatch::TaskControl,
     work: &(dyn Fn(T) -> usize + Sync),
 ) -> Result<usize> {
-    let counts = crate::runtime::map_pool(chunks, workers, |item| {
+    let counts = crate::runtime::map_pool(chunks, workers, control, |item| {
         pb.inc(1);
         Ok(work(item))
     })?;
@@ -214,6 +215,7 @@ pub fn polish_sections_report(
     sections: &mut [Section],
     frames_root: &Path,
     s: &LlmSettings,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<PolishReport> {
     let attempted = sections.iter().map(|section| section.speech.len()).sum();
     if attempted == 0 {
@@ -254,12 +256,14 @@ pub fn polish_sections_report(
         chunks,
         s.concurrency.clamp(1, MAX_CONCURRENCY),
         &pb,
+        control,
         &|(image_path, mut chunk)| {
             let image = image_path
                 .as_deref()
                 .and_then(|path| section_image_b64(path, &warned));
             polish_chunk(
                 &agent,
+                control,
                 s,
                 &mut chunk,
                 image.as_deref(),
@@ -303,6 +307,7 @@ pub fn translate_sections_report(
     sections: &mut [Section],
     s: &LlmSettings,
     target: &str,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<PolishReport> {
     let mut chunks: Vec<Vec<&mut TranscriptEvent>> = Vec::new();
     let mut refs: Vec<_> = sections
@@ -327,7 +332,18 @@ pub fn translate_sections_report(
         chunks,
         s.concurrency.clamp(1, MAX_CONCURRENCY),
         &pb,
-        &|mut chunk| translate_chunk(&agent, s, target, &mut chunk, &warned, &first_error),
+        control,
+        &|mut chunk| {
+            translate_chunk(
+                &agent,
+                control,
+                s,
+                target,
+                &mut chunk,
+                &warned,
+                &first_error,
+            )
+        },
     )?;
     pb.finish();
     Ok(PolishReport {
@@ -340,6 +356,7 @@ pub fn translate_sections_report(
 
 fn translate_chunk(
     agent: &ureq::Agent,
+    control: &crate::dispatch::TaskControl,
     s: &LlmSettings,
     target: &str,
     chunk: &mut [&mut TranscriptEvent],
@@ -361,6 +378,7 @@ fn translate_chunk(
         let expected = items.len();
         let content = send_chat_described(
             agent,
+            control,
             s,
             &body,
             Purpose::Translation,
@@ -484,6 +502,7 @@ fn section_image_b64(path: &Path, warned: &std::sync::atomic::AtomicBool) -> Opt
 /// 校对一个分块；返回成功条数（失败保留原文并记录首个错误）。
 fn polish_chunk(
     agent: &ureq::Agent,
+    control: &crate::dispatch::TaskControl,
     s: &LlmSettings,
     chunk: &mut [&mut TranscriptEvent],
     image_b64: Option<&str>,
@@ -501,7 +520,7 @@ fn polish_chunk(
         crate::render::fmt_ts(last.end)
     );
     let items: Vec<&str> = chunk.iter().map(|e| e.text.as_str()).collect();
-    match chat(agent, s, &items, image_b64, &description) {
+    match chat(agent, control, s, &items, image_b64, &description) {
         Ok(polished) => {
             apply_polish(chunk, &polished);
             chunk.len()
@@ -568,6 +587,7 @@ fn warn_once(warned: &std::sync::atomic::AtomicBool, msg: &str) {
 /// 失败由持久请求账本记录；此层保留完整原文。
 fn chat(
     agent: &ureq::Agent,
+    control: &crate::dispatch::TaskControl,
     s: &LlmSettings,
     items: &[&str],
     image_b64: Option<&str>,
@@ -577,6 +597,7 @@ fn chat(
     let expected = items.len();
     let content = send_chat_described(
         agent,
+        control,
         s,
         &body,
         Purpose::Proofreading,
@@ -839,13 +860,14 @@ fn lenient_scan(s: &str) -> Option<Vec<(usize, String)>> {
 /// 仅当服务明确拒绝这个字段（400/422）时去掉该字段重试一次。
 pub(crate) fn send_chat_described(
     agent: &ureq::Agent,
+    control: &crate::dispatch::TaskControl,
     s: &LlmSettings,
     body: &serde_json::Value,
     purpose: Purpose,
     description: &str,
     validate: &dyn Fn(&str) -> Result<()>,
 ) -> Result<String> {
-    let reply = match request_chat(agent, s, body, purpose, description, validate) {
+    let reply = match request_chat(agent, control, s, body, purpose, description, validate) {
         Ok(r) => r,
         Err(first) => {
             let degradable = first
@@ -857,7 +879,8 @@ pub(crate) fn send_chat_described(
             let mut relaxed = body.clone();
             crate::provider::strip_structured_format(s, &mut relaxed);
             // 降级请求只试一次：原请求已按 MAX_ATTEMPTS 重试过，这里只验证兼容性
-            let reply = request_chat_once(agent, s, &relaxed, purpose, description, validate)?;
+            let reply =
+                request_chat_once(agent, control, s, &relaxed, purpose, description, validate)?;
             tracing::debug!("端点不支持 response_format，降级重试成功");
             reply
         }
@@ -883,6 +906,7 @@ pub(crate) fn send_chat_described(
 /// One attempt; validation errors omit provider response bodies which may echo credentials.
 fn request_chat_once(
     agent: &ureq::Agent,
+    control: &crate::dispatch::TaskControl,
     s: &LlmSettings,
     body: &serde_json::Value,
     purpose: Purpose,
@@ -892,7 +916,7 @@ fn request_chat_once(
     let url = crate::provider::endpoint(s);
     let headers = crate::provider::auth_headers(s).map_err(crate::dispatch::Failure::local)?;
     let sse = crate::provider::is_sse(s);
-    crate::dispatch::json_request_described(
+    control.request(
         &crate::dispatch::RequestSpec {
             service: "llm",
             purpose: purpose.ledger_name(),
@@ -948,14 +972,15 @@ fn request_chat_once(
 /// 发请求：可重试错误按退避重试（退避期间可取消），总共最多 [`MAX_ATTEMPTS`] 次。
 fn request_chat(
     agent: &ureq::Agent,
+    control: &crate::dispatch::TaskControl,
     s: &LlmSettings,
     body: &serde_json::Value,
     purpose: Purpose,
     description: &str,
     validate: &dyn Fn(&str) -> Result<()>,
 ) -> Result<crate::dispatch::Reply> {
-    crate::runtime::retry(MAX_ATTEMPTS, || {
-        request_chat_once(agent, s, body, purpose, description, validate)
+    crate::runtime::retry(control, MAX_ATTEMPTS, || {
+        request_chat_once(agent, control, s, body, purpose, description, validate)
     })
 }
 
@@ -1287,7 +1312,8 @@ mod tests {
         let mut settings = test_settings();
         settings.base_url = format!("{address}/v1");
         settings.concurrency = 1;
-        let report = translate_sections_report(&mut sections, &settings, "en").unwrap();
+        let report =
+            translate_sections_report(&mut sections, &settings, "en", &Default::default()).unwrap();
         let request = server.join().unwrap();
         assert!(request.contains("English"), "{request}");
         assert_eq!((report.attempted, report.succeeded), (2, 2));

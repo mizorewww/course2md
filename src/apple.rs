@@ -304,7 +304,7 @@ pub fn prepare_cache_here(model: &str) -> Result<()> {
 /// multi-threaded process's environment is unsound, so a mirror attempt runs
 /// in a child process started with that endpoint. An explicit HF_ENDPOINT is
 /// left alone.
-pub fn prepare_cache(model: &str) -> Result<()> {
+pub fn prepare_cache(model: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
     let mirror = if std::env::var_os("HF_ENDPOINT").is_none() {
         crate::hub::endpoints().hub_override()
     } else {
@@ -313,21 +313,25 @@ pub fn prepare_cache(model: &str) -> Result<()> {
     let Some(mirror) = mirror else {
         return prepare_cache_here(model);
     };
-    let mut result = prepare_cache_from(model, mirror);
+    let mut result = prepare_cache_from(model, mirror, control);
     if let Err(error) = &result
-        && crate::dispatch::check_control().is_ok()
+        && control.check().is_ok()
     {
         tracing::warn!(
             "Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download from the mirror failed; trying Hugging Face: {error:#}"
         );
-        result = prepare_cache_from(model, crate::hub::ORIGIN);
+        result = prepare_cache_from(model, crate::hub::ORIGIN, control);
     }
     result
 }
 
 /// Runs `course2md apple-cache` with HF_ENDPOINT set for that process only.
 /// Its progress events share this process's output; its errors come back here.
-fn prepare_cache_from(model: &str, endpoint: &str) -> Result<()> {
+fn prepare_cache_from(
+    model: &str,
+    endpoint: &str,
+    control: &crate::dispatch::TaskControl,
+) -> Result<()> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command
         .args(["apple-cache", model, "--progress"])
@@ -355,7 +359,7 @@ fn prepare_cache_from(model: &str, endpoint: &str) -> Result<()> {
         if let Some(status) = child.try_wait() {
             break status;
         }
-        if let Err(error) = crate::dispatch::check_control() {
+        if let Err(error) = control.check() {
             drop(child);
             return Err(error);
         }
@@ -381,6 +385,7 @@ pub fn run_coreml(
     model: &str,
     tmp_dir: &Path,
     cp: &mut crate::checkpoint::Checkpoint,
+    control: &crate::dispatch::TaskControl,
 ) -> Result<Vec<TranscriptEvent>> {
     let t0 = Instant::now();
     let raw = vad(wav, 0.25, 0.35)?;
@@ -408,7 +413,7 @@ pub fn run_coreml(
         "coreml ready"
     );
 
-    let r = crate::asr::run_chunks(wav, &segs, cp, tmp_dir, "asr", |chunk| {
+    let r = crate::asr::run_chunks(wav, &segs, cp, tmp_dir, "asr", control, |chunk| {
         asr.transcribe(chunk).map(|t| {
             let t = t.map(|s| crate::asr::sanitize_qwen_text(&s));
             t.filter(|s| !s.is_empty())

@@ -203,9 +203,8 @@ impl Request {
     pub fn resolve(&self) -> Result<PipelineConfig> {
         let mut cfg =
             crate::options::resolve(self.source.clone(), &Default::default(), &self.config)?;
-        cfg.out_dir = self.work_dir.clone();
-        cfg.out_root = self.course_dir.clone();
-        // Recovery is a task invariant, not a configurable preference.
+        // Recovery is a task invariant, not a configurable preference. Where the
+        // task works comes from `work_dir` and `course_dir`, not the settings.
         cfg.resume = true;
         // Never enter Apple's model-choice prompt.
         if cfg
@@ -227,14 +226,13 @@ impl Request {
 
     /// Identity includes effective parameters and selected content, excluding secret values.
     pub fn binding(&self, cfg: &PipelineConfig) -> Result<serde_json::Value> {
-        let mut config = cfg.redacted_for_identity();
         // Storage moves are resolved locations, not a change in the processing plan.
-        config.out_dir = PathBuf::new();
-        config.out_root = PathBuf::new();
+        let mut config = cfg.redacted_for_identity(Path::new(""));
+        config["out_root"] = serde_json::Value::String(String::new());
         // A missing original file must not change the identity of an AI/export-only
         // continuation. Local content identity is independent of current file presence.
         if Path::new(&self.source).is_absolute() || self.source_id.starts_with("local:") {
-            config.url = self.source_id.clone();
+            config["url"] = serde_json::Value::String(self.source_id.clone());
         }
         let generating = matches!(self.operation, Operation::Generate);
         let subtitle_digest = if generating {
@@ -352,27 +350,71 @@ pub fn file_digest_cancellable(
     Ok(format!("{:x}", hash.finalize()))
 }
 
-/// Holds a task's work directory: the process lock and the request ledger.
+/// A running task's layout and control, kept apart from its settings: the
+/// resolved [`PipelineConfig`] never changes, while each entry point decides
+/// where the task works.
+#[derive(Clone)]
+pub struct Job {
+    /// The work directory the task owns: checkpoints, receipts, media.
+    pub dir: PathBuf,
+    /// The request ledger and control file every safe boundary checks.
+    pub control: crate::dispatch::TaskControl,
+}
+
+impl Job {
+    /// A job without a task context: nothing pauses it and requests are not recorded.
+    pub fn detached(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            dir: dir.into(),
+            control: Default::default(),
+        }
+    }
+    pub fn media_path(&self) -> PathBuf {
+        self.dir.join("media.mp4")
+    }
+    pub fn audio_path(&self) -> PathBuf {
+        self.dir.join("audio.wav")
+    }
+    pub fn frames_dir(&self) -> PathBuf {
+        self.dir.join("frames")
+    }
+    pub fn timeline_path(&self) -> PathBuf {
+        self.dir.join("timeline.jsonl")
+    }
+    pub fn meta_path(&self) -> PathBuf {
+        self.dir.join("meta.json")
+    }
+}
+
+/// Holds a task's work directory: the process lock and the task's job.
 pub struct WorkDir {
-    _dispatch: crate::dispatch::Guard,
+    job: Job,
     _lock: crate::runtime::FileLock,
 }
 
+impl WorkDir {
+    pub fn job(&self) -> &Job {
+        &self.job
+    }
+}
+
 /// Enters a task's work directory in one order for every entry point: create
-/// it, take the task lock, check the identity it was bound to, then install the
+/// it, take the task lock, check the identity it was bound to, then open the
 /// request ledger.
 pub fn enter_work_dir(
     work_dir: &Path,
     binding: &serde_json::Value,
-    control_path: Option<&Path>,
-    service_versions: &BTreeMap<String, String>,
+    source: crate::dispatch::ControlSource,
 ) -> Result<WorkDir> {
     std::fs::create_dir_all(work_dir)?;
     let lock = crate::runtime::lock_file(&work_dir.join(".task.lock"))?;
     bind_work_dir(work_dir, binding)?;
-    let dispatch = crate::dispatch::install(work_dir, control_path, service_versions)?;
+    let control = crate::dispatch::TaskControl::open(work_dir, source)?;
     Ok(WorkDir {
-        _dispatch: dispatch,
+        job: Job {
+            dir: work_dir.to_path_buf(),
+            control,
+        },
         _lock: lock,
     })
 }
@@ -403,11 +445,12 @@ pub fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()>
     Ok(())
 }
 
-/// Runs a request obtained from [`Request::read`], which validated it.
-pub async fn run(request: Request) -> Result<()> {
+/// Runs a request obtained from [`Request::read`], which validated it. The task
+/// stops as on quit once `parent`, recorded when the command started, is gone.
+pub async fn run(request: Request, parent: crate::dispatch::ParentProcess) -> Result<()> {
     let cfg = request.resolve()?;
     // No settings::load, environment credential resolution or wizard on this path.
-    crate::pipeline::run_task(&request, &cfg).await
+    crate::pipeline::run_task(&request, &cfg, parent).await
 }
 
 /// Call only while all writers are paused and the library copy has been verified.
@@ -478,6 +521,9 @@ pub fn relocate_work_bindings(root_old: &Path, root_new: &Path) -> Result<usize>
     }
     Ok(count)
 }
+
+#[cfg(test)]
+mod identity_snapshot;
 
 #[cfg(test)]
 mod tests {

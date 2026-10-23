@@ -1,0 +1,50 @@
+{
+  "config": {
+    "asr_api": {
+      "api_key": "",
+      "base_url": "https://openrouter.ai/api/v1",
+      "mode": "transcriptions",
+      "model": "asr-model"
+    },
+    "asr_model": null,
+    "cooldown": 10.0,
+    "formats": [
+      "md",
+      "html"
+    ],
+    "gpu_layers": 99,
+    "keep_video": false,
+    "llm": {
+      "api_key": "",
+      "base_url": "",
+      "concurrency": 8,
+      "disable_hint": false,
+      "enabled": true,
+      "model": "",
+      "prompt": null,
+      "provider": "open-ai-compatible",
+      "summarize": false,
+      "translate": null,
+      "vision": false
+    },
+    "max_height": 1080,
+    "max_speech": 20.0,
+    "mmproj_offload": true,
+    "model_dir": "/models",
+    "no_download": false,
+    "out_dir": "/library",
+    "out_root": "/library",
+    "provider": "api",
+    "resume": true,
+    "roi": null,
+    "sample_interval": 1.0,
+    "similarity": 0.85,
+    "slide_mode": "stable",
+    "stable_secs": 0.8,
+    "threads": 4,
+    "transcript_source": "auto",
+    "url": "https://www.bilibili.com/video/BV1xx"
+  },
+  "source_id": "bilibili:BV1xx",
+  "title": "Lecture"
+}
