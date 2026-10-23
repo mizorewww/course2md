@@ -426,7 +426,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 副本已核验，保存位置尚未切换：{}	副本已核验，保存位置尚未切换：{}	The copy has been verified, but the save location has not been switched: {}	副本已核驗，儲存位置尚未切換：{}	コピーは確認されましたが、保存場所は切り替えられていません: {}
 加载识别模型	加载识别模型	Loading speech model	載入語音辨識模型	音声認識モデルを読み込み中
 加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)	加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)	Loading speech model (first use may download files)	載入辨識模型（首次可能需要下載）/ Loading speech model (first use may download files)	音声認識モデルを読み込み中（初回はファイルのダウンロードが必要な場合があります）
-匹配截图 {} / {}	匹配截图 {} / {}	Matching screenshot {} / {}	匹配截圖 {} / {}	スクリーンショットを照合中 {} / {}
+匹配截图 {} / {}	匹配截图 {} / {}	Matching screenshots {} / {}	匹配截圖 {} / {}	一致するスクリーンショット {} / {}
 占用空间	占用空间	Disk usage	佔用空間	使用容量
 占用空间 {}	占用空间 {}	Uses {}	佔用空間 {}	使用容量 {}
 卡片	卡片	Cards	卡片	カード
