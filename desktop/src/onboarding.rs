@@ -347,8 +347,8 @@ fn newly_enabled_ai_tests(
     proofread: bool,
     summary: bool,
 ) -> Vec<TestKind> {
-    let existing = enabled_ai_tests(current.ai_proofread, current.ai_summary, current.vision);
-    enabled_ai_tests(proofread, summary, current.vision)
+    let existing = enabled_ai_tests(current.ai.enabled, current.ai.summarize, current.ai.vision);
+    enabled_ai_tests(proofread, summary, current.ai.vision)
         .into_iter()
         .filter(|kind| !existing.contains(kind))
         .collect()
@@ -398,8 +398,8 @@ impl Desktop {
             .asr_model
             .clone()
             .unwrap_or(course2md::config::DEFAULT_ASR_MODEL.into());
-        self.onboarding.ai_proofread = generation.ai_proofread;
-        self.onboarding.ai_summary = generation.ai_summary;
+        self.onboarding.ai_proofread = generation.ai.enabled;
+        self.onboarding.ai_summary = generation.ai.summarize;
         let refs = self.preferences.default_refs();
         self.hydrate_setup_service(ServicePurpose::Speech, refs.asr.as_deref(), window, cx);
         self.hydrate_setup_service(ServicePurpose::Ai, refs.llm.as_deref(), window, cx);
@@ -537,7 +537,7 @@ impl Desktop {
             purpose,
             self.onboarding.ai_proofread,
             self.onboarding.ai_summary,
-            self.preferences.generation().vision,
+            self.preferences.generation().ai.vision,
         )
     }
 
@@ -847,8 +847,8 @@ impl Desktop {
         match purpose {
             ServicePurpose::Speech => next.select_provider(Some(AsrProvider::Api)),
             ServicePurpose::Ai => {
-                next.ai_proofread = self.onboarding.ai_proofread;
-                next.ai_summary = self.onboarding.ai_summary;
+                next.ai.enabled = self.onboarding.ai_proofread;
+                next.ai.summarize = self.onboarding.ai_summary;
             }
         }
         if !self.commit_generation(next, cx) {
@@ -2604,12 +2604,10 @@ mod tests {
 
     #[test]
     fn existing_ai_configuration_checks_only_new_capabilities_and_never_disabled_ones() {
-        let mut existing = GenerationPreferences {
-            ai_proofread: true,
-            ai_summary: false,
-            vision: true,
-            ..Default::default()
-        };
+        let mut existing = GenerationPreferences::default();
+        existing.ai.enabled = true;
+        existing.ai.summarize = false;
+        existing.ai.vision = true;
 
         assert!(newly_enabled_ai_tests(&existing, true, false).is_empty());
         assert!(newly_enabled_ai_tests(&existing, false, false).is_empty());
@@ -2622,15 +2620,15 @@ mod tests {
             vec![TestKind::Summary]
         );
 
-        existing.ai_proofread = false;
-        existing.ai_summary = true;
+        existing.ai.enabled = false;
+        existing.ai.summarize = true;
         assert_eq!(
             newly_enabled_ai_tests(&existing, true, true),
             vec![TestKind::Proofread, TestKind::Vision]
         );
         assert!(newly_enabled_ai_tests(&existing, false, false).is_empty());
 
-        existing.vision = false;
+        existing.ai.vision = false;
         assert_eq!(
             newly_enabled_ai_tests(&existing, true, true),
             vec![TestKind::Proofread]
@@ -2639,13 +2637,11 @@ mod tests {
 
     #[test]
     fn engine_choice_changes_only_engine_fields_and_preserves_other_preferences() {
-        let mut current = GenerationPreferences {
-            ai_proofread: true,
-            ai_summary: true,
-            ai_concurrency: 5,
-            prompt: Some("Keep technical terms".into()),
-            ..Default::default()
-        };
+        let mut current = GenerationPreferences::default();
+        current.ai.enabled = true;
+        current.ai.summarize = true;
+        current.ai.concurrency = 5;
+        current.ai.prompt = Some("Keep technical terms".into());
         current.options.keep_video = Some(true);
         current.options.model_dir = Some("/existing/cache".into());
         let next = engine_preferences(&current, Some(AsrProvider::Gpu), "qwen3-1.7b");

@@ -124,16 +124,14 @@ pub fn save_failure_message(group: PreferenceGroup, error: &anyhow::Error) -> St
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default, deny_unknown_fields, from = "StoredGeneration")]
 pub struct GenerationPreferences {
     /// Ordinary processing parameters only. Storage is owned by the library registry.
     pub options: Defaults,
-    pub ai_proofread: bool,
-    pub ai_summary: bool,
-    /// Bilingual notes: target language code, or None for no translation.
-    pub translate: Option<String>,
-    pub vision: bool,
-    pub prompt: Option<String>,
+    /// What AI work a new note gets: the engine's own settings, with the
+    /// service fields (provider, address, key, model) always empty; services
+    /// are chosen separately.
+    pub ai: course2md::llm::LlmSettings,
     /// Durable editor text is not an active processing rule until explicitly applied.
     pub prompt_draft: Option<String>,
     pub local_model_draft: Option<String>,
@@ -141,8 +139,50 @@ pub struct GenerationPreferences {
     /// None means that local engine selection is automatic.
     pub last_local_provider: Option<AsrProvider>,
     pub subtitle_languages_draft: Option<String>,
-    pub ai_concurrency: usize,
     pub preferred_subtitle_languages: Vec<String>,
+}
+
+/// The stored form, which also reads files written before the AI choices were
+/// kept as `ai` (flat `ai_proofread`, `ai_summary`, `translate`, `vision`,
+/// `prompt` and `ai_concurrency`).
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct StoredGeneration {
+    options: Option<Defaults>,
+    ai: Option<course2md::llm::LlmSettings>,
+    prompt_draft: Option<String>,
+    local_model_draft: Option<String>,
+    last_local_provider: Option<AsrProvider>,
+    subtitle_languages_draft: Option<String>,
+    preferred_subtitle_languages: Option<Vec<String>>,
+    ai_proofread: Option<bool>,
+    ai_summary: Option<bool>,
+    translate: Option<String>,
+    vision: Option<bool>,
+    prompt: Option<String>,
+    ai_concurrency: Option<usize>,
+}
+
+impl From<StoredGeneration> for GenerationPreferences {
+    fn from(stored: StoredGeneration) -> Self {
+        let defaults = Self::default();
+        let mut ai = stored.ai.unwrap_or(defaults.ai);
+        ai.enabled = stored.ai_proofread.unwrap_or(ai.enabled);
+        ai.summarize = stored.ai_summary.unwrap_or(ai.summarize);
+        ai.translate = stored.translate.or(ai.translate);
+        ai.vision = stored.vision.unwrap_or(ai.vision);
+        ai.prompt = stored.prompt.or(ai.prompt);
+        ai.concurrency = stored.ai_concurrency.unwrap_or(ai.concurrency);
+        Self {
+            options: stored.options.unwrap_or(defaults.options),
+            ai,
+            prompt_draft: stored.prompt_draft,
+            local_model_draft: stored.local_model_draft,
+            last_local_provider: stored.last_local_provider,
+            subtitle_languages_draft: stored.subtitle_languages_draft,
+            preferred_subtitle_languages: stored.preferred_subtitle_languages.unwrap_or_default(),
+        }
+    }
 }
 
 impl Default for GenerationPreferences {
@@ -154,16 +194,14 @@ impl Default for GenerationPreferences {
                 keep_video: Some(false),
                 ..Defaults::default()
             },
-            ai_proofread: false,
-            ai_summary: false,
-            translate: None,
-            vision: false,
-            prompt: None,
+            ai: course2md::llm::LlmSettings {
+                concurrency: 2,
+                ..Default::default()
+            },
             prompt_draft: None,
             local_model_draft: None,
             last_local_provider: None,
             subtitle_languages_draft: None,
-            ai_concurrency: 2,
             preferred_subtitle_languages: Vec::new(),
         }
     }
@@ -194,7 +232,7 @@ impl GenerationPreferences {
     }
 
     pub fn effective_vision(&self) -> bool {
-        self.ai_proofread && self.vision
+        self.ai.enabled && self.ai.vision
     }
 
     pub fn apply_to(&self, config: &mut ConfigFile) {
@@ -202,13 +240,11 @@ impl GenerationPreferences {
         config.defaults = self.options.clone();
         config.defaults.out = out;
         config.defaults.resume = Some(true);
-        config.llm.enabled = self.ai_proofread;
-        config.llm.summarize = self.ai_summary;
-        config.llm.translate = self.translate.clone();
-        config.llm.vision = self.effective_vision();
-        config.llm.prompt = self.prompt.clone();
-        config.llm.concurrency = self.ai_concurrency;
-        config.llm.disable_hint = true;
+        config.llm = course2md::llm::LlmSettings {
+            vision: self.effective_vision(),
+            disable_hint: true,
+            ..self.ai.clone()
+        };
         clear_service_fields(config);
     }
 }
@@ -715,7 +751,7 @@ impl Validate for GenerationPreferences {
         if self.options.out.is_some() {
             bail!(course2md::tr!("保存位置由存储设置管理"));
         }
-        if self.ai_concurrency == 0 || self.ai_concurrency > 64 {
+        if self.ai.concurrency == 0 || self.ai.concurrency > 64 {
             bail!(course2md::tr!("AI 并发请求数需要在 1 到 64 之间"));
         }
         for (name, value) in [
@@ -2236,6 +2272,35 @@ pub fn normalize_endpoint(address: &str, protocol: ServiceProtocol) -> Result<St
 mod tests {
     use super::*;
 
+    #[test]
+    fn generation_files_written_before_the_nested_ai_settings_still_load() {
+        let legacy = serde_json::json!({
+            "options": {"keep_video": true},
+            "ai_proofread": true,
+            "ai_summary": true,
+            "translate": "en",
+            "vision": true,
+            "prompt": "Keep terms",
+            "ai_concurrency": 5,
+            "preferred_subtitle_languages": ["zh"]
+        });
+        let loaded: GenerationPreferences = serde_json::from_value(legacy).unwrap();
+        assert!(loaded.ai.enabled && loaded.ai.summarize && loaded.ai.vision);
+        assert_eq!(loaded.ai.translate.as_deref(), Some("en"));
+        assert_eq!(loaded.ai.prompt.as_deref(), Some("Keep terms"));
+        assert_eq!(loaded.ai.concurrency, 5);
+        assert_eq!(loaded.options.keep_video, Some(true));
+        assert_eq!(loaded.preferred_subtitle_languages, ["zh"]);
+        let saved = serde_json::to_value(&loaded).unwrap();
+        assert!(saved.get("ai_proofread").is_none() && saved["ai"]["enabled"] == true);
+        let reloaded: GenerationPreferences = serde_json::from_value(saved).unwrap();
+        assert_eq!(reloaded, loaded);
+        assert!(
+            serde_json::from_value::<GenerationPreferences>(serde_json::json!({"unknown": 1}))
+                .is_err()
+        );
+    }
+
     fn resolve_for_execution(
         store: &Store,
         base: &ConfigFile,
@@ -2373,9 +2438,9 @@ mod tests {
         draft.address.clear();
         store.save_service_draft(draft, None).unwrap();
         let mut generation = store.generation().clone();
-        generation.ai_summary = true;
+        generation.ai.summarize = true;
         store.save_generation(generation).unwrap();
-        assert!(store.generation().ai_summary);
+        assert!(store.generation().ai.summarize);
         assert_eq!(store.default_refs().llm.as_deref(), Some(old.id.as_str()));
         assert_eq!(store.service_drafts().count(), 1);
     }
@@ -2460,18 +2525,18 @@ mod tests {
     fn group_recovery_preserves_corrupt_file_and_keeps_other_group_current() {
         let (directory, mut store) = isolated();
         let mut first = store.generation().clone();
-        first.ai_summary = true;
+        first.ai.summarize = true;
         store.save_generation(first).unwrap();
         let mut second = store.generation().clone();
-        second.ai_proofread = true;
+        second.ai.enabled = true;
         store.save_generation(second).unwrap();
         let mut app = store.application().clone();
         app.desktop.reduce_motion = true;
         store.save_application(app).unwrap();
         std::fs::write(directory.path().join("generation.json"), b"broken settings").unwrap();
         let recovered = open(directory.path(), store.vault());
-        assert!(recovered.generation().ai_summary);
-        assert!(!recovered.generation().ai_proofread);
+        assert!(recovered.generation().ai.summarize);
+        assert!(!recovered.generation().ai.enabled);
         assert!(recovered.application().desktop.reduce_motion);
         assert!(
             recovered
@@ -2494,13 +2559,13 @@ mod tests {
         std::fs::remove_file(directory.path().join("generation.json")).unwrap();
         std::fs::create_dir(directory.path().join("generation.json")).unwrap();
         let mut next = store.generation().clone();
-        next.ai_summary = true;
+        next.ai.summarize = true;
         store.save_generation(next).unwrap();
         assert!(failed(&settle(&mut store), PreferenceGroup::Generation));
         assert!(
             store
                 .generation_intent()
-                .is_some_and(|intent| intent.ai_summary)
+                .is_some_and(|intent| intent.ai.summarize)
         );
         store.save_application(store.application().clone()).unwrap();
         assert!(!failed(&settle(&mut store), PreferenceGroup::Application));
@@ -2512,7 +2577,7 @@ mod tests {
         );
         // The unwritten edit is never what a relaunch applies.
         let reopened = open(directory.path(), store.vault());
-        assert!(!reopened.generation().ai_summary);
+        assert!(!reopened.generation().ai.summarize);
     }
 
     #[test]
@@ -2756,11 +2821,11 @@ mod tests {
     fn new_defaults_are_local_independent_and_do_not_export_extra_files() {
         let (_directory, store) = isolated();
         let preferences = store.generation();
-        assert!(!preferences.ai_proofread && !preferences.ai_summary && !preferences.vision);
+        assert!(!preferences.ai.enabled && !preferences.ai.summarize && !preferences.ai.vision);
         assert_eq!(preferences.options.formats.as_deref(), Some([].as_slice()));
         let mut preferences = preferences.clone();
-        preferences.ai_summary = true;
-        preferences.vision = true;
+        preferences.ai.summarize = true;
+        preferences.ai.vision = true;
         let mut config = ConfigFile::default();
         config.defaults.out = Some(PathBuf::from("/test-library"));
         config.llm.api_key = "test-only-old-global-key".into();
@@ -2802,7 +2867,7 @@ mod tests {
         std::fs::create_dir_all(root.join("application.json")).unwrap();
         let mut generation = store.generation().clone();
         generation.prompt_draft = Some("Keep the technical terms.".into());
-        generation.ai_summary = true;
+        generation.ai.summarize = true;
         let mut application = store.application().clone();
         application.font_scale = 2.0;
         store.save_generation(generation.clone()).unwrap();
@@ -2812,7 +2877,7 @@ mod tests {
         assert!(failed(&results, PreferenceGroup::Application));
         assert!(store.unsaved_intents_are_preserved());
         let mut reopened = open(&root, store.vault());
-        assert!(!reopened.generation().ai_summary);
+        assert!(!reopened.generation().ai.summarize);
         assert_eq!(reopened.application().font_scale, 1.0);
         assert_eq!(reopened.generation_intent(), Some(&generation));
         assert_eq!(reopened.application_intent(), Some(&application));
@@ -2829,7 +2894,7 @@ mod tests {
         assert!(reopened.generation_intent().is_none());
         assert!(reopened.application_intent().is_none());
         let saved = open(&root, reopened.vault());
-        assert!(saved.generation().ai_summary);
+        assert!(saved.generation().ai.summarize);
         assert_eq!(saved.application().font_scale, 2.0);
     }
 
@@ -2845,12 +2910,12 @@ mod tests {
         )
         .unwrap();
         let mut edit = store.generation().clone();
-        edit.ai_summary = true;
+        edit.ai.summarize = true;
         store.save_generation(edit).unwrap();
         assert!(failed(&settle(&mut store), PreferenceGroup::Generation));
         assert!(!store.unsaved_intents_are_preserved());
         let reopened = open(&root, store.vault());
-        assert!(!reopened.generation().ai_summary);
+        assert!(!reopened.generation().ai.summarize);
         assert!(reopened.generation_intent().is_none());
     }
 

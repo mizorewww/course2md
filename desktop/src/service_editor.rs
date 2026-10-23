@@ -371,8 +371,8 @@ impl Desktop {
                 },
                 // Nothing is sent anywhere until a service exists to choose.
                 if purpose == ServicePurpose::Ai && has_services {
-                    if self.preferences.generation().ai_proofread
-                        && self.preferences.generation().vision
+                    if self.preferences.generation().ai.enabled
+                        && self.preferences.generation().ai.vision
                     {
                         course2md::tr!("文字及对应截图会发送到所选服务")
                     } else {

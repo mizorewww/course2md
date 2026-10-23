@@ -1002,7 +1002,7 @@ impl Desktop {
             .update(cx, |input, cx| input.set_value(model, window, cx));
         self.settings_ui.prompt.update(cx, |input, cx| {
             input.set_value(
-                value.prompt_draft.or(value.prompt).unwrap_or_default(),
+                value.prompt_draft.or(value.ai.prompt).unwrap_or_default(),
                 window,
                 cx,
             )
@@ -1747,12 +1747,12 @@ impl Desktop {
         if next
             .prompt_draft
             .as_ref()
-            .or(next.prompt.as_ref())
+            .or(next.ai.prompt.as_ref())
             .map(String::as_str)
             .unwrap_or("")
             == text
             // The prefilled standard rule is not an unsaved edit.
-            || (next.prompt.is_none()
+            || (next.ai.prompt.is_none()
                 && next.prompt_draft.is_none()
                 && text.trim() == course2md::llm::DEFAULT_PROMPT.trim())
         {

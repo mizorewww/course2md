@@ -66,6 +66,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Div {
         let current = value
+            .ai
             .translate
             .as_deref()
             .and_then(course2md::language::target);
@@ -81,7 +82,7 @@ impl Desktop {
                 current,
                 |this, code, cx| {
                     let mut next = this.generation_edit_base();
-                    next.translate = code.map(str::to_owned);
+                    next.ai.translate = code.map(str::to_owned);
                     this.commit_generation(next, cx);
                 },
                 cx,
@@ -383,10 +384,10 @@ impl Desktop {
                         course2md::tr!("校对文字和标点"),
                         "",
                         Switch::new("default-ai-proofread")
-                            .checked(value.ai_proofread)
+                            .checked(value.ai.enabled)
                             .on_click(cx.listener(|this, enabled, _, cx| {
                                 let mut next = this.generation_edit_base();
-                                next.ai_proofread = *enabled;
+                                next.ai.enabled = *enabled;
                                 this.commit_generation(next, cx);
                             })),
                     ))
@@ -394,10 +395,10 @@ impl Desktop {
                         course2md::tr!("在开头生成摘要"),
                         "",
                         Switch::new("default-ai-summary")
-                            .checked(value.ai_summary)
+                            .checked(value.ai.summarize)
                             .on_click(cx.listener(|this, enabled, _, cx| {
                                 let mut next = this.generation_edit_base();
-                                next.ai_summary = *enabled;
+                                next.ai.summarize = *enabled;
                                 this.commit_generation(next, cx);
                             })),
                     ))
@@ -405,11 +406,11 @@ impl Desktop {
                         course2md::tr!("校对时附带对应截图"),
                         "",
                         Switch::new("default-ai-vision")
-                            .checked(value.vision)
-                            .disabled(!value.ai_proofread)
+                            .checked(value.ai.vision)
+                            .disabled(!value.ai.enabled)
                             .on_click(cx.listener(|this, enabled, _, cx| {
                                 let mut next = this.generation_edit_base();
-                                next.vision = *enabled;
+                                next.ai.vision = *enabled;
                                 this.commit_generation(next, cx);
                             })),
                     )),
@@ -417,7 +418,7 @@ impl Desktop {
             .child(self.translation_setting(value, cx))
             .child(self.service_picker(ServicePurpose::Ai, false, cx));
         // The rule only applies to proofreading, so it appears with it.
-        if value.ai_proofread {
+        if value.ai.enabled {
             ai = ai
                 // As on the canvas, the rule is a list item showing its current value.
                 .child(settings_row(
@@ -427,7 +428,7 @@ impl Desktop {
                     quiet("show-proofread-rules")
                         .settings_text()
                         .mr(-crate::theme::QUIET_INSET)
-                        .label(if value.prompt.is_some() {
+                        .label(if value.ai.prompt.is_some() {
                             course2md::tr!("已自定义")
                         } else {
                             course2md::tr!("使用标准规则")
@@ -481,7 +482,7 @@ impl Desktop {
                                                 .trim()
                                                 .to_owned();
                                             let mut next = this.generation_edit_base();
-                                            next.prompt = (!prompt.is_empty()
+                                            next.ai.prompt = (!prompt.is_empty()
                                                 && prompt != course2md::llm::DEFAULT_PROMPT.trim())
                                             .then_some(prompt);
                                             next.prompt_draft = None;
@@ -493,10 +494,10 @@ impl Desktop {
                                         .settings_text()
                                         .icon(icons::refresh())
                                         .label(course2md::tr!("恢复标准规则"))
-                                        .disabled(value.prompt.is_none())
+                                        .disabled(value.ai.prompt.is_none())
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             let mut next = this.generation_edit_base();
-                                            next.prompt = None;
+                                            next.ai.prompt = None;
                                             next.prompt_draft = None;
                                             if this.commit_generation(next, cx) {
                                                 this.settings_ui.prompt.update(cx, |input, cx| {
