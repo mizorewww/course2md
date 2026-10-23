@@ -441,26 +441,18 @@ pub fn enrich_bilibili_candidates(candidates: &mut [SourceCandidate]) {
         .timeout_read(std::time::Duration::from_secs(3))
         .timeout(std::time::Duration::from_secs(8))
         .build();
-    // 每个请求最长 8s：分批并发，避免几十个分集串行等待
-    for batch in bvids.chunks(BILIBILI_ENRICH_CONCURRENCY) {
-        let views: Vec<_> = std::thread::scope(|scope| {
-            batch
-                .iter()
-                .map(|bvid| scope.spawn(|| bilibili_view(&agent, bvid)))
-                .collect::<Vec<_>>()
-                .into_iter()
-                .map(|handle| {
-                    handle
-                        .join()
-                        .unwrap_or_else(|_| anyhow::bail!(crate::tr!("分集信息线程异常")))
-                })
-                .collect()
-        });
-        for (bvid, view) in batch.iter().zip(views) {
-            match view {
-                Ok(view) => apply_bilibili_view(candidates, bvid, &view),
-                Err(error) => tracing::debug!(bvid, "分集信息补充失败：{error:#}"),
-            }
+    // 每个请求最长 8s：并发补全，避免几十个分集串行等待。单个失败只记日志。
+    let views = crate::runtime::map_pool(
+        bvids.iter().collect(),
+        BILIBILI_ENRICH_CONCURRENCY,
+        &Default::default(),
+        |bvid| Ok(bilibili_view(&agent, bvid)),
+    )
+    .unwrap_or_default();
+    for (bvid, view) in bvids.iter().zip(views) {
+        match view {
+            Ok(view) => apply_bilibili_view(candidates, bvid, &view),
+            Err(error) => tracing::debug!(bvid, "分集信息补充失败：{error:#}"),
         }
     }
 }

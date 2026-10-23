@@ -524,71 +524,36 @@ fn run_api(
         workers: WORKERS.min(pending.len()),
     });
 
-    // 有界并发（std::thread::scope + 借用，无需 Arc）：网络往返是主要瓶颈；
-    // 结果经 channel 回收后记录。abort 后 in-flight 请求自然结束，无人 join 不到。
-    let (tx, rx) = std::sync::mpsc::channel::<(usize, Result<Option<String>>)>();
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let abort = std::sync::atomic::AtomicBool::new(false);
-    let mut err: Option<anyhow::Error> = None;
-    std::thread::scope(|s| {
-        for _ in 0..WORKERS {
-            let tx = tx.clone();
-            let target = ApiTarget {
-                client: &client,
-                url: &url,
-                model: &api.model,
-                key: &api_key,
-                mode: api.mode,
-                control,
-            };
-            let (tmp_dir, wav) = (tmp.path(), wav);
-            let (segs, pending, next, abort) = (&segs, &pending, &next, &abort);
-            s.spawn(move || {
-                loop {
-                    if abort.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    let Some(i) = pending.get(idx).copied() else {
-                        break;
-                    };
-                    let seg = segs[i];
-                    let r =
-                        transcribe_api(&target, &tmp_dir.join(format!("c{i:04}.wav")), seg, wav);
-                    if tx.send((i, r)).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-        drop(tx);
-
-        let mut tracker = EmptyResultTracker::default();
-        for (i, r) in rx {
-            match r {
-                _ if err.is_some() => {} // 已熔断/已出错：丢弃迟到结果
-                Ok(text) => {
-                    let text = text.as_deref().unwrap_or("");
-                    if let Err(e) = tracker.record_outcome(cp, segs[i].start, segs[i].end, text) {
-                        err = Some(e);
-                        abort.store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
-                Err(e) => {
-                    err = Some(e.context(crate::tr!("云端语音识别失败：{}", i)));
-                    abort.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-            }
-            // 每个回收的结果（含空结果）恰好推进一次，与串行路径一致
-            pb.inc(1);
-        }
-        // 正常收尾：缓冲的空结果（真实静音）落 checkpoint，避免静音 chunk 反复重跑
-        if err.is_none()
-            && let Err(e) = tracker.finish(cp)
-        {
-            err = Some(e);
-        }
+    // Network round trips dominate, so requests run on the shared worker
+    // pool. Each result is recorded into the checkpoint as it arrives (resume
+    // keeps finished chunks); the first error or an empty-result tripwire
+    // stops the pool from taking more chunks.
+    let target = ApiTarget {
+        client: &client,
+        url: &url,
+        model: &api.model,
+        key: &api_key,
+        mode: api.mode,
+        control,
+    };
+    let state = std::sync::Mutex::new((cp, EmptyResultTracker::default()));
+    let result = crate::runtime::map_pool(pending.clone(), WORKERS, control, |i| {
+        let seg = segs[i];
+        let text = transcribe_api(&target, &tmp.path().join(format!("c{i:04}.wav")), seg, wav)
+            .with_context(|| crate::tr!("云端语音识别失败：{}", i))?;
+        let mut guard = crate::runtime::lock_recover(&state);
+        let (cp, tracker) = &mut *guard;
+        tracker.record_outcome(cp, seg.start, seg.end, text.as_deref().unwrap_or(""))?;
+        // Every collected result, empty included, advances once, as serially.
+        pb.inc(1);
+        Ok(())
     });
+    let (cp, tracker) = state
+        .into_inner()
+        .unwrap_or_else(|poison| poison.into_inner());
+    // A clean finish records buffered empty results (real silence), so silent
+    // chunks are not transcribed again on resume.
+    let err = result.err().or_else(|| tracker.finish(cp).err());
     pb.finish();
     if let Some(e) = err {
         return Err(e);
@@ -1577,5 +1542,57 @@ mod tests {
         assert_eq!(caps_from_help(old_help), LlamaServerCaps::default());
         // 空输出 / 探测失败文本
         assert_eq!(caps_from_help(""), LlamaServerCaps::default());
+    }
+}
+
+#[cfg(test)]
+mod cloud_tests {
+    use super::*;
+
+    /// Cloud transcription runs its chunks on the shared worker pool and
+    /// records every result into the checkpoint, so a resumed task sends
+    /// nothing for chunks already transcribed.
+    #[test]
+    fn cloud_chunks_are_transcribed_on_the_pool_and_checkpointed() {
+        if crate::runtime::which("ffmpeg").is_none() {
+            assert!(std::env::var_os("CI").is_none(), "ffmpeg is required in CI");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("speech.wav");
+        // Three tones separated by silence: voice activity finds three segments.
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+            .arg("aevalsrc=sin(440*2*PI*t)*between(mod(t\\,3)\\,0\\,1.5):d=8.5:s=16000")
+            .args(["-ac", "1", "-ar", "16000"])
+            .arg(&wav)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let segments = ffmpeg_vad(&wav, 30.).unwrap().len();
+        assert!(segments >= 2, "{segments} segments");
+        let body = r#"{"text":"spoken"}"#;
+        let (base, _server) = crate::test_http::serve(
+            (0..segments)
+                .map(|_| crate::test_http::json_response(body))
+                .collect(),
+        );
+        let api = crate::settings::AsrApi {
+            base_url: base,
+            api_key: String::new(),
+            model: "test-asr".into(),
+            mode: crate::settings::AsrApiMode::Transcriptions,
+        };
+        let identity = crate::checkpoint::AsrIdentity::new("api", "test-asr", 30.);
+        let mut cp = crate::checkpoint::Checkpoint::open(dir.path(), true, &identity).unwrap();
+        let events = run_api(&api, &wav, 30., &mut cp, &Default::default()).unwrap();
+        assert_eq!(events.len(), segments);
+        assert!(events.iter().all(|event| event.text == "spoken"));
+        drop(cp);
+        // Resuming finds every chunk done and sends nothing (the fake server
+        // has no responses left).
+        let mut cp = crate::checkpoint::Checkpoint::open(dir.path(), true, &identity).unwrap();
+        let again = run_api(&api, &wav, 30., &mut cp, &Default::default()).unwrap();
+        assert_eq!(again.len(), segments);
     }
 }
