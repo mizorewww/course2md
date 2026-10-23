@@ -45,15 +45,13 @@ fn main() {
     // 无限挂起；从源码构建宏库只慢在首次。不认识该参数的旧工具链本就不下载
     // 预编译包。
     //
-    // 两个参数是否可用由 `swift build --help` 探测一次，按工具链版本缓存在
-    // OUT_DIR，之后只跑一次 swift build，不再串行试错。
-    let extra = swift_build_args();
-    if let Err(report) = run(Command::new("swift")
-        .args(["build", "-c", "release"])
-        .args(&extra)
-        .current_dir(&pkg))
-    {
-        println!("cargo:warning={report}");
+    // 不认识这两个参数的旧工具链依次回退。`--help` 的文字因版本而异，不能据此
+    // 判断（旧 Xcode 的帮助不列出 swiftbuild，却支持它），所以按实际构建结果
+    // 选择；成功的参数组合按工具链版本缓存在 OUT_DIR，之后只跑一次 swift build。
+    if let Err(reports) = build_swift_package(&pkg) {
+        for report in reports {
+            println!("cargo:warning={report}");
+        }
         println!(
             "cargo:warning=swift build 失败（见上方输出），跳过 Apple 原生模块；coreml 后端不可用"
         );
@@ -174,7 +172,17 @@ fn main() {
 
 /// Extra `swift build` arguments this toolchain supports, probed from its help
 /// text once and cached in OUT_DIR under the `swift --version` it came from.
-fn swift_build_args() -> Vec<String> {
+/// Builds the Swift package with the newest option set the toolchain accepts:
+/// the Swift Build engine (which compiles MLX's Metal shaders into
+/// default.metallib) and no prebuilt swift-syntax download. The set that
+/// worked is cached per toolchain version, so a rebuild runs swift once.
+fn build_swift_package(pkg: &Path) -> Result<(), Vec<String>> {
+    const ATTEMPTS: [&[&str]; 4] = [
+        &["--build-system", "swiftbuild", "--disable-experimental-prebuilts"],
+        &["--build-system", "swiftbuild"],
+        &["--disable-experimental-prebuilts"],
+        &[],
+    ];
     let version = Command::new("swift")
         .arg("--version")
         .output()
@@ -184,26 +192,36 @@ fn swift_build_args() -> Vec<String> {
         })
         .unwrap_or_default();
     let cache = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("swift-build-args");
-    if let Ok(cached) = std::fs::read_to_string(&cache) {
-        let mut lines = cached.lines();
-        if lines.next() == Some(version.as_str()) {
-            return lines.map(str::to_owned).collect();
+    let cached: Option<Vec<String>> = std::fs::read_to_string(&cache).ok().and_then(|text| {
+        let mut lines = text.lines();
+        (lines.next() == Some(version.as_str())).then(|| lines.map(str::to_owned).collect())
+    });
+    let build = |extra: &[String]| {
+        run(Command::new("swift")
+            .args(["build", "-c", "release"])
+            .args(extra)
+            .current_dir(pkg))
+    };
+    if let Some(extra) = &cached
+        && build(extra).is_ok()
+    {
+        return Ok(());
+    }
+    let mut reports = Vec::new();
+    for attempt in ATTEMPTS {
+        let extra: Vec<String> = attempt.iter().map(|arg| (*arg).to_owned()).collect();
+        if cached.as_ref() == Some(&extra) {
+            continue;
+        }
+        match build(&extra) {
+            Ok(()) => {
+                let _ = std::fs::write(&cache, [version, extra.join("\n")].join("\n"));
+                return Ok(());
+            }
+            Err(report) => reports.push(report),
         }
     }
-    let help = Command::new("swift")
-        .args(["build", "--help"])
-        .output()
-        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-        .unwrap_or_default();
-    let mut args = vec![];
-    if help.contains("swiftbuild") {
-        args.extend(["--build-system", "swiftbuild"].map(String::from));
-    }
-    if help.contains("--disable-experimental-prebuilts") {
-        args.push("--disable-experimental-prebuilts".into());
-    }
-    let _ = std::fs::write(&cache, [version, args.join("\n")].join("\n"));
-    args
+    Err(reports)
 }
 
 fn xcode_devdir() -> Option<PathBuf> {
