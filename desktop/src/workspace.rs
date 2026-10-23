@@ -1625,12 +1625,13 @@ fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
                 TaskState::Complete
             };
             let previous = task.outcomes.clone();
-            task.artifact = Some(base);
+            let previous_artifact = task.artifact.replace(base);
             task.outcomes
                 .get_or_insert_with(course2md::artifact::Outcomes::default)
                 .exports = outcomes;
-            task.unread |=
-                task.artifact.is_none() || task.outcomes != previous || task.state != next_state;
+            task.unread |= previous_artifact != task.artifact
+                || task.outcomes != previous
+                || task.state != next_state;
             task.state = next_state;
         }
     }
