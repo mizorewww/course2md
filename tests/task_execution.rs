@@ -1,4 +1,6 @@
 //! End-to-end stdin task protocol, using real ffmpeg and isolated local files only.
+mod common;
+
 use course2md::execution::Component;
 use course2md::{
     artifact,
@@ -95,15 +97,11 @@ fn scanning_finishes_before_a_slow_screenshot_reports_progress_with_estimated_to
         sync::mpsc,
         time::{Duration, Instant},
     };
-    let (Some(ffmpeg), Some(python)) = (
-        course2md::runtime::which("ffmpeg"),
-        course2md::runtime::which("python3"),
-    ) else {
-        return;
-    };
-    if course2md::runtime::which("ffprobe").is_none() {
+    if !common::tools_available(&["ffmpeg", "ffprobe", "python3"]) {
         return;
     }
+    let ffmpeg = course2md::runtime::which("ffmpeg").unwrap();
+    let python = course2md::runtime::which("python3").unwrap();
     let root = tempfile::tempdir().unwrap();
     let video = root.path().join("flat-video.mp4");
     let generated = Command::new(&ffmpeg)
@@ -242,9 +240,7 @@ fn scanning_finishes_before_a_slow_screenshot_reports_progress_with_estimated_to
 
 #[test]
 fn explicit_subtitles_zero_exports_and_confirmed_title_survive_real_conversion_and_resume() {
-    if course2md::runtime::which("ffmpeg").is_none()
-        || course2md::runtime::which("ffprobe").is_none()
-    {
+    if !common::ffmpeg_available() {
         return;
     }
     let root = tempfile::tempdir().unwrap();
@@ -310,9 +306,7 @@ fn explicit_subtitles_zero_exports_and_confirmed_title_survive_real_conversion_a
 
 #[test]
 fn broken_video_preserves_readable_subtitles_as_partial_note_without_phantom_images() {
-    if course2md::runtime::which("ffmpeg").is_none()
-        || course2md::runtime::which("ffprobe").is_none()
-    {
+    if !common::ffmpeg_available() {
         return;
     }
     let root = tempfile::tempdir().unwrap();
@@ -510,9 +504,7 @@ fn summary_response() -> serde_json::Value {
 
 #[test]
 fn proofreading_images_and_custom_rules_match_the_requested_outputs() {
-    if course2md::runtime::which("ffmpeg").is_none()
-        || course2md::runtime::which("ffprobe").is_none()
-    {
+    if !common::ffmpeg_available() {
         return;
     }
     let mock = MockAi::respond_with(|_, body| {
@@ -598,9 +590,7 @@ fn proofreading_images_and_custom_rules_match_the_requested_outputs() {
 #[test]
 fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source_work() {
     use std::sync::atomic::Ordering;
-    if course2md::runtime::which("ffmpeg").is_none()
-        || course2md::runtime::which("ffprobe").is_none()
-    {
+    if !common::ffmpeg_available() {
         return;
     }
     let mock = MockAi::respond_with(|number, _| {
@@ -751,9 +741,7 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
 #[test]
 fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() {
     use std::sync::atomic::Ordering;
-    if course2md::runtime::which("ffmpeg").is_none()
-        || course2md::runtime::which("ffprobe").is_none()
-    {
+    if !common::ffmpeg_available() {
         return;
     }
     let mock = MockAi::new();
@@ -861,9 +849,7 @@ fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() 
 #[test]
 fn export_only_recovery_uses_the_saved_version_after_source_and_subtitle_are_gone() {
     use course2md::config::OutputFormat;
-    if course2md::runtime::which("ffmpeg").is_none()
-        || course2md::runtime::which("ffprobe").is_none()
-    {
+    if !common::ffmpeg_available() {
         return;
     }
     let root = tempfile::tempdir().unwrap();

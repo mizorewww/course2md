@@ -1,4 +1,6 @@
 //! Exercise the public CLI contract without network access or real credentials.
+mod common;
+
 use std::process::{Command, Output};
 
 struct CliTest {
@@ -241,6 +243,9 @@ fn doctor_reports_required_failures_with_nonzero_exit() {
 #[test]
 fn remote_download_output_does_not_leak_into_json_or_quiet_mode() {
     use std::os::unix::fs::PermissionsExt;
+    if !common::ffmpeg_available() {
+        return;
+    }
     let cli = CliTest::new();
     // Use real ffmpeg/ffprobe, with an offline yt-dlp fixture that emits noisy output.
     let video = cli.dir.path().join("fixture.mp4");

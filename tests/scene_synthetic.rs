@@ -5,15 +5,9 @@
 //!
 //! 运行需要 ffmpeg；本地缺少时跳过，CI 中缺少则失败。
 
-use std::process::Command;
+mod common;
 
-fn have_ffmpeg() -> bool {
-    Command::new("ffmpeg")
-        .arg("-version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+use std::process::Command;
 
 /// 生成 20s 1280x720 测试视频（黑/灰/白整屏填充，亮度差异大、SSIM 可区分；
 /// 不用 drawtext 以兼容无 freetype 的 ffmpeg 构建）：
@@ -70,8 +64,7 @@ fn test_cfg(video: &std::path::Path, dir: &std::path::Path) -> course2md::config
 
 #[test]
 fn scene_detects_slides_with_true_timestamps() {
-    if !have_ffmpeg() {
-        eprintln!("skip: ffmpeg not found");
+    if !common::ffmpeg_available() {
         return;
     }
     let dir = std::env::temp_dir().join(format!("c2m-scene-test-{}", std::process::id()));
@@ -109,8 +102,7 @@ fn scene_detects_slides_with_true_timestamps() {
 /// 且时间线用 onset（候选首现），截帧用 capture（确认稳定时）。
 #[test]
 fn stable_mode_waits_for_settled_state() {
-    if !have_ffmpeg() {
-        eprintln!("skip: ffmpeg not found");
+    if !common::ffmpeg_available() {
         return;
     }
     let dir = std::env::temp_dir().join(format!("c2m-stable-test-{}", std::process::id()));
