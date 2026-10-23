@@ -254,8 +254,11 @@ public func c2mAsrTranscribe(
         trimmed.withCString { cStr in
             _ = strncpy(outText, cStr, outLen - 1)
         }
+        // strncpy leaves the last byte alone when the text fills the buffer
+        // exactly or is truncated; terminate here so the caller need not
+        // pre-zero its buffer.
+        outText[outLen - 1] = 0
         if !fits {
-            outText[outLen - 1] = 0 // strncpy 截断时不保证补 NUL
             return 2 // 2 = 成功但被截断（Rust 侧据此 warn，不再静默截断）
         }
         return 0
