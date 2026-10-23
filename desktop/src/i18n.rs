@@ -34,8 +34,9 @@ fn month_day_for(lang: Lang, month: u32, day: u32) -> String {
     }
 }
 
-/// gpui-component ships English and Simplified Chinese; other locales fall back
-/// to English for its built-in controls, while our catalog covers the app.
+/// gpui-component ships English, Simplified and Traditional Chinese; Japanese
+/// falls back to English for its built-in controls, while our catalog covers
+/// the app.
 fn component_locale(lang: Lang) -> &'static str {
     match lang {
         Lang::En => "en",

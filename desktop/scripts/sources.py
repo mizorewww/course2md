@@ -4,7 +4,11 @@
 The component repository publishes GPUI under gpui-pre package names. A manifest
 overlay connects its source to Zed's original workspace; no source is vendored
 in the project. Reviewed source patches live in desktop/patches and are replayed
-after checkout. Developer checkouts remain untouched except for fast-forward pulls.
+after checkout.
+
+Upstream clones live in the ignored desktop/.deps/upstream and are fast-forwarded
+to main. --developer-dir uses your own zed and gpui-component checkouts instead;
+they are never modified, and only pulled with --pull-developer.
 """
 import argparse
 import json
@@ -13,9 +17,32 @@ import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOS = {"zed": "zed-industries/zed", "component": "longbridge/gpui-component"}
+CHECKOUT_NAMES = {"zed": "zed", "component": "gpui-component"}
+UPSTREAM = ROOT / ".deps" / "upstream"
+
+
+def gpui_platform_features(manifest=ROOT / "Cargo.toml"):
+    """gpui_platform features are defined once, in desktop/Cargo.toml."""
+    dependency = tomllib.loads(manifest.read_text())["dependencies"]["gpui_platform"]
+    return dependency.get("features", [])
+
+
+def source_checkout(name, developer_dir=None):
+    """Where a repository's main checkout lives, and whether this script owns it."""
+    if developer_dir is None:
+        return UPSTREAM / CHECKOUT_NAMES[name], True
+    return Path(developer_dir) / CHECKOUT_NAMES[name], False
+
+
+def should_pull(owned, *, locked=False, no_pull=False, pull_developer=False):
+    """Owned clones follow main; a developer checkout only on explicit request."""
+    if locked or no_pull:
+        return False
+    return owned or pull_developer
 
 
 def git(path, *args, capture=False, lf=False):
@@ -48,7 +75,8 @@ def component_overlay(path, content):
                              ("gpui_macros", "gpui_macros"), ("sum-tree", "sum_tree"),
                              ("reqwest_client", "reqwest_client"), ("gpui_web", "gpui_web")]:
             pattern = rf'^{re.escape(alias)} = \{{ package = "gpui-pre[^\"]*",[^\n]*\}}$'
-            features = ', features = ["font-kit", "x11", "wayland", "runtime_shaders"]' if alias == "gpui_platform" else ''
+            features = (f', features = {json.dumps(gpui_platform_features())}'
+                        if alias == "gpui_platform" else '')
             package = f', package = "{crate}"' if alias != crate else ''
             replacement = f'{alias} = {{ path = "../zed/crates/{crate}"{package}{features} }}'
             text, count = re.subn(pattern, replacement, text, count=1, flags=re.M)
@@ -130,8 +158,14 @@ def main():
     mode.add_argument("--no-pull", action="store_true", help="Reuse already updated local main sources")
     mode.add_argument("--freeze", action="store_true", help="Record currently prepared and tested source revisions")
     mode.add_argument("--locked", action="store_true", help="Use release source revisions without updating main")
-    parser.add_argument("--developer-dir", type=Path, default=Path.home() / "Developer")
+    parser.add_argument("--developer-dir", type=Path,
+                        help="Use the zed and gpui-component checkouts in this directory "
+                             "instead of clones under desktop/.deps/upstream")
+    parser.add_argument("--pull-developer", action="store_true",
+                        help="Fast-forward the --developer-dir checkouts to main first")
     args = parser.parse_args()
+    if args.pull_developer and (args.developer_dir is None or args.no_pull or args.locked):
+        parser.error("--pull-developer needs --developer-dir, without --no-pull or --locked")
     lock_path = ROOT / "sources.lock.json"
     if args.freeze:
         revisions = {name: git(ROOT / ".deps" / name, "rev-parse", "HEAD", capture=True) for name in REPOS}
@@ -144,19 +178,26 @@ def main():
         raise SystemExit("Release source lock must contain a full commit hash for each dependency")
     (ROOT / ".deps").mkdir(exist_ok=True)
     for name, remote in REPOS.items():
-        source = args.developer_dir / ("gpui-component" if name == "component" else "zed")
+        source, owned = source_checkout(name, args.developer_dir)
+        url = f"https://github.com/{remote}.git"
         if not source.exists():
+            if not owned:
+                raise SystemExit(f"No {CHECKOUT_NAMES[name]} checkout in {args.developer_dir}")
             source.parent.mkdir(parents=True, exist_ok=True)
             # A blobless clone keeps CI and first-time setup from downloading all of Zed's history.
-            subprocess.run(["git", "clone", "--filter=blob:none", f"https://github.com/{remote}.git", str(source)],
-                           check=True)
-        if not args.locked and not args.no_pull:
+            subprocess.run(["git", "clone", "--filter=blob:none", url, str(source)], check=True)
+        if should_pull(owned, locked=args.locked, no_pull=args.no_pull,
+                       pull_developer=args.pull_developer):
             if git(source, "status", "--porcelain", capture=True):
                 raise SystemExit(f"Commit or stash changes in {source} before pulling main")
             if git(source, "branch", "--show-current", capture=True) != "main":
                 raise SystemExit(f"{source} must be on main")
-            git(source, "pull", "--ff-only", f"https://github.com/{remote}.git", "main")
+            git(source, "pull", "--ff-only", url, "main")
         revision = locked.get(name) or git(source, "rev-parse", "HEAD", capture=True)
+        known = subprocess.run(["git", "-C", str(source), "cat-file", "-e", f"{revision}^{{commit}}"],
+                               capture_output=True).returncode == 0
+        if not known and owned:
+            git(source, "fetch", url, "main")
         dest = ROOT / ".deps" / name
         patches = source_patches(name)
         verify_patch_revision(source, revision, patches)

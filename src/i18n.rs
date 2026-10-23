@@ -41,12 +41,7 @@ impl Lang {
 
     /// The language's own name, used by the interface-language selector.
     pub fn native_name(self) -> &'static str {
-        match self {
-            Self::En => "English",
-            Self::ZhHans => crate::tr!(crate::tr!("简体中文")),
-            Self::ZhHant => crate::tr!(crate::tr!("繁體中文")),
-            Self::Ja => crate::tr!(crate::tr!("日本語")),
-        }
+        crate::language::native_name(self.code())
     }
 
     pub fn from_code(value: &str) -> Option<Self> {

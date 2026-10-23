@@ -2,6 +2,13 @@
 
 Measured on a 3-minute 1080p Chinese lecture clip (local file), release builds.
 
+| Table | Measured | Commit |
+| --- | --- | --- |
+| macOS, Apple Silicon | 2026-09-01 | `861cf0c` (v0.6.0) |
+| Linux, Intel Core Ultra NPU | 2026-09-01 | `2f74118` |
+
+The current default speech model is `qwen3-1.7b` (`DEFAULT_ASR_MODEL` in `src/config.rs`). It has not been measured with this setup: the tables predate it as the CoreML default, and no row reflects it. Re-run `packaging/bench-mac.sh`, which includes it, before quoting numbers for the default.
+
 ## macOS, Apple Silicon
 
 Reproduce with `packaging/bench-mac.sh <video>`, which records wall time, peak memory and average power (`powermetrics` at 1 Hz; idle baseline about 1.7 W CPU and 0.26 W GPU).

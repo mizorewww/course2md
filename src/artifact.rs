@@ -177,51 +177,11 @@ pub struct CurrentVersion {
 /// 小文件居多，8 路即可吃满磁盘/CPU，又不至于进程风暴。
 const IO_PARALLELISM: usize = 8;
 
-/// std::thread::scope 并行执行 `f`（最多 IO_PARALLELISM 路），结果按原顺序写回。
-/// 多个项失败时返回索引最小的错误（与串行版的首个失败一致，结果可复现）。
 fn parallel_map<T: Sync, R: Send>(
     items: &[T],
     f: impl Fn(&T) -> Result<R> + Sync,
 ) -> Result<Vec<R>> {
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let slots: Vec<std::sync::Mutex<Option<R>>> =
-        items.iter().map(|_| std::sync::Mutex::new(None)).collect();
-    let first_err: std::sync::Mutex<Option<(usize, anyhow::Error)>> = std::sync::Mutex::new(None);
-    std::thread::scope(|scope| {
-        for _ in 0..IO_PARALLELISM.min(items.len()) {
-            scope.spawn(|| {
-                loop {
-                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let Some(item) = items.get(i) else { break };
-                    match f(item) {
-                        Ok(r) => {
-                            if let Ok(mut slot) = slots[i].lock() {
-                                *slot = Some(r);
-                            }
-                        }
-                        Err(e) => {
-                            if let Ok(mut g) = first_err.lock()
-                                && g.as_ref().is_none_or(|(j, _)| i < *j)
-                            {
-                                *g = Some((i, e));
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    });
-    if let Some((_, e)) = first_err.into_inner().unwrap_or_default() {
-        return Err(e);
-    }
-    Ok(slots
-        .into_iter()
-        .map(|slot| {
-            slot.into_inner()
-                .unwrap_or_default()
-                .expect(crate::tr!("无错误时所有槽位均已写入"))
-        })
-        .collect())
+    crate::runtime::map_pool(items.iter().collect(), IO_PARALLELISM, f)
 }
 
 #[derive(Debug, Clone)]
@@ -300,24 +260,23 @@ fn verified_digest(path: &Path) -> Result<String> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let key = path.to_path_buf();
-    if let Some(digest) = CACHE
-        .get_or_init(Default::default)
-        .lock()
-        .ok()
-        .and_then(|cache| {
-            cache
-                .get(&key)
-                .filter(|(len, stamp, _)| *len == metadata.len() && *stamp == modified)
-                .map(|(_, _, digest)| digest.clone())
-        })
+    // One entry per file a long-running desktop process has verified; the
+    // library can be large, so the cache is dropped once it reaches this size.
+    const MAX_ENTRIES: usize = 16_384;
+    let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((_, _, digest)) = crate::runtime::lock_recover(cache)
+        .get(&key)
+        .filter(|(len, stamp, _)| *len == metadata.len() && *stamp == modified)
     {
-        return Ok(digest);
+        return Ok(digest.clone());
     }
     let digest = execution::file_digest(path)?;
-    if let Ok(mut cache) = CACHE.get_or_init(Default::default).lock() {
-        cache.insert(key, (metadata.len(), modified, digest.clone()));
+    let mut cache = crate::runtime::lock_recover(cache);
+    if cache.len() >= MAX_ENTRIES {
+        cache.clear();
     }
+    cache.insert(key, (metadata.len(), modified, digest.clone()));
     Ok(digest)
 }
 

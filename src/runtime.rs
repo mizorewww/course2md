@@ -18,11 +18,16 @@ pub fn lock_recover<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// 在临时 Tokio runtime 上同步执行一个 async 块。
-/// CLI 的同步入口（main / wizard）多处需要跑单个 async 函数，
-/// 统一在此 `Runtime::new()?.block_on(...)`，避免每个调用点重复建 runtime 样板。
+/// Runs an async function from the CLI's synchronous entry points (main,
+/// wizard) on one process-wide runtime, created on first use, so a command
+/// that loops over notes does not start a worker pool per call.
 pub fn block_on<F: std::future::Future>(f: F) -> Result<F::Output> {
-    Ok(tokio::runtime::Runtime::new()?.block_on(f))
+    static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    if let Some(runtime) = RUNTIME.get() {
+        return Ok(runtime.block_on(f));
+    }
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(RUNTIME.get_or_init(|| runtime).block_on(f))
 }
 
 /// kill-on-drop 的子进程句柄。
@@ -194,7 +199,7 @@ pub fn wait_ready(
     base: &str,
     timeout: Duration,
     child: &mut ManagedChild,
-    expect_body: Option<&str>,
+    expect_status: Option<&str>,
     control: Option<&dyn Fn() -> Result<()>>,
 ) -> Result<()> {
     let t0 = Instant::now();
@@ -221,11 +226,12 @@ pub fn wait_ready(
             );
         }
         if let Ok(resp) = ureq::get(&url).timeout(Duration::from_secs(2)).call() {
-            match expect_body {
+            match expect_status {
                 None => return Ok(()),
-                Some(needle) => {
-                    if let Ok(body) = resp.into_string()
-                        && body.contains(needle)
+                Some(expected) => {
+                    if resp
+                        .into_json::<serde_json::Value>()
+                        .is_ok_and(|body| body["status"] == expected)
                     {
                         return Ok(());
                     }
@@ -346,7 +352,7 @@ pub fn lock_file(path: &Path) -> Result<FileLock> {
 
 /// 让 OS 分配一个空闲端口。
 /// 注意 TOCTOU：返回后到真正 bind 之间端口可能被抢占，
-/// 调用方需用 `wait_ready` 的响应体校验兜底。
+/// 调用方需用 `wait_ready` 的 `/health` status 校验兜底。
 pub fn free_port() -> Result<u16> {
     Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
 }

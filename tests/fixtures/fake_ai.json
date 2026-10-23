@@ -1,0 +1,39 @@
+{
+  "about": "Request markers and canned responses of the fake OpenAI-compatible service. Read by tests/common/mod.rs (Rust MockAi in tests/task_execution.rs) and desktop/scripts/ux_fixture.py; change response shapes here only. The service_test markers quote the request samples in desktop/src/service_test.rs and must stay in step with them.",
+  "markers": {
+    "speech": "input_audio",
+    "speech_path": "audio/transcriptions",
+    "summary": "tldr",
+    "proofread": "segments",
+    "custom_rule": "UX-RULE-42",
+    "service_test": {
+      "summary": "photosynthesis",
+      "proofread": "student have",
+      "vision": "card shown is red"
+    }
+  },
+  "responses": {
+    "speech": {"text": "The blue notebook contains seven pages."},
+    "summary": {
+      "tldr": "课程说明风险和收益的关系，并介绍分散投资。",
+      "key_points": ["课程说明风险和收益的关系，并介绍分散投资。"],
+      "outline": [{"t": 0, "title": "课程要点", "detail": "课程说明风险和收益的关系，并介绍分散投资。"}]
+    },
+    "proofread": {
+      "segments": [{"id": 0, "text": "第一段已经校对。"}, {"id": 1, "text": "第二段已经校对。"}]
+    },
+    "service_test": {
+      "summary": {
+        "tldr": "Photosynthesis uses sunlight and releases oxygen.",
+        "key_points": ["Photosynthesis uses sunlight and releases oxygen."],
+        "outline": [{"t": 0, "title": "Photosynthesis", "detail": "Photosynthesis uses sunlight and releases oxygen."}]
+      },
+      "proofread": {
+        "segments": [{"id": 0, "text": "The student has three books."}, {"id": 1, "text": "Water freezes at zero degrees Celsius."}]
+      },
+      "vision": {
+        "segments": [{"id": 0, "text": "The card shown is blue."}]
+      }
+    }
+  }
+}

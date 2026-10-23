@@ -1,12 +1,26 @@
 name: native desktop
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'src/**'
+      - 'native/**'
+      - 'build.rs'
+      - 'build_support/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/actions/**'
+      - '.github/workflows/desktop.yml'
+      - '!**.md'
   pull_request:
     paths:
       - 'desktop/**'
       - 'src/**'
       - 'native/**'
       - 'build.rs'
+      - 'build_support/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/actions/**'
@@ -32,8 +46,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/desktop-deps
         with:
-          # PRs build the frozen revisions; a manual run tracks upstream main.
-          locked: ${{ github.event_name == 'pull_request' }}
+          # Pushes and PRs build the frozen revisions; a manual run tracks upstream main.
+          locked: ${{ github.event_name != 'workflow_dispatch' }}
+      - name: Clippy
+        # --no-deps keeps the vendored GPUI crates' deprecation warnings out of the log.
+        run: cargo clippy --manifest-path desktop/Cargo.toml --all-targets --no-deps -- -D warnings
       - name: Check and test desktop
         run: cargo test --manifest-path desktop/Cargo.toml
       - name: Build development binaries

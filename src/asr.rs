@@ -232,24 +232,34 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
         &crate::models::llama_gguf_identity(),
         cfg.max_speech,
     );
-    let model = llama.model;
-    let mmproj = llama.mmproj;
+    let server = LlamaServer {
+        model: llama.model,
+        mmproj: llama.mmproj,
+        offload,
+        threads,
+    };
     let wav = wav.to_path_buf();
     run_with_cp(cfg, &id, move |cp| {
-        run_blocking(&wav, &model, &mmproj, offload, threads, max_speech, cp)
+        run_blocking(&wav, &server, max_speech, cp)
     })
     .await
 }
 
-fn run_blocking(
-    wav: &Path,
-    model: &Path,
-    mmproj: &Path,
+/// The local llama-server a transcription starts: model files and placement.
+struct LlamaServer {
+    model: PathBuf,
+    mmproj: PathBuf,
     offload: OffloadOpts,
     threads: i32,
+}
+
+fn run_blocking(
+    wav: &Path,
+    server: &LlamaServer,
     max_speech: f32,
     cp: &mut crate::checkpoint::Checkpoint,
 ) -> Result<Vec<TranscriptEvent>> {
+    let offload = server.offload;
     let t0 = Instant::now();
     let segs = ffmpeg_vad(wav, max_speech)?;
     tracing::info!(segs = segs.len(), "vad");
@@ -288,7 +298,7 @@ fn run_blocking(
             )
         );
     }
-    let args = build_server_args(model, mmproj, offload, caps, threads, port);
+    let args = build_server_args(server, caps, port);
     tracing::info!(
         bin = %bin.display(),
         port,
@@ -310,7 +320,7 @@ fn run_blocking(
         &base,
         SERVER_READY_TIMEOUT,
         &mut child,
-        Some("\"status\":\"ok\""),
+        Some("ok"),
         Some(&crate::dispatch::check_control),
     ) {
         if e.downcast_ref::<crate::dispatch::Failure>().is_some() {
@@ -633,12 +643,14 @@ fn post_cloud(
             crate::dispatch::receive(request.send_bytes(body))
         };
         crate::dispatch::json_request_described(
-            "asr",
-            "transcription",
-            &description,
-            t.url,
-            identity,
-            crate::dispatch::Resend::AskUser,
+            &crate::dispatch::RequestSpec {
+                service: "asr",
+                purpose: "transcription",
+                description: &description,
+                endpoint: t.url,
+                identity,
+                resend: crate::dispatch::Resend::AskUser,
+            },
             send,
             |value| {
                 anyhow::ensure!(
@@ -832,8 +844,17 @@ fn caps_from_help(help: &str) -> LlamaServerCaps {
 /// 探测失败（旧版无 --help 文本、超时、启动失败）→ 全 false，只保留 `-ngl`，
 /// 不阻断主流程。
 fn llama_server_caps(bin: &Path) -> LlamaServerCaps {
-    static CAPS: std::sync::OnceLock<LlamaServerCaps> = std::sync::OnceLock::new();
-    *CAPS.get_or_init(|| match probe_help_text(bin) {
+    // Keyed by binary: a different llama-server (a changed setting or upgrade)
+    // must be probed again rather than reuse another build's flags.
+    static CAPS: std::sync::Mutex<Vec<(PathBuf, LlamaServerCaps)>> =
+        std::sync::Mutex::new(Vec::new());
+    if let Some((_, caps)) = crate::runtime::lock_recover(&CAPS)
+        .iter()
+        .find(|(path, _)| path == bin)
+    {
+        return *caps;
+    }
+    let caps = match probe_help_text(bin) {
         Some(text) => {
             let caps = caps_from_help(&text);
             tracing::debug!(
@@ -848,7 +869,9 @@ fn llama_server_caps(bin: &Path) -> LlamaServerCaps {
             tracing::debug!("llama-server --help 探测失败，按旧版处理（仅 -ngl）");
             LlamaServerCaps::default()
         }
-    })
+    };
+    crate::runtime::lock_recover(&CAPS).push((bin.to_path_buf(), caps));
+    caps
 }
 
 /// 超时或非零退出返回 None（按旧版处理）。
@@ -869,7 +892,6 @@ pub(crate) struct OffloadOpts {
     pub mmproj_offload: bool,
 }
 
-/// 最近一次 llama-server spawn 的完整参数（诊断用：失败 run.json 附带）。
 /// 组装 llama-server 启动参数（纯函数，便于单测）：
 /// - gpu 后端：`-ngl <gpu_layers>`；mmproj_offload=false 且 llama.cpp 支持时
 ///   追加 `--no-mmproj-offload`
@@ -877,14 +899,14 @@ pub(crate) struct OffloadOpts {
 ///   --no-mmproj-offload`——新版 llama.cpp 下仅 -ngl 0 仍可能把 mmproj/部分
 ///   算子卸载到 GPU
 /// - 不支持的 flag（caps=false）一律不加，兼容发行版仓库的旧 llama-server
-fn build_server_args(
-    model: &Path,
-    mmproj: &Path,
-    offload: OffloadOpts,
-    caps: LlamaServerCaps,
-    threads: i32,
-    port: u16,
-) -> Vec<String> {
+fn build_server_args(server: &LlamaServer, caps: LlamaServerCaps, port: u16) -> Vec<String> {
+    let LlamaServer {
+        model,
+        mmproj,
+        offload,
+        threads,
+    } = server;
+    let (offload, threads) = (*offload, *threads);
     let cpu_only = offload.provider == crate::config::AsrProvider::Cpu;
     let ngl = if cpu_only { 0 } else { offload.gpu_layers };
     let mut args: Vec<String> = vec![
@@ -1406,11 +1428,13 @@ mod tests {
             mmproj_offload,
         };
         build_server_args(
-            Path::new("/m.gguf"),
-            Path::new("/mm.gguf"),
-            offload,
+            &LlamaServer {
+                model: "/m.gguf".into(),
+                mmproj: "/mm.gguf".into(),
+                offload,
+                threads: 4,
+            },
             caps,
-            4,
             8081,
         )
     }

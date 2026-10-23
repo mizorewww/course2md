@@ -17,7 +17,7 @@ use std::{
 /// Durable receipts describe a service snapshot without a stored configuration.
 pub const SNAPSHOT_PREFIX: &str = "snapshot:";
 
-pub fn snapshot_id(digest: &str) -> String {
+fn snapshot_id(digest: &str) -> String {
     format!("{SNAPSHOT_PREFIX}{digest}")
 }
 
@@ -114,6 +114,20 @@ impl Failure {
     pub fn uncertain(&self) -> bool {
         self.kind == crate::artifact::FailureKind::Uncertain
     }
+}
+
+/// What identifies one service request in the ledger, and how it may be resent.
+pub struct RequestSpec<'a> {
+    /// The configured service ("llm", "asr"), resolved to its version.
+    pub service: &'a str,
+    /// Ledger purpose, shared by retries of the same work.
+    pub purpose: &'a str,
+    /// Shown to the person when the request needs a decision.
+    pub description: &'a str,
+    pub endpoint: &'a str,
+    /// The request content that identifies a repeat of the same request.
+    pub identity: &'a Value,
+    pub resend: Resend,
 }
 
 /// A service response, and whether it was received now or replayed from a
@@ -322,7 +336,8 @@ pub fn check_control() -> Result<()> {
 }
 
 /// 轮询任务控制文件，意图不再是 run 时返回 Err。配合 `tokio::select!` 打断
-/// 长时间运行的分支（子进程句柄的 kill_on_drop 随分支 drop 生效）。
+/// 长时间运行的分支：子进程句柄的 kill_on_drop 随分支 drop 生效；spawn_blocking
+/// 里的工作不会因 drop 停止，要靠它自己在安全边界调用 check_control。
 /// 无活动任务账本时 check_control 恒 Ok，此 future 永不完成，不影响 CLI 独立调用。
 pub async fn watch_control() -> anyhow::Error {
     loop {
@@ -555,29 +570,32 @@ impl Ledger {
         validate: impl FnOnce(&Value) -> Result<()>,
     ) -> std::result::Result<Reply, Failure> {
         self.send_described(
-            service,
-            purpose,
-            purpose,
-            endpoint,
-            identity,
-            Resend::AskUser,
+            &RequestSpec {
+                service,
+                purpose,
+                description: purpose,
+                endpoint,
+                identity,
+                resend: Resend::AskUser,
+            },
             send,
             validate,
         )
     }
-    // Keep the transport, validation and persisted request identity explicit at the call site.
-    #[allow(clippy::too_many_arguments)]
     fn send_described(
         &self,
-        service: &str,
-        purpose: &str,
-        description: &str,
-        endpoint: &str,
-        identity: &Value,
-        resend: Resend,
+        spec: &RequestSpec,
         send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
         validate: impl FnOnce(&Value) -> Result<()>,
     ) -> std::result::Result<Reply, Failure> {
+        let RequestSpec {
+            service,
+            purpose,
+            description,
+            endpoint,
+            identity,
+            resend,
+        } = *spec;
         let service_version = self
             .service_versions
             .get(service)
@@ -762,30 +780,15 @@ impl Ledger {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn json_request_described(
-    service: &str,
-    purpose: &str,
-    description: &str,
-    endpoint: &str,
-    identity: &Value,
-    resend: Resend,
+    spec: &RequestSpec,
     send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
     validate: impl FnOnce(&Value) -> Result<()>,
 ) -> std::result::Result<Reply, Failure> {
     // Outside a task there is no durable context, so one in-memory ledger per
     // request classifies the response by the same rules without keeping it.
     let ledger = active().unwrap_or_else(|| Arc::new(Ledger::ephemeral()));
-    ledger.send_described(
-        service,
-        purpose,
-        description,
-        endpoint,
-        identity,
-        resend,
-        send,
-        validate,
-    )
+    ledger.send_described(spec, send, validate)
 }
 
 /// Drain the HTTP body before recording completion; a body read error is still uncertain.
@@ -985,12 +988,14 @@ mod tests {
         let ledger = Ledger::new(dir.path(), Some(&control), &Default::default()).unwrap();
         let send = |payload: &Value, resend, ok: bool| {
             ledger.send_described(
-                "llm",
-                "proofreading",
-                "segment",
-                "https://example.test",
-                payload,
-                resend,
+                &RequestSpec {
+                    service: "llm",
+                    purpose: "proofreading",
+                    description: "segment",
+                    endpoint: "https://example.test",
+                    identity: payload,
+                    resend,
+                },
                 || {
                     if ok {
                         Ok(HttpResponse {
@@ -1211,12 +1216,14 @@ mod ephemeral_tests {
     fn request(status: u16, body: &[u8], resend: Resend) -> std::result::Result<Reply, Failure> {
         let body = body.to_vec();
         json_request_described(
-            "llm",
-            "summary",
-            "summary",
-            "https://example.test",
-            &serde_json::json!({"n":1}),
-            resend,
+            &RequestSpec {
+                service: "llm",
+                purpose: "summary",
+                description: "summary",
+                endpoint: "https://example.test",
+                identity: &serde_json::json!({"n":1}),
+                resend,
+            },
             move || Ok(HttpResponse { status, body }),
             |_| Ok(()),
         )
@@ -1240,12 +1247,14 @@ mod ephemeral_tests {
         // Nothing persists between calls: the same payload sends again.
         assert!(request(200, br#"{"ok":true}"#, Resend::AskUser).is_ok());
         let lost = json_request_described(
-            "llm",
-            "summary",
-            "summary",
-            "https://example.test",
-            &serde_json::json!({"n":2}),
-            Resend::Free,
+            &RequestSpec {
+                service: "llm",
+                purpose: "summary",
+                description: "summary",
+                endpoint: "https://example.test",
+                identity: &serde_json::json!({"n":2}),
+                resend: Resend::Free,
+            },
             || {
                 Err(NetworkFailure {
                     message: "stalled".into(),

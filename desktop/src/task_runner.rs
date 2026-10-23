@@ -1937,7 +1937,7 @@ impl Desktop {
                 }
                 self.task_status = task.status_label().into();
                 self.transient_task_result = Some((id.to_owned(), std::time::Instant::now()));
-                self.schedule_wake(std::time::Duration::from_secs(8), cx);
+                self.schedule_wake(std::time::Duration::from_secs(8));
             }
             Err(error) => {
                 self.workspace_error = Some(course2md::tr!(
@@ -2031,7 +2031,7 @@ fn ensure_asr_capability(
             course2md::tr!("CPU 识别引擎尚未安装。请在设置的「应用」中查看安装方法。")
         ),
         AsrProvider::Npu => ensure!(
-            environment.npu,
+            environment.npu(),
             course2md::tr!("没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。")
         ),
         AsrProvider::Api => (),
@@ -2086,7 +2086,7 @@ pub(crate) mod tests {
         let file = dir.path().join("workspace.json");
         let root = dir.path().join("library");
         let mut workspace =
-            Workspace::open_at(file.clone(), root.clone(), Default::default()).unwrap();
+            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
         let updated = workspace.state.draft().unwrap().updated;
         let keep_video = !workspace.state.draft().unwrap().options.keep_video;
 
@@ -2109,7 +2109,7 @@ pub(crate) mod tests {
         workspace.save().unwrap();
         drop(workspace);
 
-        let reopened = Workspace::open_at(file, root, Default::default()).unwrap();
+        let reopened = Workspace::open_at_inline(file, root, Default::default()).unwrap();
         let draft = reopened.state.draft().unwrap();
         assert_eq!(draft.options.keep_video, keep_video);
         assert!(draft.overrides.contains(&Override::KeepVideo));
@@ -2408,7 +2408,7 @@ pub(crate) mod tests {
         let file = dir.path().join("workspace.json");
         let root = dir.path().join("library");
         let mut workspace =
-            Workspace::open_at(file.clone(), root.clone(), Default::default()).unwrap();
+            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
         let a = source("https://example.test/video-a", "课程 A");
         let b = source("https://example.test/video-b", "课程 B");
         let id = workspace
@@ -2453,7 +2453,7 @@ pub(crate) mod tests {
                 })
                 .unwrap();
         }
-        workspace = Workspace::open_at(file.clone(), root.clone(), Default::default()).unwrap();
+        workspace = Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
         assert!(!workspace.state.draft().unwrap().custom_title);
         assert!(workspace.state.draft().unwrap().source.is_none());
         workspace
@@ -2467,7 +2467,7 @@ pub(crate) mod tests {
                 Ok(())
             })
             .unwrap();
-        let restored = Workspace::open_at(file, root, Default::default()).unwrap();
+        let restored = Workspace::open_at_inline(file, root, Default::default()).unwrap();
         let draft = restored.state.draft().unwrap();
         assert_eq!(draft.title, "课程 B");
         assert!(!draft.custom_title);

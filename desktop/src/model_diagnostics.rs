@@ -112,9 +112,6 @@ pub(crate) struct ModelSetupSnapshot {
     pub(crate) notice: Option<(String, bool)>,
     pub(crate) cancelled: bool,
 }
-fn provider_name(provider: AsrProvider) -> &'static str {
-    crate::provider_label(Some(provider))
-}
 
 /// Local recognition engines in display order.
 pub(crate) const LOCAL_ENGINES: [AsrProvider; 4] = [
@@ -125,9 +122,7 @@ pub(crate) const LOCAL_ENGINES: [AsrProvider; 4] = [
 ];
 
 /// Choice id of an engine; automatic selection is the empty id.
-pub(crate) fn engine_id(provider: Option<AsrProvider>) -> &'static str {
-    provider.map_or("", |provider| provider.as_str())
-}
+pub(crate) use crate::provider_id as engine_id;
 pub(crate) fn engine_from_id(id: &str) -> Option<AsrProvider> {
     LOCAL_ENGINES
         .into_iter()
@@ -232,8 +227,8 @@ pub(crate) fn device_issue(
         AsrProvider::Gpu if !environment.llama => Some(DeviceIssue::LlamaMissing),
         AsrProvider::Gpu if environment.gpu.is_none() => Some(DeviceIssue::GpuAbsent),
         AsrProvider::Cpu if !environment.llama => Some(DeviceIssue::LlamaMissing),
-        AsrProvider::Npu if !environment.npu_device => Some(DeviceIssue::NpuDevice),
-        AsrProvider::Npu if !environment.npu_runtime => Some(DeviceIssue::NpuRuntime),
+        AsrProvider::Npu if !environment.npu_device() => Some(DeviceIssue::NpuDevice),
+        AsrProvider::Npu if !environment.npu_runtime() => Some(DeviceIssue::NpuRuntime),
         _ => None,
     }
 }
@@ -614,7 +609,7 @@ impl Desktop {
                 course2md::tr!("本机引擎"),
                 settings_value(
                     SharedString::from(format!("model-provider-{key}")),
-                    provider_name(provider),
+                    crate::provider_label(Some(provider)),
                 )
                 .w_auto(),
                 true,
@@ -941,7 +936,7 @@ impl Desktop {
                     .accessibility_label(course2md::tr!(
                         "{}：{} · {}",
                         label,
-                        provider_name(provider),
+                        crate::provider_label(Some(provider)),
                         model_label(&request.model)
                     ))
                     .disabled(self.job.is_some())
@@ -1090,7 +1085,7 @@ impl Desktop {
             (
                 "npu-device",
                 "Intel NPU",
-                if environment.npu_device {
+                if environment.npu_device() {
                     course2md::tr!("已检测到设备")
                 } else {
                     course2md::tr!("未检测到设备")
@@ -1099,7 +1094,7 @@ impl Desktop {
             (
                 "npu-runtime",
                 course2md::tr!("NPU 启动器"),
-                if environment.npu_runtime {
+                if environment.npu_runtime() {
                     course2md::tr!("已找到")
                 } else {
                     course2md::tr!("未找到 uv 或 Python")
@@ -1128,7 +1123,7 @@ impl Desktop {
         let available = LOCAL_ENGINES
             .into_iter()
             .filter(|provider| device_issue(*provider, environment).is_none())
-            .map(provider_name)
+            .map(|provider| crate::provider_label(Some(provider)))
             .collect::<Vec<_>>();
         if !available.is_empty() {
             facts.push((
@@ -1175,7 +1170,10 @@ impl Desktop {
                         )))
                         .settings_text()
                         .icon(icons::mic())
-                        .label(course2md::tr!("默认改用 {}", provider_name(provider)))
+                        .label(course2md::tr!(
+                            "默认改用 {}",
+                            crate::provider_label(Some(provider))
+                        ))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             let mut value = this.generation_edit_base();
                             value.select_provider(Some(provider));

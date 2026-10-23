@@ -3,9 +3,9 @@ name: packaging
 on:
   push:
     branches: [main]
-    paths: ['packaging/**', 'desktop/scripts/**', 'install.sh', '.github/workflows/packaging.yml']
+    paths: ['packaging/**', 'desktop/scripts/**', 'install.sh', '.github/actions/packaging-tests/**', '.github/workflows/packaging.yml']
   pull_request:
-    paths: ['packaging/**', 'desktop/scripts/**', 'install.sh', '.github/workflows/packaging.yml']
+    paths: ['packaging/**', 'desktop/scripts/**', 'install.sh', '.github/actions/packaging-tests/**', '.github/workflows/packaging.yml']
 
 permissions:
   contents: read
@@ -15,9 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Packaging script tests
-        run: |
-          python3 -m unittest discover -s packaging -p 'test_*.py'
-          python3 -m unittest discover -s desktop/scripts -p 'test_*.py'
+      - uses: ./.github/actions/packaging-tests
       - name: Shell scripts
         run: shellcheck --severity=error install.sh packaging/aur/update-aur.sh packaging/bench-mac.sh

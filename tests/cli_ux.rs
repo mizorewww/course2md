@@ -1,4 +1,6 @@
 //! Exercise the public CLI contract without network access or real credentials.
+mod common;
+
 use std::process::{Command, Output};
 
 struct CliTest {
@@ -52,6 +54,8 @@ fn json_error(output: &Output) -> serde_json::Value {
     value
 }
 
+/// The suite's one check that human-readable output follows the language;
+/// the other tests assert language-independent facts.
 #[test]
 fn no_arguments_or_help_succeed_with_localized_guidance() {
     let cli = CliTest::new();
@@ -59,14 +63,8 @@ fn no_arguments_or_help_succeed_with_localized_guidance() {
         let result = cli.run(&args);
         assert!(result.status.success());
         let text = stdout(&result);
-        assert!(
-            text.contains("快速开始") || text.contains("Quick start"),
-            "{text}"
-        );
-        assert!(
-            text.contains("语音识别") || text.contains("Speech recognition"),
-            "{text}"
-        );
+        assert!(text.contains("快速开始"), "{text}");
+        assert!(text.contains("语音识别"), "{text}");
     }
     let english = cli.run_with_lang(&["--help"], "en");
     assert!(english.status.success());
@@ -84,17 +82,19 @@ fn no_arguments_or_help_succeed_with_localized_guidance() {
 #[test]
 fn missing_or_invalid_sources_fail_with_recovery() {
     let cli = CliTest::new();
+    // The recovery is an example command, and the rejected path is echoed back.
     let missing = cli.run(&["--provider", "api"]);
     assert!(!missing.status.success());
     assert!(
-        stderr(&missing).contains("缺少视频来源"),
+        stderr(&missing).contains("course2md ./lecture.mp4"),
         "{}",
         stderr(&missing)
     );
+    assert!(missing.stdout.is_empty());
     let invalid = cli.run(&["./missing lecture.mp4"]);
     assert!(!invalid.status.success());
     assert!(
-        stderr(&invalid).contains("请检查路径"),
+        stderr(&invalid).contains("./missing lecture.mp4"),
         "{}",
         stderr(&invalid)
     );
@@ -229,38 +229,28 @@ fn doctor_reports_required_failures_with_nonzero_exit() {
         .output()
         .unwrap();
     assert!(!result.status.success());
-    assert!(stdout(&result).contains("必需工具"), "{}", stdout(&result));
-    assert!(
-        stderr(&result).contains("必需依赖或配置问题"),
-        "{}",
-        stderr(&result)
-    );
+    // With an empty PATH the required tools are listed as failed.
+    for tool in ["ffmpeg", "ffprobe"] {
+        assert!(
+            stdout(&result).contains(&format!("✗ {tool}")),
+            "{}",
+            stdout(&result)
+        );
+    }
+    assert!(!result.stderr.is_empty());
 }
 
-#[cfg(all(unix, feature = "integration"))]
+#[cfg(unix)]
 #[test]
 fn remote_download_output_does_not_leak_into_json_or_quiet_mode() {
     use std::os::unix::fs::PermissionsExt;
+    if !common::ffmpeg_available() {
+        return;
+    }
     let cli = CliTest::new();
     // Use real ffmpeg/ffprobe, with an offline yt-dlp fixture that emits noisy output.
     let video = cli.dir.path().join("fixture.mp4");
-    let generated = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=blue:s=320x180:d=3",
-            "-c:v",
-            "libx264",
-            "-y",
-        ])
-        .arg(&video)
-        .output()
-        .unwrap();
-    assert!(generated.status.success(), "{}", stderr(&generated));
+    common::fixture_video(&video, 3);
     let bin = cli.dir.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let script = bin.join("yt-dlp");

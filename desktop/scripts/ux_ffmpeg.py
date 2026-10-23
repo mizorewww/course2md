@@ -6,23 +6,14 @@ never installed in the user's PATH; the validation app opts into its directory.
 """
 import json
 import os
-from pathlib import Path
-import shutil
 import sys
 import time
 
-
-
-def real_tool(name):
-    """The installed tool on PATH, skipping the fixture directory that holds this wrapper."""
-    here = Path(__file__).resolve().parent
-    path = os.pathsep.join(d for d in os.environ.get("PATH", "").split(os.pathsep)
-                           if d and Path(d).resolve() != here)
-    return shutil.which(name, path=path)
+from ux_common import fixture_root, real_tool
 
 
 args = sys.argv[1:]
-root = Path(os.environ.get("COURSE2MD_UX_FIXTURE_ROOT", "/tmp/course2md-ux-validation"))
+root = fixture_root()
 binary = real_tool("ffmpeg")
 if binary is None:
     sys.exit("Installed ffmpeg is unavailable")

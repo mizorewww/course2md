@@ -2038,7 +2038,7 @@ mod tests {
         std::fs::remove_dir_all(&work).unwrap();
         let old = old.canonicalize().unwrap();
         let record = directory.path().join("workspace.json");
-        let mut workspace = workspace::Workspace::open_at(
+        let mut workspace = workspace::Workspace::open_at_inline(
             record.clone(),
             old.clone(),
             ConversionOptions::default(),
@@ -2149,7 +2149,7 @@ mod tests {
         let reread = crate::notes::read_preview(preview.course).unwrap();
         assert_eq!(reread.plain_text, original_text);
         let reopened =
-            workspace::Workspace::open_at(record, old.clone(), ConversionOptions::default())
+            workspace::Workspace::open_at_inline(record, old.clone(), ConversionOptions::default())
                 .unwrap();
         assert_eq!(reopened.state.library(&id).unwrap().root, new);
         assert!(
@@ -2173,7 +2173,7 @@ mod tests {
         let target = directory.path().join("target");
         std::fs::create_dir(&old).unwrap();
         std::fs::create_dir(&target).unwrap();
-        let workspace = workspace::Workspace::open_at(
+        let workspace = workspace::Workspace::open_at_inline(
             directory.path().join("workspace.json"),
             old,
             ConversionOptions::default(),
@@ -2209,7 +2209,7 @@ mod tests {
         let target = directory.path().join("target");
         std::fs::create_dir(&old).unwrap();
         std::fs::create_dir(&target).unwrap();
-        let mut workspace = workspace::Workspace::open_at(
+        let mut workspace = workspace::Workspace::open_at_inline(
             directory.path().join("workspace.json"),
             old,
             ConversionOptions::default(),
@@ -2250,7 +2250,7 @@ mod tests {
         let target = directory.path().join("target");
         std::fs::create_dir(&old).unwrap();
         let record = directory.path().join("workspace.json");
-        let mut workspace = workspace::Workspace::open_at(
+        let mut workspace = workspace::Workspace::open_at_inline(
             record.clone(),
             old.clone(),
             ConversionOptions::default(),
@@ -2415,7 +2415,7 @@ mod tests {
         let old = std::fs::canonicalize(old).unwrap();
         let new = std::fs::canonicalize(new).unwrap();
         let record_path = directory.path().join("workspace.json");
-        let mut workspace = workspace::Workspace::open_at(
+        let mut workspace = workspace::Workspace::open_at_inline(
             record_path.clone(),
             old.clone(),
             ConversionOptions::default(),
@@ -2503,7 +2503,7 @@ mod tests {
             assert!(failed.is_err());
             assert_eq!(workspace.state.library(&library_id).unwrap().root, old);
         }
-        let before_commit = workspace::Workspace::open_at(
+        let before_commit = workspace::Workspace::open_at_inline(
             record_path.clone(),
             old.clone(),
             ConversionOptions::default(),
@@ -2517,9 +2517,12 @@ mod tests {
         workspace
             .transaction(|state| publish_location(state, &prepared.journal, &prepared.path))
             .unwrap();
-        let mut reopened =
-            workspace::Workspace::open_at(record_path, old.clone(), ConversionOptions::default())
-                .unwrap();
+        let mut reopened = workspace::Workspace::open_at_inline(
+            record_path,
+            old.clone(),
+            ConversionOptions::default(),
+        )
+        .unwrap();
         let state = &reopened.state;
         let lagging: storage::Journal =
             serde_json::from_slice(&std::fs::read(&prepared.path).unwrap()).unwrap();
@@ -2610,7 +2613,7 @@ mod tests {
         let second = directory.path().join("second");
         std::fs::create_dir_all(&first).unwrap();
         std::fs::create_dir_all(&second).unwrap();
-        let mut workspace = workspace::Workspace::open_at(
+        let mut workspace = workspace::Workspace::open_at_inline(
             directory.path().join("workspace.json"),
             first,
             ConversionOptions::default(),

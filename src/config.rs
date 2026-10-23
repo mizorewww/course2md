@@ -317,6 +317,19 @@ impl fmt::Display for OutputFormat {
     }
 }
 
+impl std::str::FromStr for OutputFormat {
+    type Err = ();
+    /// The spelling `Display` writes (export result keys, config values).
+    fn from_str(value: &str) -> std::result::Result<Self, ()> {
+        match value {
+            "md" => Ok(Self::Md),
+            "html" => Ok(Self::Html),
+            "json" => Ok(Self::Json),
+            _ => Err(()),
+        }
+    }
+}
+
 /// 运行期管线配置（由 CLI 参数归一而来）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
@@ -429,8 +442,7 @@ impl PipelineConfig {
     /// 身份文件用的脱敏副本：clone 并清空 llm.api_key 与 asr_api.api_key。
     ///
     /// 安全不变量：身份/binding JSON 会落盘进输出目录，任何情况下不得携带
-    /// 凭据——两处手写清密钥（pipeline.rs / execution.rs）已合并为这一单一事实源，
-    /// 新增身份序列化路径必须走这里而不是再写一遍。
+    /// 凭据；所有身份序列化路径都必须经过这里。
     pub fn redacted_for_identity(&self) -> Self {
         let mut cfg = self.clone();
         cfg.llm.api_key.clear();

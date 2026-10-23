@@ -78,7 +78,14 @@ pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
     for host in &crate::hub::endpoints().hosts {
         crate::dispatch::check_control()?;
         let url = host.file_url(remote.repo, remote.file);
-        match transfer(&url, host, &part, remote, &bar) {
+        let t = Transfer {
+            url: &url,
+            host,
+            part: &part,
+            remote,
+            bar: &bar,
+        };
+        match transfer(&t) {
             Ok(()) => {}
             Err(error) => {
                 if cancelled() {
@@ -116,9 +123,19 @@ pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
     )
 }
 
-fn transfer(url: &str, host: &Host, part: &Path, remote: &Remote, bar: &Bar) -> Result<()> {
+/// One file from one host into its `.part` file, with the progress bar.
+#[derive(Clone, Copy)]
+struct Transfer<'a> {
+    url: &'a str,
+    host: &'a Host,
+    part: &'a Path,
+    remote: &'a Remote,
+    bar: &'a Bar,
+}
+
+fn transfer(t: &Transfer) -> Result<()> {
     if let Some(program) = aria2_program() {
-        match aria2(&program, url, host, part, remote, bar) {
+        match aria2(&program, t) {
             Err(error) if error.downcast_ref::<Aria2Unavailable>().is_some() => {
                 tracing::warn!(
                     "aria2 无法使用，改用内置下载 / aria2 unavailable; using the built-in downloader: {error:#}"
@@ -128,7 +145,7 @@ fn transfer(url: &str, host: &Host, part: &Path, remote: &Remote, bar: &Bar) -> 
             result => return result,
         }
     }
-    native(url, host, part, remote, bar)
+    native(t)
 }
 
 /// "下载 Qwen3-ASR-1.7B-Q8_0.gguf · modelscope.cn" for the terminal bar.
@@ -147,7 +164,14 @@ fn set_phase(bar: &Bar, remote: &Remote, host: &Host, phase: Phase) {
 
 // ── built-in client ─────────────────────────────────────────────────────
 
-fn native(url: &str, host: &Host, part: &Path, remote: &Remote, bar: &Bar) -> Result<()> {
+fn native(t: &Transfer) -> Result<()> {
+    let Transfer {
+        host,
+        part,
+        remote,
+        bar,
+        ..
+    } = *t;
     // An aria2 partial file is sparse; its length is not a contiguous prefix.
     let control = aria2_control(part);
     if control.exists() {
@@ -172,7 +196,7 @@ fn native(url: &str, host: &Host, part: &Path, remote: &Remote, bar: &Bar) -> Re
         }
         bar.set_position(have);
         set_phase(bar, remote, host, phase);
-        let result = native_attempt(&agent, url, part, have, remote, host, bar);
+        let result = native_attempt(&agent, t, have);
         let after = fs::metadata(part).map(|m| m.len()).unwrap_or(0);
         match result {
             Ok(()) => idle = 0,
@@ -195,22 +219,23 @@ fn native(url: &str, host: &Host, part: &Path, remote: &Remote, bar: &Bar) -> Re
                     "下载中断，正在续传 / Download interrupted; resuming: {error:#}"
                 );
                 phase = Phase::Retry;
-                std::thread::sleep(Duration::from_secs(2 * u64::from(idle.max(1))));
+                crate::runtime::interruptible_sleep(Duration::from_secs(
+                    2 * u64::from(idle.max(1)),
+                ))?;
             }
         }
     }
 }
 
 /// One request from byte `have`; appends to `part`.
-fn native_attempt(
-    agent: &ureq::Agent,
-    url: &str,
-    part: &Path,
-    have: u64,
-    remote: &Remote,
-    host: &Host,
-    bar: &Bar,
-) -> Result<()> {
+fn native_attempt(agent: &ureq::Agent, t: &Transfer, have: u64) -> Result<()> {
+    let Transfer {
+        url,
+        host,
+        part,
+        remote,
+        bar,
+    } = *t;
     tracing::info!(url, from = have, "download");
     let mut request = agent.get(url);
     if have > 0 {
@@ -310,14 +335,14 @@ fn random_hex(bytes: usize) -> Result<String> {
 
 /// Runs aria2c for one file and follows it over JSON-RPC, which reports exact
 /// byte counts (its console output rounds to MiB).
-fn aria2(
-    program: &Path,
-    url: &str,
-    host: &Host,
-    part: &Path,
-    remote: &Remote,
-    bar: &Bar,
-) -> Result<()> {
+fn aria2(program: &Path, t: &Transfer) -> Result<()> {
+    let Transfer {
+        url,
+        host,
+        part,
+        remote,
+        bar,
+    } = *t;
     let unavailable = |message: String| anyhow::Error::new(Aria2Unavailable(message));
     let dir = part.parent().context("part path")?;
     let out = part.file_name().context("part path")?;
@@ -519,29 +544,16 @@ mod tests {
 
     /// Serves canned responses in order and returns each request's head.
     fn serve(responses: Vec<String>) -> (String, std::thread::JoinHandle<Vec<String>>) {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            let mut requests = Vec::new();
-            for response in responses {
-                let (mut stream, _) = listener.accept().unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(3)))
-                    .unwrap();
-                let mut request = Vec::new();
-                while !request.ends_with(b"\r\n\r\n") {
-                    let mut byte = [0];
-                    if stream.read(&mut byte).unwrap() == 0 {
-                        break;
-                    }
-                    request.push(byte[0]);
-                }
-                requests.push(String::from_utf8_lossy(&request).into_owned());
-                stream.write_all(response.as_bytes()).unwrap();
-            }
-            requests
+        let (base, server) = crate::test_http::serve(responses);
+        let heads = std::thread::spawn(move || {
+            server
+                .join()
+                .unwrap()
+                .into_iter()
+                .map(|request| request.head)
+                .collect()
         });
-        (format!("http://{address}/model"), server)
+        (format!("{base}/model"), heads)
     }
 
     #[test]
@@ -556,7 +568,14 @@ mod tests {
         let part = root.path().join("synthetic.part");
         let host = Host::Hub("http://127.0.0.1".into());
         let bar = Bar::new(Stage::ModelFile("synthetic.bin".into()), remote.size);
-        native(&url, &host, &part, &remote, &bar).unwrap();
+        native(&Transfer {
+            url: &url,
+            host: &host,
+            part: &part,
+            remote: &remote,
+            bar: &bar,
+        })
+        .unwrap();
         let requests = server.join().unwrap();
         assert!(!requests[0].to_ascii_lowercase().contains("range:"));
         assert!(requests[1].to_ascii_lowercase().contains("range: bytes=3-"));
@@ -575,7 +594,14 @@ mod tests {
         fs::write(&part, b"xx").unwrap();
         let host = Host::Hub("http://127.0.0.1".into());
         let bar = Bar::new(Stage::ModelFile("synthetic.bin".into()), remote.size);
-        native(&url, &host, &part, &remote, &bar).unwrap();
+        native(&Transfer {
+            url: &url,
+            host: &host,
+            part: &part,
+            remote: &remote,
+            bar: &bar,
+        })
+        .unwrap();
         server.join().unwrap();
         assert_eq!(fs::read(&part).unwrap(), b"12345");
     }
@@ -591,7 +617,14 @@ mod tests {
         let part = root.path().join("synthetic.part");
         let host = Host::Hub("http://127.0.0.1".into());
         let bar = Bar::new(Stage::ModelFile("synthetic.bin".into()), remote.size);
-        let error = native(&url, &host, &part, &remote, &bar).unwrap_err();
+        let error = native(&Transfer {
+            url: &url,
+            host: &host,
+            part: &part,
+            remote: &remote,
+            bar: &bar,
+        })
+        .unwrap_err();
         assert!(error.downcast_ref::<PermanentHttp>().is_some());
         server.join().unwrap();
     }

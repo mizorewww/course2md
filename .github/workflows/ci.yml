@@ -30,17 +30,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install ffmpeg (ubuntu)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Install ffmpeg (macos)
-        if: runner.os == 'macOS'
-        run: brew install ffmpeg
-
-      - name: Install ffmpeg (windows)
-        if: runner.os == 'Windows'
-        run: choco install ffmpeg --no-progress --yes
+      # Tests that need ffmpeg fail rather than skip when CI is set.
+      - name: Install ffmpeg
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update && sudo apt-get install -y ffmpeg ;;
+            macOS) brew install ffmpeg ;;
+            Windows) choco install ffmpeg --no-progress --yes ;;
+          esac
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
@@ -53,5 +51,5 @@ jobs:
 
       - name: Integration tests (synthetic video)
         if: runner.os != 'Windows'
-        run: cargo test --features integration --test scene_synthetic
+        run: cargo test --test scene_synthetic
 

@@ -159,8 +159,6 @@ const WHISPER: &[ApplePart] = &[ApplePart {
     ],
     weights: false,
 }];
-// Read by the Apple native backend only.
-#[cfg_attr(not(apple_native), allow(dead_code))]
 pub(crate) const APPLE_VAD: ApplePart = ApplePart {
     repo: "aufklarer/Silero-VAD-v6.2.1-CoreML",
     files: &["config.json"],
@@ -216,22 +214,13 @@ pub fn inspect_at(
             parts.push(cache_part("Qwen3-ASR 1.7B Q8_0", path, missing)?);
         }
         AsrProvider::Coreml => {
-            for part in apple_parts(model).unwrap_or(&[]) {
-                parts.push(apple_part(
-                    apple_base,
-                    part.repo,
-                    part.files,
-                    part.bundles,
-                    part.weights,
-                )?);
+            for part in apple_parts(model)
+                .unwrap_or(&[])
+                .iter()
+                .chain(std::iter::once(&APPLE_VAD))
+            {
+                parts.push(apple_part(apple_base, part)?);
             }
-            parts.push(apple_part(
-                apple_base,
-                "aufklarer/Silero-VAD-v6.2.1-CoreML",
-                &["config.json"],
-                &["silero_vad.mlmodelc"],
-                false,
-            )?);
         }
         AsrProvider::Npu => {
             let repo = crate::npu::resolve_npu_model(Some(model));
@@ -330,13 +319,13 @@ fn cache_part(name: &str, path: PathBuf, missing: Vec<String>) -> Result<CachePa
         files,
     })
 }
-fn apple_part(
-    base: &Path,
-    repo: &str,
-    files: &[&str],
-    bundles: &[&str],
-    weights: bool,
-) -> Result<CachePart> {
+fn apple_part(base: &Path, part: &ApplePart) -> Result<CachePart> {
+    let ApplePart {
+        repo,
+        files,
+        bundles,
+        weights,
+    } = *part;
     let old = base.join(repo.replace('/', "_"));
     // Match speech-swift's directory choice exactly, then independently assess file
     // completeness. Its legacy probe accepts bundle markers, but rejects missing shards.

@@ -172,7 +172,8 @@ pub(crate) fn chat_agent() -> ureq::Agent {
 
 const STALL_TIMEOUT: Duration = Duration::from_secs(90);
 
-const ERROR_BODY_LIMIT: u64 = 4 * 1024 * 1024;
+/// Upper bound on a streamed (SSE) response body read in one connection test.
+const SSE_BODY_LIMIT: u64 = 4 * 1024 * 1024;
 /// 单次请求输出 token 上限（校对与摘要共用）。
 pub(crate) const CHAT_MAX_TOKENS: u32 = 16384;
 
@@ -186,48 +187,21 @@ pub struct PolishReport {
     pub note: Option<String>,
 }
 
-/// 校对 worker 池骨架：
-/// `Mutex` 队列 + `std::thread::scope` workers 抢占式取活，每轮先 `check_control`，
-/// 中止（或锁中毒）记 `aborted` 并由首个错误胜出；队列取走即计进度，
-/// `work` 返回本批成功条数（0 = 该批被跳过/失败，与成功语义一致地不累加）。
-/// Err = 任务被中止，携带首个 check_control 错误。
+/// Runs the AI batches on the shared worker pool. A batch counts toward
+/// progress once taken, even if it is skipped; `work` returns how many items
+/// it improved (0 for a skipped or failed batch, which keeps the original).
+/// Err = the task was stopped.
 fn run_pool<T: Send>(
-    queue: &std::sync::Mutex<impl Iterator<Item = T> + Send>,
+    chunks: Vec<T>,
     workers: usize,
-    succeeded: &std::sync::atomic::AtomicUsize,
     pb: &crate::progress::Bar,
     work: &(dyn Fn(T) -> usize + Sync),
-) -> Result<()> {
-    let aborted = std::sync::Mutex::new(None::<anyhow::Error>);
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    if let Err(e) = crate::dispatch::check_control() {
-                        let mut guard = crate::runtime::lock_recover(&aborted);
-                        if guard.is_none() {
-                            *guard = Some(e);
-                        }
-                        break;
-                    }
-                    let next = queue.lock().map(|mut it| it.next());
-                    match next {
-                        Ok(Some(item)) => {
-                            // 从队列取走即计入进度：被跳过的批次也不再卡住进度条
-                            pb.inc(1);
-                            let count = work(item);
-                            succeeded.fetch_add(count, std::sync::atomic::Ordering::Relaxed);
-                        }
-                        Ok(None) | Err(_) => break,
-                    }
-                }
-            });
-        }
-    });
-    if let Some(e) = crate::runtime::lock_recover(&aborted).take() {
-        return Err(e);
-    }
-    Ok(())
+) -> Result<usize> {
+    let counts = crate::runtime::map_pool(chunks, workers, |item| {
+        pb.inc(1);
+        Ok(work(item))
+    })?;
+    Ok(counts.into_iter().sum())
 }
 
 /// 对已合并的 Section 做校对（在 merge 之后调用；配置已由调用方校验）。
@@ -249,7 +223,6 @@ pub fn polish_sections_report(
     // Paths only: the image is read and encoded once per request batch, not all up front.
     let mut image_paths: Vec<Option<std::path::PathBuf>> = Vec::with_capacity(sections.len());
     for sec in sections.iter() {
-        crate::dispatch::check_control()?;
         image_paths
             .push((s.vision && !sec.speech.is_empty()).then(|| frames_root.join(&sec.image)));
     }
@@ -276,13 +249,10 @@ pub fn polish_sections_report(
     let pb = crate::progress::Bar::new(Stage::Llm, chunks.len() as u64)
         .with_template("{spinner:.green} llm {pos}/{len} [{bar:32.cyan/blue}] {msg}");
     let agent = chat_agent();
-    let succeeded = std::sync::atomic::AtomicUsize::new(0);
     let first_error = std::sync::Mutex::new(None::<String>);
-    let queue = std::sync::Mutex::new(chunks.into_iter());
-    run_pool(
-        &queue,
+    let succeeded = run_pool(
+        chunks,
         s.concurrency.clamp(1, MAX_CONCURRENCY),
-        &succeeded,
         &pb,
         &|(image_path, mut chunk)| {
             let image = image_path
@@ -307,7 +277,6 @@ pub fn polish_sections_report(
     for sec in sections.iter_mut() {
         sec.speech.retain(|e| !e.text.trim().is_empty());
     }
-    let succeeded = succeeded.load(std::sync::atomic::Ordering::Relaxed);
     Ok(PolishReport {
         attempted,
         succeeded,
@@ -353,18 +322,14 @@ pub fn translate_sections_report(
         .with_template("{spinner:.green} translate {pos}/{len} [{bar:32.cyan/blue}] {msg}");
     let agent = chat_agent();
     let warned = std::sync::atomic::AtomicBool::new(false);
-    let succeeded = std::sync::atomic::AtomicUsize::new(0);
     let first_error = std::sync::Mutex::new(None::<String>);
-    let queue = std::sync::Mutex::new(chunks.into_iter());
-    run_pool(
-        &queue,
+    let succeeded = run_pool(
+        chunks,
         s.concurrency.clamp(1, MAX_CONCURRENCY),
-        &succeeded,
         &pb,
         &|mut chunk| translate_chunk(&agent, s, target, &mut chunk, &warned, &first_error),
     )?;
     pb.finish();
-    let succeeded = succeeded.load(std::sync::atomic::Ordering::Relaxed);
     Ok(PolishReport {
         attempted,
         succeeded,
@@ -501,15 +466,14 @@ fn unfinished_tail_formula(text: &str) -> Option<String> {
 /// 读取本节校对截图的 base64；None = 截图不可用（已告警）。
 fn section_image_b64(path: &Path, warned: &std::sync::atomic::AtomicBool) -> Option<String> {
     use base64::Engine as _;
-    let p = path;
-    match std::fs::read(p) {
+    match std::fs::read(path) {
         Ok(bytes) => Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
         Err(e) => {
             warn_once(
                 warned,
                 &format!(
                     "无法读取校对所需截图，已保留原文 / Required image could not be read; original text retained: {}: {e:#}",
-                    p.display()
+                    path.display()
                 ),
             );
             None
@@ -695,7 +659,7 @@ pub fn parse_segments(content: &str) -> Option<Vec<(usize, String)>> {
 }
 
 /// 截取首个 { 到末个 } 解析为 JSON 对象；容忍尾逗号。
-fn extract_json_object(content: &str) -> Option<serde_json::Value> {
+pub(crate) fn extract_json_object(content: &str) -> Option<serde_json::Value> {
     let start = content.find('{')?;
     let end = content.rfind('}')?;
     if end <= start {
@@ -929,15 +893,17 @@ fn request_chat_once(
     let headers = crate::provider::auth_headers(s).map_err(crate::dispatch::Failure::local)?;
     let sse = crate::provider::is_sse(s);
     crate::dispatch::json_request_described(
-        "llm",
-        purpose.ledger_name(),
-        description,
-        &url,
-        body,
-        if crate::provider::free_to_resend(s) {
-            crate::dispatch::Resend::Free
-        } else {
-            crate::dispatch::Resend::AskUser
+        &crate::dispatch::RequestSpec {
+            service: "llm",
+            purpose: purpose.ledger_name(),
+            description,
+            endpoint: &url,
+            identity: body,
+            resend: if crate::provider::free_to_resend(s) {
+                crate::dispatch::Resend::Free
+            } else {
+                crate::dispatch::Resend::AskUser
+            },
         },
         || {
             let mut request = agent.post(&url).set("Content-Type", "application/json");
@@ -1040,7 +1006,7 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
         let mut bytes = Vec::new();
         use std::io::Read as _;
         resp.into_reader()
-            .take(ERROR_BODY_LIMIT + 1)
+            .take(SSE_BODY_LIMIT + 1)
             .read_to_end(&mut bytes)
             .context(crate::tr!(
                 "服务响应接收中断 / Service response was interrupted"
@@ -1297,44 +1263,13 @@ mod tests {
 
     #[test]
     fn translation_keeps_originals_and_adds_each_translation() {
-        use std::io::{Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
+        let content = serde_json::json!({"segments":[{"id":0,"text":"Today: compilers."},{"id":1,"text":"Next, parsing."}]});
+        let body = serde_json::json!({"choices":[{"message":{"content":content.to_string()}}]})
+            .to_string();
+        let (address, server) =
+            crate::test_http::serve(vec![crate::test_http::json_response(&body)]);
         let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0u8; 4096];
-            // Read the head, then the body announced by Content-Length.
-            let body_start = loop {
-                let n = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..n]);
-                if let Some(at) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                    break at + 4;
-                }
-            };
-            let head = String::from_utf8_lossy(&request[..body_start]).to_ascii_lowercase();
-            let length: usize = head
-                .lines()
-                .find_map(|line| line.strip_prefix("content-length:"))
-                .and_then(|value| value.trim().parse().ok())
-                .unwrap();
-            while request.len() < body_start + length {
-                let n = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..n]);
-            }
-            let content = serde_json::json!({"segments":[{"id":0,"text":"Today: compilers."},{"id":1,"text":"Next, parsing."}]});
-            let body = serde_json::json!({"choices":[{"message":{"content":content.to_string()}}]})
-                .to_string();
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-            .unwrap();
-            String::from_utf8_lossy(&request[body_start..]).into_owned()
+            String::from_utf8_lossy(&server.join().unwrap().remove(0).body).into_owned()
         });
         let event = |text: &str| TranscriptEvent {
             start: 0.0,
@@ -1350,7 +1285,7 @@ mod tests {
             speech: vec![event("今天讲编译原理。"), event("接下来是语法分析。")],
         }];
         let mut settings = test_settings();
-        settings.base_url = format!("http://{address}/v1");
+        settings.base_url = format!("{address}/v1");
         settings.concurrency = 1;
         let report = translate_sections_report(&mut sections, &settings, "en").unwrap();
         let request = server.join().unwrap();

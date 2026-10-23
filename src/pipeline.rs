@@ -23,8 +23,8 @@ const STEM_MAX_CHARS: usize = 40;
 /// Screenshot checkpoint files are digest-verified across this many parallel lanes.
 const FRAME_DIGEST_LANES: usize = 4;
 
-/// One message for an empty screenshot result; the desktop matches this value.
-pub const NO_SCREENSHOTS: &str = "未提取到截图";
+/// One message for an empty screenshot result.
+const NO_SCREENSHOTS: &str = "未提取到截图";
 
 /// Traditional CLI entry. Its generated task directory is stable for compatible recovery.
 /// New settings or --no-resume use another work directory and never overwrite old notes.
@@ -117,10 +117,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         cfg.asr_api.api_key = key;
     }
     cfg.resume = true;
-    let _dispatch = crate::dispatch::install(&cfg.out_dir, None, &Default::default())?;
-    std::fs::create_dir_all(&cfg.out_dir)?;
-    let _lock = crate::runtime::lock_file(&cfg.out_dir.join(".task.lock"))?;
-    execution::bind_work_dir(&cfg.out_dir, &binding)?;
+    let _work = execution::enter_work_dir(&cfg.out_dir, &binding, None, &Default::default())?;
     let record = FailureRecord {
         cfg: &cfg,
         is_local,
@@ -152,13 +149,16 @@ pub(crate) async fn run_task(request: &execution::Request, cfg: &PipelineConfig)
     // The caller (`execution::run`) validates through `Request::resolve`.
     let started = Instant::now();
     let target = Target::from_request(request);
-    std::fs::create_dir_all(&cfg.out_dir)?;
-    let _lock = crate::runtime::lock_file(&cfg.out_dir.join(".task.lock"))?;
     let binding = {
         let (request, cfg) = (request.clone(), cfg.clone());
         blocking(move || request.binding(&cfg)).await?
     };
-    execution::bind_work_dir(&cfg.out_dir, &binding)?;
+    let _work = execution::enter_work_dir(
+        &cfg.out_dir,
+        &binding,
+        request.control_path.as_deref(),
+        &request.service_versions,
+    )?;
     let is_local = Path::new(&request.source).is_file();
     let meta = VideoMeta {
         title: request.title.clone(),
@@ -172,10 +172,12 @@ pub(crate) async fn run_task(request: &execution::Request, cfg: &PipelineConfig)
         },
         id: request.source_id.clone(),
     };
+    // The record outlives `meta`, which moves into the task.
+    let platform = meta.extractor.clone();
     let record = FailureRecord {
         cfg,
         is_local,
-        platform: &meta.extractor.clone(),
+        platform: &platform,
         id: &request.source_id,
         started,
     };
@@ -309,80 +311,43 @@ async fn reprocess(
         crate::llm::validate(&cfg.llm)?;
     }
     if let Some(prior) = prior_work {
-        let identity: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(prior.join("task-identity.json"))?)?;
-        anyhow::ensure!(
-            identity["source_id"].as_str() == Some(request.source_id.as_str()),
-            crate::tr!("旧进度与此视频来源不符 / Prior work belongs to another source")
-        );
-        anyhow::ensure!(
-            identity["task_id"]
-                .as_str()
-                .is_none_or(|id| id == base.task_id),
-            crate::tr!("旧进度与原笔记任务不符 / Prior work belongs to another task")
-        );
-        let ledger_dir = cfg.out_dir.join("requests");
-        std::fs::create_dir_all(&ledger_dir)?;
-        for mut receipt in crate::dispatch::receipts(prior)? {
-            let needed = Component::parse(&receipt.purpose).is_some_and(|c| {
-                matches!(c, Component::Proofreading | Component::Summary) && has(c)
-            });
-            let matching_service = request.service_versions.get("llm").map_or(
-                receipt
-                    .service_version
-                    .starts_with(crate::dispatch::SNAPSHOT_PREFIX),
-                |version| version == &receipt.service_version,
-            );
-            if needed && matching_service && execution::valid_id(&receipt.stable_id) {
-                let destination = ledger_dir.join(format!("{}.json", receipt.stable_id));
-                if !destination.exists() {
-                    // This new task explicitly requests another attempt at selected
-                    // failed components. Persist authorization only while importing;
-                    // restarting this task must never refresh a consumed authorization.
-                    receipt.retry_authorized = matches!(
-                        receipt.state,
-                        crate::dispatch::State::Failed | crate::dispatch::State::Rejected
-                    )
-                    .then(|| receipt.request_id.clone());
-                    crate::checkpoint::atomic_write(
-                        &destination,
-                        &serde_json::to_vec_pretty(&receipt)?,
-                    )?;
-                }
-            }
-        }
-        if !cfg.media_path().exists() {
-            let (prior, media, marker) = (
-                prior.to_path_buf(),
-                cfg.media_path(),
-                cfg.out_dir.join("media.sha256"),
-            );
-            blocking(move || {
-                if verified_file(&prior.join("media.mp4"), &prior.join("media.sha256"))? {
-                    std::fs::copy(prior.join("media.mp4"), &media)?;
-                    save_file_digest(&media, &marker)?;
-                }
-                Ok(())
-            })
-            .await?;
-        }
+        import_prior_work(request, cfg, &base, components, prior).await?;
     }
     // Copy verified base images into a separate namespace; a failed new screenshot pass
     // cannot mix old and new frames or mutate the old version through shared hard links.
+    let images: Vec<String> = document
+        .sections
+        .iter()
+        .filter(|section| !section.image.is_empty())
+        .map(|section| section.image.clone())
+        .collect();
+    {
+        let (base_dir, out_dir, timeline) = (
+            base_dir.to_path_buf(),
+            cfg.out_dir.clone(),
+            cfg.timeline_path(),
+        );
+        blocking(move || {
+            crate::runtime::map_pool(images, 4, |image| {
+                let source = artifact::safe_asset_path(&base_dir, &image)?;
+                let dest = out_dir.join("base").join(&image);
+                std::fs::create_dir_all(dest.parent().context("asset path")?)?;
+                if !dest.exists() {
+                    std::fs::copy(source, &dest)?;
+                }
+                Ok(())
+            })?;
+            if base_dir.join("timeline.jsonl").is_file() {
+                std::fs::copy(base_dir.join("timeline.jsonl"), timeline)?;
+            }
+            Ok(())
+        })
+        .await?;
+    }
     for section in &mut document.sections {
         if !section.image.is_empty() {
-            let source = artifact::safe_asset_path(base_dir, &section.image)?;
-            let relative = format!("base/{}", section.image);
-            let dest = cfg.out_dir.join(&relative);
-            std::fs::create_dir_all(dest.parent().unwrap())?;
-            if !dest.exists() {
-                std::fs::copy(source, &dest)?;
-            }
-            section.image = relative;
+            section.image = format!("base/{}", section.image);
         }
-    }
-    if base_dir.join("timeline.jsonl").is_file() {
-        std::fs::copy(base_dir.join("timeline.jsonl"), cfg.timeline_path())?;
     }
     let mut outcomes = base.outcomes.clone();
     outcomes.exports.clear();
@@ -640,12 +605,12 @@ async fn subtitles(
     cfg: &PipelineConfig,
     local: bool,
     input: SubtitleInput,
-) -> Result<Option<(Vec<timeline::TranscriptEvent>, String)>> {
+) -> Result<Option<(Vec<timeline::TranscriptEvent>, TranscriptOrigin)>> {
     let probed = match input {
         SubtitleInput::Selected(selected) => {
+            // Selected events were validated with the request.
             if let Some(events) = selected {
-                execution::validate_events(&events)?;
-                return Ok(Some((events, "selected-subtitle".into())));
+                return Ok(Some((events, TranscriptOrigin::SelectedSubtitle)));
             }
             anyhow::ensure!(
                 cfg.transcript_source != config::TranscriptSource::Subtitle,
@@ -679,11 +644,10 @@ async fn subtitles(
             Ok(Some((
                 events,
                 if file.auto {
-                    "auto-caption"
+                    TranscriptOrigin::AutoCaption
                 } else {
-                    "subtitle"
-                }
-                .into(),
+                    TranscriptOrigin::Subtitle
+                },
             )))
         }
         None if cfg.transcript_source == config::TranscriptSource::Subtitle => {
@@ -693,9 +657,19 @@ async fn subtitles(
     }
 }
 
+/// Where a note's transcript came from; recorded in run.json and the cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum TranscriptOrigin {
+    SelectedSubtitle,
+    AutoCaption,
+    Subtitle,
+    Asr,
+}
+
 #[derive(Serialize, Deserialize)]
 struct TranscriptCache {
-    source: String,
+    source: TranscriptOrigin,
     events: Vec<timeline::TranscriptEvent>,
 }
 
@@ -743,68 +717,14 @@ async fn run_prepared(
     progress::start(Stage::Subtitle);
     let selected = subtitles(cfg, is_local, input).await?;
     progress::done(Stage::Subtitle);
-    if selected.is_none() {
-        let (require_key, allow_environment) = match credentials {
-            Credentials::Cli => (true, true),
-            Credentials::Task {
-                allow_unauthenticated_asr,
-            } => (!allow_unauthenticated_asr, false),
-        };
-        cfg.validate_asr_with_auth(require_key, allow_environment)?;
-        if !matches!(
-            cfg.provider,
-            config::AsrProvider::Coreml | config::AsrProvider::Api | config::AsrProvider::Npu
-        ) {
-            crate::error::require_cmd("llama-server")?;
-        }
-    }
-    crate::error::require_cmd("ffmpeg")?;
-    crate::error::require_cmd("ffprobe")?;
-    if !is_local {
-        crate::error::require_ytdlp()?;
-    }
-    if selected.is_none() && cfg.provider != config::AsrProvider::Api {
-        progress::start(Stage::ModelPrepare);
-        crate::models::ensure_cache(
-            cfg.provider,
-            cfg.asr_model
-                .as_deref()
-                .unwrap_or(config::DEFAULT_ASR_MODEL),
-            &cfg.model_dir,
-        )
-        .await?;
-        progress::done(Stage::ModelPrepare);
-    }
+    check_tools(cfg, is_local, selected.is_none(), credentials).await?;
     meta.save(&cfg.meta_path())?;
-    let media_path = if is_local {
-        PathBuf::from(&cfg.url)
-    } else {
-        cfg.media_path()
-    };
-    let media_existed = !is_local && prepare_cached_media_async(cfg).await?;
-    crate::dispatch::check_control()?;
-    if !is_local && !media_existed {
-        anyhow::ensure!(
-            !cfg.no_download,
-            crate::tr!(
-                "找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again"
-            )
-        );
-        progress::start(Stage::Download);
-        fetch::download(
-            &cfg.url,
-            &media_path,
-            cfg.max_height,
-            tracing::enabled!(tracing::Level::DEBUG),
-        )
-        .await?;
-        save_file_digest_async(media_path.clone(), cfg.out_dir.join("media.sha256")).await?;
-        progress::done(Stage::Download);
-    }
+    let (media_path, media_existed) = acquire_media(cfg, is_local).await?;
     crate::dispatch::check_control()?;
     let mut outcomes = Outcomes::default();
-    // 两路并行但都受 watch_control 打断：取消时任一路不再等到自身阶段边界才停；
-    // 被 dropped 的分支由 kill_on_drop 清理其子进程
+    // 两路并行但都受 watch_control 打断：取消时任一路不再等到自身阶段边界才停。
+    // 被 dropped 的子进程分支由 kill_on_drop 终止；转写跑在 spawn_blocking 里，
+    // drop 不会停止它，它在下一段开始前的 check_control 处退出。
     let (frames_result, transcript_result) = tokio::join!(
         async {
             tokio::select! {
@@ -813,47 +733,8 @@ async fn run_prepared(
             }
         },
         async {
-            let transcript_work = async {
-                let cache_path = cfg.out_dir.join("transcript.json");
-                let cache = match cached_transcript(&cache_path)?
-                    .or_else(|| selected.map(|(events, source)| TranscriptCache { source, events }))
-                {
-                    Some(cache) => cache,
-                    None => {
-                        progress::start(Stage::Audio);
-                        let audio = cfg.audio_path();
-                        // A verified marker proves audio extraction completed; a bare WAV may be truncated.
-                        let marker = cfg.out_dir.join("audio.sha256");
-                        let verified = {
-                            let (audio, marker) = (audio.clone(), marker.clone());
-                            blocking(move || verified_file(&audio, &marker)).await?
-                        };
-                        if !verified {
-                            media::extract_audio(&media_path, &audio).await?;
-                            save_file_digest_async(audio.clone(), marker).await?;
-                        }
-                        progress::done(Stage::Audio);
-                        crate::dispatch::check_control()?;
-                        progress::start(Stage::Transcribe);
-                        let events = asr::run(cfg, &audio).await?;
-                        progress::done(Stage::Transcribe);
-                        TranscriptCache {
-                            source: "asr".into(),
-                            events,
-                        }
-                    }
-                };
-                // 全空转写不入缓存：空缓存会在下次运行时挡住重新识别
-                if crate::timeline::has_readable_events(&cache.events) {
-                    crate::checkpoint::atomic_write(
-                        &cache_path,
-                        &serde_json::to_vec_pretty(&cache)?,
-                    )?;
-                }
-                Ok::<_, anyhow::Error>(cache)
-            };
             tokio::select! {
-                r = transcript_work => r,
+                r = transcript(cfg, &media_path, selected) => r,
                 e = crate::dispatch::watch_control() => Err(e),
             }
         }
@@ -880,7 +761,7 @@ async fn run_prepared(
         Ok(_) => {
             outcomes.transcript =
                 Outcome::failed(crate::tr!("没有获得可读文字 / No readable transcript"));
-            save_materials(cfg, &frames, &[], &outcomes)?;
+            save_timeline(cfg, &frames, &[]).await?;
             anyhow::bail!(crate::tr!(
                 "没有获得可读文字；已保留可用截图 / No readable transcript; available screenshots were retained"
             ));
@@ -910,41 +791,14 @@ async fn run_prepared(
                     ),
                 }
             };
-            save_materials(cfg, &frames, &completed, &outcomes)?;
+            save_timeline(cfg, &frames, &completed).await?;
             return Err(error);
         }
     };
-    save_materials(cfg, &frames, &transcript.events, &outcomes)?;
+    save_timeline(cfg, &frames, &transcript.events).await?;
     let mut sections = build_sections(frames, transcript.events, meta.duration);
     timeline::coalesce_sections(&mut sections);
-    // Save the complete raw body before any optional request.
-    crate::checkpoint::atomic_write(
-        &cfg.out_dir.join("raw-document.json"),
-        &serde_json::to_vec_pretty(&artifact::Document {
-            schema: 1,
-            meta: meta.clone(),
-            sections: sections.clone(),
-            summary: None,
-        })?,
-    )?;
-    crate::dispatch::check_control()?;
-    if cfg.llm.enabled {
-        progress::start(Stage::Llm);
-        let (polished, report) = polish_with_rollback(sections, cfg).await?;
-        sections = polished;
-        outcomes.proofreading = Outcome::from_report(&report);
-        progress::done(Stage::Llm);
-    }
-    crate::dispatch::check_control()?;
-    if let Some(target) = cfg.llm.translation_target() {
-        sections = translate_step(sections, cfg, target, &mut outcomes).await?;
-    }
-    crate::dispatch::check_control()?;
-    let summary = if cfg.llm.summarize {
-        summarize_step(cfg, &sections, meta, &mut outcomes).await?
-    } else {
-        None
-    };
+    let (sections, summary) = enrich(sections, cfg, meta, &mut outcomes).await?;
     crate::dispatch::check_control()?;
     progress::start(Stage::Render);
     let manifest = artifact::publish(
@@ -988,19 +842,229 @@ async fn run_prepared(
     Ok(())
 }
 
-fn save_materials(
+/// Reuses what an earlier task for the same note already paid for: its
+/// receipts for the requested AI components (each failed one authorized for
+/// one more attempt) and its verified video download.
+async fn import_prior_work(
+    request: &execution::Request,
+    cfg: &PipelineConfig,
+    base: &artifact::Manifest,
+    components: &[execution::Component],
+    prior: &Path,
+) -> Result<()> {
+    use execution::Component;
+    let has = |component: Component| components.contains(&component);
+    let identity: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(prior.join("task-identity.json"))?)?;
+    anyhow::ensure!(
+        identity["source_id"].as_str() == Some(request.source_id.as_str()),
+        crate::tr!("旧进度与此视频来源不符 / Prior work belongs to another source")
+    );
+    anyhow::ensure!(
+        identity["task_id"]
+            .as_str()
+            .is_none_or(|id| id == base.task_id),
+        crate::tr!("旧进度与原笔记任务不符 / Prior work belongs to another task")
+    );
+    let ledger_dir = cfg.out_dir.join("requests");
+    std::fs::create_dir_all(&ledger_dir)?;
+    for mut receipt in crate::dispatch::receipts(prior)? {
+        let needed = Component::parse(&receipt.purpose)
+            .is_some_and(|c| matches!(c, Component::Proofreading | Component::Summary) && has(c));
+        let matching_service = request.service_versions.get("llm").map_or(
+            receipt
+                .service_version
+                .starts_with(crate::dispatch::SNAPSHOT_PREFIX),
+            |version| version == &receipt.service_version,
+        );
+        if needed && matching_service && execution::valid_id(&receipt.stable_id) {
+            let destination = ledger_dir.join(format!("{}.json", receipt.stable_id));
+            if !destination.exists() {
+                // This new task explicitly requests another attempt at selected
+                // failed components. Persist authorization only while importing;
+                // restarting this task must never refresh a consumed authorization.
+                receipt.retry_authorized = matches!(
+                    receipt.state,
+                    crate::dispatch::State::Failed | crate::dispatch::State::Rejected
+                )
+                .then(|| receipt.request_id.clone());
+                crate::checkpoint::atomic_write(
+                    &destination,
+                    &serde_json::to_vec_pretty(&receipt)?,
+                )?;
+            }
+        }
+    }
+    if !cfg.media_path().exists() {
+        let (prior, media, marker) = (
+            prior.to_path_buf(),
+            cfg.media_path(),
+            cfg.out_dir.join("media.sha256"),
+        );
+        blocking(move || {
+            if verified_file(&prior.join("media.mp4"), &prior.join("media.sha256"))? {
+                std::fs::copy(prior.join("media.mp4"), &media)?;
+                save_file_digest(&media, &marker)?;
+            }
+            Ok(())
+        })
+        .await?;
+    }
+    Ok(())
+}
+
+/// Tools and credentials the chosen path needs, and the speech model cache,
+/// all checked before any full media download.
+async fn check_tools(
+    cfg: &PipelineConfig,
+    is_local: bool,
+    needs_speech: bool,
+    credentials: Credentials,
+) -> Result<()> {
+    if needs_speech {
+        let (require_key, allow_environment) = match credentials {
+            Credentials::Cli => (true, true),
+            Credentials::Task {
+                allow_unauthenticated_asr,
+            } => (!allow_unauthenticated_asr, false),
+        };
+        cfg.validate_asr_with_auth(require_key, allow_environment)?;
+        if !matches!(
+            cfg.provider,
+            config::AsrProvider::Coreml | config::AsrProvider::Api | config::AsrProvider::Npu
+        ) {
+            crate::error::require_cmd("llama-server")?;
+        }
+    }
+    crate::error::require_cmd("ffmpeg")?;
+    crate::error::require_cmd("ffprobe")?;
+    if !is_local {
+        crate::error::require_ytdlp()?;
+    }
+    if needs_speech && cfg.provider != config::AsrProvider::Api {
+        progress::start(Stage::ModelPrepare);
+        crate::models::ensure_cache(
+            cfg.provider,
+            cfg.asr_model
+                .as_deref()
+                .unwrap_or(config::DEFAULT_ASR_MODEL),
+            &cfg.model_dir,
+        )
+        .await?;
+        progress::done(Stage::ModelPrepare);
+    }
+    Ok(())
+}
+
+/// The video to process, and whether a verified download already existed.
+async fn acquire_media(cfg: &PipelineConfig, is_local: bool) -> Result<(PathBuf, bool)> {
+    if is_local {
+        return Ok((PathBuf::from(&cfg.url), false));
+    }
+    let media_path = cfg.media_path();
+    let existed = prepare_cached_media_async(cfg).await?;
+    crate::dispatch::check_control()?;
+    if !existed {
+        anyhow::ensure!(
+            !cfg.no_download,
+            crate::tr!(
+                "找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again"
+            )
+        );
+        progress::start(Stage::Download);
+        fetch::download(
+            &cfg.url,
+            &media_path,
+            cfg.max_height,
+            tracing::enabled!(tracing::Level::DEBUG),
+        )
+        .await?;
+        save_file_digest_async(media_path.clone(), cfg.out_dir.join("media.sha256")).await?;
+        progress::done(Stage::Download);
+    }
+    Ok((media_path, existed))
+}
+
+/// The transcript: a saved one, the selected subtitles, or speech recognition.
+async fn transcript(
+    cfg: &PipelineConfig,
+    media_path: &Path,
+    selected: Option<(Vec<timeline::TranscriptEvent>, TranscriptOrigin)>,
+) -> Result<TranscriptCache> {
+    let cache_path = cfg.out_dir.join("transcript.json");
+    let cache = match cached_transcript(&cache_path)?
+        .or_else(|| selected.map(|(events, source)| TranscriptCache { source, events }))
+    {
+        Some(cache) => cache,
+        None => {
+            progress::start(Stage::Audio);
+            let audio = cfg.audio_path();
+            // A verified marker proves audio extraction completed; a bare WAV may be truncated.
+            let marker = cfg.out_dir.join("audio.sha256");
+            let verified = {
+                let (audio, marker) = (audio.clone(), marker.clone());
+                blocking(move || verified_file(&audio, &marker)).await?
+            };
+            if !verified {
+                media::extract_audio(media_path, &audio).await?;
+                save_file_digest_async(audio.clone(), marker).await?;
+            }
+            progress::done(Stage::Audio);
+            crate::dispatch::check_control()?;
+            progress::start(Stage::Transcribe);
+            let events = asr::run(cfg, &audio).await?;
+            progress::done(Stage::Transcribe);
+            TranscriptCache {
+                source: TranscriptOrigin::Asr,
+                events,
+            }
+        }
+    };
+    // 全空转写不入缓存：空缓存会在下次运行时挡住重新识别
+    if crate::timeline::has_readable_events(&cache.events) {
+        let bytes = serde_json::to_vec_pretty(&cache)?;
+        let cache_path = cache_path.clone();
+        blocking(move || crate::checkpoint::atomic_write(&cache_path, &bytes)).await?;
+    }
+    Ok(cache)
+}
+
+/// Optional AI work on the assembled note: proofreading, translation, summary.
+async fn enrich(
+    mut sections: Vec<timeline::Section>,
+    cfg: &PipelineConfig,
+    meta: &VideoMeta,
+    outcomes: &mut Outcomes,
+) -> Result<(Vec<timeline::Section>, Option<crate::summarize::Summary>)> {
+    crate::dispatch::check_control()?;
+    if cfg.llm.enabled {
+        progress::start(Stage::Llm);
+        let (polished, report) = polish_with_rollback(sections, cfg).await?;
+        sections = polished;
+        outcomes.proofreading = Outcome::from_report(&report);
+        progress::done(Stage::Llm);
+    }
+    crate::dispatch::check_control()?;
+    if let Some(target) = cfg.llm.translation_target() {
+        sections = translate_step(sections, cfg, target, outcomes).await?;
+    }
+    crate::dispatch::check_control()?;
+    let summary = if cfg.llm.summarize {
+        summarize_step(cfg, &sections, meta, outcomes).await?
+    } else {
+        None
+    };
+    Ok((sections, summary))
+}
+
+/// The timeline a later reprocess task starts from.
+async fn save_timeline(
     cfg: &PipelineConfig,
     frames: &[timeline::FrameEvent],
     events: &[timeline::TranscriptEvent],
-    outcomes: &Outcomes,
 ) -> Result<()> {
-    timeline::write_jsonl(&cfg.timeline_path(), frames, events)?;
-    crate::checkpoint::atomic_write(
-        &cfg.out_dir.join("materials.json"),
-        &serde_json::to_vec_pretty(
-            &serde_json::json!({"schema":1,"frames":frames,"outcomes":outcomes}),
-        )?,
-    )
+    let (path, frames, events) = (cfg.timeline_path(), frames.to_vec(), events.to_vec());
+    blocking(move || timeline::write_jsonl(&path, &frames, &events)).await
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1324,28 +1388,20 @@ async fn summarize_step(
     }
 }
 
-/// Screenshot checkpoints are verified by full-content digests. Spread the files
-/// over parallel lanes so resuming a large cache is not a serial wait.
+/// Screenshot checkpoints are verified by full-content digests, in parallel so
+/// resuming a large cache is not a serial wait.
 fn verified_cache_files(out_dir: &Path, files: &[(String, String)]) -> bool {
-    if files.is_empty() {
-        return true;
-    }
-    let lanes = FRAME_DIGEST_LANES.min(files.len());
-    let chunk_size = files.len().div_ceil(lanes);
-    std::thread::scope(|scope| {
-        files
-            .chunks(chunk_size)
-            .map(|chunk| {
-                scope.spawn(move || {
-                    chunk.iter().all(|(path, digest)| {
-                        artifact::safe_asset_path(out_dir, path)
-                            .and_then(|p| execution::file_digest(&p))
-                            .is_ok_and(|actual| actual == *digest)
-                    })
-                })
-            })
-            .all(|handle| handle.join().unwrap_or(false))
-    })
+    crate::runtime::map_pool(
+        files.iter().collect(),
+        FRAME_DIGEST_LANES,
+        |(path, digest)| {
+            let actual = artifact::safe_asset_path(out_dir, path)
+                .and_then(|p| execution::file_digest(&p))?;
+            anyhow::ensure!(actual == *digest, "digest mismatch");
+            Ok(())
+        },
+    )
+    .is_ok()
 }
 
 /// 失败诊断 run.json 的上下文：任何在工作目录确定后失败的路径都写一份。
@@ -1503,13 +1559,14 @@ mod tests {
     /// 失败也写诊断 run.json（success:false + 错误全文）。
     /// 用损坏的本地视频让 pipeline 在 out_dir 确定之后（场景检测阶段）必然失败。
     #[test]
+    #[ignore = "needs ffmpeg, ffprobe and llama-server on PATH; run with --ignored"]
     fn failure_writes_diagnostic_run_json() {
-        // 缺任何一个工具都会在 out_dir 确定之前的预检失败（不写 run.json），跳过
+        // 缺任何一个工具都会在 out_dir 确定之前的预检失败（不写 run.json）
         for tool in ["ffmpeg", "ffprobe", "llama-server"] {
-            if crate::runtime::which(tool).is_none() {
-                eprintln!("skip: {tool} not found");
-                return;
-            }
+            assert!(
+                crate::runtime::which(tool).is_some(),
+                "{tool} is required by this test"
+            );
         }
         let dir = std::env::temp_dir().join(format!("c2md-failrun-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1596,7 +1653,7 @@ mod tests {
 
         // 全空缓存（上次端点故障的残留）→ 丢弃并删除文件，ASR 得以重跑
         let empty = super::TranscriptCache {
-            source: "asr".into(),
+            source: super::TranscriptOrigin::Asr,
             events: vec![ev(""), ev("  ")],
         };
         std::fs::write(&path, serde_json::to_vec(&empty).unwrap()).unwrap();
@@ -1605,7 +1662,7 @@ mod tests {
 
         // 有可读文字的缓存 → 正常复用
         let good = super::TranscriptCache {
-            source: "asr".into(),
+            source: super::TranscriptOrigin::Asr,
             events: vec![ev("你好")],
         };
         std::fs::write(&path, serde_json::to_vec(&good).unwrap()).unwrap();

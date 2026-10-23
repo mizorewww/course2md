@@ -68,7 +68,7 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
     let uploader = if meta.uploader.is_empty() {
         String::new()
     } else {
-        format!("- 作者：{}\n", md_inline(&meta.uploader))
+        format!("- {}\n", crate::tr!("作者 {}", md_inline(&meta.uploader)))
     };
     // 本地来源的 canonicalize 每次渲染只算一次
     let source = source_url(meta);
@@ -77,16 +77,27 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
     write!(md, "# {title}\n\n").unwrap();
     md.push_str(&uploader);
     if meta.duration > 0. {
-        writeln!(md, "- 时长：{}", fmt_ts(meta.duration)).unwrap();
+        writeln!(md, "- {}", crate::tr!("时长 {}", fmt_ts(meta.duration))).unwrap();
     }
     if !meta.webpage_url.is_empty() {
-        writeln!(md, "- 来源：[{}]({})", md_inline(&meta.webpage_url), source).unwrap();
+        writeln!(
+            md,
+            "- {} [{}]({})",
+            crate::tr!("来源"),
+            md_inline(&meta.webpage_url),
+            source
+        )
+        .unwrap();
     }
     writeln!(
         md,
-        "- 由 course2md 生成（{} 张截图 / {} 段文字）\n",
-        sections.iter().filter(|s| !s.image.is_empty()).count(),
-        sections.iter().map(|s| s.speech.len()).sum::<usize>()
+        "- {} · {}\n",
+        crate::tr!("由 course2md 生成"),
+        crate::tr!(
+            "{} 张截图 / {} 段文字",
+            sections.iter().filter(|s| !s.image.is_empty()).count(),
+            sections.iter().map(|s| s.speech.len()).sum::<usize>()
+        )
     )
     .unwrap();
     md.push_str("---\n\n");
@@ -103,7 +114,13 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
             .unwrap();
         }
         if !s.image.is_empty() {
-            write!(md, "![视频 {} 的截图]({})\n\n", fmt_ts(s.t), s.image).unwrap();
+            write!(
+                md,
+                "![{}]({})\n\n",
+                crate::tr!("视频 {} 的截图", fmt_ts(s.t)),
+                s.image
+            )
+            .unwrap();
         }
         for ev in &s.speech {
             write!(md, "{}\n\n", ev.text).unwrap();
@@ -128,7 +145,11 @@ pub fn render_html(meta: &VideoMeta, sections: &[Section]) -> String {
         details.push(crate::tr!("时长 {}", fmt_ts(meta.duration)));
     }
     if !meta.webpage_url.is_empty() {
-        details.push(crate::tr!("<a href=\"{}\">源视频</a>", esc(&source)));
+        details.push(format!(
+            "<a href=\"{}\">{}</a>",
+            esc(&source),
+            esc(crate::tr!("源视频"))
+        ));
     }
     details.push(crate::tr!(
         "{} 张截图 / {} 段文字",

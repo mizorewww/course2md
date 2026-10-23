@@ -1,5 +1,6 @@
 """Dependency overlay checks use disposable Git repositories, never real sources."""
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -89,6 +90,33 @@ class SourcePatchTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             sources.verify_patch_revision(self.repo, "HEAD", [self.patch])
         self.assertEqual((self.repo / "input.rs").read_bytes(), original)
+
+
+class SourceLocationTests(unittest.TestCase):
+    def test_default_clones_live_under_ignored_deps(self):
+        for name in sources.REPOS:
+            path, owned = sources.source_checkout(name)
+            self.assertTrue(owned)
+            self.assertEqual(path.parent, sources.ROOT / ".deps" / "upstream")
+
+    def test_developer_checkouts_are_opt_in_and_never_pulled_implicitly(self):
+        path, owned = sources.source_checkout("component", Path("/work"))
+        self.assertEqual((path, owned), (Path("/work/gpui-component"), False))
+        self.assertFalse(sources.should_pull(owned))
+        self.assertTrue(sources.should_pull(owned, pull_developer=True))
+        self.assertTrue(sources.should_pull(True))
+        for mode in ({"locked": True}, {"no_pull": True}):
+            self.assertFalse(sources.should_pull(True, **mode))
+
+    def test_overlay_takes_gpui_platform_features_from_the_desktop_manifest(self):
+        features = sources.gpui_platform_features()
+        self.assertTrue(features)
+        manifest = b'gpui_platform = { package = "gpui-pre-platform", version = "0.1" }\n'
+        aliases = ["gpui", "gpui_macros", "sum-tree", "reqwest_client", "gpui_web"]
+        manifest += b"".join(f'{a} = {{ package = "gpui-pre-x", version = "0.1" }}\n'.encode()
+                             for a in aliases)
+        text = sources.component_overlay("Cargo.toml", manifest).decode()
+        self.assertIn(f"features = {json.dumps(features)}", text)
 
 
 if __name__ == "__main__":

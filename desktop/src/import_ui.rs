@@ -3815,7 +3815,7 @@ mod tests {
     #[test]
     fn completion_belongs_to_the_submitted_input_and_requires_a_readable_result() {
         let root = tempfile::tempdir().unwrap();
-        let mut workspace = workspace::Workspace::open_at(
+        let mut workspace = workspace::Workspace::open_at_inline(
             root.path().join("workspace.json"),
             root.path().join("library"),
             Default::default(),
