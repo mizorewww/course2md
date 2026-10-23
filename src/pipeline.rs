@@ -371,20 +371,39 @@ async fn reprocess(
     }
     // Copy verified base images into a separate namespace; a failed new screenshot pass
     // cannot mix old and new frames or mutate the old version through shared hard links.
+    let images: Vec<String> = document
+        .sections
+        .iter()
+        .filter(|section| !section.image.is_empty())
+        .map(|section| section.image.clone())
+        .collect();
+    {
+        let (base_dir, out_dir, timeline) = (
+            base_dir.to_path_buf(),
+            cfg.out_dir.clone(),
+            cfg.timeline_path(),
+        );
+        blocking(move || {
+            crate::runtime::map_pool(images, 4, |image| {
+                let source = artifact::safe_asset_path(&base_dir, &image)?;
+                let dest = out_dir.join("base").join(&image);
+                std::fs::create_dir_all(dest.parent().context("asset path")?)?;
+                if !dest.exists() {
+                    std::fs::copy(source, &dest)?;
+                }
+                Ok(())
+            })?;
+            if base_dir.join("timeline.jsonl").is_file() {
+                std::fs::copy(base_dir.join("timeline.jsonl"), timeline)?;
+            }
+            Ok(())
+        })
+        .await?;
+    }
     for section in &mut document.sections {
         if !section.image.is_empty() {
-            let source = artifact::safe_asset_path(base_dir, &section.image)?;
-            let relative = format!("base/{}", section.image);
-            let dest = cfg.out_dir.join(&relative);
-            std::fs::create_dir_all(dest.parent().unwrap())?;
-            if !dest.exists() {
-                std::fs::copy(source, &dest)?;
-            }
-            section.image = relative;
+            section.image = format!("base/{}", section.image);
         }
-    }
-    if base_dir.join("timeline.jsonl").is_file() {
-        std::fs::copy(base_dir.join("timeline.jsonl"), cfg.timeline_path())?;
     }
     let mut outcomes = base.outcomes.clone();
     outcomes.exports.clear();
@@ -857,10 +876,9 @@ async fn run_prepared(
                 };
                 // 全空转写不入缓存：空缓存会在下次运行时挡住重新识别
                 if crate::timeline::has_readable_events(&cache.events) {
-                    crate::checkpoint::atomic_write(
-                        &cache_path,
-                        &serde_json::to_vec_pretty(&cache)?,
-                    )?;
+                    let bytes = serde_json::to_vec_pretty(&cache)?;
+                    let cache_path = cache_path.clone();
+                    blocking(move || crate::checkpoint::atomic_write(&cache_path, &bytes)).await?;
                 }
                 Ok::<_, anyhow::Error>(cache)
             };
@@ -892,7 +910,7 @@ async fn run_prepared(
         Ok(_) => {
             outcomes.transcript =
                 Outcome::failed(crate::tr!("没有获得可读文字 / No readable transcript"));
-            save_timeline(cfg, &frames, &[])?;
+            save_timeline(cfg, &frames, &[]).await?;
             anyhow::bail!(crate::tr!(
                 "没有获得可读文字；已保留可用截图 / No readable transcript; available screenshots were retained"
             ));
@@ -922,11 +940,11 @@ async fn run_prepared(
                     ),
                 }
             };
-            save_timeline(cfg, &frames, &completed)?;
+            save_timeline(cfg, &frames, &completed).await?;
             return Err(error);
         }
     };
-    save_timeline(cfg, &frames, &transcript.events)?;
+    save_timeline(cfg, &frames, &transcript.events).await?;
     let mut sections = build_sections(frames, transcript.events, meta.duration);
     timeline::coalesce_sections(&mut sections);
     crate::dispatch::check_control()?;
@@ -991,12 +1009,13 @@ async fn run_prepared(
 }
 
 /// The timeline a later reprocess task starts from.
-fn save_timeline(
+async fn save_timeline(
     cfg: &PipelineConfig,
     frames: &[timeline::FrameEvent],
     events: &[timeline::TranscriptEvent],
 ) -> Result<()> {
-    timeline::write_jsonl(&cfg.timeline_path(), frames, events)
+    let (path, frames, events) = (cfg.timeline_path(), frames.to_vec(), events.to_vec());
+    blocking(move || timeline::write_jsonl(&path, &frames, &events)).await
 }
 
 #[derive(Serialize, Deserialize)]
