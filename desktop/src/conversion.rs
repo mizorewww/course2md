@@ -67,6 +67,13 @@ impl Default for ConversionOptions {
 }
 
 impl ConversionOptions {
+    /// These options as a task plan records them: the configuration keeps
+    /// only what takes effect (vision only with proofreading).
+    pub(crate) fn as_planned(&self) -> Self {
+        let mut config = course2md::settings::ConfigFile::default();
+        self.apply_to(&mut config);
+        Self::from_config(&config)
+    }
     pub(crate) fn apply_to(&self, config: &mut course2md::settings::ConfigFile) {
         use course2md::config::OutputFormat;
         config.defaults.provider = self.provider;

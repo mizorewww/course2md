@@ -709,7 +709,6 @@ impl Desktop {
             title: draft.title.clone(),
             library_id: draft.library_id.clone(),
             folder: draft.folder,
-            options: draft.options.clone(),
             subtitle: draft.subtitle.clone(),
             config,
             asr_service: refs.asr,
@@ -780,7 +779,6 @@ impl Desktop {
             title,
             library_id: draft.library_id.clone(),
             folder: draft.folder,
-            options: draft.options.clone(),
             subtitle: None,
             config,
             asr_service: refs.asr,
@@ -1038,7 +1036,7 @@ impl Desktop {
             title: task.plan.title.clone(),
             author: task.plan.source.author.clone(),
             duration: task.plan.source.duration,
-            subtitle: if task.plan.options.source_mode != TranscriptSource::Asr {
+            subtitle: if task.plan.options().source_mode != TranscriptSource::Asr {
                 task.plan.subtitle.clone()
             } else {
                 None
@@ -1209,7 +1207,7 @@ impl Desktop {
         let read_task = task.clone();
         let read = crate::spawn_blocking_io(move || {
             let mut request = request;
-            if read_task.plan.options.source_mode != TranscriptSource::Asr
+            if read_task.plan.options().source_mode != TranscriptSource::Asr
                 && read_task.plan.subtitle.is_none()
             {
                 request.subtitle_events = workspace::task_subtitle_events(&read_task)?;
@@ -2407,7 +2405,6 @@ pub(crate) mod tests {
                         title: a.title.clone(),
                         library_id: state.default_library.clone(),
                         folder: None,
-                        options: Default::default(),
                         subtitle: None,
                         config: Default::default(),
                         asr_service: None,

@@ -277,7 +277,6 @@ pub struct TaskPlan {
     pub title: String,
     pub library_id: String,
     pub folder: Option<u64>,
-    pub options: ConversionOptions,
     pub subtitle: Option<PathBuf>,
     #[serde(serialize_with = "serialize_public_config")]
     pub config: ConfigFile,
@@ -286,6 +285,12 @@ pub struct TaskPlan {
 }
 
 impl TaskPlan {
+    /// The processing choices this plan's configuration carries. Records
+    /// written before this was derived also stored an `options` copy, which
+    /// loading now ignores.
+    pub fn options(&self) -> ConversionOptions {
+        ConversionOptions::from_config(&self.config)
+    }
     pub fn same_work(&self, other: &Self) -> bool {
         if self.operation != other.operation {
             return false;
@@ -305,7 +310,7 @@ impl TaskPlan {
         right.defaults.out = None;
         left.desktop = Default::default();
         right.desktop = Default::default();
-        left == right && self.options == other.options
+        left == right
     }
 }
 
@@ -711,7 +716,7 @@ impl State {
         let mut draft = Draft::new(
             task.plan.source.online,
             task.plan.library_id.clone(),
-            task.plan.options.clone(),
+            task.plan.options(),
         );
         draft.input = task.plan.source.input.clone();
         let mut source = task.plan.source;
@@ -1093,9 +1098,6 @@ impl State {
         plan.config.llm.enabled = components.contains(&Component::Proofreading);
         plan.config.llm.summarize = components.contains(&Component::Summary);
         plan.config.llm.vision &= plan.config.llm.enabled;
-        plan.options.llm = plan.config.llm.enabled;
-        plan.options.summarize = plan.config.llm.summarize;
-        plan.options.vision = plan.config.llm.vision;
         if only_exports {
             use course2md::config::OutputFormat;
             let formats: Vec<_> = [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json]
@@ -1111,8 +1113,6 @@ impl State {
                 !formats.is_empty(),
                 course2md::tr!("需要补做的导出格式记录不完整，请从笔记中重新选择导出格式")
             );
-            plan.options.formats = [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json]
-                .map(|format| formats.contains(&format));
             plan.config.defaults.formats = Some(formats);
         }
         plan.operation = course2md::execution::Operation::Reprocess {
@@ -2669,7 +2669,6 @@ mod tests {
             title: "课程 A".into(),
             library_id: library.into(),
             folder: None,
-            options: ConversionOptions::default(),
             subtitle: None,
             config: ConfigFile::default(),
             asr_service: None,
@@ -3275,9 +3274,9 @@ mod tests {
         original.title = "A 的手工名称".into();
         original.folder = Some(42);
         original.subtitle = Some(dir.path().join("french.srt"));
-        original.options.llm = true;
-        original.options.vision = true;
-        original.options.formats = [false, false, true];
+        original.config.llm.enabled = true;
+        original.config.llm.vision = true;
+        original.config.defaults.formats = Some(vec![course2md::config::OutputFormat::Json]);
         original.asr_service = Some("asr-version-a".into());
         original.ai_service = Some("ai-version-a".into());
         original.config.defaults.asr_model = Some("qwen3-0.6b".into());
@@ -3323,7 +3322,6 @@ mod tests {
         assert!(reopened.state.task(&id).unwrap().plan == original);
         assert_eq!(reopened.state.task(&id).unwrap().state, TaskState::Paused);
         let mut adjusted = original;
-        adjusted.options.summarize = true;
         adjusted.config.llm.summarize = true;
         let (followup, created) = reopened
             .state
@@ -3536,8 +3534,6 @@ mod tests {
         let mut snapshot = plan(&ws.state.default_library);
         snapshot.config.llm.enabled = true;
         snapshot.config.llm.summarize = summarize;
-        snapshot.options.llm = true;
-        snapshot.options.summarize = summarize;
         let id = ws.state.enqueue(snapshot, None).unwrap().0;
         let outcomes = course2md::artifact::Outcomes {
             transcript: course2md::artifact::Outcome::succeeded(),
@@ -3588,7 +3584,7 @@ mod tests {
         assert_eq!(Some(base_version_dir), original.artifact.as_ref());
         assert_eq!(prior_work_dir.as_ref(), Some(&original.work_dir));
         assert!(child.plan.config.llm.enabled && child.plan.config.llm.summarize);
-        assert!(child.plan.options.llm && child.plan.options.summarize);
+        assert!(child.plan.options().llm && child.plan.options().summarize);
         assert_eq!(child.resend, vec![request.clone()]);
         assert!(ws.state.task(&id).unwrap().plan == original.plan);
         assert!(ws.state.draft().unwrap() == &draft);
@@ -3624,7 +3620,7 @@ mod tests {
                 panic!("expected component recovery");
             };
             assert_eq!(components, &[Component::Proofreading]);
-            assert!(!child.plan.config.llm.summarize && !child.plan.options.summarize);
+            assert!(!child.plan.config.llm.summarize && !child.plan.options().summarize);
         }
     }
 
@@ -3689,7 +3685,7 @@ mod tests {
                     panic!("expected component recovery");
                 };
                 assert_eq!(components, &[Component::Proofreading], "{receipt_state:?}");
-                assert!(!child.plan.config.llm.summarize && !child.plan.options.summarize);
+                assert!(!child.plan.config.llm.summarize && !child.plan.options().summarize);
             }
         }
     }
@@ -4074,7 +4070,7 @@ mod tests {
         ws.state.task_mut(&parent).unwrap().state = TaskState::NeedsAttention;
         let mut changed = plan(&ws.state.default_library);
         changed.title = "changed display title".into();
-        changed.options.summarize = true;
+        changed.config.llm.summarize = true;
         let next = ws.state.enqueue(changed, Some(parent.clone())).unwrap().0;
         ws.state.task_mut(&parent).unwrap().handled_by = None;
         ws.state.task_mut(&parent).unwrap().state = TaskState::Running;

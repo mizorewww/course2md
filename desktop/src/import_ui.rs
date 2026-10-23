@@ -305,7 +305,7 @@ fn retired_input_task<'a>(
         .iter()
         .find(|task| Some(task.id.as_str()) == draft.submitted_task.as_deref())?;
     (draft.title == submitted.plan.title
-        && draft.options == submitted.plan.options
+        && draft.options.as_planned() == submitted.plan.options()
         && draft.library_id == submitted.plan.library_id
         && draft.folder == submitted.plan.folder
         && draft.subtitle == submitted.plan.subtitle
@@ -3481,6 +3481,13 @@ mod tests {
     use course2md::config::TranscriptSource;
     use course2md::subtitle::{CachedSubtitle, SubtitleEvidence, SubtitleReadError};
 
+    /// A plan's configuration as build_plan writes it from default options.
+    fn planned_config() -> course2md::settings::ConfigFile {
+        let mut config = course2md::settings::ConfigFile::default();
+        crate::ConversionOptions::default().apply_to(&mut config);
+        config
+    }
+
     /// A pending Start for revision 7 with every prerequisite met.
     fn ready() -> GateInputs {
         GateInputs {
@@ -3831,9 +3838,8 @@ mod tests {
             title: "已提交的标题".into(),
             library_id: state.default_library.clone(),
             folder: None,
-            options: Default::default(),
             subtitle: None,
-            config: Default::default(),
+            config: planned_config(),
             asr_service: None,
             ai_service: None,
         };
@@ -3892,9 +3898,8 @@ mod tests {
                 title: "已提交的课程".into(),
                 library_id: "library".into(),
                 folder: None,
-                options: Default::default(),
                 subtitle: None,
-                config: Default::default(),
+                config: planned_config(),
                 asr_service: None,
                 ai_service: None,
             },
@@ -3965,8 +3970,12 @@ mod tests {
         draft.title = "尚未提交的新名称".into();
         assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
         draft = unchanged.clone();
-        draft.options.vision = !draft.options.vision;
+        draft.options.keep_video = !draft.options.keep_video;
         assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
+        // Vision without proofreading has no effect, so the plan does not record it.
+        draft = unchanged.clone();
+        draft.options.vision = !draft.options.vision;
+        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_some());
         draft = unchanged.clone();
         draft.folder = Some(42);
         assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());

@@ -1472,7 +1472,7 @@ impl Desktop {
                     .iter()
                     .find(|task| task.id == *task_id)
             })
-            .is_some_and(|task| task.plan.options.vision);
+            .is_some_and(|task| task.plan.options().vision);
         let required: Vec<_> = [TestKind::Proofread, TestKind::Summary, TestKind::Vision]
             .into_iter()
             .filter(|kind| match kind {

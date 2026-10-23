@@ -2943,7 +2943,6 @@ mod tests {
                 title: "Course A".into(),
                 library_id: "library-1".into(),
                 folder: None,
-                options: Default::default(),
                 subtitle: None,
                 config: Default::default(),
                 asr_service: None,

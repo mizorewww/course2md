@@ -2535,7 +2535,7 @@ impl Desktop {
                 fact_value(
                     course2md::tr!(
                         "{}发送到「{}」",
-                        if task.plan.options.vision {
+                        if task.plan.options().vision {
                             course2md::tr!("文字与截图")
                         } else {
                             course2md::tr!("文字")
@@ -2783,11 +2783,11 @@ fn attention_reason(task: &TaskRecord) -> Option<String> {
 }
 
 fn task_text_source(task: &TaskRecord) -> &'static str {
-    if task.plan.options.source_mode != TranscriptSource::Asr
+    if task.plan.options().source_mode != TranscriptSource::Asr
         && task.plan.source.selected_subtitle.is_some()
     {
         course2md::tr!("视频字幕")
-    } else if task.plan.options.uses_cloud_provider() {
+    } else if task.plan.options().uses_cloud_provider() {
         course2md::tr!("语音识别服务")
     } else {
         course2md::tr!("本机识别")
@@ -2973,7 +2973,6 @@ mod tests {
                 title: "课程".into(),
                 library_id: "library".into(),
                 folder: None,
-                options: Default::default(),
                 subtitle: None,
                 config: Default::default(),
                 asr_service: None,
@@ -3216,7 +3215,6 @@ mod tests {
                 title: "课程".into(),
                 library_id: "library".into(),
                 folder: None,
-                options: Default::default(),
                 subtitle: None,
                 config: Default::default(),
                 asr_service: None,

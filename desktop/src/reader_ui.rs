@@ -154,7 +154,7 @@ impl OfflineVideoRequest {
     ) -> Option<Self> {
         let manifest = course.manifest.as_ref()?;
         if !task.plan.source.online
-            || !task.plan.options.keep_video
+            || !task.plan.options().keep_video
             || task.id != manifest.task_id
             || task.plan.source_id != manifest.source_id
             || task.artifact.as_ref() != Some(&course.dir)
@@ -5813,7 +5813,7 @@ mod tests {
         gallery_capture_position, gallery_items, gallery_restore_offset, image_zoom_offset,
         load_reader_data, matching_frames, nav, processing_notice,
     };
-    use crate::{ConversionOptions, notes::Course, source, workspace};
+    use crate::{notes::Course, source, workspace};
 
     #[test]
     fn saved_export_folder_requires_a_listed_file_inside_the_version() {
@@ -6014,12 +6014,14 @@ mod tests {
                 title: course.title.clone(),
                 library_id: library.id.clone(),
                 folder: None,
-                options: ConversionOptions {
-                    keep_video: true,
+                subtitle: None,
+                config: course2md::settings::ConfigFile {
+                    defaults: course2md::settings::Defaults {
+                        keep_video: Some(true),
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
-                subtitle: None,
-                config: Default::default(),
                 asr_service: None,
                 ai_service: None,
             },
@@ -6064,7 +6066,7 @@ mod tests {
         changed.plan.source_id = "another-video".into();
         assert!(OfflineVideoRequest::for_version(&first, &changed, &library).is_none());
         changed = task.clone();
-        changed.plan.options.keep_video = false;
+        changed.plan.config.defaults.keep_video = Some(false);
         assert!(OfflineVideoRequest::for_version(&first, &changed, &library).is_none());
         std::fs::remove_file(media).unwrap();
         assert_eq!(request.inspect(), OfflineVideo::Missing);
