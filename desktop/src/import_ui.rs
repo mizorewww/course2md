@@ -2649,7 +2649,7 @@ impl Desktop {
         let provider = self.actual_local_provider();
         let mut config = self.import_base_config();
         // 与计划构造同一回填规则：空白时按识别方式补默认模型（NPU 专属解析）。
-        crate::task_ui::fill_default_asr_model(&mut config, provider);
+        crate::task_runner::fill_default_asr_model(&mut config, provider);
         let model = config.defaults.asr_model.unwrap_or_default();
         let root = course2md::config::model_dir_from(config.defaults.model_dir.as_deref());
         (provider, model, root)

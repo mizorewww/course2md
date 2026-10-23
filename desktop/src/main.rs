@@ -34,6 +34,7 @@ mod settings_ui;
 mod source;
 mod storage;
 mod storage_ui;
+mod task_runner;
 mod task_ui;
 mod theme;
 mod views;
