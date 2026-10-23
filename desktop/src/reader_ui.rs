@@ -3394,6 +3394,10 @@ const TOC_ROW_PADDING: Rems = rems(8. / 14.);
 const PAGE_VERTICAL_PADDING: Pixels = px(48.);
 const TOC_BESIDE_MIN_WIDTH: Rems = rems(56.);
 const COMPACT_MIN_WIDTH: Rems = rems(60.);
+/// The reader's search field in the title bar, and how narrow it may become
+/// before the window switches to the compact layout.
+const READER_SEARCH_WIDTH: Rems = rems(240. / 14.);
+const READER_SEARCH_MIN_WIDTH: Rems = rems(140. / 14.);
 const COMPACT_MIN_HEIGHT: Rems = rems(36.);
 const SHORT_MAX_HEIGHT: Rems = rems(24.);
 /// Inline actions inside text rows are shorter than standalone controls.
@@ -3714,13 +3718,16 @@ impl Desktop {
         let (compact, short_reader) = (metrics.compact, metrics.short);
         let reading_note = self.result_tab == 0;
         let (search, short_matches) = self.reader_find_controls(short_reader, window, cx);
-        let mut toolbar =
-            h_flex()
-                .flex_shrink_0()
-                .gap_2()
-                .items_center()
-                .when(!short_reader, |row| {
-                    row.child(
+        // The tools share the title bar with the note title: the search field
+        // gives way first, down to its minimum; the other controls keep their size.
+        let mut toolbar = h_flex()
+            .min_w_0()
+            .flex_shrink(1.)
+            .gap_2()
+            .items_center()
+            .when(!short_reader, |row| {
+                row.child(
+                    div().flex_shrink_0().child(
                         SingleChoiceGroup::new("reader-tabs", course2md::tr!("阅读视图"))
                             .tabs()
                             .options([
@@ -3738,14 +3745,20 @@ impl Desktop {
                                     cx,
                                 );
                             })),
-                    )
-                });
+                    ),
+                )
+            });
         let search_visible = !reading_note || self.reader_ui.find.open;
         let mut search_row = h_flex()
             .min_w_0()
             .gap_2()
             .items_center()
-            .when(search_visible, |row| row.w(rems(240. / 14.)).child(search))
+            .when(search_visible, |row| {
+                row.w(READER_SEARCH_WIDTH)
+                    .flex_shrink(1.)
+                    .min_w(READER_SEARCH_MIN_WIDTH)
+                    .child(search)
+            })
             .when(!search_visible, |row| {
                 row.child(
                     quiet("reader-open-find")
@@ -3771,6 +3784,7 @@ impl Desktop {
             let toc_on = self.reader_ui.toc_open.unwrap_or(false);
             search_row = search_row.child(
                 quiet("note-contents")
+                    .flex_shrink_0()
                     .icon(icons::toc())
                     .label(course2md::tr!("目录"))
                     .selected(toc_on)
@@ -3808,6 +3822,7 @@ impl Desktop {
         if !short_reader {
             toolbar = toolbar.child(
                 outline_pill("export-note")
+                    .flex_shrink_0()
                     .icon(icons::download())
                     .label(if exporting_current {
                         course2md::tr!("正在导出…")
@@ -3830,7 +3845,11 @@ impl Desktop {
             );
         }
         toolbar = toolbar
-            .child(self.reader_more_menu(preview, short_reader, cx))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .child(self.reader_more_menu(preview, short_reader, cx)),
+            )
             .children(short_search);
         ReaderToolbarParts {
             bar: toolbar,
@@ -6193,6 +6212,70 @@ mod flow_tests {
     };
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    struct TitleBarHarness {
+        width: f32,
+    }
+
+    impl Render for TitleBarHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            use gpui_component::h_flex;
+            let fixed = |name: &'static str, width: f32| {
+                div()
+                    .flex_shrink_0()
+                    .w(px(width))
+                    .h(px(28.))
+                    .debug_selector(move || name.into())
+            };
+            h_flex()
+                .w(px(self.width))
+                .debug_selector(|| "bar".into())
+                .child(fixed("home", 140.))
+                .child(div().flex_1().min_w_0().child("Course title"))
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .flex_shrink(1.)
+                        .gap_2()
+                        .child(fixed("tabs", 260.))
+                        .child(
+                            h_flex()
+                                .w(super::READER_SEARCH_WIDTH)
+                                .flex_shrink(1.)
+                                .min_w(super::READER_SEARCH_MIN_WIDTH)
+                                .debug_selector(|| "search".into())
+                                .child(div().flex_1().min_w_0().h(px(28.))),
+                        )
+                        .child(fixed("export", 120.))
+                        .child(fixed("more", 32.)),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn the_search_field_gives_way_before_export_leaves_the_title_bar(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| TitleBarHarness { width: 1400. });
+        cx.update(|window, cx| {
+            window.set_rem_size(px(17.5));
+            window.draw(cx).clear(cx)
+        });
+        let wide = cx.debug_bounds("search").unwrap().size.width;
+        assert_eq!(wide, px(240. / 14. * 17.5));
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.width = 800.;
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        let bar = cx.debug_bounds("bar").unwrap();
+        let export = cx.debug_bounds("export").unwrap();
+        let more = cx.debug_bounds("more").unwrap();
+        let search = cx.debug_bounds("search").unwrap();
+        assert!(more.right() <= bar.right() + px(0.5), "{more:?} {bar:?}");
+        assert_eq!(export.size.width, px(120.));
+        assert!(search.size.width < wide && search.size.width >= px(140. / 14. * 17.5));
+    }
 
     struct PanelHarness {
         rows: usize,
