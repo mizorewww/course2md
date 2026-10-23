@@ -165,16 +165,21 @@ pub(crate) fn task_group(task: &TaskRecord) -> TaskGroup {
     }
 }
 
-pub(super) fn actionable_task_count(tasks: &[TaskRecord]) -> usize {
-    tasks
-        .iter()
-        .filter(|task| {
-            matches!(
-                task_group(task),
-                TaskGroup::Running | TaskGroup::Attention | TaskGroup::Queued
-            )
-        })
-        .count()
+/// What the app bar shows for the task page, in one pass over the tasks: how
+/// many still need doing, and whether one needs the person.
+pub(super) fn task_navigation_summary(tasks: &[TaskRecord]) -> (usize, bool) {
+    tasks.iter().fold((0, false), |(count, attention), task| {
+        let actionable = matches!(
+            task_group(task),
+            TaskGroup::Running | TaskGroup::Attention | TaskGroup::Queued
+        );
+        let needs_person = task.handled_by.is_none()
+            && matches!(
+                task.state,
+                TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Partial
+            );
+        (count + usize::from(actionable), attention || needs_person)
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2604,11 +2609,11 @@ impl Desktop {
             .min_w_0()
             .gap_4()
             .child(self.task_heading(task));
-        if let Some(message) = self
-            .task_feedback_view(task)
-            .filter(|_| partial_failures.is_empty())
-        {
-            card = card.child(message);
+        // A partly published note shows its unfinished parts instead of the
+        // task's feedback, progress, history and log.
+        let partial = !partial_failures.is_empty();
+        if !partial {
+            card = card.children(self.task_feedback_view(task));
         }
         // Without partial failures the feedback line above already names the reason.
         let missing = partial_failures
@@ -2641,13 +2646,14 @@ impl Desktop {
         if let Some(block) = self.uncertain_block(task, cx) {
             card = card.child(block);
         }
-        let (progress, history) = self.task_progress_sections(task, cx);
-        card = card.when_some(
-            progress.filter(|_| partial_failures.is_empty()),
-            |view, progress| view.child(progress),
-        );
+        let (progress, history) = if partial {
+            (None, None)
+        } else {
+            self.task_progress_sections(task, cx)
+        };
+        card = card.children(progress);
         let mut actions = h_flex().gap_2().flex_wrap();
-        if !partial_failures.is_empty() {
+        if partial {
             if let Some(path) = &task.artifact {
                 let path = path.clone();
                 let title = task.plan.title.clone();
@@ -2689,7 +2695,7 @@ impl Desktop {
         } else if !uncertain {
             actions = actions.child(self.resume_action(task, style, cx).self_start());
         }
-        if partial_failures.is_empty() {
+        if !partial {
             actions = actions
                 .children(self.reassociate_action(
                     self.task_library(task),
@@ -2709,15 +2715,9 @@ impl Desktop {
                         })),
                 );
         }
-        card = card.child(actions).when_some(
-            history.filter(|_| partial_failures.is_empty()),
-            |view, history| view.child(history),
-        );
-        if let Some(logs) = self
-            .task_log_view(task, cx)
-            .filter(|_| partial_failures.is_empty())
-        {
-            card = card.child(logs);
+        card = card.child(actions).children(history);
+        if !partial {
+            card = card.children(self.task_log_view(task, cx));
         }
         card
     }
@@ -3343,7 +3343,7 @@ mod tests {
         assert_eq!(super::task_group(&task), super::TaskGroup::Attention);
         assert_eq!(super::task_group(&history), super::TaskGroup::History);
         assert_eq!(
-            super::actionable_task_count(&[task, completed, history, running]),
+            super::task_navigation_summary(&[task, completed, history, running]).0,
             2
         );
     }

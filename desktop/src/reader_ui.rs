@@ -5393,7 +5393,9 @@ impl Desktop {
                 row.child(self.image_zoom_controls(scale, compact, cx))
             });
         let media = (!text_only).then(|| self.image_viewer_media(scale, label.clone(), cx));
-        let viewer = self.reader_ui.viewer.as_ref().expect("checked above");
+        let Some(viewer) = self.reader_ui.viewer.as_ref() else {
+            return div().into_any_element();
+        };
         let frame = &viewer.frames[viewer.index];
         let has_text = !frame.transcript.is_empty();
         let details = (text_only || (has_text && details_open)).then(|| {

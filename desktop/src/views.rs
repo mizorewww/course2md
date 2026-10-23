@@ -101,20 +101,10 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TitleBar {
-        let tasks_need_attention = self.workspace.as_ref().is_some_and(|workspace| {
-            workspace.state.tasks.iter().any(|task| {
-                task.handled_by.is_none()
-                    && matches!(
-                        task.state,
-                        workspace::TaskState::NeedsAttention
-                            | workspace::TaskState::Uncertain
-                            | workspace::TaskState::Partial
-                    )
-            })
-        });
-        let task_count = self.workspace.as_ref().map_or(0, |workspace| {
-            crate::task_ui::actionable_task_count(&workspace.state.tasks)
-        });
+        let (task_count, tasks_need_attention) =
+            self.workspace.as_ref().map_or((0, false), |workspace| {
+                crate::task_ui::task_navigation_summary(&workspace.state.tasks)
+            });
         // macOS draws the traffic lights inside the title bar's leading edge.
         let leading = if cfg!(target_os = "macos") { 88. } else { 12. };
         let page = self.page;
