@@ -9,7 +9,7 @@ impl Desktop {
             return v_flex();
         };
         let purpose = editor.form.draft.protocol.purpose();
-        // 纯文字标题，与打开它的「添加语音服务」/「添加 AI 服务」同一写法
+        // A text-only title, worded like the 「添加语音服务」/「添加 AI 服务」 action that opened it.
         let editing = editor.form.draft.based_on.is_some();
         let title = match (purpose == ServicePurpose::Speech, editing) {
             (true, false) => course2md::tr!("添加语音服务"),
@@ -732,7 +732,7 @@ impl Desktop {
             // The outward-paint allowance is cancelled outside so cards keep the pane edges.
             .mx(rems(-0.25))
             .px_1()
-            // 滚动容器为首末卡片的阴影与焦点外绘留出空间（system.md：clipped container 需预留 outward paint）
+            // The scroll container leaves room for the first and last cards' shadow and focus paint (system.md: clipped containers reserve outward paint).
             .pt_1()
             .pb_3();
         use crate::settings_ui::{settings_card, settings_switch_row};
@@ -752,7 +752,7 @@ impl Desktop {
                 .bg(color(HAIRLINE))
         };
         let mut fields = v_flex().w_full().min_w_0().gap(rems(24. / 14.));
-        // Codex 账号连接：登录态决定模型目录与可用性
+        // Codex account connection: the login decides the model catalog and availability.
         if protocol == ServiceProtocol::CodexResponses {
             fields = fields.child(
                 div()
@@ -775,7 +775,7 @@ impl Desktop {
             window,
             cx,
         ));
-        // Codex 端点固定、凭据由登录态持有：不展示地址与密钥
+        // Codex has a fixed endpoint and its login holds the credential: no address or key fields.
         if protocol != ServiceProtocol::CodexResponses {
             let address = editor.form.value(FormField::Address, cx);
             let endpoint = preferences::normalize_endpoint(&address, protocol)
@@ -1290,7 +1290,7 @@ impl Desktop {
             .flex_shrink_0()
             .gap_2()
             .pt_3()
-            // 底部按钮不贴窗口下缘
+            // Keep the bottom buttons off the window's lower edge.
             .pb_4()
             .border_t_1()
             .border_color(color(CARD_LINE))

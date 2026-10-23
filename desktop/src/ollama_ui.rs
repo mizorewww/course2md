@@ -1,5 +1,5 @@
-//! Ollama 本地服务发现：探测本机服务与已下载模型，作为 Ollama 服务表单的地址与模型候选。
-//! Ollama 的 OpenAI 兼容端点无需凭据，「登录」即服务发现 + 配置（见 core login/ollama）。
+//! Local Ollama discovery: probe the local service and downloaded models as address and model candidates for the Ollama service form.
+//! Ollama's OpenAI-compatible endpoint needs no credential; "signing in" is discovery plus configuration (see core login/ollama).
 use super::*;
 use crate::preferences::{ServiceProtocol, ServicePurpose};
 use crate::settings_ui::service_form::{FormField, FormOwner};
@@ -8,7 +8,7 @@ use crate::settings_ui::service_form::{FormField, FormOwner};
 pub(crate) struct OllamaUi {
     generation: u64,
     working: bool,
-    /// Ok((地址, 模型列表)) 已检测到；Err(说明) 未检测到；None 尚未检测
+    /// Ok((address, models)) when found; Err(explanation) when not; None before the first check.
     status: Option<Result<(String, Vec<String>), String>>,
 }
 
@@ -36,7 +36,7 @@ impl OllamaUi {
 }
 
 impl Desktop {
-    /// 探测本机 Ollama 服务。阻塞网络请求不进 GPUI 执行器（见 spawn_blocking_io）。
+    /// Probe the local Ollama service. Blocking requests stay off the GPUI executor (see spawn_blocking_io).
     pub(crate) fn ollama_refresh(&mut self, cx: &mut Context<Self>) {
         if self.ollama.working {
             return;

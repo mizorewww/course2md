@@ -146,7 +146,7 @@ fn text_source_id(mode: TranscriptSource) -> &'static str {
     }
 }
 
-/// A shared heading for related conversion options. 图标由调用方显式给出（不做文案子串匹配）。
+/// A shared heading for related conversion options. Callers pass the icon explicitly (no matching on label text).
 pub(crate) fn box_section(icon: Icon, label: &'static str) -> Div {
     v_flex().w_full().min_w_0().gap_3().child(
         h_flex()
@@ -1245,12 +1245,12 @@ impl Desktop {
             )
     }
 
-    /// 候选合集列表：在线来源走多选批量入队；本地多文件拖入保持单选。
-    /// 身份可确认的候选才可勾选；其余保持单条打开。
+    /// The candidate list: online sources queue several at once; several dropped local files stay single-choice.
+    /// Only candidates with a confirmed identity can be checked; the rest open one at a time.
     fn candidate_list_view(&self, view: Div, title: &str, cx: &mut Context<Self>) -> Div {
         let mut view = view;
-        // 在线列表走多选批量入队；本地多文件拖入保持单选（本地身份要做内容哈希，
-        // 逐个走原读取确认流程）。身份可确认的候选才可勾选；其余保持单条打开。
+        // Online lists queue several at once; dropped local files stay single-choice (a local identity needs a
+        // content hash, read and confirmed one by one). Only identified candidates can be checked.
         let batch = self.online();
         // Identities are resolved once when the candidates arrive.
         let identities: Vec<Option<&str>> = self
@@ -1277,7 +1277,7 @@ impl Desktop {
             && selectable
                 .iter()
                 .all(|input| self.selected_candidates.contains(input));
-        // 手动勾选了已有笔记的候选：入队会生成新版本，后果与操作同处可见
+        // A checked candidate that already has a note gets a new version; say so beside the action.
         let noted_selected = self
             .source_candidates
             .iter()
@@ -1289,8 +1289,8 @@ impl Desktop {
         let any_batchable = identities.iter().any(Option::is_some);
         let list = v_flex()
             .id("source-candidates")
-            // 视口按字号缩放（约 3 行 + 露出第 4 行一角）；内边距让
-            // 行的 hover/press 涂层不贴容器发丝边
+            // The viewport scales with the text (about three rows and a glimpse of the fourth); the padding keeps
+            // a row's hover/press layer off the container's hairline.
             .max_h(rems(20.))
             .overflow_y_scroll();
         let mut list = crate::focus_scroll::contain_scroll(list, &self.candidate_scroll)
@@ -1310,9 +1310,9 @@ impl Desktop {
             let (preview, text) = self.candidate_row_parts(candidate, &title, untitled);
             let batchable = batch && identities[index].is_some();
             if batch {
-                // 与导出行同一多选模式：Checkbox 自身可点（键盘 Tab+空格可切换），
-                // 预览/标题区作为兄弟可点区域；行不再嵌套两层 on_click。
-                // 无身份候选不可勾选，同一行样式改为箭头、点击走单条读取确认流程。
+                // The same multi-select pattern as the export row: the checkbox is clickable itself (Tab and Space
+                // toggle it), the preview/title area is a sibling target, and rows no longer nest two on_click handlers.
+                // Unidentified candidates cannot be checked: the row shows an arrow and opens the single-source flow.
                 let mut content = h_flex()
                     .id(("source-candidate-text", index))
                     .flex_1()
@@ -1444,7 +1444,7 @@ impl Desktop {
                                     } else {
                                         course2md::tr!("整理选中的视频").to_owned()
                                     })
-                                    // 空选择即不可执行：与开始转换同一纪律
+                                    // An empty selection cannot run, as with 开始转换.
                                     .disabled(selected_count == 0)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.enqueue_selected_candidates(cx)
@@ -1456,7 +1456,7 @@ impl Desktop {
         view
     }
 
-    /// 候选行共享的 leading 预览槽与标题文本：批量行与单选行仅容器与点击行为不同。
+    /// The candidate rows' shared leading preview and title; batch and single rows differ only in container and click.
     fn candidate_row_parts(
         &self,
         candidate: &source::SourceCandidate,
@@ -1464,8 +1464,8 @@ impl Desktop {
         untitled: bool,
     ) -> (Div, Div) {
         let cover = self.source_candidate_covers.get(&candidate.input).cloned();
-        // 统一的 leading 预览槽：已缓存的首帧/封面，
-        // 未就绪或无预览时回退到影片图标，保证每行文字起点对齐
+        // One leading preview slot: the cached first frame or cover,
+        // or a movie icon until one is ready, so every row's text starts on the same ruler.
         let preview = div()
             .w(rems(5.6))
             .h(rems(3.15))
@@ -1496,7 +1496,7 @@ impl Desktop {
                     .text_ellipsis()
                     .line_clamp(2)
                     .font_weight(FontWeight::MEDIUM)
-                    // 标题是行的扫描锚点：主墨色
+                    // The title is the row's scanning anchor: primary ink.
                     .text_color(color(INK))
                     .child(title.to_owned()),
             )
@@ -1630,7 +1630,7 @@ impl Desktop {
         view
     }
 
-    /// 本地来源输入：空输入为拖放区，已选文件为文件名卡。
+    /// The local source input: a drop zone while empty, a file card once a file is chosen.
     fn local_source_input(&self, view: Div, cx: &mut Context<Self>) -> Div {
         let mut view = view;
         let input = self.value(Field::Source, cx);
@@ -1953,7 +1953,7 @@ impl Desktop {
         } else if speech {
             course2md::tr!("语音识别").into()
         } else if let Some(subtitle) = &source.selected_subtitle {
-            // 自动选择的解析结果就是当前值，与显式选择同样只显示字幕名
+            // An automatic choice resolves to the current value; like an explicit one, only the subtitle name shows.
             subtitle.label.clone()
         } else {
             match &source.subtitles {
@@ -1984,7 +1984,7 @@ impl Desktop {
                 .child(
                     accessible_text("import-text-source-state", description)
                         .font_weight(FontWeight::MEDIUM)
-                        // 值与其「更换」动作收成一个对象行，不用 flex_1 把两者钉到两端
+                        // The value and its 「更换」 action form one row instead of being pinned to opposite edges by flex_1.
                         .min_w_0()
                         .whitespace_normal(),
                 )
@@ -2598,7 +2598,7 @@ impl Desktop {
     fn import_model_request(&self) -> (course2md::config::AsrProvider, String, PathBuf) {
         let provider = self.actual_local_provider();
         let mut config = self.import_base_config();
-        // 与计划构造同一回填规则：空白时按识别方式补默认模型（NPU 专属解析）。
+        // The plan builders' rule: an empty model takes the engine's default (NPU resolves its own).
         crate::task_runner::fill_default_asr_model(&mut config, provider);
         let model = config.defaults.asr_model.unwrap_or_default();
         let root = course2md::config::model_dir_from(config.defaults.model_dir.as_deref());
@@ -2790,8 +2790,8 @@ impl Desktop {
     }
 
     fn can_start_input(&self, cx: &App) -> bool {
-        // 候选列表展示时，批量/单选操作在列表自己的行动区；输入行的「开始转换」
-        // 对合集链接必然失败，不再同屏出现两个 primary
+        // While candidates show, batch and single actions live in the list's own action area; the input row's
+        // 「开始转换」 would always fail for a collection link, so two primary actions never share the screen.
         self.source_collection_title.is_none()
             && (self.online() || !self.value(Field::Source, cx).is_empty())
             && self.preview_error.is_none()

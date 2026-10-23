@@ -125,8 +125,8 @@ pub(crate) fn spawn_blocking_io<T: Send + 'static>(
     rx
 }
 
-/// 识别引擎的规范展示名：全桌面唯一来源（选择与描述场景共用）。
-/// 与 PROVIDERS 表的 id 一一对应；None 表示「自动」。
+/// The canonical display name of a recognition engine; the desktop's one source for choosing and describing it.
+/// Matches the ids of the providers table one to one; None means 「自动」.
 pub(crate) fn provider_label(provider: Option<course2md::config::AsrProvider>) -> &'static str {
     let id = provider.map(|provider| provider.as_str()).unwrap_or("");
     providers()
@@ -141,7 +141,7 @@ pub(crate) fn provider_from_id(id: &str) -> Option<course2md::config::AsrProvide
 }
 
 impl ConversionOptions {
-    /// 当前是否使用云端识别服务。
+    /// Whether the options use a cloud recognition service.
     pub(crate) fn uses_cloud_provider(&self) -> bool {
         self.provider == Some(course2md::config::AsrProvider::Api)
     }
@@ -225,11 +225,11 @@ struct Desktop {
     source_preview: Option<source::Source>,
     source_candidates: Vec<source::SourceCandidate>,
     source_collection_title: Option<String>,
-    /// 探测得到的真实合集名（批量笔记名前缀）；占位提示文案不算，见 source_collection_title
+    /// The real collection name from the probe (the batch note title prefix); placeholder hints are not names, see source_collection_title.
     source_collection_name: Option<String>,
-    /// 多选模式（在线列表）选中的候选 input 集合；候选变化时清空
+    /// Inputs of the candidates checked in an online list; cleared when the candidates change.
     selected_candidates: std::collections::BTreeSet<String>,
-    /// 候选行预览图的本地缓存（candidate.input → 缓存文件）；后台按 URL 去重下载
+    /// Local cache of candidate row previews (candidate.input → cached file), downloaded once per URL in the background.
     source_candidate_covers: std::collections::HashMap<String, PathBuf>,
     source_covers_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     subtitle_loading: bool,
@@ -732,8 +732,8 @@ impl Desktop {
     }
     fn refresh_environment(&mut self, cx: &mut Context<Self>) {
         self.environment = None;
-        // 环境探测会同步启动子进程（Metal 枚举可超过十秒），必须离开 executor；
-        // 见 spawn_blocking_io 的说明
+        // Environment detection starts subprocesses synchronously (Metal enumeration can exceed ten seconds),
+        // so it runs off the executor; see spawn_blocking_io.
         let task = spawn_blocking_io(backend::Environment::detect);
         cx.spawn(async move |this, cx| {
             let Ok(environment) = task.recv().await else {
@@ -1365,8 +1365,8 @@ impl Desktop {
                 }
                 match result {
                     Ok(preview) => {
-                        // 与 navigate() 相同的离页义务：离开工作台先存草稿；
-                        // 主动打开另一篇笔记时取消无关的转换跟随，后台完成不得抢占当前位置
+                        // The same duties as navigate() when leaving a page: save the draft when leaving the workbench;
+                        // opening another note stops following an unrelated conversion, and a background completion never takes over.
                         if this.page == Page::New {
                             this.save_current_draft(cx);
                         }

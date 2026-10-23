@@ -65,7 +65,7 @@ struct ServiceSetup {
 }
 
 impl State {
-    /// model_preparation_finished 事件调用：请求匹配时同步准备结果
+    /// Called from the model_preparation_finished event: adopt the result when it matches the request.
     pub(crate) fn apply_model_preparation_result(
         &mut self,
         request_key: &str,
@@ -886,7 +886,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // 渲染不收敛状态：model_preparation 的结果在 model_preparation_finished 事件里同步
+        // Rendering does not settle state: model_preparation results are adopted in model_preparation_finished.
         let step = self.onboarding.step;
         let (number, title, description, icon) = match step {
             Step::Engine => (
@@ -2028,8 +2028,8 @@ impl Desktop {
         }
     }
 
-    /// footer 的服务动作落在哪个服务上：Engine 步选了云端识别时按 Speech
-    /// 服务检查，AI 步按 AI 服务；其余步骤没有服务动作。
+    /// Which service the footer's service action targets: the speech service when the engine step chose
+    /// cloud recognition, the AI service on the AI step; other steps have no service action.
     fn footer_service_purpose(&self) -> Option<ServicePurpose> {
         if self.onboarding.step == Step::Engine
             && self.onboarding.provider == Some(AsrProvider::Api)

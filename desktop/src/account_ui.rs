@@ -178,7 +178,7 @@ impl Desktop {
         self.account.checking = true;
         self.account.status_error = None;
         self.account.logout_failed = false;
-        // 账号状态是同步网络请求；见 crate::spawn_blocking_io 的说明
+        // The account status is a blocking network request; see crate::spawn_blocking_io.
         let task = crate::spawn_blocking_io(|| {
             let saved = course2md::auth::cookie_path().is_file();
             let status =

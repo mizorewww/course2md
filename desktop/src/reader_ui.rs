@@ -444,7 +444,7 @@ pub(crate) struct State {
     export_folder: Option<PathBuf>,
     export_state: ExportState,
     source_loading: bool,
-    /// 进行中的重新定位探测取消标志：换笔记/新探测/完成时置位
+    /// Cancels the source relocation probe in flight; set when the note changes, a new probe starts or it finishes.
     source_probe_cancel: Option<Arc<AtomicBool>>,
     source: Option<nav::SourceTarget>,
     source_available: bool,
@@ -2177,7 +2177,7 @@ impl Desktop {
         self.reader_ui.versions.clear();
         self.reader_ui.issues.clear();
         self.reader_ui.source = None;
-        // 换笔记：中止进行中的重新定位探测
+        // A different note: stop the relocation probe in flight.
         if let Some(cancel) = self.reader_ui.source_probe_cancel.take() {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
@@ -2337,7 +2337,7 @@ impl Desktop {
         self.reader_ui.data_loading = true;
         self.reader_ui.offline_opening = false;
         cx.spawn(async move |this, cx| {
-            // 解析全文与离线检查是同步文件/子进程工作；见 crate::spawn_blocking_io 的说明
+            // Parsing the note and the offline check are blocking file/subprocess work; see crate::spawn_blocking_io.
             let (data, source, source_available, offline_video) =
                 crate::spawn_blocking_io(move || {
                     let source = source.map(|source| match source {
@@ -2511,7 +2511,7 @@ impl Desktop {
             let stored = cancel.clone();
             let probing = cancel.clone();
             let _ = this.update(cx, |this, cx| {
-                // 前一次探测若还在跑，先取消再开始新的
+                // Cancel a previous probe that is still running before starting another.
                 if let Some(previous) = this.reader_ui.source_probe_cancel.take() {
                     previous.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
@@ -2539,7 +2539,7 @@ impl Desktop {
             });
             let _ = this.update(cx, |this, cx| {
                 this.reader_ui.source_loading = false;
-                // 只清自己的标志：更晚开始的探测持有另一个 Arc
+                // Clear only this probe's flag: a later probe holds a different Arc.
                 if this
                     .reader_ui
                     .source_probe_cancel
@@ -2732,7 +2732,7 @@ impl Desktop {
                         if refresh {
                             this.reader_ui.loaded = None;
                         }
-                        // 事件路径触发数据加载（渲染不再负责）
+                        // The event path loads the data; rendering no longer does.
                         this.ensure_reader_data(cx);
                         let has_saved_position = this.reading_key().is_some_and(|key| {
                             this.workspace.as_ref().is_some_and(|workspace| {
@@ -3877,7 +3877,7 @@ impl Desktop {
                     if reading_note && count > 0 {
                         format!("{}/{count}", self.reader_ui.find.current + 1)
                     } else if count == 0 {
-                        // 笔记与图片搜索的零结果用同一说法
+                        // Note and screenshot searches word their empty results the same way.
                         course2md::tr!("无匹配").into()
                     } else {
                         course2md::tr!("{} 张", count)

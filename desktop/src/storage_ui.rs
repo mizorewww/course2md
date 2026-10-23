@@ -721,7 +721,7 @@ impl Desktop {
         self.open_storage_dialog(window, cx);
         let root = location.root.clone();
         let worker_cancel = cancel.clone();
-        // 扫描会同步读取磁盘上的全部笔记；见 crate::spawn_blocking_io 的说明
+        // Scanning reads every note on disk synchronously; see crate::spawn_blocking_io.
         let worker = crate::spawn_blocking_io(move || {
             let stamp = storage::directory_stamp(&root)?;
             let mut names = Vec::new();
@@ -1157,7 +1157,7 @@ impl Desktop {
             }
             let (report, reports) = smol::channel::unbounded();
             let worker_cancel = cancel.clone();
-            // 移动是大量同步文件读写；见 crate::spawn_blocking_io 的说明
+            // Moving is a large amount of blocking file I/O; see crate::spawn_blocking_io.
             let worker = crate::spawn_blocking_io(move || {
                 let sent = std::cell::Cell::new(None::<Instant>);
                 let report = |value: Progress| {
@@ -1656,8 +1656,8 @@ impl Desktop {
                 let needs_relocation =
                     check.is_some_and(|check| !check.available || check.problem.is_some());
                 let needs_reassociation = check.is_some_and(|check| check.needs_reassociation);
-                // 与账号卡片同一组合：徽章与动作是标题行尾部的一个槽位，窄时整体换行。
-                // 强调顺序与其他卡片一致：描边主动作在前，安静的「打开位置」在后。
+                // As on the account cards: badge and actions share one trailing slot on the title row and wrap together.
+                // Emphasis follows the other cards: the outlined main action first, the quiet 「打开位置」 after it.
                 let trailing = h_flex()
                     .gap_2()
                     .items_center()
@@ -1929,7 +1929,7 @@ impl Desktop {
                         .unwrap_or_default()
                 })
                 .unwrap_or_default();
-            // 清理是同步删除文件；见 crate::spawn_blocking_io 的说明
+            // Cleaning up deletes files synchronously; see crate::spawn_blocking_io.
             let worker = crate::spawn_blocking_io(move || {
                 storage::cleanup_backup(&backup, &roots, &worker_cancel)
             });

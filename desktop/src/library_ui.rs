@@ -152,14 +152,14 @@ impl Desktop {
         self.preview_cancel = Some(cancel.clone());
         let online = self.online();
         let handle = window.window_handle();
-        // probe 是同步网络/子进程工作；见 crate::spawn_blocking_io 的说明
+        // probe is blocking network/subprocess work; see crate::spawn_blocking_io.
         let task = crate::spawn_blocking_io(move || source::probe(input, online, cancel));
         cx.spawn(async move |this, cx| {
             let result = task
                 .recv()
                 .await
                 .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            // worker 计数无论窗口存亡都必须归还（request_close 等待它归零）
+            // Always return the worker count, window or not (request_close waits for zero).
             let _ = this.update(cx, |this, _| {
                 this.preview_workers = this.preview_workers.saturating_sub(1);
             });
@@ -227,9 +227,9 @@ impl Desktop {
         cx.notify();
     }
 
-    /// 后台逐张下载候选行预览图：同一封面 URL 只下载一次（首帧缺失的分集共享
-    /// 视频封面），完成一张刷新一行。过期结果由 preview_generation 守卫丢弃，
-    /// 与探测结果同一纪律。
+    /// Download candidate row previews in the background, each cover URL once (episodes without a first
+    /// frame share the video cover), refreshing a row as each arrives. preview_generation drops stale
+    /// results, as it does for probe results.
     fn start_source_cover_fetch(
         &mut self,
         candidates: &[source::SourceCandidate],
@@ -267,7 +267,7 @@ impl Desktop {
             let queue = queue.clone();
             let tx = tx.clone();
             let cancel = cancel.clone();
-            // 阻塞网络下载不进 GPUI 执行器；见 crate::spawn_blocking_io 的说明
+            // Blocking downloads stay off the GPUI executor; see crate::spawn_blocking_io.
             std::thread::spawn(move || {
                 loop {
                     let next = queue.lock().unwrap_or_else(|p| p.into_inner()).pop_front();
@@ -284,7 +284,7 @@ impl Desktop {
         drop(tx);
         let handle = window.window_handle();
         cx.spawn(async move |this, cx| {
-            // 通道在所有工作线程结束后关闭，循环自然退出
+            // The channel closes once every worker ends, which ends the loop.
             while let Ok((inputs, path)) = rx.recv().await {
                 let keep = cx
                     .update_window(handle, |_, _window, cx| {

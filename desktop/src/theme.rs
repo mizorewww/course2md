@@ -238,7 +238,7 @@ fn menu_style(dark: bool) -> gpui_component::menu::MenuStyle {
     }
 }
 
-/* ---------- 几何（px，不随字号缩放） ---------- */
+/* ---------- Geometry (px; does not scale with text) ---------- */
 pub const RADIUS_PILL: Pixels = px(999.);
 pub const RADIUS_CARD: Pixels = px(16.);
 /// Settings reference surfaces share a 24px corner radius.
@@ -323,11 +323,11 @@ pub fn on_image_scrim() -> Rgba {
     rgb(0xffffff)
 }
 
-/* ---------- 栏宽（rems，随字号缩放的结构尺寸） ---------- */
+/* ---------- Column widths (rems; structure that scales with text) ---------- */
 pub const COLUMN: Rems = rems(65.714);
 pub const TOC_PANEL: Rems = rems(16.);
 
-/* ---------- 字级（rems；14px 为 1rem 基准） ---------- */
+/* ---------- Type scale (rems; 14px is 1rem) ---------- */
 pub const TEXT_AUX: Rems = rems(0.857);
 pub const TEXT_BODY: Rems = rems(1.);
 pub const TEXT_TITLE: Rems = rems(1.286);
@@ -376,7 +376,7 @@ pub fn page_heading(
     )
 }
 
-/* ---------- 中性阴影 ---------- */
+/* ---------- Neutral shadows ---------- */
 fn shadow_color(alpha: f32) -> gpui::Hsla {
     gpui::hsla(0., 0., 0., alpha)
 }
@@ -741,7 +741,7 @@ pub fn labeled_input(
     )
 }
 
-/* ---------- 共享控件 ---------- */
+/* ---------- Shared controls ---------- */
 
 /// A section title led by its category icon, as on diagnostic groups.
 pub fn section_heading(

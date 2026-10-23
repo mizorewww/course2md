@@ -405,12 +405,12 @@ impl Desktop {
         }
     }
 
-    /// 该任务是否正持有运行中的后台作业（记录状态可能尚未追上事件流）。
+    /// Whether this task holds the running background job (its record may lag the event stream).
     pub(crate) fn is_running_task(&self, id: &str) -> bool {
         self.active_task.as_deref() == Some(id) && self.job.is_some()
     }
 
-    /// 任务计划对应的笔记库保存位置；记录可能引用了已移除的库。
+    /// The library location a task's plan saves to; the record may name a removed library.
     pub(crate) fn task_library(&self, task: &TaskRecord) -> Option<&workspace::LibraryLocation> {
         self.workspace
             .as_ref()
@@ -532,7 +532,7 @@ impl Desktop {
         }
     }
 
-    /// 计划构造函数共享的输入序言：工作区与草稿快照的同一组前置条件。
+    /// The plan builders' shared preamble: the workspace and draft they both require.
     fn plan_draft(&self) -> Result<(&workspace::Workspace, &workspace::Draft)> {
         let workspace = self
             .workspace
@@ -545,8 +545,8 @@ impl Desktop {
         Ok((workspace, draft))
     }
 
-    /// 计划构造共享的组件检查：引擎与 FFmpeg 必备；`online` 来源另需 yt-dlp
-    /// （批量计划恒为在线来源，单条计划按已确认来源的 online 标记）。
+    /// The plan builders' shared tool check: the engine and FFmpeg always; an `online` source also needs
+    /// yt-dlp (batch plans are always online; a single plan follows its confirmed source).
     fn ensure_plan_environment(&self, online: bool) -> Result<&crate::backend::Environment> {
         let environment = self
             .environment
@@ -564,7 +564,7 @@ impl Desktop {
         Ok(environment)
     }
 
-    /// 保存位置仍在笔记库中且当前可写；两个计划构造函数同一组校验与错误文案。
+    /// The destination is still a registered, writable library; both plan builders share these checks and messages.
     fn ensure_plan_storage(
         &self,
         workspace: &workspace::Workspace,
@@ -585,7 +585,7 @@ impl Desktop {
         Ok(())
     }
 
-    /// 草稿选项覆写基础配置并规整模型目录；两个计划构造函数同一构建序列。
+    /// Draft options override the base config and normalize the model directory; both plan builders build it this way.
     fn plan_config(&self, draft: &workspace::Draft) -> course2md::settings::ConfigFile {
         let mut config = draft
             .base_config
@@ -598,7 +598,7 @@ impl Desktop {
         config
     }
 
-    /// 草稿上的服务引用，缺省回落到默认服务。
+    /// The draft's service references, falling back to the default services.
     fn plan_refs(&self, draft: &workspace::Draft) -> ServiceRefs {
         let defaults = self.preferences.default_refs();
         ServiceRefs {
@@ -717,9 +717,9 @@ impl Desktop {
         })
     }
 
-    /// 候选多选的批量计划。环境、保存位置与配置解析同 build_plan；字幕确认留给
-    /// 任务运行时（pipeline 按 transcript_source 自行探测发现），因此不要求桌面
-    /// 端预先读取每个视频。标题用候选行里用户看到的分集标题。
+    /// The batch plan for selected candidates. Tools, destination and config resolve as in build_plan;
+    /// subtitles are found when each task runs (the pipeline probes by transcript_source), so the desktop
+    /// need not read every video first. Titles are the episode titles shown in the candidate rows.
     fn build_batch_plan(
         &self,
         candidate: &source::SourceCandidate,
@@ -736,8 +736,8 @@ impl Desktop {
         let environment = self.ensure_plan_environment(true)?;
         self.ensure_plan_storage(workspace, draft, PlanValidation::Submission)?;
         let mut config = self.plan_config(draft);
-        // 强制字幕（source_mode 1）不会走到语音识别；其余模式运行时可能退回 ASR，
-        // 与 build_plan 一样先确认本机识别能力并补默认模型。
+        // Subtitles-only never reaches speech recognition; other modes may fall back to ASR at run time,
+        // so, as in build_plan, check local recognition and fill in the default model first.
         if draft.options.source_mode != TranscriptSource::Subtitle {
             let provider = config
                 .defaults
@@ -788,8 +788,8 @@ impl Desktop {
         })
     }
 
-    /// 把多选候选一次性加入队列：逐个复用既有去重（进行中的相同任务不重复创建），
-    /// 一次事务落盘，随后选中第一个任务并启动队列。
+    /// Queue the selected candidates at once, reusing per-candidate deduplication (an identical task in
+    /// progress is not created again), in one transaction; then select the first task and start the queue.
     pub fn enqueue_selected_candidates(&mut self, cx: &mut Context<Self>) {
         let selected: Vec<(usize, source::SourceCandidate)> = self
             .source_candidates
@@ -1329,8 +1329,8 @@ impl Desktop {
                 Ok(())
             });
             if let Err(error) = compensated {
-                // 补偿持久化失败也不能让任务停在 Running 被调度器无视：
-                // 内存中同样标记 NeedsAttention；重启时 recover() 与磁盘对齐
+                // Even if recording the compensation fails, the task must not stay Running and be ignored by the
+                // scheduler: mark it NeedsAttention in memory too; recover() reconciles with the disk on restart.
                 if let Some(record) = workspace.state.task_mut(task_id) {
                     record.state = TaskState::NeedsAttention;
                     record.error = Some(message);
@@ -1994,8 +1994,8 @@ impl ConversionOptions {
     }
 }
 
-/// 批量任务的笔记名称：候选行里展示的分集标题；裸链接候选回落到「合集 视频 N」
-/// （合集名来自探测，占位提示文案永远不会拼进笔记名）。
+/// A batch task's note title: the episode title shown in the candidate row; a bare link falls back to
+/// 「合集 视频 N」 (the collection name comes from the probe; placeholder hints never enter a title).
 fn batch_note_title(
     candidate: &source::SourceCandidate,
     collection: Option<&str>,
@@ -2011,7 +2011,7 @@ fn batch_note_title(
     }
 }
 
-/// 本机识别能力检查：build_plan/build_batch_plan 的错误文案逐字一致，合一处维护。
+/// Local recognition check; build_plan and build_batch_plan share its exact messages.
 fn ensure_asr_capability(
     environment: &crate::backend::Environment,
     provider: course2md::config::AsrProvider,
@@ -2039,8 +2039,8 @@ fn ensure_asr_capability(
     Ok(())
 }
 
-/// 未显式选择模型时按识别方式补默认模型（NPU 走专属解析）。import_ui 的
-/// import_model_request 与两个计划构造函数共用同一回填规则。
+/// Without an explicit model, fill in the default for the recognition engine (NPU resolves its own).
+/// import_ui's import_model_request and both plan builders share this rule.
 pub(crate) fn fill_default_asr_model(
     config: &mut course2md::settings::ConfigFile,
     provider: course2md::config::AsrProvider,
@@ -2128,7 +2128,7 @@ pub(crate) mod tests {
             batch_note_title(&candidate, Some("合集"), 1),
             "视频与图书介绍"
         );
-        // 裸链接候选：回落到「合集 视频 N」，与列表行的展示规则一致
+        // A bare link candidate falls back to 「合集 视频 N」, as its list row shows it.
         let bare = crate::source::SourceCandidate {
             title: candidate.input.clone(),
             ..candidate.clone()

@@ -461,7 +461,7 @@ pub(crate) fn task_requires_service_repair(task: &TaskRecord) -> bool {
     task_service_repair_reason(task).is_some()
 }
 
-/// 组件 key → 补做按钮文案的唯一来源（任务卡/笔记库/阅读页共用，防止多处漂移）。
+/// Component key → retry button label; the one source shared by task cards, the library and the reader.
 pub(crate) fn retry_component_label(component: &str) -> &'static str {
     match Component::parse(component) {
         Some(Component::Screenshots) => course2md::tr!("重新生成截图"),
@@ -472,7 +472,7 @@ pub(crate) fn retry_component_label(component: &str) -> &'static str {
     }
 }
 
-/// 补做按钮文案：单组件按组件命名，多组件统一「补全未完成部分」。
+/// Retry button label: one component is named; several read as 「补全未完成部分」.
 pub(crate) fn retry_components_label(components: &[String]) -> &'static str {
     if components.len() == 1 {
         retry_component_label(&components[0])
@@ -1973,7 +1973,7 @@ impl Desktop {
             .unwrap_or_else(|| course2md::tr!("保存位置暂时不可用").into());
         let facts = self.task_facts(task, destination);
         let (progress, mut history) = self.task_progress_sections(task, cx);
-        // 需要处理的卡片只留可操作的信息；保存位置与文字来源收进「查看已完成的处理」
+        // A card that needs the person keeps only what they can act on; destination and text source move into 「查看已完成的处理」.
         let recovery = matches!(
             task.state,
             TaskState::NeedsAttention | TaskState::Partial | TaskState::Uncertain
@@ -2092,7 +2092,7 @@ impl Desktop {
             actions = actions.child(self.adjust_action(task, style, cx));
         }
         details = details.child(actions);
-        // 两个展开行是同一组，沿用 detail_row 的行高与行距（gap_1），而不是区块间距
+        // The two expanded rows are one group: they keep detail_row's height and gap_1, not the section spacing.
         let logs = self.task_log_view(task, cx);
         if history.is_some() || logs.is_some() {
             details = details.child(
@@ -2582,7 +2582,7 @@ impl Desktop {
     pub fn box_task_attention(&mut self, task: &TaskRecord, cx: &mut Context<Self>) -> Div {
         let id = task.id.clone();
         let uncertain = task.has_uncertain() && task.handled_by.is_none();
-        // 部分完成：正文已发布，逐项标明未完成的附加处理并可只补做该项。
+        // Partly complete: the note is published; each unfinished extra is named and can be retried alone.
         let partial_failures: Vec<(String, String, String)> = if task.state == TaskState::Partial {
             task.artifact
                 .as_ref()

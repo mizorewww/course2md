@@ -1067,7 +1067,7 @@ impl Desktop {
         cx.notify();
     }
 
-    /// 服务与账号页：补齐两个账号卡片的状态（忙碌/已查守卫保证不重复发起）。
+    /// Services and accounts: bring both account cards up to date (busy and checked guards avoid repeats).
     fn ensure_account_cards(&mut self, cx: &mut Context<Self>) {
         if self.settings_tab != SettingsTab::Services {
             return;
@@ -1156,8 +1156,8 @@ impl Desktop {
     }
 
     pub fn settings_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        // 渲染不得有副作用：hydrate/诊断检查都在 open_settings、
-        // select_settings_tab、restore_settings_group 等事件入口完成
+        // Rendering has no side effects: hydration and diagnostics run from event entries such as
+        // open_settings, select_settings_tab and restore_settings_group.
         let content_width = crate::views::settings_content_width(window);
         let layout_width = content_width
             + crate::views::settings_sidebar_width(window)
@@ -2885,7 +2885,7 @@ impl Desktop {
                     PreferenceGroup::Services => {}
                 }
                 self.settings_ui.initialized = false;
-                // 事件路径立刻重新水合，不等下一次进入设置（渲染不做这件事）
+                // Rehydrate on the event path now rather than on the next visit; rendering never does this.
                 self.hydrate_settings_inputs(window, cx);
                 self.set_settings_feedback(
                     group,

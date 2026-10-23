@@ -1,12 +1,12 @@
-//! Codex（ChatGPT 订阅）账号连接：导入 codex CLI 登录态或浏览器 PKCE 授权。
-//! 凭据只存在于 CLI 令牌文件（{config_dir}/auth/codex.json）；桌面设置、日志与
-//! 界面文本不接触令牌。设置的服务编辑器与首次引导的 AI 步骤共用此状态与组合。
+//! Codex (ChatGPT subscription) account connection: import the codex CLI login or authorize with PKCE in the browser.
+//! Credentials live only in the CLI token file ({config_dir}/auth/codex.json); desktop settings, logs and
+//! interface text never touch the token. The settings service editor and first-use AI step share this state.
 use super::*;
 use crate::preferences::{ServiceProtocol, ServicePurpose};
 use crate::theme::*;
 use course2md::login::codex::LoginStatus;
 
-/// 识别根 crate 的登录缺失/失效标记，替换为界面内的连接引导。
+/// Recognize the engine's missing/expired login marker and replace it with in-app connection guidance.
 fn login_required(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
@@ -15,12 +15,12 @@ fn login_required(error: &anyhow::Error) -> bool {
     })
 }
 
-/// Codex 动作的归属界面：异步结果只落回发起时的界面。
+/// The surface a Codex action belongs to: asynchronous results return only to the surface that started it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CodexSurface {
     Editor,
     Onboarding,
-    /// 设置「服务与账号」页的账号卡片：只呈现连接状态，不填任何模型输入
+    /// The account card on the services and accounts page: connection state only, no model input.
     Settings,
 }
 
@@ -38,7 +38,7 @@ pub(crate) struct CodexUi {
     generation: u64,
     pub(crate) status: Option<LoginStatus>,
     working: Option<CodexWork>,
-    /// 最近一次动作的可见结果；bool = 是否为失败（失败用危险色呈现）
+    /// The visible result of the last action; the bool marks a failure (shown in the danger color).
     pub(crate) notice: Option<(String, bool)>,
     surface: Option<CodexSurface>,
     authorize_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
@@ -94,8 +94,8 @@ impl CodexUi {
     }
 }
 
-/// 目录到达时为空的模型输入填入首个候选（受支持默认值，仍可修改）。
-/// set_value 需要 Window：经共享的 defer + update_window 途径回到窗口上下文。
+/// When the catalog arrives, an empty model input takes the first candidate (a supported default, still editable).
+/// set_value needs the Window, so it returns to the window through the shared defer + update_window path.
 pub(crate) fn autofill_input(
     handle: AnyWindowHandle,
     input: Entity<InputState>,
@@ -109,7 +109,7 @@ pub(crate) fn autofill_input(
     cx.defer(move |cx| {
         let _ = cx.update_window(handle, |_, window, cx| {
             input.update(cx, |input, cx| {
-                // 动作完成到落窗之间用户可能已开始输入；空输入才填默认值
+                // The person may have typed since the action finished; fill in the default only when empty.
                 if input.value().trim().is_empty() {
                     input.set_value(value, window, cx);
                 }
@@ -119,7 +119,7 @@ pub(crate) fn autofill_input(
 }
 
 impl Desktop {
-    /// 读本地令牌文件的账号状态（不触网）；仍在后台线程执行，不占用渲染。
+    /// Read the account status from the local token file (no network), still off the render thread.
     pub(crate) fn codex_refresh_status(&mut self, surface: CodexSurface, cx: &mut Context<Self>) {
         if self.codex.busy() {
             return;
@@ -145,7 +145,7 @@ impl Desktop {
                         .codex
                         .fail(course2md::tr!("暂时无法读取 Codex 登录状态：{}", error)),
                 }
-                // 已连接的 Codex 界面没有目录时，顺接拉取账号目录（空模型输入自动填首个候选）
+                // A connected Codex surface without a catalog fetches it next (an empty model input takes the first candidate).
                 let needs_catalog = matches!(this.codex.status, Some(LoginStatus::Connected))
                     && this.codex_form_needs_catalog(surface);
                 if needs_catalog {
@@ -167,7 +167,7 @@ impl Desktop {
         );
     }
 
-    /// 浏览器 PKCE 授权：阻塞最长 180 秒并打开系统浏览器，必须离开 UI 线程。
+    /// Browser PKCE authorization blocks up to 180 seconds and opens the system browser, so it runs off the UI thread.
     pub(crate) fn codex_authorize(&mut self, surface: CodexSurface, cx: &mut Context<Self>) {
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.codex.authorize_cancel = Some(cancel.clone());
@@ -213,12 +213,12 @@ impl Desktop {
                             this.codex.notice = None;
                         }
                         this.codex_apply_catalog(surface, catalog.models, cx);
-                        // 重读登录状态，展示账号详情而非通用占位
+                        // Re-read the login so the account details show instead of a generic placeholder.
                         this.codex_refresh_status(surface, cx);
                     }
                     Err(error) => {
                         let message = if login_required(&error) {
-                            // 登录缺失/失效：引导使用界面内的连接动作，而非 CLI 命令
+                            // Missing or expired login: point to the in-app connect action, not a CLI command.
                             match work {
                                 CodexWork::Importing => {
                                     course2md::tr!("命令行 Codex 的登录已失效，请先在 Codex 中重新登录再导入，或改用浏览器授权")
@@ -242,10 +242,10 @@ impl Desktop {
         cx.notify();
     }
 
-    /// 用已保存的登录态重新拉取账号可用的模型目录。
+    /// Fetch the account's model catalog again with the saved login.
     pub(crate) fn codex_refresh_models(&mut self, surface: CodexSurface, cx: &mut Context<Self>) {
-        // 先让模型字段进入加载状态：即使随后被忙碌守卫拦下，点击也不是静默无响应
-        // 设置页账号卡片没有模型输入，无目录可刷新
+        // Put the model field into its loading state first, so a click stopped by the busy guard is not silent.
+        // The settings account card has no model input and no catalog to refresh.
         if !self.codex_form_models_loading(surface) {
             return;
         }
@@ -295,7 +295,7 @@ impl Desktop {
         cx.notify();
     }
 
-    /// 退出 Codex 登录：删除 CLI 令牌副本，并解除指向 Codex 服务的默认绑定。
+    /// Sign out of Codex: delete the CLI token copy and unbind defaults that point at the Codex service.
     pub(crate) fn codex_logout(&mut self, surface: CodexSurface, cx: &mut Context<Self>) {
         if self.codex.busy() {
             return;
@@ -335,7 +335,7 @@ impl Desktop {
         cx.notify();
     }
 
-    /// 默认 AI 服务绑定指向 Codex 服务时解除绑定；返回是否发生了变更。
+    /// Unbind the default AI service when it points at Codex; returns whether anything changed.
     fn codex_detach_default_service(&mut self) -> bool {
         let is_codex = self
             .preferences
@@ -362,7 +362,7 @@ impl Desktop {
         }
     }
 
-    /// 账号目录只落到仍在编辑 Codex 服务的发起界面。
+    /// The account catalog reaches only the originating surface while it still edits a Codex service.
     fn codex_apply_catalog(
         &mut self,
         surface: CodexSurface,
@@ -374,7 +374,7 @@ impl Desktop {
         self.codex_form_catalog(surface, models, suggested, cx);
     }
 
-    /// 编辑器/引导共用的 Codex 账号区：状态、说明与登录动作。
+    /// The Codex account section shared by the editor and first use: status, explanation and sign-in actions.
     pub(crate) fn codex_account_section(
         &self,
         surface: CodexSurface,
@@ -463,7 +463,7 @@ impl Desktop {
                     buttons
                 }
             } else {
-                // 与 Bilibili 账号同序：重新检查在前、退出登录在后
+                // The same order as the Bilibili account: check again first, sign out last.
                 vec![
                     quiet(SharedString::from(format!("{id}-recheck")))
                         .icon(icons::refresh())
