@@ -1504,13 +1504,7 @@ impl Desktop {
             return;
         }
         let inline = target.is_none() && !repairing;
-        let scope = if repairing || (target.is_some() && !editor.also_default) {
-            BindingScope::CurrentTask
-        } else if editor.also_default {
-            BindingScope::Defaults
-        } else {
-            BindingScope::Saved
-        };
+        let scope = publish_scope(repairing, target.is_some(), editor.also_default);
         let result = if let Some(version) = editor
             .pending_binding
             .as_ref()
@@ -1558,8 +1552,7 @@ impl Desktop {
                             .context(course2md::tr!(
                                 "原笔记已关闭；服务正在保存，但未用于其他笔记"
                             ))?;
-                        let selected =
-                            (scope == BindingScope::CurrentTask).then(|| version.id.clone());
+                        let selected = draft_service(scope, &version.id);
                         match version.config.protocol.purpose() {
                             ServicePurpose::Speech => draft.asr_service = selected,
                             ServicePurpose::Ai => draft.ai_service = selected,
@@ -1894,5 +1887,59 @@ impl Desktop {
             }
         }
         cx.notify();
+    }
+}
+
+/// Where a published service applies. A repair, or a service chosen while
+/// editing one input, binds to that task alone unless the person also made it
+/// the default; a service saved in settings is the default only when chosen so.
+fn publish_scope(repairing: bool, from_input: bool, also_default: bool) -> BindingScope {
+    if repairing || (from_input && !also_default) {
+        BindingScope::CurrentTask
+    } else if also_default {
+        BindingScope::Defaults
+    } else {
+        BindingScope::Saved
+    }
+}
+
+/// The service the input records after a publish: its own binding, or none so
+/// that it follows the defaults the publish just changed.
+fn draft_service(scope: BindingScope, id: &str) -> Option<String> {
+    (scope == BindingScope::CurrentTask).then(|| id.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BindingScope, draft_service, publish_scope};
+
+    #[test]
+    fn a_repair_binds_only_its_task_whatever_the_default_choice() {
+        for (from_input, also_default) in [(false, false), (false, true), (true, false), (true, true)]
+        {
+            assert_eq!(
+                publish_scope(true, from_input, also_default),
+                BindingScope::CurrentTask
+            );
+        }
+    }
+
+    #[test]
+    fn a_service_chosen_for_an_input_binds_it_unless_it_becomes_the_default() {
+        let scope = publish_scope(false, true, false);
+        assert_eq!(scope, BindingScope::CurrentTask);
+        assert_eq!(draft_service(scope, "svc").as_deref(), Some("svc"));
+
+        // Made the default as well: the input follows the new default instead
+        // of pinning a copy of it.
+        let scope = publish_scope(false, true, true);
+        assert_eq!(scope, BindingScope::Defaults);
+        assert_eq!(draft_service(scope, "svc"), None);
+    }
+
+    #[test]
+    fn a_service_saved_in_settings_changes_defaults_only_when_asked() {
+        assert_eq!(publish_scope(false, false, false), BindingScope::Saved);
+        assert_eq!(publish_scope(false, false, true), BindingScope::Defaults);
     }
 }

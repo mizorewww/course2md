@@ -1778,9 +1778,10 @@ impl Desktop {
             .map(|issue| issue.message);
         let had_pending = self.settings_ui.pending_generation.is_some()
             || self.preferences.generation_intent().is_some();
-        match self.preferences.save_generation(next.clone()) {
+        let result = self.preferences.save_generation(next.clone());
+        self.settings_ui.pending_generation = pending_after_save(&result, next);
+        match result {
             Ok(()) => {
-                self.settings_ui.pending_generation = None;
                 self.set_settings_feedback(
                     PreferenceGroup::Generation,
                     course2md::tr!("已暂存，点击「应用」后生效").into(),
@@ -1793,7 +1794,6 @@ impl Desktop {
                 self.clear_resolved_generation_errors(previous);
             }
             Err(error) => {
-                self.settings_ui.pending_generation = Some(next);
                 self.set_settings_save_failure(PreferenceGroup::Generation, &error, cx);
             }
         }
@@ -1905,7 +1905,7 @@ impl Desktop {
                     .timer(Duration::from_secs(SUCCESS_NOTICE_SECS))
                     .await;
                 let _ = this.update(cx, |this, cx| {
-                    if this.settings_ui.feedback.get(&group) == Some(&(shown, false)) {
+                    if success_notice_current(this.settings_ui.feedback.get(&group), &shown) {
                         this.settings_ui.feedback.remove(&group);
                         cx.notify();
                     }
@@ -2986,5 +2986,41 @@ impl Desktop {
             return false;
         }
         true
+    }
+}
+
+/// A success notice clears itself only while it is still the group's notice;
+/// a newer message, or an error that replaced it, stays.
+fn success_notice_current(current: Option<&(String, bool)>, shown: &str) -> bool {
+    matches!(current, Some((message, false)) if message == shown)
+}
+
+/// The staged edit after a save attempt: cleared once the store accepted it,
+/// kept for retry and exit when the save failed.
+fn pending_after_save<T, E>(result: &std::result::Result<(), E>, next: T) -> Option<T> {
+    result.is_err().then_some(next)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{pending_after_save, success_notice_current};
+
+    #[test]
+    fn a_success_notice_expires_only_while_it_is_still_shown() {
+        let shown = "已保存".to_owned();
+        assert!(success_notice_current(Some(&(shown.clone(), false)), &shown));
+        // Cleared already, or replaced by a newer notice or by an error.
+        assert!(!success_notice_current(None, &shown));
+        assert!(!success_notice_current(
+            Some(&("服务已保存".to_owned(), false)),
+            &shown
+        ));
+        assert!(!success_notice_current(Some(&(shown.clone(), true)), &shown));
+    }
+
+    #[test]
+    fn a_failed_save_keeps_the_staged_edit_and_a_successful_one_clears_it() {
+        assert_eq!(pending_after_save::<_, ()>(&Ok(()), 7), None);
+        assert_eq!(pending_after_save(&Err("disk full"), 7), Some(7));
     }
 }
