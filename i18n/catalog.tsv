@@ -2461,3 +2461,8 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 视频 {} 的截图	视频 {} 的截图	Screenshot at {} in the video	影片 {} 的截圖	動画 {} のスクリーンショット
 无法识别的任务事件（{}）：{}	无法识别的任务事件（{}）：{}	Unrecognized task event ({}): {}	無法識別的任務事件（{}）：{}	認識できないタスクイベント（{}）：{}
 检查识别模型	检查识别模型	Checking speech model	檢查辨識模型	音声認識モデルを確認
+服务拒绝了 API Key	服务拒绝了 API Key	The service rejected the API Key	服務拒絕了 API Key	サービスが API キーを拒否しました
+服务地址或模型名称有误	服务地址或模型名称有误	The service address or model name is incorrect	服務地址或模型名稱有誤	サービスのアドレスまたはモデル名が間違っています
+服务不支持当前的模型设置	服务不支持当前的模型设置	The service does not support the current model settings	服務不支援當前的模型設定	サービスは現在のモデル設定をサポートしていません
+服务暂时限制了请求次数	服务暂时限制了请求次数	The service is limiting requests for now	服務暫時限制了請求次數	サービスが一時的にリクエスト数を制限しています
+服务暂时无法完成请求	服务暂时无法完成请求	The service could not complete the request for now	服務暫時無法完成請求	サービスは現在リクエストを完了できません

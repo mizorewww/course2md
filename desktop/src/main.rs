@@ -29,6 +29,7 @@ mod preferences;
 mod provider_serde;
 mod reader_navigation;
 mod reader_ui;
+mod scroll;
 mod service_test;
 mod settings_ui;
 mod source;
@@ -38,13 +39,14 @@ mod task_ui;
 mod theme;
 mod views;
 mod workspace;
-use backend::{Course, Done, EngineEvent, Event, Job};
+use backend::{Done, EngineEvent, Event, Job};
 use course2md::progress::{ModelOperation, Stage, StageStatus};
 use gpui::{prelude::*, *};
 use gpui_component::{
     input::{InputEvent, InputState},
     *,
 };
+use notes::Course;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     path::PathBuf,
@@ -108,26 +110,38 @@ pub(crate) fn interrupted() -> &'static str {
     course2md::tr!("操作意外中断，请重试")
 }
 
-/// Runs blocking IO on a dedicated OS thread and delivers the result through a channel.
+/// Runs blocking IO on smol's blocking thread pool and delivers the result through a
+/// channel. The work runs to completion even if the receiver is dropped.
 ///
-/// GPUI's background executor dispatches to GCD global queues, and macOS may run those
-/// blocks on the main thread via queue override; `cx.spawn` always polls on the main
-/// thread. Blocking syscalls — keychain reads that can wait on an authorization dialog,
-/// synchronous HTTP — therefore must never run inside executor tasks.
+/// This is the one way the desktop leaves the UI thread for blocking work: file and
+/// process IO, keychain access, synchronous HTTP. GPUI's background executor dispatches
+/// to GCD global queues, and macOS may run those blocks on the main thread via queue
+/// override; `cx.spawn` always polls on the main thread. Blocking syscalls — keychain
+/// reads that can wait on an authorization dialog, synchronous HTTP — therefore must
+/// never run inside executor tasks. smol's pool is separate from GPUI's executor and
+/// reuses its threads, so short operations do not each start a thread. Code that wants
+/// a future instead of a channel may await `smol::unblock` directly; it is the same pool.
 pub(crate) fn spawn_blocking_io<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> smol::channel::Receiver<T> {
     let (tx, rx) = smol::channel::bounded(1);
-    std::thread::spawn(move || {
+    smol::unblock(move || {
         let _ = tx.send_blocking(work());
-    });
+    })
+    .detach();
     rx
 }
 
+/// Choice id of a recognition engine, as in `providers()`; automatic
+/// selection is the empty id.
+pub(crate) fn provider_id(provider: Option<course2md::config::AsrProvider>) -> &'static str {
+    provider.map_or("", |provider| provider.as_str())
+}
+
 /// 识别引擎的规范展示名：全桌面唯一来源（选择与描述场景共用）。
-/// 与 PROVIDERS 表的 id 一一对应；None 表示「自动」。
+/// 与 providers() 表的 id 一一对应；None 表示「自动」。
 pub(crate) fn provider_label(provider: Option<course2md::config::AsrProvider>) -> &'static str {
-    let id = provider.map(|provider| provider.as_str()).unwrap_or("");
+    let id = provider_id(provider);
     providers()
         .iter()
         .find(|(provider_id, _)| *provider_id == id)
@@ -243,6 +257,8 @@ struct Desktop {
     pending_conversion: Option<u64>,
     following_conversion: Option<import_ui::ConversionFollow>,
     preview_workers: usize,
+    /// A startup reconciliation of the task record is running.
+    workspace_reconciling: bool,
     preview_error: Option<String>,
     source_validation: Option<String>,
     /// The current validation error is the missing-title case (typed, not text-matched).
@@ -308,7 +324,7 @@ struct Desktop {
     courses: Vec<Course>,
     cover_by_source: BTreeMap<String, PathBuf>,
     loading: bool,
-    preview: Option<Rc<backend::Preview>>,
+    preview: Option<Rc<notes::Preview>>,
     read_generation: u64,
     reading: bool,
     opening_course: Option<PathBuf>,
@@ -605,6 +621,9 @@ impl Desktop {
             };
         let (event_wake_tx, event_wake_rx) = smol::channel::bounded(1);
         preferences.set_wake_sender(event_wake_tx.clone());
+        if let Some(workspace) = &workspace {
+            workspace.set_wake_sender(event_wake_tx.clone());
+        }
         let settings_ui = settings_ui::State::new(window, cx);
         let onboarding = onboarding::State::new(window, cx);
         let reader_ui = reader_ui::State::new(window, cx);
@@ -642,6 +661,7 @@ impl Desktop {
             pending_conversion: None,
             following_conversion: None,
             preview_workers: 0,
+            workspace_reconciling: false,
             preview_error: None,
             source_validation: None,
             title_required: false,
@@ -742,10 +762,53 @@ impl Desktop {
         this.refresh_account(cx);
         this.refresh_environment(cx);
         this.refresh_library(cx);
+        this.poll_workspace(cx);
         if !this.preferences.application().desktop.setup_completed {
             this.start_onboarding(window, cx);
         }
         this
+    }
+    /// Reports record writes that failed after the event loop moved on, and
+    /// reconciles a freshly opened record with the libraries off the UI thread.
+    fn poll_workspace(&mut self, cx: &mut Context<Self>) {
+        let Some(workspace) = &self.workspace else {
+            return;
+        };
+        if let Some(error) = workspace.take_write_error() {
+            self.workspace_error = Some(course2md::tr!("任务进度尚未保存：{}", error));
+            cx.notify();
+        }
+        if self.workspace_reconciling {
+            return;
+        }
+        let Some(reconciliation) = workspace.reconciliation() else {
+            return;
+        };
+        // A record reopened elsewhere needs the wake sender too.
+        workspace.set_wake_sender(self.event_wake_tx.clone());
+        self.workspace_reconciling = true;
+        let task = spawn_blocking_io(move || reconciliation.run());
+        cx.spawn(async move |this, cx| {
+            let reconciled = task.recv().await;
+            let _ = this.update(cx, |this, cx| {
+                let Ok(reconciled) = reconciled else {
+                    // Leave dispatch held: the checks did not finish.
+                    this.workspace_error = Some(interrupted().into());
+                    cx.notify();
+                    return;
+                };
+                this.workspace_reconciling = false;
+                if let Some(workspace) = &mut this.workspace
+                    && let Err(error) = workspace.apply_reconciliation(reconciled)
+                {
+                    this.workspace_error =
+                        Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
+                }
+                this.start_next_task(cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
     fn refresh_environment(&mut self, cx: &mut Context<Self>) {
         self.environment = None;
@@ -959,12 +1022,12 @@ impl Desktop {
     fn wake_poll(&self) {
         let _ = self.event_wake_tx.try_send(());
     }
-    fn schedule_wake(&self, after: Duration) {
-        let wake = self.event_wake_tx.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(after);
-            let _ = wake.try_send(());
-        });
+    /// Makes the event loop recompute its next deadline now. Every delayed
+    /// wake (the draft save, a transient task result) is a deadline in
+    /// `next_poll_deadline`, which the loop sleeps toward on an async timer, so
+    /// no thread has to sleep for `_after`.
+    fn schedule_wake(&self, _after: Duration) {
+        self.wake_poll();
     }
     /// The next instant the UI must run `poll` even without a job event.
     /// Returning `None` lets the loop sleep until an explicit wake.
@@ -997,6 +1060,7 @@ impl Desktop {
             cx.notify();
         }
         self.poll_storage(cx);
+        self.poll_workspace(cx);
         self.poll_reading_position(cx);
         if self
             .draft_deadline
@@ -1132,8 +1196,10 @@ impl Desktop {
             }
         }
         if save && let Some(workspace) = &self.workspace {
+            // Never wait on the writer here: a failure of this write arrives
+            // through `poll_workspace`.
             let result = if flush {
-                workspace.save().map(|_| ())
+                workspace.save_soon()
             } else {
                 workspace.save_progress().map(|_| ())
             };
@@ -1183,7 +1249,7 @@ impl Desktop {
             .begin_location_checks(generation, &locations);
         self.loading = true;
         let task = storage_ui::scan_locations(locations, move |location| {
-            let scan = backend::scan_library(&location.root);
+            let scan = notes::scan_library(&location.root);
             let organization = organize::Library::load(&location.root);
             let cache = course_library::LibraryViewCache::inspect(location, scan.as_ref().ok());
             (scan, organization, cache)
@@ -1353,7 +1419,7 @@ impl Desktop {
         } else {
             origin
         };
-        let task = spawn_blocking_io(move || backend::read_preview(course));
+        let task = spawn_blocking_io(move || notes::read_preview(course));
         cx.spawn(async move |this, cx| {
             let result = task
                 .recv()
@@ -1601,7 +1667,6 @@ fn main() {
     });
     app.run(|cx| {
         gpui_component::init(cx);
-        gpui_component::set_locale("zh-CN");
         theme::init(cx);
         // Debug validation uses the same native window and render path at an exact size.
         // Release builds always use the ordinary initial window size.

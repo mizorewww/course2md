@@ -30,18 +30,123 @@ impl Event {
     }
 }
 
+/// `CREATE_NO_WINDOW`: helper processes never flash a console window.
+#[cfg(windows)]
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// A child process reaped on its own thread. `kill` cannot reach a recycled
+/// PID: on Unix the reaper first waits without reaping (`WNOWAIT`), so the
+/// zombie keeps its PID reserved until the reaper marks it reaped under the
+/// same lock `kill` takes; on Windows the open process handle reserves it.
+pub(crate) struct Watched {
+    shared: std::sync::Arc<WatchedProcess>,
+}
+struct WatchedProcess {
+    pid: u32,
+    /// Kill the whole process group (Unix) / tree (Windows).
+    group: bool,
+    state: std::sync::Mutex<WatchState>,
+}
+#[derive(Default)]
+struct WatchState {
+    reaped: bool,
+    killed: bool,
+}
+impl Watched {
+    /// Reaps `child` on a dedicated thread and then calls `on_exit` there with
+    /// its status and whether `kill` stopped it.
+    pub(crate) fn spawn(
+        mut child: std::process::Child,
+        group: bool,
+        on_exit: impl FnOnce(std::io::Result<std::process::ExitStatus>, bool) + Send + 'static,
+    ) -> Self {
+        let shared = std::sync::Arc::new(WatchedProcess {
+            pid: child.id(),
+            group,
+            state: Default::default(),
+        });
+        let reaper = std::sync::Arc::clone(&shared);
+        thread::spawn(move || {
+            #[cfg(unix)]
+            loop {
+                // SAFETY: waitid only writes the zeroed siginfo it is given.
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                let waited = unsafe {
+                    libc::waitid(
+                        libc::P_PID,
+                        reaper.pid as libc::id_t,
+                        &mut info,
+                        libc::WEXITED | libc::WNOWAIT,
+                    )
+                };
+                if waited == 0
+                    || std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+                {
+                    break;
+                }
+            }
+            let (status, killed) = {
+                let mut state = course2md::runtime::lock_recover(&reaper.state);
+                let status = child.wait();
+                state.reaped = true;
+                (status, state.killed)
+            };
+            drop(child);
+            on_exit(status, killed);
+        });
+        Self { shared }
+    }
+
+    /// Stops the process unless it has already been reaped. Returns whether
+    /// it was still running.
+    pub(crate) fn kill(&self) -> bool {
+        let mut state = course2md::runtime::lock_recover(&self.shared.state);
+        if state.reaped {
+            return false;
+        }
+        state.killed = true;
+        kill_pid(self.shared.pid, self.shared.group);
+        true
+    }
+}
+
+fn kill_pid(pid: u32, group: bool) {
+    #[cfg(unix)]
+    unsafe {
+        if group {
+            libc::killpg(pid as i32, libc::SIGKILL);
+        }
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let pid = pid.to_string();
+        let mut args = vec!["/PID", pid.as_str(), "/F"];
+        if group {
+            args.push("/T");
+        }
+        let _ = Command::new("taskkill")
+            .creation_flags(CREATE_NO_WINDOW)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
 pub struct Job {
     pub events: Receiver<Event>,
-    cancel: mpsc::Sender<()>,
+    process: Watched,
 }
 impl Job {
     pub fn start(args: Vec<String>, wake: smol::channel::Sender<()>) -> Result<Self> {
-        Self::spawn_input(resolve_cli()?, args, None, wake)
+        Self::spawn_input(resolve_cli()?, args, None, Redactions(vec![]), wake)
     }
     #[cfg(test)]
     fn spawn(bin: PathBuf, args: Vec<String>) -> Result<Self> {
         let (wake, _) = smol::channel::bounded(1);
-        Self::spawn_input(bin, args, None, wake)
+        Self::spawn_input(bin, args, None, Redactions(vec![]), wake)
     }
     pub fn start_task(
         request: &course2md::execution::Request,
@@ -51,32 +156,18 @@ impl Job {
             resolve_cli()?,
             vec!["run-task".into()],
             Some(serde_json::to_vec(request)?),
+            Redactions::for_request(request),
             wake,
         )
     }
     fn spawn_input(
         bin: PathBuf,
         args: Vec<String>,
-        mut input: Option<Vec<u8>>,
+        input: Option<Vec<u8>>,
+        redactions: Redactions,
         wake: smol::channel::Sender<()>,
     ) -> Result<Self> {
-        let redactions = std::sync::Arc::new(Redactions(
-            input
-                .as_ref()
-                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
-                .map(|value| {
-                    [
-                        value["config"]["llm"]["api_key"].as_str(),
-                        value["config"]["asr_api"]["api_key"].as_str(),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .filter(|key| !key.is_empty())
-                    .map(str::to_owned)
-                    .collect()
-                })
-                .unwrap_or_default(),
-        ));
+        let redactions = std::sync::Arc::new(redactions);
         let mut command = Command::new(&bin);
         command
             .args(args)
@@ -96,84 +187,104 @@ impl Job {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            command.creation_flags(CREATE_NO_WINDOW);
         }
         let mut child = command
             .spawn()
             .with_context(|| course2md::tr!("启动 {} 失败", bin.display()))?;
-        if let Some(bytes) = input.as_mut() {
-            let sent = child
-                .stdin
-                .take()
-                .context(course2md::tr!("无法传递任务参数"))
-                .and_then(|mut pipe| {
-                    pipe.write_all(bytes)
-                        .context(course2md::tr!("传递任务参数失败"))
-                });
-            use zeroize::Zeroize;
-            bytes.zeroize();
-            if let Err(error) = sent {
+        let pipes = (|| {
+            Ok::<_, anyhow::Error>((
+                child
+                    .stdout
+                    .take()
+                    .context(course2md::tr!("缺少 stdout 管道"))?,
+                child
+                    .stderr
+                    .take()
+                    .context(course2md::tr!("缺少 stderr 管道"))?,
+                match &input {
+                    Some(_) => Some(
+                        child
+                            .stdin
+                            .take()
+                            .context(course2md::tr!("无法传递任务参数"))?,
+                    ),
+                    None => None,
+                },
+            ))
+        })();
+        let (stdout, stderr, stdin) = match pipes {
+            Ok(pipes) => pipes,
+            Err(error) => {
                 terminate(&mut child);
                 let _ = child.wait();
                 return Err(error);
             }
-        }
+        };
         let (tx, events) = mpsc::sync_channel(512);
-        let (cancel, cancelled) = mpsc::channel();
-        let stdout = child
-            .stdout
-            .take()
-            .context(course2md::tr!("缺少 stdout 管道"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .context(course2md::tr!("缺少 stderr 管道"))?;
-        let readers = [
-            reader(stdout, tx.clone(), true, redactions.clone(), wake.clone()),
-            reader(stderr, tx.clone(), false, redactions, wake.clone()),
-        ];
-        thread::spawn(move || {
-            let mut was_cancelled = false;
-            let success = loop {
-                // Reap and cancel on the same thread: a stale PID cannot be killed
-                // after completion, and queued stdout is drained before Exit.
-                match child.try_wait() {
-                    Ok(Some(status)) => break status.success(),
+        // Readers start before the request is written: a request larger than the
+        // pipe buffer must not wait on an engine that is blocked writing output.
+        let (finished, drained) = mpsc::channel();
+        reader(
+            stdout,
+            tx.clone(),
+            true,
+            redactions.clone(),
+            wake.clone(),
+            finished.clone(),
+        );
+        reader(
+            stderr,
+            tx.clone(),
+            false,
+            redactions,
+            wake.clone(),
+            finished,
+        );
+        let process = Watched::spawn(child, true, {
+            let tx = tx.clone();
+            let wake = wake.clone();
+            move |status, cancelled| {
+                let success = match status {
+                    Ok(status) => !cancelled && status.success(),
                     Err(error) => {
                         let _ = tx.send(Event::error(error.to_string()));
-                        terminate(&mut child);
-                        let _ = child.wait();
-                        break false;
+                        false
                     }
-                    Ok(None) => {}
+                };
+                // 有界排空：子进程已死则管道必将 EOF，但卡住的 reader（例如管道被
+                // 孙进程继承）不得把 Exit 永远挡在门外。读不到的剩余输出允许丢失。
+                let deadline = Instant::now() + Duration::from_secs(3);
+                for _ in 0..2 {
+                    if drained
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
-                if !matches!(cancelled.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    was_cancelled = true;
-                    terminate(&mut child);
-                    let _ = child.wait();
-                    break false;
-                }
-                thread::sleep(Duration::from_millis(40));
-            };
-            // 有界排空：子进程已死则管道必将 EOF，但卡住的 reader 不得把 Exit 永远挡在
-            // 门外（否则 job 永远存在、后续任务全部排队）。读不到的剩余输出允许丢失。
-            let drain_deadline = Instant::now() + Duration::from_secs(3);
-            for reader in readers {
-                while !reader.is_finished() && Instant::now() < drain_deadline {
-                    thread::sleep(Duration::from_millis(20));
-                }
-                // 仍未完成的 reader：进程已死，线程会随管道 EOF 自行结束
+                let _ = tx.send(Event::Exit { success, cancelled });
+                let _ = wake.try_send(());
             }
-            let _ = tx.send(Event::Exit {
-                success,
-                cancelled: was_cancelled,
-            });
-            let _ = wake.try_send(());
         });
-        Ok(Self { events, cancel })
+        if let (Some(mut bytes), Some(mut pipe)) = (input, stdin) {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                let sent = pipe.write_all(&bytes);
+                drop(pipe);
+                use zeroize::Zeroize;
+                bytes.zeroize();
+                if let Err(error) = sent {
+                    // The engine closed its input early; its own exit reports why.
+                    let _ = tx.send(Event::error(course2md::tr!("传递任务参数失败：{}", error)));
+                    let _ = wake.try_send(());
+                }
+            });
+        }
+        Ok(Self { events, process })
     }
     pub fn cancel(&self) {
-        let _ = self.cancel.send(());
+        self.process.kill();
     }
 }
 impl Drop for Job {
@@ -183,6 +294,17 @@ impl Drop for Job {
 }
 struct Redactions(Vec<String>);
 impl Redactions {
+    /// Every credential the request carries, read from its typed fields so a
+    /// renamed field fails to compile instead of silently disabling redaction.
+    fn for_request(request: &course2md::execution::Request) -> Self {
+        Self(
+            [&request.config.llm.api_key, &request.config.asr_api.api_key]
+                .into_iter()
+                .filter(|key| !key.is_empty())
+                .cloned()
+                .collect(),
+        )
+    }
     fn text(&self, input: &str) -> String {
         let mut result = input.to_owned();
         // Long keys first: a shorter credential may be a prefix of another one.
@@ -271,8 +393,17 @@ fn reader(
     json: bool,
     redactions: std::sync::Arc<Redactions>,
     wake: smol::channel::Sender<()>,
+    finished: mpsc::Sender<()>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
+        // Reports the end of this stream however the loop exits.
+        struct Finished(mpsc::Sender<()>);
+        impl Drop for Finished {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+        let _finished = Finished(finished);
         for line in BufReader::new(stream).lines() {
             let event = match line {
                 Ok(line) if line.trim().is_empty() => continue,
@@ -312,7 +443,7 @@ pub(crate) fn terminate(child: &mut std::process::Child) {
     {
         use std::os::windows::process::CommandExt;
         let _ = Command::new("taskkill")
-            .creation_flags(0x08000000)
+            .creation_flags(CREATE_NO_WINDOW)
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -321,7 +452,14 @@ pub(crate) fn terminate(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 
+/// The search path for engine and helper tools. The environment it is built
+/// from does not change while the app runs, so it is computed once.
 pub fn tool_path() -> std::ffi::OsString {
+    static PATH: std::sync::OnceLock<std::ffi::OsString> = std::sync::OnceLock::new();
+    PATH.get_or_init(compute_tool_path).clone()
+}
+
+fn compute_tool_path() -> std::ffi::OsString {
     if let Some(path) = std::env::var_os("COURSE2MD_TOOL_PATH").filter(|path| !path.is_empty()) {
         return path;
     }
@@ -400,21 +538,35 @@ pub struct Environment {
     pub llama: bool,
     pub apple: bool,
     pub gpu: Option<String>,
-    pub npu: bool,
-    pub npu_device: bool,
-    pub npu_runtime: bool,
+    pub npu_parts: NpuParts,
 }
+
+/// The two independent requirements of Intel NPU recognition.
+#[derive(Clone, Copy, Default)]
+pub struct NpuParts {
+    pub device: bool,
+    pub runtime: bool,
+}
+
 impl Environment {
-    /// 本机环境是否支持指定的识别方式。NPU 要求设备与运行器同时可用——
-    /// `npu` 字段在 detect() 中即 `npu_device && npu_runtime` 的合一，
-    /// 两处写法等价，以此处为准。Api 不依赖本机组件。
+    /// Intel NPU recognition needs both the device and its Python runtime.
+    pub fn npu(&self) -> bool {
+        self.npu_parts.device && self.npu_parts.runtime
+    }
+    pub fn npu_device(&self) -> bool {
+        self.npu_parts.device
+    }
+    pub fn npu_runtime(&self) -> bool {
+        self.npu_parts.runtime
+    }
+    /// 本机环境是否支持指定的识别方式。Api 不依赖本机组件。
     pub fn supports(&self, provider: course2md::config::AsrProvider) -> bool {
         use course2md::config::AsrProvider;
         match provider {
             AsrProvider::Coreml => self.apple,
             AsrProvider::Gpu => self.llama && self.gpu.is_some(),
             AsrProvider::Cpu => self.llama,
-            AsrProvider::Npu => self.npu,
+            AsrProvider::Npu => self.npu(),
             AsrProvider::Api => true,
         }
     }
@@ -491,7 +643,6 @@ impl Environment {
             let executable = format!("{name}{}", std::env::consts::EXE_SUFFIX);
             std::env::split_paths(&tool_path()).any(|dir| dir.join(&executable).is_file())
         });
-        let npu = npu_device && npu_runtime;
         Self {
             engine: cli.is_some() && checks.contains_key("engine"),
             ffmpeg: checks.contains_key("ffmpeg"),
@@ -500,9 +651,10 @@ impl Environment {
             llama,
             apple,
             gpu,
-            npu,
-            npu_device,
-            npu_runtime,
+            npu_parts: NpuParts {
+                device: npu_device,
+                runtime: npu_runtime,
+            },
         }
     }
 }
@@ -522,21 +674,24 @@ fn probe(bin: &Path, args: &[&str], timeout: Duration) -> Option<String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
+        command.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut child = command.spawn().ok()?;
-    let started = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => break,
-            Ok(Some(_)) => return None,
-            Ok(None) if started.elapsed() < timeout => thread::sleep(Duration::from_millis(25)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
+    let child = command.spawn().ok()?;
+    let (exited, exit) = mpsc::channel();
+    let process = Watched::spawn(child, false, move |status, _| {
+        let _ = exited.send(status);
+    });
+    let status = match exit.recv_timeout(timeout) {
+        Ok(status) => status.ok()?,
+        Err(_) => {
+            process.kill();
+            // The reaper reports once the killed child is gone.
+            let _ = exit.recv();
+            return None;
         }
+    };
+    if !status.success() {
+        return None;
     }
     output.rewind().ok()?;
     let mut text = String::new();
@@ -544,55 +699,15 @@ fn probe(bin: &Path, args: &[&str], timeout: Duration) -> Option<String> {
     Some(text)
 }
 
-pub use crate::notes::{Course, Preview, read_preview, scan_library};
-
-/// macOS「始终显示滚动条」系统偏好（states-and-motion 滚动条契约要求尊重该偏好）。
-/// 首次调用在后台线程读取 `defaults`，渲染期只读缓存值；读到之前与非 macOS 均按
-/// Automatic（滚动时显示）。
-pub fn scrollbars_always_visible() -> bool {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    static ALWAYS: AtomicBool = AtomicBool::new(false);
-    static PROBE: std::sync::Once = std::sync::Once::new();
-    if cfg!(target_os = "macos") {
-        PROBE.call_once(|| {
-            thread::spawn(|| {
-                let always = Command::new("defaults")
-                    .args(["read", "-g", "AppleShowScrollBars"])
-                    .stdin(Stdio::null())
-                    .stderr(Stdio::null())
-                    .output()
-                    .ok()
-                    .filter(|out| out.status.success())
-                    .is_some_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "Always");
-                ALWAYS.store(always, Ordering::Relaxed);
-            });
-        });
-    }
-    ALWAYS.load(Ordering::Relaxed)
-}
-
-/// 滚动条模式：常显偏好→Always；其余滚动时显示、闲置淡出。
-pub(crate) fn vertical_scrollbar(handle: &gpui::ScrollHandle) -> gpui_component::scroll::Scrollbar {
-    vertical_scrollbar_for(handle)
-}
-
-/// 任意 ScrollbarHandle（含 gpui::ListState 虚拟列表）都走同一模式决策：
-/// 系统「始终显示滚动条」偏好开启时常驻，否则滚动时显示。
-pub(crate) fn vertical_scrollbar_for<H: gpui_component::scroll::ScrollbarHandle + Clone>(
-    handle: &H,
-) -> gpui_component::scroll::Scrollbar {
-    use gpui_component::scroll::{Scrollbar, ScrollbarMode};
-    Scrollbar::vertical(handle).mode(if scrollbars_always_visible() {
-        ScrollbarMode::Always
-    } else {
-        ScrollbarMode::Scrolling
-    })
-}
+// Render pages still name the scrollbar helpers through this module.
+pub(crate) use crate::scroll::{
+    scrollbars_always_visible, vertical_scrollbar, vertical_scrollbar_for,
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notes::PreviewBlock;
+    use crate::notes::{Course, PreviewBlock, read_preview};
     use std::time::SystemTime;
 
     #[test]
@@ -615,6 +730,7 @@ mod tests {
             true,
             std::sync::Arc::new(Redactions(vec![])),
             wake,
+            mpsc::channel().0,
         )
         .join()
         .unwrap();
@@ -650,6 +766,7 @@ mod tests {
             true,
             redactions.clone(),
             wake,
+            mpsc::channel().0,
         );
         handle.join().unwrap();
         match rx.recv().unwrap() {
@@ -830,6 +947,75 @@ mod tests {
             }
         }
         assert_eq!(lines, 901);
+    }
+
+    #[test]
+    fn task_redaction_covers_every_typed_credential() {
+        let mut request: course2md::execution::Request =
+            serde_json::from_value(serde_json::json!({
+                "schema": 1,
+                "task_id": "task",
+                "course_id": "course",
+                "version_id": "version",
+                "source": "lecture.mp4",
+                "source_id": "source",
+                "title": "Lecture",
+                "work_dir": "/tmp/work",
+                "course_dir": "/tmp/course",
+                "config": course2md::settings::ConfigFile::default(),
+            }))
+            .unwrap();
+        request.config.llm.api_key = "llm-only-secret".into();
+        request.config.asr_api.api_key = "asr-only-secret".into();
+        let clean = Redactions::for_request(&request)
+            .line("proofreading llm-only-secret, speech asr-only-secret");
+        assert!(!clean.contains("only-secret"), "{clean}");
+        assert_eq!(clean.matches("[已隐藏密钥]").count(), 2);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_oversized_request_cannot_deadlock_against_engine_output() {
+        // cat echoes its input: written before the readers, this request would
+        // fill both pipes and block forever.
+        let line = "x".repeat(63);
+        let lines = 64 * 1024;
+        let input = format!("{line}\n").repeat(lines).into_bytes();
+        let (wake, _) = smol::channel::bounded(1);
+        let job = Job::spawn_input(
+            "/bin/cat".into(),
+            vec![],
+            Some(input),
+            Redactions(vec![]),
+            wake,
+        )
+        .unwrap();
+        let mut echoed = 0;
+        loop {
+            match job.events.recv_timeout(Duration::from_secs(20)).unwrap() {
+                Event::Engine(EngineEvent::Log { .. }) => echoed += 1,
+                Event::Exit { success, cancelled } => {
+                    assert!(success && !cancelled);
+                    break;
+                }
+                other => panic!("unexpected event {other:?}"),
+            }
+        }
+        assert_eq!(echoed, lines);
+    }
+
+    #[test]
+    fn probe_reports_output_and_times_out_without_polling() {
+        #[cfg(unix)]
+        {
+            let started = Instant::now();
+            assert_eq!(
+                probe(Path::new("/bin/echo"), &["ready"], Duration::from_secs(5)).as_deref(),
+                Some("ready\n")
+            );
+            assert!(probe(Path::new("/bin/sleep"), &["5"], Duration::from_millis(200)).is_none());
+            assert!(started.elapsed() < Duration::from_secs(3));
+        }
     }
 
     #[test]

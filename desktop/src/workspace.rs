@@ -547,6 +547,9 @@ pub struct State {
     pub reader_sources: BTreeMap<String, PathBuf>,
     pub collapsed: BTreeSet<String>,
     pub storage_backups: Vec<crate::storage::BackupRecord>,
+    /// Startup reconciliation has not been applied yet; nothing is dispatched.
+    #[serde(skip)]
+    pub reconciling: bool,
 }
 
 impl State {
@@ -571,6 +574,7 @@ impl State {
             reader_sources: BTreeMap::new(),
             collapsed: BTreeSet::new(),
             storage_backups: Vec::new(),
+            reconciling: false,
         }
     }
 
@@ -603,6 +607,9 @@ impl State {
         self.tasks.iter_mut().find(|t| t.id == id)
     }
     pub fn next_task(&self) -> Option<&TaskRecord> {
+        if self.reconciling {
+            return None;
+        }
         self.tasks.iter().find(|t| {
             t.state == TaskState::Queued && t.intent == Intent::Run && t.handled_by.is_none()
         })
@@ -1144,16 +1151,46 @@ pub struct PreparedLibrary {
 }
 
 pub struct Workspace {
-    pub state: State,
+    pub state: SharedState,
     pub recovery: Option<String>,
     path: PathBuf,
     /// Last mirror attempt per task and registered location. A normal input
     /// save must not probe the disks holding every historical task.
     mirror_snapshots: MirrorSnapshots,
-    /// Last successful record save; high-frequency saves skip the disk until
-    /// this ages past their interval.
+    /// Last progress save; high-frequency saves skip the writer until this
+    /// ages past their interval.
     last_write: Cell<Option<Instant>>,
-    writer: WorkspaceWriter,
+    writer: Box<dyn Writer>,
+    /// Identifies this opened record, so findings for a record that was
+    /// replaced meanwhile are not applied to its successor.
+    identity: u64,
+}
+
+/// The current state, shared with the record writer without copying. Reads go
+/// through `Deref`; a direct edit copies the state only while the writer still
+/// holds that snapshot.
+pub struct SharedState(std::sync::Arc<State>);
+
+impl std::ops::Deref for SharedState {
+    type Target = State;
+    fn deref(&self) -> &State {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for SharedState {
+    fn deref_mut(&mut self) -> &mut State {
+        std::sync::Arc::make_mut(&mut self.0)
+    }
+}
+impl Serialize for SharedState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+impl PartialEq<State> for SharedState {
+    fn eq(&self, other: &State) -> bool {
+        *self.0 == *other
+    }
 }
 
 type MirrorSnapshots =
@@ -1167,129 +1204,122 @@ struct WriterCache {
     last_draft_subtitle: Option<course2md::subtitle::CachedSubtitle>,
 }
 
+/// Where a writer puts the record, and what it remembers between writes.
+pub(crate) struct WriterTarget {
+    path: PathBuf,
+    mirrors: MirrorSnapshots,
+    cache: std::sync::Mutex<WriterCache>,
+    error: std::sync::Mutex<Option<String>>,
+    wake: std::sync::Mutex<Option<smol::channel::Sender<()>>>,
+}
+
+impl WriterTarget {
+    fn new(path: PathBuf, mirrors: MirrorSnapshots) -> Self {
+        Self {
+            path,
+            mirrors,
+            cache: std::sync::Mutex::new(WriterCache {
+                last_record: None,
+                last_draft_subtitle: None,
+            }),
+            error: Default::default(),
+            wake: Default::default(),
+        }
+    }
+
+    /// Writes one state; a failure is kept for `take_error` and wakes the UI.
+    fn write(&self, state: &State) -> Result<()> {
+        let mut cache = course2md::runtime::lock_recover(&self.cache);
+        let result = Workspace::write_state(&self.path, state, &self.mirrors, &mut cache);
+        if let Err(error) = &result {
+            *course2md::runtime::lock_recover(&self.error) = Some(format!("{error:#}"));
+            if let Some(wake) = course2md::runtime::lock_recover(&self.wake).as_ref() {
+                let _ = wake.try_send(());
+            }
+        }
+        result
+    }
+
+    fn take_error(&self) -> Option<String> {
+        course2md::runtime::lock_recover(&self.error).take()
+    }
+}
+
+/// Persists workspace states. Production uses [`ThreadWriter`]; tests inject
+/// [`InlineWriter`] through `Workspace::open_with`.
+pub(crate) trait Writer: Send {
+    fn start(target: WriterTarget) -> Self
+    where
+        Self: Sized;
+    /// Queues `state`; a newer state replaces one not yet written.
+    fn enqueue(&self, state: std::sync::Arc<State>);
+    /// Writes anything queued and waits for it.
+    fn flush(&self) -> Result<()>;
+    /// The last write failure not yet reported.
+    fn take_error(&self) -> Option<String>;
+    fn set_wake(&self, wake: smol::channel::Sender<()>);
+}
+
 enum WriterSignal {
     Wake,
     Flush(std::sync::mpsc::Sender<Result<()>>),
     Stop,
 }
 
-struct WorkspaceWriter {
-    path: PathBuf,
-    mirrors: MirrorSnapshots,
-    pending: std::sync::Arc<std::sync::Mutex<Option<State>>>,
-    signals: Option<std::sync::mpsc::Sender<WriterSignal>>,
-    error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
-    sync_cache: Option<std::sync::Mutex<WriterCache>>,
+/// Writes on one background thread and coalesces states queued meanwhile.
+pub(crate) struct ThreadWriter {
+    target: std::sync::Arc<WriterTarget>,
+    pending: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<State>>>>,
+    signals: std::sync::mpsc::Sender<WriterSignal>,
 }
 
-impl WorkspaceWriter {
-    fn new(path: PathBuf, mirrors: MirrorSnapshots) -> Self {
-        let pending = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let error = std::sync::Arc::new(std::sync::Mutex::new(None));
-        // Unit tests keep the synchronous contract they assert against.
-        if cfg!(test) {
-            return Self {
-                path,
-                mirrors,
-                pending,
-                signals: None,
-                error,
-                sync_cache: Some(std::sync::Mutex::new(WriterCache {
-                    last_record: None,
-                    last_draft_subtitle: None,
-                })),
-            };
-        }
+impl Writer for ThreadWriter {
+    fn start(target: WriterTarget) -> Self {
+        let target = std::sync::Arc::new(target);
+        let pending: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<State>>>> =
+            Default::default();
         let (signals, rx) = std::sync::mpsc::channel();
-        let thread_path = path.clone();
-        let thread_mirrors = std::sync::Arc::clone(&mirrors);
+        let thread_target = std::sync::Arc::clone(&target);
         let thread_pending = std::sync::Arc::clone(&pending);
-        let thread_error = std::sync::Arc::clone(&error);
         std::thread::Builder::new()
             .name("course2md-workspace-writer".into())
             .spawn(move || {
-                let mut cache = WriterCache {
-                    last_record: None,
-                    last_draft_subtitle: None,
-                };
-                let write = |state: State, cache: &mut WriterCache| -> Result<()> {
-                    Workspace::write_state(&thread_path, &state, &thread_mirrors, cache)
+                let write_pending = || {
+                    course2md::runtime::lock_recover(&thread_pending)
+                        .take()
+                        .map_or(Ok(()), |state| thread_target.write(&state))
                 };
                 while let Ok(signal) = rx.recv() {
                     match signal {
                         WriterSignal::Stop => {
-                            if let Some(state) =
-                                thread_pending.lock().ok().and_then(|mut p| p.take())
-                                && let Err(error) = write(state, &mut cache)
-                            {
-                                *thread_error.lock().unwrap() = Some(format!("{error:#}"));
-                            }
+                            let _ = write_pending();
                             break;
                         }
                         WriterSignal::Wake => {
-                            if let Some(state) =
-                                thread_pending.lock().ok().and_then(|mut p| p.take())
-                                && let Err(error) = write(state, &mut cache)
-                            {
-                                *thread_error.lock().unwrap() = Some(format!("{error:#}"));
-                            }
+                            let _ = write_pending();
                         }
                         WriterSignal::Flush(ack) => {
-                            let result = thread_pending
-                                .lock()
-                                .ok()
-                                .and_then(|mut p| p.take())
-                                .map_or(Ok(()), |state| write(state, &mut cache));
-                            if let Err(error) = &result {
-                                *thread_error.lock().unwrap() = Some(format!("{error:#}"));
-                            }
-                            let _ = ack.send(result);
+                            let _ = ack.send(write_pending());
                         }
                     }
                 }
             })
             .expect("workspace writer thread");
         Self {
-            path,
-            mirrors,
+            target,
             pending,
-            signals: Some(signals),
-            error,
-            sync_cache: None,
+            signals,
         }
     }
 
-    fn enqueue(&self, state: State) {
-        if let Some(cache) = &self.sync_cache {
-            let result = cache
-                .lock()
-                .map_err(|_| anyhow::anyhow!("workspace writer cache poisoned"))
-                .and_then(|mut cache| {
-                    Workspace::write_state(&self.path, &state, &self.mirrors, &mut cache)
-                });
-            if let Err(error) = result {
-                *self.error.lock().unwrap() = Some(format!("{error:#}"));
-            }
-            return;
-        }
-        if let Ok(mut pending) = self.pending.lock() {
-            *pending = Some(state);
-        }
-        if let Some(signals) = &self.signals {
-            let _ = signals.send(WriterSignal::Wake);
-        }
+    fn enqueue(&self, state: std::sync::Arc<State>) {
+        *course2md::runtime::lock_recover(&self.pending) = Some(state);
+        let _ = self.signals.send(WriterSignal::Wake);
     }
 
     fn flush(&self) -> Result<()> {
-        if self.sync_cache.is_some() {
-            return match self.take_error() {
-                Some(error) => Err(anyhow::anyhow!(error)),
-                None => Ok(()),
-            };
-        }
         let (tx, rx) = std::sync::mpsc::channel();
-        if let Some(signals) = &self.signals
-            && signals.send(WriterSignal::Flush(tx)).is_ok()
+        if self.signals.send(WriterSignal::Flush(tx)).is_ok()
             && let Ok(result) = rx.recv()
         {
             return result;
@@ -1298,15 +1328,43 @@ impl WorkspaceWriter {
     }
 
     fn take_error(&self) -> Option<String> {
-        self.error.lock().ok().and_then(|mut error| error.take())
+        self.target.take_error()
+    }
+
+    fn set_wake(&self, wake: smol::channel::Sender<()>) {
+        *course2md::runtime::lock_recover(&self.target.wake) = Some(wake);
     }
 }
 
-impl Drop for WorkspaceWriter {
+impl Drop for ThreadWriter {
     fn drop(&mut self) {
-        if let Some(signals) = self.signals.take() {
-            let _ = signals.send(WriterSignal::Stop);
+        let _ = self.signals.send(WriterSignal::Stop);
+    }
+}
+
+/// Writes each state before `enqueue` returns.
+#[cfg(test)]
+pub(crate) struct InlineWriter(WriterTarget);
+
+#[cfg(test)]
+impl Writer for InlineWriter {
+    fn start(target: WriterTarget) -> Self {
+        Self(target)
+    }
+    fn enqueue(&self, state: std::sync::Arc<State>) {
+        let _ = self.0.write(&state);
+    }
+    fn flush(&self) -> Result<()> {
+        match self.0.take_error() {
+            Some(error) => Err(anyhow::anyhow!(error)),
+            None => Ok(()),
         }
+    }
+    fn take_error(&self) -> Option<String> {
+        self.0.take_error()
+    }
+    fn set_wake(&self, wake: smol::channel::Sender<()>) {
+        *course2md::runtime::lock_recover(&self.0.wake) = Some(wake);
     }
 }
 
@@ -1460,9 +1518,26 @@ fn create_library_marker(location: &LibraryLocation) -> Result<()> {
     check_library(location)
 }
 
-fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Result<()> {
+/// What the library holds for a task, read without changing the record.
+#[derive(Clone)]
+enum ArtifactFact {
+    Nothing,
+    Published {
+        version: PathBuf,
+        outcomes: Box<course2md::artifact::Outcomes>,
+        partial: bool,
+    },
+    Exports {
+        base: PathBuf,
+        outcomes: BTreeMap<String, course2md::artifact::Outcome>,
+    },
+}
+
+/// The published result of a task, if any. Reads and hashes files; the
+/// result is applied by `apply_artifact`.
+fn probe_artifact(task: &TaskRecord, location: &LibraryLocation) -> Result<ArtifactFact> {
     if task.artifact.is_some() && !task.exports_only() {
-        return Ok(());
+        return Ok(ArtifactFact::Nothing);
     }
     let course = course_dir_name(&task.plan.source_id);
     let version = location.root.join(&course).join("versions").join(&task.id);
@@ -1473,16 +1548,11 @@ fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Resu
             course2md::tr!("已发布笔记与任务身份不匹配，原文件已保留")
         );
         course2md::artifact::validate_version(&version, &manifest)?;
-        task.artifact = Some(version);
-        task.outcomes = Some(manifest.outcomes);
-        task.state = if manifest.partial {
-            TaskState::Partial
-        } else {
-            TaskState::Complete
-        };
-        task.error = None;
-        task.unread = true;
-        return Ok(());
+        return Ok(ArtifactFact::Published {
+            version,
+            outcomes: Box::new(manifest.outcomes),
+            partial: manifest.partial,
+        });
     }
     if let course2md::execution::Operation::Reprocess {
         base_version_dir,
@@ -1509,11 +1579,8 @@ fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Resu
             .context(course2md::tr!("导出位置与任务记录不匹配"))?;
         for (format, outcome) in &mut record.outcomes {
             if outcome.status == course2md::artifact::Status::Succeeded {
-                let format = match format.as_str() {
-                    "md" => course2md::config::OutputFormat::Md,
-                    "html" => course2md::config::OutputFormat::Html,
-                    "json" => course2md::config::OutputFormat::Json,
-                    _ => continue,
+                let Some(format) = output_format(format) else {
+                    continue;
                 };
                 let expected = export_directory.join(course2md::portable::file_name(format));
                 if !expected.is_file() {
@@ -1523,33 +1590,81 @@ fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Resu
                 }
             }
         }
-        let next_state = if record.outcomes.values().any(failed_outcome) {
-            TaskState::Partial
-        } else {
-            TaskState::Complete
-        };
-        let previous = task.outcomes.clone();
-        task.artifact = Some(base_version_dir.clone());
-        task.outcomes
-            .get_or_insert_with(course2md::artifact::Outcomes::default)
-            .exports = record.outcomes;
-        task.unread |=
-            task.artifact.is_none() || task.outcomes != previous || task.state != next_state;
-        task.state = next_state;
+        return Ok(ArtifactFact::Exports {
+            base: base_version_dir.clone(),
+            outcomes: record.outcomes,
+        });
     }
+    Ok(ArtifactFact::Nothing)
+}
+
+fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
+    match fact {
+        ArtifactFact::Nothing => {}
+        // A result recorded meanwhile is newer than what startup found.
+        ArtifactFact::Published { .. } if task.artifact.is_some() && !task.exports_only() => {}
+        ArtifactFact::Published {
+            version,
+            outcomes,
+            partial,
+        } => {
+            task.artifact = Some(version);
+            task.outcomes = Some(*outcomes);
+            task.state = if partial {
+                TaskState::Partial
+            } else {
+                TaskState::Complete
+            };
+            task.error = None;
+            task.unread = true;
+        }
+        ArtifactFact::Exports { base, outcomes } => {
+            let next_state = if outcomes.values().any(failed_outcome) {
+                TaskState::Partial
+            } else {
+                TaskState::Complete
+            };
+            let previous = task.outcomes.clone();
+            let previous_artifact = task.artifact.replace(base);
+            task.outcomes
+                .get_or_insert_with(course2md::artifact::Outcomes::default)
+                .exports = outcomes;
+            task.unread |= previous_artifact != task.artifact
+                || task.outcomes != previous
+                || task.state != next_state;
+            task.state = next_state;
+        }
+    }
+}
+
+fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Result<()> {
+    let fact = probe_artifact(task, location)?;
+    apply_artifact(task, fact);
     Ok(())
 }
 
-pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
+/// The output format a saved export outcome is keyed by, parsed with the
+/// engine's own serialized spelling.
+fn output_format(key: &str) -> Option<course2md::config::OutputFormat> {
+    use serde::de::IntoDeserializer;
+    course2md::config::OutputFormat::deserialize(
+        IntoDeserializer::<serde::de::value::Error>::into_deserializer(key),
+    )
+    .ok()
+}
+
+/// Requests whose result is unknown, read from the task's receipts.
+fn uncertain_requests(task: &TaskRecord) -> Result<Vec<BlockedRequest>> {
     let receipts = course2md::dispatch::receipts(&task.work_dir)?;
-    task.blocked.retain(|request| !request.is_uncertain());
-    for receipt in receipts.into_iter().filter(|r| {
-        matches!(
-            r.state,
-            course2md::dispatch::State::Sending | course2md::dispatch::State::Uncertain
-        )
-    }) {
-        task.blocked.push(BlockedRequest {
+    Ok(receipts
+        .into_iter()
+        .filter(|r| {
+            matches!(
+                r.state,
+                course2md::dispatch::State::Sending | course2md::dispatch::State::Uncertain
+            )
+        })
+        .map(|receipt| BlockedRequest {
             reason: BlockReason::Uncertain,
             request_id: Some(receipt.request_id),
             purpose: Some(receipt.purpose),
@@ -1568,13 +1683,87 @@ pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
                         .unwrap_or_else(|| { course2md::tr!("请求结果未确认").into() })
                 )
             },
-        });
-    }
+        })
+        .collect())
+}
+
+fn apply_receipts(task: &mut TaskRecord, uncertain: Vec<BlockedRequest>) {
+    task.blocked.retain(|request| !request.is_uncertain());
+    task.blocked.extend(uncertain);
     if !task.blocked.is_empty() && task.has_uncertain() && task.intent == Intent::Run {
         task.state = TaskState::Uncertain;
         task.unread = true;
     }
+}
+
+pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
+    let uncertain = uncertain_requests(task)?;
+    apply_receipts(task, uncertain);
     Ok(())
+}
+
+/// What startup found on disk for one task.
+struct TaskFacts {
+    task_id: String,
+    found: Result<(ArtifactFact, Vec<BlockedRequest>), String>,
+}
+
+impl TaskFacts {
+    fn apply(self, task: &mut TaskRecord) {
+        match self.found {
+            Ok((artifact, uncertain)) => {
+                apply_artifact(task, artifact);
+                apply_receipts(task, uncertain);
+            }
+            Err(error) => {
+                task.state = TaskState::NeedsAttention;
+                task.error = Some(course2md::tr!(
+                    "请求记录暂时无法读取，尚未发送新请求：{}",
+                    error
+                ));
+            }
+        }
+    }
+}
+
+/// Startup checks of published results and request receipts. They read and
+/// hash every published asset, so they run on a blocking thread after the
+/// window opens; meanwhile the UI shows the last persisted state and no task
+/// is dispatched (`State::next_task` waits for them).
+pub struct Reconciliation {
+    workspace: u64,
+    tasks: Vec<(TaskRecord, Option<LibraryLocation>)>,
+}
+
+/// The findings of a [`Reconciliation`], applied by `Workspace::apply_reconciliation`.
+pub struct Reconciled {
+    workspace: u64,
+    facts: Vec<TaskFacts>,
+}
+
+impl Reconciliation {
+    /// Blocking: run through `crate::spawn_blocking_io`.
+    pub fn run(self) -> Reconciled {
+        Reconciled {
+            workspace: self.workspace,
+            facts: self
+                .tasks
+                .into_iter()
+                .map(|(task, location)| {
+                    let found = location
+                        .map_or(Ok(ArtifactFact::Nothing), |location| {
+                            probe_artifact(&task, &location)
+                        })
+                        .and_then(|artifact| Ok((artifact, uncertain_requests(&task)?)))
+                        .map_err(|error| format!("{error:#}"));
+                    TaskFacts {
+                        task_id: task.id,
+                        found,
+                    }
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Move inline subtitle events of submitted tasks into their work directories.
@@ -1747,6 +1936,14 @@ impl Workspace {
     }
 
     pub fn rebuild_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
+        Self::rebuild_with::<ThreadWriter>(path, root, options)
+    }
+
+    pub(crate) fn rebuild_with<W: Writer + 'static>(
+        path: PathBuf,
+        root: PathBuf,
+        options: ConversionOptions,
+    ) -> Result<Self> {
         let parent = path
             .parent()
             .context(course2md::tr!("任务记录缺少保存目录"))?;
@@ -1970,16 +2167,31 @@ impl Workspace {
                 issues.join(course2md::tr!("；"))
             }
         );
+        Ok(Self::assemble::<W>(state, Some(recovery), path))
+    }
+
+    fn assemble<W: Writer + 'static>(
+        state: State,
+        recovery: Option<String>,
+        path: PathBuf,
+    ) -> Self {
         let mirror_snapshots: MirrorSnapshots = Default::default();
-        let writer = WorkspaceWriter::new(path.clone(), std::sync::Arc::clone(&mirror_snapshots));
-        Ok(Self {
-            state,
-            recovery: Some(recovery),
+        let writer = W::start(WriterTarget::new(
+            path.clone(),
+            std::sync::Arc::clone(&mirror_snapshots),
+        ));
+        Self {
+            state: SharedState(std::sync::Arc::new(state)),
+            recovery,
             path,
             mirror_snapshots,
             last_write: Cell::new(None),
-            writer,
-        })
+            writer: Box::new(writer),
+            identity: {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
+        }
     }
 
     pub fn open(root: PathBuf, options: ConversionOptions) -> Result<Self> {
@@ -1989,7 +2201,17 @@ impl Workspace {
             options,
         )
     }
+    /// Opens the record without reconciling it with the libraries; call
+    /// `reconciliation` and `apply_reconciliation` before work is dispatched.
     pub fn open_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
+        Self::open_with::<ThreadWriter>(path, root, options)
+    }
+
+    pub(crate) fn open_with<W: Writer + 'static>(
+        path: PathBuf,
+        root: PathBuf,
+        options: ConversionOptions,
+    ) -> Result<Self> {
         let mut recovery = None;
         if path.is_file()
             && let Ok(bytes) = read_record_bytes(&path)
@@ -2077,32 +2299,73 @@ impl Workspace {
         }
         hydrate_draft_subtitles(&mut state, &path);
         store_task_subtitles(&mut state);
-        for task in &mut state.tasks {
-            let result = state
-                .libraries
+        state.reconciling = !state.tasks.is_empty();
+        Ok(Self::assemble::<W>(state, recovery, path))
+    }
+
+    /// The startup checks still owed, to run on a blocking thread.
+    pub fn reconciliation(&self) -> Option<Reconciliation> {
+        self.state.reconciling.then(|| Reconciliation {
+            workspace: self.identity,
+            tasks: self
+                .state
+                .tasks
                 .iter()
-                .find(|location| location.id == task.plan.library_id)
-                .map(|location| reconcile_artifact(task, location))
-                .unwrap_or(Ok(()))
-                .and_then(|_| reconcile_receipts(task));
-            if let Err(error) = result {
-                task.state = TaskState::NeedsAttention;
-                task.error = Some(course2md::tr!(
-                    "请求记录暂时无法读取，尚未发送新请求：{}",
-                    format!("{error:#}")
-                ));
-            }
-        }
-        let mirror_snapshots: MirrorSnapshots = Default::default();
-        let writer = WorkspaceWriter::new(path.clone(), std::sync::Arc::clone(&mirror_snapshots));
-        Ok(Self {
-            state,
-            recovery,
-            path,
-            mirror_snapshots,
-            last_write: Cell::new(None),
-            writer,
+                .map(|task| {
+                    (
+                        task.clone(),
+                        self.state.library(&task.plan.library_id).cloned(),
+                    )
+                })
+                .collect(),
         })
+    }
+
+    /// Applies startup findings to the current records (which may have
+    /// changed meanwhile) and allows dispatch again. When the record cannot be
+    /// saved the findings still apply in memory, so the error is reported
+    /// without holding every task back.
+    pub fn apply_reconciliation(&mut self, reconciled: Reconciled) -> Result<()> {
+        if reconciled.workspace != self.identity {
+            return Ok(());
+        }
+        fn apply(state: &mut State, facts: Vec<TaskFacts>) {
+            for facts in facts {
+                if let Some(task) = state.task_mut(&facts.task_id) {
+                    facts.apply(task);
+                }
+            }
+            state.reconciling = false;
+        }
+        let mut facts = Some(reconciled.facts);
+        let result = self.transaction(|state| {
+            apply(state, facts.take().unwrap_or_default());
+            Ok(())
+        });
+        if let Some(facts) = facts.take().filter(|_| result.is_err()) {
+            apply(&mut self.state, facts);
+        }
+        result
+    }
+
+    /// `open_at` for tests: writes finish before each call returns and the
+    /// startup reconciliation has been applied.
+    #[cfg(test)]
+    pub(crate) fn open_at_inline(
+        path: PathBuf,
+        root: PathBuf,
+        options: ConversionOptions,
+    ) -> Result<Self> {
+        let mut workspace = Self::open_with::<InlineWriter>(path, root, options)?;
+        workspace.reconcile_now();
+        Ok(workspace)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reconcile_now(&mut self) {
+        if let Some(reconciliation) = self.reconciliation() {
+            self.apply_reconciliation(reconciliation.run()).unwrap();
+        }
     }
 
     fn read(path: &Path) -> Result<State> {
@@ -2128,27 +2391,45 @@ impl Workspace {
         }
         Ok(state)
     }
+    /// Edits a copy of the state and commits it once the writer has it. The
+    /// copy is the only deep clone: the writer shares the committed snapshot.
     pub fn transaction<T>(&mut self, edit: impl FnOnce(&mut State) -> Result<T>) -> Result<T> {
-        let mut next = self.state.clone();
+        let mut next = State::clone(&self.state);
         let result = edit(&mut next)?;
         store_task_subtitles(&mut next);
         compact_history(&mut next);
         next.revision = next.revision.wrapping_add(1);
-        self.writer.enqueue(next.clone());
+        let next = std::sync::Arc::new(next);
+        self.writer.enqueue(std::sync::Arc::clone(&next));
         if let Some(error) = self.writer.take_error() {
             return Err(anyhow::anyhow!(error));
         }
-        self.state = next;
+        self.state = SharedState(next);
         Ok(result)
     }
-    /// Durable save: enqueue the current state and wait for the writer.
+    /// Durable save: enqueue the current state and wait for the writer. Only
+    /// for leaving the app or an explicit retry; the event loop uses `save_soon`.
     pub fn save(&self) -> Result<()> {
-        self.writer.enqueue(self.state.clone());
-        self.writer.flush()
+        self.writer.enqueue(std::sync::Arc::clone(&self.state.0));
+        self.writer.flush()?;
+        match self.writer.take_error() {
+            Some(error) => Err(anyhow::anyhow!(error)),
+            None => Ok(()),
+        }
+    }
+    /// Queues the current state without waiting. Reports a failure of an
+    /// earlier write; a failure of this one arrives through `take_write_error`.
+    pub fn save_soon(&self) -> Result<()> {
+        self.last_write.set(Some(Instant::now()));
+        self.writer.enqueue(std::sync::Arc::clone(&self.state.0));
+        match self.writer.take_error() {
+            Some(error) => Err(anyhow::anyhow!(error)),
+            None => Ok(()),
+        }
     }
     /// Throttled progress save for the task event stream. Stage transitions,
-    /// completion and exit flush through `save`; steady progress reaches the
-    /// disk at most once per interval. Returns true when this call wrote.
+    /// completion and exit go through `save_soon`; steady progress reaches the
+    /// writer at most once per interval. Returns true when this call queued.
     pub fn save_progress(&self) -> Result<bool> {
         if self
             .last_write
@@ -2157,11 +2438,15 @@ impl Workspace {
         {
             return Ok(false);
         }
-        self.writer.enqueue(self.state.clone());
-        if let Some(error) = self.writer.take_error() {
-            anyhow::bail!(error);
-        }
-        Ok(true)
+        self.save_soon().map(|()| true)
+    }
+    /// A write failure that no call has reported yet. The writer wakes the
+    /// event loop (see `set_wake_sender`) when one occurs.
+    pub fn take_write_error(&self) -> Option<String> {
+        self.writer.take_error()
+    }
+    pub fn set_wake_sender(&self, wake: smol::channel::Sender<()>) {
+        self.writer.set_wake(wake);
     }
 
     fn write_state(
@@ -2445,7 +2730,7 @@ mod tests {
     fn failed_commit_does_not_publish_an_unpersisted_task() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("state");
-        let mut ws = Workspace::open_at(
+        let mut ws = Workspace::open_at_inline(
             target.clone(),
             dir.path().join("library"),
             Default::default(),
@@ -2461,7 +2746,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("state.json");
         let mut ws =
-            Workspace::open_at(file.clone(), dir.path().join("library"), Default::default())
+            Workspace::open_at_inline(file.clone(), dir.path().join("library"), Default::default())
                 .unwrap();
         let mut task = plan(&ws.state.default_library);
         task.config.asr_api.api_key = "asr-secret-do-not-store".into();
@@ -2474,7 +2759,7 @@ mod tests {
         })
         .unwrap();
         let restored =
-            Workspace::open_at(file.clone(), dir.path().into(), Default::default()).unwrap();
+            Workspace::open_at_inline(file.clone(), dir.path().into(), Default::default()).unwrap();
         assert_eq!(
             restored.state.task(&id).unwrap().plan.source.input,
             "lecture.mp4"
@@ -2610,7 +2895,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("state.json");
         let mut ws =
-            Workspace::open_at(file.clone(), dir.path().join("library"), Default::default())
+            Workspace::open_at_inline(file.clone(), dir.path().join("library"), Default::default())
                 .unwrap();
         ws.transaction(|state| {
             state
@@ -2637,7 +2922,8 @@ mod tests {
             translate: Some("en".into()),
             ..Default::default()
         };
-        let reopened = Workspace::open_at(file, dir.path().join("library"), defaults).unwrap();
+        let reopened =
+            Workspace::open_at_inline(file, dir.path().join("library"), defaults).unwrap();
         let options = &reopened.state.draft().unwrap().options;
         assert_eq!(options.translate.as_deref(), Some("en"));
         assert!(options.summarize);
@@ -3141,7 +3427,7 @@ mod tests {
     }
 
     fn test_workspace(dir: &Path) -> Workspace {
-        Workspace::open_at(
+        Workspace::open_at_inline(
             dir.join("workspace.json"),
             dir.join("library"),
             Default::default(),
@@ -3417,11 +3703,8 @@ mod tests {
     fn unknown_authorization_is_exact_and_cannot_be_reused_by_an_old_button() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Uncertain;
         let first = write_unknown(ws.state.task(&id).unwrap(), 1);
         ws.state
@@ -3453,11 +3736,8 @@ mod tests {
     fn published_result_after_crash_is_not_enqueued_again() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Running;
         ws.save().unwrap();
         let version = publish_note(&ws.state, &id, false);
@@ -3469,14 +3749,84 @@ mod tests {
     }
 
     #[test]
+    fn export_keys_parse_as_the_engine_spells_them() {
+        use course2md::config::OutputFormat;
+        for format in [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json] {
+            assert_eq!(output_format(&format.to_string()), Some(format));
+        }
+        assert_eq!(output_format("pdf"), None);
+        assert_eq!(output_format("MD"), None);
+    }
+
+    #[test]
+    fn startup_checks_run_later_and_hold_dispatch_until_applied() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let published = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let mut other = plan(&library);
+        other.source_id = "video-b".into();
+        other.title = "课程 B".into();
+        let queued = ws.state.enqueue(other, None).unwrap().0;
+        ws.state.task_mut(&published).unwrap().state = TaskState::Running;
+        ws.save().unwrap();
+        let version = publish_note(&ws.state, &published, false);
+        let open = || {
+            Workspace::open_with::<InlineWriter>(
+                dir.path().join("workspace.json"),
+                dir.path().join("library"),
+                Default::default(),
+            )
+            .unwrap()
+        };
+        let mut reopened = open();
+        // Opening does not hash the library; it dispatches nothing meanwhile.
+        assert!(reopened.state.task(&published).unwrap().artifact.is_none());
+        assert!(reopened.state.next_task().is_none());
+        let reconciliation = reopened.reconciliation().unwrap();
+        // Findings for a record that was replaced meanwhile are not applied.
+        let mut replaced = open();
+        let stale = replaced.reconciliation().unwrap();
+        reopened.apply_reconciliation(stale.run()).unwrap();
+        assert!(reopened.state.reconciling);
+        reopened.apply_reconciliation(reconciliation.run()).unwrap();
+        let task = reopened.state.task(&published).unwrap();
+        assert_eq!(task.state, TaskState::Complete);
+        assert_eq!(task.artifact.as_ref(), Some(&version));
+        assert_eq!(reopened.state.next_task().unwrap().id, queued);
+        replaced.reconcile_now();
+        assert!(!replaced.state.reconciling);
+    }
+
+    #[test]
+    fn a_failed_background_write_is_reported_without_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.json");
+        let ws = Workspace::open_at(path.clone(), dir.path().join("library"), Default::default())
+            .unwrap();
+        let (wake, woken) = smol::channel::bounded(1);
+        ws.set_wake_sender(wake);
+        // A directory in place of the record makes the write fail even as root.
+        std::fs::create_dir(&path).unwrap();
+        ws.save_soon().unwrap();
+        let woke = smol::block_on(smol::future::or(
+            async { woken.recv().await.is_ok() },
+            async {
+                smol::Timer::after(Duration::from_secs(10)).await;
+                false
+            },
+        ));
+        assert!(woke, "the writer wakes the event loop on failure");
+        assert!(ws.take_write_error().is_some());
+        assert!(ws.take_write_error().is_none());
+    }
+
+    #[test]
     fn partial_followup_is_single_and_does_not_rewrite_another_draft_or_successful_stage() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         let version = publish_note(&ws.state, &id, true);
         let outcomes = course2md::artifact::read_manifest(&version.join("manifest.json"))
             .unwrap()
@@ -3621,14 +3971,14 @@ mod tests {
         )
         .unwrap();
         assert!(
-            Workspace::open_at(
+            Workspace::open_at_inline(
                 ws.path.clone(),
                 dir.path().join("library"),
                 Default::default()
             )
             .is_err()
         );
-        let rebuilt = Workspace::rebuild_at(
+        let rebuilt = Workspace::rebuild_with::<InlineWriter>(
             ws.path.clone(),
             dir.path().join("library"),
             Default::default(),
@@ -3665,7 +4015,7 @@ mod tests {
             std::fs::read(archive.join("workspace.json.bak")).unwrap(),
             b"{broken backup"
         );
-        let reopened = Workspace::open_at(
+        let reopened = Workspace::open_at_inline(
             ws.path.clone(),
             dir.path().join("library"),
             Default::default(),
@@ -3679,11 +4029,8 @@ mod tests {
     fn mirror_failure_keeps_primary_record_and_offline_location_is_not_recreated() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.save().unwrap();
         let bytes = std::fs::read(ws.storage_path()).unwrap();
         let mirror = ws
@@ -3712,11 +4059,8 @@ mod tests {
     fn backup_recovery_does_not_assume_a_lost_final_run_intent() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Running;
         ws.save().unwrap();
         ws.save().unwrap();
@@ -3730,11 +4074,8 @@ mod tests {
     fn older_parent_links_recover_to_latest_followup_without_requeuing_parent() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let parent = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let parent = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&parent).unwrap().state = TaskState::NeedsAttention;
         let mut changed = plan(&ws.state.default_library);
         changed.title = "changed display title".into();
@@ -3754,11 +4095,8 @@ mod tests {
         use course2md::config::OutputFormat;
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         let version = publish_note(&ws.state, &id, false);
         let original = ws.state.task_mut(&id).unwrap();
         original.state = TaskState::Partial;
@@ -3799,11 +4137,8 @@ mod tests {
         use course2md::{artifact, config::OutputFormat, portable};
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Running;
         ws.save().unwrap();
         let outcomes = artifact::Outcomes {
@@ -3849,11 +4184,8 @@ mod tests {
         use course2md::{artifact, config::OutputFormat, portable};
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         let mut outcomes = artifact::Outcomes {
             transcript: artifact::Outcome::succeeded(),
             ..Default::default()
@@ -3976,7 +4308,7 @@ mod tests {
         let bytes = serde_json::to_vec(&future).unwrap();
         std::fs::write(ws.storage_path(), &bytes).unwrap();
         assert!(
-            Workspace::open_at(
+            Workspace::open_at_inline(
                 ws.path.clone(),
                 dir.path().join("library"),
                 Default::default()
@@ -3984,7 +4316,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            Workspace::rebuild_at(
+            Workspace::rebuild_with::<InlineWriter>(
                 ws.path.clone(),
                 dir.path().join("library"),
                 Default::default()

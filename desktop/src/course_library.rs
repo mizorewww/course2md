@@ -646,9 +646,9 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(root) = self
+        let Some((root, library_id)) = self
             .course_location(&course)
-            .map(|library| library.root.clone())
+            .map(|library| (library.root.clone(), library.id.clone()))
         else {
             self.message = Some(
                 course2md::tr!("这份笔记的保存位置暂时无法确认，请在笔记库菜单中重新扫描。").into(),
@@ -660,14 +660,8 @@ impl Desktop {
             .manifest
             .as_ref()
             .map(|manifest| manifest.source_id.as_str());
-        let busy = source.is_some_and(|source| {
-            self.workspace.as_ref().is_some_and(|workspace| {
-                workspace.state.tasks.iter().any(|task| {
-                    !task.state.finished()
-                        && task.plan.source_id == source
-                        && task.plan.library_id == root.to_string_lossy()
-                })
-            })
+        let busy = self.workspace.as_ref().is_some_and(|workspace| {
+            note_has_unfinished_task(&workspace.state.tasks, &library_id, source)
         });
         if busy {
             self.message =
@@ -2908,11 +2902,77 @@ impl Desktop {
     }
 }
 
+/// Whether an unfinished task is still writing a version of the note with
+/// `source_id` into the library `library_id`. Tasks name their library by
+/// `LibraryLocation::id`, never by its path.
+pub(crate) fn note_has_unfinished_task(
+    tasks: &[crate::workspace::TaskRecord],
+    library_id: &str,
+    source_id: Option<&str>,
+) -> bool {
+    source_id.is_some_and(|source| {
+        tasks.iter().any(|task| {
+            !task.state.finished()
+                && task.plan.source_id == source
+                && task.plan.library_id == library_id
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{LibraryGroupBody, LibraryGroupHeader, LibraryItem, LibraryRow};
     use crate::notes::Course;
     use std::time::SystemTime;
+
+    #[test]
+    fn a_note_with_a_running_task_is_not_trashed() {
+        use crate::workspace::{Intent, TaskPlan, TaskRecord, TaskState};
+        let task = |state: TaskState| TaskRecord {
+            id: "task-1".into(),
+            plan: TaskPlan {
+                operation: Default::default(),
+                source: Default::default(),
+                source_id: "video-a".into(),
+                title: "Course A".into(),
+                library_id: "library-1".into(),
+                folder: None,
+                options: Default::default(),
+                subtitle: None,
+                config: Default::default(),
+                asr_service: None,
+                ai_service: None,
+            },
+            state,
+            intent: Intent::Run,
+            created: 0,
+            updated: 0,
+            parent: None,
+            handled_by: None,
+            work_dir: "/tmp/work".into(),
+            stages: Default::default(),
+            error: None,
+            artifact: None,
+            outcomes: None,
+            unread: false,
+            logs: vec![],
+            blocked: vec![],
+            resend: vec![],
+        };
+        let busy = super::note_has_unfinished_task;
+        let running = [task(TaskState::Running)];
+        assert!(busy(&running, "library-1", Some("video-a")));
+        // The old guard compared the id with the library's root path.
+        assert!(!busy(&running, "/Users/someone/Notes", Some("video-a")));
+        assert!(!busy(&running, "library-2", Some("video-a")));
+        assert!(!busy(&running, "library-1", Some("video-b")));
+        assert!(!busy(&running, "library-1", None));
+        assert!(!busy(
+            &[task(TaskState::Complete)],
+            "library-1",
+            Some("video-a")
+        ));
+    }
 
     fn course(dir: &str) -> Course {
         Course {

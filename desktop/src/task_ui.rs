@@ -4024,7 +4024,7 @@ impl Desktop {
                 if unknown_component {
                     continue;
                 }
-                let reason = activity::component_failure_message(label, outcome.message.as_deref());
+                let reason = activity::outcome_failure_message(label, outcome);
                 let ai_component = ai_component(component).is_some();
                 if !(requires_repair && ai_component) {
                     details = details.child(
@@ -4531,10 +4531,7 @@ impl Desktop {
                     task_component_failures(task)
                         .into_iter()
                         .map(|(component, label, outcome)| {
-                            let reason = activity::component_failure_message(
-                                &label,
-                                outcome.message.as_deref(),
-                            );
+                            let reason = activity::outcome_failure_message(&label, &outcome);
                             (component, label, reason)
                         })
                         .collect()
@@ -4885,7 +4882,7 @@ fn ensure_asr_capability(
             course2md::tr!("CPU 识别引擎尚未安装。请在设置的「应用」中查看安装方法。")
         ),
         AsrProvider::Npu => ensure!(
-            environment.npu,
+            environment.npu(),
             course2md::tr!("没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。")
         ),
         AsrProvider::Api => (),
@@ -5554,7 +5551,7 @@ mod tests {
         let file = dir.path().join("workspace.json");
         let root = dir.path().join("library");
         let mut workspace =
-            Workspace::open_at(file.clone(), root.clone(), Default::default()).unwrap();
+            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
         let a = source("https://example.test/video-a", "课程 A");
         let b = source("https://example.test/video-b", "课程 B");
         let id = workspace
@@ -5599,7 +5596,8 @@ mod tests {
                 })
                 .unwrap();
         }
-        workspace = Workspace::open_at(file.clone(), root.clone(), Default::default()).unwrap();
+        workspace =
+            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
         assert!(!workspace.state.draft().unwrap().custom_title);
         assert!(workspace.state.draft().unwrap().source.is_none());
         workspace
@@ -5613,7 +5611,7 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        let restored = Workspace::open_at(file, root, Default::default()).unwrap();
+        let restored = Workspace::open_at_inline(file, root, Default::default()).unwrap();
         let draft = restored.state.draft().unwrap();
         assert_eq!(draft.title, "课程 B");
         assert!(!draft.custom_title);

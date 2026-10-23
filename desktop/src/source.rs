@@ -330,27 +330,35 @@ fn command_once(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
+        command.creation_flags(crate::backend::CREATE_NO_WINDOW);
     }
-    let mut child = command.spawn().map_err(|error| {
+    let child = command.spawn().map_err(|error| {
         eprintln!("cannot start {name}: {error}");
         anyhow::anyhow!(course2md::tr!(
             "缺少读取视频所需的组件，请在设置中检查运行环境"
         ))
     })?;
+    let (exited, exit) = std::sync::mpsc::channel();
+    let process = crate::backend::Watched::spawn(child, true, move |status, _| {
+        let _ = exited.send(status);
+    });
+    // Exit is delivered the moment the reaper sees it. The caller's cancel flag
+    // is a plain atomic, so it is still sampled between waits.
+    const CANCEL_CHECK: Duration = Duration::from_millis(100);
     let status = loop {
-        if cancel.load(Ordering::Relaxed) || start.elapsed() > PREVIEW_TIMEOUT {
-            crate::backend::terminate(&mut child);
-            let _ = child.wait();
+        if cancel.load(Ordering::Relaxed) || start.elapsed() >= PREVIEW_TIMEOUT {
+            process.kill();
+            let _ = exit.recv();
             check_preview_deadline(cancel, start)?;
         }
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(e) => {
-                crate::backend::terminate(&mut child);
-                let _ = child.wait();
-                return Err(e.into());
+        let wait = PREVIEW_TIMEOUT
+            .saturating_sub(start.elapsed())
+            .min(CANCEL_CHECK);
+        match exit.recv_timeout(wait) {
+            Ok(status) => break status?,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                anyhow::bail!(crate::interrupted())
             }
         }
     };
