@@ -310,7 +310,7 @@ fn run_blocking(
         &base,
         SERVER_READY_TIMEOUT,
         &mut child,
-        Some("\"status\":\"ok\""),
+        Some("ok"),
         Some(&crate::dispatch::check_control),
     ) {
         if e.downcast_ref::<crate::dispatch::Failure>().is_some() {
@@ -832,8 +832,17 @@ fn caps_from_help(help: &str) -> LlamaServerCaps {
 /// 探测失败（旧版无 --help 文本、超时、启动失败）→ 全 false，只保留 `-ngl`，
 /// 不阻断主流程。
 fn llama_server_caps(bin: &Path) -> LlamaServerCaps {
-    static CAPS: std::sync::OnceLock<LlamaServerCaps> = std::sync::OnceLock::new();
-    *CAPS.get_or_init(|| match probe_help_text(bin) {
+    // Keyed by binary: a different llama-server (a changed setting or upgrade)
+    // must be probed again rather than reuse another build's flags.
+    static CAPS: std::sync::Mutex<Vec<(PathBuf, LlamaServerCaps)>> =
+        std::sync::Mutex::new(Vec::new());
+    if let Some((_, caps)) = crate::runtime::lock_recover(&CAPS)
+        .iter()
+        .find(|(path, _)| path == bin)
+    {
+        return *caps;
+    }
+    let caps = match probe_help_text(bin) {
         Some(text) => {
             let caps = caps_from_help(&text);
             tracing::debug!(
@@ -848,7 +857,9 @@ fn llama_server_caps(bin: &Path) -> LlamaServerCaps {
             tracing::debug!("llama-server --help 探测失败，按旧版处理（仅 -ngl）");
             LlamaServerCaps::default()
         }
-    })
+    };
+    crate::runtime::lock_recover(&CAPS).push((bin.to_path_buf(), caps));
+    caps
 }
 
 /// 超时或非零退出返回 None（按旧版处理）。
@@ -869,7 +880,6 @@ pub(crate) struct OffloadOpts {
     pub mmproj_offload: bool,
 }
 
-/// 最近一次 llama-server spawn 的完整参数（诊断用：失败 run.json 附带）。
 /// 组装 llama-server 启动参数（纯函数，便于单测）：
 /// - gpu 后端：`-ngl <gpu_layers>`；mmproj_offload=false 且 llama.cpp 支持时
 ///   追加 `--no-mmproj-offload`
