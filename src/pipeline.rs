@@ -117,10 +117,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         cfg.asr_api.api_key = key;
     }
     cfg.resume = true;
-    let _dispatch = crate::dispatch::install(&cfg.out_dir, None, &Default::default())?;
-    std::fs::create_dir_all(&cfg.out_dir)?;
-    let _lock = crate::runtime::lock_file(&cfg.out_dir.join(".task.lock"))?;
-    execution::bind_work_dir(&cfg.out_dir, &binding)?;
+    let _work = execution::enter_work_dir(&cfg.out_dir, &binding, None, &Default::default())?;
     let record = FailureRecord {
         cfg: &cfg,
         is_local,
@@ -152,13 +149,16 @@ pub(crate) async fn run_task(request: &execution::Request, cfg: &PipelineConfig)
     // The caller (`execution::run`) validates through `Request::resolve`.
     let started = Instant::now();
     let target = Target::from_request(request);
-    std::fs::create_dir_all(&cfg.out_dir)?;
-    let _lock = crate::runtime::lock_file(&cfg.out_dir.join(".task.lock"))?;
     let binding = {
         let (request, cfg) = (request.clone(), cfg.clone());
         blocking(move || request.binding(&cfg)).await?
     };
-    execution::bind_work_dir(&cfg.out_dir, &binding)?;
+    let _work = execution::enter_work_dir(
+        &cfg.out_dir,
+        &binding,
+        request.control_path.as_deref(),
+        &request.service_versions,
+    )?;
     let is_local = Path::new(&request.source).is_file();
     let meta = VideoMeta {
         title: request.title.clone(),
@@ -172,10 +172,12 @@ pub(crate) async fn run_task(request: &execution::Request, cfg: &PipelineConfig)
         },
         id: request.source_id.clone(),
     };
+    // The record outlives `meta`, which moves into the task.
+    let platform = meta.extractor.clone();
     let record = FailureRecord {
         cfg,
         is_local,
-        platform: &meta.extractor.clone(),
+        platform: &platform,
         id: &request.source_id,
         started,
     };

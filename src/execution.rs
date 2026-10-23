@@ -352,6 +352,31 @@ pub fn file_digest_cancellable(
     Ok(format!("{:x}", hash.finalize()))
 }
 
+/// Holds a task's work directory: the process lock and the request ledger.
+pub struct WorkDir {
+    _dispatch: crate::dispatch::Guard,
+    _lock: crate::runtime::FileLock,
+}
+
+/// Enters a task's work directory in one order for every entry point: create
+/// it, take the task lock, check the identity it was bound to, then install the
+/// request ledger.
+pub fn enter_work_dir(
+    work_dir: &Path,
+    binding: &serde_json::Value,
+    control_path: Option<&Path>,
+    service_versions: &BTreeMap<String, String>,
+) -> Result<WorkDir> {
+    std::fs::create_dir_all(work_dir)?;
+    let lock = crate::runtime::lock_file(&work_dir.join(".task.lock"))?;
+    bind_work_dir(work_dir, binding)?;
+    let dispatch = crate::dispatch::install(work_dir, control_path, service_versions)?;
+    Ok(WorkDir {
+        _dispatch: dispatch,
+        _lock: lock,
+    })
+}
+
 /// A mismatch is evidence that this is a different task; preserve both old work and error.
 pub fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()> {
     std::fs::create_dir_all(work_dir)?;
@@ -381,11 +406,6 @@ pub fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()>
 /// Runs a request obtained from [`Request::read`], which validated it.
 pub async fn run(request: Request) -> Result<()> {
     let cfg = request.resolve()?;
-    let _dispatch = crate::dispatch::install(
-        &request.work_dir,
-        request.control_path.as_deref(),
-        &request.service_versions,
-    )?;
     // No settings::load, environment credential resolution or wizard on this path.
     crate::pipeline::run_task(&request, &cfg).await
 }

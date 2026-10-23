@@ -501,12 +501,12 @@ fn summarize_note(
         ))?
         .to_path_buf();
     let work = course_dir.join(".work").join(&task_id);
-    execution::bind_work_dir(
+    let _work = execution::enter_work_dir(
         &work,
         &serde_json::json!({"source_id":base.source_id,"task_id":task_id,"settings":settings,"base_version":base.version_id}),
+        None,
+        &Default::default(),
     )?;
-    let _lock = course2md::runtime::lock_file(&work.join(".task.lock"))?;
-    let _dispatch = course2md::dispatch::install(&work, None, &Default::default())?;
     let target = artifact::Target {
         task_id: task_id.clone(),
         course_id: base.course_id.clone(),
