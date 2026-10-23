@@ -313,26 +313,29 @@ pub fn prepare_cache(model: &str, control: &crate::dispatch::TaskControl) -> Res
     let Some(mirror) = mirror else {
         return prepare_cache_here(model);
     };
-    let mut result = prepare_cache_from(model, mirror, control);
+    let program = std::env::current_exe()?;
+    let mut result = prepare_cache_from(&program, model, mirror, control);
     if let Err(error) = &result
         && control.check().is_ok()
     {
         tracing::warn!(
             "Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download from the mirror failed; trying Hugging Face: {error:#}"
         );
-        result = prepare_cache_from(model, crate::hub::ORIGIN, control);
+        result = prepare_cache_from(&program, model, crate::hub::ORIGIN, control);
     }
     result
 }
 
-/// Runs `course2md apple-cache` with HF_ENDPOINT set for that process only.
-/// Its progress events share this process's output; its errors come back here.
+/// Runs `program apple-cache` (the course2md executable) with HF_ENDPOINT set
+/// for that process only. Its progress events share this process's output;
+/// its errors come back here.
 fn prepare_cache_from(
+    program: &Path,
     model: &str,
     endpoint: &str,
     control: &crate::dispatch::TaskControl,
 ) -> Result<()> {
-    let mut command = std::process::Command::new(std::env::current_exe()?);
+    let mut command = std::process::Command::new(program);
     command
         .args(["apple-cache", model, "--progress"])
         .arg(if crate::progress::is_json() {
@@ -425,4 +428,68 @@ pub fn run_coreml(
         "asr done"
     );
     Ok(r)
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    /// Network test: run with `QWEN3_CACHE_DIR=<scratch dir outside /private>
+    /// cargo test --lib -- --ignored mirror_attempt` after `cargo build`.
+    #[test]
+    #[ignore = "downloads part of an Apple model from the Hub mirror"]
+    fn mirror_attempt_runs_in_a_helper_and_stops_when_the_task_pauses() {
+        let cache = std::path::PathBuf::from(
+            std::env::var_os("QWEN3_CACHE_DIR")
+                .expect("set QWEN3_CACHE_DIR to a scratch directory"),
+        );
+        let program = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/course2md");
+        assert!(program.is_file(), "build course2md first");
+        let work = tempfile::tempdir().unwrap();
+        let control_path = work.path().join("control.json");
+        let control = crate::dispatch::TaskControl::open(
+            work.path(),
+            crate::dispatch::ControlSource {
+                control_path: Some(control_path.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let pause = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(15));
+            std::fs::write(&control_path, br#"{"intent":"pause"}"#).unwrap();
+        });
+        let started = std::time::Instant::now();
+        let result = prepare_cache_from(&program, "qwen3-0.6b", crate::hub::MIRROR, &control);
+        pause.join().unwrap();
+        let elapsed = started.elapsed();
+        assert!(result.is_err(), "the pause stops the helper");
+        assert!(
+            elapsed < std::time::Duration::from_secs(25),
+            "stopped promptly: {elapsed:?}"
+        );
+        let bytes: u64 = walk(&cache);
+        assert!(
+            bytes > 1_000_000,
+            "the helper downloaded from the mirror: {bytes} bytes"
+        );
+    }
+
+    fn walk(dir: &Path) -> u64 {
+        std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            walk(&path)
+                        } else {
+                            entry.metadata().map_or(0, |m| m.len())
+                        }
+                    })
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
 }
