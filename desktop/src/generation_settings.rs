@@ -414,7 +414,7 @@ impl Desktop {
                             })),
                     )),
             )
-            .child(self.translation_setting(&value, cx))
+            .child(self.translation_setting(value, cx))
             .child(self.service_picker(ServicePurpose::Ai, false, cx));
         // The rule only applies to proofreading, so it appears with it.
         if value.ai_proofread {
