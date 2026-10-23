@@ -178,7 +178,11 @@ fn main() {
 /// worked is cached per toolchain version, so a rebuild runs swift once.
 fn build_swift_package(pkg: &Path) -> Result<(), Vec<String>> {
     const ATTEMPTS: [&[&str]; 4] = [
-        &["--build-system", "swiftbuild", "--disable-experimental-prebuilts"],
+        &[
+            "--build-system",
+            "swiftbuild",
+            "--disable-experimental-prebuilts",
+        ],
         &["--build-system", "swiftbuild"],
         &["--disable-experimental-prebuilts"],
         &[],
