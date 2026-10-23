@@ -232,24 +232,34 @@ pub async fn run(cfg: &PipelineConfig, wav: &std::path::Path) -> Result<Vec<Tran
         &crate::models::llama_gguf_identity(),
         cfg.max_speech,
     );
-    let model = llama.model;
-    let mmproj = llama.mmproj;
+    let server = LlamaServer {
+        model: llama.model,
+        mmproj: llama.mmproj,
+        offload,
+        threads,
+    };
     let wav = wav.to_path_buf();
     run_with_cp(cfg, &id, move |cp| {
-        run_blocking(&wav, &model, &mmproj, offload, threads, max_speech, cp)
+        run_blocking(&wav, &server, max_speech, cp)
     })
     .await
 }
 
-fn run_blocking(
-    wav: &Path,
-    model: &Path,
-    mmproj: &Path,
+/// The local llama-server a transcription starts: model files and placement.
+struct LlamaServer {
+    model: PathBuf,
+    mmproj: PathBuf,
     offload: OffloadOpts,
     threads: i32,
+}
+
+fn run_blocking(
+    wav: &Path,
+    server: &LlamaServer,
     max_speech: f32,
     cp: &mut crate::checkpoint::Checkpoint,
 ) -> Result<Vec<TranscriptEvent>> {
+    let offload = server.offload;
     let t0 = Instant::now();
     let segs = ffmpeg_vad(wav, max_speech)?;
     tracing::info!(segs = segs.len(), "vad");
@@ -288,7 +298,7 @@ fn run_blocking(
             )
         );
     }
-    let args = build_server_args(model, mmproj, offload, caps, threads, port);
+    let args = build_server_args(server, caps, port);
     tracing::info!(
         bin = %bin.display(),
         port,
@@ -889,14 +899,14 @@ pub(crate) struct OffloadOpts {
 ///   --no-mmproj-offload`——新版 llama.cpp 下仅 -ngl 0 仍可能把 mmproj/部分
 ///   算子卸载到 GPU
 /// - 不支持的 flag（caps=false）一律不加，兼容发行版仓库的旧 llama-server
-fn build_server_args(
-    model: &Path,
-    mmproj: &Path,
-    offload: OffloadOpts,
-    caps: LlamaServerCaps,
-    threads: i32,
-    port: u16,
-) -> Vec<String> {
+fn build_server_args(server: &LlamaServer, caps: LlamaServerCaps, port: u16) -> Vec<String> {
+    let LlamaServer {
+        model,
+        mmproj,
+        offload,
+        threads,
+    } = server;
+    let (offload, threads) = (*offload, *threads);
     let cpu_only = offload.provider == crate::config::AsrProvider::Cpu;
     let ngl = if cpu_only { 0 } else { offload.gpu_layers };
     let mut args: Vec<String> = vec![
@@ -1418,11 +1428,13 @@ mod tests {
             mmproj_offload,
         };
         build_server_args(
-            Path::new("/m.gguf"),
-            Path::new("/mm.gguf"),
-            offload,
+            &LlamaServer {
+                model: "/m.gguf".into(),
+                mmproj: "/mm.gguf".into(),
+                offload,
+                threads: 4,
+            },
             caps,
-            4,
             8081,
         )
     }
