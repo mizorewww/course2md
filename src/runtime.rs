@@ -199,7 +199,7 @@ pub fn wait_ready(
     base: &str,
     timeout: Duration,
     child: &mut ManagedChild,
-    expect_body: Option<&str>,
+    expect_status: Option<&str>,
     control: Option<&dyn Fn() -> Result<()>>,
 ) -> Result<()> {
     let t0 = Instant::now();
@@ -226,11 +226,12 @@ pub fn wait_ready(
             );
         }
         if let Ok(resp) = ureq::get(&url).timeout(Duration::from_secs(2)).call() {
-            match expect_body {
+            match expect_status {
                 None => return Ok(()),
-                Some(needle) => {
-                    if let Ok(body) = resp.into_string()
-                        && body.contains(needle)
+                Some(expected) => {
+                    if resp
+                        .into_json::<serde_json::Value>()
+                        .is_ok_and(|body| body["status"] == expected)
                     {
                         return Ok(());
                     }
@@ -351,7 +352,7 @@ pub fn lock_file(path: &Path) -> Result<FileLock> {
 
 /// 让 OS 分配一个空闲端口。
 /// 注意 TOCTOU：返回后到真正 bind 之间端口可能被抢占，
-/// 调用方需用 `wait_ready` 的响应体校验兜底。
+/// 调用方需用 `wait_ready` 的 `/health` status 校验兜底。
 pub fn free_port() -> Result<u16> {
     Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
 }

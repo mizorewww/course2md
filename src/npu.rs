@@ -265,7 +265,7 @@ impl NpuWorker {
             &base,
             NPU_READY_TIMEOUT,
             &mut child,
-            Some("\"status\":\"ok\""),
+            Some("ok"),
             Some(&crate::dispatch::check_control),
         ) {
             return Err(e.context(format!(
