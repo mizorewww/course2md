@@ -1,6 +1,6 @@
 use anyhow::Context;
 use clap::{CommandFactory, FromArgMatches};
-use course2md::cli::{Cli, Command, ConfigCmd, LlmCmd, ModelsCmd};
+use course2md::cli::{ChildProgress, Cli, Command, ConfigCmd, LlmCmd, ModelsCmd};
 use course2md::{config, doctor, llm, models, pipeline, progress, settings, wizard};
 use tracing_subscriber::EnvFilter;
 
@@ -107,8 +107,13 @@ fn main() -> std::process::ExitCode {
             }
         }
     }
+    let helper = match &cli.command {
+        Some(Command::AppleCache { progress, .. }) => Some(*progress),
+        _ => None,
+    };
     let json = cli.opts.json
         || matches!(&cli.command, Some(Command::RunTask))
+        || helper == Some(ChildProgress::Json)
         || matches!(
             &cli.command,
             Some(Command::Models {
@@ -117,8 +122,9 @@ fn main() -> std::process::ExitCode {
                     | ModelsCmd::Inspect { json: true, .. }
             })
         );
-    let quiet =
-        cli.opts.quiet || matches!(&cli.command, Some(Command::Summarize(args)) if args.quiet);
+    let quiet = cli.opts.quiet
+        || helper == Some(ChildProgress::Quiet)
+        || matches!(&cli.command, Some(Command::Summarize(args)) if args.quiet);
     if json {
         // Machine consumers (--json, run-task) parse message text; keep the
         // protocol's source language whatever --lang says.
@@ -140,7 +146,9 @@ fn main() -> std::process::ExitCode {
                 return std::process::ExitCode::SUCCESS;
             }
             let message = format!("{error:#}");
-            if json {
+            // A helper's parent reads its error from stderr and decides what
+            // the task reports, so the helper never emits an error event.
+            if json && helper.is_none() {
                 progress::emit(&progress::Event::Error { message });
             } else {
                 course2md::eprintln_tr!("错误：{}", message);
@@ -173,6 +181,19 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             Ok(course2md::runtime::block_on(course2md::execution::run(
                 request,
             ))??)
+        }
+        Some(Command::AppleCache { model, .. }) => {
+            #[cfg(apple_native)]
+            {
+                course2md::apple::prepare_cache_here(&model)
+            }
+            #[cfg(not(apple_native))]
+            {
+                let _ = model;
+                anyhow::bail!(course2md::tr!(
+                    "此版本不支持 Apple 识别，请改用 GPU 或 CPU 识别 / This build lacks Apple transcription; use GPU or CPU transcription."
+                ))
+            }
         }
         Some(Command::Models { cmd }) => match cmd {
             ModelsCmd::Inspect { target, json } => {

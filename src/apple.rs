@@ -286,43 +286,84 @@ fn cache_manifest(model: &str) -> Result<String> {
     Ok(serde_json::to_string(&items)?)
 }
 
-pub fn prepare_cache(model: &str) -> Result<()> {
+/// Downloads the model's cache files with the Swift downloader in this process,
+/// from whatever HF_ENDPOINT this process started with.
+pub fn prepare_cache_here(model: &str) -> Result<()> {
     ensure_metallib()?;
     let name = CString::new(model)?;
     let manifest = CString::new(cache_manifest(model)?)?;
-    let attempt = || {
-        let status = unsafe { ffi::c2m_asr_prepare_cache(name.as_ptr(), manifest.as_ptr()) };
-        if status != 0 {
-            anyhow::bail!("{}", last_error());
-        }
-        Ok(())
-    };
-    // The Swift downloader reads HF_ENDPOINT; an explicit setting is left alone.
+    let status = unsafe { ffi::c2m_asr_prepare_cache(name.as_ptr(), manifest.as_ptr()) };
+    if status != 0 {
+        anyhow::bail!("{}", last_error());
+    }
+    Ok(())
+}
+
+/// Prepares the model cache, trying the configured mirror first. The Swift
+/// downloader only reads HF_ENDPOINT from the environment, and changing this
+/// multi-threaded process's environment is unsound, so a mirror attempt runs
+/// in a child process started with that endpoint. An explicit HF_ENDPOINT is
+/// left alone.
+pub fn prepare_cache(model: &str) -> Result<()> {
     let mirror = if std::env::var_os("HF_ENDPOINT").is_none() {
         crate::hub::endpoints().hub_override()
     } else {
         None
     };
     let Some(mirror) = mirror else {
-        return attempt();
+        return prepare_cache_here(model);
     };
-    // SAFETY: Darwin's libc serializes environment access, Rust's std takes
-    // its own environment lock, and no download is running while it changes.
-    unsafe { std::env::set_var("HF_ENDPOINT", mirror) };
-    let mut result = attempt();
+    let mut result = prepare_cache_from(model, mirror);
     if let Err(error) = &result
         && crate::dispatch::check_control().is_ok()
     {
         tracing::warn!(
             "Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download from the mirror failed; trying Hugging Face: {error:#}"
         );
-        // SAFETY: as above.
-        unsafe { std::env::set_var("HF_ENDPOINT", crate::hub::ORIGIN) };
-        result = attempt();
+        result = prepare_cache_from(model, crate::hub::ORIGIN);
     }
-    // SAFETY: as above.
-    unsafe { std::env::remove_var("HF_ENDPOINT") };
     result
+}
+
+/// Runs `course2md apple-cache` with HF_ENDPOINT set for that process only.
+/// Its progress events share this process's output; its errors come back here.
+fn prepare_cache_from(model: &str, endpoint: &str) -> Result<()> {
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    command
+        .args(["apple-cache", model, "--progress"])
+        .arg(if crate::progress::is_json() {
+            "json"
+        } else if crate::progress::is_quiet() {
+            "quiet"
+        } else {
+            "human"
+        })
+        .env("HF_ENDPOINT", endpoint)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    let mut child = crate::runtime::ManagedChild::spawn("course2md apple-cache", &mut command)?;
+    let stderr = child.take_stderr();
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(mut stderr) = stderr {
+            use std::io::Read as _;
+            let _ = stderr.read_to_string(&mut text);
+        }
+        text
+    });
+    let status = loop {
+        if let Some(status) = child.try_wait() {
+            break status;
+        }
+        if let Err(error) = crate::dispatch::check_control() {
+            drop(child);
+            return Err(error);
+        }
+        std::thread::sleep(crate::dispatch::CONTROL_POLL);
+    };
+    let errors = reader.join().unwrap_or_default();
+    anyhow::ensure!(status.success(), "{}", errors.trim());
+    Ok(())
 }
 
 impl Drop for CoremlAsr {

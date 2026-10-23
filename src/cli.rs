@@ -283,11 +283,26 @@ pub struct RunOpts {
     pub json: bool,
 }
 
+/// How a helper process reports progress: as its parent does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum ChildProgress {
+    Json,
+    Quiet,
+    Human,
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     /// 执行已保存的任务；从标准输入读取完整 JSON 参数 / Execute a saved task from stdin JSON
     #[command(hide = true)]
     RunTask,
+    /// 在独立进程中准备 Apple 模型缓存 / Prepare the Apple model cache in its own process
+    #[command(hide = true)]
+    AppleCache {
+        model: String,
+        #[arg(long, value_enum, default_value_t = ChildProgress::Human)]
+        progress: ChildProgress,
+    },
     /// 管理本地识别模型 / Manage local speech models
     Models {
         #[command(subcommand)]
