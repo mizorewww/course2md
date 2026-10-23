@@ -311,7 +311,6 @@ struct Desktop {
     reader_course_error: Option<(PathBuf, String)>,
     reader_failure_notice: Option<String>,
     candidate_scroll: ScrollHandle,
-    reader_position_saved_at: Option<Instant>,
     // Virtualized long pages: the task queue and the course library each keep
     // a persistent list state plus the identity keys and focus containers of
     // the items the state currently describes.
@@ -695,7 +694,6 @@ impl Desktop {
             reader_course_error: None,
             reader_failure_notice: None,
             candidate_scroll: ScrollHandle::new(),
-            reader_position_saved_at: None,
             queue_list: ListState::new(0, ListAlignment::Top, px(1000.)),
             queue_cache: None,
             event_wake_tx,
@@ -954,9 +952,6 @@ impl Desktop {
         if let Some((_, shown)) = &self.transient_task_result {
             deadline = earliest_deadline(deadline, Some(*shown + Duration::from_secs(8)));
         }
-        if self.page == Page::Result {
-            deadline = earliest_deadline(deadline, Some(Instant::now() + Duration::from_secs(2)));
-        }
         // Running work shows a live clock.
         if self.job.is_some() {
             deadline = earliest_deadline(deadline, Some(Instant::now() + Duration::from_secs(1)));
@@ -978,7 +973,6 @@ impl Desktop {
             cx.notify();
         }
         self.poll_storage(cx);
-        self.poll_reading_position(cx);
         if self
             .draft_deadline
             .is_some_and(|deadline| Instant::now() >= deadline)

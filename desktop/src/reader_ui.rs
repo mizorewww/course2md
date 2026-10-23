@@ -27,7 +27,8 @@ const SCROLLBAR_GUTTER: Pixels = px(14.);
 /// The icon of an empty state.
 const EMPTY_STATE_ICON: Rems = rems(32. / 14.);
 /// Minimum spacing between polled reading-position saves during scrolling.
-const READING_POSITION_INTERVAL: Duration = Duration::from_secs(5);
+/// How long scrolling must rest before the reading position is recorded.
+const READING_POSITION_SETTLE: Duration = Duration::from_secs(1);
 
 actions!(
     course2md_reader,
@@ -451,6 +452,8 @@ pub(crate) struct State {
     restoring: bool,
     restore_generation: u64,
     last_position: Option<(String, workspace::ReadingPosition)>,
+    /// The pending record of a settling scroll; replacing it restarts the wait.
+    position_save: Option<Task<()>>,
     /// A note restore waiting for its target block's first measurement.
     note_refine: Option<NoteRefine>,
     restore_target: Rc<Cell<Option<usize>>>,
@@ -556,6 +559,14 @@ impl State {
         let scale = cx.observe_global_in::<gpui_component::Theme>(window, |this, window, cx| {
             this.reader_layout_changed(window, cx)
         });
+        let gallery_list = ListState::new(1, ListAlignment::Top, px(1000.));
+        let desktop = cx.weak_entity();
+        gallery_list.set_scroll_handler(move |_, _, cx| {
+            let desktop = desktop.clone();
+            cx.defer(move |cx| {
+                let _ = desktop.update(cx, |this, cx| this.reading_position_moved(cx));
+            });
+        });
         Self {
             controls_scroll: ScrollHandle::new(),
             information_scroll: ScrollHandle::new(),
@@ -582,7 +593,7 @@ impl State {
             missing_by_block: Rc::default(),
             gallery_matches: Rc::default(),
             gallery_excerpts: Rc::default(),
-            gallery_list: ListState::new(1, ListAlignment::Top, px(1000.)),
+            gallery_list,
             gallery_items: Rc::new(vec![GalleryItem::Header]),
             gallery_focus: Rc::new(vec![cx.focus_handle()]),
             gallery_columns: 1,
@@ -595,6 +606,7 @@ impl State {
             restoring: false,
             restore_generation: 0,
             last_position: None,
+            position_save: None,
             note_refine: None,
             restore_target: Rc::default(),
             layout: reader_window_layout(window),
@@ -886,6 +898,29 @@ fn note_scroll_key(items: &[NoteItem], list: &ListState) -> Option<usize> {
         .unwrap_or(0);
     (top.item_ix > first || (top.item_ix == first && top.offset_in_item > px(0.)))
         .then_some(top.item_ix)
+}
+
+/// What the page draws from the note's scroll position: whether the article
+/// has left its top, and the contents entry the top of the text is in.
+fn note_view_key(
+    items: &[NoteItem],
+    list: &ListState,
+    outline: &[(usize, String, Option<f64>)],
+) -> (bool, Option<usize>) {
+    let top_block = note_top_block(items, list.logical_scroll_top().item_ix).unwrap_or(0);
+    (
+        note_scroll_key(items, list).is_some(),
+        outline_current(outline, top_block),
+    )
+}
+
+/// The contents entry that holds `block`: the last heading at or before it.
+fn outline_current(outline: &[(usize, String, Option<f64>)], block: usize) -> Option<usize> {
+    outline
+        .iter()
+        .rev()
+        .find(|(index, _, _)| *index <= block)
+        .map(|(index, _, _)| *index)
 }
 
 /// The block an item's position resolves to, when it draws any.
@@ -1862,6 +1897,7 @@ impl Desktop {
             let step = list.viewport_bounds().size.height * 0.85 * direction;
             list.scroll_by(-step);
         }
+        self.reading_position_moved(cx);
         cx.notify();
     }
     fn reading_key(&self) -> Option<String> {
@@ -1910,16 +1946,18 @@ impl Desktop {
             },
         )
     }
+    /// Scrolling records the position once it has settled, so continuous
+    /// scrolling does not clone and rewrite the workspace for every step.
+    /// Navigation and exit call `save_reading_position` to record at once.
+    fn reading_position_moved(&mut self, cx: &mut Context<Self>) {
+        self.reader_ui.position_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(READING_POSITION_SETTLE)
+                .await;
+            let _ = this.update(cx, |this, cx| this.save_reading_position(cx));
+        }));
+    }
     pub fn save_reading_position(&mut self, cx: &mut Context<Self>) {
-        self.persist_reading_position(false, cx);
-    }
-    /// Polled while the reader scrolls: persist at most once per interval, so
-    /// continuous scrolling does not clone and rewrite the workspace each tick.
-    /// Navigation and exit call `save_reading_position` for an immediate flush.
-    pub fn poll_reading_position(&mut self, cx: &mut Context<Self>) {
-        self.persist_reading_position(true, cx);
-    }
-    fn persist_reading_position(&mut self, throttled: bool, cx: &mut Context<Self>) {
         if self.page != Page::Result
             || self.reading
             || (self.result_tab == 1 && self.reader_ui.gallery_search_position.is_some())
@@ -1935,15 +1973,6 @@ impl Desktop {
         if self.reader_ui.last_position.as_ref() == Some(&(key.clone(), position.clone())) {
             return;
         }
-        // Skipped ticks leave `last_position` stale, keeping the position dirty
-        // for the next poll or the immediate flush on navigation and exit.
-        if throttled
-            && self
-                .reader_position_saved_at
-                .is_some_and(|saved| saved.elapsed() < READING_POSITION_INTERVAL)
-        {
-            return;
-        }
         if let Some(workspace) = &mut self.workspace
             && let Err(error) = workspace.transaction(|state| {
                 state.positions.insert(key.clone(), position.clone());
@@ -1955,7 +1984,6 @@ impl Desktop {
             cx.notify();
             return;
         }
-        self.reader_position_saved_at = Some(Instant::now());
         self.reader_ui.last_position = Some((key, position));
     }
     pub fn restore_reading_position(&mut self, cx: &mut Context<Self>) {
@@ -2197,6 +2225,38 @@ impl Desktop {
             Rc::new(chapter_starts(&preview.blocks, &summary_outline(&preview)));
         self.reader_ui.note_layout.borrow_mut().clear();
         self.reader_ui.gallery_layout.borrow_mut().clear();
+        // Scrolling repaints the page only when what it shows from the
+        // position changes: whether the article has left its top, and the
+        // contents entry the text is in. GPUI calls the handler while it
+        // still borrows the list state, so the position is read once the
+        // scroll has been applied.
+        let (entity, list) = (cx.weak_entity(), self.reader_ui.note_list.clone());
+        let (items, outline) = (
+            self.reader_ui.note_items.clone(),
+            self.reader_ui.outline.clone(),
+        );
+        let last = Rc::new(Cell::new(note_view_key(&items, &list, &outline)));
+        self.reader_ui
+            .note_list
+            .set_scroll_handler(move |_, _, cx| {
+                let (entity, list, items, outline, last) = (
+                    entity.clone(),
+                    list.clone(),
+                    items.clone(),
+                    outline.clone(),
+                    last.clone(),
+                );
+                cx.defer(move |cx| {
+                    let key = note_view_key(&items, &list, &outline);
+                    let changed = last.replace(key) != key;
+                    let _ = entity.update(cx, |this, cx| {
+                        if changed {
+                            cx.notify();
+                        }
+                        this.reading_position_moved(cx);
+                    });
+                });
+            });
     }
 
     /// Search the screenshots once per query change: the matching frames,
@@ -3053,6 +3113,7 @@ impl Desktop {
                 } else {
                     this.reader_ui.gallery_list.scroll_to(ListOffset::default());
                 }
+                this.reading_position_moved(cx);
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ReaderEnd, _, cx| {
@@ -3061,6 +3122,7 @@ impl Desktop {
                 } else {
                     this.reader_ui.gallery_list.scroll_to_end();
                 }
+                this.reading_position_moved(cx);
                 cx.notify();
             }))
             .on_action(cx.listener(move |this, _: &CloseFind, window, cx| {
@@ -3232,30 +3294,6 @@ impl Desktop {
             note_list: self.reader_ui.note_list.clone(),
             desktop: cx.weak_entity(),
         };
-        // The page re-renders when the top item changes: the header collapses
-        // once the article leaves its top, and the outline follows the text.
-        // GPUI calls this while it still borrows the list state, so the
-        // position is read once the scroll has been applied.
-        let entity = cx.weak_entity();
-        let list_state = self.reader_ui.note_list.clone();
-        let items = self.reader_ui.note_items.clone();
-        let last = Rc::new(std::cell::Cell::new(note_scroll_key(&items, &list_state)));
-        self.reader_ui
-            .note_list
-            .set_scroll_handler(move |_, _, cx| {
-                let (entity, list_state, items, last) = (
-                    entity.clone(),
-                    list_state.clone(),
-                    items.clone(),
-                    last.clone(),
-                );
-                cx.defer(move |cx| {
-                    let key = note_scroll_key(&items, &list_state);
-                    if last.replace(key) != key {
-                        let _ = entity.update(cx, |_, cx| cx.notify());
-                    }
-                });
-            });
         div()
             .id("note-reader")
             .role(Role::Document)
@@ -3297,11 +3335,7 @@ impl Desktop {
         }
         let top = self.reader_ui.note_list.logical_scroll_top();
         let top_block = note_top_block(&self.reader_ui.note_items, top.item_ix).unwrap_or(0);
-        let current = outline
-            .iter()
-            .rev()
-            .find(|(index, _, _)| *index <= top_block)
-            .map(|(index, _, _)| *index);
+        let current = outline_current(outline, top_block);
         if metrics.toc_fits_beside {
             h_flex()
                 .flex_1()
@@ -6137,7 +6171,7 @@ mod tests {
 mod flow_tests {
     use super::{
         NoteItem, nav, note_block_item, note_capture_position, note_item_block, note_items,
-        note_restore_target, note_scroll_key, note_top_block,
+        note_restore_target, note_scroll_key, note_top_block, outline_current,
     };
     use crate::notes::PreviewBlock;
     use gpui::{
@@ -6221,6 +6255,15 @@ mod flow_tests {
         assert_eq!(note_item_block(items[0]), None);
 
         assert_eq!(note_items(&[]), [NoteItem::Title]);
+    }
+
+    #[test]
+    fn the_contents_follow_the_last_heading_at_or_before_the_top() {
+        let outline = vec![(2, "一".to_owned(), None), (6, "二".to_owned(), None)];
+        assert_eq!(outline_current(&outline, 0), None);
+        assert_eq!(outline_current(&outline, 2), Some(2));
+        assert_eq!(outline_current(&outline, 5), Some(2));
+        assert_eq!(outline_current(&outline, 9), Some(6));
     }
 
     #[test]
