@@ -11,7 +11,6 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -63,9 +62,41 @@ fn cancelled() -> bool {
     crate::dispatch::check_control().is_err()
 }
 
-/// Downloads `remote` to `dest` unless a complete copy is already there.
-/// `.part` keeps the bytes received so far, so a later run resumes.
-pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
+/// Downloads the files of one model preparation. Once aria2 proves unusable
+/// for one file, the other files of the same preparation skip it.
+pub struct Downloader {
+    aria2: Option<PathBuf>,
+    aria2_broken: AtomicBool,
+}
+
+impl Downloader {
+    pub fn new() -> Self {
+        Self {
+            aria2: find_aria2(),
+            aria2_broken: AtomicBool::new(false),
+        }
+    }
+
+    fn aria2(&self) -> Option<&Path> {
+        self.aria2
+            .as_deref()
+            .filter(|_| !self.aria2_broken.load(Ordering::Relaxed))
+    }
+
+    /// Downloads `remote` to `dest` unless a complete copy is already there.
+    /// `.part` keeps the bytes received so far, so a later run resumes.
+    pub fn fetch(&self, remote: &Remote, dest: &Path) -> Result<()> {
+        fetch(self, remote, dest)
+    }
+}
+
+impl Default for Downloader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn fetch(downloader: &Downloader, remote: &Remote, dest: &Path) -> Result<()> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -85,7 +116,7 @@ pub fn fetch(remote: &Remote, dest: &Path) -> Result<()> {
             remote,
             bar: &bar,
         };
-        match transfer(&t) {
+        match transfer(downloader, &t) {
             Ok(()) => {}
             Err(error) => {
                 if cancelled() {
@@ -133,14 +164,14 @@ struct Transfer<'a> {
     bar: &'a Bar,
 }
 
-fn transfer(t: &Transfer) -> Result<()> {
-    if let Some(program) = aria2_program() {
-        match aria2(&program, t) {
+fn transfer(downloader: &Downloader, t: &Transfer) -> Result<()> {
+    if let Some(program) = downloader.aria2() {
+        match aria2(program, t) {
             Err(error) if error.downcast_ref::<Aria2Unavailable>().is_some() => {
                 tracing::warn!(
                     "aria2 无法使用，改用内置下载 / aria2 unavailable; using the built-in downloader: {error:#}"
                 );
-                ARIA2_BROKEN.store(true, Ordering::Relaxed);
+                downloader.aria2_broken.store(true, Ordering::Relaxed);
             }
             result => return result,
         }
@@ -301,24 +332,17 @@ fn native_attempt(agent: &ureq::Agent, t: &Transfer, have: u64) -> Result<()> {
 
 // ── aria2 ───────────────────────────────────────────────────────────────
 
-static ARIA2_BROKEN: AtomicBool = AtomicBool::new(false);
-
 /// aria2c beside the executable (desktop packages) or on PATH.
-fn aria2_program() -> Option<PathBuf> {
-    static FOUND: OnceLock<Option<PathBuf>> = OnceLock::new();
-    if ARIA2_BROKEN.load(Ordering::Relaxed) || std::env::var_os("COURSE2MD_NO_ARIA2").is_some() {
+fn find_aria2() -> Option<PathBuf> {
+    if std::env::var_os("COURSE2MD_NO_ARIA2").is_some() {
         return None;
     }
-    FOUND
-        .get_or_init(|| {
-            let name = format!("aria2c{}", std::env::consts::EXE_SUFFIX);
-            std::env::current_exe()
-                .ok()
-                .and_then(|exe| exe.parent().map(|dir| dir.join(&name)))
-                .filter(|path| path.is_file())
-                .or_else(|| crate::runtime::which("aria2c"))
-        })
-        .clone()
+    let name = format!("aria2c{}", std::env::consts::EXE_SUFFIX);
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(&name)))
+        .filter(|path| path.is_file())
+        .or_else(|| crate::runtime::which("aria2c"))
 }
 
 fn aria2_control(part: &Path) -> PathBuf {

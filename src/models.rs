@@ -252,9 +252,11 @@ pub async fn download_models(root: &Path) -> Result<()> {
             .await
             .context(crate::tr!("模型下载任务失败 / Model download task failed"))?;
     }
+    let downloader = std::sync::Arc::new(crate::download::Downloader::new());
     let tasks: Vec<_> = missing
         .into_iter()
         .map(|(remote, path)| {
+            let downloader = downloader.clone();
             tokio::task::spawn_blocking(move || {
                 if path.is_file() {
                     tracing::warn!(
@@ -264,7 +266,7 @@ pub async fn download_models(root: &Path) -> Result<()> {
                     let _ = fs::remove_file(&path);
                     let _ = fs::remove_file(path.with_extension("manifest.json"));
                 }
-                crate::download::fetch(&remote, &path)
+                downloader.fetch(&remote, &path)
             })
         })
         .collect();
