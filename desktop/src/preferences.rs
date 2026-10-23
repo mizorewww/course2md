@@ -983,6 +983,10 @@ fn write_preference_file(root: &Path, path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// A credential that a blocking step confirmed is present in the vault.
+/// Only [`Store::verify_credential`] creates one.
+pub struct VerifiedCredential(Option<CredentialRef>);
+
 pub struct Store {
     root: PathBuf,
     vault: Arc<dyn CredentialVault>,
@@ -1137,32 +1141,81 @@ impl Store {
             })
             .collect()
     }
-    /// The user selects a named environment value explicitly. Capture it into a new vault
-    /// entry now; queued tasks never consult the later process environment.
-    pub fn capture_environment_credential(
-        &mut self,
-        mut draft: ServiceDraft,
-        name: &str,
-    ) -> Result<ServiceDraft> {
-        if !Self::available_environment_credentials(draft.protocol.purpose()).contains(&name) {
+    // Vault access. The vault may wait on a system authorization dialog
+    // (macOS Keychain), so every operation that touches it is split in two:
+    // a blocking step (`insert_credential`, `verify_credential`,
+    // `remove_credentials`) that only talks to the vault and runs through
+    // `crate::spawn_blocking_io`, and an in-memory commit on the store. The
+    // one-call forms (`save_service_draft` with a key, `publish_service`,
+    // `delete_service`, `capture_environment_credential`) do both on the
+    // calling thread and must only be used from a blocking context.
+
+    /// Blocking step: stores a secret under a new vault identity.
+    pub fn insert_credential(vault: &dyn CredentialVault, secret: Secret) -> Result<CredentialRef> {
+        vault.insert(secret)
+    }
+
+    /// Blocking step: confirms a credential is present before publication.
+    pub fn verify_credential(
+        vault: &dyn CredentialVault,
+        reference: Option<CredentialRef>,
+    ) -> Result<VerifiedCredential> {
+        if let Some(reference) = &reference {
+            vault.resolve(reference)?;
+        }
+        Ok(VerifiedCredential(reference))
+    }
+
+    /// Blocking step: forgets credentials that a commit released or that a
+    /// failed commit never used. Failures are ignored; an orphaned entry holds
+    /// no configuration.
+    pub fn remove_credentials(vault: &dyn CredentialVault, references: &[CredentialRef]) {
+        for reference in references {
+            let _ = vault.remove(reference);
+        }
+    }
+
+    /// The value of an offered environment variable. Reads no vault.
+    pub fn environment_secret(purpose: ServicePurpose, name: &str) -> Result<Secret> {
+        if !Self::available_environment_credentials(purpose).contains(&name) {
             bail!(course2md::tr!(
                 "这个环境变量当前没有可用的凭据，请重新选择或填写 API Key"
             ));
         }
-        let value = Secret::new(
-            std::env::var(name).map_err(|_| anyhow!(course2md::tr!("无法读取所选环境变量")))?,
-        );
-        let reference = self.vault.insert(value)?;
-        draft.credential = Some(reference.clone());
+        Ok(Secret::new(std::env::var(name).map_err(|_| {
+            anyhow!(course2md::tr!("无法读取所选环境变量"))
+        })?))
+    }
+
+    /// Commit step for a captured environment credential already stored as
+    /// `reference`. On error the caller removes `reference` again.
+    pub fn commit_environment_credential(
+        &mut self,
+        mut draft: ServiceDraft,
+        name: &str,
+        reference: CredentialRef,
+    ) -> Result<ServiceDraft> {
+        draft.credential = Some(reference);
         draft.credential_source = Some(course2md::tr!("环境变量 {}", name));
         draft.authentication = Authentication::ApiKey;
-        match self.save_service_draft(draft, None) {
-            Ok(draft) => Ok(draft),
-            Err(error) => {
-                let _ = self.vault.remove(&reference);
-                Err(error)
-            }
-        }
+        self.commit_service_draft(draft, None)
+    }
+
+    /// The user selects a named environment value explicitly. Capture it into a new vault
+    /// entry now; queued tasks never consult the later process environment.
+    ///
+    /// Blocks on the vault: call only from a blocking context. UI code uses
+    /// `environment_secret` → `insert_credential` (blocking) →
+    /// `commit_environment_credential`.
+    pub fn capture_environment_credential(
+        &mut self,
+        draft: ServiceDraft,
+        name: &str,
+    ) -> Result<ServiceDraft> {
+        let secret = Self::environment_secret(draft.protocol.purpose(), name)?;
+        let reference = Self::insert_credential(self.vault.as_ref(), secret)?;
+        self.commit_environment_credential(draft, name, reference.clone())
+            .inspect_err(|_| Self::remove_credentials(self.vault.as_ref(), &[reference]))
     }
     pub fn generation(&self) -> &GenerationPreferences {
         &self.generation
@@ -1471,21 +1524,38 @@ impl Store {
 
     /// Incomplete text is a valid draft. Replacing a key allocates a new vault identity before
     /// the secret-free draft is committed. A stale editor cannot overwrite a newer revision.
+    ///
+    /// With `new_key` this blocks on the vault: call it only from a blocking
+    /// context. UI code uses `insert_credential` (blocking) and then
+    /// `commit_service_draft`.
     pub fn save_service_draft(
         &mut self,
-        mut draft: ServiceDraft,
+        draft: ServiceDraft,
         new_key: Option<Secret>,
     ) -> Result<ServiceDraft> {
         self.check_draft_edit(&draft)?;
-        let created_credential = match new_key {
-            Some(secret) => {
-                let reference = self.vault.insert(secret)?;
-                draft.credential = Some(reference.clone());
-                draft.credential_source = None;
-                Some(reference)
-            }
-            None => None,
-        };
+        let created = new_key
+            .map(|secret| Self::insert_credential(self.vault.as_ref(), secret))
+            .transpose()?;
+        self.commit_service_draft(draft, created.clone())
+            .inspect_err(|_| {
+                Self::remove_credentials(self.vault.as_ref(), created.as_slice());
+            })
+    }
+
+    /// Commit step of a draft save; touches no vault. `new_credential` is a key
+    /// the caller already stored with `insert_credential`; when this returns an
+    /// error the caller removes it again with `remove_credentials`.
+    pub fn commit_service_draft(
+        &mut self,
+        mut draft: ServiceDraft,
+        new_credential: Option<CredentialRef>,
+    ) -> Result<ServiceDraft> {
+        self.check_draft_edit(&draft)?;
+        if let Some(reference) = new_credential {
+            draft.credential = Some(reference);
+            draft.credential_source = None;
+        }
         draft.revision += 1;
         let mut next = self.services.clone();
         next.drafts.insert(draft.id.clone(), draft.clone());
@@ -1495,9 +1565,6 @@ impl Store {
             if recovered {
                 self.services.drafts.insert(draft.id.clone(), draft.clone());
                 return Ok(draft);
-            }
-            if let Some(reference) = created_credential {
-                let _ = self.vault.remove(&reference);
             }
             return Err(error);
         }
@@ -1542,16 +1609,38 @@ impl Store {
         Ok((draft, config))
     }
 
+    /// The credential a publication would use, for `verify_credential`.
+    pub fn publication_credential(&self, draft_id: &str) -> Result<Option<CredentialRef>> {
+        Ok(self.publication(draft_id)?.1.credential)
+    }
+
+    /// Blocks on the vault: call only from a blocking context. UI code uses
+    /// `publication_credential` → `verify_credential` (blocking) →
+    /// `commit_publication`.
     pub fn publish_service(
         &mut self,
         draft_id: &str,
         scope: BindingScope,
     ) -> Result<ServiceVersion> {
+        let reference = self.publication_credential(draft_id)?;
+        // Local credential availability is part of static validation, not a paid test.
+        let verified = Self::verify_credential(self.vault.as_ref(), reference)?;
+        self.commit_publication(draft_id, scope, verified)
+    }
+
+    /// Commit step of a publication; touches no vault. The draft must still
+    /// carry the credential that was verified.
+    pub fn commit_publication(
+        &mut self,
+        draft_id: &str,
+        scope: BindingScope,
+        verified: VerifiedCredential,
+    ) -> Result<ServiceVersion> {
         let (draft, config) = self.publication(draft_id)?;
-        if let Some(reference) = &config.credential {
-            // Local credential availability is part of static validation, not a paid test.
-            self.vault.resolve(reference)?;
-        }
+        ensure!(
+            config.credential == verified.0,
+            course2md::tr!("服务编辑已发生变化，请重新打开服务后再试")
+        );
         let version = ServiceVersion {
             id: new_id("service-version"),
             service_id: draft.service_id.clone(),
@@ -1606,7 +1695,18 @@ impl Store {
 
     /// Delete the service configuration. Already dispatched requests are still
     /// received and saved. A marker keeps later restores from sending new ones.
+    ///
+    /// Blocks on the vault: call only from a blocking context. UI code uses
+    /// `retire_service` and then `remove_credentials` (blocking).
     pub fn delete_service(&mut self, service_id: &str) -> Result<()> {
+        let credentials = self.retire_service(service_id)?;
+        Self::remove_credentials(self.vault.as_ref(), &credentials);
+        Ok(())
+    }
+
+    /// Commit step of a deletion; touches no vault. Returns the credentials
+    /// the service no longer needs, for `remove_credentials`.
+    pub fn retire_service(&mut self, service_id: &str) -> Result<Vec<CredentialRef>> {
         let versions: Vec<_> = self
             .services
             .versions
@@ -1648,10 +1748,7 @@ impl Store {
         }
         self.persist(PreferenceGroup::Services, &next)?;
         self.services = next;
-        for reference in credentials {
-            let _ = self.vault.remove(&reference);
-        }
-        Ok(())
+        Ok(credentials)
     }
 
     pub fn check_dispatch(&self, reference: &str) -> Result<&ServiceVersion> {
@@ -3004,6 +3101,51 @@ mod tests {
         assert!(!store.references_storage_path(&old));
         assert!(store.references_storage_path(&new));
     }
+    #[test]
+    fn service_commits_never_touch_the_vault() {
+        struct Untouchable;
+        impl CredentialVault for Untouchable {
+            fn insert(&self, _: Secret) -> Result<CredentialRef> {
+                panic!("a commit step reached the vault")
+            }
+            fn resolve(&self, _: &str) -> Result<Secret> {
+                panic!("a commit step reached the vault")
+            }
+            fn remove(&self, _: &str) -> Result<()> {
+                panic!("a commit step reached the vault")
+            }
+        }
+        let vault = MemoryCredentialVault::new();
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = open(directory.path(), Arc::new(Untouchable));
+        let mut draft = ServiceDraft::new(ServicePurpose::Ai);
+        draft.address = "https://example.test/v1".into();
+        draft.model = "split-model".into();
+        let key = Store::insert_credential(&vault, Secret::new("split-secret")).unwrap();
+        let draft = store
+            .commit_service_draft(draft, Some(key.clone()))
+            .unwrap();
+        let credential = store.publication_credential(&draft.id).unwrap();
+        assert_eq!(credential.as_ref(), Some(&key));
+        // Verifying a different credential cannot publish this draft.
+        let other = Store::insert_credential(&vault, Secret::new("other")).unwrap();
+        let wrong = Store::verify_credential(&vault, Some(other)).unwrap();
+        assert!(
+            store
+                .commit_publication(&draft.id, BindingScope::Defaults, wrong)
+                .is_err()
+        );
+        let verified = Store::verify_credential(&vault, credential).unwrap();
+        let version = store
+            .commit_publication(&draft.id, BindingScope::Defaults, verified)
+            .unwrap();
+        assert_eq!(store.default_refs().llm.as_ref(), Some(&version.id));
+        let released = store.retire_service(&version.service_id).unwrap();
+        assert_eq!(released, vec![key.clone()]);
+        Store::remove_credentials(&vault, &released);
+        assert!(vault.resolve(&key).is_err());
+    }
+
     #[test]
     fn background_preferences_writer_serializes_and_flushes() {
         let root = tempfile::tempdir().unwrap();
