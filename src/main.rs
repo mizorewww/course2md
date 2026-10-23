@@ -388,7 +388,6 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             } else {
                 wizard::maybe_run(&cli.opts, &file)?
             };
-            #[cfg_attr(not(apple_native), allow(unused_mut))]
             let mut cfg = course2md::options::resolve(source, &cli.opts, &file)?;
             // coreml 首次使用时先确定模型（可能交互询问），模型缓存准备与转写才会是同一个模型
             #[cfg(apple_native)]
@@ -397,7 +396,15 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             {
                 cfg.asr_model = Some(course2md::apple::resolve_model(cfg.asr_model.as_deref())?);
             }
-            tracing::info!(out = %cfg.out_dir.display(), provider = %cfg.provider, "start");
+            // The CLI may take the cloud transcription key from the environment;
+            // desktop tasks carry fully resolved credentials instead.
+            if cfg.provider == config::AsrProvider::Api
+                && cfg.asr_api.api_key.is_empty()
+                && let Some(key) = config::asr_api_key_from_env()
+            {
+                cfg.asr_api.api_key = key;
+            }
+            tracing::info!(out = %cfg.out_root.display(), provider = %cfg.provider, "start");
             Ok(course2md::runtime::block_on(pipeline::run(&cfg))??)
         }
     }
@@ -506,7 +513,7 @@ fn summarize_note(
         &serde_json::json!({"source_id":base.source_id,"task_id":task_id,"settings":settings,"base_version":base.version_id}),
         Default::default(),
     )?;
-    let control = work_dir.control();
+    let control = &work_dir.job().control;
     let target = artifact::Target {
         task_id: task_id.clone(),
         course_id: base.course_id.clone(),

@@ -52,8 +52,6 @@ pub fn resolve(
         .unwrap_or_else(|| config::DEFAULT_OUT_DIR.into());
     Ok(config::PipelineConfig {
         url: source,
-        // out_dir 此处只是初值；pipeline 里会改写为 {out_root}/{platform}/{title}/{id}/
-        out_dir: out_root.clone(),
         out_root,
         similarity: opts
             .similarity

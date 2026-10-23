@@ -234,9 +234,10 @@ async fn sample_timestamps(
 pub async fn run(
     cfg: &PipelineConfig,
     media: &Path,
-    control: &crate::dispatch::TaskControl,
+    job: &crate::execution::Job,
 ) -> Result<Vec<FrameEvent>> {
-    let frames_dir = cfg.frames_dir();
+    let control = &job.control;
+    let frames_dir = job.frames_dir();
     tokio::fs::create_dir_all(&frames_dir).await?;
     let t0 = std::time::Instant::now();
     crate::progress::start(Stage::ScenesScan);

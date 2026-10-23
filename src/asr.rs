@@ -145,14 +145,16 @@ pub fn sanitize_qwen_text(s: &str) -> String {
 
 /// 打开 checkpoint → spawn_blocking 执行 → 成功才 finish → join（各 provider 共用）。
 async fn run_with_cp<F>(
-    cfg: &PipelineConfig,
+    work_dir: &Path,
     identity: &crate::checkpoint::AsrIdentity,
     f: F,
 ) -> Result<Vec<TranscriptEvent>>
 where
     F: FnOnce(&mut crate::checkpoint::Checkpoint) -> Result<Vec<TranscriptEvent>> + Send + 'static,
 {
-    let mut cp = crate::checkpoint::Checkpoint::open(&cfg.out_dir, cfg.resume, identity)?;
+    // A work directory belongs to one task identity (--no-resume picks a new one),
+    // so the progress saved in it is always this task's to resume.
+    let mut cp = crate::checkpoint::Checkpoint::open(work_dir, true, identity)?;
     tokio::task::spawn_blocking(move || {
         let r = f(&mut cp);
         if r.is_ok() {
@@ -169,10 +171,11 @@ where
 pub async fn run(
     cfg: &PipelineConfig,
     wav: &std::path::Path,
-    control: &crate::dispatch::TaskControl,
+    job: &crate::execution::Job,
 ) -> Result<Vec<TranscriptEvent>> {
     use crate::checkpoint::AsrIdentity;
     use crate::config::AsrProvider;
+    let control = &job.control;
 
     if cfg.provider == AsrProvider::Api {
         // 同一模型在 transcriptions / chat 两种端点下的输出可能不同，身份须含模式
@@ -187,7 +190,7 @@ pub async fn run(
         let max_speech = cfg.max_speech as f64;
         let wav = wav.to_path_buf();
         let control = control.clone();
-        return run_with_cp(cfg, &id, move |cp| {
+        return run_with_cp(&job.dir, &id, move |cp| {
             run_api(&api, &wav, max_speech, cp, &control)
         })
         .await;
@@ -198,7 +201,7 @@ pub async fn run(
         let max_speech = cfg.max_speech as f64;
         let wav = wav.to_path_buf();
         let control = control.clone();
-        return run_with_cp(cfg, &id, move |cp| {
+        return run_with_cp(&job.dir, &id, move |cp| {
             crate::npu::run_npu(&model, &wav, max_speech, cp, &control)
         })
         .await;
@@ -213,7 +216,7 @@ pub async fn run(
             )?;
             let id = AsrIdentity::new("coreml", &model, cfg.max_speech);
             let control = control.clone();
-            let joined = run_with_cp(cfg, &id, move |cp| {
+            let joined = run_with_cp(&job.dir, &id, move |cp| {
                 let tmp = crate::runtime::TempWorkDir::new("asr")?;
                 crate::apple::run_coreml(&wav, max_speech, &model, tmp.path(), cp, &control)
             })
@@ -250,7 +253,7 @@ pub async fn run(
     };
     let wav = wav.to_path_buf();
     let control = control.clone();
-    run_with_cp(cfg, &id, move |cp| {
+    run_with_cp(&job.dir, &id, move |cp| {
         run_blocking(&wav, &server, max_speech, cp, &control)
     })
     .await

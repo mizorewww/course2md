@@ -40,7 +40,6 @@ fn make_video(path: &Path, secs: u32, pages: &[(&str, f64, f64)]) {
 fn test_cfg(video: &Path, dir: &Path) -> course2md::config::PipelineConfig {
     course2md::config::PipelineConfig {
         url: video.display().to_string(),
-        out_dir: dir.to_path_buf(),
         out_root: dir.to_path_buf(),
         similarity: 0.9,
         sample_interval: INTERVAL,
@@ -72,7 +71,7 @@ fn onsets(cfg: &course2md::config::PipelineConfig, video: &Path) -> Vec<f64> {
         .block_on(course2md::scene::run(
             cfg,
             video,
-            &course2md::dispatch::TaskControl::default(),
+            &course2md::execution::Job::detached(cfg.out_root.clone()),
         ))
         .expect("scene run")
         .iter()

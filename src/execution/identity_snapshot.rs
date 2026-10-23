@@ -63,8 +63,7 @@ fn bindings() -> Vec<(&'static str, serde_json::Value)> {
             &file(),
         )
         .unwrap();
-        let identity_config = cfg.redacted_for_identity();
-        serde_json::json!({"source_id": "bilibili:BV1xx", "config": identity_config, "title": "Lecture"})
+        crate::pipeline::cli_binding("bilibili:BV1xx", &cfg, "Lecture")
     };
     vec![
         ("desktop-online", desktop(&online)),
