@@ -199,8 +199,8 @@ impl Request {
         Ok(())
     }
 
+    /// Expects a request that passed [`Request::validate`] (as [`Request::read`] ensures).
     pub fn resolve(&self) -> Result<PipelineConfig> {
-        self.validate()?;
         let mut cfg =
             crate::options::resolve(self.source.clone(), &Default::default(), &self.config)?;
         cfg.out_dir = self.work_dir.clone();
@@ -378,6 +378,7 @@ pub fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()>
     Ok(())
 }
 
+/// Runs a request obtained from [`Request::read`], which validated it.
 pub async fn run(request: Request) -> Result<()> {
     let cfg = request.resolve()?;
     let _dispatch = crate::dispatch::install(

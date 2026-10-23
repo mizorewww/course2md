@@ -643,8 +643,8 @@ async fn subtitles(
 ) -> Result<Option<(Vec<timeline::TranscriptEvent>, TranscriptOrigin)>> {
     let probed = match input {
         SubtitleInput::Selected(selected) => {
+            // Selected events were validated with the request.
             if let Some(events) = selected {
-                execution::validate_events(&events)?;
                 return Ok(Some((events, TranscriptOrigin::SelectedSubtitle)));
             }
             anyhow::ensure!(
@@ -812,8 +812,9 @@ async fn run_prepared(
     }
     crate::dispatch::check_control()?;
     let mut outcomes = Outcomes::default();
-    // 两路并行但都受 watch_control 打断：取消时任一路不再等到自身阶段边界才停；
-    // 被 dropped 的分支由 kill_on_drop 清理其子进程
+    // 两路并行但都受 watch_control 打断：取消时任一路不再等到自身阶段边界才停。
+    // 被 dropped 的子进程分支由 kill_on_drop 终止；转写跑在 spawn_blocking 里，
+    // drop 不会停止它，它在下一段开始前的 check_control 处退出。
     let (frames_result, transcript_result) = tokio::join!(
         async {
             tokio::select! {
