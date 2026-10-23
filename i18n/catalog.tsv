@@ -1760,7 +1760,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 课程位置已被其他课程使用 / Course identity conflict	课程位置已被其他课程使用	Course identity conflict	課程位置已被其他課程使用	コースの場所はすでに別のコースで使用されています
 调整后重试	调整后重试	Adjust and try again	調整後重試	調整して再試行してください
 调整并生成新版	调整并生成新版	Adjust and generate new version	調整並生成新版	調整して新しいバージョンを生成
-调整选项	调整选项	Adjustment options	調整選項	調整オプション
+调整选项	调整选项	Adjust options	調整選項	調整オプション
 账号已确认，但保存登录状态失败。请检查本地权限后重新扫码。	账号已确认，但保存登录状态失败。请检查本地权限后重新扫码。	The account has been confirmed, but saving the login status failed. Please check the local permissions and scan the QR code again.	帳號已確認，但儲存登入狀態失敗。請檢查本機權限後重新掃描 QR 碼。	アカウントは確認されましたが、ログイン状態の保存に失敗しました。ローカルの権限を確認し、QR コードを再度スキャンしてください。
 账号状态	账号状态	Account status	帳號狀態	アカウントのステータス
 账号状态响应不完整，请稍后重试 / Account status response is incomplete; retry later	账号状态响应不完整，请稍后重试	Account status response is incomplete; retry later	帳號狀態回應不完整，請稍後重試	アカウントステータスの応答が不完全です。後でもう一度試してください。
