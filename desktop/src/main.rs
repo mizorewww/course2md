@@ -1016,12 +1016,12 @@ impl Desktop {
     fn wake_poll(&self) {
         let _ = self.event_wake_tx.try_send(());
     }
-    fn schedule_wake(&self, after: Duration) {
-        let wake = self.event_wake_tx.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(after);
-            let _ = wake.try_send(());
-        });
+    /// Makes the event loop recompute its next deadline now. Every delayed
+    /// wake (the draft save, a transient task result) is a deadline in
+    /// `next_poll_deadline`, which the loop sleeps toward on an async timer, so
+    /// no thread has to sleep for `_after`.
+    fn schedule_wake(&self, _after: Duration) {
+        self.wake_poll();
     }
     /// The next instant the UI must run `poll` even without a job event.
     /// Returning `None` lets the loop sleep until an explicit wake.
