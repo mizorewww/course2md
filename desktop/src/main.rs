@@ -216,14 +216,11 @@ struct Desktop {
     preference_defaults_pending: bool,
     active_task: Option<String>,
     transient_task_result: Option<(String, Instant)>,
-    draft_loading: bool,
     draft_deadline: Option<Instant>,
     quit_deadline: Option<Instant>,
     account: account_ui::AccountUi,
     codex: codex_ui::CodexUi,
     ollama: ollama_ui::OllamaUi,
-    online: bool,
-    last_source_input: String,
     completed_source: Option<String>,
     source_preview: Option<source::Source>,
     source_candidates: Vec<source::SourceCandidate>,
@@ -260,7 +257,6 @@ struct Desktop {
     library_view_cache: course_library::LibraryViewCache,
     library_generation: u64,
     folder_filter: FolderFilter,
-    target_folder: Option<u64>,
     folder_editor: Option<Option<u64>>,
     /// The folder a new folder is created inside; `None` is the top level.
     folder_parent: Option<u64>,
@@ -286,7 +282,6 @@ struct Desktop {
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
     config: course2md::settings::ConfigFile,
-    task_options: ConversionOptions,
     settings_options: ConversionOptions,
     job: Option<Job>,
     kind: Kind,
@@ -507,12 +502,11 @@ impl Desktop {
             .map(|(field, input)| {
                 let field = *field;
                 cx.observe_in(input, window, move |this: &mut Self, _, window, cx| {
-                    if this.draft_loading {
-                        return;
-                    }
                     if field == Field::Source {
                         let value = this.value(Field::Source, cx);
-                        if value != this.last_source_input {
+                        // The draft records the input once autosave or a
+                        // preview accepts it; anything else is a new edit.
+                        if this.draft().is_some_and(|draft| draft.input != value) {
                             this.following_conversion = None;
                             if this.reading && this.page == Page::New {
                                 this.read_generation = this.read_generation.wrapping_add(1);
@@ -521,7 +515,6 @@ impl Desktop {
                             if !this.prepare_next_import(&value, window, cx) {
                                 return;
                             }
-                            this.last_source_input = value;
                             this.invalidate_source();
                         }
                     }
@@ -552,7 +545,7 @@ impl Desktop {
             |this: &mut Self, _, event, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. })
                     && this.page == Page::New
-                    && this.online
+                    && this.online()
                 {
                     this.inspect_source(window, cx);
                 }
@@ -620,12 +613,9 @@ impl Desktop {
             preference_defaults_pending: false,
             active_task: None,
             transient_task_result: None,
-            draft_loading: false,
             draft_deadline: None,
             quit_deadline: None,
             page: Page::New,
-            online: true,
-            last_source_input: String::new(),
             completed_source: None,
             source_preview: None,
             source_candidates: Vec::new(),
@@ -661,7 +651,6 @@ impl Desktop {
             library_view_cache: Default::default(),
             library_generation: 0,
             folder_filter: FolderFilter::All,
-            target_folder: None,
             folder_editor: None,
             folder_parent: None,
             folder_origin: None,
@@ -683,7 +672,6 @@ impl Desktop {
             desktop_settings: config.desktop.clone(),
             last_tick: Instant::now(),
             config,
-            task_options: options.clone(),
             settings_options: options,
             job: None,
             kind: Kind::Convert,
@@ -812,16 +800,10 @@ impl Desktop {
         }
         match workspace.transaction(|state| Ok(state.prepare_next_import(value, defaults))) {
             Ok(true) => {
-                if let Some(draft) = workspace.state.draft() {
-                    self.task_options = draft.options.clone();
-                    self.target_folder = draft.folder;
-                }
                 self.completed_source = None;
                 self.invalidate_source();
                 self.message = None;
-                self.draft_loading = true;
                 self.inputs[&Field::Title].update(cx, |state, cx| state.set_value("", window, cx));
-                self.draft_loading = false;
                 self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
                 true
             }
@@ -841,7 +823,7 @@ impl Desktop {
         }
         self.source_editor_open = true;
         self.navigate(Page::New, cx);
-        if self.online {
+        if self.online() {
             self.inputs[&Field::Source].update(cx, |input, cx| input.focus(window, cx));
         }
     }

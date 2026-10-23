@@ -160,6 +160,20 @@ fn update_input_form(
 ) -> bool {
     let previous = draft.clone();
     update_draft_source_title(draft, input, title, source);
+    apply_draft_options(draft, options);
+    draft.folder = folder;
+    draft.scroll = scroll;
+    draft.updated = previous.updated;
+    if *draft == previous {
+        return false;
+    }
+    draft.updated = workspace::now();
+    true
+}
+
+/// Replace the draft's processing options, recording each changed choice as an
+/// explicit override so later default changes no longer reach it.
+fn apply_draft_options(draft: &mut workspace::Draft, options: ConversionOptions) {
     use workspace::Override;
     for (changed, field) in [
         (
@@ -196,17 +210,102 @@ fn update_input_form(
         draft.local_provider = draft.options.provider;
     }
     draft.options = options;
-    draft.folder = folder;
-    draft.scroll = scroll;
-    draft.updated = previous.updated;
-    if *draft == previous {
-        return false;
-    }
-    draft.updated = workspace::now();
-    true
 }
 
+/// The single write path for the current draft: apply `edit` to a copy and
+/// commit it in one workspace transaction. An edit that changes nothing
+/// neither writes nor moves the timestamp. Returns whether a write happened.
+fn edit_current_draft(
+    workspace: &mut workspace::Workspace,
+    edit: impl FnOnce(&mut workspace::Draft),
+) -> Result<bool> {
+    let current = workspace
+        .state
+        .draft()
+        .context(course2md::tr!("当前输入记录暂时不可用"))?;
+    let mut next = current.clone();
+    edit(&mut next);
+    next.updated = current.updated;
+    if next == *current {
+        return Ok(false);
+    }
+    next.updated = workspace::now();
+    workspace.transaction(|state| {
+        *state
+            .draft_mut()
+            .context(course2md::tr!("没有可保存的输入"))? = next;
+        Ok(())
+    })?;
+    Ok(true)
+}
+
+/// Options shown before the workspace has restored a draft.
+static NO_DRAFT_OPTIONS: std::sync::LazyLock<ConversionOptions> =
+    std::sync::LazyLock::new(ConversionOptions::default);
+
 impl Desktop {
+    /// The current input form. It is the only copy of its choices: views read
+    /// it and option controls write through `update_draft`.
+    pub(crate) fn draft(&self) -> Option<&workspace::Draft> {
+        self.workspace.as_ref().and_then(|w| w.state.draft())
+    }
+
+    /// Whether the current input is an online link (the default before a
+    /// workspace is restored) rather than a local file.
+    pub(crate) fn online(&self) -> bool {
+        self.draft().is_none_or(|draft| draft.online)
+    }
+
+    pub(crate) fn task_options(&self) -> &ConversionOptions {
+        self.draft()
+            .map(|draft| &draft.options)
+            .unwrap_or(&NO_DRAFT_OPTIONS)
+    }
+
+    pub(crate) fn target_folder(&self) -> Option<u64> {
+        self.draft().and_then(|draft| draft.folder)
+    }
+
+    /// Change the current draft and record it. A failed write is reported
+    /// beside the workspace and returns false.
+    pub(crate) fn update_draft(
+        &mut self,
+        edit: impl FnOnce(&mut workspace::Draft),
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(workspace) = &mut self.workspace else {
+            return false;
+        };
+        match edit_current_draft(workspace, edit) {
+            Ok(_) => {
+                self.workspace_error = None;
+                true
+            }
+            Err(error) => {
+                self.workspace_error =
+                    Some(course2md::tr!("当前输入尚未保存：{}", format!("{error:#}")));
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    /// Change this task's processing options; changed choices become overrides.
+    pub(crate) fn update_task_options(
+        &mut self,
+        edit: impl FnOnce(&mut ConversionOptions),
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.update_draft(
+            |draft| {
+                let mut options = draft.options.clone();
+                edit(&mut options);
+                apply_draft_options(draft, options);
+            },
+            cx,
+        )
+    }
+
     pub fn retry_workspace_records(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(workspace) = &self.workspace {
             match workspace.save() {
@@ -318,10 +417,8 @@ impl Desktop {
             .and_then(|w| w.state.library(&task.plan.library_id))
     }
 
+    /// Record the text fields, preview and scroll position of the visible form.
     pub fn save_current_draft(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.draft_loading {
-            return true;
-        }
         let input = self.value(Field::Source, cx);
         // A source edit must establish the next form's defaults before autosave
         // can detach the submitted task. Failed preparation cannot fall through
@@ -336,8 +433,6 @@ impl Desktop {
         }
         let title = self.value(Field::Title, cx);
         let source = self.source_preview.clone();
-        let options = self.task_options.clone();
-        let folder = self.target_folder;
         let scroll = f32::from(self.scrolls[Page::New as usize].offset().y);
         let Some(workspace) = &mut self.workspace else {
             return false;
@@ -347,6 +442,7 @@ impl Desktop {
             return false;
         };
         self.draft_deadline = None;
+        let (options, folder) = (next.options.clone(), next.folder);
         if !update_input_form(&mut next, input, title, source, options, folder, scroll) {
             return true;
         }
@@ -375,12 +471,7 @@ impl Desktop {
         else {
             return;
         };
-        self.draft_loading = true;
-        self.online = draft.online;
-        self.last_source_input = draft.input.clone();
         self.source_preview = draft.source.clone();
-        self.task_options = draft.options.clone();
-        self.target_folder = draft.folder;
         self.preview_error = None;
         self.source_validation = None;
         self.title_required = false;
@@ -404,7 +495,6 @@ impl Desktop {
         self.inputs[&Field::Source].update(cx, |s, cx| s.set_value(draft.input, window, cx));
         self.inputs[&Field::Title].update(cx, |s, cx| s.set_value(draft.title, window, cx));
         self.scrolls[Page::New as usize].set_offset(point(px(0.), px(draft.scroll)));
-        self.draft_loading = false;
         self.draft_deadline = None;
         cx.notify();
     }
@@ -415,7 +505,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.online == online {
+        if self.online() == online {
             return;
         }
         if !self.save_current_draft(cx) {
@@ -825,7 +915,7 @@ impl Desktop {
                     && self.value(Field::Title, cx).trim().is_empty()
                 {
                     Some(Field::Title)
-                } else if self.source_preview.is_none() && self.online {
+                } else if self.source_preview.is_none() && self.online() {
                     Some(Field::Source)
                 } else {
                     None
@@ -1984,9 +2074,46 @@ fn validate_plan_config(source: &str, config: &course2md::settings::ConfigFile) 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::{
-        PlanValidation, batch_note_title, update_draft_source_title, update_input_form,
-        validate_plan_config, validate_plan_storage,
+        PlanValidation, apply_draft_options, batch_note_title, edit_current_draft,
+        update_draft_source_title, update_input_form, validate_plan_config,
+        validate_plan_storage,
     };
+
+    #[test]
+    fn a_changed_option_is_the_draft_without_a_separate_save() {
+        use crate::workspace::{Override, Workspace};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("workspace.json");
+        let root = dir.path().join("library");
+        let mut workspace =
+            Workspace::open_at(file.clone(), root.clone(), Default::default()).unwrap();
+        let updated = workspace.state.draft().unwrap().updated;
+        let keep_video = !workspace.state.draft().unwrap().options.keep_video;
+
+        // Re-applying the same options neither writes nor counts as an override.
+        let same = workspace.state.draft().unwrap().options.clone();
+        assert!(!edit_current_draft(&mut workspace, |d| apply_draft_options(d, same)).unwrap());
+        assert!(workspace.state.draft().unwrap().overrides.is_empty());
+
+        let wrote = edit_current_draft(&mut workspace, |draft| {
+            let mut options = draft.options.clone();
+            options.keep_video = keep_video;
+            apply_draft_options(draft, options);
+        })
+        .unwrap();
+        assert!(wrote);
+        let draft = workspace.state.draft().unwrap();
+        assert_eq!(draft.options.keep_video, keep_video);
+        assert!(draft.overrides.contains(&Override::KeepVideo));
+        assert!(draft.updated >= updated);
+        workspace.save().unwrap();
+        drop(workspace);
+
+        let reopened = Workspace::open_at(file, root, Default::default()).unwrap();
+        let draft = reopened.state.draft().unwrap();
+        assert_eq!(draft.options.keep_video, keep_video);
+        assert!(draft.overrides.contains(&Override::KeepVideo));
+    }
 
     #[test]
     fn batch_titles_come_from_candidate_rows() {

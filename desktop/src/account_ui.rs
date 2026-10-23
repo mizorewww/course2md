@@ -419,7 +419,7 @@ impl Desktop {
             &self.value(Field::Source, cx),
             !self.onboarding.active
                 && matches!(self.page, Page::New)
-                && self.online
+                && self.online()
                 && (self.preview_error.is_some() || self.subtitle_attention_required()),
         )
     }
@@ -468,7 +468,7 @@ impl Desktop {
         }
         self.account.retry_source = if !self.onboarding.active
             && matches!(self.page, Page::New)
-            && self.online
+            && self.online()
             && (self.preview_error.is_some() || self.subtitle_attention_required())
             && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx))
         {

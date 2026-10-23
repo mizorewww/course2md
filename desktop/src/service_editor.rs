@@ -1878,9 +1878,6 @@ impl Desktop {
                 Ok(())
             }) {
                 Ok(()) => {
-                    if let Some(draft) = workspace.state.draft() {
-                        self.task_options = draft.options.clone();
-                    }
                     if self.preference_defaults_pending {
                         self.preference_defaults_pending = false;
                         self.workspace_error = None;

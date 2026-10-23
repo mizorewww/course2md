@@ -540,21 +540,20 @@ impl Desktop {
             self.reading = false;
         }
         let input = self.value(Field::Source, cx);
-        if input != self.last_source_input {
+        if self.draft().is_some_and(|draft| draft.input != input) {
             if !self.prepare_next_import(&input, window, cx) {
                 return;
             }
             self.following_conversion = None;
-            self.last_source_input = input.clone();
             self.invalidate_source();
         }
         if input.is_empty() {
-            self.source_validation = Some(if self.online {
+            self.source_validation = Some(if self.online() {
                 course2md::tr!("先粘贴视频链接").into()
             } else {
                 course2md::tr!("先选择一个视频").into()
             });
-            if self.online {
+            if self.online() {
                 self.inputs[&Field::Source].update(cx, |input, cx| input.focus(window, cx));
             }
             cx.notify();
@@ -592,12 +591,13 @@ impl Desktop {
             return;
         };
         let reading = self.preview_cancel.is_some() || self.subtitle_loading;
+        let source_mode = self.task_options().source_mode;
         if generation == self.preview_generation
             && !reading
             && let Some(source) = &mut self.source_preview
             && automatic_subtitle_fallback(
                 source,
-                self.task_options.source_mode,
+                source_mode,
                 self.subtitle_error.as_deref(),
             )
         {
@@ -700,7 +700,7 @@ impl Desktop {
         if explicit {
             // The requested text source takes effect before I/O. A failed
             // caption read must never silently keep the previous ASR choice.
-            self.task_options.source_mode = TranscriptSource::Subtitle;
+            self.update_task_options(|o| o.source_mode = TranscriptSource::Subtitle, cx);
         }
         if let Some(source) = &mut self.source_preview {
             source.subtitle_request = Some(track.clone());
@@ -751,7 +751,10 @@ impl Desktop {
                             source.subtitle_read_error = None;
                         }
                         if explicit {
-                            this.task_options.source_mode = TranscriptSource::Subtitle;
+                            this.update_task_options(
+                                |o| o.source_mode = TranscriptSource::Subtitle,
+                                cx,
+                            );
                         }
                         this.save_current_draft(cx);
                     }
@@ -973,8 +976,7 @@ impl Desktop {
     fn use_speech(&mut self, cx: &mut Context<Self>) {
         self.abort_subtitle_read();
         self.subtitle_error = None;
-        self.task_options.source_mode = TranscriptSource::Asr;
-        self.save_current_draft(cx);
+        self.update_task_options(|o| o.source_mode = TranscriptSource::Asr, cx);
         self.advance_conversion_when_ready(cx);
         cx.notify();
     }
@@ -989,8 +991,7 @@ impl Desktop {
         }
         self.abort_subtitle_read();
         self.subtitle_error = None;
-        self.task_options.source_mode = TranscriptSource::Subtitle;
-        self.save_current_draft(cx);
+        self.update_task_options(|o| o.source_mode = TranscriptSource::Subtitle, cx);
         self.advance_conversion_when_ready(cx);
         cx.notify();
     }
@@ -1022,7 +1023,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.online {
+        if self.online() {
             self.switch_source_kind(false, window, cx);
         }
         match files {
@@ -1065,7 +1066,7 @@ impl Desktop {
                 ])
                 .icon("online", icons::link())
                 .icon("local", icons::movie())
-                .selected(if self.online { "online" } else { "local" })
+                .selected(if self.online() { "online" } else { "local" })
                 .on_change(cx.listener(|this, value: &SharedString, window, cx| {
                     this.switch_source_kind(value.as_ref() == "online", window, cx);
                 })),
@@ -1076,21 +1077,28 @@ impl Desktop {
         self.subtitle_loading
             || self.subtitle_error.is_some()
             || self.source_preview.as_ref().is_some_and(|source| {
-                subtitle_needs_confirmation(source, self.task_options.source_mode)
+                subtitle_needs_confirmation(source, self.task_options().source_mode)
             })
     }
 
-    /// 选项监听器共享的收尾：草稿落盘成功后推进转换就绪，随后刷新界面。
-    fn persist_task_options(&mut self, cx: &mut Context<Self>) {
-        if !self.task_options.uses_cloud_provider()
+    /// The shared path for every processing-option control: record the change
+    /// in the draft, check the model it now needs, and continue a confirmed
+    /// conversion that was waiting for it.
+    fn set_task_option(
+        &mut self,
+        edit: impl FnOnce(&mut ConversionOptions),
+        cx: &mut Context<Self>,
+    ) {
+        let saved = self.update_task_options(edit, cx);
+        if !self.task_options().uses_cloud_provider()
             && (self.import_uses_speech()
                 || (self.generation_options_open
-                    && self.task_options.source_mode != TranscriptSource::Subtitle))
+                    && self.task_options().source_mode != TranscriptSource::Subtitle))
         {
             let (provider, model, root) = self.import_model_request();
             self.ensure_model_diagnostic(provider, Some(&model), &root, cx);
         }
-        if self.save_current_draft(cx) {
+        if saved {
             self.advance_conversion_when_ready(cx);
         }
         cx.notify();
@@ -1103,7 +1111,7 @@ impl Desktop {
             .read(cx)
             .focus_handle(cx)
             .is_focused(window);
-        if self.online {
+        if self.online() {
             let validation = self
                 .source_preview
                 .is_none()
@@ -1255,7 +1263,7 @@ impl Desktop {
             view = self.candidate_list_view(view, title, cx);
         }
         view = self.source_preview_error(view, cx);
-        if self.online {
+        if self.online() {
             view = view.child(self.local_upload_hint(cx));
         }
         view
@@ -1292,7 +1300,7 @@ impl Desktop {
         let mut view = view;
         // 在线列表走多选批量入队；本地多文件拖入保持单选（本地身份要做内容哈希，
         // 逐个走原读取确认流程）。身份可确认的候选才可勾选；其余保持单条打开。
-        let batch = self.online;
+        let batch = self.online();
         // Identities are resolved once when the candidates arrive.
         let identities: Vec<Option<&str>> = self
             .source_candidates
@@ -1631,7 +1639,7 @@ impl Desktop {
                                     })),
                             )
                             .when(
-                                self.online
+                                self.online()
                                     && source::legacy_login_failure_from_text(error)
                                     && course2md::auth::is_bilibili_url(
                                         &self.value(Field::Source, cx),
@@ -1921,7 +1929,7 @@ impl Desktop {
                                         cx.notify();
                                     })),
                             )
-                            .when(self.online, |row| {
+                            .when(self.online(), |row| {
                                 row.child(
                                     quiet("reread-source")
                                         .icon(icons::refresh())
@@ -1954,7 +1962,7 @@ impl Desktop {
                     }),
                 )
                 .child(selected)
-                .when(!self.online && self.can_start_input(cx), |card| {
+                .when(!self.online() && self.can_start_input(cx), |card| {
                     card.child(
                         h_flex()
                             .w_full()
@@ -1976,7 +1984,7 @@ impl Desktop {
         };
         let speech = self.import_uses_speech();
         let failure = self.subtitle_error.as_deref().or_else(|| {
-            if subtitle_needs_confirmation(source, self.task_options.source_mode)
+            if subtitle_needs_confirmation(source, self.task_options().source_mode)
                 && let SubtitleEvidence::Failed { message } = &source.subtitles
             {
                 Some(message.as_str())
@@ -1985,7 +1993,7 @@ impl Desktop {
             }
         });
         let needs_text_choice =
-            subtitle_needs_confirmation(source, self.task_options.source_mode) || failure.is_some();
+            subtitle_needs_confirmation(source, self.task_options().source_mode) || failure.is_some();
         let description = if self.subtitle_loading {
             course2md::tr!("正在读取字幕…").to_owned()
         } else if !speech
@@ -2265,7 +2273,7 @@ impl Desktop {
                     icons::subtitles(),
                 )
                 .icon(text_source_id(TranscriptSource::Asr), icons::mic())
-                .selected(text_source_id(self.task_options.source_mode))
+                .selected(text_source_id(self.task_options().source_mode))
                 .on_change(cx.listener(|this, value: &SharedString, _, cx| {
                     let Some(mode) = text_source_choices()
                         .iter()
@@ -2277,10 +2285,7 @@ impl Desktop {
                     if mode == TranscriptSource::Asr {
                         this.use_speech(cx);
                     } else {
-                        this.task_options.source_mode = mode;
-                        this.save_current_draft(cx);
-                        this.advance_conversion_when_ready(cx);
-                        cx.notify();
+                        this.set_task_option(|o| o.source_mode = mode, cx);
                     }
                 }));
         let mut view = v_flex()
@@ -2291,7 +2296,7 @@ impl Desktop {
                 "conversion-text-mode-label",
                 course2md::tr!("文字来源"),
                 v_flex().w_full().gap_2().child(selector).when(
-                    self.task_options.source_mode == TranscriptSource::Auto,
+                    self.task_options().source_mode == TranscriptSource::Auto,
                     |view| {
                         view.child(aux_text(course2md::tr!(
                             "有字幕时直接用字幕，没有字幕时使用语音识别"
@@ -2299,7 +2304,7 @@ impl Desktop {
                     },
                 ),
             ));
-        if self.task_options.source_mode != TranscriptSource::Subtitle {
+        if self.task_options().source_mode != TranscriptSource::Subtitle {
             view = view.child(self.import_speech_options(window, cx));
         }
         view
@@ -2319,15 +2324,18 @@ impl Desktop {
                 conversion_ai_option_label(option),
                 "",
                 processing_switch(Switch::new(("import-ai-option", index)))
-                    .checked(conversion_ai_option_enabled(&self.task_options, option))
-                    .disabled(option == ConversionAiOption::Vision && !self.task_options.llm)
+                    .checked(conversion_ai_option_enabled(self.task_options(), option))
+                    .disabled(option == ConversionAiOption::Vision && !self.task_options().llm)
                     .on_click(cx.listener(move |this, enabled, _, cx| {
-                        apply_conversion_ai_option(&mut this.task_options, option, *enabled);
-                        this.persist_task_options(cx);
+                        let enabled = *enabled;
+                        this.set_task_option(
+                            |o| apply_conversion_ai_option(o, option, enabled),
+                            cx,
+                        );
                     })),
             ));
         }
-        if self.task_options.llm
+        if self.task_options().llm
             && self
                 .import_base_config()
                 .llm
@@ -2340,7 +2348,7 @@ impl Desktop {
         // Bilingual translation is a per-task choice; the global default is only
         // the starting value inherited by this input.
         let translated = self
-            .task_options
+            .task_options()
             .translate
             .as_deref()
             .and_then(course2md::language::target);
@@ -2348,8 +2356,7 @@ impl Desktop {
             "import-ai-translate",
             translated,
             |this, code, cx| {
-                this.task_options.translate = code.map(str::to_owned);
-                this.persist_task_options(cx);
+                this.set_task_option(|o| o.translate = code.map(str::to_owned), cx);
             },
             cx,
         );
@@ -2377,7 +2384,7 @@ impl Desktop {
             if let Some(selected) = self.selected_task_service(ServicePurpose::Ai) {
                 service = service.child(aux_text(course2md::tr!(
                     "{}会发送到 {}",
-                    if self.task_options.llm && self.task_options.vision {
+                    if self.task_options().llm && self.task_options().vision {
                         course2md::tr!("文字及对应截图")
                     } else {
                         course2md::tr!("文字")
@@ -2423,16 +2430,12 @@ impl Desktop {
             cx.notify();
             return;
         }
-        self.task_options.llm = defaults.llm;
-        self.task_options.summarize = defaults.summarize;
-        self.task_options.vision = defaults.vision;
-        self.task_options.translate = defaults.translate.clone();
         self.advance_conversion_when_ready(cx);
         cx.notify();
     }
 
     fn import_speech_options(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let cloud = self.task_options.uses_cloud_provider();
+        let cloud = self.task_options().uses_cloud_provider();
         let label = if cloud {
             course2md::tr!("语音识别服务").to_owned()
         } else {
@@ -2444,7 +2447,7 @@ impl Desktop {
         } else {
             self.local_engine_name().to_owned()
         };
-        let current = self.task_options.provider;
+        let current = self.task_options().provider;
         let entity = cx.entity().downgrade();
         let providers: Vec<_> = providers()
             .iter()
@@ -2468,8 +2471,7 @@ impl Desktop {
                         .checked(provider == current)
                         .on_click(move |_, _, cx| {
                             let _ = entity.update(cx, |this, cx| {
-                                this.task_options.provider = provider;
-                                this.persist_task_options(cx);
+                                this.set_task_option(|o| o.provider = provider, cx);
                             });
                         }),
                 )
@@ -2603,15 +2605,15 @@ impl Desktop {
     fn import_uses_speech(&self) -> bool {
         self.source_preview
             .as_ref()
-            .is_some_and(|source| uses_speech(source, self.task_options.source_mode))
+            .is_some_and(|source| uses_speech(source, self.task_options().source_mode))
     }
 
     /// Proofreading, a summary or a bilingual translation sends text to the AI service.
     fn task_uses_ai(&self) -> bool {
-        self.task_options.llm
-            || self.task_options.summarize
+        self.task_options().llm
+            || self.task_options().summarize
             || self
-                .task_options
+                .task_options()
                 .translate
                 .as_deref()
                 .and_then(course2md::language::target)
@@ -2619,7 +2621,7 @@ impl Desktop {
     }
 
     fn missing_import_service(&self) -> Option<ServicePurpose> {
-        let separate_subtitle = self.task_options.source_mode != TranscriptSource::Asr
+        let separate_subtitle = self.task_options().source_mode != TranscriptSource::Asr
             && self
                 .workspace
                 .as_ref()
@@ -2628,7 +2630,7 @@ impl Desktop {
         [
             (
                 ServicePurpose::Speech,
-                self.task_options.uses_cloud_provider()
+                self.task_options().uses_cloud_provider()
                     && self.import_uses_speech()
                     && !separate_subtitle,
             ),
@@ -2657,7 +2659,7 @@ impl Desktop {
 
     fn actual_local_provider(&self) -> course2md::config::AsrProvider {
         use course2md::config::AsrProvider;
-        self.task_options
+        self.task_options()
             .provider
             .filter(|provider| *provider != AsrProvider::Api)
             .unwrap_or_else(|| self.recommended_local_provider())
@@ -2714,7 +2716,6 @@ impl Desktop {
                                             Ok(())
                                         }) {
                                             Ok(()) => {
-                                                this.target_folder = None;
                                                 this.advance_conversion_when_ready(cx);
                                             }
                                             Err(error) => {
@@ -2781,16 +2782,15 @@ impl Desktop {
             choices = choices.child(
                 filter_chip(
                     ("import-export", index),
-                    self.task_options.formats[index],
+                    self.task_options().formats[index],
                     cx,
                 )
-                .when(self.task_options.formats[index], |button| {
+                .when(self.task_options().formats[index], |button| {
                     button.icon(icons::check())
                 })
                 .label(label)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.task_options.formats[index] = !this.task_options.formats[index];
-                    this.save_current_draft(cx);
+                    this.update_task_options(|o| o.formats[index] = !o.formats[index], cx);
                     cx.notify();
                 })),
             );
@@ -2803,7 +2803,7 @@ impl Desktop {
                 course2md::tr!("同时导出"),
                 choices,
             ))
-            .when(self.online, |view| {
+            .when(self.online(), |view| {
                 view.child(
                     div()
                         .w_full()
@@ -2813,10 +2813,10 @@ impl Desktop {
                             course2md::tr!("保留原视频"),
                             course2md::tr!("供离线播放，会占用更多磁盘空间"),
                             processing_switch(Switch::new("import-keep-video"))
-                                .checked(self.task_options.keep_video)
+                                .checked(self.task_options().keep_video)
                                 .on_click(cx.listener(|this, value, _, cx| {
-                                    this.task_options.keep_video = *value;
-                                    this.save_current_draft(cx);
+                                    let value = *value;
+                                    this.update_task_options(|o| o.keep_video = value, cx);
                                     cx.notify();
                                 })),
                         )),
@@ -2844,7 +2844,7 @@ impl Desktop {
         // 候选列表展示时，批量/单选操作在列表自己的行动区；输入行的「开始转换」
         // 对合集链接必然失败，不再同屏出现两个 primary
         self.source_collection_title.is_none()
-            && (self.online || !self.value(Field::Source, cx).is_empty())
+            && (self.online() || !self.value(Field::Source, cx).is_empty())
             && self.preview_error.is_none()
             && self.existing_source_note().is_none()
             && self.current_input_task(cx).is_none_or(|task| {
@@ -2862,7 +2862,7 @@ impl Desktop {
     fn preview_source_button(&self, compact: bool, cx: &mut Context<Self>) -> Div {
         // Enter remains bound to inspect_source. Only this explicitly relabeled
         // button changes to conversion once an eligible preview is on screen.
-        let start = self.online
+        let start = self.online()
             && self.source_preview.is_some()
             && self.workbench_linked_task(cx).is_none()
             && self.can_start_input(cx);
@@ -2953,6 +2953,7 @@ impl Desktop {
             return false;
         }
         let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
+        let online = self.online();
         let Some(workspace) = &mut self.workspace else {
             return true;
         };
@@ -2970,7 +2971,7 @@ impl Desktop {
             })
             .flatten();
         match workspace.transaction(|state| {
-            state.reset_input(self.online, defaults, destination);
+            state.reset_input(online, defaults, destination);
             Ok(())
         }) {
             Ok(()) => {
@@ -3004,7 +3005,7 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .gap_4()
-            .when(!self.online, |input| input.child(self.source_kind_tabs(cx)))
+            .when(!self.online(), |input| input.child(self.source_kind_tabs(cx)))
             .child(self.box_source_input(window, cx));
         let mut view = v_flex()
             .gap(SECTION_GAP)
@@ -3352,7 +3353,7 @@ impl Desktop {
             !environment.engine
                 || !environment.ffmpeg
                 || !environment.ffprobe
-                || (self.online && !environment.ytdlp)
+                || (self.online() && !environment.ytdlp)
         }) {
             actions = actions.child(
                 outline_pill("repair-conversion-components")

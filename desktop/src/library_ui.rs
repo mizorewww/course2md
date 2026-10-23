@@ -55,7 +55,7 @@ impl Render for FolderDialog {
 impl Desktop {
     pub fn begin_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.import_video_from_action(window, cx);
-        if self.online && self.value(Field::Source, cx).is_empty() {
+        if self.online() && self.value(Field::Source, cx).is_empty() {
             self.inputs[&Field::Source].update(cx, |state, cx| state.focus(window, cx));
         }
     }
@@ -95,7 +95,7 @@ impl Desktop {
         if !self.prepare_next_import(&input, window, cx) {
             return;
         }
-        if self.preview_cancel.is_some() && self.last_source_input == input {
+        if self.preview_cancel.is_some() && self.draft().is_some_and(|draft| draft.input == input) {
             return;
         }
         let previous_source = self.source_preview.clone();
@@ -103,7 +103,7 @@ impl Desktop {
         self.invalidate_source();
         if input.is_empty() {
             self.source_validation = Some(
-                if self.online {
+                if self.online() {
                     course2md::tr!("先粘贴视频链接")
                 } else {
                     course2md::tr!("先选择一个视频")
@@ -113,13 +113,13 @@ impl Desktop {
             cx.notify();
             return;
         }
-        if self.online
+        if self.online()
             && let Some(path) = source::pasted_local_path(&input)
         {
             self.drop_source_files(&[path], window, cx);
             return;
         }
-        if self.online {
+        if self.online() {
             let links = source::video_links(&input);
             if links.len() > 1 {
                 self.source_candidates = links
@@ -156,7 +156,6 @@ impl Desktop {
                 return;
             }
         }
-        self.last_source_input = input.clone();
         if !self.save_current_draft(cx) {
             return;
         }
@@ -170,7 +169,7 @@ impl Desktop {
         self.preview_workers += 1;
         let cancel = Arc::new(AtomicBool::new(false));
         self.preview_cancel = Some(cancel.clone());
-        let online = self.online;
+        let online = self.online();
         let handle = window.window_handle();
         // probe 是同步网络/子进程工作；见 crate::spawn_blocking_io 的说明
         let task = crate::spawn_blocking_io(move || source::probe(input, online, cancel));
@@ -200,9 +199,7 @@ impl Desktop {
                             }
                             let title = this.workspace.as_ref().and_then(|workspace| workspace.state.draft())
                                 .filter(|draft| draft.custom_title).map(|draft| draft.title.clone()).unwrap_or_else(|| source.title.clone());
-                            this.draft_loading = true;
                             this.inputs[&Field::Title].update(cx, |state, cx| state.set_value(title, window, cx));
-                            this.draft_loading = false;
                             let previous_source = previous_source.as_ref().filter(|previous| previous.identity == source.identity);
                             let wanted = previous_source.and_then(|previous| previous.subtitle_request.as_ref().map(|track| track.id.clone()).or_else(|| previous.selected_subtitle.as_ref().map(|subtitle| subtitle.track_id.clone())));
                             let default_track = match &wanted {
@@ -217,7 +214,7 @@ impl Desktop {
                             }
                             this.source_preview = Some(source);
                             this.save_current_draft(cx);
-                            if this.task_options.source_mode != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
+                            if this.task_options().source_mode != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
                                 this.confirm_subtitle(track, false, cx);
                             }
                         }
@@ -549,9 +546,6 @@ impl Desktop {
                     self.folder_editor = Some(Some(saved));
                     return;
                 }
-                if workspace.state.current_draft == *draft_id {
-                    self.target_folder = Some(saved);
-                }
             }
         } else {
             self.select_library_scope(origin.root, crate::FolderFilter::Folder(saved), cx);
@@ -735,7 +729,7 @@ impl Desktop {
             .and_then(|location| loaded?.folder_key(&location.relative))
             .or_else(|| {
                 if storage.is_none() {
-                    self.target_folder
+                    self.target_folder()
                 } else {
                     None
                 }
@@ -813,8 +807,7 @@ impl Desktop {
                                         Some(&draft.id) == origin.draft_id.as_ref()
                                     })
                                 {
-                                    this.target_folder = id;
-                                    this.save_current_draft(cx);
+                                    this.update_draft(|draft| draft.folder = id, cx);
                                 }
                                 cx.notify();
                             });
