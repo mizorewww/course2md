@@ -3525,11 +3525,7 @@ impl Desktop {
         let platform = if meta.is_local() {
             Some(course2md::tr!("本地视频"))
         } else {
-            match course2md::config::known_video_site(&meta.webpage_url) {
-                Some("bilibili") => Some("Bilibili"),
-                Some("youtube") => Some("YouTube"),
-                _ => None,
-            }
+            crate::views::video_site_name(&meta.webpage_url)
         };
         let facts = preview.facts.join(" · ");
         let title = v_flex()
@@ -3602,7 +3598,10 @@ impl Desktop {
                         quiet("reader-source")
                             .text_color(color(ACCENT))
                             .icon(icons::external_link())
-                            .label(course2md::tr!("在 {} 打开", platform.unwrap_or("浏览器")))
+                            .label(match platform {
+                                Some(platform) => course2md::tr!("在 {} 打开", platform),
+                                None => course2md::tr!("在浏览器中打开").to_owned(),
+                            })
                     } else {
                         play("reader-source")
                     };

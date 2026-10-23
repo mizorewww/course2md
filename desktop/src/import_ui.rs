@@ -1834,10 +1834,9 @@ impl Desktop {
         let platform = if !source.online {
             course2md::tr!("本地视频").to_owned()
         } else {
-            match course2md::config::known_video_site(&source.input) {
-                Some("bilibili") => "Bilibili".to_owned(),
-                Some("youtube") => "YouTube".to_owned(),
-                _ => url::Url::parse(&source.input)
+            match crate::views::video_site_name(&source.input) {
+                Some(name) => name.to_owned(),
+                None => url::Url::parse(&source.input)
                     .ok()
                     .and_then(|url| url.host_str().map(str::to_owned))
                     .unwrap_or_default(),
