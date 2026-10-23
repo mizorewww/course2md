@@ -19,7 +19,11 @@ pub fn git_commit(root: &Path) -> Option<String> {
         // A linked worktree's .git is a pointer file: "gitdir: <private gitdir>".
         let pointer = std::fs::read_to_string(&dot_git).ok()?;
         let path = PathBuf::from(pointer.trim().strip_prefix("gitdir:")?.trim());
-        if path.is_absolute() { path } else { root.join(path) }
+        if path.is_absolute() {
+            path
+        } else {
+            root.join(path)
+        }
     };
     // Branch refs and packed-refs live in the common gitdir; for a linked
     // worktree, `commondir` names it relative to the private gitdir.
