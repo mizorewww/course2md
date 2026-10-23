@@ -625,6 +625,30 @@ pub fn switch_row(
         .child(div().flex_shrink_0().child(switch))
 }
 
+/// A 16:9 video cover; the width scales with the text size. Without a cover
+/// the tonal slot stays, so rows keep their rhythm while covers load.
+pub fn cover_slot(width: Rems, cover: Option<std::path::PathBuf>) -> gpui::Div {
+    use gpui::{prelude::*, *};
+    div()
+        .w(width)
+        .aspect_ratio(16. / 9.)
+        .flex_shrink_0()
+        .rounded(RADIUS_SMALL)
+        .overflow_hidden()
+        .bg(color(SECONDARY_CONTAINER))
+        .flex()
+        .items_center()
+        .justify_center()
+        .when_some(cover, |slot, cover| {
+            slot.child(
+                img(cover)
+                    .size_full()
+                    .rounded(RADIUS_SMALL)
+                    .object_fit(ObjectFit::Cover),
+            )
+        })
+}
+
 /// Related facts share a bounded label column and a stable value start.
 pub fn detail_row(
     id: impl Into<gpui::ElementId>,

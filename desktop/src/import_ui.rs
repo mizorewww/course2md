@@ -59,28 +59,6 @@ fn import_option_label(
         .child(content)
 }
 
-/// A 16:9 cover slot; the width scales with the text size.
-pub(crate) fn cover_slot(width: Rems, cover: Option<PathBuf>) -> Div {
-    div()
-        .w(width)
-        .aspect_ratio(16. / 9.)
-        .flex_shrink_0()
-        .rounded(RADIUS_SMALL)
-        .overflow_hidden()
-        .bg(color(SECONDARY_CONTAINER))
-        .flex()
-        .items_center()
-        .justify_center()
-        .when_some(cover, |slot, cover| {
-            slot.child(
-                img(cover)
-                    .size_full()
-                    .rounded(RADIUS_SMALL)
-                    .object_fit(ObjectFit::Cover),
-            )
-        })
-}
-
 /// Secondary text below a control.
 pub(crate) fn aux_text(content: impl IntoElement) -> Div {
     div()

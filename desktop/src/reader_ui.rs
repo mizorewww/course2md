@@ -1324,6 +1324,22 @@ struct NoteFlow {
 }
 
 impl NoteFlow {
+    /// Warnings for the screenshots of block `index` that could not be read.
+    fn missing_images(&self, index: usize) -> impl Iterator<Item = Stateful<Div>> + '_ {
+        self.missing_by_block
+            .get(&index)
+            .into_iter()
+            .flatten()
+            .map(|&frame_index| {
+                theme::accessible_text(
+                    ("missing-body-image", frame_index),
+                    course2md::tr!("{}无法读取", frame_label(&self.frames[frame_index])),
+                )
+                .text_sm()
+                .text_color(color(WARNING))
+            })
+    }
+
     /// Find highlights group per block; the current match reads stronger.
     /// `matches` arrive in block order, so one binary search scopes a block.
     fn highlight_runs(&self, index: usize) -> Vec<(Range<usize>, HighlightStyle)> {
@@ -1620,19 +1636,7 @@ fn render_note_section(flow: &NoteFlow, heading: usize, end: usize, ordinal: usi
     let chapter = flow.chapter_starts.get(&heading);
     let marks = flow.highlight_runs(heading);
     let time = seconds.map(course2md::render::fmt_ts);
-    let missing = flow
-        .missing_by_block
-        .get(&heading)
-        .into_iter()
-        .flatten()
-        .map(|&frame_index| {
-            theme::accessible_text(
-                ("missing-body-image", frame_index),
-                course2md::tr!("{}无法读取", frame_label(&flow.frames[frame_index])),
-            )
-            .text_sm()
-            .text_color(color(WARNING))
-        });
+    let missing = flow.missing_images(heading);
     let title_row = h_flex()
         .id(SharedString::from(anchor))
         .flex_wrap()
@@ -1768,19 +1772,7 @@ fn render_note_heading(
             chip.id(("reader-heading-chip", index))
         }
     });
-    let missing = flow
-        .missing_by_block
-        .get(&index)
-        .into_iter()
-        .flatten()
-        .map(|&frame_index| {
-            theme::accessible_text(
-                ("missing-body-image", frame_index),
-                course2md::tr!("{}无法读取", frame_label(&flow.frames[frame_index])),
-            )
-            .text_sm()
-            .text_color(color(WARNING))
-        });
+    let missing = flow.missing_images(index);
     v_flex()
         .id(SharedString::from(anchor.to_owned()))
         .gap_2()

@@ -1781,23 +1781,10 @@ impl Desktop {
                             .id(("storage-location", index))
                             .min_w_0()
                             .context_menu(move |popup, window, cx| row_menu(popup, window, cx))
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .min_w_0()
-                                    .items_center()
-                                    .gap(px(16.))
-                                    .child(
-                                        crate::settings_ui::settings_resource_icon(
-                                            icons::folder_open(),
-                                        )
-                                        .rounded(RADIUS_SMALL),
-                                    )
-                                    .child(
-                                        v_flex()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .gap_1()
+                            .child(crate::settings_ui::resource_layout(
+                                crate::settings_ui::settings_resource_icon(icons::folder_open())
+                                    .rounded(RADIUS_SMALL),
+                                v_flex()
                                             .child(
                                                 accessible_text(
                                                     ("storage-location-name", index),
@@ -1819,9 +1806,8 @@ impl Desktop {
                                                 .text_size(TEXT_SETTINGS_AUX)
                                                 .text_color(color(GRAY)),
                                             ),
-                                    )
-                                    .child(trailing.flex_shrink_0()),
-                            )
+                                trailing,
+                            ))
                             .when_some(
                                 check.and_then(|check| check.problem.clone()),
                                 |card, problem| {

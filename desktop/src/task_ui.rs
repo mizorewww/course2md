@@ -1,7 +1,6 @@
 //! The task page: queue rows, running and attention cards, and their menus.
 use super::*;
 
-use crate::import_ui::cover_slot;
 use crate::{
     theme::*,
     workspace::{Intent, TaskRecord, TaskState},
@@ -2772,34 +2771,20 @@ fn task_log_box(id: &str, text: String) -> Stateful<Div> {
 
 /// A 16:9 cover slot; queued and coverless tasks show what they wait for.
 fn task_row_cover(cover: Option<PathBuf>, queued: bool) -> Div {
-    let slot = div()
-        .w(rems(96. / 14.))
+    let placeholder = cover.is_none();
+    cover_slot(rems(96. / 14.), cover)
         .max_w(relative(0.3))
-        .flex_shrink_0()
-        .aspect_ratio(16. / 9.)
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(RADIUS_SMALL)
-        .overflow_hidden()
-        .bg(color(SECONDARY_CONTAINER));
-    match cover {
-        Some(path) => slot.child(
-            img(path)
-                .size_full()
-                .rounded(RADIUS_SMALL)
-                .object_fit(ObjectFit::Cover),
-        ),
-        None => slot.child(
-            if queued {
-                icons::schedule()
-            } else {
-                icons::movie()
-            }
-            .size(rems(20. / 14.))
-            .text_color(color(ON_SECONDARY_CONTAINER)),
-        ),
-    }
+        .when(placeholder, |slot| {
+            slot.child(
+                if queued {
+                    icons::schedule()
+                } else {
+                    icons::movie()
+                }
+                .size(rems(20. / 14.))
+                .text_color(color(ON_SECONDARY_CONTAINER)),
+            )
+        })
 }
 
 /// The reason a task needs the person, when it differs from its badge.

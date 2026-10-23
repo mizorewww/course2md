@@ -501,37 +501,39 @@ impl AccountCard {
                 .text_size(TEXT_SETTINGS_AUX)
                 .text_color(color(if error { DANGER } else { GRAY }))
         };
-        h_flex()
-            .w_full()
-            .min_w_0()
-            .gap(px(16.))
-            .items_center()
-            .child(settings_resource_icon(self.icon))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_1()
-                    .child(identity)
+        resource_layout(
+            settings_resource_icon(self.icon),
+            v_flex()
+                .child(identity)
                     .when_some(self.detail, |view, detail| {
                         view.child(line("detail", detail, false))
                     })
-                    .children(
-                        self.lines
-                            .into_iter()
-                            .map(|(suffix, message, error)| line(suffix, message, error)),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .flex_wrap()
-                    .flex_shrink_0()
-                    .max_w_full()
-                    .children(self.actions),
-            )
+                .children(
+                    self.lines
+                        .into_iter()
+                        .map(|(suffix, message, error)| line(suffix, message, error)),
+                ),
+            h_flex()
+                .gap_2()
+                .items_center()
+                .flex_wrap()
+                .max_w_full()
+                .children(self.actions),
+        )
     }
+}
+
+/// A resource item's layout (an account or a library location): its icon,
+/// its text column, and trailing status or actions on the item's edge.
+pub(crate) fn resource_layout(icon: impl IntoElement, text: Div, trailing: Div) -> Div {
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .gap(px(16.))
+        .items_center()
+        .child(icon)
+        .child(text.flex_1().min_w_0().gap_1())
+        .child(trailing.flex_shrink_0())
 }
 
 /// One row of a resource list (an account or a saved service): icon, text,
@@ -2552,15 +2554,10 @@ impl Desktop {
                                     .iter()
                                     .filter(|(_, _, optional)| !optional)
                                     .map(|(label, _, _)| {
-                                        h_flex()
-                                            .h(rems(32. / 14.))
-                                            .pl(rems(8. / 14.))
+                                        settings_chip(h_flex())
                                             .pr(rems(12. / 14.))
                                             .gap(rems(6. / 14.))
                                             .items_center()
-                                            .rounded(RADIUS_SMALL)
-                                            .border_1()
-                                            .border_color(color(HAIRLINE))
                                             .text_size(TEXT_SETTINGS_AUX)
                                             .child(
                                                 icons::check()
