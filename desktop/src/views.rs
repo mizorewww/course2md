@@ -108,8 +108,11 @@ impl Desktop {
         // macOS draws the traffic lights inside the title bar's leading edge.
         let leading = if cfg!(target_os = "macos") { 88. } else { 12. };
         let page = self.page;
+        // TitleBar wraps its children in a box that grows to their content, so
+        // the bar takes the window's width explicitly; otherwise nothing in it
+        // (the note title, the reader's search) would ever shrink.
         let bar = h_flex()
-            .w_full()
+            .w(window.viewport_size().width)
             .min_w_0()
             .h_full()
             .pl(px(leading))
