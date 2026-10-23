@@ -157,6 +157,28 @@ pub(crate) fn provider_from_id(id: &str) -> Option<course2md::config::AsrProvide
     course2md::config::AsrProvider::from_id(id)
 }
 
+/// Debug builds: open a note in a given reader state at startup, so native
+/// layout can be checked without synthetic input. Release builds ignore it.
+struct ValidationOpen {
+    /// Matched against note titles and version directories.
+    note: Option<String>,
+    /// Comma-separated reader panels: `find`, `info`.
+    panels: String,
+}
+
+impl ValidationOpen {
+    fn from_env() -> Option<Self> {
+        if !cfg!(debug_assertions) {
+            return None;
+        }
+        let note = std::env::var("COURSE2MD_VALIDATION_OPEN_NOTE").ok()?;
+        Some(Self {
+            note: Some(note),
+            panels: std::env::var("COURSE2MD_VALIDATION_READER").unwrap_or_default(),
+        })
+    }
+}
+
 struct Desktop {
     preferences: preferences::Store,
     settings_ui: settings_ui::State,
@@ -254,6 +276,9 @@ struct Desktop {
     last_tick: Instant,
     logs: VecDeque<String>,
     pending_done: Option<Done>,
+    /// Debug validation only: a note to open after the first library scan,
+    /// and the reader panels to show once it has loaded.
+    validation: Option<ValidationOpen>,
     completed: Option<Done>,
     /// Library notes, shared so render closures hold a pointer, not a copy.
     courses: Vec<Rc<Course>>,
@@ -640,6 +665,7 @@ impl Desktop {
             job_started: None,
             logs: VecDeque::new(),
             pending_done: None,
+            validation: ValidationOpen::from_env(),
             completed: None,
             courses: vec![],
             cover_by_source: BTreeMap::new(),
@@ -1241,6 +1267,7 @@ impl Desktop {
                 }
                 this.courses.sort_by_key(|c| std::cmp::Reverse(c.modified));
                 this.apply_course_title_aliases();
+                this.open_validation_note(cx);
                 if let Some(library) = this.library_indexes.get(&this.library_root) {
                     this.library = library.clone();
                     this.library_error = None;
@@ -1418,6 +1445,7 @@ impl Desktop {
                         this.apply_course_title_aliases();
                         this.restore_reading_position(cx);
                         this.page = Page::Result;
+                        this.show_validation_panels();
                         if follow.is_some() {
                             this.following_conversion = None;
                         }

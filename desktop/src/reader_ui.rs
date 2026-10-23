@@ -2790,6 +2790,41 @@ impl Desktop {
         })
         .detach();
     }
+    /// Debug validation: open the requested note after the first scan.
+    pub(crate) fn open_validation_note(&mut self, cx: &mut Context<Self>) {
+        let Some(wanted) = self.validation.as_mut().and_then(|v| v.note.take()) else {
+            return;
+        };
+        let found = self
+            .courses
+            .iter()
+            .find(|course| {
+                course.title.contains(&wanted) || course.dir.to_string_lossy().contains(&wanted)
+            })
+            .cloned();
+        if let Some(course) = found {
+            self.open_course(course, cx);
+        }
+    }
+
+    /// Debug validation: show the requested reader panels once the note loaded.
+    pub(crate) fn show_validation_panels(&mut self) {
+        // Only after the requested note was opened.
+        if self.validation.as_ref().is_none_or(|v| v.note.is_some()) {
+            return;
+        }
+        let Some(validation) = self.validation.take() else {
+            return;
+        };
+        for panel in validation.panels.split(',').map(str::trim) {
+            match panel {
+                "find" => self.reader_ui.find.open = true,
+                "info" => self.reader_ui.info_open = true,
+                _ => {}
+            }
+        }
+    }
+
     /// The note version at `dir`: the library's shared copy, or the open note
     /// when the library has not listed it yet. Copies only when it must.
     pub(crate) fn note_at(&self, dir: &std::path::Path) -> Option<Rc<Course>> {
@@ -6251,28 +6286,35 @@ mod flow_tests {
                     .h(px(28.))
                     .debug_selector(move || name.into())
             };
-            h_flex()
-                .w(px(self.width))
-                .debug_selector(|| "bar".into())
-                .child(fixed("home", 140.))
-                .child(div().flex_1().min_w_0().child("Course title"))
-                .child(
+            // As in gpui-component's TitleBar: a box that never shrinks below
+            // its content, around the app's bar of the window's width.
+            h_flex().w(px(self.width)).child(
+                h_flex().flex_shrink_0().flex_1().child(
                     h_flex()
+                        .w(px(self.width))
                         .min_w_0()
-                        .flex_shrink(1.)
-                        .gap_2()
-                        .child(fixed("tabs", 260.))
+                        .debug_selector(|| "bar".into())
+                        .child(fixed("home", 140.))
+                        .child(div().flex_1().min_w_0().child("Course title"))
                         .child(
                             h_flex()
-                                .w(super::READER_SEARCH_WIDTH)
+                                .min_w_0()
                                 .flex_shrink(1.)
-                                .min_w(super::READER_SEARCH_MIN_WIDTH)
-                                .debug_selector(|| "search".into())
-                                .child(div().flex_1().min_w_0().h(px(28.))),
-                        )
-                        .child(fixed("export", 120.))
-                        .child(fixed("more", 32.)),
-                )
+                                .gap_2()
+                                .child(fixed("tabs", 260.))
+                                .child(
+                                    h_flex()
+                                        .w(super::READER_SEARCH_WIDTH)
+                                        .flex_shrink(1.)
+                                        .min_w(super::READER_SEARCH_MIN_WIDTH)
+                                        .debug_selector(|| "search".into())
+                                        .child(div().flex_1().min_w_0().h(px(28.))),
+                                )
+                                .child(fixed("export", 120.))
+                                .child(fixed("more", 32.)),
+                        ),
+                ),
+            )
         }
     }
 
