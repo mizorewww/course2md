@@ -432,7 +432,15 @@ pub(crate) struct State {
     missing_by_block: Rc<HashMap<usize, Vec<usize>>>,
     /// Screenshots matching the gallery search, in note order.
     gallery_matches: Rc<Vec<usize>>,
-    gallery_excerpts: Rc<HashMap<usize, String>>,
+    /// Each matching screenshot's excerpt and the find ranges inside it.
+    gallery_excerpts: Rc<HashMap<usize, GalleryExcerpt>>,
+    // The screenshot tab is a variable-height `list` of grid rows, like the
+    // note tab: its items, per-row focus containers and the column count
+    // the rows were cut for.
+    gallery_list: ListState,
+    gallery_items: Rc<Vec<GalleryItem>>,
+    gallery_focus: Rc<Vec<FocusHandle>>,
+    gallery_columns: usize,
     /// The note's contents rail and the chapter titles its headings open.
     outline: Rc<Vec<(usize, String, Option<f64>)>>,
     chapter_starts: Rc<HashMap<usize, String>>,
@@ -513,7 +521,7 @@ impl State {
                         this.save_reading_position(cx);
                         this.reader_ui.gallery_search_position = this.capture_reading_position();
                     }
-                    this.reader_scroll.set_offset(point(px(0.), px(0.)));
+                    this.reader_ui.gallery_list.scroll_to(ListOffset::default());
                 } else if let Some(position) = this.reader_ui.gallery_search_position.take() {
                     this.reader_ui.pending_restore = Some(position);
                     this.reader_ui.restore_generation += 1;
@@ -574,6 +582,10 @@ impl State {
             missing_by_block: Rc::default(),
             gallery_matches: Rc::default(),
             gallery_excerpts: Rc::default(),
+            gallery_list: ListState::new(1, ListAlignment::Top, px(1000.)),
+            gallery_items: Rc::new(vec![GalleryItem::Header]),
+            gallery_focus: Rc::new(vec![cx.focus_handle()]),
+            gallery_columns: 1,
             outline: Rc::default(),
             chapter_starts: Rc::default(),
             versions: Vec::new(),
@@ -670,25 +682,90 @@ fn block_time(blocks: &[PreviewBlock], index: usize) -> Option<f64> {
     }
     None
 }
-fn capture_reader_position(
+/// One item of the virtualized screenshot gallery.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum GalleryItem {
+    /// The title on compact windows and the gallery's loading, empty or
+    /// no-match state.
+    Header,
+    /// One grid row: a range of the matching screenshots.
+    Row(Range<usize>),
+}
+
+/// The gallery as list items: the header, then rows of `columns` screenshots.
+fn gallery_items(matches: usize, columns: usize) -> Vec<GalleryItem> {
+    let columns = columns.max(1);
+    std::iter::once(GalleryItem::Header)
+        .chain(
+            (0..matches)
+                .step_by(columns)
+                .map(|start| GalleryItem::Row(start..(start + columns).min(matches))),
+        )
+        .collect()
+}
+
+/// A screenshot's three-line excerpt and its find matches.
+struct GalleryExcerpt {
+    text: SharedString,
+    marks: Vec<Range<usize>>,
+}
+
+/// The screenshot tab's reading position: the first screenshot of the top
+/// row and how far into that row the view starts. Rows are measured in
+/// window coordinates under their first screenshot (see `ReadingLayout`).
+fn gallery_capture_position(
+    items: &[GalleryItem],
+    matches: &[usize],
+    list: &ListState,
     layout: &nav::ReadingLayout,
-    offset: f32,
     anchor: impl FnOnce(usize) -> (Option<String>, Option<f64>),
 ) -> Option<workspace::ReadingPosition> {
-    // The top is a document boundary, not the first measured paragraph. Keep it
-    // fixed while images/metadata arrive and when the reading measure changes.
-    if offset >= 0. {
+    let top = list.logical_scroll_top();
+    // The top is a document boundary: the header, however tall, reads as it.
+    let Some(GalleryItem::Row(row)) = items.get(top.item_ix) else {
         return Some(workspace::ReadingPosition::default());
-    }
-    let (index, within, height) = layout.top_item(offset)?;
-    let (paragraph, seconds) = anchor(index);
+    };
+    let first = *matches.get(row.start)?;
+    let within = -f32::from(top.offset_in_item);
+    let (paragraph, seconds) = anchor(first);
     Some(workspace::ReadingPosition {
         paragraph,
         seconds,
-        offset,
+        offset: f32::from(list.scroll_px_offset_for_scrollbar().y).min(0.),
         within,
-        fraction: Some(nav::within_fraction(within, height)),
+        fraction: layout
+            .item_height(first)
+            .map(|height| nav::within_fraction(within, height)),
     })
+}
+
+/// Where a saved gallery position opens: the row now holding its screenshot,
+/// at the same proportion of that row once the row has been measured.
+fn gallery_restore_offset(
+    items: &[GalleryItem],
+    matches: &[usize],
+    frame: Option<usize>,
+    position: &workspace::ReadingPosition,
+    layout: &nav::ReadingLayout,
+) -> ListOffset {
+    let found = frame.and_then(|frame| {
+        let at = matches.iter().position(|index| *index == frame)?;
+        items.iter().enumerate().find_map(|(item_ix, item)| match item {
+            GalleryItem::Row(row) if row.contains(&at) => Some((item_ix, matches[row.start])),
+            _ => None,
+        })
+    });
+    let Some((item_ix, first)) = found else {
+        return ListOffset::default();
+    };
+    let within = match layout.item_height(first) {
+        Some(height) => nav::restore_within(position.fraction, position.within, height),
+        None => position.within.min(0.),
+    };
+    ListOffset {
+        item_ix,
+        offset_in_item: px(-within),
+    }
 }
 fn heading_times(blocks: &[PreviewBlock]) -> impl Iterator<Item = (usize, Option<f64>)> + '_ {
     blocks.iter().enumerate().map(|(index, block)| {
@@ -719,15 +796,6 @@ fn note_position_index(
                 nav::nearest_time(heading_times(blocks), seconds).map(|(index, _)| index)
             })
         })
-}
-fn restored_reader_offset(
-    layout: &nav::ReadingLayout,
-    index: Option<usize>,
-    position: &workspace::ReadingPosition,
-) -> f32 {
-    index
-        .and_then(|index| layout.restore(index, position.fraction, position.within))
-        .unwrap_or(position.offset.min(0.))
 }
 
 /// The note tab's article as list items: the title (shown on short windows),
@@ -1790,9 +1858,9 @@ impl Desktop {
             let step = self.reader_ui.note_list.viewport_bounds().size.height * 0.85 * direction;
             self.reader_ui.note_list.scroll_by(-step);
         } else {
-            let step = self.reader_scroll.bounds().size.height * 0.85 * direction;
-            let offset = self.reader_scroll.offset() + point(px(0.), step);
-            self.reader_scroll.set_offset(offset);
+            let list = &self.reader_ui.gallery_list;
+            let step = list.viewport_bounds().size.height * 0.85 * direction;
+            list.scroll_by(-step);
         }
         cx.notify();
     }
@@ -1828,9 +1896,11 @@ impl Desktop {
                 &self.reader_ui.note_layout.borrow(),
             );
         }
-        capture_reader_position(
+        gallery_capture_position(
+            &self.reader_ui.gallery_items,
+            &self.reader_ui.gallery_matches,
+            &self.reader_ui.gallery_list,
             &self.reader_ui.gallery_layout.borrow(),
-            f32::from(self.reader_scroll.offset().y),
             |index| {
                 self.reader_ui
                     .frames
@@ -1949,12 +2019,14 @@ impl Desktop {
                 this.apply_note_restore(position, search, true, cx);
                 return;
             }
-            let layout = this.reader_ui.gallery_layout.borrow();
-            let target = restored_reader_offset(&layout, this.position_index(&position), &position);
-            drop(layout);
-            let maximum = this.reader_scroll.max_offset().y;
-            this.reader_scroll
-                .set_offset(point(px(0.), px(target).max(-maximum).min(px(0.))));
+            let target = gallery_restore_offset(
+                &this.reader_ui.gallery_items,
+                &this.reader_ui.gallery_matches,
+                this.position_index(&position),
+                &position,
+                &this.reader_ui.gallery_layout.borrow(),
+            );
+            this.reader_ui.gallery_list.scroll_to(target);
             this.finish_reader_restore(cx);
         });
     }
@@ -2070,6 +2142,8 @@ impl Desktop {
         self.reader_ui.frame_by_path = Rc::default();
         self.reader_ui.missing_by_block = Rc::default();
         self.reader_ui.gallery_matches = Rc::default();
+        self.reader_ui.gallery_excerpts = Rc::default();
+        self.set_gallery_items(self.reader_ui.gallery_columns, cx);
         self.reader_ui.versions.clear();
         self.reader_ui.issues.clear();
         self.reader_ui.source = None;
@@ -2125,6 +2199,8 @@ impl Desktop {
         self.reader_ui.gallery_layout.borrow_mut().clear();
     }
 
+    /// Search the screenshots once per query change: the matching frames,
+    /// their excerpts and the find ranges inside each excerpt.
     fn update_gallery_matches(&mut self, cx: &App) {
         let query = self.reader_ui.gallery_find.read(cx).value();
         let matches = matching_frames(&self.reader_ui.frames, &query);
@@ -2132,14 +2208,42 @@ impl Desktop {
             matches
                 .iter()
                 .map(|index| {
+                    let text = frame_excerpt(&self.reader_ui.frames[*index], &query);
+                    let marks = nav::text_matches(&text, &query);
                     (
                         *index,
-                        frame_excerpt(&self.reader_ui.frames[*index], &query),
+                        GalleryExcerpt {
+                            text: text.into(),
+                            marks,
+                        },
                     )
                 })
                 .collect(),
         );
         self.reader_ui.gallery_matches = Rc::new(matches);
+        self.set_gallery_items(self.reader_ui.gallery_columns, cx);
+    }
+
+    /// Cut the matching screenshots into rows of `columns`.
+    fn set_gallery_items(&mut self, columns: usize, cx: &App) {
+        let items = gallery_items(self.reader_ui.gallery_matches.len(), columns);
+        self.reader_ui.gallery_columns = columns;
+        if *self.reader_ui.gallery_items == items {
+            return;
+        }
+        let focus: Vec<FocusHandle> = (0..items.len()).map(|_| cx.focus_handle()).collect();
+        let list = &self.reader_ui.gallery_list;
+        let top = list.logical_scroll_top();
+        list.reset(items.len());
+        list.splice_focusable(0..items.len(), focus.iter().cloned().map(Some));
+        // Keep the view near the same row; a pending restore refines it.
+        list.scroll_to(ListOffset {
+            item_ix: top.item_ix.min(items.len().saturating_sub(1)),
+            offset_in_item: top.offset_in_item,
+        });
+        self.reader_ui.gallery_items = Rc::new(items);
+        self.reader_ui.gallery_focus = Rc::new(focus);
+        self.reader_ui.gallery_layout.borrow_mut().clear();
     }
     fn refresh_reader_data(&mut self, cx: &mut Context<Self>) {
         // The blocking closure below needs an owned, Send preview; data loads
@@ -2853,7 +2957,7 @@ impl Desktop {
                     .is_empty()
             {
                 self.reader_ui.pending_restore = None;
-                self.reader_scroll.set_offset(point(px(0.), px(0.)));
+                self.reader_ui.gallery_list.scroll_to(ListOffset::default());
             } else {
                 self.restore_reading_position(cx);
             }
@@ -2877,12 +2981,12 @@ impl Desktop {
             self.reader_ui.toc_open == Some(true),
             !outline.is_empty(),
         );
-        let (controls, scrolling_title, tools) =
+        let (controls, tools) =
             self.reader_controls(&preview, &outline, metrics, window, cx);
         let article = if self.result_tab == 0 {
             self.reader_note_article(&preview, metrics, cx)
         } else {
-            self.reader_gallery(&preview, metrics, scrolling_title, window, cx)
+            self.reader_gallery(&preview, metrics, window, cx)
         };
         let body = self.reader_body(article, &outline, metrics, cx);
         (
@@ -2947,7 +3051,7 @@ impl Desktop {
                         offset_in_item: px(0.),
                     });
                 } else {
-                    this.reader_scroll.set_offset(point(px(0.), px(0.)));
+                    this.reader_ui.gallery_list.scroll_to(ListOffset::default());
                 }
                 cx.notify();
             }))
@@ -2955,7 +3059,7 @@ impl Desktop {
                 if this.result_tab == 0 {
                     this.reader_ui.note_list.scroll_to_end();
                 } else {
-                    this.reader_scroll.scroll_to_bottom();
+                    this.reader_ui.gallery_list.scroll_to_end();
                 }
                 cx.notify();
             }))
@@ -2982,7 +3086,7 @@ impl Desktop {
     }
 
     /// Tool bar, title, facts, export feedback, notices and the details panel.
-    /// Compact layouts return the title to scroll with the screenshot grid.
+    /// Compact layouts leave the title to scroll with the screenshot grid.
     fn reader_controls(
         &mut self,
         preview: &Rc<notes::Preview>,
@@ -2990,7 +3094,7 @@ impl Desktop {
         metrics: ReaderMetrics,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> (AnyElement, Option<AnyElement>, Div) {
+    ) -> (AnyElement, Div) {
         let ReaderMetrics {
             compact,
             short,
@@ -3021,11 +3125,8 @@ impl Desktop {
             },
             cx,
         );
-        let (heading, scrolling_title) = if compact {
-            (None, Some(title))
-        } else {
-            (Some(title), None)
-        };
+        // Compact windows draw the title as the first gallery item instead.
+        let heading = (!compact).then_some(title);
         let toolbar = self.reader_toolbar(preview, outline, &metrics, window, cx);
         if toolbar.compact_search.is_some() || toolbar.short_matches.is_some() {
             page = page.child(
@@ -3094,7 +3195,7 @@ impl Desktop {
             .when(self.reader_ui.info_open, |view| {
                 view.gap_2().children(information_panel)
             });
-        (controls.into_any_element(), scrolling_title, toolbar.bar)
+        (controls.into_any_element(), toolbar.bar)
     }
 
     /// The note tab's article: a variable-height list that builds only the
@@ -4392,52 +4493,114 @@ impl Desktop {
     }
 
     /// Screenshot grid: loading, empty and no-match states plus measured cards.
+    /// The screenshot tab: a virtualized list whose first item carries the
+    /// compact title and the gallery's state, followed by rows of cards. Only
+    /// the visible rows and their overdraw are built.
     fn reader_gallery(
         &mut self,
         preview: &Rc<notes::Preview>,
         metrics: ReaderMetrics,
-        scrolling_title: Option<AnyElement>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let gallery_query = self.reader_ui.gallery_find.read(cx).value().to_string();
-        let gallery_indices = self.reader_ui.gallery_matches.clone();
-        let measured_scroll = self.reader_scroll.clone();
-        let item_layout = self.reader_ui.gallery_layout.clone();
-        let measured = |index: usize, child: AnyElement| {
-            let positions = item_layout.clone();
-            let scroll = measured_scroll.clone();
-            div()
-                .w_full()
-                .min_w_0()
-                .flex_shrink_0()
-                .on_children_prepainted(move |bounds, _, _| {
+        // Each screenshot needs enough width for both the slide and a readable
+        // text excerpt. The final row keeps the same column widths as the rest.
+        let columns = ((metrics.reader_width + GALLERY_GAP) / (metrics.rem * 20. + GALLERY_GAP))
+            .floor()
+            .clamp(1., 3.) as usize;
+        if columns != self.reader_ui.gallery_columns {
+            self.set_gallery_items(columns, cx);
+        }
+        // GPUI rounds each rendered line to whole pixels. Reserve that same
+        // three-line height so enlarged text cannot run into the action row.
+        let excerpt_line_height =
+            px((f32::from(TEXT_BODY.to_pixels(window.rem_size())) * 1.6).round());
+        let items = self.reader_ui.gallery_items.clone();
+        let focus = self.reader_ui.gallery_focus.clone();
+        let layout = self.reader_ui.gallery_layout.clone();
+        let matches = self.reader_ui.gallery_matches.clone();
+        let preview_for_items = preview.clone();
+        let desktop = cx.weak_entity();
+        let gallery = list(self.reader_ui.gallery_list.clone(), move |index, _, cx| {
+            let Some(item) = items.get(index) else {
+                return div().into_any_element();
+            };
+            let last = index + 1 == items.len();
+            let content = desktop
+                .update(cx, |this, cx| match item {
+                    GalleryItem::Header => this
+                        .gallery_header(&preview_for_items, metrics, cx)
+                        .into_any_element(),
+                    GalleryItem::Row(row) => this
+                        .gallery_row(&matches[row.clone()], columns, excerpt_line_height, cx)
+                        .into_any_element(),
+                })
+                .unwrap_or_else(|_| div().into_any_element());
+            let mut wrapper = div().w_full().min_w_0().flex_shrink_0();
+            if let GalleryItem::Row(row) = item {
+                // Virtual list measurements include padding, not margins.
+                wrapper = wrapper.when(!last, |row| row.pb(px(GALLERY_GAP)));
+                let first = matches[row.start];
+                let positions = layout.clone();
+                wrapper = wrapper.on_children_prepainted(move |bounds, _, _| {
                     if let Some(bounds) = bounds.first() {
+                        // Window coordinates: see `ReadingLayout`.
                         positions.borrow_mut().record(
-                            index,
-                            f32::from(bounds.top() - scroll.bounds().top() - scroll.offset().y),
+                            first,
+                            f32::from(bounds.top()),
                             f32::from(bounds.size.height),
                         );
                     }
-                })
-                .child(child)
-        };
-        let mut article = v_flex()
+                });
+            }
+            wrapper
+                .child(content)
+                .id(("gallery-item", index))
+                .track_focus(&focus[index])
+                .tab_stop(false)
+                .into_any_element()
+        });
+        div()
             .id("note-reader")
             .role(Role::Document)
             .aria_label(preview.course.title.clone())
+            .relative()
             .flex_1()
             .min_h_0()
             .min_w_0()
             .w_full()
             .h_full()
-            .overflow_y_scroll()
-            .track_scroll(&self.reader_scroll)
-            .gap_3()
-            .py_3()
-            .children(scrolling_title);
+            .child(gallery.w_full().h_full().py_3())
+            .child(crate::backend::vertical_scrollbar_for(
+                &self.reader_ui.gallery_list,
+            ))
+            .into_any_element()
+    }
+
+    /// The gallery's first item: the title on compact windows, then loading,
+    /// empty or no-match state when there is one.
+    fn gallery_header(
+        &mut self,
+        preview: &Rc<notes::Preview>,
+        metrics: ReaderMetrics,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut header = v_flex().w_full().min_w_0().gap_3();
+        let mut empty = true;
+        if metrics.compact {
+            let ReaderHeaderParts { title, .. } = self.reader_metadata_row(
+                preview,
+                true,
+                metrics.short,
+                HeaderContainer::List(self.reader_ui.gallery_list.clone()),
+                cx,
+            );
+            header = header.child(title);
+            empty = false;
+        }
         if self.reader_ui.data_loading && self.reader_ui.frames.is_empty() {
-            article = article.child(
+            empty = false;
+            header = header.child(
                 h_flex()
                     .gap_2()
                     .items_center()
@@ -4449,7 +4612,8 @@ impl Desktop {
                     )),
             );
         } else if self.reader_ui.frames.is_empty() {
-            article = article.child(crate::motion::enter(
+            empty = false;
+            header = header.child(crate::motion::enter(
                 "reader-images-empty",
                 v_flex()
                     .w_full()
@@ -4495,9 +4659,9 @@ impl Desktop {
                             })),
                     ),
             ));
-        }
-        if !self.reader_ui.frames.is_empty() && gallery_indices.is_empty() {
-            article = article.child(
+        } else if self.reader_ui.gallery_matches.is_empty() {
+            empty = false;
+            header = header.child(
                 v_flex()
                     .w_full()
                     .py_8()
@@ -4520,38 +4684,33 @@ impl Desktop {
                     ),
             );
         }
-        // Each screenshot needs enough width for both the slide and a readable
-        // text excerpt. The final row keeps the same column widths as the rest.
-        let gallery_columns = ((metrics.reader_width + GALLERY_GAP)
-            / (metrics.rem * 20. + GALLERY_GAP))
-            .floor()
-            .clamp(1., 3.) as u16;
-        // GPUI rounds each rendered line to whole pixels. Reserve that same
-        // three-line height so enlarged text cannot run into the action row.
-        let excerpt_line_height =
-            px((f32::from(TEXT_BODY.to_pixels(window.rem_size())) * 1.6).round());
-        let mut grid = div()
-            .grid()
-            .grid_cols(gallery_columns)
-            .w_full()
-            .min_w_0()
-            .flex_shrink_0()
-            .gap(px(GALLERY_GAP));
-        for index in gallery_indices.iter().copied() {
-            let card = self.gallery_card(index, &gallery_query, excerpt_line_height, cx);
-            grid = grid.child(measured(index, card).h_full());
-        }
-        article = article.child(grid);
+        // Spacing before the first row, as the grid's gap did inside one column.
+        header.when(!empty && !self.reader_ui.gallery_matches.is_empty(), |header| {
+            header.pb_3()
+        })
+    }
+
+    /// One grid row of screenshot cards with equal column widths.
+    fn gallery_row(
+        &self,
+        frames: &[usize],
+        columns: usize,
+        excerpt_line_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> Div {
         div()
-            .relative()
-            .flex_1()
-            .min_h_0()
-            .min_w_0()
+            .grid()
+            .grid_cols(columns as u16)
             .w_full()
-            .h_full()
-            .child(article)
-            .child(crate::backend::vertical_scrollbar(&self.reader_scroll))
-            .into_any_element()
+            .min_w_0()
+            .gap(px(GALLERY_GAP))
+            .children(frames.iter().map(|&index| {
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .h_full()
+                    .child(self.gallery_card(index, excerpt_line_height, cx))
+            }))
     }
 
     /// One screenshot card: the image, its time with a link to the note, and
@@ -4559,12 +4718,15 @@ impl Desktop {
     fn gallery_card(
         &self,
         index: usize,
-        query: &str,
         excerpt_line_height: Pixels,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let reveal = |id: ElementId, child: AnyElement| {
-            crate::focus_scroll::RevealFocus::new(id, child, self.reader_scroll.clone())
+            crate::focus_scroll::RevealFocus::in_list(
+                id,
+                child,
+                self.reader_ui.gallery_list.clone(),
+            )
         };
         {
             let frame = &self.reader_ui.frames[index];
@@ -4660,14 +4822,13 @@ impl Desktop {
                         )
                     }),
             );
-            let excerpt = self
-                .reader_ui
-                .gallery_excerpts
-                .get(&index)
+            let (excerpt, marks) = match self.reader_ui.gallery_excerpts.get(&index) {
+                Some(found) => (found.text.clone(), found.marks.as_slice()),
+                None => (SharedString::default(), &[][..]),
+            };
+            let excerpt_marks = marks
+                .iter()
                 .cloned()
-                .unwrap_or_else(|| frame_excerpt(frame, query));
-            let excerpt_marks = nav::text_matches(&excerpt, query)
-                .into_iter()
                 .map(|range| {
                     (
                         range,
@@ -5598,9 +5759,9 @@ fn image_zoom_offset(viewport: f32, old_extent: f32, new_extent: f32, offset: f3
 mod tests {
     use super::{
         ExportFeedback, ExportState, Frame, OfflineVideo, OfflineVideoRequest, PreviewBlock,
-        block_anchor, block_time, capture_reader_position, existing_export_folder,
-        files_need_reload, frame_excerpt, image_zoom_offset, load_reader_data, matching_frames,
-        nav, note_position_index, processing_notice, restored_reader_offset,
+        GalleryItem, block_time, existing_export_folder, files_need_reload, frame_excerpt,
+        gallery_capture_position, gallery_items, gallery_restore_offset, image_zoom_offset,
+        load_reader_data, matching_frames, nav, processing_notice,
     };
     use crate::{ConversionOptions, notes::Course, source, workspace};
 
@@ -5680,92 +5841,59 @@ mod tests {
         assert!(frame_excerpt(&phrase, "Buckmaster").starts_with("…OpenAI said that Buckmaster"));
     }
 
-    fn reading_blocks() -> Vec<PreviewBlock> {
-        vec![
-            PreviewBlock::Heading {
-                text: "摘要".into(),
-                anchor: "summary".into(),
-                seconds: None,
-            },
-            PreviewBlock::Paragraph {
-                text: "摘要正文".into(),
-                anchor: "summary-tldr".into(),
-            },
-            PreviewBlock::Heading {
-                text: "第一节".into(),
-                anchor: "section-1".into(),
-                seconds: Some(5.),
-            },
-            PreviewBlock::Paragraph {
-                text: "可在放大字号后继续阅读的长正文".into(),
-                anchor: "section-1-text".into(),
-            },
-        ]
-    }
-
     #[test]
-    fn reading_top_survives_late_measurement_and_enlarged_text() {
-        let blocks = reading_blocks();
-        let mut initial = nav::ReadingLayout::default();
-        initial.record(1, 48., 60.);
-        let position = capture_reader_position(&initial, 0., |index| {
-            (
-                Some(block_anchor(&blocks[index], index)),
-                block_time(&blocks, index),
-            )
-        })
-        .unwrap();
-        // Loading initially exposes only the paragraph. Its later measured
-        // heading and a larger type scale must not replace the document top.
-        let mut resized = nav::ReadingLayout::default();
-        resized.record(0, 12., 36.);
-        resized.record(1, 64., 120.);
-        assert!(position.paragraph.is_none());
+    fn the_gallery_top_survives_late_measurement_and_new_columns() {
+        use gpui::{ListAlignment, ListState, px};
+        let matches: Vec<usize> = (0..7).collect();
+        let items = gallery_items(matches.len(), 3);
         assert_eq!(
-            restored_reader_offset(&resized, note_position_index(&blocks, &position), &position),
-            0.
+            items,
+            [
+                GalleryItem::Header,
+                GalleryItem::Row(0..3),
+                GalleryItem::Row(3..6),
+                GalleryItem::Row(6..7),
+            ]
         );
+        let list = ListState::new(items.len(), ListAlignment::Top, px(1000.));
+        let layout = nav::ReadingLayout::default();
+        let position =
+            gallery_capture_position(&items, &matches, &list, &layout, |_| unreachable!())
+                .unwrap();
+        assert_eq!(position, workspace::ReadingPosition::default());
+        let narrow = gallery_items(matches.len(), 1);
+        let target = gallery_restore_offset(&narrow, &matches, None, &position, &layout);
+        assert_eq!((target.item_ix, target.offset_in_item), (0, px(0.)));
     }
 
     #[test]
-    fn reading_summary_navigation_returns_to_the_heading_after_reflow() {
-        let blocks = reading_blocks();
-        let position = workspace::ReadingPosition {
-            paragraph: Some("summary".into()),
-            fraction: Some(0.),
-            ..Default::default()
-        };
-        let index = note_position_index(&blocks, &position);
-        assert_eq!(index, Some(0));
-        for (top, height) in [(12., 22.), (16., 44.)] {
-            let mut layout = nav::ReadingLayout::default();
-            layout.record(0, top, height);
-            layout.record(1, top + height + 12., 120.);
-            let offset = restored_reader_offset(&layout, index, &position);
-            assert_eq!(layout.top_item(offset).map(|(index, _, _)| index), Some(0));
-        }
-    }
-
-    #[test]
-    fn reading_resize_keeps_the_same_paragraph_and_progress() {
-        let blocks = reading_blocks();
-        let mut initial = nav::ReadingLayout::default();
-        initial.record(3, 220., 200.);
-        let position = capture_reader_position(&initial, -270., |index| {
-            (
-                Some(block_anchor(&blocks[index], index)),
-                block_time(&blocks, index),
-            )
+    fn a_gallery_resize_keeps_the_same_screenshot_and_progress() {
+        use gpui::{ListAlignment, ListOffset, ListState, px};
+        let matches: Vec<usize> = (0..7).collect();
+        let items = gallery_items(matches.len(), 3);
+        let list = ListState::new(items.len(), ListAlignment::Top, px(1000.));
+        list.scroll_to(ListOffset {
+            item_ix: 2,
+            offset_in_item: px(50.),
+        });
+        let mut layout = nav::ReadingLayout::default();
+        layout.record(3, 400., 200.);
+        let position = gallery_capture_position(&items, &matches, &list, &layout, |index| {
+            (Some(format!("frame-{index}")), None)
         })
         .unwrap();
+        assert_eq!(position.paragraph.as_deref(), Some("frame-3"));
+        assert_eq!(position.fraction, Some(0.25));
+        // Two columns: screenshot 3 now sits second in the row 2..4.
+        let narrow = gallery_items(matches.len(), 2);
         let mut resized = nav::ReadingLayout::default();
-        resized.record(3, 400., 400.);
-        let offset =
-            restored_reader_offset(&resized, note_position_index(&blocks, &position), &position);
-        assert_eq!(offset, -500.);
-        let (index, within, height) = resized.top_item(offset).unwrap();
-        assert_eq!(index, 3);
-        assert_eq!(nav::within_fraction(within, height), 0.25);
+        resized.record(2, 100., 400.);
+        let target = gallery_restore_offset(&narrow, &matches, Some(3), &position, &resized);
+        assert_eq!((target.item_ix, target.offset_in_item), (2, px(100.)));
+        // Before that row is measured, the saved pixel offset stands in.
+        let unmeasured = nav::ReadingLayout::default();
+        let target = gallery_restore_offset(&narrow, &matches, Some(3), &position, &unmeasured);
+        assert_eq!((target.item_ix, target.offset_in_item), (2, px(50.)));
     }
 
     #[test]

@@ -310,7 +310,6 @@ struct Desktop {
     opening_course: Option<PathBuf>,
     reader_course_error: Option<(PathBuf, String)>,
     reader_failure_notice: Option<String>,
-    reader_scroll: ScrollHandle,
     candidate_scroll: ScrollHandle,
     reader_position_saved_at: Option<Instant>,
     // Virtualized long pages: the task queue and the course library each keep
@@ -695,7 +694,6 @@ impl Desktop {
             opening_course: None,
             reader_course_error: None,
             reader_failure_notice: None,
-            reader_scroll: ScrollHandle::new(),
             candidate_scroll: ScrollHandle::new(),
             reader_position_saved_at: None,
             queue_list: ListState::new(0, ListAlignment::Top, px(1000.)),
