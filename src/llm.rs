@@ -1263,44 +1263,13 @@ mod tests {
 
     #[test]
     fn translation_keeps_originals_and_adds_each_translation() {
-        use std::io::{Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
+        let content = serde_json::json!({"segments":[{"id":0,"text":"Today: compilers."},{"id":1,"text":"Next, parsing."}]});
+        let body = serde_json::json!({"choices":[{"message":{"content":content.to_string()}}]})
+            .to_string();
+        let (address, server) =
+            crate::test_http::serve(vec![crate::test_http::json_response(&body)]);
         let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0u8; 4096];
-            // Read the head, then the body announced by Content-Length.
-            let body_start = loop {
-                let n = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..n]);
-                if let Some(at) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                    break at + 4;
-                }
-            };
-            let head = String::from_utf8_lossy(&request[..body_start]).to_ascii_lowercase();
-            let length: usize = head
-                .lines()
-                .find_map(|line| line.strip_prefix("content-length:"))
-                .and_then(|value| value.trim().parse().ok())
-                .unwrap();
-            while request.len() < body_start + length {
-                let n = stream.read(&mut buffer).unwrap();
-                request.extend_from_slice(&buffer[..n]);
-            }
-            let content = serde_json::json!({"segments":[{"id":0,"text":"Today: compilers."},{"id":1,"text":"Next, parsing."}]});
-            let body = serde_json::json!({"choices":[{"message":{"content":content.to_string()}}]})
-                .to_string();
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-            .unwrap();
-            String::from_utf8_lossy(&request[body_start..]).into_owned()
+            String::from_utf8_lossy(&server.join().unwrap().remove(0).body).into_owned()
         });
         let event = |text: &str| TranscriptEvent {
             start: 0.0,
@@ -1316,7 +1285,7 @@ mod tests {
             speech: vec![event("今天讲编译原理。"), event("接下来是语法分析。")],
         }];
         let mut settings = test_settings();
-        settings.base_url = format!("http://{address}/v1");
+        settings.base_url = format!("{address}/v1");
         settings.concurrency = 1;
         let report = translate_sections_report(&mut sections, &settings, "en").unwrap();
         let request = server.join().unwrap();

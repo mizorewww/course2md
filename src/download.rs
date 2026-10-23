@@ -544,29 +544,16 @@ mod tests {
 
     /// Serves canned responses in order and returns each request's head.
     fn serve(responses: Vec<String>) -> (String, std::thread::JoinHandle<Vec<String>>) {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            let mut requests = Vec::new();
-            for response in responses {
-                let (mut stream, _) = listener.accept().unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(3)))
-                    .unwrap();
-                let mut request = Vec::new();
-                while !request.ends_with(b"\r\n\r\n") {
-                    let mut byte = [0];
-                    if stream.read(&mut byte).unwrap() == 0 {
-                        break;
-                    }
-                    request.push(byte[0]);
-                }
-                requests.push(String::from_utf8_lossy(&request).into_owned());
-                stream.write_all(response.as_bytes()).unwrap();
-            }
-            requests
+        let (base, server) = crate::test_http::serve(responses);
+        let heads = std::thread::spawn(move || {
+            server
+                .join()
+                .unwrap()
+                .into_iter()
+                .map(|request| request.head)
+                .collect()
         });
-        (format!("http://{address}/model"), server)
+        (format!("{base}/model"), heads)
     }
 
     #[test]

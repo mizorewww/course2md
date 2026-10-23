@@ -753,20 +753,19 @@ second cue
 
     #[test]
     fn pick_prefers_zh_then_en() {
-        let d = std::env::temp_dir().join(format!("c2m-subs-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let d = temp.path().to_path_buf();
         for name in ["sub.en.srt", "sub.zh-Hans.srt", "sub.ja.srt"] {
             std::fs::write(d.join(name), b"1\n00:00:01,000 --> 00:00:02,000\nx\n").unwrap();
         }
         let picked = pick_subtitle_file(&d).unwrap();
         assert_eq!(picked.file_name().unwrap(), "sub.zh-Hans.srt");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn sidecar_lookup() {
-        let d = std::env::temp_dir().join(format!("c2m-side-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let d = temp.path().to_path_buf();
         let video = d.join("lecture.mp4");
         std::fs::write(&video, b"v").unwrap();
         assert!(sidecar_subtitle(&video).is_none());
@@ -782,6 +781,5 @@ second cue
         )
         .unwrap();
         assert_eq!(sidecar_subtitle(&video).unwrap(), d.join("lecture.zh.VTT"));
-        let _ = std::fs::remove_dir_all(&d);
     }
 }
