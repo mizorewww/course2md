@@ -317,6 +317,19 @@ impl fmt::Display for OutputFormat {
     }
 }
 
+impl std::str::FromStr for OutputFormat {
+    type Err = ();
+    /// The spelling `Display` writes (export result keys, config values).
+    fn from_str(value: &str) -> std::result::Result<Self, ()> {
+        match value {
+            "md" => Ok(Self::Md),
+            "html" => Ok(Self::Html),
+            "json" => Ok(Self::Json),
+            _ => Err(()),
+        }
+    }
+}
+
 /// 运行期管线配置（由 CLI 参数归一而来）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {

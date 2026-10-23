@@ -1643,14 +1643,9 @@ fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Resu
     Ok(())
 }
 
-/// The output format a saved export outcome is keyed by, parsed with the
-/// engine's own serialized spelling.
+/// The output format a saved export outcome is keyed by.
 fn output_format(key: &str) -> Option<course2md::config::OutputFormat> {
-    use serde::de::IntoDeserializer;
-    course2md::config::OutputFormat::deserialize(
-        IntoDeserializer::<serde::de::value::Error>::into_deserializer(key),
-    )
-    .ok()
+    key.parse().ok()
 }
 
 /// Requests whose result is unknown, read from the task's receipts.
