@@ -54,6 +54,8 @@ fn json_error(output: &Output) -> serde_json::Value {
     value
 }
 
+/// The suite's one check that human-readable output follows the language;
+/// the other tests assert language-independent facts.
 #[test]
 fn no_arguments_or_help_succeed_with_localized_guidance() {
     let cli = CliTest::new();
@@ -61,14 +63,8 @@ fn no_arguments_or_help_succeed_with_localized_guidance() {
         let result = cli.run(&args);
         assert!(result.status.success());
         let text = stdout(&result);
-        assert!(
-            text.contains("快速开始") || text.contains("Quick start"),
-            "{text}"
-        );
-        assert!(
-            text.contains("语音识别") || text.contains("Speech recognition"),
-            "{text}"
-        );
+        assert!(text.contains("快速开始"), "{text}");
+        assert!(text.contains("语音识别"), "{text}");
     }
     let english = cli.run_with_lang(&["--help"], "en");
     assert!(english.status.success());
@@ -86,17 +82,19 @@ fn no_arguments_or_help_succeed_with_localized_guidance() {
 #[test]
 fn missing_or_invalid_sources_fail_with_recovery() {
     let cli = CliTest::new();
+    // The recovery is an example command, and the rejected path is echoed back.
     let missing = cli.run(&["--provider", "api"]);
     assert!(!missing.status.success());
     assert!(
-        stderr(&missing).contains("缺少视频来源"),
+        stderr(&missing).contains("course2md ./lecture.mp4"),
         "{}",
         stderr(&missing)
     );
+    assert!(missing.stdout.is_empty());
     let invalid = cli.run(&["./missing lecture.mp4"]);
     assert!(!invalid.status.success());
     assert!(
-        stderr(&invalid).contains("请检查路径"),
+        stderr(&invalid).contains("./missing lecture.mp4"),
         "{}",
         stderr(&invalid)
     );
@@ -231,12 +229,15 @@ fn doctor_reports_required_failures_with_nonzero_exit() {
         .output()
         .unwrap();
     assert!(!result.status.success());
-    assert!(stdout(&result).contains("必需工具"), "{}", stdout(&result));
-    assert!(
-        stderr(&result).contains("必需依赖或配置问题"),
-        "{}",
-        stderr(&result)
-    );
+    // With an empty PATH the required tools are listed as failed.
+    for tool in ["ffmpeg", "ffprobe"] {
+        assert!(
+            stdout(&result).contains(&format!("✗ {tool}")),
+            "{}",
+            stdout(&result)
+        );
+    }
+    assert!(!result.stderr.is_empty());
 }
 
 #[cfg(unix)]

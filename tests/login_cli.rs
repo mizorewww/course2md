@@ -40,6 +40,7 @@ fn login_is_standalone_or_precedes_video_processing() {
     }
 }
 
+/// The suite's one check that error output follows the language.
 #[test]
 fn invalid_source_does_not_start_login() {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_course2md"))
@@ -64,7 +65,6 @@ fn initial_config_recommends_bilibili_login_without_creating_credentials() {
     assert!(out.status.success());
     let message = String::from_utf8_lossy(&out.stdout);
     assert!(message.contains("course2md --login bilibili"));
-    assert!(message.contains("账号权限范围内更高清晰度"));
     assert!(dir.path().join("course2md/config.toml").is_file());
     assert!(!dir.path().join("course2md/auth").exists());
 }

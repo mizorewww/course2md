@@ -328,11 +328,15 @@ fn changed_local_source_is_rejected_before_using_the_confirmed_subtitles() {
     let result = run(root.path(), &request);
     assert!(!result.status.success());
     let observed = events(&result);
+    // run-task messages stay in Simplified Chinese for the desktop app; this is
+    // the suite's one check of that language, the others use stable fields.
     assert!(observed.iter().any(|event| {
-        event["message"]
-            .as_str()
-            .is_some_and(|s| s.contains("视频文件已在读取后发生变化"))
+        event["type"] == "error"
+            && event["message"]
+                .as_str()
+                .is_some_and(|s| s.contains("视频文件已在读取后发生变化"))
     }));
+    assert!(!observed.iter().any(|event| event["type"] == "stage"));
     assert!(!request.course_dir.join("current.json").exists());
 }
 
