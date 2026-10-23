@@ -1998,10 +1998,7 @@ impl Desktop {
         } else if !speech
             && (source.subtitle_request.is_some() || source.subtitle_read_error.is_some())
         {
-            match &source.selected_subtitle {
-                Some(_) => course2md::tr!("字幕还没读取完成").into(),
-                None => course2md::tr!("字幕还没读取完成").into(),
-            }
+            course2md::tr!("字幕还没读取完成").into()
         } else if speech {
             course2md::tr!("语音识别").into()
         } else if let Some(subtitle) = &source.selected_subtitle {

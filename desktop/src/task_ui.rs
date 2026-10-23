@@ -795,14 +795,14 @@ impl Desktop {
         let state = self.queue_list.clone();
         let items = Rc::new(items);
         let desktop = cx.weak_entity();
-        let queue = list(state, move |index, window, cx| {
+        let queue = list(state, move |index, _, cx| {
             let Some(item) = items.get(index) else {
                 return div().into_any_element();
             };
             let last = index + 1 == items.len();
             desktop
                 .update(cx, |this, cx| {
-                    this.queue_item(item, index, &tasks, last, focus.get(index), window, cx)
+                    this.queue_item(item, index, &tasks, last, focus.get(index), cx)
                 })
                 .unwrap_or_else(|_| div().into_any_element())
         })
@@ -971,7 +971,6 @@ impl Desktop {
         tasks: &[TaskRecord],
         last: bool,
         focus: Option<&FocusHandle>,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut gap = !last;
@@ -1046,7 +1045,7 @@ impl Desktop {
                 div()
                     .id(SharedString::from(format!("task-menu-{}", task.id)))
                     .w_full()
-                    .child(self.running_task_card(task, window, cx))
+                    .child(self.running_task_card(task, cx))
                     .context_menu(move |popup, window, cx| menu(popup, window, cx))
                     .into_any_element()
             }
@@ -1529,8 +1528,6 @@ impl Desktop {
         actions
     }
 
-    /// One task card in the virtualized queue: the heading row, live progress
-    /// or attention summary, and the expanded detail while selected.
     /// A row of a group's surface: identity, status and the row's commands.
     /// Clicking it folds its details out below, inside the same surface.
     fn task_row(
@@ -1744,7 +1741,6 @@ impl Desktop {
     fn running_task_card(
         &mut self,
         task: &TaskRecord,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = task.id.clone();
@@ -1936,7 +1932,6 @@ impl Desktop {
                     move |this, _, _, cx| this.set_task_intent(id.clone(), Intent::Cancel, cx)
                 })),
         );
-        let _ = window;
         v_flex()
             .w_full()
             .min_w_0()

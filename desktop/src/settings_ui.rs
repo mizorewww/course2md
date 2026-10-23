@@ -2832,7 +2832,6 @@ impl Desktop {
             )
     }
 
-    // Wrappers only while the other interface modules are being integrated.
     /// Service editor drafts are deliberately excluded: an existing published service
     /// continues to be usable. An unapplied failed ordinary commit must never be silently
     /// replaced by the older effective defaults when submitting a task.

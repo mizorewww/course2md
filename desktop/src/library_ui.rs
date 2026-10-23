@@ -531,21 +531,21 @@ impl Desktop {
 
     fn folder_saved(&mut self, origin: FolderOrigin, saved: u64, cx: &mut Context<Self>) {
         if let Some(draft_id) = &origin.draft_id {
-            if let Some(workspace) = &mut self.workspace {
-                if let Err(error) = workspace.transaction(|state| {
+            if let Some(workspace) = &mut self.workspace
+                && let Err(error) = workspace.transaction(|state| {
                     if let Some(draft) = state.drafts.iter_mut().find(|draft| &draft.id == draft_id)
                     {
                         draft.folder = Some(saved);
                     }
                     Ok(())
-                }) {
-                    self.folder_error = Some(course2md::tr!(
-                        "文件夹已创建，保存位置尚未更新：{}",
-                        format!("{error:#}")
-                    ));
-                    self.folder_editor = Some(Some(saved));
-                    return;
-                }
+                })
+            {
+                self.folder_error = Some(course2md::tr!(
+                    "文件夹已创建，保存位置尚未更新：{}",
+                    format!("{error:#}")
+                ));
+                self.folder_editor = Some(Some(saved));
+                return;
             }
         } else {
             self.select_library_scope(origin.root, crate::FolderFilter::Folder(saved), cx);
