@@ -70,15 +70,22 @@ struct LoadedEvents {
     needs_newline: bool,
 }
 
+/// Every recorded chunk counts as done (an empty chunk is a completed
+/// silent span), while only chunks with text are kept as events.
+fn split_done(events: Vec<TranscriptEvent>) -> (HashSet<(u64, u64)>, Vec<TranscriptEvent>) {
+    let done = events.iter().map(|e| key(e.start, e.end)).collect();
+    let readable = events
+        .into_iter()
+        .filter(|e| !e.text.trim().is_empty())
+        .collect();
+    (done, readable)
+}
+
 impl Checkpoint {
     /// Read completed chunks for a failed task's material preview without opening a
     /// writer, repairing a truncated tail, or marking the transcription complete.
     pub fn saved_events(out_dir: &Path) -> Result<Vec<TranscriptEvent>> {
-        let mut events = Self::load_events(&out_dir.join("asr.jsonl"))?
-            .events
-            .into_iter()
-            .filter(|event| !event.text.trim().is_empty())
-            .collect::<Vec<_>>();
+        let (_, mut events) = split_done(Self::load_events(&out_dir.join("asr.jsonl"))?.events);
         events.sort_by(|a, b| a.start.total_cmp(&b.start));
         Ok(events)
     }
@@ -117,23 +124,13 @@ impl Checkpoint {
             // 不复用：清掉全部旧进度（否则旧记录会叠加进本次结果）
             Self::clear(&path, &done_path, &identity_path)?;
         } else if done_path.is_file() {
-            let events = Self::load_events(&path)?.events;
-            cp.done = events.iter().map(|e| key(e.start, e.end)).collect();
-            cp.events = events
-                .into_iter()
-                .filter(|e| !e.text.trim().is_empty())
-                .collect();
+            (cp.done, cp.events) = split_done(Self::load_events(&path)?.events);
             tracing::info!(n = cp.events.len(), "asr checkpoint complete, reusing");
         } else {
             let loaded = Self::load_events(&path)?;
             if path.is_file() {
                 tracing::info!(n = loaded.events.len(), "asr checkpoint resumed (partial)");
-                cp.done = loaded.events.iter().map(|e| key(e.start, e.end)).collect();
-                cp.events = loaded
-                    .events
-                    .into_iter()
-                    .filter(|e| !e.text.trim().is_empty())
-                    .collect();
+                (cp.done, cp.events) = split_done(loaded.events);
                 let mut f = std::fs::OpenOptions::new()
                     .create(true)
                     .read(true)
