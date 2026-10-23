@@ -1307,10 +1307,10 @@ impl Desktop {
                     crate::backend::vertical_scrollbar(&self.scrolls[Page::Settings as usize]),
                 )
             });
-        // Wide references reserve 56 px after the content; center that complete
+        // Wide layouts reserve space after the content; center that complete
         // box so the navigation and panel share the same left ruler.
-        let wide_trailing_space = if f32::from(window.viewport_size().width) >= 1200. {
-            56.
+        let wide_trailing_space = if design_width(window) >= WIDE_WINDOW {
+            SETTINGS_WIDE_TRAILING * f32::from(window.rem_size()) / 14.
         } else {
             0.
         };

@@ -44,24 +44,24 @@ pub(super) fn shell_content_width(page: Page, window: &Window) -> f32 {
 
 pub(super) fn settings_sidebar_width(window: &Window) -> f32 {
     let scale = f32::from(window.rem_size()) / 14.;
-    let width = f32::from(window.bounds().size.width) / scale;
-    (if width >= 1200. {
-        260.
-    } else if width >= 960. {
-        220.
+    let width = design_width(window);
+    (if width >= WIDE_WINDOW {
+        SETTINGS_NAV_WIDE
+    } else if width >= COMPACT_WINDOW {
+        SETTINGS_NAV_MEDIUM
     } else if scale > 1.0 {
-        72.
+        SETTINGS_NAV_RAIL_ENLARGED
     } else {
-        64.
+        SETTINGS_NAV_RAIL
     }) * scale
 }
 
 pub(super) fn settings_column_gap(window: &Window) -> f32 {
     let scale = f32::from(window.rem_size()) / 14.;
-    let width = f32::from(window.bounds().size.width) / scale;
-    (if width >= 1200. {
+    let width = design_width(window);
+    (if width >= WIDE_WINDOW {
         40.
-    } else if width >= 960. {
+    } else if width >= COMPACT_WINDOW {
         24.
     } else {
         8.

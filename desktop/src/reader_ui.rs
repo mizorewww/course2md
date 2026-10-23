@@ -225,8 +225,7 @@ fn zoomed(scale: f32, factor: f32) -> f32 {
     (scale * factor).clamp(ZOOM_MIN, ZOOM_MAX)
 }
 
-/// Image dialog geometry: the dialog keeps a 24px window margin on each side
-/// up to 1180px, and its content sits inside 17px of padding on each side.
+/// Image dialog geometry from the shared viewer margins and padding.
 struct ImageDialogMetrics {
     width: f32,
     /// Narrow dialogs shorten labels and fold zoom into a menu.
@@ -241,11 +240,12 @@ impl ImageDialogMetrics {
     fn new(window: &Window) -> Self {
         let rem = f32::from(window.rem_size());
         let size = window.bounds().size;
-        let width = (f32::from(size.width) - 48.).min(1180.);
-        let available = f32::from(size.height - task_dialog_top(window) - px(24.));
+        let width = f32::from(size.width - IMAGE_DIALOG_MARGIN * 2.)
+            .min(f32::from(IMAGE_DIALOG_MAX_WIDTH));
+        let available = f32::from(size.height - task_dialog_top(window) - IMAGE_DIALOG_MARGIN);
         Self {
-            width: width.max(280.),
-            compact: width - 34. < rem * 52.,
+            width: width.max(f32::from(IMAGE_DIALOG_MIN_WIDTH)),
+            compact: width - f32::from(IMAGE_DIALOG_PADDING) * 2. < rem * 52.,
             separate_modes: available < rem * 24.,
             details_by_default: f32::from(size.height) >= rem * 32.,
         }
@@ -1828,8 +1828,8 @@ fn render_note_image(flow: &NoteFlow, index: usize, path: &std::path::Path) -> A
                 .pl(rems(8. / 14.))
                 .pr(rems(12. / 14.))
                 .rounded_full()
-                .bg(gpui::rgba(0x101416c7))
-                .text_color(gpui::white())
+                .bg(image_scrim())
+                .text_color(on_image_scrim())
                 .text_size(TEXT_AUX)
                 .icon(icons::play_arrow())
                 .label(time.clone())

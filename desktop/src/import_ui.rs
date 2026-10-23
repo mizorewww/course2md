@@ -174,7 +174,7 @@ pub(crate) fn box_section(icon: Icon, label: &'static str) -> Div {
         h_flex()
             .gap_2()
             .items_center()
-            .child(icon.size(px(20.)).text_color(color(ACCENT)))
+            .child(icon.size(rems(20. / 14.)).text_color(color(ACCENT)))
             .child(
                 accessible_text(text_id("box-section", label), label)
                     .text_size(TEXT_TITLE)
@@ -1359,7 +1359,7 @@ impl Desktop {
                         row.child(badge(BadgeKind::Success).child(course2md::tr!("已有笔记")))
                     });
                 } else {
-                    content = content.child(icons::arrow_forward().size(px(18.)).flex_shrink_0());
+                    content = content.child(icons::arrow_forward().size(rems(18. / 14.)).flex_shrink_0());
                 }
                 let mut row = h_flex()
                     .id(("source-candidate", index))
@@ -1398,7 +1398,7 @@ impl Desktop {
                         .accessibility_label(course2md::tr!("选择 {}", title))
                         .child(preview)
                         .child(text)
-                        .child(icons::arrow_forward().size(px(18.)).flex_shrink_0())
+                        .child(icons::arrow_forward().size(rems(18. / 14.)).flex_shrink_0())
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.select_source_input(input.clone(), window, cx)
                         })),
@@ -1503,7 +1503,7 @@ impl Desktop {
             })
             .when(
                 !self.source_candidate_covers.contains_key(&candidate.input),
-                |slot| slot.child(icons::movie().size(px(18.)).text_color(color(GRAY))),
+                |slot| slot.child(icons::movie().size(rems(18. / 14.)).text_color(color(GRAY))),
             );
         let text = v_flex()
             .flex_1()
@@ -1580,7 +1580,7 @@ impl Desktop {
                             .items_start()
                             .child(
                                 crate::icons::error()
-                                    .size(px(20.))
+                                    .size(rems(20. / 14.))
                                     .text_color(color(DANGER))
                                     .flex_shrink_0(),
                             )
@@ -1999,7 +1999,7 @@ impl Desktop {
                     } else {
                         icons::subtitles()
                     })
-                    .size(px(20.))
+                    .size(rems(20. / 14.))
                     .text_color(color(GRAY))
                     .into_any_element()
                 })
@@ -2059,7 +2059,7 @@ impl Desktop {
                             .items_start()
                             .child(
                                 crate::icons::warning()
-                                    .size(px(20.))
+                                    .size(rems(20. / 14.))
                                     .text_color(color(WARNING))
                                     .flex_shrink_0(),
                             )
@@ -3172,17 +3172,7 @@ impl Desktop {
                 lower = lower.child(recent);
             }
         }
-        let hero_top = motion::value(
-            "home-hero-top",
-            match (quiet, compact) {
-                (true, true) => 96.,
-                (true, false) => 160.,
-                (false, true) => 40.,
-                (false, false) => 56.,
-            },
-            window,
-            cx,
-        );
+        let hero_top = motion::value("home-hero-top", hero_top(quiet, compact), window, cx);
         let mut view = v_flex()
             .w_full()
             .min_w_0()

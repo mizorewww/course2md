@@ -271,10 +271,56 @@ pub fn task_dialog_top(window: &Window) -> Pixels {
     title_bar_height(window) + px(24.)
 }
 
-/// Windows narrower than 960px at the current text scale use compact layouts:
-/// narrow gutters, an icon-only navigation rail and stacked controls.
+/// Window widths, in 100%-scale pixels, where page arrangements change.
+/// Below `COMPACT_WINDOW` pages use narrow gutters, an icon-only navigation
+/// rail and stacked controls; from `WIDE_WINDOW` they use their widest form.
+pub const COMPACT_WINDOW: f32 = 960.;
+pub const WIDE_WINDOW: f32 = 1200.;
+
+/// The window width in 100%-scale pixels, so breakpoints follow the text scale.
+pub fn design_width(window: &Window) -> f32 {
+    f32::from(window.bounds().size.width) * 14. / f32::from(window.rem_size())
+}
+
 pub fn is_compact(window: &Window) -> bool {
-    f32::from(window.bounds().size.width) < 960. * f32::from(window.rem_size()) / 14.
+    design_width(window) < COMPACT_WINDOW
+}
+
+/// Settings navigation width (100%-scale pixels) at wide, medium and compact
+/// windows; the compact rail widens a little once text is enlarged.
+pub const SETTINGS_NAV_WIDE: f32 = 260.;
+pub const SETTINGS_NAV_MEDIUM: f32 = 220.;
+pub const SETTINGS_NAV_RAIL: f32 = 64.;
+pub const SETTINGS_NAV_RAIL_ENLARGED: f32 = 72.;
+/// Space wide settings layouts keep after their content (100%-scale pixels).
+pub const SETTINGS_WIDE_TRAILING: f32 = 56.;
+
+/// Space above the workbench hero (100%-scale pixels). A quiet workbench, with
+/// nothing in progress, lets the hero sit lower.
+pub fn hero_top(quiet: bool, compact: bool) -> f32 {
+    match (quiet, compact) {
+        (true, true) => 96.,
+        (true, false) => 160.,
+        (false, true) => 40.,
+        (false, false) => 56.,
+    }
+}
+
+/// The image viewer keeps this margin to each window edge up to its maximum
+/// width, and its content sits inside `IMAGE_DIALOG_PADDING` on each side.
+pub const IMAGE_DIALOG_MARGIN: Pixels = px(24.);
+pub const IMAGE_DIALOG_MAX_WIDTH: Pixels = px(1180.);
+pub const IMAGE_DIALOG_MIN_WIDTH: Pixels = px(280.);
+pub const IMAGE_DIALOG_PADDING: Pixels = px(17.);
+
+/// Controls drawn over a screenshot sit on a fixed dark scrim with white text:
+/// the image beneath is not themed, so palette roles cannot promise contrast.
+pub fn image_scrim() -> Rgba {
+    gpui::rgba(0x101416c7)
+}
+
+pub fn on_image_scrim() -> Rgba {
+    rgb(0xffffff)
 }
 
 /* ---------- 栏宽（rems，随字号缩放的结构尺寸） ---------- */
