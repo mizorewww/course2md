@@ -48,6 +48,9 @@ jobs:
         with:
           # Pushes and PRs build the frozen revisions; a manual run tracks upstream main.
           locked: ${{ github.event_name != 'workflow_dispatch' }}
+      - name: Format
+        # The package only; the vendored GPUI sources keep their upstream style.
+        run: cargo fmt --manifest-path desktop/Cargo.toml --check
       - name: Clippy
         # --no-deps keeps the vendored GPUI crates' deprecation warnings out of the log.
         run: cargo clippy --manifest-path desktop/Cargo.toml --all-targets --no-deps -- -D warnings
