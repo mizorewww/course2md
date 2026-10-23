@@ -264,22 +264,6 @@ impl State {
     }
 }
 
-struct StorageDialog {
-    desktop: Entity<Desktop>,
-    _observation: Subscription,
-}
-impl Render for StorageDialog {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.desktop.update(cx, |desktop, cx| {
-            div()
-                .id("storage-dialog-content")
-                .role(Role::Dialog)
-                .aria_label(desktop.storage_ui.title())
-                .child(desktop.storage_operation_view(window, cx))
-        })
-    }
-}
-
 impl Desktop {
     pub(super) fn registered_storage_locations(&self) -> Vec<workspace::LibraryLocation> {
         self.workspace
@@ -1312,9 +1296,13 @@ impl Desktop {
 
     fn open_storage_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let desktop = cx.entity();
-        let content = cx.new(|cx| StorageDialog {
-            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
-            desktop,
+        let content = crate::views::DesktopView::observing(desktop, cx, |desktop, window, cx| {
+            div()
+                .id("storage-dialog-content")
+                .role(Role::Dialog)
+                .aria_label(desktop.storage_ui.title())
+                .child(desktop.storage_operation_view(window, cx))
+                .into_any_element()
         });
         let title = self.storage_ui.title();
         window.open_dialog(cx, move |dialog, _, _| {

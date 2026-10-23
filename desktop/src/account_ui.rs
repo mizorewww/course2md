@@ -164,23 +164,6 @@ impl AccountUi {
     }
 }
 
-struct AccountDialog {
-    desktop: Entity<Desktop>,
-    _observation: Subscription,
-    footer: bool,
-}
-impl Render for AccountDialog {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.desktop.update(cx, |desktop, cx| {
-            if self.footer {
-                desktop.account_dialog_actions(cx).into_any_element()
-            } else {
-                desktop.account_dialog_content(window, cx)
-            }
-        })
-    }
-}
-
 impl Desktop {
     pub(crate) fn account_connected(&self) -> bool {
         matches!(self.account.status, Some(AccountStatus::Connected(_)))
@@ -479,15 +462,11 @@ impl Desktop {
         self.account.return_focus = window.focused(cx);
         self.start_account_qr(cx);
         let desktop = cx.entity();
-        let content = cx.new(|cx| AccountDialog {
-            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
-            desktop: desktop.clone(),
-            footer: false,
+        let content = crate::views::DesktopView::observing(desktop.clone(), cx, |desktop, window, cx| {
+            desktop.account_dialog_content(window, cx).into_any_element()
         });
-        let footer = cx.new(|cx| AccountDialog {
-            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
-            desktop,
-            footer: true,
+        let footer = crate::views::DesktopView::observing(desktop, cx, |desktop, _, cx| {
+            desktop.account_dialog_actions(cx).into_any_element()
         });
         let weak = cx.weak_entity();
         window.open_dialog(cx, move |dialog, window, _| {

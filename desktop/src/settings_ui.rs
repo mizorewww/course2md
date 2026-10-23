@@ -172,18 +172,6 @@ impl State {
     }
 }
 
-struct ServiceDialog {
-    desktop: Entity<Desktop>,
-    _observation: Subscription,
-}
-impl Render for ServiceDialog {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.desktop.update(cx, |desktop, cx| {
-            desktop.service_editor_content(false, window, cx)
-        })
-    }
-}
-
 pub(crate) fn text(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Stateful<Div> {
     theme::accessible_text(id, value)
 }

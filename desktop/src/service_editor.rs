@@ -633,9 +633,10 @@ impl Desktop {
             return true;
         }
         let desktop = cx.entity();
-        let content = cx.new(|cx| ServiceDialog {
-            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
-            desktop,
+        let content = crate::views::DesktopView::observing(desktop, cx, |desktop, window, cx| {
+            desktop
+                .service_editor_content(false, window, cx)
+                .into_any_element()
         });
         let weak = cx.weak_entity();
         window.open_dialog(cx, move |sheet, window, _| {

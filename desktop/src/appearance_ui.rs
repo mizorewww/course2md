@@ -50,21 +50,6 @@ fn palette_columns(width: f32, minimum_width: f32, maximum: u16) -> u16 {
     (((width + PALETTE_GAP) / (minimum_width + PALETTE_GAP)).floor() as u16).clamp(1, maximum)
 }
 
-struct PalettePicker {
-    desktop: Entity<Desktop>,
-    dark: bool,
-    scroll: ScrollHandle,
-    _observation: Subscription,
-}
-
-impl Render for PalettePicker {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.desktop.update(cx, |desktop, cx| {
-            desktop.palette_picker_content(self.dark, self.scroll.clone(), window, cx)
-        })
-    }
-}
-
 fn sample(palette: PaletteId) -> Div {
     let p = palette.colors();
     // These are the selected palette's actual preview colors, not application chrome.
@@ -341,11 +326,11 @@ impl Desktop {
 
     fn open_palette_picker(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
         let desktop = cx.entity();
-        let content = cx.new(|cx| PalettePicker {
-            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
-            desktop,
-            dark,
-            scroll: ScrollHandle::new(),
+        let scroll = ScrollHandle::new();
+        let content = crate::views::DesktopView::observing(desktop, cx, move |desktop, window, cx| {
+            desktop
+                .palette_picker_content(dark, scroll.clone(), window, cx)
+                .into_any_element()
         });
         window.open_dialog(cx, move |dialog, window, _| {
             dialog

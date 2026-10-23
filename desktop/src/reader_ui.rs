@@ -212,7 +212,8 @@ struct ImageViewer {
     details_open: Option<bool>,
     return_focus: Option<FocusHandle>,
     focus: FocusHandle,
-    dialogs: [WeakEntity<ImageDialog>; 2],
+    /// The dialog's two halves, notified when the viewer state changes.
+    dialogs: [EntityId; 2],
 }
 
 const ZOOM_STEP_IN: f32 = 1.25;
@@ -663,23 +664,6 @@ fn reader_window_layout(window: &Window) -> (f32, f32, f32) {
     )
 }
 
-/// One half of the image viewer dialog. It renders from the desktop's viewer
-/// state and is notified only when that state changes.
-struct ImageDialog {
-    desktop: Entity<Desktop>,
-    footer: bool,
-}
-impl Render for ImageDialog {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.desktop.update(cx, |desktop, cx| {
-            if self.footer {
-                desktop.reader_image_actions(window, cx)
-            } else {
-                desktop.reader_image_content(window, cx)
-            }
-        })
-    }
-}
 fn block_text(block: &PreviewBlock) -> Option<&str> {
     match block {
         PreviewBlock::Heading { text, .. }
@@ -5085,13 +5069,17 @@ impl Desktop {
             &mut self.following_conversion,
         );
         let desktop = cx.entity();
-        let content = cx.new(|_| ImageDialog {
-            desktop: desktop.clone(),
-            footer: false,
+        // The viewer's two halves render from its state and are notified only
+        // when that state changes.
+        let content = crate::views::DesktopView::notified(desktop.clone(), cx, |desktop, window, cx| {
+            desktop
+                .reader_image_content(window, cx)
+                .into_any_element()
         });
-        let footer = cx.new(|_| ImageDialog {
-            desktop,
-            footer: true,
+        let footer = crate::views::DesktopView::notified(desktop, cx, |desktop, window, cx| {
+            desktop
+                .reader_image_actions(window, cx)
+                .into_any_element()
         });
         let focus = cx.focus_handle();
         self.reader_ui.viewer = Some(ImageViewer {
@@ -5111,7 +5099,7 @@ impl Desktop {
             details_open: None,
             return_focus: window.focused(cx),
             focus: focus.clone(),
-            dialogs: [content.downgrade(), footer.downgrade()],
+            dialogs: [content.entity_id(), footer.entity_id()],
         });
         let weak = cx.weak_entity();
         window.open_dialog(cx, move |dialog, window, _| {
@@ -5138,8 +5126,8 @@ impl Desktop {
     /// The dialog renders from the viewer state; only its changes repaint it.
     fn notify_image_viewer(&self, cx: &mut Context<Self>) {
         if let Some(viewer) = &self.reader_ui.viewer {
-            for dialog in &viewer.dialogs {
-                let _ = dialog.update(cx, |_, cx| cx.notify());
+            for dialog in viewer.dialogs {
+                App::notify(cx, dialog);
             }
         }
     }

@@ -33,25 +33,6 @@ pub(crate) struct FolderContext {
     pub(crate) folders: Vec<(u64, String)>,
 }
 
-struct FolderDialog {
-    desktop: Entity<Desktop>,
-    title: &'static str,
-    _observation: Subscription,
-}
-
-impl Render for FolderDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id("folder-dialog-content")
-            .role(Role::Dialog)
-            .aria_label(self.title)
-            .child(
-                self.desktop
-                    .update(cx, |desktop, cx| desktop.folder_editor_view(cx)),
-            )
-    }
-}
-
 impl Desktop {
     pub fn begin_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.import_video_from_action(window, cx);
@@ -416,10 +397,13 @@ impl Desktop {
         } else {
             course2md::tr!("新建文件夹")
         };
-        let content = cx.new(|cx| FolderDialog {
-            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
-            desktop,
-            title,
+        let content = crate::views::DesktopView::observing(desktop, cx, move |desktop, _, cx| {
+            div()
+                .id("folder-dialog-content")
+                .role(Role::Dialog)
+                .aria_label(title)
+                .child(desktop.folder_editor_view(cx))
+                .into_any_element()
         });
         let weak = cx.weak_entity();
         window.open_dialog(cx, move |dialog, _, _| {
