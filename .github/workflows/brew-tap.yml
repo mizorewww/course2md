@@ -39,12 +39,17 @@ jobs:
         if: steps.release.outputs.publish == 'true'
         uses: Homebrew/actions/setup-homebrew@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
 
-      # TODO: switch to a dedicated tap deploy key; this reuses the AUR key authorized on GitHub.
+      # A deploy key with write access to mizorewww/homebrew-tap only, so a
+      # leak cannot push to the AUR or any other repository.
       - name: Setup GitHub SSH
         if: steps.release.outputs.publish == 'true'
         env:
-          GH_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          GH_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
+          if [ -z "$GH_KEY" ]; then
+            echo "::error::Add the HOMEBREW_TAP_DEPLOY_KEY secret: a deploy key with write access to mizorewww/homebrew-tap (see docs/PACKAGING.md)."
+            exit 1
+          fi
           install -dm700 ~/.ssh
           printf '%s\n' "$GH_KEY" > ~/.ssh/gh_key
           chmod 600 ~/.ssh/gh_key
