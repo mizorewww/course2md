@@ -260,7 +260,10 @@ fn verified_digest(path: &Path) -> Result<String> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let key = path.to_path_buf();
+    // One entry per file a long-running desktop process has verified; the
+    // library can be large, so the cache is dropped once it reaches this size.
+    const MAX_ENTRIES: usize = 16_384;
+    let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     if let Some(digest) = CACHE
         .get_or_init(Default::default)
         .lock()
@@ -276,6 +279,9 @@ fn verified_digest(path: &Path) -> Result<String> {
     }
     let digest = execution::file_digest(path)?;
     if let Ok(mut cache) = CACHE.get_or_init(Default::default).lock() {
+        if cache.len() >= MAX_ENTRIES {
+            cache.clear();
+        }
         cache.insert(key, (metadata.len(), modified, digest.clone()));
     }
     Ok(digest)
