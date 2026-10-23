@@ -80,14 +80,6 @@ impl Outcome {
             ..Self::succeeded()
         }
     }
-    pub fn failed_kind(message: impl Into<String>, kind: FailureKind) -> Self {
-        Self {
-            status: Status::Failed,
-            message: Some(message.into()),
-            kind: Some(kind),
-            ..Self::succeeded()
-        }
-    }
     /// Copies the structured cause from a dispatcher failure when present.
     pub fn from_error(error: &anyhow::Error) -> Self {
         let failure = error.downcast_ref::<crate::dispatch::Failure>();

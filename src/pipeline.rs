@@ -890,7 +890,7 @@ async fn run_prepared(
         Ok(_) => {
             outcomes.transcript =
                 Outcome::failed(crate::tr!("没有获得可读文字 / No readable transcript"));
-            save_materials(cfg, &frames, &[], &outcomes)?;
+            save_timeline(cfg, &frames, &[])?;
             anyhow::bail!(crate::tr!(
                 "没有获得可读文字；已保留可用截图 / No readable transcript; available screenshots were retained"
             ));
@@ -920,23 +920,13 @@ async fn run_prepared(
                     ),
                 }
             };
-            save_materials(cfg, &frames, &completed, &outcomes)?;
+            save_timeline(cfg, &frames, &completed)?;
             return Err(error);
         }
     };
-    save_materials(cfg, &frames, &transcript.events, &outcomes)?;
+    save_timeline(cfg, &frames, &transcript.events)?;
     let mut sections = build_sections(frames, transcript.events, meta.duration);
     timeline::coalesce_sections(&mut sections);
-    // Save the complete raw body before any optional request.
-    crate::checkpoint::atomic_write(
-        &cfg.out_dir.join("raw-document.json"),
-        &serde_json::to_vec_pretty(&artifact::Document {
-            schema: 1,
-            meta: meta.clone(),
-            sections: sections.clone(),
-            summary: None,
-        })?,
-    )?;
     crate::dispatch::check_control()?;
     if cfg.llm.enabled {
         progress::start(Stage::Llm);
@@ -998,19 +988,13 @@ async fn run_prepared(
     Ok(())
 }
 
-fn save_materials(
+/// The timeline a later reprocess task starts from.
+fn save_timeline(
     cfg: &PipelineConfig,
     frames: &[timeline::FrameEvent],
     events: &[timeline::TranscriptEvent],
-    outcomes: &Outcomes,
 ) -> Result<()> {
-    timeline::write_jsonl(&cfg.timeline_path(), frames, events)?;
-    crate::checkpoint::atomic_write(
-        &cfg.out_dir.join("materials.json"),
-        &serde_json::to_vec_pretty(
-            &serde_json::json!({"schema":1,"frames":frames,"outcomes":outcomes}),
-        )?,
-    )
+    timeline::write_jsonl(&cfg.timeline_path(), frames, events)
 }
 
 #[derive(Serialize, Deserialize)]
