@@ -10,9 +10,13 @@ use course2md::{
     timeline::TranscriptEvent,
 };
 use std::{
-    io::Write,
+    io::{Read, Write},
     path::Path,
     process::{Child, Command, Output, Stdio},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
 };
 
 fn request(root: &Path, source: &Path) -> Request {
@@ -332,109 +336,90 @@ fn changed_local_source_is_rejected_before_using_the_confirmed_subtitles() {
     assert!(!request.course_dir.join("current.json").exists());
 }
 
+/// An OpenAI-compatible chat endpoint on a loopback port. `respond` receives
+/// the zero-based request number and the parsed body; `None` closes the
+/// connection without any response. Server-side failures are collected and
+/// reported as the test's panic message when the mock is dropped, instead of
+/// panicking on the worker thread.
 struct MockAi {
     url: String,
-    calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    bodies: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
-    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    address: std::net::SocketAddr,
+    calls: Arc<AtomicUsize>,
+    bodies: Arc<Mutex<Vec<serde_json::Value>>>,
+    failures: Arc<Mutex<Vec<String>>>,
+    stop: Arc<AtomicBool>,
     worker: Option<std::thread::JoinHandle<()>>,
 }
 impl MockAi {
+    /// Loses the response to the first request, then answers proofreading and
+    /// summary requests with the shared fixture samples.
     fn new() -> Self {
-        Self::respond_with(|number, body| {
+        let samples = common::fake_ai();
+        let proofread_marker = samples["markers"]["proofread"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let proofread = samples["responses"]["proofread"].clone();
+        let summary = samples["responses"]["summary"].clone();
+        Self::respond_with(move |number, body| {
             if number == 0 {
                 return None; // Request was received, but its response is lost.
             }
             let is_polish = body["messages"][0]["content"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("segments");
-            let content = if is_polish {
-                serde_json::json!({"segments":[{"id":0,"text":"第一段已经校对。"},{"id":1,"text":"第二段已经校对。"}]})
-            } else {
-                serde_json::json!({"tldr":"这是一份独立生成的摘要。","key_points":["实际要点"],"outline":[{"t":0,"title":"开头","detail":"实际内容"}]})
-            };
-            Some((
-                200,
-                serde_json::json!({"choices":[{"message":{"content":content.to_string()}}]}),
-            ))
+                .contains(&proofread_marker);
+            let content = if is_polish { &proofread } else { &summary };
+            Some((200, chat_completion(content)))
         })
     }
     fn respond_with(
         respond: impl Fn(usize, &serde_json::Value) -> Option<(u16, serde_json::Value)> + Send + 'static,
     ) -> Self {
-        use std::{
-            io::Read,
-            sync::{
-                Arc,
-                atomic::{AtomicBool, AtomicUsize, Ordering},
-            },
-            time::Duration,
-        };
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
-        let bodies = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let received = bodies.clone();
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let failures = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
-        let (count, shutdown) = (calls.clone(), stop.clone());
+        let (count, received, failed, shutdown) =
+            (calls.clone(), bodies.clone(), failures.clone(), stop.clone());
         let worker = std::thread::spawn(move || {
-            while !shutdown.load(Ordering::SeqCst) {
-                let Ok((mut stream, _)) = listener.accept() else {
-                    std::thread::sleep(Duration::from_millis(5));
-                    continue;
-                };
-                // BSD may inherit the listener's nonblocking mode. The request
-                // reader below uses blocking reads with a bounded timeout.
-                stream.set_nonblocking(false).unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(2)))
-                    .unwrap();
-                let mut data = Vec::new();
-                let mut buffer = [0u8; 4096];
-                let (header_end, length) = loop {
-                    let size = stream.read(&mut buffer).unwrap();
-                    if size == 0 {
-                        return;
-                    }
-                    data.extend_from_slice(&buffer[..size]);
-                    if let Some(index) = data.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
-                        let header = String::from_utf8_lossy(&data[..index]);
-                        let length = header
-                            .lines()
-                            .find_map(|line| {
-                                line.split_once(':')
-                                    .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-                                    .and_then(|(_, value)| value.trim().parse::<usize>().ok())
-                            })
-                            .unwrap();
-                        break (index + 4, length);
-                    }
-                };
-                while data.len() < header_end + length {
-                    let size = stream.read(&mut buffer).unwrap();
-                    if size == 0 {
-                        return;
-                    }
-                    data.extend_from_slice(&buffer[..size]);
+            // Blocking accept; Drop sets `stop` and connects once to wake it.
+            for stream in listener.incoming() {
+                if shutdown.load(Ordering::SeqCst) {
+                    break;
                 }
-                let number = count.fetch_add(1, Ordering::SeqCst);
-                let body: serde_json::Value =
-                    serde_json::from_slice(&data[header_end..header_end + length]).unwrap();
-                received.lock().unwrap().push(body.clone());
-                let Some((status, response)) = respond(number, &body) else {
-                    continue;
-                };
-                let response = serde_json::to_vec(&response).unwrap();
-                write!(stream,"HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",response.len()).unwrap();
-                stream.write_all(&response).unwrap();
+                let result = stream
+                    .map_err(|error| format!("accepting a connection: {error}"))
+                    .and_then(|mut stream| {
+                        let body = read_json_request(&mut stream)?;
+                        let number = count.fetch_add(1, Ordering::SeqCst);
+                        received.lock().unwrap().push(body.clone());
+                        // Returning without writing closes the connection unanswered.
+                        let Some((status, json)) = respond(number, &body) else {
+                            return Ok(());
+                        };
+                        let payload = serde_json::to_vec(&json).unwrap();
+                        write!(
+                            stream,
+                            "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            payload.len()
+                        )
+                        .and_then(|()| stream.write_all(&payload))
+                        .map_err(|error| format!("writing response {number}: {error}"))
+                    });
+                if let Err(message) = result {
+                    failed.lock().unwrap().push(message);
+                }
             }
         });
         Self {
-            url,
+            url: format!("http://{address}"),
+            address,
             calls,
             bodies,
+            failures,
             stop,
             worker: Some(worker),
         }
@@ -442,18 +427,79 @@ impl MockAi {
 }
 impl Drop for MockAi {
     fn drop(&mut self) {
-        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.stop.store(true, Ordering::SeqCst);
+        let _ = std::net::TcpStream::connect(self.address);
         if let Some(worker) = self.worker.take() {
-            let result = worker.join();
-            if !std::thread::panicking() {
-                result.unwrap();
-            }
+            let _ = worker.join();
+        }
+        let failures = self.failures.lock().unwrap();
+        if failures.is_empty() {
+            return;
+        }
+        let report = format!("mock AI server failures:\n{}", failures.join("\n"));
+        if std::thread::panicking() {
+            eprintln!("{report}");
+        } else {
+            panic!("{report}");
         }
     }
 }
 
+/// Read one HTTP/1.1 request with a Content-Length body and parse the body as JSON.
+fn read_json_request(stream: &mut std::net::TcpStream) -> Result<serde_json::Value, String> {
+    // BSD may inherit the listener's mode; reads below block with a bound.
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .map_err(|error| error.to_string())?;
+    let mut data = Vec::new();
+    let mut buffer = [0u8; 4096];
+    let mut read = |data: &mut Vec<u8>| -> Result<(), String> {
+        let size = stream
+            .read(&mut buffer)
+            .map_err(|error| format!("reading the request: {error}"))?;
+        if size == 0 {
+            return Err(format!(
+                "connection closed mid-request after {} bytes",
+                data.len()
+            ));
+        }
+        data.extend_from_slice(&buffer[..size]);
+        Ok(())
+    };
+    let header_end = loop {
+        read(&mut data)?;
+        if let Some(index) = data.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+            break index + 4;
+        }
+    };
+    let header = String::from_utf8_lossy(&data[..header_end]).into_owned();
+    let length = header
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())?
+        })
+        .ok_or_else(|| format!("request without Content-Length:\n{header}"))?;
+    while data.len() < header_end + length {
+        read(&mut data)?;
+    }
+    let body = &data[header_end..header_end + length];
+    serde_json::from_slice(body).map_err(|error| {
+        format!(
+            "request body is not JSON ({error}): {}",
+            String::from_utf8_lossy(body)
+        )
+    })
+}
+
+/// Wrap a JSON content sample the way a chat completion carries it.
+fn chat_completion(content: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({"choices":[{"message":{"content":content.to_string()}}]})
+}
+
 fn summary_response() -> serde_json::Value {
-    serde_json::json!({"choices":[{"message":{"content":serde_json::json!({"tldr":"这份摘要来自保留的正文。","key_points":["正文内容"],"outline":[{"t":0,"title":"开头","detail":"正文内容"}]}).to_string()}}]})
+    chat_completion(&common::fake_ai()["responses"]["summary"])
 }
 
 #[test]
@@ -461,10 +507,13 @@ fn proofreading_images_and_custom_rules_match_the_requested_outputs() {
     if !common::ffmpeg_available() {
         return;
     }
-    let mock = MockAi::respond_with(|_, body| {
-        if body.to_string().contains("tldr") {
+    let markers = common::fake_ai()["markers"].clone();
+    let summary_marker = markers["summary"].as_str().unwrap().to_owned();
+    let mock = MockAi::respond_with(move |_, body| {
+        if body.to_string().contains(&summary_marker) {
             return Some((200, summary_response()));
         }
+        // Echo the segments back as the proofread result.
         let user = &body["messages"][1]["content"];
         let text = user.as_str().map(str::to_owned).unwrap_or_else(|| {
             user.as_array()
@@ -477,7 +526,7 @@ fn proofreading_images_and_custom_rules_match_the_requested_outputs() {
         let segments: serde_json::Value = serde_json::from_str(&text).unwrap();
         Some((
             200,
-            serde_json::json!({"choices":[{"message":{"content":serde_json::json!({"segments":segments}).to_string()}}]}),
+            chat_completion(&serde_json::json!({"segments": segments})),
         ))
     });
     let root = tempfile::tempdir().unwrap();
@@ -487,7 +536,8 @@ fn proofreading_images_and_custom_rules_match_the_requested_outputs() {
     initial.config.llm.enabled = true;
     initial.config.llm.summarize = true;
     initial.config.llm.vision = true;
-    initial.config.llm.prompt = Some("UX-RULE-42: preserve terminology.".into());
+    let rule = markers["custom_rule"].as_str().unwrap();
+    initial.config.llm.prompt = Some(format!("{rule}: preserve terminology."));
     initial.config.llm.base_url = mock.url.clone();
     initial.config.llm.model = "proofread-vision".into();
     initial.config.llm.api_key = "private-task-key".into();
@@ -516,7 +566,7 @@ fn proofreading_images_and_custom_rules_match_the_requested_outputs() {
     assert!(!manifest.frames.is_empty());
     let bodies = mock.bodies.lock().unwrap();
     assert_eq!(bodies.len(), 2);
-    assert!(bodies[0].to_string().contains("UX-RULE-42"));
+    assert!(bodies[0].to_string().contains(rule));
     assert!(bodies[0].to_string().contains("image_url"));
     assert!(!bodies[1].to_string().contains("image_url"));
     assert!(bodies.iter().all(
@@ -526,7 +576,6 @@ fn proofreading_images_and_custom_rules_match_the_requested_outputs() {
 
 #[test]
 fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source_work() {
-    use std::sync::atomic::Ordering;
     if !common::ffmpeg_available() {
         return;
     }
@@ -659,7 +708,10 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     );
     let document: artifact::Document =
         serde_json::from_slice(&std::fs::read(final_dir.join("document.json")).unwrap()).unwrap();
-    assert_eq!(document.summary.unwrap().tldr, "这份摘要来自保留的正文。");
+    assert_eq!(
+        document.summary.unwrap().tldr,
+        common::fake_ai()["responses"]["summary"]["tldr"]
+    );
     for (path, bytes) in original_files {
         assert_eq!(std::fs::read(path).unwrap(), bytes);
     }
@@ -677,7 +729,6 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
 
 #[test]
 fn proofreading_resend_continues_unsent_summary_without_repeating_source_work() {
-    use std::sync::atomic::Ordering;
     if !common::ffmpeg_available() {
         return;
     }

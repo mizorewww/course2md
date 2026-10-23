@@ -45,3 +45,9 @@ pub fn fixture_video(path: &Path, secs: u32) {
         String::from_utf8_lossy(&generated.stderr)
     );
 }
+
+/// Request markers and canned responses of the fake AI service, shared with
+/// `desktop/scripts/ux_fixture.py` so both fakes answer with the same shapes.
+pub fn fake_ai() -> serde_json::Value {
+    serde_json::from_str(include_str!("../fixtures/fake_ai.json")).expect("valid fixture")
+}
