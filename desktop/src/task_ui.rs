@@ -2510,7 +2510,7 @@ impl Desktop {
         let mut facts = v_flex()
             .w_full()
             .min_w_0()
-            .gap_1()
+            .gap_2()
             .child(detail_row(
                 SharedString::from(format!("task-destination-{}", task.id)),
                 course2md::tr!("保存到"),

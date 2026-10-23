@@ -664,7 +664,10 @@ pub fn detail_row(
         .min_h(rems(32. / 14.))
         .items_center()
         .flex_wrap()
-        .gap(rems(12. / 14.))
+        // A value that wraps under its label stays closer to it than to
+        // the next row's label.
+        .gap_x(rems(12. / 14.))
+        .gap_y(rems(2. / 14.))
         .child(
             semantic_label(id, label, icon)
                 .w(rems(160. / 14.))
