@@ -14,3 +14,4 @@ out-gpu/
 out-smoke/
 native/apple-asr/.build/
 desktop/assets/icon-design/exports/
+.claude
