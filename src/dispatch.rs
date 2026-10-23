@@ -954,9 +954,9 @@ mod tests {
     }
     #[test]
     fn confirmed_connection_failure_can_resume_without_resend_authorization() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        drop(listener);
+        // Nothing can listen on port 0, so the connection always fails before
+        // a byte is sent; a freed ephemeral port could be reused meanwhile.
+        let endpoint = "http://127.0.0.1:0".to_owned();
         let dir = tempfile::tempdir().unwrap();
         let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
         let payload = serde_json::json!({"text":"lesson"});
