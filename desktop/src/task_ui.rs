@@ -1953,30 +1953,8 @@ impl Desktop {
 
     /// What the task was submitted with: where it saves, where its text comes
     /// from, and which service receives its content.
+    /// The running card's side panel: the choices this task was started with.
     fn task_settings_panel(&self, task: &TaskRecord, library: &SharedString) -> Div {
-        let id = &task.id;
-        let source = task_text_source(task);
-        let service = task
-            .plan
-            .ai_service
-            .as_ref()
-            .filter(|_| task.plan.config.llm.uses_service())
-            .and_then(|service| self.preferences.version(service));
-        let fact = |key: &str, label: &'static str, value: SharedString| {
-            v_flex()
-                .gap_1()
-                .child(
-                    div()
-                        .text_size(TEXT_AUX)
-                        .text_color(color(GRAY))
-                        .child(label),
-                )
-                .child(
-                    accessible_text(SharedString::from(format!("{key}-{id}")), value)
-                        .text_size(TEXT_BODY)
-                        .whitespace_normal(),
-                )
-        };
         v_flex()
             .flex_1()
             .flex_basis(rems(16.))
@@ -1993,34 +1971,7 @@ impl Desktop {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(course2md::tr!("这次的设置")),
             )
-            .child(fact(
-                "task-destination",
-                course2md::tr!("保存到"),
-                library.clone(),
-            ))
-            .child(fact(
-                "task-text-source",
-                course2md::tr!("文字来源"),
-                source.into(),
-            ))
-            .children(service.map(|version| {
-                fact(
-                    "task-ai-destination",
-                    course2md::tr!("AI 服务"),
-                    version.config.name.clone().into(),
-                )
-                .child(
-                    div()
-                        .text_size(TEXT_AUX)
-                        .whitespace_normal()
-                        .text_color(color(GRAY))
-                        .child(if task.plan.options.vision {
-                            course2md::tr!("文字和截图会发送到这个服务")
-                        } else {
-                            course2md::tr!("文字会发送到这个服务")
-                        }),
-                )
-            }))
+            .child(self.task_facts(task, library.clone()))
     }
 
     /// The expanded part of a row: what happened, the recovery that applies,
@@ -2043,22 +1994,7 @@ impl Desktop {
             .task_library(task)
             .map(|lib| lib.name.clone())
             .unwrap_or_else(|| course2md::tr!("保存位置暂时不可用").into());
-        let facts = v_flex()
-            .w_full()
-            .min_w_0()
-            .gap_1()
-            .child(detail_row(
-                SharedString::from(format!("task-destination-{id}")),
-                course2md::tr!("保存到"),
-                icons::folder_open()
-                    .size(rems(20. / 14.))
-                    .text_color(color(GRAY)),
-                div()
-                    .text_size(TEXT_BODY)
-                    .whitespace_normal()
-                    .child(destination),
-            ))
-            .child(self.task_processing_facts(task));
+        let facts = self.task_facts(task, destination);
         let (progress, mut history) = self.task_progress_sections(task, cx);
         // 需要处理的卡片只留可操作的信息；保存位置与文字来源收进「查看已完成的处理」
         let recovery = matches!(
@@ -2583,15 +2519,35 @@ impl Desktop {
             )
     }
 
-    fn task_processing_facts(&self, task: &TaskRecord) -> Div {
+    /// Where a task saves and how it processes: one set of facts shared by the
+    /// running card and the expanded record.
+    fn task_facts(&self, task: &TaskRecord, destination: impl Into<SharedString>) -> Div {
         let source = task_text_source(task);
-        let mut facts = v_flex().w_full().min_w_0().gap_1().child(detail_row(
+        let fact_value = |value: SharedString| {
+            div()
+                .text_size(TEXT_BODY)
+                .whitespace_normal()
+                .child(value)
+        };
+        let mut facts = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap_1()
+            .child(detail_row(
+                SharedString::from(format!("task-destination-{}", task.id)),
+                course2md::tr!("保存到"),
+                icons::folder_open()
+                    .size(rems(20. / 14.))
+                    .text_color(color(GRAY)),
+                fact_value(destination.into()),
+            ))
+            .child(detail_row(
             SharedString::from(format!("task-text-source-{}", task.id)),
             course2md::tr!("文字来源"),
             icons::subtitles()
                 .size(rems(20. / 14.))
                 .text_color(color(GRAY)),
-            div().text_size(TEXT_BODY).whitespace_normal().child(source),
+            fact_value(source.into()),
         ));
         if task.plan.config.llm.uses_service()
             && let Some(version) = task
@@ -2606,10 +2562,8 @@ impl Desktop {
                 icons::auto_fix()
                     .size(rems(20. / 14.))
                     .text_color(color(GRAY)),
-                div()
-                    .text_size(TEXT_BODY)
-                    .whitespace_normal()
-                    .child(course2md::tr!(
+                fact_value(
+                    course2md::tr!(
                         "{}发送到「{}」",
                         if task.plan.options.vision {
                             course2md::tr!("文字与截图")
@@ -2617,7 +2571,9 @@ impl Desktop {
                             course2md::tr!("文字")
                         },
                         version.config.name,
-                    )),
+                    )
+                    .into(),
+                ),
             ));
         }
         facts

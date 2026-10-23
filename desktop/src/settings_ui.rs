@@ -196,6 +196,15 @@ pub(super) fn field_label(
         .font_weight(FontWeight::SEMIBOLD)
 }
 
+/// A setting's hint, identified after its row.
+fn setting_hint(id: &ElementId, hint: &'static str) -> Stateful<Div> {
+    theme::row_hint(
+        SharedString::from(format!("{id:?}-hint")),
+        hint,
+        RowScale::Settings,
+    )
+}
+
 fn setting_label(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Div {
     div().child(
         text(id, value)
@@ -212,35 +221,7 @@ pub(super) fn settings_row(
     hint: &'static str,
     control: impl IntoElement,
 ) -> Div {
-    settings_form_row(id, label, hint, control, false)
-}
-
-/// Editing fields use a top label: errors and related actions stay with the
-/// input without forcing long values into the preference label/control grid.
-pub(super) fn settings_field_row(
-    id: impl Into<ElementId>,
-    label: &'static str,
-    field: impl IntoElement,
-) -> Div {
-    settings_form_row(id, label, "", field, true)
-}
-
-fn settings_form_row(
-    id: impl Into<ElementId>,
-    label: &'static str,
-    hint: &'static str,
-    control: impl IntoElement,
-    editing_field: bool,
-) -> Div {
     let id = id.into();
-    if editing_field {
-        return v_flex()
-            .w_full()
-            .min_w_0()
-            .gap_2()
-            .child(setting_label(id.clone(), label))
-            .child(div().w_full().min_w_0().child(control));
-    }
     // Label and its hint read as one unit, centered against the control.
     let row = h_flex()
         .w_full()
@@ -258,11 +239,7 @@ fn settings_form_row(
                 .gap(rems(2. / 14.))
                 .child(setting_label(id.clone(), label))
                 .when(!hint.is_empty(), |column| {
-                    column.child(
-                        text(SharedString::from(format!("{id:?}-hint")), hint)
-                            .text_size(TEXT_SETTINGS_AUX)
-                            .text_color(color(GRAY)),
-                    )
+                    column.child(setting_hint(&id, hint))
                 }),
         )
         .child(
@@ -278,6 +255,22 @@ fn settings_form_row(
                 .child(control),
         );
     setting_surface().child(row)
+}
+
+/// Editing fields use a top label: errors and related actions stay with the
+/// input without forcing long values into the preference label/control grid.
+pub(super) fn settings_field_row(
+    id: impl Into<ElementId>,
+    label: &'static str,
+    field: impl IntoElement,
+) -> Div {
+    let id = id.into();
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .gap_2()
+        .child(setting_label(id, label))
+        .child(div().w_full().min_w_0().child(field))
 }
 
 /// A setting whose control sits under its label.
@@ -296,12 +289,7 @@ pub(super) fn settings_stacked_row(
             .child(text(id.clone(), label).text_size(TEXT_SETTINGS_BODY))
             .child(control)
             .when(!hint.is_empty(), |view| {
-                view.child(
-                    text(SharedString::from(format!("{id:?}-hint")), hint)
-                        .text_size(TEXT_SETTINGS_AUX)
-                        .text_color(color(GRAY))
-                        .px(px(12.)),
-                )
+                view.child(setting_hint(&id, hint).px(rems(12. / 14.)))
             }),
     )
 }
@@ -316,41 +304,17 @@ pub(super) fn settings_outlined_row(
     let id = id.into();
     setting_surface().child(v_flex().w_full().min_w_0().gap_2().child(control).when(
         !hint.is_empty(),
-        |view| {
-            view.child(
-                text(SharedString::from(format!("{id:?}-hint")), hint)
-                    .text_size(TEXT_SETTINGS_AUX)
-                    .text_color(color(GRAY)),
-            )
-        },
+        |view| view.child(setting_hint(&id, hint)),
     ))
 }
 
 pub(super) fn settings_switch_row(label: &'static str, hint: &'static str, control: Switch) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .min_h(px(56.))
-        .items_center()
-        .gap_4()
-        .child(
-            v_flex()
-                .flex_1()
-                .min_w_0()
-                .gap_1()
-                .child(
-                    text(SharedString::from(format!("switch-label-{label}")), label)
-                        .text_size(TEXT_SETTINGS_BODY),
-                )
-                .when(!hint.is_empty(), |view| {
-                    view.child(
-                        text(SharedString::from(format!("switch-hint-{label}")), hint)
-                            .text_size(TEXT_SETTINGS_AUX)
-                            .text_color(color(GRAY)),
-                    )
-                }),
-        )
-        .child(processing_switch(control).accessibility_label(label))
+    theme::switch_row(
+        label,
+        hint,
+        processing_switch(control).accessibility_label(label),
+        RowScale::Settings,
+    )
 }
 
 /// Compact outlined chips used for capabilities and license links in settings.
@@ -502,20 +466,7 @@ impl RenderOnce for DetailGroup {
             .w_full()
             .min_w_0()
             .gap_2()
-            .child(
-                h_flex()
-                    .min_w_0()
-                    .items_center()
-                    .gap_2()
-                    .text_color(color(ACCENT))
-                    .child(self.icon.size(rems(18. / 14.)).flex_shrink_0())
-                    .child(
-                        text(self.id, self.title)
-                            .role(Role::Heading)
-                            .text_size(TEXT_SETTINGS_AUX)
-                            .font_weight(FontWeight::MEDIUM),
-                    ),
-            )
+            .child(theme::section_heading(self.id, self.icon, self.title))
             .child(block)
             .children(self.after)
     }

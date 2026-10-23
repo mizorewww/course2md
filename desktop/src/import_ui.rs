@@ -37,12 +37,7 @@ fn import_option_section(
         .w_full()
         .min_w_0()
         .gap_2()
-        .child(
-            accessible_text(id, label)
-                .text_size(TEXT_BODY)
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(color(ACCENT)),
-        )
+        .child(section_title(id, label))
         .child(content)
 }
 
@@ -92,28 +87,6 @@ pub(crate) fn aux_text(content: impl IntoElement) -> Div {
         .text_size(TEXT_AUX)
         .text_color(color(GRAY))
         .child(content)
-}
-
-fn import_option_switch_row(
-    label: &'static str,
-    hint: &'static str,
-    switch: impl IntoElement,
-) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .min_h(rems(44. / 14.))
-        .items_center()
-        .gap_4()
-        .child(
-            v_flex()
-                .flex_1()
-                .min_w_0()
-                .gap_1()
-                .child(div().text_size(TEXT_LEAD).child(label))
-                .when(!hint.is_empty(), |view| view.child(aux_text(hint))),
-        )
-        .child(div().flex_shrink_0().child(switch))
 }
 
 /// The first line of a message when it is already readable. A raw download
@@ -2316,7 +2289,7 @@ impl Desktop {
         .into_iter()
         .enumerate()
         {
-            choices = choices.child(import_option_switch_row(
+            choices = choices.child(switch_row(
                 conversion_ai_option_label(option),
                 "",
                 processing_switch(Switch::new(("import-ai-option", index)))
@@ -2329,6 +2302,7 @@ impl Desktop {
                             cx,
                         );
                     })),
+                RowScale::Panel,
             ));
         }
         if self.task_options().llm
@@ -2805,7 +2779,7 @@ impl Desktop {
                         .w_full()
                         .min_w_0()
                         .pt(SECTION_GAP)
-                        .child(import_option_switch_row(
+                        .child(switch_row(
                             course2md::tr!("保留原视频"),
                             course2md::tr!("供离线播放，会占用更多磁盘空间"),
                             processing_switch(Switch::new("import-keep-video"))
@@ -2815,6 +2789,7 @@ impl Desktop {
                                     this.update_task_options(|o| o.keep_video = value, cx);
                                     cx.notify();
                                 })),
+                            RowScale::Panel,
                         )),
                 )
             })

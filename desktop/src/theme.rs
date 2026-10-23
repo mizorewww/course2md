@@ -500,6 +500,85 @@ pub fn info_callout(
         )
 }
 
+/// The type scale of a labelled row: settings content reads one step larger
+/// than the workbench's processing panel.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RowScale {
+    Settings,
+    Panel,
+}
+
+impl RowScale {
+    pub fn label(self) -> Rems {
+        TEXT_SETTINGS_BODY
+    }
+
+    pub fn hint(self) -> Rems {
+        match self {
+            RowScale::Settings => TEXT_SETTINGS_AUX,
+            RowScale::Panel => TEXT_AUX,
+        }
+    }
+
+    /// A switch row's height; it scales with the text so rows line up at
+    /// every interface size.
+    fn switch_height(self) -> Rems {
+        match self {
+            RowScale::Settings => rems(56. / 14.),
+            RowScale::Panel => rems(44. / 14.),
+        }
+    }
+}
+
+/// Supporting text under a row's label.
+pub fn row_hint(
+    id: impl Into<gpui::ElementId>,
+    hint: impl Into<gpui::SharedString>,
+    scale: RowScale,
+) -> gpui::Stateful<gpui::Div> {
+    use gpui::Styled;
+    accessible_text(id, hint)
+        .text_size(scale.hint())
+        .text_color(color(GRAY))
+}
+
+/// Label and optional hint on the left, a switch on the trailing edge.
+pub fn switch_row(
+    label: &'static str,
+    hint: &'static str,
+    switch: impl gpui::IntoElement,
+    scale: RowScale,
+) -> gpui::Div {
+    use gpui::{prelude::*, *};
+    div()
+        .flex()
+        .w_full()
+        .min_w_0()
+        .min_h(scale.switch_height())
+        .items_center()
+        .gap_4()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .gap_1()
+                .child(
+                    accessible_text(SharedString::from(format!("switch-label-{label}")), label)
+                        .text_size(scale.label()),
+                )
+                .when(!hint.is_empty(), |view| {
+                    view.child(row_hint(
+                        SharedString::from(format!("switch-hint-{label}")),
+                        hint,
+                        scale,
+                    ))
+                }),
+        )
+        .child(div().flex_shrink_0().child(switch))
+}
+
 /// Related facts share a bounded label column and a stable value start.
 pub fn detail_row(
     id: impl Into<gpui::ElementId>,
@@ -594,8 +673,26 @@ pub fn labeled_input(
 
 /* ---------- 共享控件 ---------- */
 
+/// A section title led by its category icon, as on diagnostic groups.
+pub fn section_heading(
+    id: impl Into<gpui::ElementId>,
+    icon: gpui_component::Icon,
+    title: impl Into<gpui::SharedString>,
+) -> gpui::Div {
+    use gpui::{prelude::*, *};
+    div()
+        .flex()
+        .min_w_0()
+        .items_center()
+        .gap(ICON_GAP)
+        .text_color(color(ACCENT))
+        .child(icon.size(rems(18. / 14.)).flex_shrink_0())
+        .child(section_title(id, title))
+}
+
 /// M3 list section title: primary-colored, semibold, above the list it names.
-/// Shared by settings groups, task groups and the workbench's recent notes.
+/// Shared by settings groups, task groups, diagnostic groups, the workbench's
+/// processing options and its recent notes.
 pub fn section_title(
     id: impl Into<gpui::ElementId>,
     title: impl Into<gpui::SharedString>,
