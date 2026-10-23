@@ -1,5 +1,7 @@
 /target
+# Conversion output from local runs: out/ anywhere, out-*/ at the root
 out/
+/out-*/
 .pi/
 models/
 *.wav
@@ -8,9 +10,5 @@ models/
 .DS_Store
 .venv/
 __pycache__/
-out-bv/
-out-bench/
-out-gpu/
-out-smoke/
 native/apple-asr/.build/
 desktop/assets/icon-design/exports/
