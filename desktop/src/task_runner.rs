@@ -37,7 +37,7 @@ enum PlanValidation {
 /// scan can include slow locations, so its old manifest cannot be the only
 /// source of the card while the newly published version is already readable.
 fn update_published_course(
-    courses: &mut Vec<Course>,
+    courses: &mut Vec<Rc<Course>>,
     done: &Done,
     manifest: &course2md::artifact::Manifest,
     thumbnail: Option<PathBuf>,
@@ -66,7 +66,7 @@ fn update_published_course(
         }
     }
     courses.retain(|previous| previous.storage_dir() != storage);
-    courses.push(course);
+    courses.push(Rc::new(course));
     courses.sort_by_key(|course| std::cmp::Reverse(course.modified));
 }
 
@@ -2190,7 +2190,7 @@ pub(crate) mod tests {
         };
         let mut other_library = old.clone();
         other_library.dir = "/other-library/course/versions/old".into();
-        let mut courses = vec![old.clone(), other_library.clone()];
+        let mut courses = vec![std::rc::Rc::new(old.clone()), std::rc::Rc::new(other_library.clone())];
         let mut repaired = old_manifest;
         repaired.task_id = "repair".into();
         repaired.version_id = "repair".into();

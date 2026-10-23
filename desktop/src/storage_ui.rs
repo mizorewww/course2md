@@ -708,7 +708,7 @@ impl Desktop {
                 self.course_location(course)
                     .is_some_and(|library| library.id == library_id)
             })
-            .cloned()
+            .map(|course| Course::clone(course))
             .collect::<Vec<_>>();
         self.storage_ui.begin(StorageOp::Reassociate);
         self.storage_ui.busy = true;

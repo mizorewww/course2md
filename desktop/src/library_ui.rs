@@ -685,7 +685,7 @@ impl Desktop {
             self.courses
                 .iter()
                 .find(|course| &course.dir == path || &course.storage_dir() == path)
-                .map(Course::storage_dir)
+                .map(|course| course.storage_dir())
                 .unwrap_or_else(|| path.clone())
         });
         let origin = if let Some(path) = &storage {

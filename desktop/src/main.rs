@@ -317,7 +317,8 @@ struct Desktop {
     logs: VecDeque<String>,
     pending_done: Option<Done>,
     completed: Option<Done>,
-    courses: Vec<Course>,
+    /// Library notes, shared so render closures hold a pointer, not a copy.
+    courses: Vec<Rc<Course>>,
     cover_by_source: BTreeMap<String, PathBuf>,
     loading: bool,
     preview: Option<Rc<notes::Preview>>,
@@ -1265,7 +1266,7 @@ impl Desktop {
                                     this.cover_by_source.insert(source_id, cover.clone());
                                 }
                             }
-                            this.courses.extend(scan.courses);
+                            this.courses.extend(scan.courses.into_iter().map(Rc::new));
                             this.library_issues
                                 .extend(scan.issues.into_iter().map(|message| {
                                     course_library::LibraryIssue {
@@ -1350,22 +1351,24 @@ impl Desktop {
             .get(&course.storage_dir())?;
         self.library_indexes.get(root)?.folder_key(&cached.relative)
     }
-    fn open_course(&mut self, course: Course, cx: &mut Context<Self>) {
+    fn open_course(&mut self, course: impl Into<Rc<Course>>, cx: &mut Context<Self>) {
         self.following_conversion = None;
-        self.open_course_with_conversion_guard(course, None, cx);
+        self.open_course_with_conversion_guard(course.into(), None, cx);
     }
 
     fn open_completed_conversion(&mut self, course: Course, cx: &mut Context<Self>) {
         let follow = self.following_conversion.clone();
-        self.open_course_with_conversion_guard(course, follow, cx);
+        self.open_course_with_conversion_guard(Rc::new(course), follow, cx);
     }
 
     fn open_course_with_conversion_guard(
         &mut self,
-        course: Course,
+        course: Rc<Course>,
         follow: Option<import_ui::ConversionFollow>,
         cx: &mut Context<Self>,
     ) {
+        // Reading needs its own copy on the worker; rendering shares the rest.
+        let course = Rc::unwrap_or_clone(course);
         self.save_reading_position(cx);
         let reader_revision = self.read_generation;
         let reader_origin = follow.as_ref().and_then(|follow| {

@@ -1194,11 +1194,11 @@ impl Desktop {
                     .find(|course| &course.dir == dir)
                     .cloned()
                     .unwrap_or_else(|| {
-                        Course::from_completed(&Done {
+                        Rc::new(Course::from_completed(&Done {
                             out_dir: dir.clone(),
                             title: task.plan.title.clone(),
                             ..Default::default()
-                        })
+                        }))
                     })
             });
             let has_exports = desktop

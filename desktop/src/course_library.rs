@@ -82,7 +82,7 @@ struct LibraryRow {
 }
 
 impl LibraryRow {
-    fn cards(all: &[Course], courses: &[usize], columns: usize) -> Vec<Self> {
+    fn cards(all: &[Rc<Course>], courses: &[usize], columns: usize) -> Vec<Self> {
         courses
             .chunks(columns)
             .map(|row| Self {
@@ -92,7 +92,7 @@ impl LibraryRow {
             .collect()
     }
 
-    fn list(all: &[Course], index: usize) -> Self {
+    fn list(all: &[Rc<Course>], index: usize) -> Self {
         Self {
             key: format!("card-{}", all[index].dir.display()),
             courses: vec![index],
@@ -492,7 +492,7 @@ impl Desktop {
             .get(identity)
             .into_iter()
             .flatten()
-            .filter_map(|index| self.courses.get(*index))
+            .filter_map(|index| self.courses.get(*index).map(|course| &**course))
     }
 
     fn index_note_sources(&mut self) {
@@ -568,8 +568,9 @@ impl Desktop {
                     .aliases
                     .get(&location.root)
                     .and_then(|names| names.get(&location.relative))
+                && course.title != *name
             {
-                course.title = name.clone();
+                Rc::make_mut(course).title = name.clone();
             }
         }
         let title = self
@@ -739,8 +740,13 @@ impl Desktop {
         .detach();
     }
 
-    fn course_actions(&self, course: Course, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let menu = self.course_menu(&course, false, cx);
+    fn course_actions(
+        &self,
+        course: &Rc<Course>,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let menu = self.course_menu(course, false, cx);
         control(("course-actions", index))
             .ghost()
             .icon(crate::icons::ellipsis())
@@ -758,12 +764,12 @@ impl Desktop {
     /// the ⋯ button sits on a row that already opens it.
     pub(crate) fn course_menu(
         &self,
-        course: &Course,
+        course: &Rc<Course>,
         with_open: bool,
         cx: &mut Context<Self>,
     ) -> MenuBuilder {
         let entity = cx.entity().downgrade();
-        let course = course.clone();
+        let course = Rc::clone(course);
         Rc::new(move |menu, window, cx| {
             // Read when the menu opens, not for every row on every frame.
             let Some(desktop) = entity.upgrade() else {
@@ -831,7 +837,7 @@ impl Desktop {
                         let course = course.clone();
                         menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
                             let _ = entity.update(cx, |this, cx| {
-                                this.export_course(course.clone(), format, window, cx)
+                                this.export_course(Course::clone(&course), format, window, cx)
                             });
                         }))
                     })
@@ -868,7 +874,7 @@ impl Desktop {
                         .icon(icons::edit())
                         .on_click(move |_, window, cx| {
                             let _ = rename.update(cx, |this, cx| {
-                                this.begin_course_rename(selected.clone(), window, cx)
+                                this.begin_course_rename(Course::clone(&selected), window, cx)
                             });
                         }),
                 )
@@ -878,7 +884,7 @@ impl Desktop {
                         .danger(true)
                         .on_click(move |_, window, cx| {
                             let _ = delete.update(cx, |this, cx| {
-                                this.confirm_course_delete(doomed.clone(), window, cx)
+                                this.confirm_course_delete(Course::clone(&doomed), window, cx)
                             });
                         }),
                 )
@@ -2055,15 +2061,15 @@ impl Desktop {
     /// Cover and title both open the note; the card needs no separate read button.
     pub(crate) fn note_card(
         &self,
-        course: &Course,
+        course: &Rc<Course>,
         index: usize,
         scope: &'static str,
         with_actions: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let menu = self.course_menu(course, true, cx);
-        let open = |course: &Course| {
-            let course = course.clone();
+        let open = |course: &Rc<Course>| {
+            let course = Rc::clone(course);
             cx.listener(move |this: &mut Self, _, _, cx| this.open_course(course.clone(), cx))
         };
         let cover = control(SharedString::from(format!("{scope}-cover-{index}")))
@@ -2140,7 +2146,7 @@ impl Desktop {
                                 ),
                             )
                             .when(with_actions, |row| {
-                                row.child(self.course_actions(course.clone(), index, cx))
+                                row.child(self.course_actions(course, index, cx))
                             }),
                     )
                     .when(course.incomplete(), |view| {
@@ -2272,7 +2278,7 @@ impl Desktop {
                         cx.listener(move |this, _, _, cx| this.open_course(course.clone(), cx))
                     }),
             )
-            .child(self.course_actions(course.clone(), index, cx));
+            .child(self.course_actions(course, index, cx));
         let menu = self.course_menu(course, true, cx);
         v_flex()
             .id(("library-row", index))
@@ -2505,7 +2511,7 @@ impl Desktop {
         attention.sort_by_key(|task| std::cmp::Reverse(task.updated));
         attention.truncate(2);
         let attention: Vec<crate::workspace::TaskRecord> = attention.into_iter().cloned().collect();
-        let notes: Vec<Course> = self
+        let notes: Vec<Rc<Course>> = self
             .courses
             .iter()
             .filter(|course| {
@@ -2988,7 +2994,7 @@ mod tests {
 
     #[test]
     fn library_item_keys_follow_content_identity_and_columns() {
-        let all = [course("/lib/a"), course("/lib/b"), course("/lib/c")];
+        let all = [course("/lib/a"), course("/lib/b"), course("/lib/c")].map(std::rc::Rc::new);
         let row = |columns| LibraryRow::cards(&all, &[0, 1], columns).remove(0);
         let items = [
             LibraryItem::Coverage("m".into()),

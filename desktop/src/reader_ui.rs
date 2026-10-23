@@ -2693,8 +2693,8 @@ impl Desktop {
         self.reader_ui.restore.active = false;
         cx.notify();
     }
-    fn open_reader_version(&mut self, course: Course, cx: &mut Context<Self>) {
-        self.load_reader_version(course, false, cx);
+    fn open_reader_version(&mut self, course: impl Into<Rc<Course>>, cx: &mut Context<Self>) {
+        self.load_reader_version(Rc::unwrap_or_clone(course.into()), false, cx);
     }
     fn load_reader_version(&mut self, course: Course, refresh: bool, cx: &mut Context<Self>) {
         if self.reading
