@@ -311,6 +311,8 @@ pub(super) struct LibraryViewCache {
     sources: std::collections::HashMap<String, NoteSource>,
     /// Source identity → indices into `Desktop::courses` of its notes.
     notes_by_source: std::collections::HashMap<String, Vec<usize>>,
+    /// Course identity → index into `Desktop::courses` of its newest version.
+    newest_by_course: std::collections::HashMap<String, usize>,
     pub recovery: BTreeMap<PathBuf, organize::Recovery>,
     pub title_recovery: BTreeMap<PathBuf, organize::Recovery>,
     aliases: BTreeMap<PathBuf, BTreeMap<PathBuf, String>>,
@@ -318,6 +320,29 @@ pub(super) struct LibraryViewCache {
 }
 
 impl LibraryViewCache {
+    /// A newer version of the note `manifest` belongs to, when the library has one.
+    pub fn newer_version(
+        &self,
+        courses: &[Rc<Course>],
+        manifest: &course2md::artifact::Manifest,
+    ) -> Option<Rc<Course>> {
+        self.newest_by_course
+            .get(&manifest.course_id)
+            .and_then(|index| courses.get(*index))
+            .filter(|course| {
+                course
+                    .manifest
+                    .as_ref()
+                    // Indices are rebuilt after each scan; until then an inserted
+                    // note can shift them, so the identity is checked too.
+                    .is_some_and(|newest| {
+                        newest.course_id == manifest.course_id
+                            && newest.revision > manifest.revision
+                    })
+            })
+            .cloned()
+    }
+
     pub fn inspect(
         location: &workspace::LibraryLocation,
         scan: Option<&notes::LibraryScan>,
@@ -506,6 +531,18 @@ impl Desktop {
             }
         }
         self.library_view_cache.notes_by_source = notes_by_source;
+        let mut newest: std::collections::HashMap<String, usize> = Default::default();
+        for (index, course) in self.courses.iter().enumerate() {
+            let Some(manifest) = &course.manifest else {
+                continue;
+            };
+            let current = newest.entry(manifest.course_id.clone()).or_insert(index);
+            let revision = |i: usize| self.courses[i].manifest.as_ref().map(|m| m.revision);
+            if revision(*current) < Some(manifest.revision) {
+                *current = index;
+            }
+        }
+        self.library_view_cache.newest_by_course = newest;
         let wanted: std::collections::HashSet<&str> = self
             .courses
             .iter()

@@ -4274,14 +4274,8 @@ impl Desktop {
         let mut notices = Vec::new();
         if let Some(current) = &preview.course.manifest
             && let Some(newer) = self
-                .courses
-                .iter()
-                .find(|course| {
-                    course.manifest.as_ref().is_some_and(|m| {
-                        m.course_id == current.course_id && m.revision > current.revision
-                    })
-                })
-                .cloned()
+                .library_view_cache
+                .newer_version(&self.courses, current)
         {
             notices.push(crate::motion::enter(
                 "reader-new-version-notice",
