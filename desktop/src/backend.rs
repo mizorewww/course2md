@@ -538,21 +538,35 @@ pub struct Environment {
     pub llama: bool,
     pub apple: bool,
     pub gpu: Option<String>,
-    pub npu: bool,
-    pub npu_device: bool,
-    pub npu_runtime: bool,
+    pub npu_parts: NpuParts,
 }
+
+/// The two independent requirements of Intel NPU recognition.
+#[derive(Clone, Copy, Default)]
+pub struct NpuParts {
+    pub device: bool,
+    pub runtime: bool,
+}
+
 impl Environment {
-    /// 本机环境是否支持指定的识别方式。NPU 要求设备与运行器同时可用——
-    /// `npu` 字段在 detect() 中即 `npu_device && npu_runtime` 的合一，
-    /// 两处写法等价，以此处为准。Api 不依赖本机组件。
+    /// Intel NPU recognition needs both the device and its Python runtime.
+    pub fn npu(&self) -> bool {
+        self.npu_parts.device && self.npu_parts.runtime
+    }
+    pub fn npu_device(&self) -> bool {
+        self.npu_parts.device
+    }
+    pub fn npu_runtime(&self) -> bool {
+        self.npu_parts.runtime
+    }
+    /// 本机环境是否支持指定的识别方式。Api 不依赖本机组件。
     pub fn supports(&self, provider: course2md::config::AsrProvider) -> bool {
         use course2md::config::AsrProvider;
         match provider {
             AsrProvider::Coreml => self.apple,
             AsrProvider::Gpu => self.llama && self.gpu.is_some(),
             AsrProvider::Cpu => self.llama,
-            AsrProvider::Npu => self.npu,
+            AsrProvider::Npu => self.npu(),
             AsrProvider::Api => true,
         }
     }
@@ -629,7 +643,6 @@ impl Environment {
             let executable = format!("{name}{}", std::env::consts::EXE_SUFFIX);
             std::env::split_paths(&tool_path()).any(|dir| dir.join(&executable).is_file())
         });
-        let npu = npu_device && npu_runtime;
         Self {
             engine: cli.is_some() && checks.contains_key("engine"),
             ffmpeg: checks.contains_key("ffmpeg"),
@@ -638,9 +651,10 @@ impl Environment {
             llama,
             apple,
             gpu,
-            npu,
-            npu_device,
-            npu_runtime,
+            npu_parts: NpuParts {
+                device: npu_device,
+                runtime: npu_runtime,
+            },
         }
     }
 }

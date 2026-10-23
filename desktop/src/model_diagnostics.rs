@@ -232,8 +232,8 @@ pub(crate) fn device_issue(
         AsrProvider::Gpu if !environment.llama => Some(DeviceIssue::LlamaMissing),
         AsrProvider::Gpu if environment.gpu.is_none() => Some(DeviceIssue::GpuAbsent),
         AsrProvider::Cpu if !environment.llama => Some(DeviceIssue::LlamaMissing),
-        AsrProvider::Npu if !environment.npu_device => Some(DeviceIssue::NpuDevice),
-        AsrProvider::Npu if !environment.npu_runtime => Some(DeviceIssue::NpuRuntime),
+        AsrProvider::Npu if !environment.npu_device() => Some(DeviceIssue::NpuDevice),
+        AsrProvider::Npu if !environment.npu_runtime() => Some(DeviceIssue::NpuRuntime),
         _ => None,
     }
 }
@@ -1090,7 +1090,7 @@ impl Desktop {
             (
                 "npu-device",
                 "Intel NPU",
-                if environment.npu_device {
+                if environment.npu_device() {
                     course2md::tr!("已检测到设备")
                 } else {
                     course2md::tr!("未检测到设备")
@@ -1099,7 +1099,7 @@ impl Desktop {
             (
                 "npu-runtime",
                 course2md::tr!("NPU 启动器"),
-                if environment.npu_runtime {
+                if environment.npu_runtime() {
                     course2md::tr!("已找到")
                 } else {
                     course2md::tr!("未找到 uv 或 Python")

@@ -4885,7 +4885,7 @@ fn ensure_asr_capability(
             course2md::tr!("CPU 识别引擎尚未安装。请在设置的「应用」中查看安装方法。")
         ),
         AsrProvider::Npu => ensure!(
-            environment.npu,
+            environment.npu(),
             course2md::tr!("没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。")
         ),
         AsrProvider::Api => (),
