@@ -171,6 +171,62 @@ pub enum ModelOperation {
     Download,
 }
 
+/// Why a command failed, for scripts that must not parse the message.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    /// The command line or task input was rejected before any work started.
+    InvalidArguments,
+    /// The configuration file could not be used as written.
+    InvalidConfiguration,
+    /// A required program (ffmpeg, ffprobe, yt-dlp, llama-server) is missing.
+    MissingTool,
+    /// A service rejected the credentials.
+    Authentication,
+    /// A service does not have the endpoint or model asked for.
+    Model,
+    /// A service rejected the request parameters.
+    Parameters,
+    RateLimit,
+    /// A service failed to complete the request.
+    Service,
+    /// A request was sent but its result is unknown.
+    Uncertain,
+    #[default]
+    Other,
+}
+
+impl ErrorCode {
+    /// The code a typed error carries; untyped errors are `Other`.
+    pub fn of(error: &anyhow::Error) -> Self {
+        use crate::artifact::FailureKind;
+        if error.downcast_ref::<crate::error::MissingTool>().is_some() {
+            return Self::MissingTool;
+        }
+        if error.downcast_ref::<crate::error::InvalidInput>().is_some() {
+            return Self::InvalidArguments;
+        }
+        if error
+            .downcast_ref::<crate::error::InvalidConfiguration>()
+            .is_some()
+        {
+            return Self::InvalidConfiguration;
+        }
+        match error
+            .downcast_ref::<crate::dispatch::Failure>()
+            .map(|failure| failure.kind)
+        {
+            Some(FailureKind::Authentication) => Self::Authentication,
+            Some(FailureKind::Model) => Self::Model,
+            Some(FailureKind::Parameters) => Self::Parameters,
+            Some(FailureKind::RateLimit) => Self::RateLimit,
+            Some(FailureKind::Service) => Self::Service,
+            Some(FailureKind::Uncertain) => Self::Uncertain,
+            _ => Self::Other,
+        }
+    }
+}
+
 /// The published note version a finished task reports.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Done {
@@ -244,6 +300,9 @@ pub enum Event {
     },
     Error {
         message: String,
+        /// Stable for consumers; the message is for people and may change.
+        #[serde(default)]
+        code: ErrorCode,
     },
     Done(Box<Done>),
     ModelReady {

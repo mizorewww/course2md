@@ -494,12 +494,21 @@ async fn reprocess(
         // As with screenshots: when the summary was the only thing asked for,
         // a failure publishes no new version identical to the old one.
         if components.len() == 1 && document.summary.is_none() {
-            anyhow::bail!(
-                "{}",
-                outcomes.summary.message.clone().unwrap_or_else(|| crate::tr!(
+            let message = outcomes.summary.message.clone().unwrap_or_else(|| {
+                crate::tr!(
                     "生成摘要未完成，原笔记不受影响 / Summary generation failed; the original note is unaffected"
-                ).into())
-            );
+                )
+                .into()
+            });
+            // Keep the recorded cause so the error event's code matches it.
+            return Err(crate::dispatch::Failure {
+                kind: outcomes
+                    .summary
+                    .kind
+                    .unwrap_or(crate::artifact::FailureKind::Local),
+                ..crate::dispatch::Failure::local(message)
+            }
+            .into());
         }
     }
     job.control.check()?;

@@ -129,12 +129,14 @@ pub fn load() -> anyhow::Result<ConfigFile> {
             p.display()
         )
     })?;
-    toml::from_str(&s).with_context(|| {
-        format!(
-            "配置格式有误，请修正后重试 / Fix the configuration syntax and retry: {}",
-            p.display()
-        )
-    })
+    toml::from_str(&s)
+        .with_context(|| {
+            format!(
+                "配置格式有误，请修正后重试 / Fix the configuration syntax and retry: {}",
+                p.display()
+            )
+        })
+        .map_err(crate::error::invalid_configuration)
 }
 
 pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {

@@ -104,12 +104,22 @@ fn missing_or_invalid_sources_fail_with_recovery() {
 #[test]
 fn json_covers_missing_source_parse_and_config_errors() {
     let cli = CliTest::new();
-    json_error(&cli.run(&["--json"]));
-    json_error(&cli.run(&["./missing.mp4", "--json"]));
-    json_error(&cli.run(&["./missing.mp4", "--json", "--provider", "invalid"]));
+    // Scripts read the stable code, never the message.
+    for args in [
+        &["--json"][..],
+        &["./missing.mp4", "--json"],
+        &["./missing.mp4", "--json", "--provider", "invalid"],
+    ] {
+        assert_eq!(
+            json_error(&cli.run(args))["code"],
+            "invalid_arguments",
+            "{args:?}"
+        );
+    }
     std::fs::write(cli.dir.path().join("lecture.mp4"), []).unwrap();
     cli.config("[defaults\n");
     let error = json_error(&cli.run(&["./lecture.mp4", "--json"]));
+    assert_eq!(error["code"], "invalid_configuration");
     assert!(error["message"].as_str().unwrap().contains("configuration"));
 }
 
@@ -119,6 +129,7 @@ fn validation_precedes_dependency_checks_and_downloads() {
     std::fs::write(cli.dir.path().join("lecture.mp4"), []).unwrap();
     let result = cli.run(&["./lecture.mp4", "--sample-interval", "0", "--json"]);
     let error = json_error(&result);
+    assert_eq!(error["code"], "invalid_arguments");
     assert!(
         error["message"]
             .as_str()

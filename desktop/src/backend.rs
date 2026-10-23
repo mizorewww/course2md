@@ -26,7 +26,10 @@ impl Event {
         })
     }
     fn error(message: String) -> Self {
-        Self::Engine(EngineEvent::Error { message })
+        Self::Engine(EngineEvent::Error {
+            message,
+            code: Default::default(),
+        })
     }
 }
 
@@ -770,7 +773,7 @@ mod tests {
         );
         handle.join().unwrap();
         match rx.recv().unwrap() {
-            Event::Engine(EngineEvent::Error { message }) => {
+            Event::Engine(EngineEvent::Error { message, .. }) => {
                 assert_eq!(message, "failed [已隐藏密钥]")
             }
             _ => panic!("protocol was lost during redaction"),

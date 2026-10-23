@@ -105,16 +105,16 @@ impl Request {
         // serde's error can include unknown field names. Do not echo attacker-supplied
         // values or accidentally repeat a secret from a malformed JSON document.
         let request: Self = serde_json::from_slice(&data).map_err(|e| {
-            anyhow::anyhow!(
+            crate::error::invalid_input(anyhow::anyhow!(
                 "{}",
                 crate::tr!(
                     "无法读取任务参数（第 {} 行，第 {} 列）/ Invalid task JSON",
                     e.line(),
                     e.column()
                 )
-            )
+            ))
         })?;
-        request.validate()?;
+        request.validate().map_err(crate::error::invalid_input)?;
         Ok(request)
     }
 

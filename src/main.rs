@@ -79,6 +79,7 @@ fn main() -> std::process::ExitCode {
                 progress::set_json_mode();
                 progress::emit(&progress::Event::Error {
                     message: course2md::tr!("参数无效：{}", error),
+                    code: progress::ErrorCode::InvalidArguments,
                 });
             } else if course2md::i18n::lang() == course2md::i18n::Lang::En {
                 let _ = error.print();
@@ -149,7 +150,10 @@ fn main() -> std::process::ExitCode {
             // A helper's parent reads its error from stderr and decides what
             // the task reports, so the helper never emits an error event.
             if json && helper.is_none() {
-                progress::emit(&progress::Event::Error { message });
+                progress::emit(&progress::Event::Error {
+                    code: progress::ErrorCode::of(&error),
+                    message,
+                });
             } else {
                 course2md::eprintln_tr!("错误：{}", message);
             }
@@ -381,10 +385,11 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             let source = match cli.source {
                 Some(source) => normalize_source(&source)?,
                 None => {
-                    anyhow::ensure!(
-                        no_args,
-                        course2md::tr!("缺少视频来源。示例：course2md ./lecture.mp4")
-                    );
+                    if !no_args {
+                        return Err(course2md::error::invalid_input(anyhow::anyhow!(
+                            course2md::tr!("缺少视频来源。示例：course2md ./lecture.mp4")
+                        )));
+                    }
                     println!("{}\n", course2md::tr!("course2md — 将视频转换为图文笔记"));
                     println!("{}", course2md::tr!(course2md::cli::QUICK_START));
                     course2md::println_tr!("全部参数 / All options: course2md --help");
@@ -662,9 +667,9 @@ fn normalize_source(source: &str) -> anyhow::Result<String> {
     if config::known_video_site(source).is_some() {
         return Ok(format!("https://{source}"));
     }
-    anyhow::bail!(
+    Err(course2md::error::invalid_input(anyhow::anyhow!(
         "{}\n{}",
         course2md::tr!("找不到视频文件或无法识别链接：{}", source),
         course2md::tr!("请检查路径；含空格的路径需加引号")
-    )
+    )))
 }

@@ -1737,7 +1737,7 @@ impl Desktop {
                     phase.map(|phase| crate::activity::model_transfer_phase(stage, Some(phase)))
                 });
             }
-            EngineEvent::Error { message } => {
+            EngineEvent::Error { message, .. } => {
                 task.updated = workspace::now();
                 task.error = Some(message.clone());
             }

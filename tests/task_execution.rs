@@ -666,6 +666,7 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     assert!(!second.status.success(), "{second_events:#?}");
     assert!(second_events.iter().any(|event| {
         event["type"] == "error"
+            && event["code"] == "parameters"
             && event["message"]
                 .as_str()
                 .is_some_and(|m| m.contains("HTTP 400"))

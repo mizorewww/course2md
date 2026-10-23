@@ -457,7 +457,12 @@ impl PipelineConfig {
 
     /// 全量预检：所有配置错误必须在任何昂贵操作（下载/抽帧/模型加载）之前暴露。
     /// 返回 Err 的送进 main 后直接退出，不会碰网络与模型。
+    /// Rejects settings no run can use; the error is typed as invalid input.
     pub fn validate(&self) -> AnyhowResult<()> {
+        self.check_values().map_err(crate::error::invalid_input)
+    }
+
+    fn check_values(&self) -> AnyhowResult<()> {
         let finite = |name: &str, v: f64| -> AnyhowResult<()> {
             anyhow::ensure!(
                 v.is_finite(),

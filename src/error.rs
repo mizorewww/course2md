@@ -34,11 +34,60 @@ pub fn require_ytdlp() -> Result<()> {
     Ok(())
 }
 
+/// The command line or task input was rejected before any work started. It
+/// shows the wrapped error unchanged; the type only names the cause.
+#[derive(Debug)]
+pub struct InvalidInput(pub anyhow::Error);
+
+/// The configuration file could not be used as written.
+#[derive(Debug)]
+pub struct InvalidConfiguration(pub anyhow::Error);
+
+impl std::fmt::Display for InvalidInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+impl std::error::Error for InvalidInput {}
+
+impl std::fmt::Display for InvalidConfiguration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+impl std::error::Error for InvalidConfiguration {}
+
+pub fn invalid_input(error: impl Into<anyhow::Error>) -> anyhow::Error {
+    anyhow::Error::new(InvalidInput(error.into()))
+}
+
+pub fn invalid_configuration(error: impl Into<anyhow::Error>) -> anyhow::Error {
+    anyhow::Error::new(InvalidConfiguration(error.into()))
+}
+
+/// A required external program is not installed.
+#[derive(Debug)]
+pub struct MissingTool {
+    pub tool: String,
+}
+
+impl std::fmt::Display for MissingTool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let cmd = &self.tool;
+        write!(
+            f,
+            "未找到 {cmd}，请先安装 / {cmd} is not installed. {}",
+            install_hint(cmd)
+        )
+    }
+}
+
+impl std::error::Error for MissingTool {}
+
 fn missing_tool(cmd: &str) -> anyhow::Error {
-    anyhow::anyhow!(
-        "未找到 {cmd}，请先安装 / {cmd} is not installed. {}",
-        install_hint(cmd)
-    )
+    anyhow::Error::new(MissingTool {
+        tool: cmd.to_owned(),
+    })
 }
 
 /// 按平台给一行安装命令（常见包管理器；ffprobe 随 ffmpeg 包提供）。

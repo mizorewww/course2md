@@ -1074,7 +1074,7 @@ impl Desktop {
                         .or_insert_with(activity::Activity::new)
                         .workers = workers
                 }
-                EngineEvent::Error { message } => {
+                EngineEvent::Error { message, .. } => {
                     self.task_error = Some(message.clone());
                     self.logs.push_back(message);
                     flush = recording;
