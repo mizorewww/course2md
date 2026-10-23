@@ -1661,7 +1661,6 @@ fn main() {
     });
     app.run(|cx| {
         gpui_component::init(cx);
-        gpui_component::set_locale("zh-CN");
         theme::init(cx);
         // Debug validation uses the same native window and render path at an exact size.
         // Release builds always use the ordinary initial window size.
