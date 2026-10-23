@@ -74,16 +74,14 @@ fn readable_first_line(message: &str) -> Option<&str> {
     (!first.contains("WARNING:") && !first.contains("ERROR:")).then_some(first)
 }
 
-fn help(text: impl Into<SharedString>) -> Div {
-    let text = text.into();
-    crate::theme::supporting_info(text_id("help", &text), text).text_sm()
+fn help(id: &'static str, text: impl Into<SharedString>) -> Div {
+    crate::theme::supporting_info(id, text).text_sm()
 }
-fn issue(message: impl Into<SharedString>) -> Stateful<Div> {
-    let message = message.into();
-    error_text(text_id("issue", &message), message)
-        .text_sm()
-        .whitespace_normal()
+fn issue(id: &'static str, message: impl Into<SharedString>) -> Stateful<Div> {
+    error_text(id, message).text_sm().whitespace_normal()
 }
+/// An element id that follows the text it shows: an entrance replays and an
+/// expanded detail closes when a different message takes the same place.
 fn text_id(kind: &str, value: &str) -> SharedString {
     use std::hash::{Hash, Hasher};
     let mut hash = std::collections::hash_map::DefaultHasher::new();
@@ -154,16 +152,19 @@ pub(crate) fn box_section(icon: Icon, label: &'static str) -> Div {
             .items_center()
             .child(icon.size(rems(20. / 14.)).text_color(color(ACCENT)))
             .child(
-                accessible_text(text_id("box-section", label), label)
+                accessible_text(label, label)
                     .text_size(TEXT_TITLE)
                     .font_weight(FontWeight::SEMIBOLD),
             ),
     )
 }
 /// A consequence or recovery fact kept beside its action.
-pub(crate) fn conversion_fact(value: impl Into<SharedString>, warning: bool) -> Stateful<Div> {
-    let value = value.into();
-    accessible_text(text_id("conversion-fact", &value), value)
+pub(crate) fn conversion_fact(
+    id: &'static str,
+    value: impl Into<SharedString>,
+    warning: bool,
+) -> Stateful<Div> {
+    accessible_text(id, value)
         .w_full()
         .min_w_0()
         .whitespace_normal()
@@ -586,7 +587,7 @@ impl Desktop {
         v_flex()
             .min_w_0()
             .gap_2()
-            .child(help(summary.to_owned()))
+            .child(help("import-subtitle-issue-summary", summary.to_owned()))
             .when(!details.trim().is_empty(), |view| {
                 view.child(
                     quiet(id.clone())
@@ -610,7 +611,7 @@ impl Desktop {
                 .child(motion::disclosure(
                     text_id("subtitle-technical", message),
                     expanded,
-                    v_flex().child(help(details.to_owned())),
+                    v_flex().child(help("import-subtitle-issue-details", details.to_owned())),
                 ))
             })
     }
@@ -1134,7 +1135,9 @@ impl Desktop {
                             )
                             .child(self.preview_source_button(is_compact(window), cx)),
                     )
-                    .when_some(validation, |view, message| view.child(issue(message))),
+                    .when_some(validation, |view, message| {
+                        view.child(issue("import-validation", message))
+                    }),
             );
         } else {
             view = self.local_source_input(view, cx);
@@ -1241,6 +1244,21 @@ impl Desktop {
             )
     }
 
+    fn candidate_has_note(&self, candidate: &source::SourceCandidate) -> bool {
+        candidate
+            .identity
+            .as_deref()
+            .is_some_and(|identity| self.notes_for_source(identity).next().is_some())
+    }
+
+    /// Candidates that can be checked for a batch: identified, without a note yet.
+    fn selectable_candidates(&self) -> impl Iterator<Item = &source::SourceCandidate> {
+        let batch = self.online();
+        self.source_candidates.iter().filter(move |candidate| {
+            batch && candidate.identity.is_some() && !self.candidate_has_note(candidate)
+        })
+    }
+
     /// The candidate list: online sources queue several at once; several dropped local files stay single-choice.
     /// Only candidates with a confirmed identity can be checked; the rest open one at a time.
     fn candidate_list_view(&self, view: Div, title: &str, cx: &mut Context<Self>) -> Div {
@@ -1248,41 +1266,25 @@ impl Desktop {
         // Online lists queue several at once; dropped local files stay single-choice (a local identity needs a
         // content hash, read and confirmed one by one). Only identified candidates can be checked.
         let batch = self.online();
-        // Identities are resolved once when the candidates arrive.
-        let identities: Vec<Option<&str>> = self
-            .source_candidates
-            .iter()
-            .map(|candidate| candidate.identity.as_deref())
-            .collect();
-        let noted: Vec<bool> = identities
-            .iter()
-            .map(|identity| {
-                identity.is_some_and(|identity| self.notes_for_source(identity).next().is_some())
-            })
-            .collect();
-        let selectable: Vec<String> = self
-            .source_candidates
-            .iter()
-            .zip(&identities)
-            .zip(&noted)
-            .filter(|((_, identity), noted)| batch && identity.is_some() && !**noted)
-            .map(|((candidate, _), _)| candidate.input.clone())
-            .collect();
+        // One pass over the candidates: whether each already has a note, and
+        // the counts the header shows.
+        let mut noted = Vec::with_capacity(self.source_candidates.len());
+        let (mut selectable, mut selectable_selected, mut noted_selected) = (0, 0, 0);
+        let mut any_batchable = false;
+        for candidate in &self.source_candidates {
+            let has_note = self.candidate_has_note(candidate);
+            let selected = self.selected_candidates.contains(&candidate.input);
+            any_batchable |= candidate.identity.is_some();
+            if batch && candidate.identity.is_some() && !has_note {
+                selectable += 1;
+                selectable_selected += usize::from(selected);
+            }
+            // A checked candidate that already has a note gets a new version; say so beside the action.
+            noted_selected += usize::from(has_note && selected);
+            noted.push(has_note);
+        }
         let selected_count = self.selected_candidates.len();
-        let all_selected = !selectable.is_empty()
-            && selectable
-                .iter()
-                .all(|input| self.selected_candidates.contains(input));
-        // A checked candidate that already has a note gets a new version; say so beside the action.
-        let noted_selected = self
-            .source_candidates
-            .iter()
-            .zip(&noted)
-            .filter(|(candidate, noted)| {
-                **noted && self.selected_candidates.contains(&candidate.input)
-            })
-            .count();
-        let any_batchable = identities.iter().any(Option::is_some);
+        let all_selected = selectable > 0 && selectable_selected == selectable;
         let list = v_flex()
             .id("source-candidates")
             // The viewport scales with the text (about three rows and a glimpse of the fourth); the padding keeps
@@ -1304,7 +1306,7 @@ impl Desktop {
                 candidate.title.clone()
             };
             let (preview, text) = self.candidate_row_parts(candidate, &title, untitled);
-            let batchable = batch && identities[index].is_some();
+            let batchable = batch && candidate.identity.is_some();
             if batch {
                 // The same multi-select pattern as the export row: the checkbox is clickable itself (Tab and Space
                 // toggle it), the preview/title area is a sibling target, and rows no longer nest two on_click handlers.
@@ -1380,7 +1382,6 @@ impl Desktop {
                 );
             }
         }
-        let selectable_inputs = selectable.clone();
         view = view.child(motion::enter(
             text_id("source-candidates", title),
             v_flex()
@@ -1413,8 +1414,11 @@ impl Desktop {
                                                 if all_selected {
                                                     this.selected_candidates.clear();
                                                 } else {
-                                                    this.selected_candidates
-                                                        .extend(selectable_inputs.iter().cloned());
+                                                    let inputs: Vec<String> = this
+                                                        .selectable_candidates()
+                                                        .map(|c| c.input.clone())
+                                                        .collect();
+                                                    this.selected_candidates.extend(inputs);
                                                 }
                                                 cx.notify();
                                             })),
@@ -1533,7 +1537,7 @@ impl Desktop {
         if let Some(error) = &self.preview_error
             && !self.source_candidates.is_empty()
         {
-            view = view.child(help(error.clone()));
+            view = view.child(help("import-source-error", error.clone()));
         }
         if let Some(error) = &self.preview_error
             && self.source_candidates.is_empty()
@@ -1541,7 +1545,7 @@ impl Desktop {
             let details = motion::disclosure(
                 "source-error-disclosure",
                 self.show_preview_details,
-                v_flex().child(help(error.clone())),
+                v_flex().child(help("import-source-error-details", error.clone())),
             );
             view = view.child(motion::enter(
                 text_id("source-error", error),
@@ -1560,16 +1564,19 @@ impl Desktop {
                                     .flex_shrink_0(),
                             )
                             .child(
-                                issue(if source::legacy_login_failure_from_text(error) {
-                                    course2md::tr!("视频需要登录后读取，请登录后重试预览")
-                                        .to_owned()
-                                } else {
-                                    readable_first_line(error)
-                                        .unwrap_or(course2md::tr!(
-                                            "暂时无法读取这个视频，请检查链接或稍后重试"
-                                        ))
-                                        .to_owned()
-                                })
+                                issue(
+                                    "import-login-failure",
+                                    if source::legacy_login_failure_from_text(error) {
+                                        course2md::tr!("视频需要登录后读取，请登录后重试预览")
+                                            .to_owned()
+                                    } else {
+                                        readable_first_line(error)
+                                            .unwrap_or(course2md::tr!(
+                                                "暂时无法读取这个视频，请检查链接或稍后重试"
+                                            ))
+                                            .to_owned()
+                                    },
+                                )
                                 .flex_1()
                                 .min_w_0(),
                             ),
@@ -1726,7 +1733,7 @@ impl Desktop {
             if self.source_preview.is_none()
                 && let Some(error) = &self.source_validation
             {
-                view = view.child(issue(error.clone()));
+                view = view.child(issue("import-preview-error", error.clone()));
             }
         }
         view
@@ -1795,10 +1802,13 @@ impl Desktop {
             .filter(|part| !part.trim().is_empty())
             .collect::<Vec<_>>()
             .join(" · ");
-        let details = v_flex().gap_3().child(help(source.input.clone())).when(
-            source.online && course2md::auth::is_bilibili_url(&source.input),
-            |view| view.child(self.source_account_row(cx)),
-        );
+        let details = v_flex()
+            .gap_3()
+            .child(help("import-source-input", source.input.clone()))
+            .when(
+                source.online && course2md::auth::is_bilibili_url(&source.input),
+                |view| view.child(self.source_account_row(cx)),
+            );
         let selected = h_flex()
             .w_full()
             .min_w_0()
@@ -2065,10 +2075,10 @@ impl Desktop {
         if speech && !show_text_choices {
             match &source.subtitles {
                 SubtitleEvidence::NoneFound => {
-                    view = view.child(help(course2md::tr!("未找到字幕")))
+                    view = view.child(help("import-no-subtitles", course2md::tr!("未找到字幕")))
                 }
                 SubtitleEvidence::Unsupported { message } => {
-                    view = view.child(help(message.clone()))
+                    view = view.child(help("import-subtitle-message", message.clone()))
                 }
                 _ => {}
             }
@@ -2149,10 +2159,13 @@ impl Desktop {
                 ));
             }
             if let SubtitleEvidence::Unsupported { message } = &source.subtitles {
-                options = options.child(help(message.clone()));
+                options = options.child(help("import-option-subtitle-message", message.clone()));
             }
             if matches!(source.subtitles, SubtitleEvidence::NoneFound) {
-                options = options.child(help(course2md::tr!("未找到字幕")));
+                options = options.child(help(
+                    "import-option-no-subtitles",
+                    course2md::tr!("未找到字幕"),
+                ));
             }
             options = options.child(
                 h_flex()
@@ -2289,7 +2302,10 @@ impl Desktop {
                 .as_ref()
                 .is_some_and(|prompt| !prompt.trim().is_empty())
         {
-            choices = choices.child(help(course2md::tr!("使用自定义校对规则")));
+            choices = choices.child(help(
+                "import-custom-rule",
+                course2md::tr!("使用自定义校对规则"),
+            ));
         }
         // Bilingual translation is a per-task choice; the global default is only
         // the starting value inherited by this input.
@@ -3162,7 +3178,7 @@ impl Desktop {
                     .p_4()
                     .rounded(RADIUS_CARD)
                     .bg(color(DANGER_BG))
-                    .child(issue(error.clone())),
+                    .child(issue("import-start-error", error.clone())),
             ));
         }
         // The whole workbench accepts a dropped video, not just the local tab.
@@ -3343,6 +3359,7 @@ impl Desktop {
         if let Some((id, title, location)) = matching_task.clone() {
             let location = location.unwrap_or_else(|| course2md::tr!("原保存位置").into());
             inset = inset.child(conversion_fact(
+                "conversion-fact-consequence",
                 course2md::tr!("已有相同处理任务：《{}》（{}）", title, location),
                 true,
             ));
@@ -3395,7 +3412,11 @@ impl Desktop {
                     ),
             );
             if busy {
-                inset = inset.child(conversion_fact(course2md::tr!("将排在当前任务之后"), false));
+                inset = inset.child(conversion_fact(
+                    "conversion-fact-queued",
+                    course2md::tr!("将排在当前任务之后"),
+                    false,
+                ));
             }
         } else if let Some(purpose) = self.missing_import_service() {
             actions = actions.child(
