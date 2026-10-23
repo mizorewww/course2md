@@ -53,5 +53,5 @@ jobs:
 
       - name: Integration tests (synthetic video)
         if: runner.os != 'Windows'
-        run: cargo test --features integration --test scene_synthetic
+        run: cargo test --test scene_synthetic
 

@@ -3,9 +3,7 @@
 //! - 换页被检出、时间戳为候选首次出现时间（而非 cooldown 到期时间）
 //! - cooldown 期间检测不休眠：跳过的中间页、后续页真实起点仍正确
 //!
-//! 运行需要 ffmpeg；不存在时跳过。
-
-#![cfg(feature = "integration")]
+//! 运行需要 ffmpeg；本地缺少时跳过，CI 中缺少则失败。
 
 use std::process::Command;
 

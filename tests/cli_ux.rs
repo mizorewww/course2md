@@ -237,7 +237,7 @@ fn doctor_reports_required_failures_with_nonzero_exit() {
     );
 }
 
-#[cfg(all(unix, feature = "integration"))]
+#[cfg(unix)]
 #[test]
 fn remote_download_output_does_not_leak_into_json_or_quiet_mode() {
     use std::os::unix::fs::PermissionsExt;
