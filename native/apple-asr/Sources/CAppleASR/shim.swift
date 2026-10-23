@@ -33,21 +33,26 @@ private func loadWav(_ path: String) throws -> [Float] {
     return AudioFileLoader.resample(samples, from: rate, to: 16000)
 }
 
-// 单线程使用（Rust 侧在同一个阻塞线程内串行调用）。
-nonisolated(unsafe) private var lastErrorCStr: UnsafeMutablePointer<CChar>?
+// The last error is kept per thread: every exported function records its
+// failure on the calling thread, and the Rust side reads it on that same
+// thread right after the call, so concurrent callers cannot overwrite each
+// other's message.
+private let lastErrorKey = "dev.course2md.apple-asr.last-error"
 
 private func setErr(_ message: String) {
-    message.withCString { c in
-        if let old = lastErrorCStr { free(old) }
-        lastErrorCStr = strdup(c)
-    }
+    Thread.current.threadDictionary[lastErrorKey] = message as NSString
 }
 
-/// 最近一次错误的可读描述（指针在下次 setErr 前有效）。
+/// 本线程最近一次错误的可读描述（指针在本线程下次 setErr 前有效）。
 @_cdecl("c2m_last_error")
 public func c2mLastError() -> UnsafePointer<CChar> {
-    if let p = lastErrorCStr { return UnsafePointer(p) }
-    return ("unknown error" as NSString).utf8String!
+    if let message = Thread.current.threadDictionary[lastErrorKey] as? NSString,
+       let text = message.utf8String {
+        return text
+    }
+    // A string literal's storage is static and NUL-terminated.
+    let fallback: StaticString = "unknown error"
+    return UnsafeRawPointer(fallback.utf8Start).assumingMemoryBound(to: CChar.self)
 }
 
 // MARK: - Silero VAD
