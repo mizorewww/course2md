@@ -1,0 +1,10 @@
+name: Packaging script tests
+description: Unit tests of the release, channel and desktop packaging scripts.
+runs:
+  using: composite
+  steps:
+    - name: Packaging script tests
+      shell: bash
+      run: |
+        python3 -m unittest discover -s packaging -p 'test_*.py'
+        python3 -m unittest discover -s desktop/scripts -p 'test_*.py'

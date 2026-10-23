@@ -49,8 +49,6 @@ security-framework = "3.7"
 
 [build-dependencies]
 embed-resource = "3.0"
-# 纯 Rust 读取 git 信息（gix 后端），与 core 的 build.rs 同一来源；天然处理 worktree
-vergen-gix = { version = "10", features = ["emit_and_set"] }
 
 [dev-dependencies]
 gpui = { path = ".deps/zed/crates/gpui", features = ["test-support"] }

@@ -4,6 +4,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "build_support/git.rs"]
+mod git;
+
 fn main() {
     emit_commit_hash();
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
@@ -40,36 +43,17 @@ fn main() {
     // 关闭 swift-syntax 预编译包：新工具链首次构建会从 download.swift.org
     // 下载预编译宏库，SwiftPM 的下载没有超时，网络慢时整个 cargo build
     // 无限挂起；从源码构建宏库只慢在首次。不认识该参数的旧工具链本就不下载
-    // 预编译包，依次回退到不带该参数、再到默认构建系统。
-    // 只在全部尝试都失败时才打印输出，回退成功不留误导性的警告。
-    let attempts: [&[&str]; 4] = [
-        &[
-            "--build-system",
-            "swiftbuild",
-            "--disable-experimental-prebuilts",
-        ],
-        &["--build-system", "swiftbuild"],
-        &["--disable-experimental-prebuilts"],
-        &[],
-    ];
-    let mut reports = Vec::new();
-    let ok = attempts.iter().any(|extra| {
-        match run(Command::new("swift")
-            .args(["build", "-c", "release"])
-            .args(*extra)
-            .current_dir(&pkg))
-        {
-            Ok(()) => true,
-            Err(report) => {
-                reports.push(report);
-                false
-            }
-        }
-    });
-    if !ok {
-        for report in reports {
-            println!("cargo:warning={report}");
-        }
+    // 预编译包。
+    //
+    // 两个参数是否可用由 `swift build --help` 探测一次，按工具链版本缓存在
+    // OUT_DIR，之后只跑一次 swift build，不再串行试错。
+    let extra = swift_build_args();
+    if let Err(report) = run(Command::new("swift")
+        .args(["build", "-c", "release"])
+        .args(&extra)
+        .current_dir(&pkg))
+    {
+        println!("cargo:warning={report}");
         println!(
             "cargo:warning=swift build 失败（见上方输出），跳过 Apple 原生模块；coreml 后端不可用"
         );
@@ -156,7 +140,11 @@ fn main() {
     };
     if let Some(bundle) = bundle {
         if let Ok(out_dir) = std::env::var("OUT_DIR") {
-            // OUT_DIR = <target>/<profile>/build/<pkg>-<hash>/out
+            // OUT_DIR = <target>/[<triple>/]<profile>/build/<pkg>-<hash>/out, so
+            // this is the executable's directory. Cargo has no stable way to
+            // name it; the layout is also hard-coded by the consumers of this
+            // copy: release.yml ("Collect mlx.metallib"),
+            // desktop/scripts/package.py and desktop/scripts/ux_fixture.py.
             let exe_dir = PathBuf::from(out_dir).join("../../../");
             let dest = exe_dir.join("mlx.metallib");
             if std::fs::copy(&bundle, &dest).is_err() {
@@ -182,6 +170,40 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", rt.display());
         println!("cargo:rustc-link-lib=static=clang_rt.osx");
     }
+}
+
+/// Extra `swift build` arguments this toolchain supports, probed from its help
+/// text once and cached in OUT_DIR under the `swift --version` it came from.
+fn swift_build_args() -> Vec<String> {
+    let version = Command::new("swift")
+        .arg("--version")
+        .output()
+        .map(|out| {
+            let text = String::from_utf8_lossy(&out.stdout);
+            text.lines().next().unwrap_or_default().trim().to_owned()
+        })
+        .unwrap_or_default();
+    let cache = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("swift-build-args");
+    if let Ok(cached) = std::fs::read_to_string(&cache) {
+        let mut lines = cached.lines();
+        if lines.next() == Some(version.as_str()) {
+            return lines.map(str::to_owned).collect();
+        }
+    }
+    let help = Command::new("swift")
+        .args(["build", "--help"])
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default();
+    let mut args = vec![];
+    if help.contains("swiftbuild") {
+        args.extend(["--build-system", "swiftbuild"].map(String::from));
+    }
+    if help.contains("--disable-experimental-prebuilts") {
+        args.push("--disable-experimental-prebuilts".into());
+    }
+    let _ = std::fs::write(&cache, [version, args.join("\n")].join("\n"));
+    args
 }
 
 fn xcode_devdir() -> Option<PathBuf> {
@@ -289,59 +311,9 @@ fn find_file_recursive(dir: &Path, name: &str, depth: u32) -> Option<PathBuf> {
 /// Embed build provenance, including when this checkout is a linked worktree.
 fn emit_commit_hash() {
     let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let commit = git_commit(&root);
+    let commit = git::git_commit(&root);
     println!(
         "cargo:rustc-env=COURSE2MD_COMMIT_HASH={}",
         commit.as_deref().unwrap_or("unknown")
     );
-}
-
-/// Resolve `HEAD` to a 12-character prefix via vergen-gix (pure Rust gix backend,
-/// no git CLI dependency, handles linked worktrees). Returns `None` outside a git
-/// checkout so source archives embed the fallback instead of an enclosing repo.
-fn git_commit(root: &Path) -> Option<String> {
-    // Source archives have no .git; do not accidentally use an enclosing repository.
-    if !root.join(".git").exists() {
-        return None;
-    }
-    let mut gix = vergen_gix::Gix::builder().sha(false).build();
-    gix.at_path(root.to_path_buf());
-    vergen_gix::Emitter::default()
-        .quiet()
-        .add_instructions(&gix)
-        .ok()?
-        .emit_and_set()
-        .ok()?;
-    // `.sha(false)` yields the full id; `--short=12` is its 12-character prefix.
-    let sha = std::env::var("VERGEN_GIT_SHA").ok()?;
-    let commit = sha.get(..12)?.to_owned();
-    // vergen watches HEAD and the resolved ref. The reflog also changes on every
-    // commit (including in linked worktrees, where the ref lives in the common
-    // gitdir) and is cheap to watch.
-    for reflog in head_reflogs(root) {
-        if reflog.is_file() {
-            println!("cargo:rerun-if-changed={}", reflog.display());
-        }
-    }
-    Some(commit)
-}
-
-/// Reflog paths that record commit movement for this checkout: `.git/logs/HEAD`,
-/// or the per-worktree reflog a linked worktree's `.git` pointer file refers to.
-fn head_reflogs(root: &Path) -> Vec<PathBuf> {
-    let git = root.join(".git");
-    if git.is_dir() {
-        return vec![git.join("logs").join("HEAD")];
-    }
-    // A worktree's .git is a pointer file: "gitdir: <private gitdir>".
-    let pointer = std::fs::read_to_string(&git).unwrap_or_default();
-    let Some(gitdir) = pointer.trim().strip_prefix("gitdir:").map(str::trim) else {
-        return vec![];
-    };
-    let gitdir = if Path::new(gitdir).is_absolute() {
-        PathBuf::from(gitdir)
-    } else {
-        root.join(gitdir)
-    };
-    vec![gitdir.join("logs").join("HEAD")]
 }

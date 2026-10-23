@@ -12,13 +12,21 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from ux_common import fixture_root
+
+PROJECT = Path(__file__).resolve().parents[2]
+# Request markers and response samples shared with the Rust MockAi
+# (tests/task_execution.rs); change response shapes there, not here.
+FAKE_AI = json.loads((PROJECT / "tests/fixtures/fake_ai.json").read_text())
+
 
 def bundle(root, label, window_size):
     """Package already-built native binaries; isolate configuration and synthetic sources."""
-    project = Path(__file__).resolve().parents[2]
+    project = PROJECT
     app = root / f"course2md Validation {label}.app"
     binaries = app / "Contents/MacOS"
     binaries.mkdir(parents=True, exist_ok=True)
+    # build.rs copies mlx.metallib beside the CLI executable; see the note there.
     for source in [project / "target/debug/course2md", project / "desktop/target/debug/course2md-desktop", project / "target/debug/mlx.metallib"]:
         if source.is_file():
             shutil.copy2(source, binaries / source.name)
@@ -32,6 +40,8 @@ def bundle(root, label, window_size):
     frame_tool = testbin / "ffmpeg"
     shutil.copy2(project / "desktop/scripts/ux_ffmpeg.py", frame_tool)
     frame_tool.chmod(0o755)
+    # The wrappers import their shared helpers from their own directory.
+    shutil.copy2(project / "desktop/scripts/ux_common.py", testbin / "ux_common.py")
     config = root / "config/course2md"
     config.mkdir(parents=True, exist_ok=True)
     config_file = config / "config.toml"
@@ -86,6 +96,8 @@ def prepare(root):
 
 def serve(root, port):
     lock = threading.Lock()
+    markers, responses = FAKE_AI["markers"], FAKE_AI["responses"]
+    probes = markers["service_test"]  # request samples from desktop/src/service_test.rs
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -117,9 +129,11 @@ def serve(root, port):
                 policy = {"mode": "valid"}
             text = json.dumps(body, ensure_ascii=False)
             mode = policy.get("mode", "valid")
+            is_speech = markers["speech"] in text or markers["speech_path"] in self.path
+            is_summary = markers["summary"] in text or probes["summary"] in text
             with lock, (root / "service-requests.jsonl").open("a") as log:
-                purpose = "speech" if "input_audio" in text or "audio/transcriptions" in self.path else "summary" if "tldr" in text or "photosynthesis" in text else "proofread"
-                log.write(json.dumps({"time": time.time(), "path": self.path, "mode": mode, "model": body.get("model"), "purpose": purpose, "bytes": len(raw), "has_audio": "input_audio" in text or "audio/transcriptions" in self.path, "has_images": "image_url" in text, "has_authorization": bool(self.headers.get("Authorization")), "has_test_rule": "UX-RULE-42" in text}, ensure_ascii=False) + "\n")
+                purpose = "speech" if is_speech else "summary" if is_summary else "proofread"
+                log.write(json.dumps({"time": time.time(), "path": self.path, "mode": mode, "model": body.get("model"), "purpose": purpose, "bytes": len(raw), "has_audio": is_speech, "has_images": "image_url" in text, "has_authorization": bool(self.headers.get("Authorization")), "has_test_rule": markers["custom_rule"] in text}, ensure_ascii=False) + "\n")
             if mode == "drop":
                 self.connection.shutdown(socket.SHUT_RDWR)
                 self.connection.close()
@@ -132,24 +146,21 @@ def serve(root, port):
             if mode == "invalid-200":
                 self.answer(200, {"status": "ok", "result": "wrong protocol"})
                 return
-            if "audio/transcriptions" in self.path:
-                self.answer(200, {"text": "The blue notebook contains seven pages."})
+            if markers["speech_path"] in self.path:
+                self.answer(200, responses["speech"])
                 return
-            if "input_audio" in text:
-                content = "The blue notebook contains seven pages."
-            elif "tldr" in text or "photosynthesis" in text:
+            if markers["speech"] in text:
+                content = responses["speech"]["text"]
+            elif is_summary:
                 if mode == "summary-error":
                     self.answer(400, {"error": {"message": "Synthetic summary failure"}})
                     return
-                if "photosynthesis" in text:
-                    summary = "Photosynthesis uses sunlight and releases oxygen."
-                else:
-                    summary = "课程说明风险和收益的关系，并介绍分散投资。"
-                content = json.dumps({"tldr": summary, "key_points": [summary], "outline": [{"t": 0, "title": "课程要点", "detail": summary}]}, ensure_ascii=False)
-            elif "student have" in text:
-                content = json.dumps({"segments": [{"id": 0, "text": "The student has three books."}, {"id": 1, "text": "Water freezes at zero degrees Celsius."}]})
-            elif "card shown is red" in text:
-                content = json.dumps({"segments": [{"id": 0, "text": "The card shown is blue."}]})
+                sample = responses["service_test"]["summary"] if probes["summary"] in text else responses["summary"]
+                content = json.dumps(sample, ensure_ascii=False)
+            elif probes["proofread"] in text:
+                content = json.dumps(responses["service_test"]["proofread"])
+            elif probes["vision"] in text:
+                content = json.dumps(responses["service_test"]["vision"])
             else:
                 segments = []
                 for message in body.get("messages", []):
@@ -173,7 +184,7 @@ def serve(root, port):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["prepare", "serve", "bundle"])
-    parser.add_argument("--root", type=Path, default=Path("/tmp/course2md-ux-validation"))
+    parser.add_argument("--root", type=Path, default=fixture_root())
     parser.add_argument("--port", type=int, default=8769)
     parser.add_argument("--label", default="v2", help="Unique test bundle label to avoid cached launch environments")
     parser.add_argument("--window", default="1140x820", help="Initial native window dimensions for debug validation builds")

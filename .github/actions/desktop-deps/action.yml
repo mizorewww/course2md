@@ -38,4 +38,4 @@ runs:
       run: |
         mode=()
         if [ "$LOCKED" = true ]; then mode=(--locked); fi
-        python desktop/scripts/sources.py "${mode[@]}" --developer-dir "$RUNNER_TEMP/sources"
+        python desktop/scripts/sources.py "${mode[@]}"
