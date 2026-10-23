@@ -1,5 +1,5 @@
 //! Durable user work. Views never supply the identity or settings of a retry.
-use super::ConversionOptions;
+use crate::conversion::ConversionOptions;
 use anyhow::{Context, Result, bail, ensure};
 use course2md::execution::Component;
 use course2md::progress::{BlockReason, Stage, StageStatus};

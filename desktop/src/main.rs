@@ -7,6 +7,7 @@ mod appearance_ui;
 mod backend;
 mod bounded_http;
 mod codex_ui;
+mod conversion;
 mod course_library;
 mod credentials;
 mod focus_scroll;
@@ -40,7 +41,9 @@ mod task_ui;
 mod theme;
 mod views;
 mod workspace;
+
 use backend::{Done, EngineEvent, Event, Job};
+use conversion::ConversionOptions;
 use course2md::progress::{ModelOperation, Stage, StageStatus};
 use gpui::{prelude::*, *};
 use gpui_component::{
@@ -152,71 +155,6 @@ pub(crate) fn provider_label(provider: Option<course2md::config::AsrProvider>) -
 
 pub(crate) fn provider_from_id(id: &str) -> Option<course2md::config::AsrProvider> {
     course2md::config::AsrProvider::from_id(id)
-}
-
-impl ConversionOptions {
-    /// Whether the options use a cloud recognition service.
-    pub(crate) fn uses_cloud_provider(&self) -> bool {
-        self.provider == Some(course2md::config::AsrProvider::Api)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-struct ConversionOptions {
-    #[serde(with = "provider_serde")]
-    provider: Option<course2md::config::AsrProvider>,
-    #[serde(with = "workspace::text_source_index")]
-    source_mode: course2md::config::TranscriptSource,
-    llm: bool,
-    #[serde(default)]
-    summarize: bool,
-    #[serde(default)]
-    vision: bool,
-    /// Bilingual notes: target language code, or None for no translation.
-    #[serde(default)]
-    translate: Option<String>,
-    keep_video: bool,
-    formats: [bool; 3],
-}
-
-impl ConversionOptions {
-    fn from_config(config: &course2md::settings::ConfigFile) -> Self {
-        let provider = config.defaults.provider;
-        let source_mode = config.defaults.transcript_source.unwrap_or_default();
-        let llm = config.llm.enabled;
-        let keep_video = config.defaults.keep_video.unwrap_or(false);
-        let formats = config
-            .defaults
-            .formats
-            .as_ref()
-            .map(|formats| {
-                use course2md::config::OutputFormat::*;
-                [
-                    formats.contains(&Md),
-                    formats.contains(&Html),
-                    formats.contains(&Json),
-                ]
-            })
-            .unwrap_or([true, true, false]);
-        Self {
-            provider,
-            source_mode,
-            llm,
-            summarize: config.llm.summarize,
-            vision: config.llm.vision,
-            translate: config.llm.translate.clone(),
-            keep_video,
-            formats,
-        }
-    }
-}
-
-impl Default for ConversionOptions {
-    fn default() -> Self {
-        let mut value = Self::from_config(&Default::default());
-        value.formats = [false; 3];
-        value
-    }
 }
 
 struct Desktop {

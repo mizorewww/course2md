@@ -1972,28 +1972,6 @@ impl Desktop {
     }
 }
 
-impl ConversionOptions {
-    pub fn apply_to(&self, config: &mut course2md::settings::ConfigFile) {
-        use course2md::config::OutputFormat;
-        config.defaults.provider = self.provider;
-        config.defaults.transcript_source = Some(self.source_mode);
-        config.defaults.keep_video = Some(self.keep_video);
-        config.defaults.resume = Some(true);
-        config.defaults.formats = Some(
-            [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json]
-                .into_iter()
-                .zip(self.formats)
-                .filter_map(|(f, selected)| selected.then_some(f))
-                .collect(),
-        );
-        config.llm.enabled = self.llm;
-        config.llm.summarize = self.summarize;
-        config.llm.vision = self.llm && self.vision;
-        config.llm.translate = self.translate.clone();
-        config.llm.disable_hint = true;
-    }
-}
-
 /// A batch task's note title: the episode title shown in the candidate row; a bare link falls back to
 /// 「合集 视频 N」 (the collection name comes from the probe; placeholder hints never enter a title).
 fn batch_note_title(
