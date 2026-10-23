@@ -223,7 +223,6 @@ pub fn polish_sections_report(
     // Paths only: the image is read and encoded once per request batch, not all up front.
     let mut image_paths: Vec<Option<std::path::PathBuf>> = Vec::with_capacity(sections.len());
     for sec in sections.iter() {
-        crate::dispatch::check_control()?;
         image_paths
             .push((s.vision && !sec.speech.is_empty()).then(|| frames_root.join(&sec.image)));
     }

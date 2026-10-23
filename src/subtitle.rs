@@ -506,7 +506,7 @@ pub fn pick_subtitle_file(dir: &Path) -> Option<PathBuf> {
     if files.is_empty() {
         return None;
     }
-    let mut tracks: Vec<SubtitleTrack> = files
+    let tracks: Vec<SubtitleTrack> = files
         .into_iter()
         .enumerate()
         .map(|(index, path)| {
@@ -520,6 +520,11 @@ pub fn pick_subtitle_file(dir: &Path) -> Option<PathBuf> {
             track
         })
         .collect();
+    preferred_file(tracks)
+}
+
+/// The best file track: Chinese first, then English.
+fn preferred_file(mut tracks: Vec<SubtitleTrack>) -> Option<PathBuf> {
     sort_tracks(&mut tracks, &[], "zh", Some("en"));
     tracks.into_iter().find_map(|track| match track.origin {
         SubtitleOrigin::File { path } => Some(path),
@@ -530,12 +535,7 @@ pub fn pick_subtitle_file(dir: &Path) -> Option<PathBuf> {
 /// 本地视频的同名字幕 sidecar（`lecture.srt`、`lecture.zh.vtt` 等，与桌面端同一发现规则），
 /// 中文优先、其次英文。
 pub fn sidecar_subtitle(video: &Path) -> Option<PathBuf> {
-    let mut tracks = sidecar_tracks(video);
-    sort_tracks(&mut tracks, &[], "zh", Some("en"));
-    tracks.into_iter().find_map(|track| match track.origin {
-        SubtitleOrigin::File { path } => Some(path),
-        _ => None,
-    })
+    preferred_file(sidecar_tracks(video))
 }
 
 #[cfg(test)]

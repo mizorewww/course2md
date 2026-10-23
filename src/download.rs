@@ -195,7 +195,9 @@ fn native(url: &str, host: &Host, part: &Path, remote: &Remote, bar: &Bar) -> Re
                     "下载中断，正在续传 / Download interrupted; resuming: {error:#}"
                 );
                 phase = Phase::Retry;
-                std::thread::sleep(Duration::from_secs(2 * u64::from(idle.max(1))));
+                crate::runtime::interruptible_sleep(Duration::from_secs(
+                    2 * u64::from(idle.max(1)),
+                ))?;
             }
         }
     }

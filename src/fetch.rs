@@ -133,33 +133,19 @@ impl<'de> Deserialize<'de> for OrderedTracks {
 struct ExtractorInfo {
     #[serde(rename = "_type", default)]
     kind: String,
-    #[serde(default)]
     id: Option<String>,
-    #[serde(default)]
     title: Option<String>,
-    #[serde(default)]
     uploader: Option<String>,
-    #[serde(default)]
     duration: Option<f64>,
-    #[serde(default)]
     webpage_url: Option<String>,
-    #[serde(default)]
     url: Option<String>,
-    #[serde(default)]
     extractor: Option<String>,
-    #[serde(default)]
     extractor_key: Option<String>,
-    #[serde(default)]
     ie_key: Option<String>,
-    #[serde(default)]
     thumbnail: Option<String>,
-    #[serde(default)]
     language: Option<String>,
-    #[serde(default)]
     subtitles: Option<OrderedTracks>,
-    #[serde(default)]
     automatic_captions: Option<OrderedTracks>,
-    #[serde(default)]
     entries: Option<Vec<Option<ExtractorInfo>>>,
 }
 
