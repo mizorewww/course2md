@@ -5554,7 +5554,7 @@ mod tests {
         let file = dir.path().join("workspace.json");
         let root = dir.path().join("library");
         let mut workspace =
-            Workspace::open_at(file.clone(), root.clone(), Default::default()).unwrap();
+            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
         let a = source("https://example.test/video-a", "课程 A");
         let b = source("https://example.test/video-b", "课程 B");
         let id = workspace
@@ -5599,7 +5599,8 @@ mod tests {
                 })
                 .unwrap();
         }
-        workspace = Workspace::open_at(file.clone(), root.clone(), Default::default()).unwrap();
+        workspace =
+            Workspace::open_at_inline(file.clone(), root.clone(), Default::default()).unwrap();
         assert!(!workspace.state.draft().unwrap().custom_title);
         assert!(workspace.state.draft().unwrap().source.is_none());
         workspace
@@ -5613,7 +5614,7 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        let restored = Workspace::open_at(file, root, Default::default()).unwrap();
+        let restored = Workspace::open_at_inline(file, root, Default::default()).unwrap();
         let draft = restored.state.draft().unwrap();
         assert_eq!(draft.title, "课程 B");
         assert!(!draft.custom_title);

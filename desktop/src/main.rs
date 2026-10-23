@@ -607,6 +607,9 @@ impl Desktop {
             };
         let (event_wake_tx, event_wake_rx) = smol::channel::bounded(1);
         preferences.set_wake_sender(event_wake_tx.clone());
+        if let Some(workspace) = &workspace {
+            workspace.set_wake_sender(event_wake_tx.clone());
+        }
         let settings_ui = settings_ui::State::new(window, cx);
         let onboarding = onboarding::State::new(window, cx);
         let reader_ui = reader_ui::State::new(window, cx);
@@ -748,6 +751,17 @@ impl Desktop {
             this.start_onboarding(window, cx);
         }
         this
+    }
+    /// Reports record writes that failed after the event loop moved on.
+    fn poll_workspace(&mut self, cx: &mut Context<Self>) {
+        if let Some(error) = self
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.take_write_error())
+        {
+            self.workspace_error = Some(course2md::tr!("任务进度尚未保存：{}", error));
+            cx.notify();
+        }
     }
     fn refresh_environment(&mut self, cx: &mut Context<Self>) {
         self.environment = None;
@@ -999,6 +1013,7 @@ impl Desktop {
             cx.notify();
         }
         self.poll_storage(cx);
+        self.poll_workspace(cx);
         self.poll_reading_position(cx);
         if self
             .draft_deadline
@@ -1134,8 +1149,10 @@ impl Desktop {
             }
         }
         if save && let Some(workspace) = &self.workspace {
+            // Never wait on the writer here: a failure of this write arrives
+            // through `poll_workspace`.
             let result = if flush {
-                workspace.save().map(|_| ())
+                workspace.save_soon()
             } else {
                 workspace.save_progress().map(|_| ())
             };

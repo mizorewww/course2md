@@ -1144,16 +1144,43 @@ pub struct PreparedLibrary {
 }
 
 pub struct Workspace {
-    pub state: State,
+    pub state: SharedState,
     pub recovery: Option<String>,
     path: PathBuf,
     /// Last mirror attempt per task and registered location. A normal input
     /// save must not probe the disks holding every historical task.
     mirror_snapshots: MirrorSnapshots,
-    /// Last successful record save; high-frequency saves skip the disk until
-    /// this ages past their interval.
+    /// Last progress save; high-frequency saves skip the writer until this
+    /// ages past their interval.
     last_write: Cell<Option<Instant>>,
-    writer: WorkspaceWriter,
+    writer: Box<dyn Writer>,
+}
+
+/// The current state, shared with the record writer without copying. Reads go
+/// through `Deref`; a direct edit copies the state only while the writer still
+/// holds that snapshot.
+pub struct SharedState(std::sync::Arc<State>);
+
+impl std::ops::Deref for SharedState {
+    type Target = State;
+    fn deref(&self) -> &State {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for SharedState {
+    fn deref_mut(&mut self) -> &mut State {
+        std::sync::Arc::make_mut(&mut self.0)
+    }
+}
+impl Serialize for SharedState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+impl PartialEq<State> for SharedState {
+    fn eq(&self, other: &State) -> bool {
+        *self.0 == *other
+    }
 }
 
 type MirrorSnapshots =
@@ -1167,129 +1194,122 @@ struct WriterCache {
     last_draft_subtitle: Option<course2md::subtitle::CachedSubtitle>,
 }
 
+/// Where a writer puts the record, and what it remembers between writes.
+pub(crate) struct WriterTarget {
+    path: PathBuf,
+    mirrors: MirrorSnapshots,
+    cache: std::sync::Mutex<WriterCache>,
+    error: std::sync::Mutex<Option<String>>,
+    wake: std::sync::Mutex<Option<smol::channel::Sender<()>>>,
+}
+
+impl WriterTarget {
+    fn new(path: PathBuf, mirrors: MirrorSnapshots) -> Self {
+        Self {
+            path,
+            mirrors,
+            cache: std::sync::Mutex::new(WriterCache {
+                last_record: None,
+                last_draft_subtitle: None,
+            }),
+            error: Default::default(),
+            wake: Default::default(),
+        }
+    }
+
+    /// Writes one state; a failure is kept for `take_error` and wakes the UI.
+    fn write(&self, state: &State) -> Result<()> {
+        let mut cache = course2md::runtime::lock_recover(&self.cache);
+        let result = Workspace::write_state(&self.path, state, &self.mirrors, &mut cache);
+        if let Err(error) = &result {
+            *course2md::runtime::lock_recover(&self.error) = Some(format!("{error:#}"));
+            if let Some(wake) = course2md::runtime::lock_recover(&self.wake).as_ref() {
+                let _ = wake.try_send(());
+            }
+        }
+        result
+    }
+
+    fn take_error(&self) -> Option<String> {
+        course2md::runtime::lock_recover(&self.error).take()
+    }
+}
+
+/// Persists workspace states. Production uses [`ThreadWriter`]; tests inject
+/// [`InlineWriter`] through `Workspace::open_with`.
+pub(crate) trait Writer: Send {
+    fn start(target: WriterTarget) -> Self
+    where
+        Self: Sized;
+    /// Queues `state`; a newer state replaces one not yet written.
+    fn enqueue(&self, state: std::sync::Arc<State>);
+    /// Writes anything queued and waits for it.
+    fn flush(&self) -> Result<()>;
+    /// The last write failure not yet reported.
+    fn take_error(&self) -> Option<String>;
+    fn set_wake(&self, wake: smol::channel::Sender<()>);
+}
+
 enum WriterSignal {
     Wake,
     Flush(std::sync::mpsc::Sender<Result<()>>),
     Stop,
 }
 
-struct WorkspaceWriter {
-    path: PathBuf,
-    mirrors: MirrorSnapshots,
-    pending: std::sync::Arc<std::sync::Mutex<Option<State>>>,
-    signals: Option<std::sync::mpsc::Sender<WriterSignal>>,
-    error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
-    sync_cache: Option<std::sync::Mutex<WriterCache>>,
+/// Writes on one background thread and coalesces states queued meanwhile.
+pub(crate) struct ThreadWriter {
+    target: std::sync::Arc<WriterTarget>,
+    pending: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<State>>>>,
+    signals: std::sync::mpsc::Sender<WriterSignal>,
 }
 
-impl WorkspaceWriter {
-    fn new(path: PathBuf, mirrors: MirrorSnapshots) -> Self {
-        let pending = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let error = std::sync::Arc::new(std::sync::Mutex::new(None));
-        // Unit tests keep the synchronous contract they assert against.
-        if cfg!(test) {
-            return Self {
-                path,
-                mirrors,
-                pending,
-                signals: None,
-                error,
-                sync_cache: Some(std::sync::Mutex::new(WriterCache {
-                    last_record: None,
-                    last_draft_subtitle: None,
-                })),
-            };
-        }
+impl Writer for ThreadWriter {
+    fn start(target: WriterTarget) -> Self {
+        let target = std::sync::Arc::new(target);
+        let pending: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<State>>>> =
+            Default::default();
         let (signals, rx) = std::sync::mpsc::channel();
-        let thread_path = path.clone();
-        let thread_mirrors = std::sync::Arc::clone(&mirrors);
+        let thread_target = std::sync::Arc::clone(&target);
         let thread_pending = std::sync::Arc::clone(&pending);
-        let thread_error = std::sync::Arc::clone(&error);
         std::thread::Builder::new()
             .name("course2md-workspace-writer".into())
             .spawn(move || {
-                let mut cache = WriterCache {
-                    last_record: None,
-                    last_draft_subtitle: None,
-                };
-                let write = |state: State, cache: &mut WriterCache| -> Result<()> {
-                    Workspace::write_state(&thread_path, &state, &thread_mirrors, cache)
+                let write_pending = || {
+                    course2md::runtime::lock_recover(&thread_pending)
+                        .take()
+                        .map_or(Ok(()), |state| thread_target.write(&state))
                 };
                 while let Ok(signal) = rx.recv() {
                     match signal {
                         WriterSignal::Stop => {
-                            if let Some(state) =
-                                thread_pending.lock().ok().and_then(|mut p| p.take())
-                                && let Err(error) = write(state, &mut cache)
-                            {
-                                *thread_error.lock().unwrap() = Some(format!("{error:#}"));
-                            }
+                            let _ = write_pending();
                             break;
                         }
                         WriterSignal::Wake => {
-                            if let Some(state) =
-                                thread_pending.lock().ok().and_then(|mut p| p.take())
-                                && let Err(error) = write(state, &mut cache)
-                            {
-                                *thread_error.lock().unwrap() = Some(format!("{error:#}"));
-                            }
+                            let _ = write_pending();
                         }
                         WriterSignal::Flush(ack) => {
-                            let result = thread_pending
-                                .lock()
-                                .ok()
-                                .and_then(|mut p| p.take())
-                                .map_or(Ok(()), |state| write(state, &mut cache));
-                            if let Err(error) = &result {
-                                *thread_error.lock().unwrap() = Some(format!("{error:#}"));
-                            }
-                            let _ = ack.send(result);
+                            let _ = ack.send(write_pending());
                         }
                     }
                 }
             })
             .expect("workspace writer thread");
         Self {
-            path,
-            mirrors,
+            target,
             pending,
-            signals: Some(signals),
-            error,
-            sync_cache: None,
+            signals,
         }
     }
 
-    fn enqueue(&self, state: State) {
-        if let Some(cache) = &self.sync_cache {
-            let result = cache
-                .lock()
-                .map_err(|_| anyhow::anyhow!("workspace writer cache poisoned"))
-                .and_then(|mut cache| {
-                    Workspace::write_state(&self.path, &state, &self.mirrors, &mut cache)
-                });
-            if let Err(error) = result {
-                *self.error.lock().unwrap() = Some(format!("{error:#}"));
-            }
-            return;
-        }
-        if let Ok(mut pending) = self.pending.lock() {
-            *pending = Some(state);
-        }
-        if let Some(signals) = &self.signals {
-            let _ = signals.send(WriterSignal::Wake);
-        }
+    fn enqueue(&self, state: std::sync::Arc<State>) {
+        *course2md::runtime::lock_recover(&self.pending) = Some(state);
+        let _ = self.signals.send(WriterSignal::Wake);
     }
 
     fn flush(&self) -> Result<()> {
-        if self.sync_cache.is_some() {
-            return match self.take_error() {
-                Some(error) => Err(anyhow::anyhow!(error)),
-                None => Ok(()),
-            };
-        }
         let (tx, rx) = std::sync::mpsc::channel();
-        if let Some(signals) = &self.signals
-            && signals.send(WriterSignal::Flush(tx)).is_ok()
+        if self.signals.send(WriterSignal::Flush(tx)).is_ok()
             && let Ok(result) = rx.recv()
         {
             return result;
@@ -1298,15 +1318,43 @@ impl WorkspaceWriter {
     }
 
     fn take_error(&self) -> Option<String> {
-        self.error.lock().ok().and_then(|mut error| error.take())
+        self.target.take_error()
+    }
+
+    fn set_wake(&self, wake: smol::channel::Sender<()>) {
+        *course2md::runtime::lock_recover(&self.target.wake) = Some(wake);
     }
 }
 
-impl Drop for WorkspaceWriter {
+impl Drop for ThreadWriter {
     fn drop(&mut self) {
-        if let Some(signals) = self.signals.take() {
-            let _ = signals.send(WriterSignal::Stop);
+        let _ = self.signals.send(WriterSignal::Stop);
+    }
+}
+
+/// Writes each state before `enqueue` returns.
+#[cfg(test)]
+pub(crate) struct InlineWriter(WriterTarget);
+
+#[cfg(test)]
+impl Writer for InlineWriter {
+    fn start(target: WriterTarget) -> Self {
+        Self(target)
+    }
+    fn enqueue(&self, state: std::sync::Arc<State>) {
+        let _ = self.0.write(&state);
+    }
+    fn flush(&self) -> Result<()> {
+        match self.0.take_error() {
+            Some(error) => Err(anyhow::anyhow!(error)),
+            None => Ok(()),
         }
+    }
+    fn take_error(&self) -> Option<String> {
+        self.0.take_error()
+    }
+    fn set_wake(&self, wake: smol::channel::Sender<()>) {
+        *course2md::runtime::lock_recover(&self.0.wake) = Some(wake);
     }
 }
 
@@ -1747,6 +1795,14 @@ impl Workspace {
     }
 
     pub fn rebuild_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
+        Self::rebuild_with::<ThreadWriter>(path, root, options)
+    }
+
+    pub(crate) fn rebuild_with<W: Writer + 'static>(
+        path: PathBuf,
+        root: PathBuf,
+        options: ConversionOptions,
+    ) -> Result<Self> {
         let parent = path
             .parent()
             .context(course2md::tr!("任务记录缺少保存目录"))?;
@@ -1970,16 +2026,27 @@ impl Workspace {
                 issues.join(course2md::tr!("；"))
             }
         );
+        Ok(Self::assemble::<W>(state, Some(recovery), path))
+    }
+
+    fn assemble<W: Writer + 'static>(
+        state: State,
+        recovery: Option<String>,
+        path: PathBuf,
+    ) -> Self {
         let mirror_snapshots: MirrorSnapshots = Default::default();
-        let writer = WorkspaceWriter::new(path.clone(), std::sync::Arc::clone(&mirror_snapshots));
-        Ok(Self {
-            state,
-            recovery: Some(recovery),
+        let writer = W::start(WriterTarget::new(
+            path.clone(),
+            std::sync::Arc::clone(&mirror_snapshots),
+        ));
+        Self {
+            state: SharedState(std::sync::Arc::new(state)),
+            recovery,
             path,
             mirror_snapshots,
             last_write: Cell::new(None),
-            writer,
-        })
+            writer: Box::new(writer),
+        }
     }
 
     pub fn open(root: PathBuf, options: ConversionOptions) -> Result<Self> {
@@ -1990,6 +2057,14 @@ impl Workspace {
         )
     }
     pub fn open_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
+        Self::open_with::<ThreadWriter>(path, root, options)
+    }
+
+    pub(crate) fn open_with<W: Writer + 'static>(
+        path: PathBuf,
+        root: PathBuf,
+        options: ConversionOptions,
+    ) -> Result<Self> {
         let mut recovery = None;
         if path.is_file()
             && let Ok(bytes) = read_record_bytes(&path)
@@ -2093,16 +2168,17 @@ impl Workspace {
                 ));
             }
         }
-        let mirror_snapshots: MirrorSnapshots = Default::default();
-        let writer = WorkspaceWriter::new(path.clone(), std::sync::Arc::clone(&mirror_snapshots));
-        Ok(Self {
-            state,
-            recovery,
-            path,
-            mirror_snapshots,
-            last_write: Cell::new(None),
-            writer,
-        })
+        Ok(Self::assemble::<W>(state, recovery, path))
+    }
+
+    /// `open_at` for tests: writes finish before each call returns.
+    #[cfg(test)]
+    pub(crate) fn open_at_inline(
+        path: PathBuf,
+        root: PathBuf,
+        options: ConversionOptions,
+    ) -> Result<Self> {
+        Self::open_with::<InlineWriter>(path, root, options)
     }
 
     fn read(path: &Path) -> Result<State> {
@@ -2128,27 +2204,45 @@ impl Workspace {
         }
         Ok(state)
     }
+    /// Edits a copy of the state and commits it once the writer has it. The
+    /// copy is the only deep clone: the writer shares the committed snapshot.
     pub fn transaction<T>(&mut self, edit: impl FnOnce(&mut State) -> Result<T>) -> Result<T> {
-        let mut next = self.state.clone();
+        let mut next = State::clone(&self.state);
         let result = edit(&mut next)?;
         store_task_subtitles(&mut next);
         compact_history(&mut next);
         next.revision = next.revision.wrapping_add(1);
-        self.writer.enqueue(next.clone());
+        let next = std::sync::Arc::new(next);
+        self.writer.enqueue(std::sync::Arc::clone(&next));
         if let Some(error) = self.writer.take_error() {
             return Err(anyhow::anyhow!(error));
         }
-        self.state = next;
+        self.state = SharedState(next);
         Ok(result)
     }
-    /// Durable save: enqueue the current state and wait for the writer.
+    /// Durable save: enqueue the current state and wait for the writer. Only
+    /// for leaving the app or an explicit retry; the event loop uses `save_soon`.
     pub fn save(&self) -> Result<()> {
-        self.writer.enqueue(self.state.clone());
-        self.writer.flush()
+        self.writer.enqueue(std::sync::Arc::clone(&self.state.0));
+        self.writer.flush()?;
+        match self.writer.take_error() {
+            Some(error) => Err(anyhow::anyhow!(error)),
+            None => Ok(()),
+        }
+    }
+    /// Queues the current state without waiting. Reports a failure of an
+    /// earlier write; a failure of this one arrives through `take_write_error`.
+    pub fn save_soon(&self) -> Result<()> {
+        self.last_write.set(Some(Instant::now()));
+        self.writer.enqueue(std::sync::Arc::clone(&self.state.0));
+        match self.writer.take_error() {
+            Some(error) => Err(anyhow::anyhow!(error)),
+            None => Ok(()),
+        }
     }
     /// Throttled progress save for the task event stream. Stage transitions,
-    /// completion and exit flush through `save`; steady progress reaches the
-    /// disk at most once per interval. Returns true when this call wrote.
+    /// completion and exit go through `save_soon`; steady progress reaches the
+    /// writer at most once per interval. Returns true when this call queued.
     pub fn save_progress(&self) -> Result<bool> {
         if self
             .last_write
@@ -2157,11 +2251,15 @@ impl Workspace {
         {
             return Ok(false);
         }
-        self.writer.enqueue(self.state.clone());
-        if let Some(error) = self.writer.take_error() {
-            anyhow::bail!(error);
-        }
-        Ok(true)
+        self.save_soon().map(|()| true)
+    }
+    /// A write failure that no call has reported yet. The writer wakes the
+    /// event loop (see `set_wake_sender`) when one occurs.
+    pub fn take_write_error(&self) -> Option<String> {
+        self.writer.take_error()
+    }
+    pub fn set_wake_sender(&self, wake: smol::channel::Sender<()>) {
+        self.writer.set_wake(wake);
     }
 
     fn write_state(
@@ -2445,7 +2543,7 @@ mod tests {
     fn failed_commit_does_not_publish_an_unpersisted_task() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("state");
-        let mut ws = Workspace::open_at(
+        let mut ws = Workspace::open_at_inline(
             target.clone(),
             dir.path().join("library"),
             Default::default(),
@@ -2461,7 +2559,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("state.json");
         let mut ws =
-            Workspace::open_at(file.clone(), dir.path().join("library"), Default::default())
+            Workspace::open_at_inline(file.clone(), dir.path().join("library"), Default::default())
                 .unwrap();
         let mut task = plan(&ws.state.default_library);
         task.config.asr_api.api_key = "asr-secret-do-not-store".into();
@@ -2474,7 +2572,7 @@ mod tests {
         })
         .unwrap();
         let restored =
-            Workspace::open_at(file.clone(), dir.path().into(), Default::default()).unwrap();
+            Workspace::open_at_inline(file.clone(), dir.path().into(), Default::default()).unwrap();
         assert_eq!(
             restored.state.task(&id).unwrap().plan.source.input,
             "lecture.mp4"
@@ -2610,7 +2708,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("state.json");
         let mut ws =
-            Workspace::open_at(file.clone(), dir.path().join("library"), Default::default())
+            Workspace::open_at_inline(file.clone(), dir.path().join("library"), Default::default())
                 .unwrap();
         ws.transaction(|state| {
             state
@@ -2637,7 +2735,8 @@ mod tests {
             translate: Some("en".into()),
             ..Default::default()
         };
-        let reopened = Workspace::open_at(file, dir.path().join("library"), defaults).unwrap();
+        let reopened =
+            Workspace::open_at_inline(file, dir.path().join("library"), defaults).unwrap();
         let options = &reopened.state.draft().unwrap().options;
         assert_eq!(options.translate.as_deref(), Some("en"));
         assert!(options.summarize);
@@ -3141,7 +3240,7 @@ mod tests {
     }
 
     fn test_workspace(dir: &Path) -> Workspace {
-        Workspace::open_at(
+        Workspace::open_at_inline(
             dir.join("workspace.json"),
             dir.join("library"),
             Default::default(),
@@ -3417,11 +3516,8 @@ mod tests {
     fn unknown_authorization_is_exact_and_cannot_be_reused_by_an_old_button() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Uncertain;
         let first = write_unknown(ws.state.task(&id).unwrap(), 1);
         ws.state
@@ -3453,11 +3549,8 @@ mod tests {
     fn published_result_after_crash_is_not_enqueued_again() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Running;
         ws.save().unwrap();
         let version = publish_note(&ws.state, &id, false);
@@ -3469,14 +3562,34 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_background_write_is_reported_without_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.json");
+        let ws = Workspace::open_at(path.clone(), dir.path().join("library"), Default::default())
+            .unwrap();
+        let (wake, woken) = smol::channel::bounded(1);
+        ws.set_wake_sender(wake);
+        // A directory in place of the record makes the write fail even as root.
+        std::fs::create_dir(&path).unwrap();
+        ws.save_soon().unwrap();
+        let woke = smol::block_on(smol::future::or(
+            async { woken.recv().await.is_ok() },
+            async {
+                smol::Timer::after(Duration::from_secs(10)).await;
+                false
+            },
+        ));
+        assert!(woke, "the writer wakes the event loop on failure");
+        assert!(ws.take_write_error().is_some());
+        assert!(ws.take_write_error().is_none());
+    }
+
+    #[test]
     fn partial_followup_is_single_and_does_not_rewrite_another_draft_or_successful_stage() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         let version = publish_note(&ws.state, &id, true);
         let outcomes = course2md::artifact::read_manifest(&version.join("manifest.json"))
             .unwrap()
@@ -3621,14 +3734,14 @@ mod tests {
         )
         .unwrap();
         assert!(
-            Workspace::open_at(
+            Workspace::open_at_inline(
                 ws.path.clone(),
                 dir.path().join("library"),
                 Default::default()
             )
             .is_err()
         );
-        let rebuilt = Workspace::rebuild_at(
+        let rebuilt = Workspace::rebuild_with::<InlineWriter>(
             ws.path.clone(),
             dir.path().join("library"),
             Default::default(),
@@ -3665,7 +3778,7 @@ mod tests {
             std::fs::read(archive.join("workspace.json.bak")).unwrap(),
             b"{broken backup"
         );
-        let reopened = Workspace::open_at(
+        let reopened = Workspace::open_at_inline(
             ws.path.clone(),
             dir.path().join("library"),
             Default::default(),
@@ -3679,11 +3792,8 @@ mod tests {
     fn mirror_failure_keeps_primary_record_and_offline_location_is_not_recreated() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.save().unwrap();
         let bytes = std::fs::read(ws.storage_path()).unwrap();
         let mirror = ws
@@ -3712,11 +3822,8 @@ mod tests {
     fn backup_recovery_does_not_assume_a_lost_final_run_intent() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Running;
         ws.save().unwrap();
         ws.save().unwrap();
@@ -3730,11 +3837,8 @@ mod tests {
     fn older_parent_links_recover_to_latest_followup_without_requeuing_parent() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let parent = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let parent = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&parent).unwrap().state = TaskState::NeedsAttention;
         let mut changed = plan(&ws.state.default_library);
         changed.title = "changed display title".into();
@@ -3754,11 +3858,8 @@ mod tests {
         use course2md::config::OutputFormat;
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         let version = publish_note(&ws.state, &id, false);
         let original = ws.state.task_mut(&id).unwrap();
         original.state = TaskState::Partial;
@@ -3799,11 +3900,8 @@ mod tests {
         use course2md::{artifact, config::OutputFormat, portable};
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Running;
         ws.save().unwrap();
         let outcomes = artifact::Outcomes {
@@ -3849,11 +3947,8 @@ mod tests {
         use course2md::{artifact, config::OutputFormat, portable};
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let id = ws
-            .state
-            .enqueue(plan(&ws.state.default_library), None)
-            .unwrap()
-            .0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         let mut outcomes = artifact::Outcomes {
             transcript: artifact::Outcome::succeeded(),
             ..Default::default()
@@ -3976,7 +4071,7 @@ mod tests {
         let bytes = serde_json::to_vec(&future).unwrap();
         std::fs::write(ws.storage_path(), &bytes).unwrap();
         assert!(
-            Workspace::open_at(
+            Workspace::open_at_inline(
                 ws.path.clone(),
                 dir.path().join("library"),
                 Default::default()
@@ -3984,7 +4079,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            Workspace::rebuild_at(
+            Workspace::rebuild_with::<InlineWriter>(
                 ws.path.clone(),
                 dir.path().join("library"),
                 Default::default()
