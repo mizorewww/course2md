@@ -452,7 +452,14 @@ pub(crate) fn terminate(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 
+/// The search path for engine and helper tools. The environment it is built
+/// from does not change while the app runs, so it is computed once.
 pub fn tool_path() -> std::ffi::OsString {
+    static PATH: std::sync::OnceLock<std::ffi::OsString> = std::sync::OnceLock::new();
+    PATH.get_or_init(compute_tool_path).clone()
+}
+
+fn compute_tool_path() -> std::ffi::OsString {
     if let Some(path) = std::env::var_os("COURSE2MD_TOOL_PATH").filter(|path| !path.is_empty()) {
         return path;
     }
