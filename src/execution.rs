@@ -522,7 +522,9 @@ pub fn relocate_work_bindings(root_old: &Path, root_new: &Path) -> Result<usize>
     Ok(count)
 }
 
-#[cfg(test)]
+// The snapshots hold the absolute Unix paths a saved task records; Windows
+// builds the same JSON from Windows paths, so they are checked on Unix only.
+#[cfg(all(test, unix))]
 mod identity_snapshot;
 
 #[cfg(test)]

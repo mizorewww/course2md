@@ -87,9 +87,6 @@ fn fixture(name: &str) -> PathBuf {
         .join(format!("{name}.json"))
 }
 
-// The snapshots hold the absolute Unix paths a saved task records; Windows
-// builds the same JSON from Windows paths, so it is checked on Unix only.
-#[cfg(unix)]
 #[test]
 fn task_identity_bindings_match_saved_snapshots() {
     for (name, binding) in bindings() {

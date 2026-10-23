@@ -405,7 +405,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 凭据读取意外中断	凭据读取意外中断	Credential reading interrupted unexpectedly	憑證讀取意外中斷	資格情報の読み取りが予期せず中断されました
 分享内容中有多个链接，请选择一个视频	分享内容中有多个链接，请选择一个视频	There are multiple links in the shared content, please select a video	分享內容中有多個連結，請選擇一個影片	共有コンテンツには複数のリンクがあります。動画を選択してください
 分组展开状态尚未保存：{}	分组展开状态尚未保存：{}	Group expansion status has not been saved: {}	分組展開狀態尚未儲存：{}	グループ展開ステータスが保存されていません: {}
-分集信息线程异常	分集信息线程异常	Episode information thread error	分集資訊執行緒異常	エピソード情報スレッドで例外が発生しました
 分集信息补充失败：{error:#}	分集信息补充失败：{error:#}	Failed to supplement episode information: {error:#}	分集資訊補充失敗：{error:#}	エピソード情報を補足できませんでした: {error:#}
 列表	列表	List	列表	リスト
 创建 checkpoint 目录 {} / Failed to create checkpoint directory {}	创建 checkpoint 目录 {}	Failed to create checkpoint directory {}	建立 checkpoint 目錄 {}	チェックポイント ディレクトリ {} の作成に失敗しました
