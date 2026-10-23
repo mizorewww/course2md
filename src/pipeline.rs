@@ -773,64 +773,9 @@ async fn run_prepared(
     progress::start(Stage::Subtitle);
     let selected = subtitles(cfg, is_local, input).await?;
     progress::done(Stage::Subtitle);
-    if selected.is_none() {
-        let (require_key, allow_environment) = match credentials {
-            Credentials::Cli => (true, true),
-            Credentials::Task {
-                allow_unauthenticated_asr,
-            } => (!allow_unauthenticated_asr, false),
-        };
-        cfg.validate_asr_with_auth(require_key, allow_environment)?;
-        if !matches!(
-            cfg.provider,
-            config::AsrProvider::Coreml | config::AsrProvider::Api | config::AsrProvider::Npu
-        ) {
-            crate::error::require_cmd("llama-server")?;
-        }
-    }
-    crate::error::require_cmd("ffmpeg")?;
-    crate::error::require_cmd("ffprobe")?;
-    if !is_local {
-        crate::error::require_ytdlp()?;
-    }
-    if selected.is_none() && cfg.provider != config::AsrProvider::Api {
-        progress::start(Stage::ModelPrepare);
-        crate::models::ensure_cache(
-            cfg.provider,
-            cfg.asr_model
-                .as_deref()
-                .unwrap_or(config::DEFAULT_ASR_MODEL),
-            &cfg.model_dir,
-        )
-        .await?;
-        progress::done(Stage::ModelPrepare);
-    }
+    check_tools(cfg, is_local, selected.is_none(), credentials).await?;
     meta.save(&cfg.meta_path())?;
-    let media_path = if is_local {
-        PathBuf::from(&cfg.url)
-    } else {
-        cfg.media_path()
-    };
-    let media_existed = !is_local && prepare_cached_media_async(cfg).await?;
-    crate::dispatch::check_control()?;
-    if !is_local && !media_existed {
-        anyhow::ensure!(
-            !cfg.no_download,
-            crate::tr!(
-                "找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again"
-            )
-        );
-        progress::start(Stage::Download);
-        fetch::download(
-            &cfg.url,
-            &media_path,
-            cfg.max_height,
-            tracing::enabled!(tracing::Level::DEBUG),
-        )
-        .await?;
-        save_file_digest_async(media_path.clone(), cfg.out_dir.join("media.sha256")).await?;
-        progress::done(Stage::Download);
-    }
+    let (media_path, media_existed) = acquire_media(cfg, is_local).await?;
     crate::dispatch::check_control()?;
     let mut outcomes = Outcomes::default();
     // 两路并行但都受 watch_control 打断：取消时任一路不再等到自身阶段边界才停。
@@ -844,46 +789,8 @@ async fn run_prepared(
             }
         },
         async {
-            let transcript_work = async {
-                let cache_path = cfg.out_dir.join("transcript.json");
-                let cache = match cached_transcript(&cache_path)?
-                    .or_else(|| selected.map(|(events, source)| TranscriptCache { source, events }))
-                {
-                    Some(cache) => cache,
-                    None => {
-                        progress::start(Stage::Audio);
-                        let audio = cfg.audio_path();
-                        // A verified marker proves audio extraction completed; a bare WAV may be truncated.
-                        let marker = cfg.out_dir.join("audio.sha256");
-                        let verified = {
-                            let (audio, marker) = (audio.clone(), marker.clone());
-                            blocking(move || verified_file(&audio, &marker)).await?
-                        };
-                        if !verified {
-                            media::extract_audio(&media_path, &audio).await?;
-                            save_file_digest_async(audio.clone(), marker).await?;
-                        }
-                        progress::done(Stage::Audio);
-                        crate::dispatch::check_control()?;
-                        progress::start(Stage::Transcribe);
-                        let events = asr::run(cfg, &audio).await?;
-                        progress::done(Stage::Transcribe);
-                        TranscriptCache {
-                            source: TranscriptOrigin::Asr,
-                            events,
-                        }
-                    }
-                };
-                // 全空转写不入缓存：空缓存会在下次运行时挡住重新识别
-                if crate::timeline::has_readable_events(&cache.events) {
-                    let bytes = serde_json::to_vec_pretty(&cache)?;
-                    let cache_path = cache_path.clone();
-                    blocking(move || crate::checkpoint::atomic_write(&cache_path, &bytes)).await?;
-                }
-                Ok::<_, anyhow::Error>(cache)
-            };
             tokio::select! {
-                r = transcript_work => r,
+                r = transcript(cfg, &media_path, selected) => r,
                 e = crate::dispatch::watch_control() => Err(e),
             }
         }
@@ -947,24 +854,7 @@ async fn run_prepared(
     save_timeline(cfg, &frames, &transcript.events).await?;
     let mut sections = build_sections(frames, transcript.events, meta.duration);
     timeline::coalesce_sections(&mut sections);
-    crate::dispatch::check_control()?;
-    if cfg.llm.enabled {
-        progress::start(Stage::Llm);
-        let (polished, report) = polish_with_rollback(sections, cfg).await?;
-        sections = polished;
-        outcomes.proofreading = Outcome::from_report(&report);
-        progress::done(Stage::Llm);
-    }
-    crate::dispatch::check_control()?;
-    if let Some(target) = cfg.llm.translation_target() {
-        sections = translate_step(sections, cfg, target, &mut outcomes).await?;
-    }
-    crate::dispatch::check_control()?;
-    let summary = if cfg.llm.summarize {
-        summarize_step(cfg, &sections, meta, &mut outcomes).await?
-    } else {
-        None
-    };
+    let (sections, summary) = enrich(sections, cfg, meta, &mut outcomes).await?;
     crate::dispatch::check_control()?;
     progress::start(Stage::Render);
     let manifest = artifact::publish(
@@ -1006,6 +896,150 @@ async fn run_prepared(
         }
     }
     Ok(())
+}
+
+/// Tools and credentials the chosen path needs, and the speech model cache,
+/// all checked before any full media download.
+async fn check_tools(
+    cfg: &PipelineConfig,
+    is_local: bool,
+    needs_speech: bool,
+    credentials: Credentials,
+) -> Result<()> {
+    if needs_speech {
+        let (require_key, allow_environment) = match credentials {
+            Credentials::Cli => (true, true),
+            Credentials::Task {
+                allow_unauthenticated_asr,
+            } => (!allow_unauthenticated_asr, false),
+        };
+        cfg.validate_asr_with_auth(require_key, allow_environment)?;
+        if !matches!(
+            cfg.provider,
+            config::AsrProvider::Coreml | config::AsrProvider::Api | config::AsrProvider::Npu
+        ) {
+            crate::error::require_cmd("llama-server")?;
+        }
+    }
+    crate::error::require_cmd("ffmpeg")?;
+    crate::error::require_cmd("ffprobe")?;
+    if !is_local {
+        crate::error::require_ytdlp()?;
+    }
+    if needs_speech && cfg.provider != config::AsrProvider::Api {
+        progress::start(Stage::ModelPrepare);
+        crate::models::ensure_cache(
+            cfg.provider,
+            cfg.asr_model
+                .as_deref()
+                .unwrap_or(config::DEFAULT_ASR_MODEL),
+            &cfg.model_dir,
+        )
+        .await?;
+        progress::done(Stage::ModelPrepare);
+    }
+    Ok(())
+}
+
+/// The video to process, and whether a verified download already existed.
+async fn acquire_media(cfg: &PipelineConfig, is_local: bool) -> Result<(PathBuf, bool)> {
+    if is_local {
+        return Ok((PathBuf::from(&cfg.url), false));
+    }
+    let media_path = cfg.media_path();
+    let existed = prepare_cached_media_async(cfg).await?;
+    crate::dispatch::check_control()?;
+    if !existed {
+        anyhow::ensure!(
+            !cfg.no_download,
+            crate::tr!(
+                "找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again"
+            )
+        );
+        progress::start(Stage::Download);
+        fetch::download(
+            &cfg.url,
+            &media_path,
+            cfg.max_height,
+            tracing::enabled!(tracing::Level::DEBUG),
+        )
+        .await?;
+        save_file_digest_async(media_path.clone(), cfg.out_dir.join("media.sha256")).await?;
+        progress::done(Stage::Download);
+    }
+    Ok((media_path, existed))
+}
+
+/// The transcript: a saved one, the selected subtitles, or speech recognition.
+async fn transcript(
+    cfg: &PipelineConfig,
+    media_path: &Path,
+    selected: Option<(Vec<timeline::TranscriptEvent>, TranscriptOrigin)>,
+) -> Result<TranscriptCache> {
+    let cache_path = cfg.out_dir.join("transcript.json");
+    let cache = match cached_transcript(&cache_path)?
+        .or_else(|| selected.map(|(events, source)| TranscriptCache { source, events }))
+    {
+        Some(cache) => cache,
+        None => {
+            progress::start(Stage::Audio);
+            let audio = cfg.audio_path();
+            // A verified marker proves audio extraction completed; a bare WAV may be truncated.
+            let marker = cfg.out_dir.join("audio.sha256");
+            let verified = {
+                let (audio, marker) = (audio.clone(), marker.clone());
+                blocking(move || verified_file(&audio, &marker)).await?
+            };
+            if !verified {
+                media::extract_audio(media_path, &audio).await?;
+                save_file_digest_async(audio.clone(), marker).await?;
+            }
+            progress::done(Stage::Audio);
+            crate::dispatch::check_control()?;
+            progress::start(Stage::Transcribe);
+            let events = asr::run(cfg, &audio).await?;
+            progress::done(Stage::Transcribe);
+            TranscriptCache {
+                source: TranscriptOrigin::Asr,
+                events,
+            }
+        }
+    };
+    // 全空转写不入缓存：空缓存会在下次运行时挡住重新识别
+    if crate::timeline::has_readable_events(&cache.events) {
+        let bytes = serde_json::to_vec_pretty(&cache)?;
+        let cache_path = cache_path.clone();
+        blocking(move || crate::checkpoint::atomic_write(&cache_path, &bytes)).await?;
+    }
+    Ok(cache)
+}
+
+/// Optional AI work on the assembled note: proofreading, translation, summary.
+async fn enrich(
+    mut sections: Vec<timeline::Section>,
+    cfg: &PipelineConfig,
+    meta: &VideoMeta,
+    outcomes: &mut Outcomes,
+) -> Result<(Vec<timeline::Section>, Option<crate::summarize::Summary>)> {
+    crate::dispatch::check_control()?;
+    if cfg.llm.enabled {
+        progress::start(Stage::Llm);
+        let (polished, report) = polish_with_rollback(sections, cfg).await?;
+        sections = polished;
+        outcomes.proofreading = Outcome::from_report(&report);
+        progress::done(Stage::Llm);
+    }
+    crate::dispatch::check_control()?;
+    if let Some(target) = cfg.llm.translation_target() {
+        sections = translate_step(sections, cfg, target, outcomes).await?;
+    }
+    crate::dispatch::check_control()?;
+    let summary = if cfg.llm.summarize {
+        summarize_step(cfg, &sections, meta, outcomes).await?
+    } else {
+        None
+    };
+    Ok((sections, summary))
 }
 
 /// The timeline a later reprocess task starts from.
