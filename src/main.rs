@@ -475,6 +475,7 @@ fn collect_targets(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, dep
 }
 
 /// `summarize` 子命令：为一份笔记补写 AI 摘要，保存为新版笔记（幂等，--force 重新生成）。
+/// It runs the same summary-only reprocess task the desktop runs.
 fn summarize_note(
     file: &settings::ConfigFile,
     dir: &std::path::Path,
@@ -482,8 +483,8 @@ fn summarize_note(
     out: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     use course2md::{artifact, execution};
+    let dir = std::fs::canonicalize(dir)?;
     let base = artifact::read_manifest(&dir.join("manifest.json"))?;
-    artifact::validate_version(dir, &base)?;
     let document: artifact::Document =
         serde_json::from_slice(&std::fs::read(dir.join(&base.document))?)?;
     if document.summary.is_some() && !force {
@@ -499,9 +500,11 @@ fn summarize_note(
     settings.api_key.clear();
     let mut task_id = format!(
         "summary-{}",
-        execution::digest(&serde_json::to_vec(
-            &serde_json::json!({"base_version":base.version_id,"settings":settings})
-        )?)
+        &execution::digest(&serde_json::to_vec(&serde_json::json!({
+            "operation": "reprocess-summary",
+            "base_version": base.version_id,
+            "settings": settings,
+        }))?)[..32]
     );
     if force {
         task_id.push_str(&format!(
@@ -518,53 +521,50 @@ fn summarize_note(
             "笔记版本位置无效 / Invalid note version location"
         ))?
         .to_path_buf();
-    let work = course_dir.join(".work").join(&task_id);
-    let _work = execution::enter_work_dir(
-        &work,
-        &serde_json::json!({"source_id":base.source_id,"task_id":task_id,"settings":settings,"base_version":base.version_id}),
-        None,
-        &Default::default(),
-    )?;
-    let target = artifact::Target {
+    let source = if document.meta.webpage_url.trim().is_empty() {
+        base.source_id.clone()
+    } else {
+        document.meta.webpage_url.clone()
+    };
+    let request = execution::Request {
+        schema: execution::REQUEST_SCHEMA,
+        operation: execution::Operation::Reprocess {
+            base_version_dir: dir.clone(),
+            components: vec![execution::Component::Summary],
+            prior_work_dir: None,
+        },
         task_id: task_id.clone(),
         course_id: base.course_id.clone(),
+        version_id: task_id.clone(),
+        source,
         source_id: base.source_id.clone(),
-        version_id: task_id,
-        course_dir,
+        title: base.title.clone(),
+        author: document.meta.uploader.clone(),
+        duration: document.meta.duration.max(0.),
+        subtitle: None,
+        subtitle_events: None,
+        config: file.clone(),
+        allow_unauthenticated_asr: false,
+        work_dir: course_dir.join(".work").join(&task_id),
+        course_dir: course_dir.clone(),
+        control_path: None,
+        service_versions: Default::default(),
     };
-    if artifact::published(&target)?.is_some() {
-        if !progress::is_quiet() {
-            println!(
-                "摘要已保存 / Summary already saved: {}",
-                target.version_dir().display()
-            );
-        }
-        return Ok(());
-    }
-    let speech = pipeline::all_speech(&document.sections);
-    let summary = course2md::runtime::block_on(course2md::summarize::summarize(
-        &file.llm,
-        &speech,
-        &document.meta,
-    ))??;
-    let mut outcomes = base.outcomes;
-    outcomes.summary = artifact::Outcome::succeeded();
-    outcomes.exports.clear();
-    course2md::runtime::block_on(artifact::publish(
-        &target,
-        dir,
-        &document.meta,
-        &document.sections,
-        Some(&summary),
-        &[],
-        outcomes,
-    ))??;
+    request.validate()?;
+    course2md::runtime::block_on(execution::run(request))??;
+    let version = course_dir.join("versions").join(&task_id);
     if let Some(out) = out {
+        let manifest = artifact::read_manifest(&version.join("manifest.json"))?;
+        let saved: artifact::Document =
+            serde_json::from_slice(&std::fs::read(version.join(&manifest.document))?)?;
+        let summary = saved.summary.context(course2md::tr!(
+            "新版笔记缺少摘要 / The new note version has no summary"
+        ))?;
         let file = out.join(format!(
             "{}.summary.md",
-            course2md::summarize::sanitize_filename(&document.meta.title)
+            course2md::summarize::sanitize_filename(&saved.meta.title)
         ));
-        let text = course2md::summarize::render_standalone_md(&document.meta.title, &summary);
+        let text = course2md::summarize::render_standalone_md(&saved.meta.title, &summary);
         course2md::checkpoint::atomic_write(&file, text.as_bytes())?;
         if !progress::is_quiet() {
             println!("已导出摘要 / Summary exported: {}", file.display());
@@ -573,7 +573,7 @@ fn summarize_note(
     if !progress::is_quiet() {
         println!(
             "摘要已作为新版笔记保存 / Summary saved as a new note version: {}",
-            target.version_dir().display()
+            version.display()
         );
     }
     Ok(())

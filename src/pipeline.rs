@@ -459,6 +459,16 @@ async fn reprocess(
     if has(Component::Summary) {
         document.summary =
             summarize_step(cfg, &document.sections, &document.meta, &mut outcomes).await?;
+        // As with screenshots: when the summary was the only thing asked for,
+        // a failure publishes no new version identical to the old one.
+        if components.len() == 1 && document.summary.is_none() {
+            anyhow::bail!(
+                "{}",
+                outcomes.summary.message.clone().unwrap_or_else(|| crate::tr!(
+                    "生成摘要未完成，原笔记不受影响 / Summary generation failed; the original note is unaffected"
+                ).into())
+            );
+        }
     }
     crate::dispatch::check_control()?;
     let formats = if has(Component::Exports) {

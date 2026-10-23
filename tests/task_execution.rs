@@ -661,7 +661,16 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     };
     let second = run(root.path(), &retry);
     let second_events = events(&second);
-    assert!(second.status.success(), "{second_events:#?}");
+    // The summary was the only thing asked for and failed again, so no new
+    // version repeats the old one; the error says why.
+    assert!(!second.status.success(), "{second_events:#?}");
+    assert!(second_events.iter().any(|event| {
+        event["type"] == "error"
+            && event["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("HTTP 400"))
+    }));
+    assert!(!initial.course_dir.join("versions/summary-retry").exists());
     assert_eq!(
         mock.calls.load(Ordering::SeqCst),
         3,
@@ -689,7 +698,7 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
         "a consumed authorization must not survive the retried attempt"
     );
     let resumed = run(root.path(), &retry);
-    assert!(resumed.status.success(), "{:?}", events(&resumed));
+    assert!(!resumed.status.success(), "{:?}", events(&resumed));
     assert_eq!(
         mock.calls.load(Ordering::SeqCst),
         3,
@@ -700,9 +709,11 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     final_retry.version_id = "summary-final".into();
     final_retry.work_dir = root.path().join("final-work");
     final_retry.operation = course2md::execution::Operation::Reprocess {
-        base_version_dir: initial.course_dir.join("versions/summary-retry"),
+        base_version_dir: base.clone(),
         components: vec![Component::Summary],
-        prior_work_dir: Some(retry.work_dir.clone()),
+        // A failed retry left no version; the next repair starts from the
+        // base version's own task, as the desktop's repair does.
+        prior_work_dir: Some(initial.work_dir.clone()),
     };
     let third = run(root.path(), &final_retry);
     assert!(third.status.success(), "{:?}", events(&third));
@@ -732,6 +743,84 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     // Later tasks resend the full payload, byte-identical to the first request.
     assert_eq!(bodies[0], bodies[2]);
     assert_eq!(bodies[2], bodies[3]);
+}
+
+#[test]
+fn summarize_command_adds_a_summary_as_a_new_version() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let mock = MockAi::respond_with(|_, _| Some((200, summary_response())));
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("video.mp4");
+    std::fs::write(
+        &source,
+        b"unreadable video; the selected subtitles carry the text",
+    )
+    .unwrap();
+    let initial = request(root.path(), &source);
+    let first = run(root.path(), &initial);
+    assert!(first.status.success(), "{:?}", events(&first));
+    let base = initial.course_dir.join("versions/version-one");
+    let config = root.path().join("cli-config/course2md");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.toml"),
+        format!(
+            "[llm]\nbase_url = {:?}\nmodel = \"summary-model\"\napi_key = \"cli-key\"\n",
+            mock.url
+        ),
+    )
+    .unwrap();
+    let exported = root.path().join("exported");
+    std::fs::create_dir_all(&exported).unwrap();
+    let summarize = || {
+        Command::new(env!("CARGO_BIN_EXE_course2md"))
+            .env("COURSE2MD_LANG", "zh-Hans")
+            .env("XDG_CONFIG_HOME", root.path().join("cli-config"))
+            .env("XDG_CACHE_HOME", root.path().join("cache"))
+            .env_remove("RUST_LOG")
+            .args(["summarize", "--quiet", "--out"])
+            .arg(&exported)
+            .arg(&base)
+            .output()
+            .unwrap()
+    };
+    let output = summarize();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 1);
+    let versions: Vec<_> = std::fs::read_dir(initial.course_dir.join("versions"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with("summary-"))
+        .collect();
+    assert_eq!(versions.len(), 1, "{versions:?}");
+    let version = initial.course_dir.join("versions").join(&versions[0]);
+    let manifest = artifact::read_manifest(&version.join("manifest.json")).unwrap();
+    assert_eq!(
+        manifest.outcomes.summary.status,
+        artifact::Status::Succeeded
+    );
+    assert_eq!(manifest.source_id, initial.source_id);
+    let markdown = std::fs::read_dir(&exported)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    assert!(markdown.to_string_lossy().ends_with(".summary.md"));
+    // The same note and settings are already summarized: nothing is sent again.
+    let again = summarize();
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]
