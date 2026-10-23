@@ -256,26 +256,19 @@ fn verified_digest(path: &Path) -> Result<String> {
     // library can be large, so the cache is dropped once it reaches this size.
     const MAX_ENTRIES: usize = 16_384;
     let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    if let Some(digest) = CACHE
-        .get_or_init(Default::default)
-        .lock()
-        .ok()
-        .and_then(|cache| {
-            cache
-                .get(&key)
-                .filter(|(len, stamp, _)| *len == metadata.len() && *stamp == modified)
-                .map(|(_, _, digest)| digest.clone())
-        })
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((_, _, digest)) = crate::runtime::lock_recover(cache)
+        .get(&key)
+        .filter(|(len, stamp, _)| *len == metadata.len() && *stamp == modified)
     {
-        return Ok(digest);
+        return Ok(digest.clone());
     }
     let digest = execution::file_digest(path)?;
-    if let Ok(mut cache) = CACHE.get_or_init(Default::default).lock() {
-        if cache.len() >= MAX_ENTRIES {
-            cache.clear();
-        }
-        cache.insert(key, (metadata.len(), modified, digest.clone()));
+    let mut cache = crate::runtime::lock_recover(cache);
+    if cache.len() >= MAX_ENTRIES {
+        cache.clear();
     }
+    cache.insert(key, (metadata.len(), modified, digest.clone()));
     Ok(digest)
 }
 
