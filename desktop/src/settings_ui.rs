@@ -3158,3 +3158,47 @@ mod tests {
         assert_eq!(pending_after_save(&Err("disk full"), 7), Some(7));
     }
 }
+
+impl Desktop {
+    /// Settings is a place of its own: the bar names it instead of offering
+    /// the other destinations, and its leading crumb returns where it was
+    /// opened from.
+    pub(crate) fn settings_title_bar(
+        &self,
+        bar: Div,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> TitleBar {
+        let origin = self
+            .settings_origin
+            .as_ref()
+            .map_or(Page::New, |(page, _)| *page);
+        let (icon, name) = match origin {
+            Page::Library | Page::Result => (icons::book_open(), course2md::tr!("笔记库")),
+            Page::Task => (icons::task(), course2md::tr!("任务")),
+            _ => (icons::home(), course2md::tr!("主页")),
+        };
+        let crumb = nav_action("settings-origin", false, cx)
+            .w(CONTROL_HEIGHT)
+            .px_0()
+            .icon(icon)
+            .accessibility_label(course2md::tr!("返回「{}」", name))
+            .tooltip(name)
+            .on_click(cx.listener(|this, _, window, cx| this.leave_settings(window, cx)));
+        crate::views::apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window)))
+            .child(
+                bar.child(crumb)
+                    .child(
+                        icons::chevron_right()
+                            .size(rems(18. / 14.))
+                            .text_color(color(GRAY)),
+                    )
+                    .child(
+                        accessible_text("settings-page-title", course2md::tr!("设置"))
+                            .role(Role::Heading)
+                            .text_size(rems(18. / 14.))
+                            .font_weight(FontWeight::MEDIUM),
+                    ),
+            )
+    }
+}

@@ -6741,3 +6741,65 @@ mod flow_tests {
         }
     }
 }
+
+impl Desktop {
+    /// A note is read where it was opened: home › origin › title, with the
+    /// reading tools taking the destinations' place.
+    pub(crate) fn reader_title_bar(
+        &self,
+        bar: Div,
+        tools: AnyElement,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> TitleBar {
+        let chevron = || {
+            icons::chevron_right()
+                .size(rems(16. / 14.))
+                .flex_shrink_0()
+                .text_color(color(FAINT))
+        };
+        let title = self
+            .preview
+            .as_ref()
+            .map(|preview| preview.course.title.clone())
+            .unwrap_or_default();
+        let compact = is_compact(window);
+        crate::views::apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window)))
+            .child(
+                bar.child(
+                    nav_action("nav-home", false, cx)
+                        .w(CONTROL_HEIGHT)
+                        .px_0()
+                        .icon(icons::home())
+                        .accessibility_label(course2md::tr!("主页"))
+                        .tooltip(course2md::tr!("主页"))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if this.prepare_workbench_input(window, cx) {
+                                this.navigate(Page::New, cx);
+                            }
+                        })),
+                )
+                .child(chevron())
+                .when(!compact && self.result_origin != Page::New, |bar| {
+                    bar.child(
+                        quiet("reader-origin")
+                            .text_color(color(GRAY))
+                            .label(self.reader_origin_label())
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.navigate(this.result_origin, cx)),
+                            ),
+                    )
+                    .child(chevron())
+                })
+                .child(
+                    accessible_text("reader-crumb-title", title)
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .px_1()
+                        .font_weight(FontWeight::MEDIUM),
+                )
+                .child(tools),
+            )
+    }
+}

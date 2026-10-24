@@ -119,94 +119,11 @@ impl Desktop {
             .pr(px(16.))
             .gap(px(4.))
             .items_center();
-        // Settings is a place of its own: the bar names it instead of offering
-        // the other destinations, and its leading crumb returns where it was
-        // opened from.
         if page == Page::Settings {
-            let origin = self
-                .settings_origin
-                .as_ref()
-                .map_or(Page::New, |(page, _)| *page);
-            let (icon, name) = match origin {
-                Page::Library | Page::Result => (icons::book_open(), course2md::tr!("笔记库")),
-                Page::Task => (icons::task(), course2md::tr!("任务")),
-                _ => (icons::home(), course2md::tr!("主页")),
-            };
-            let crumb = nav_action("settings-origin", false, cx)
-                .w(CONTROL_HEIGHT)
-                .px_0()
-                .icon(icon)
-                .accessibility_label(course2md::tr!("返回「{}」", name))
-                .tooltip(name)
-                .on_click(cx.listener(|this, _, window, cx| this.leave_settings(window, cx)));
-            return apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window)))
-                .child(
-                    bar.child(crumb)
-                        .child(
-                            icons::chevron_right()
-                                .size(rems(18. / 14.))
-                                .text_color(color(GRAY)),
-                        )
-                        .child(
-                            accessible_text("settings-page-title", course2md::tr!("设置"))
-                                .role(Role::Heading)
-                                .text_size(rems(18. / 14.))
-                                .font_weight(FontWeight::MEDIUM),
-                        ),
-                );
+            return self.settings_title_bar(bar, window, cx);
         }
-        // A note is read where it was opened: home › origin › title, with the
-        // reading tools taking the destinations' place.
         if let (Page::Result, Some(tools)) = (page, reader_tools) {
-            let chevron = || {
-                icons::chevron_right()
-                    .size(rems(16. / 14.))
-                    .flex_shrink_0()
-                    .text_color(color(FAINT))
-            };
-            let title = self
-                .preview
-                .as_ref()
-                .map(|preview| preview.course.title.clone())
-                .unwrap_or_default();
-            let compact = is_compact(window);
-            return apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window)))
-                .child(
-                    bar.child(
-                        nav_action("nav-home", false, cx)
-                            .w(CONTROL_HEIGHT)
-                            .px_0()
-                            .icon(icons::home())
-                            .accessibility_label(course2md::tr!("主页"))
-                            .tooltip(course2md::tr!("主页"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if this.prepare_workbench_input(window, cx) {
-                                    this.navigate(Page::New, cx);
-                                }
-                            })),
-                    )
-                    .child(chevron())
-                    .when(!compact && self.result_origin != Page::New, |bar| {
-                        bar.child(
-                            quiet("reader-origin")
-                                .text_color(color(GRAY))
-                                .label(self.reader_origin_label())
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.navigate(this.result_origin, cx)
-                                })),
-                        )
-                        .child(chevron())
-                    })
-                    .child(
-                        accessible_text("reader-crumb-title", title)
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .px_1()
-                            .font_weight(FontWeight::MEDIUM),
-                    )
-                    .child(tools),
-                );
+            return self.reader_title_bar(bar, tools, window, cx);
         }
         // The brand leads the bar and returns to the workbench, as on the M3
         // canvas; destinations follow on the trailing edge with icon and label.
