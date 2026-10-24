@@ -196,6 +196,9 @@ struct ImageViewer {
     source_available: bool,
     version: PathBuf,
     zoom: Option<f32>,
+    /// A drag panning the enlarged image: where it started and the scroll
+    /// offset then.
+    drag: Option<(Point<Pixels>, Point<Pixels>)>,
     details_open: Option<bool>,
     return_focus: Option<FocusHandle>,
     focus: FocusHandle,
@@ -5444,6 +5447,7 @@ impl Desktop {
             source_available: self.reader_ui.source_available,
             version: preview.course.dir.clone(),
             zoom: None,
+            drag: None,
             details_open: None,
             return_focus: window.focused(cx),
             focus: focus.clone(),
@@ -5851,6 +5855,8 @@ impl Desktop {
         let version = viewer.version.clone();
         let width = px(image.width as f32 * scale);
         let height = px(image.height as f32 * scale);
+        let viewport = viewer.viewport_size;
+        let pannable = width > viewport.width + px(1.) || height > viewport.height + px(1.);
         let images = &mut self.reader_ui.images;
         images.pin(
             std::iter::once(image.path.clone())
@@ -5910,6 +5916,55 @@ impl Desktop {
             .overflow_x_scroll()
             .overflow_y_scroll()
             .track_scroll(&viewer.viewport_scroll)
+            // An image larger than the viewport moves with the pointer, and a
+            // trackpad pinch zooms it, as in Preview.
+            .when(pannable, |viewport| viewport.cursor_grab())
+            .when(viewer.drag.is_some(), |viewport| viewport.cursor_grabbing())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    if let Some(viewer) = &mut this.reader_ui.viewer {
+                        let max = viewer.viewport_scroll.max_offset();
+                        if max.x > px(0.) || max.y > px(0.) {
+                            viewer.drag = Some((event.position, viewer.viewport_scroll.offset()));
+                            this.notify_image_viewer(cx);
+                        }
+                    }
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                let Some(viewer) = &mut this.reader_ui.viewer else {
+                    return;
+                };
+                let Some((start, offset)) = viewer.drag else {
+                    return;
+                };
+                if event.pressed_button != Some(MouseButton::Left) {
+                    viewer.drag = None;
+                    this.notify_image_viewer(cx);
+                    return;
+                }
+                let max = viewer.viewport_scroll.max_offset();
+                let moved = offset + (event.position - start);
+                viewer.viewport_scroll.set_offset(point(
+                    moved.x.clamp(-max.x, px(0.)),
+                    moved.y.clamp(-max.y, px(0.)),
+                ));
+                this.notify_image_viewer(cx);
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                    if let Some(viewer) = &mut this.reader_ui.viewer
+                        && viewer.drag.take().is_some()
+                    {
+                        this.notify_image_viewer(cx);
+                    }
+                }),
+            )
+            .on_pinch(cx.listener(|this, event: &PinchEvent, window, cx| {
+                this.zoom_reader_image(Some(1. + event.delta), window, cx);
+            }))
             .child(
                 div()
                     .id("reader-image-canvas")
