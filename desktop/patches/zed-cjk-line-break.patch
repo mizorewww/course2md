@@ -1,0 +1,96 @@
+diff --git a/crates/gpui/src/text_system/line_wrapper.rs b/crates/gpui/src/text_system/line_wrapper.rs
+index 678e9e0f18..cf4d0748d2 100644
+--- a/crates/gpui/src/text_system/line_wrapper.rs
++++ b/crates/gpui/src/text_system/line_wrapper.rs
+@@ -49,6 +49,9 @@ impl LineWrapper {
+         let mut last_candidate_width = px(0.);
+         let mut last_wrap_ix = 0;
+         let mut prev_c = '\0';
++        // Start and width of the previous character, for a forced break
++        // that must not leave closing punctuation at the start of a line.
++        let mut prev_char: Option<(usize, Pixels)> = None;
+         let mut index = 0;
+         let mut candidates = fragments
+             .iter()
+@@ -72,7 +75,10 @@ impl LineWrapper {
+                             }
+                         } else {
+                             // CJK may not be space separated, e.g.: `Hello world你好世界`
+-                            if c != ' ' && first_non_whitespace_ix.is_some() {
++                            if c != ' '
++                                && !Self::is_cjk_closing_punctuation(c)
++                                && first_non_whitespace_ix.is_some()
++                            {
+                                 last_candidate_ix = ix;
+                                 last_candidate_width = width;
+                             }
+@@ -104,6 +110,7 @@ impl LineWrapper {
+                 };
+ 
+                 width += item_width;
++                let previous = prev_char.replace((ix, item_width));
+                 if width > wrap_width && ix > last_wrap_ix {
+                     if let (None, Some(first_non_whitespace_ix)) = (indent, first_non_whitespace_ix)
+                     {
+@@ -112,10 +119,20 @@ impl LineWrapper {
+                         );
+                     }
+ 
++                    let closing = matches!(
++                        candidate,
++                        WrapBoundaryCandidate::Char { character } if Self::is_cjk_closing_punctuation(character)
++                    );
+                     if last_candidate_ix > 0 {
+                         last_wrap_ix = last_candidate_ix;
+                         width -= last_candidate_width;
+                         last_candidate_ix = 0;
++                    } else if let Some((previous_ix, previous_width)) =
++                        previous.filter(|(previous_ix, _)| closing && *previous_ix > last_wrap_ix)
++                    {
++                        // Carry the previous character down with the punctuation.
++                        last_wrap_ix = previous_ix;
++                        width = previous_width + item_width;
+                     } else {
+                         last_wrap_ix = ix;
+                         width = item_width;
+@@ -445,6 +462,13 @@ impl LineWrapper {
+         (text, Cow::Borrowed(runs))
+     }
+ 
++    /// Full-width punctuation that never starts a line in Chinese and
++    /// Japanese (UAX #14 classes CL, CP, EX, IS and NS): `你好，世界` may break
++    /// before `你` or `世`, never before `，`.
++    pub(crate) fn is_cjk_closing_punctuation(c: char) -> bool {
++        "，。、；：！？）］｝〕〉》」』】〗〙〛”’…‥・ー々〜．｡､".contains(c)
++    }
++
+     /// Any character in this list should be treated as a word character,
+     /// meaning it can be part of a word that should not be wrapped.
+     pub(crate) fn is_word_char(c: char) -> bool {
+@@ -715,6 +739,26 @@ mod tests {
+             .collect()
+     }
+ 
++    #[test]
++    fn test_wrap_line_keeps_cjk_closing_punctuation() {
++        let mut wrapper = build_wrapper();
++        let text = "缺少识别组件 llama.cpp，安装后重新检查。你好（世界）、再见！好的，谢谢。";
++        // From two glyphs per line up: narrower lines must force breaks anywhere.
++        for width in 40..240 {
++            let boundaries: Vec<_> = wrapper
++                .wrap_line(&[LineFragment::text(text)], px(width as f32))
++                .map(|boundary| boundary.ix)
++                .collect();
++            for &ix in &boundaries {
++                let next = text[ix..].chars().next().unwrap();
++                assert!(
++                    !LineWrapper::is_cjk_closing_punctuation(next),
++                    "line starts with {next:?} at width {width}: {boundaries:?}"
++                );
++            }
++        }
++    }
++
+     #[test]
+     fn test_wrap_line() {
+         let mut wrapper = build_wrapper();
