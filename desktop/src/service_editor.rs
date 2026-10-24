@@ -19,30 +19,28 @@ impl Desktop {
         };
         // A secondary page: the way back names where it leads.
         let parent = editor.origin_tab.unwrap_or(SettingsTab::Services).label();
-        // As in the settings pane: a tonal round back button, then the title
-        // in the page headline role under the category it returns to.
-        let header = h_flex()
+        // The settings pane's round back button already leaves settings;
+        // a second one beside it would look like the same way out. The way
+        // back to the category is the category's name above the title.
+        let header = v_flex()
             .flex_shrink_0()
-            .items_center()
-            .gap(rems(16. / 14.))
+            .min_w_0()
+            .items_start()
+            .gap(rems(4. / 14.))
             .child(
-                icon_button("service-editor-back", rems(48. / 14.), true, cx)
-                    .icon(icons::arrow_left())
+                text_button("service-editor-back", cx)
+                    .settings_text()
+                    // The label's ink, not its state layer, starts on the
+                    // title's edge.
+                    .ml(rems(-12. / 14.))
+                    .icon(icons::chevron_left())
+                    .label(parent)
                     .accessibility_label(course2md::tr!("返回「{}」", parent))
                     .on_click(
                         cx.listener(|this, _, window, cx| this.close_service_editor(window, cx)),
                     ),
             )
-            .child(
-                v_flex()
-                    .min_w_0()
-                    .child(
-                        accessible_text("service-editor-parent", parent)
-                            .text_size(TEXT_AUX)
-                            .text_color(color(GRAY)),
-                    )
-                    .child(page_heading("service-editor-inline-title", title)),
-            );
+            .child(page_heading("service-editor-inline-title", title));
         v_flex()
             .w_full()
             .h_full()
@@ -830,7 +828,6 @@ impl Desktop {
         if !protocol.keyless() {
             let visibility = self
                 .service_key_visibility(FormOwner::Editor, "toggle-service-key", cx)
-                .settings_text()
                 .into_any_element();
             let mut key = v_flex()
                 .w_full()
@@ -1047,6 +1044,7 @@ impl Desktop {
             .child(
                 primary_pill("save-service")
                     .settings_text()
+                    .icon(icons::check())
                     .label(if editor.repair_task.is_some() {
                         repair_submit_label
                     } else if awaiting_binding {
@@ -1925,13 +1923,13 @@ impl Desktop {
             )
             .child(accessible_text(
                 "delete-service-consequence",
-                course2md::tr!("将删除此服务配置，已有笔记不受影响"),
+                course2md::tr!("将删除此服务配置，已有笔记不受影响。"),
             ))
             .when(affected > 0, |dialog| {
                 dialog.child(accessible_text(
                     "delete-service-affected",
                     course2md::tr!(
-                        "有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续",
+                        "有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续。",
                         affected
                     ),
                 ))

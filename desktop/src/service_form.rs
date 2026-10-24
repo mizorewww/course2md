@@ -75,6 +75,7 @@ impl ServiceForm {
                         .placeholder(match field {
                             FormField::Address => "https://api.example.com/v1",
                             FormField::Name => course2md::tr!("例如：我的 API"),
+                            FormField::Model => course2md::tr!("模型 ID，或从服务获取列表"),
                             _ => "",
                         })
                         .masked(field == FormField::Key)
@@ -416,7 +417,8 @@ impl Desktop {
         .disabled(disabled)
     }
 
-    /// The trailing 显示/隐藏 action of the key input.
+    /// The trailing eye of the key input: it shows or hides the key inside
+    /// the field's own boundary, as the model field's actions do.
     pub(crate) fn service_key_visibility(
         &self,
         owner: FormOwner,
@@ -424,17 +426,16 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Button {
         let shown = self.service_form(owner).is_some_and(|form| form.show_key);
-        // An M3 text button beside the outlined field.
-        text_button(id, cx)
+        input_action(id)
             .icon(if shown {
                 icons::eye_off()
             } else {
                 icons::eye()
             })
-            .label(if shown {
-                course2md::tr!("隐藏")
+            .accessibility_label(if shown {
+                course2md::tr!("隐藏密钥")
             } else {
-                course2md::tr!("显示")
+                course2md::tr!("显示密钥")
             })
             .tooltip(if shown {
                 course2md::tr!("隐藏密钥")

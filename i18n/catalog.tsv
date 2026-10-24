@@ -577,7 +577,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 将使用语音识别	将使用语音识别	Speech recognition will be used	將使用語音辨識	音声認識を使用します
 将全部分段摘要合并为整篇摘要 / Merge all partial summaries into the full summary	将全部分段摘要合并为整篇摘要	Merge all partial summaries into the full summary	將全部分段摘要合併為整篇摘要	すべてのセグメント化されたサマリーを完全なサマリーに結合します
 将删除 {} 中的旧位置备份。当前笔记库仍保留在 {}。	将删除 {} 中的旧位置备份。当前笔记库仍保留在 {}。	The old location backup in {} will be deleted. The current note library remains at {}.	將刪除 {} 中的舊位置備份。目前筆記庫仍保留在 {}。	{} の古い場所のバックアップは削除されます。現在のノート ライブラリは {} のままです。
-将删除此服务配置，已有笔记不受影响	将删除此服务配置，已有笔记不受影响	This service configuration will be deleted and existing notes will not be affected.	將刪除此服務設定，已有筆記不受影響	このサービス構成は削除され、既存のノートは影響を受けません。
+将删除此服务配置，已有笔记不受影响。	将删除此服务配置，已有笔记不受影响。	This service configuration will be deleted and existing notes will not be affected.	將刪除此服務設定，已有筆記不受影響。	このサービス構成は削除され、既存のノートは影響を受けません。
 将排在当前任务之后	将排在当前任务之后	Will be queued after the current task	將排在目前任務之後	現在のタスクの後にキューに入れられます
 将课程视频转换为图文笔记 / Turn course videos into illustrated notes	将课程视频转换为图文笔记 / Turn course videos into illustrated notes	Turn course videos into illustrated notes	將課程影片轉換為圖文筆記	コース動画を図解ノートに変換
 尚未删除此服务	尚未删除此服务	This service has not been deleted yet	尚未刪除此服務	このサービスは削除されていません
@@ -1069,7 +1069,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 最近备份也无法读取，原记录已保留	最近备份也无法读取，原记录已保留	The latest backup cannot be read, and the original record has been retained.	最近備份也無法讀取，原記錄已保留	最新のバックアップを読み取ることができず、元のレコードが保持されています。
 最近备份无法读取，原记录已保留	最近备份无法读取，原记录已保留	The latest backup cannot be read, the original record has been retained	最近備份無法讀取，原記錄已保留	最新のバックアップを読み取ることができません。元の記録は保持されています。
 最近的笔记	最近的笔记	Recent notes	最近的筆記	最近のノート
-有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续	有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续	{} unfinished tasks use this service; their steps that need it will not continue.	有 {} 個未完成任務引用此服務；這些任務中用到此服務的步驟將不再繼續	{} 件の未完了タスクがこのサービスを使用しています。このサービスが必要な手順は続行されません。
+有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续。	有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续。	{} unfinished tasks use this service; their steps that need it will not continue.	有 {} 個未完成任務引用此服務；這些任務中用到此服務的步驟將不再繼續。	{} 件の未完了タスクがこのサービスを使用しています。このサービスが必要な手順は続行されません。
 有 {} 次未完成的移动记录已损坏，相关文件均已保留	有 {} 次未完成的移动记录已损坏，相关文件均已保留	{} unfinished move records are corrupted and related files have been retained	有 {} 次未完成的移動記錄已損壞，相關檔案均已保留	{} 件の未完了の移動記録が破損しています。関連ファイルはすべて保持されています
 有一个旧版本无法读取	有一个旧版本无法读取	There is an older version that cannot be read	有一個舊版本無法讀取	読み込めない古いバージョンがあります
 有字幕时直接用字幕，没有字幕时使用语音识别	有字幕时直接用字幕，没有字幕时使用语音识别	Use subtitles when available; otherwise use speech recognition	有字幕時直接使用字幕，沒有字幕時使用語音辨識	字幕があれば字幕を使用し、なければ音声認識を使用します

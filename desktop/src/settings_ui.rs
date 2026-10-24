@@ -875,11 +875,13 @@ impl Desktop {
     /// A service editor input with its field error and an optional trailing action.
     /// A connection field on the service form: outlined, its label floating
     /// on the outline, an optional trailing action and its error below.
+    /// An outlined field of the service editor; `suffix` is an icon action
+    /// inside the field's boundary (the key's eye).
     fn service_field(
         &self,
         field: FormField,
         label: &'static str,
-        action: Option<AnyElement>,
+        suffix: Option<AnyElement>,
         window: &Window,
         cx: &App,
     ) -> AnyElement {
@@ -901,7 +903,8 @@ impl Desktop {
                     .map(|error| course2md::tr!("{}，{}", label, error))
                     .unwrap_or_else(|| label.to_owned()),
             )
-            .when(error.is_some(), |input| input.border_color(color(DANGER)));
+            .when(error.is_some(), |input| input.border_color(color(DANGER)))
+            .when_some(suffix, |input, suffix| input.suffix(suffix));
         let index = 8 + field as usize;
         let field = labeled_input(
             ("setting-field-label", index),
@@ -917,17 +920,7 @@ impl Desktop {
                 .w_full()
                 .min_w_0()
                 .gap_1()
-                .child(match action {
-                    Some(action) => h_flex()
-                        .w_full()
-                        .min_w_0()
-                        .gap_2()
-                        .items_end()
-                        .child(div().flex_1().min_w_0().child(field))
-                        .child(div().pb(rems(8. / 14.)).child(action))
-                        .into_any_element(),
-                    None => field.into_any_element(),
-                })
+                .child(field)
                 .when_some(error, |view, error| {
                     view.child(
                         accessible_text(("setting-error", index), error)

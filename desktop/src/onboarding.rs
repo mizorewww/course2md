@@ -1543,7 +1543,14 @@ impl Desktop {
                         .unwrap_or_else(|| label.to_owned()),
                 )
                 .disabled(busy)
-                .when(error.is_some(), |input| input.border_color(color(DANGER)));
+                .when(error.is_some(), |input| input.border_color(color(DANGER)))
+                .when(field == FormField::Key, |input| {
+                    input.suffix(self.service_key_visibility(
+                        owner,
+                        format!("setup-key-visibility-{}", purpose as usize),
+                        cx,
+                    ))
+                });
             let input = labeled_input(
                 SharedString::from(id.clone()),
                 label,
@@ -1556,24 +1563,7 @@ impl Desktop {
                 .w_full()
                 .min_w_0()
                 .gap(rems(4. / 14.))
-                .child(if field == FormField::Key {
-                    h_flex()
-                        .w_full()
-                        .min_w_0()
-                        .gap_2()
-                        .items_end()
-                        .child(div().flex_1().min_w_0().child(input))
-                        .child(div().flex().items_center().h(rems(56. / 14.)).child(
-                            self.service_key_visibility(
-                                owner,
-                                format!("setup-key-visibility-{}", purpose as usize),
-                                cx,
-                            ),
-                        ))
-                        .into_any_element()
-                } else {
-                    input.into_any_element()
-                })
+                .child(input)
                 .when(
                     field == FormField::Key && form.draft.credential.is_some(),
                     |column| {
