@@ -1936,6 +1936,25 @@ fn render_note_image(
 const FIGURE_RADIUS: Pixels = px(20.);
 
 /// A screenshot's time over its lower-left corner, on the image scrim.
+/// A contents entry's state layer sits on whatever it rests on (the page
+/// beside the article, the surface over it, or the current entry's tonal
+/// fill), so hover never replaces the selection or darkens a dark palette.
+fn toc_item_variant(on: bool, side: bool, cx: &App) -> ButtonCustomVariant {
+    let (base, ink) = if on {
+        (color(SECONDARY_CONTAINER), color(ON_SECONDARY_CONTAINER))
+    } else if side {
+        (color(CANVAS), color(INK))
+    } else {
+        (color(SURFACE), color(INK))
+    };
+    ButtonCustomVariant::new(cx)
+        .color(Rgba { a: 0., ..base }.into())
+        .foreground(ink.into())
+        .hover(blend(base, ink, 0.08).into())
+        .active(blend(base, ink, 0.10).into())
+        .shadow(false)
+}
+
 fn image_time_chip(time: String) -> Div {
     div()
         .absolute()
@@ -5250,7 +5269,7 @@ impl Desktop {
                     .when(on, |row| row.bg(color(SECONDARY_CONTAINER)))
                     .child(
                         control(("toc-item", index))
-                            .ghost()
+                            .custom(toc_item_variant(on, side, cx))
                             .w_full()
                             .h_auto()
                             .min_h(row_height)
