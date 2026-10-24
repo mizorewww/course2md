@@ -311,21 +311,34 @@ impl Render for Desktop {
                         .bg(color(CANVAS))
                         .text_color(color(INK))
                         .text_size(TEXT_BODY)
+                        // The shell's brand, without its destinations: setup is
+                        // modal, so the mark is not a way home here.
                         .child(
-                            TitleBar::new()
-                                .h(title_bar_height(window))
-                                .pl_0()
-                                .bg(color(CANVAS))
-                                .border_color(color(HAIRLINE))
-                                .child(
-                                    h_flex()
-                                        .w_full()
-                                        .justify_center()
-                                        .gap_2()
-                                        .items_center()
-                                        .child(icons::book_open().size_4().text_color(color(GRAY)))
-                                        .child("course2md"),
-                                ),
+                            apply_shell_title_bar_chrome(
+                                TitleBar::new().h(title_bar_height(window)),
+                            )
+                            .child(
+                                h_flex()
+                                    .w(window.viewport_size().width)
+                                    .h_full()
+                                    // The traffic lights, then the home action's inset.
+                                    .pl(px(if cfg!(target_os = "macos") { 92. } else { 16. }))
+                                    .gap(px(10.))
+                                    .items_center()
+                                    .child(
+                                        img("images/course2md.png")
+                                            .size(px(32.))
+                                            .rounded(px(10.))
+                                            .flex_shrink_0(),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(rems(20. / 14.))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(color(INK))
+                                            .child("course2md"),
+                                    ),
+                            ),
                         )
                         .child(content),
                     window.has_active_dialog(cx),
