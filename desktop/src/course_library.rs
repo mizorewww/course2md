@@ -2980,7 +2980,9 @@ impl Desktop {
                                     .min_w(rems(12.))
                                     .flex_1()
                                     .whitespace_normal()
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(rems(16. / 14.))
+                                    .line_height(rems(22. / 14.))
+                                    .font_weight(FontWeight::MEDIUM)
                                     .child(task.plan.title.clone()),
                             )
                             .child(badge(BadgeKind::Warning).child(task.state.label()))
