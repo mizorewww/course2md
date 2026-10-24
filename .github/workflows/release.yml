@@ -63,7 +63,7 @@ jobs:
         # Without Xcode's Metal toolchain build.rs skips the Apple speech
         # module, which would ship a macOS build without CoreML recognition.
         if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
-        run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is missing on this runner; install Xcode (xcode-select -s /Applications/Xcode.app) before releasing."; exit 1; }
+        run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is unavailable on this runner. Point DEVELOPER_DIR (runner .env) or xcode-select at Xcode and run xcodebuild -downloadComponent MetalToolchain."; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -136,7 +136,7 @@ jobs:
         # Without Xcode's Metal toolchain build.rs skips the Apple speech
         # module, which would ship a macOS build without CoreML recognition.
         if: runner.os == 'macOS'
-        run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is missing on this runner; install Xcode (xcode-select -s /Applications/Xcode.app) before releasing."; exit 1; }
+        run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is unavailable on this runner. Point DEVELOPER_DIR (runner .env) or xcode-select at Xcode and run xcodebuild -downloadComponent MetalToolchain."; exit 1; }
       - uses: ./.github/actions/desktop-deps
       # Tag builds package the locked inputs; pull-request desktop tests are not implied here.
       - name: Build CLI engine and desktop app
