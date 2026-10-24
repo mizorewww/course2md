@@ -1631,7 +1631,7 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .flex_shrink_0()
-            .gap_6()
+            .gap(px(28.))
             .child(self.storage_status_panel(cx));
         let mut locations = crate::settings_ui::SettingsGroup::new(
             "storage-locations-heading",
@@ -1663,8 +1663,9 @@ impl Desktop {
                     .items_center()
                     .flex_wrap()
                     .child(
-                        quiet(("open-storage-location", index))
+                        tonal_pill(("open-storage-location", index), cx)
                             .settings_text()
+                            .pl(rems(12. / 14.))
                             .icon(icons::folder_open())
                             .label(course2md::tr!("打开位置"))
                             .disabled(offline)
@@ -1673,19 +1674,8 @@ impl Desktop {
                                 move |_, _, cx| cx.open_with_system(&root)
                             }),
                     )
-                    .when(default && several, |row| {
-                        row.child(
-                            badge(BadgeKind::Neutral)
-                                .text_size(TEXT_SETTINGS_AUX)
-                                .child(course2md::tr!("默认保存位置")),
-                        )
-                    })
                     .when(offline, |row| {
-                        row.child(
-                            badge(BadgeKind::Warning)
-                                .text_size(TEXT_SETTINGS_AUX)
-                                .child(course2md::tr!("暂时不可访问")),
-                        )
+                        row.child(badge(BadgeKind::Warning).child(course2md::tr!("暂时不可访问")))
                     })
                     .when(needs_reassociation, |row| {
                         row.child(
@@ -1779,81 +1769,116 @@ impl Desktop {
                     crate::settings_ui::setting_surface()
                         .id(("storage-location", index))
                         .min_w_0()
+                        .min_h(rems(88. / 14.))
+                        .justify_center()
+                        .pr(rems(12. / 14.))
                         .context_menu(move |popup, window, cx| row_menu(popup, window, cx))
-                        .child(crate::settings_ui::resource_layout(
-                            crate::settings_ui::settings_resource_icon(icons::folder_open())
-                                .rounded(RADIUS_SMALL),
-                            v_flex()
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .min_w_0()
+                                .gap(rems(16. / 14.))
+                                .items_center()
+                                .flex_wrap()
+                                .child(tinted_icon(icons::folder(), Tint::Amber, px(48.)))
                                 .child(
-                                    accessible_text(
-                                        ("storage-location-name", index),
-                                        library.name.clone(),
-                                    )
-                                    .text_size(TEXT_SETTINGS_BODY)
-                                    .font_weight(FontWeight::NORMAL),
+                                    v_flex()
+                                        .flex_1()
+                                        .flex_basis(rems(260. / 14.))
+                                        .min_w_0()
+                                        .gap(rems(4. / 14.))
+                                        .child(
+                                            h_flex()
+                                                .gap(rems(10. / 14.))
+                                                .items_center()
+                                                .flex_wrap()
+                                                .child(crate::settings_ui::tile_label(
+                                                    ("storage-location-name", index),
+                                                    library.name.clone(),
+                                                ))
+                                                .when(default && several, |row| {
+                                                    row.child(
+                                                        badge(BadgeKind::Tonal)
+                                                            .child(course2md::tr!("默认保存位置")),
+                                                    )
+                                                }),
+                                        )
+                                        .child(
+                                            crate::settings_ui::tile_support(
+                                                ("storage-location-path", index),
+                                                root.display().to_string(),
+                                            )
+                                            .font_family(
+                                                gpui_component::Theme::global(cx)
+                                                    .mono_font_family
+                                                    .clone(),
+                                            )
+                                            .text_size(rems(13. / 14.)),
+                                        ),
                                 )
-                                .child(
-                                    accessible_text(
-                                        ("storage-location-path", index),
-                                        root.display().to_string(),
-                                    )
-                                    .font_family(
-                                        gpui_component::Theme::global(cx).mono_font_family.clone(),
-                                    )
-                                    .text_size(TEXT_SETTINGS_AUX)
-                                    .text_color(color(GRAY)),
-                                ),
-                            trailing,
-                        ))
+                                .child(trailing.ml_auto().flex_shrink_0()),
+                        )
                         .when_some(
                             check.and_then(|check| check.problem.clone()),
                             |card, problem| {
-                                card.child(theme::item_detail(
-                                    ("storage-location-problem", index),
-                                    problem,
-                                    DANGER,
-                                ))
+                                card.child(
+                                    crate::settings_ui::tile_support(
+                                        ("storage-location-problem", index),
+                                        problem,
+                                    )
+                                    .pl(rems(64. / 14.))
+                                    .text_color(color(DANGER)),
+                                )
                             },
                         )
                         .when(needs_reassociation, |card| {
-                            card.child(theme::item_detail(
-                                ("storage-association-needed", index),
-                                course2md::tr!("无法确认这是原来的笔记库，请检查后重新关联"),
-                                WARNING,
+                            card.child(
+                                crate::settings_ui::tile_support(
+                                    ("storage-association-needed", index),
+                                    course2md::tr!("无法确认这是原来的笔记库，请检查后重新关联"),
+                                )
+                                .pl(rems(64. / 14.))
+                                .text_color(color(WARNING)),
+                            )
+                        })
+                        .when(default && several, |card| {
+                            card.child(div().pl(rems(64. / 14.)).child(
+                                crate::settings_ui::tile_info(
+                                    "storage-policy",
+                                    course2md::tr!("更改默认位置只影响后续生成的笔记"),
+                                ),
                             ))
                         }),
                 );
             }
         }
-        locations = locations.child(
-            crate::settings_ui::setting_surface()
-                .py(rems(9. / 14.))
-                .child(
-                    h_flex()
-                        .w_full()
-                        .min_w_0()
-                        .gap_4()
-                        .items_center()
-                        .flex_wrap()
-                        .when(several, |row| {
-                            row.child(div().flex_1().min_w(rems(12.)).map(|lead| {
-                                lead.child(theme::supporting_info(
-                                    "storage-policy",
-                                    course2md::tr!("更改默认位置只影响后续生成的笔记"),
-                                ))
-                            }))
-                        })
-                        .child(
-                            quiet("register-storage-location")
-                                .settings_text()
-                                .icon(icons::plus())
-                                .label(course2md::tr!("添加笔记库位置"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.register_storage_location(window, cx)
-                                })),
-                        ),
-                ),
-        );
+        let count = self
+            .workspace
+            .as_ref()
+            .map_or(0, |workspace| workspace.state.libraries.len());
+        let add = crate::settings_ui::tile_button(
+            "register-storage-location",
+            [count == 0, count == 0, true, true],
+            cx,
+        )
+        .min_h(rems(72. / 14.))
+        .accessibility_label(course2md::tr!("添加笔记库位置"))
+        .child(
+            h_flex()
+                .size(px(48.))
+                .flex_shrink_0()
+                .items_center()
+                .justify_center()
+                .text_color(color(INK))
+                .child(icons::plus().size(rems(24. / 14.))),
+        )
+        .child(crate::settings_ui::tile_text(
+            "register-storage-location-label",
+            course2md::tr!("添加笔记库位置"),
+            None,
+        ))
+        .on_click(cx.listener(|this, _, window, cx| this.register_storage_location(window, cx)));
+        locations = locations.tile(move |_| add.into_any_element());
         view.child(locations).into_any_element()
     }
 

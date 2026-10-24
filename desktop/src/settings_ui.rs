@@ -433,18 +433,6 @@ pub(super) fn settings_outlined_row(
     )
 }
 
-pub(crate) fn settings_resource_icon(icon: Icon) -> Div {
-    div()
-        .flex()
-        .size(px(40.))
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .rounded_full()
-        .bg(color(INSET))
-        .child(icon.size(px(22.)).text_color(color(GRAY)))
-}
-
 /// Editing fields use a top label: errors and related actions stay with the
 /// input without forcing long values into the preference label/control grid.
 pub(super) fn settings_field_row(
