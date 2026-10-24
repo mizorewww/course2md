@@ -20,7 +20,7 @@ use course2md::execution::Component;
 use gpui_component::{
     button::*,
     input::{InputContentType, Textarea, TextareaState},
-    menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
+    menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
     switch::Switch,
 };
 use service_form::{FormField, FormOwner, ServiceForm};
@@ -91,6 +91,8 @@ const TEXT_SAVE_DELAY_MS: u64 = 600;
 pub(crate) struct State {
     model_diagnostics: model_diagnostics::State,
     tab_focus: [FocusHandle; SettingsTab::ALL.len()],
+    /// Settings search in the navigation pane.
+    search: Entity<InputState>,
     inputs: BTreeMap<EditField, Entity<InputState>>,
     prompt: Entity<TextareaState>,
     editor: Option<ServiceEditor>,
@@ -149,6 +151,16 @@ impl State {
                 }),
             );
         }
+        let search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(course2md::tr!("搜索设置"))
+                .clean_on_escape()
+        });
+        subscriptions.push(cx.subscribe_in(&search, window, |this, _, event, _, cx| {
+            if let InputEvent::Change = event {
+                this.settings_search_changed(cx);
+            }
+        }));
         let prompt = cx.new(|cx| TextareaState::new(window, cx).rows(6));
         subscriptions.push(cx.subscribe(&prompt, |this, _, event, cx| match event {
             InputEvent::Change => this.save_prompt_draft(cx),
@@ -158,6 +170,7 @@ impl State {
         Self {
             model_diagnostics: Default::default(),
             tab_focus: std::array::from_fn(|_| cx.focus_handle()),
+            search,
             inputs,
             prompt,
             editor: None,
@@ -190,20 +203,128 @@ pub(super) fn field_label(
         .font_weight(FontWeight::SEMIBOLD)
 }
 
-/// A setting's hint, identified after its row.
-fn setting_hint(id: &ElementId, hint: &'static str) -> Stateful<Div> {
-    theme::row_hint(
-        SharedString::from(format!("{id:?}-hint")),
-        hint,
-        RowScale::Settings,
-    )
+fn setting_label(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Div {
+    div().child(tile_label(id, value))
 }
 
-fn setting_label(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Div {
-    div().child(
-        accessible_text(id, value)
-            .text_size(TEXT_SETTINGS_BODY)
-            .text_color(color(GRAY)),
+/// The main label of a settings tile: 17px medium, as on the canvas.
+pub(crate) const TEXT_TILE_LABEL: Rems = rems(17. / 14.);
+
+pub(crate) fn tile_label(
+    id: impl Into<ElementId>,
+    value: impl Into<SharedString>,
+) -> Stateful<Div> {
+    accessible_text(id, value)
+        .text_size(TEXT_TILE_LABEL)
+        .line_height(rems(24. / 14.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(color(INK))
+}
+
+/// Supporting text under a tile's label: 14px regular gray.
+pub(crate) fn tile_support(
+    id: impl Into<ElementId>,
+    value: impl Into<SharedString>,
+) -> Stateful<Div> {
+    accessible_text(id, value)
+        .min_w_0()
+        .whitespace_normal()
+        .text_size(TEXT_SETTINGS_AUX)
+        .line_height(rems(20. / 14.))
+        .font_weight(FontWeight::NORMAL)
+        .text_color(color(GRAY))
+}
+
+/// A tile's text column: its label and, when present, the value or
+/// explanation under it.
+pub(crate) fn tile_text(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    support: Option<SharedString>,
+) -> Div {
+    let id = id.into();
+    v_flex()
+        .flex_1()
+        .min_w_0()
+        .gap(rems(2. / 14.))
+        .child(tile_label(id.clone(), label))
+        .when_some(support, |column, support| {
+            column.child(tile_support(
+                SharedString::from(format!("{id:?}-support")),
+                support,
+            ))
+        })
+}
+
+/// The trailing chevron of a tile that opens something.
+pub(crate) fn tile_chevron() -> Icon {
+    icons::chevron_right()
+        .size(rems(20. / 14.))
+        .flex_shrink_0()
+        .text_color(color(GRAY))
+}
+
+/// An explanation inside a tile: the information icon and 14px gray text.
+pub(crate) fn tile_info(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Div {
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .items_start()
+        .gap(rems(10. / 14.))
+        .child(
+            div()
+                .flex()
+                .flex_shrink_0()
+                .h(rems(20. / 14.))
+                .items_center()
+                .child(icons::info().size(rems(18. / 14.)).text_color(color(GRAY))),
+        )
+        .child(tile_support(id, text).flex_1())
+}
+
+/// The corner radii of a tile at a position in its connected group.
+fn tile_corners<E: Styled>(element: E, outer: [bool; 4]) -> E {
+    let radius = |outside: bool| {
+        if outside {
+            TILE_RADIUS
+        } else {
+            TILE_INNER_RADIUS
+        }
+    };
+    element
+        .rounded_tl(radius(outer[0]))
+        .rounded_tr(radius(outer[1]))
+        .rounded_br(radius(outer[2]))
+        .rounded_bl(radius(outer[3]))
+}
+
+/// A whole tile that acts: the surface with M3 state layers, the tile's
+/// corners and its padding. Callers add the label column and trailing items.
+pub(crate) fn tile_button(id: impl Into<ElementId>, outer: [bool; 4], cx: &App) -> Button {
+    let surface = color(SURFACE);
+    let ink = color(INK);
+    tile_corners(
+        Button::new(id)
+            .custom(
+                ButtonCustomVariant::new(cx)
+                    .color(surface.into())
+                    .foreground(ink.into())
+                    .hover(theme::blend(surface, ink, 0.08).into())
+                    .active(theme::blend(surface, ink, 0.10).into())
+                    .shadow(false),
+            )
+            .bg(surface)
+            .w_full()
+            .h_auto()
+            .min_h(rems(64. / 14.))
+            .px(SETTING_ITEM_INSET)
+            .py(rems(16. / 14.))
+            .gap(rems(16. / 14.))
+            .justify_start()
+            .text_left()
+            .whitespace_normal()
+            .font_weight(FontWeight::NORMAL),
+        outer,
     )
 }
 
@@ -225,16 +346,9 @@ pub(super) fn settings_row(
         .flex_wrap()
         .gap_4()
         .child(
-            v_flex()
-                .flex_1()
+            tile_text(id.clone(), label, (!hint.is_empty()).then(|| hint.into()))
                 .flex_basis(rems(120. / 14.))
-                .min_w_0()
-                .max_w_full()
-                .gap(rems(2. / 14.))
-                .child(setting_label(id.clone(), label))
-                .when(!hint.is_empty(), |column| {
-                    column.child(setting_hint(&id, hint))
-                }),
+                .max_w_full(),
         )
         .child(
             h_flex()
@@ -249,6 +363,86 @@ pub(super) fn settings_row(
                 .child(control),
         );
     setting_surface().child(row)
+}
+
+/// A tile that expands content in place below its row.
+pub(crate) fn tile_disclosure(
+    id: impl Into<ElementId>,
+    outer: [bool; 4],
+    open: bool,
+    cx: &App,
+) -> Button {
+    tile_button(id, outer, cx).selected(open)
+}
+
+/// The chevron of an in-place disclosure; it turns over when open.
+pub(crate) fn disclosure_chevron(open: bool) -> Icon {
+    if open {
+        icons::chevron_up()
+    } else {
+        icons::chevron_down()
+    }
+    .size(rems(20. / 14.))
+    .flex_shrink_0()
+    .text_color(color(GRAY))
+}
+
+/// A small outlined fact chip beside a tile's label, e.g. the local engine.
+pub(crate) fn outlined_chip(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+) -> Stateful<Div> {
+    accessible_text(id, label)
+        .flex_shrink_0()
+        .px(px(10.))
+        .py(px(4.))
+        .rounded(RADIUS_SMALL)
+        .border_1()
+        .border_color(color(HAIRLINE))
+        .text_size(TEXT_AUX)
+        .line_height(rems(16. / 14.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(color(GRAY))
+        .whitespace_nowrap()
+}
+
+/// A setting's hint, identified after its row.
+fn setting_hint(id: &ElementId, hint: &'static str) -> Stateful<Div> {
+    theme::row_hint(
+        SharedString::from(format!("{id:?}-hint")),
+        hint,
+        RowScale::Settings,
+    )
+}
+
+/// A full-width control that labels itself (an outlined field), with an
+/// optional hint below it.
+pub(super) fn settings_outlined_row(
+    id: impl Into<ElementId>,
+    hint: &'static str,
+    control: impl IntoElement,
+) -> Div {
+    let id = id.into();
+    setting_surface().child(
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap_2()
+            .child(control)
+            .when(!hint.is_empty(), |view| view.child(setting_hint(&id, hint))),
+    )
+}
+
+pub(crate) fn settings_resource_icon(icon: Icon) -> Div {
+    div()
+        .flex()
+        .size(px(40.))
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .bg(color(INSET))
+        .child(icon.size(px(22.)).text_color(color(GRAY)))
 }
 
 /// Editing fields use a top label: errors and related actions stay with the
@@ -279,40 +473,33 @@ pub(super) fn settings_stacked_row(
         v_flex()
             .w_full()
             .min_w_0()
-            .gap_3()
-            .child(accessible_text(id.clone(), label).text_size(TEXT_SETTINGS_BODY))
+            .gap(rems(1.))
+            .child(tile_label(id.clone(), label))
             .child(control)
             .when(!hint.is_empty(), |view| {
-                view.child(setting_hint(&id, hint).px(rems(12. / 14.)))
+                view.child(tile_info(SharedString::from(format!("{id:?}-hint")), hint))
             }),
     )
 }
 
-/// A full-width control that labels itself (an outlined field), with an
-/// optional hint below it.
-pub(super) fn settings_outlined_row(
-    id: impl Into<ElementId>,
-    hint: &'static str,
-    control: impl IntoElement,
-) -> Div {
-    let id = id.into();
-    setting_surface().child(
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .gap_2()
-            .child(control)
-            .when(!hint.is_empty(), |view| view.child(setting_hint(&id, hint))),
-    )
-}
-
+/// A preference switch: label and explanation, the switch on the tile's edge.
 pub(super) fn settings_switch_row(label: &'static str, hint: &'static str, control: Switch) -> Div {
-    theme::switch_row(
-        label,
-        hint,
-        processing_switch(control).accessibility_label(label),
-        RowScale::Settings,
-    )
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .min_h(rems(32. / 14.))
+        .items_center()
+        .gap(rems(16. / 14.))
+        .child(tile_text(
+            SharedString::from(format!("switch-label-{label}")),
+            label,
+            (!hint.is_empty()).then(|| hint.into()),
+        ))
+        .child(
+            div()
+                .flex_shrink_0()
+                .child(preference_switch(control).accessibility_label(label)),
+        )
 }
 
 /// Compact outlined chips used for capabilities and license links in settings.
@@ -358,7 +545,7 @@ pub(super) fn setting_surface() -> Div {
         .min_w_0()
         .flex_shrink_0()
         .px(SETTING_ITEM_INSET)
-        .py(rems(20. / 14.))
+        .py(rems(16. / 14.))
         .gap_2()
 }
 
@@ -438,24 +625,19 @@ impl ParentElement for DetailGroup {
 
 impl RenderOnce for DetailGroup {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let mut block = v_flex()
-            .w_full()
-            .min_w_0()
-            .rounded(FIELD_RADIUS)
-            .bg(color(INSET))
-            .overflow_hidden();
+        // Label/value rows separated by hairlines, as on the canvas.
+        let mut block = v_flex().w_full().min_w_0();
         for (index, row) in self.rows.into_iter().enumerate() {
             block = block.child(
                 div()
                     .w_full()
                     .min_w_0()
-                    .min_h(CONTROL_HEIGHT)
-                    .px(rems(16. / 14.))
+                    .min_h(rems(48. / 14.))
                     .py(rems(8. / 14.))
                     .flex()
                     .items_center()
                     .when(index > 0, |row| {
-                        row.border_t_1().border_color(color(CARD_LINE))
+                        row.border_t_1().border_color(color(HAIRLINE))
                     })
                     .child(row),
             );
@@ -477,6 +659,7 @@ impl RenderOnce for DetailGroup {
 pub(crate) struct AccountCard {
     pub(crate) id: &'static str,
     pub(crate) icon: Icon,
+    pub(crate) tint: Tint,
     pub(crate) title: &'static str,
     pub(crate) status: (BadgeKind, &'static str),
     pub(crate) detail: Option<String>,
@@ -494,25 +677,23 @@ impl AccountCard {
             .gap_2()
             .items_center()
             .flex_wrap()
-            .child(
-                accessible_text(SharedString::from(format!("{id}-heading")), self.title)
-                    .text_size(TEXT_SETTINGS_BODY)
-                    .font_weight(FontWeight::SEMIBOLD),
-            )
+            .child(tile_label(
+                SharedString::from(format!("{id}-heading")),
+                self.title,
+            ))
             .when(self.busy, |row| {
                 row.child(crate::motion::spinner(
                     SharedString::from(format!("{id}-busy")),
                     cx,
                 ))
             })
-            .child(badge(kind).text_size(TEXT_SETTINGS_AUX).child(label));
+            .child(badge(kind).child(label));
         let line = move |suffix: &str, message: String, error: bool| {
-            accessible_text(SharedString::from(format!("{id}-{suffix}")), message)
-                .text_size(TEXT_SETTINGS_AUX)
+            tile_support(SharedString::from(format!("{id}-{suffix}")), message)
                 .text_color(color(if error { DANGER } else { GRAY }))
         };
         resource_layout(
-            settings_resource_icon(self.icon),
+            tinted_icon(self.icon, self.tint, px(48.)),
             v_flex()
                 .child(identity)
                 .when_some(self.detail, |view, detail| {
@@ -558,18 +739,6 @@ fn resource_row(id: impl Into<ElementId>) -> Stateful<Div> {
         .py(rems(16. / 14.))
         .pl(SETTING_ITEM_INSET)
         .pr(rems(12. / 14.))
-}
-
-pub(crate) fn settings_resource_icon(icon: Icon) -> Div {
-    div()
-        .flex()
-        .size(px(40.))
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .rounded_full()
-        .bg(color(INSET))
-        .child(icon.size(px(22.)).text_color(color(GRAY)))
 }
 
 /// Diagnostic values begin on a common reading axis. They can wrap and grow
@@ -663,8 +832,95 @@ impl SettingsTab {
             Self::Application => icons::info(),
         }
     }
-    fn offset(self, by: usize) -> Self {
-        Self::ALL[(self.index() + by) % Self::ALL.len()]
+    /// What the category holds, under its name in the navigation.
+    fn subtitle(self) -> &'static str {
+        match self {
+            Self::Appearance => course2md::tr!("主题、语言、文字大小"),
+            Self::Generation => course2md::tr!("字幕、语音识别、AI 处理"),
+            Self::Services => course2md::tr!("来源账号、AI 与语音服务"),
+            Self::Storage => course2md::tr!("笔记库位置"),
+            Self::Application => course2md::tr!("运行检查、版本、许可"),
+        }
+    }
+    fn tint(self) -> Tint {
+        match self {
+            Self::Appearance => Tint::Orange,
+            Self::Generation => Tint::Blue,
+            Self::Services => Tint::Teal,
+            Self::Storage => Tint::Amber,
+            Self::Application => Tint::Green,
+        }
+    }
+    /// The labels of the settings a category contains, for settings search.
+    fn keywords(self) -> Vec<&'static str> {
+        match self {
+            Self::Appearance => vec![
+                course2md::tr!("主题"),
+                course2md::tr!("外观模式"),
+                course2md::tr!("浅色主题"),
+                course2md::tr!("深色主题"),
+                course2md::tr!("界面偏好"),
+                course2md::tr!("界面语言"),
+                course2md::tr!("界面文字大小"),
+                course2md::tr!("减少动态效果"),
+                course2md::tr!("主页"),
+                course2md::tr!("显示最近的笔记"),
+            ],
+            Self::Generation => vec![
+                course2md::tr!("字幕与识别"),
+                course2md::tr!("文字来源"),
+                course2md::tr!("字幕语言"),
+                course2md::tr!("自定义语言优先级"),
+                course2md::tr!("语音识别"),
+                course2md::tr!("识别方式"),
+                course2md::tr!("识别模型"),
+                course2md::tr!("高级识别设置"),
+                course2md::tr!("本机引擎"),
+                course2md::tr!("AI 处理"),
+                course2md::tr!("校对文字和标点"),
+                course2md::tr!("在开头生成摘要"),
+                course2md::tr!("校对时附带对应截图"),
+                course2md::tr!("双语翻译"),
+                course2md::tr!("自定义校对规则"),
+                course2md::tr!("保存与导出"),
+                course2md::tr!("保存位置"),
+                course2md::tr!("同时导出"),
+                course2md::tr!("保留下载的视频"),
+            ],
+            Self::Services => vec![
+                course2md::tr!("来源账号"),
+                course2md::tr!("Bilibili 账号"),
+                course2md::tr!("AI 服务"),
+                course2md::tr!("添加 AI 服务"),
+                course2md::tr!("语音服务"),
+                course2md::tr!("添加语音服务"),
+                course2md::tr!("ChatGPT 账号"),
+            ],
+            Self::Storage => vec![
+                course2md::tr!("添加笔记库位置"),
+                course2md::tr!("移动笔记库…"),
+                course2md::tr!("设为默认保存位置"),
+                course2md::tr!("打开位置"),
+            ],
+            Self::Application => vec![
+                course2md::tr!("运行检查"),
+                course2md::tr!("诊断详情"),
+                course2md::tr!("关于"),
+                course2md::tr!("项目主页"),
+                course2md::tr!("发送反馈"),
+                course2md::tr!("开源许可"),
+                course2md::tr!("首次设置"),
+            ],
+        }
+    }
+    /// Whether settings search for `query` finds this category.
+    fn matches(self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        query.is_empty()
+            || [self.label(), self.subtitle()]
+                .into_iter()
+                .chain(self.keywords())
+                .any(|text| text.to_lowercase().contains(&query))
     }
     fn group(self) -> Option<PreferenceGroup> {
         match self {
@@ -680,14 +936,31 @@ fn group(id: &'static str, title: &'static str) -> SettingsGroup {
     SettingsGroup::new(id, title)
 }
 
-/// One settings section as in the M3 canvas: a primary-colored title above a
-/// single card whose items are separated by inset dividers.
+/// Builds a tile's content once the group knows which corners are outside.
+type TileBuilder = Box<dyn FnOnce([bool; 4]) -> AnyElement>;
+
+enum TileMain {
+    /// Content on the plain surface; the group draws the tile.
+    Content(AnyElement),
+    /// A tile that draws itself (a button), given its corners.
+    Built(TileBuilder),
+    /// Two tiles side by side in one row of the group.
+    Pair(TileBuilder, TileBuilder),
+}
+
+struct GroupTile {
+    main: TileMain,
+    details: Vec<AnyElement>,
+}
+
+/// One settings section as on the M3 canvas: a quiet title above a connected
+/// group of tiles, each setting on its own surface with 24px outer and 6px
+/// inner corners and 2px between tiles.
 #[derive(IntoElement)]
 pub(crate) struct SettingsGroup {
     id: &'static str,
     title: &'static str,
-    items: Vec<Vec<AnyElement>>,
-    resource_dividers: bool,
+    tiles: Vec<GroupTile>,
 }
 
 impl SettingsGroup {
@@ -695,22 +968,42 @@ impl SettingsGroup {
         Self {
             id,
             title,
-            items: Vec::new(),
-            resource_dividers: false,
+            tiles: Vec::new(),
         }
     }
 
-    fn resource_dividers(mut self) -> Self {
-        self.resource_dividers = true;
+    /// A tile that draws its own surface (a button row), given its corners as
+    /// top-left, top-right, bottom-right, bottom-left (true = outside).
+    pub(crate) fn tile(mut self, build: impl FnOnce([bool; 4]) -> AnyElement + 'static) -> Self {
+        self.tiles.push(GroupTile {
+            main: TileMain::Built(Box::new(build)),
+            details: Vec::new(),
+        });
+        self
+    }
+
+    /// Two tiles sharing one row of the group.
+    pub(crate) fn pair(
+        mut self,
+        leading: impl FnOnce([bool; 4]) -> AnyElement + 'static,
+        trailing: impl FnOnce([bool; 4]) -> AnyElement + 'static,
+    ) -> Self {
+        self.tiles.push(GroupTile {
+            main: TileMain::Pair(Box::new(leading), Box::new(trailing)),
+            details: Vec::new(),
+        });
         self
     }
 
     /// Content that belongs to the previous item (a disclosure, a summary
-    /// line): it shares that item's boundary instead of adding a divider.
+    /// line): it stays inside that item's tile.
     pub(crate) fn detail(mut self, element: impl IntoElement) -> Self {
-        match self.items.last_mut() {
-            Some(item) => item.push(element.into_any_element()),
-            None => self.items.push(vec![element.into_any_element()]),
+        match self.tiles.last_mut() {
+            Some(tile) => tile.details.push(element.into_any_element()),
+            None => self.tiles.push(GroupTile {
+                main: TileMain::Content(element.into_any_element()),
+                details: Vec::new(),
+            }),
         }
         self
     }
@@ -718,64 +1011,120 @@ impl SettingsGroup {
 
 impl ParentElement for SettingsGroup {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
-        self.items
-            .extend(elements.into_iter().map(|element| vec![element]));
+        self.tiles
+            .extend(elements.into_iter().map(|element| GroupTile {
+                main: TileMain::Content(element),
+                details: Vec::new(),
+            }));
     }
 }
 
 impl RenderOnce for SettingsGroup {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let mut card = settings_card();
-        let count = self.items.len();
-        for (index, item) in self.items.into_iter().enumerate() {
-            if index > 0 {
-                card = card.child(
-                    div()
-                        .h(px(1.))
-                        .mr(SETTING_ITEM_INSET)
-                        .ml(if self.resource_dividers && index + 1 < count {
-                            rems(76. / 14.)
-                        } else {
-                            SETTING_ITEM_INSET
-                        })
-                        .flex_shrink_0()
-                        .bg(color(HAIRLINE)),
-                );
-            }
-            card = card.child(v_flex().w_full().min_w_0().children(item));
+        let count = self.tiles.len();
+        let mut group = v_flex()
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
+            .gap(TILE_GAP)
+            .child(
+                theme::section_title(self.id, self.title)
+                    .pl(SETTING_ITEM_INSET)
+                    .mb(px(8.)),
+            );
+        for (index, tile) in self.tiles.into_iter().enumerate() {
+            let first = index == 0;
+            let last = index + 1 == count;
+            let outer = [first, first, last, last];
+            let element = match tile.main {
+                TileMain::Content(content) => settings_tile(outer)
+                    .child(content)
+                    .children(tile.details)
+                    .into_any_element(),
+                TileMain::Built(build) if tile.details.is_empty() => build(outer),
+                // Details continue below the built tile inside the same
+                // surface, so its own bottom corners stay inner.
+                TileMain::Built(build) => settings_tile(outer)
+                    .child(build([outer[0], outer[1], false, false]))
+                    .children(tile.details)
+                    .into_any_element(),
+                TileMain::Pair(leading, trailing) => v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .grid()
+                            .grid_cols(2)
+                            .w_full()
+                            .min_w_0()
+                            .gap(TILE_GAP)
+                            .child(leading([first, false, false, last]))
+                            .child(trailing([false, first, last, false])),
+                    )
+                    .children(tile.details)
+                    .into_any_element(),
+            };
+            group = group.child(element);
         }
+        group
+    }
+}
+
+/// One tile of a settings group: the surface and the corners for its
+/// position (top-left, top-right, bottom-right, bottom-left; true = outside).
+pub(crate) fn settings_tile(outer: [bool; 4]) -> Div {
+    tile_corners(
         v_flex()
             .w_full()
             .min_w_0()
             .flex_shrink_0()
-            .gap(rems(10. / 14.))
-            .child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .min_h(rems(24. / 14.))
-                    .items_center()
-                    .child(
-                        theme::section_title(self.id, self.title)
-                            .flex_1()
-                            .pl(SETTING_ITEM_INSET),
-                    ),
-            )
-            .child(card)
-    }
+            .bg(color(SURFACE))
+            .text_size(TEXT_SETTINGS_BODY),
+        outer,
+    )
 }
 
-/// The settings card shared by groups and standalone settings: tonal surface,
-/// faint outline, M3 level-1 elevation.
+/// A standalone settings surface outside a group (a single tile).
 pub(crate) fn settings_card() -> Div {
-    v_flex()
-        .w_full()
-        .min_w_0()
-        .flex_shrink_0()
-        .bg(color(SURFACE))
-        .text_size(TEXT_SETTINGS_BODY)
-        .rounded(SETTINGS_CARD_RADIUS)
-        .overflow_hidden()
+    settings_tile([true; 4])
+}
+
+/// The settings arrangement for the current window: a navigation pane (or a
+/// compact rail), the gap after it and the content width. As on the canvas,
+/// the whole layout is centered and at most 1180px wide with 24px gutters;
+/// the pane takes 300–340px and the content at most 760px.
+pub(crate) struct SettingsLayout {
+    pub(crate) compact: bool,
+    pub(crate) nav: f32,
+    pub(crate) gap: f32,
+    pub(crate) content: f32,
+}
+
+pub(crate) fn settings_layout(window: &Window) -> SettingsLayout {
+    let scale = f32::from(window.rem_size()) / 14.;
+    let width = f32::from(window.bounds().size.width);
+    let compact = is_compact(window);
+    let gutter = if compact { 16. } else { 24. };
+    let available = (width.min(1180. * scale) - gutter * 2.).max(0.);
+    if compact {
+        let nav = 88. * scale;
+        let gap = 16.;
+        SettingsLayout {
+            compact,
+            nav,
+            gap,
+            content: (available - nav - gap).max(0.),
+        }
+    } else {
+        let gap = 40.;
+        let nav = (available - gap - 760. * scale).clamp(300. * scale, 340. * scale);
+        SettingsLayout {
+            compact,
+            nav,
+            gap,
+            content: (available - nav - gap).clamp(0., 760. * scale),
+        }
+    }
 }
 
 impl Desktop {
@@ -1072,6 +1421,20 @@ impl Desktop {
         self.settings_tab = tab;
         self.sync_settings_tab_stops();
         self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
+        // Capture builds can review the lower part of a category.
+        #[cfg(feature = "capture")]
+        if let Some(offset) = std::env::var("COURSE2MD_CAPTURE_SETTINGS_SCROLL")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+        {
+            self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(-offset)));
+        }
+        #[cfg(feature = "capture")]
+        if let Ok(query) = std::env::var("COURSE2MD_CAPTURE_SETTINGS_SEARCH") {
+            self.settings_ui
+                .search
+                .update(cx, |search, cx| search.set_value(query, window, cx));
+        }
         self.settings_ui.tab_focus[tab.index()].focus(window, cx);
         self.ensure_account_cards(cx);
         cx.notify();
@@ -1087,74 +1450,333 @@ impl Desktop {
         }
     }
 
-    fn settings_navigation(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let rail = is_compact(window);
-        let mut navigation = v_flex()
-            .id("settings-navigation")
-            .key_context("SettingsTabs")
-            .w(px(crate::views::settings_sidebar_width(window)))
+    /// The categories settings search currently shows, in navigation order.
+    fn visible_settings_tabs(&self, cx: &App) -> Vec<SettingsTab> {
+        let query = self.settings_ui.search.read(cx).value().to_string();
+        SettingsTab::ALL
+            .into_iter()
+            .filter(|tab| tab.matches(&query))
+            .collect()
+    }
+
+    /// Search narrows the categories and moves to the first one that matches
+    /// when the open category no longer does. Focus stays in the field.
+    fn settings_search_changed(&mut self, cx: &mut Context<Self>) {
+        let visible = self.visible_settings_tabs(cx);
+        if !visible.contains(&self.settings_tab)
+            && let Some(first) = visible.first()
+        {
+            self.settings_tab = *first;
+            self.sync_settings_tab_stops();
+            self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
+            self.ensure_account_cards(cx);
+        }
+        cx.notify();
+    }
+
+    /// Arrow keys move between the categories search leaves visible.
+    fn step_settings_tab(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let visible = self.visible_settings_tabs(cx);
+        if visible.is_empty() {
+            return;
+        }
+        let position = visible
+            .iter()
+            .position(|tab| *tab == self.settings_tab)
+            .unwrap_or(0);
+        let next = if forward {
+            (position + 1) % visible.len()
+        } else {
+            (position + visible.len() - 1) % visible.len()
+        };
+        self.select_settings_tab(visible[next], window, cx);
+    }
+
+    fn settings_back_button(&self, cx: &mut Context<Self>) -> Button {
+        let origin = self
+            .settings_origin
+            .as_ref()
+            .map_or(Page::New, |(page, _)| *page);
+        let name = match origin {
+            Page::Library | Page::Result => course2md::tr!("笔记库"),
+            Page::Task => course2md::tr!("任务"),
+            _ => course2md::tr!("主页"),
+        };
+        icon_button("settings-back", BUTTON_MEDIUM, true, cx)
+            .icon(icons::arrow_left().size(rems(22. / 14.)))
+            .accessibility_label(course2md::tr!("返回「{}」", name))
+            .tooltip(course2md::tr!("返回「{}」", name))
+            .on_click(cx.listener(|this, _, window, cx| this.leave_settings(window, cx)))
+    }
+
+    /// The outlined settings search field of the navigation pane.
+    fn settings_search_field(&self, window: &Window, cx: &App) -> Div {
+        let focused = self
+            .settings_ui
+            .search
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window);
+        h_flex()
+            .w_full()
+            .min_w_0()
+            .h(BUTTON_LARGE)
             .flex_shrink_0()
-            .gap(px(8.))
+            .pl(rems(22. / 14.))
+            .pr(rems(12. / 14.))
+            .gap(rems(1.))
+            .items_center()
+            .rounded(RADIUS_PILL)
+            .bg(color(SURFACE))
+            .border_1()
+            .border_color(color(if focused { ACCENT } else { HAIRLINE }))
+            .child(
+                icons::search()
+                    .size(rems(22. / 14.))
+                    .flex_shrink_0()
+                    .text_color(color(GRAY)),
+            )
+            .child(
+                div().flex_1().min_w_0().child(
+                    gpui_component::input::Input::new(&self.settings_ui.search)
+                        .appearance(false)
+                        .aria_label(course2md::tr!("搜索设置"))
+                        .w_full()
+                        .px_0()
+                        .text_size(TEXT_TILE_LABEL)
+                        .cleanable(true),
+                ),
+            )
+    }
+
+    fn settings_navigation_actions(
+        &self,
+        view: Stateful<Div>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        view.key_context("SettingsTabs")
             .on_action(cx.listener(|this, _: &NextSettingsTab, window, cx| {
-                this.select_settings_tab(this.settings_tab.offset(1), window, cx);
+                this.step_settings_tab(true, window, cx);
             }))
             .on_action(cx.listener(|this, _: &PreviousSettingsTab, window, cx| {
-                this.select_settings_tab(
-                    this.settings_tab.offset(SettingsTab::ALL.len() - 1),
-                    window,
-                    cx,
-                );
+                this.step_settings_tab(false, window, cx);
             }))
             .on_action(cx.listener(|this, _: &FirstSettingsTab, window, cx| {
-                this.select_settings_tab(SettingsTab::ALL[0], window, cx)
+                if let Some(first) = this.visible_settings_tabs(cx).first() {
+                    this.select_settings_tab(*first, window, cx)
+                }
             }))
             .on_action(cx.listener(|this, _: &LastSettingsTab, window, cx| {
-                this.select_settings_tab(SettingsTab::ALL[SettingsTab::ALL.len() - 1], window, cx)
-            }));
+                if let Some(last) = this.visible_settings_tabs(cx).last() {
+                    this.select_settings_tab(*last, window, cx)
+                }
+            }))
+    }
+
+    /// One category tile: tinted icon circle, name and what it holds. The
+    /// open category fills with the secondary container and its circle turns
+    /// to the surface.
+    fn settings_category_tile(
+        &self,
+        tab: SettingsTab,
+        outer: [bool; 4],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let index = tab.index();
+        let selected = self.settings_tab == tab;
+        let fill = color(if selected {
+            SECONDARY_CONTAINER
+        } else {
+            SURFACE
+        });
+        let hover = theme::blend(fill, color(INK), 0.08);
+        let icon = tinted_icon(tab.icon(), tab.tint(), px(40.))
+            .when(selected, |circle| circle.bg(color(SURFACE)));
+        tile_corners(
+            gpui_base::Tab::new(("settings-tab", index))
+                .selected(selected)
+                .track_focus(&self.settings_ui.tab_focus[index].clone().tab_stop(selected))
+                .accessibility_label(tab.label())
+                .w_full()
+                .h_auto()
+                .min_h(rems(72. / 14.))
+                .px(rems(16. / 14.))
+                .py(rems(1.))
+                .justify_start()
+                .bg(fill)
+                .border_2()
+                .border_color(gpui::transparent_black())
+                .cursor_pointer()
+                .hover(move |style| style.bg(hover))
+                .focus_visible(|style| style.border_color(color(ACCENT)))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .items_center()
+                        .gap(rems(16. / 14.))
+                        .child(icon)
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(rems(2. / 14.))
+                                .child(
+                                    div()
+                                        .text_size(TEXT_SETTINGS_BODY)
+                                        .line_height(rems(22. / 14.))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(color(INK))
+                                        .child(tab.label()),
+                                )
+                                .child(
+                                    div()
+                                        .whitespace_normal()
+                                        .text_size(rems(13. / 14.))
+                                        .line_height(rems(18. / 14.))
+                                        .text_color(color(GRAY))
+                                        .child(tab.subtitle()),
+                                ),
+                        ),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.select_settings_tab(tab, window, cx)
+                })),
+            outer,
+        )
+        .into_any_element()
+    }
+
+    /// The leading pane: the way back, the 设置 title, search and the
+    /// categories as connected tile groups. It scrolls on its own.
+    fn settings_navigation(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let visible = self.visible_settings_tabs(cx);
+        let mut navigation = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rems(16. / 14.))
+            .pb(px(64.))
+            .child(
+                h_flex()
+                    .h(BUTTON_LARGE)
+                    .flex_shrink_0()
+                    .items_center()
+                    .gap(rems(16. / 14.))
+                    .child(self.settings_back_button(cx))
+                    .child(theme::page_heading(
+                        "settings-page-title",
+                        course2md::tr!("设置"),
+                    )),
+            )
+            .child(self.settings_search_field(window, cx));
+        let groups: [&[SettingsTab]; 3] = [
+            &[SettingsTab::Appearance, SettingsTab::Generation],
+            &[SettingsTab::Services, SettingsTab::Storage],
+            &[SettingsTab::Application],
+        ];
+        let mut first = true;
+        for tabs in groups {
+            let shown: Vec<_> = tabs
+                .iter()
+                .copied()
+                .filter(|tab| visible.contains(tab))
+                .collect();
+            if shown.is_empty() {
+                continue;
+            }
+            let count = shown.len();
+            navigation = navigation.child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(TILE_GAP)
+                    .when(first, |group| group.mt(rems(4. / 14.)))
+                    .children(shown.into_iter().enumerate().map(|(index, tab)| {
+                        let top = index == 0;
+                        let bottom = index + 1 == count;
+                        self.settings_category_tile(tab, [top, top, bottom, bottom], cx)
+                    })),
+            );
+            first = false;
+        }
+        if visible.is_empty() {
+            navigation = navigation.child(
+                tile_support("settings-search-empty", course2md::tr!("没有匹配的设置"))
+                    .px(SETTING_ITEM_INSET)
+                    .mt(rems(4. / 14.)),
+            );
+        }
+        let view = div()
+            .id("settings-navigation")
+            .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
+            .role(Role::TabList)
+            .aria_label(course2md::tr!("设置分类"))
+            .child(navigation);
+        self.settings_navigation_actions(view, cx)
+            .into_any_element()
+    }
+
+    /// Narrow windows keep the categories in a compact rail beside the content.
+    fn settings_rail(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mut rail = v_flex()
+            .w_full()
+            .items_center()
+            .gap(rems(4. / 14.))
+            .pb(px(24.))
+            .child(
+                div()
+                    .h(BUTTON_LARGE)
+                    .flex()
+                    .items_center()
+                    .mb(rems(8. / 14.))
+                    .child(self.settings_back_button(cx)),
+            );
         for tab in SettingsTab::ALL {
             let index = tab.index();
             let selected = self.settings_tab == tab;
-            let icon = div()
-                .flex()
-                .items_center()
-                .justify_center()
-                .h(px(32.))
-                .w(px(if rail { 56. } else { 24. }))
-                .rounded_full()
-                .when(selected && rail, |view| view.bg(color(SECONDARY_CONTAINER)))
-                .child(tab.icon().size(px(22.)));
-            let label = if rail { tab.short_label() } else { tab.label() };
-            navigation = navigation.child(
+            let fill = color(if selected {
+                SECONDARY_CONTAINER
+            } else {
+                CANVAS
+            });
+            let hover = theme::blend(fill, color(INK), 0.08);
+            rail = rail.child(
                 gpui_base::Tab::new(("settings-tab", index))
                     .selected(selected)
                     .track_focus(&self.settings_ui.tab_focus[index].clone().tab_stop(selected))
                     .accessibility_label(tab.label())
                     .w_full()
                     .h_auto()
-                    .min_h(px(56.))
-                    .rounded_full()
-                    .px(px(if rail { 0. } else { 16. }))
-                    .py(px(8.))
-                    .bg(gpui::transparent_black())
-                    .when(selected && !rail, |tab| tab.bg(color(SECONDARY_CONTAINER)))
+                    .py(rems(8. / 14.))
+                    .px(rems(2. / 14.))
+                    .rounded(px(16.))
+                    .bg(fill)
+                    .border_2()
+                    .border_color(gpui::transparent_black())
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(hover))
+                    .focus_visible(|style| style.border_color(color(ACCENT)))
                     .child(
-                        div()
-                            .flex()
+                        v_flex()
                             .w_full()
                             .items_center()
-                            .gap(px(if rail { 4. } else { 12. }))
-                            .when(rail, |view| view.flex_col())
-                            .child(icon)
+                            .gap(rems(4. / 14.))
+                            .child(
+                                tinted_icon(tab.icon(), tab.tint(), px(40.))
+                                    .when(selected, |circle| circle.bg(color(SURFACE))),
+                            )
                             .child(
                                 div()
-                                    .when(rail, |label| label.w_full().text_center())
+                                    .w_full()
+                                    .text_center()
                                     .whitespace_normal()
-                                    .text_size(if rail {
-                                        theme::TEXT_AUX
-                                    } else {
-                                        theme::TEXT_BODY
-                                    })
-                                    .child(label),
+                                    .text_size(TEXT_AUX)
+                                    .line_height(rems(16. / 14.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(color(INK))
+                                    .child(tab.short_label()),
                             ),
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -1162,27 +1784,38 @@ impl Desktop {
                     })),
             );
         }
-        navigation.into_any_element()
+        let view = div()
+            .id("settings-navigation")
+            .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
+            .role(Role::TabList)
+            .aria_label(course2md::tr!("设置分类"))
+            .child(rail);
+        self.settings_navigation_actions(view, cx)
+            .into_any_element()
     }
 
     pub fn settings_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         // Rendering has no side effects: hydration and diagnostics run from event entries such as
         // open_settings, select_settings_tab and restore_settings_group.
-        let content_width = crate::views::settings_content_width(window);
-        let layout_width = content_width
-            + crate::views::settings_sidebar_width(window)
-            + crate::views::settings_column_gap(window);
-        let navigation = self.settings_navigation(window, cx);
+        let layout = settings_layout(window);
+        let navigation = if layout.compact {
+            self.settings_rail(cx)
+        } else {
+            self.settings_navigation(window, cx)
+        };
         let mut panel = v_flex()
             .relative()
             .id("settings-panel")
             .role(Role::TabPanel)
             .aria_label(self.settings_tab.label())
-            .flex_1()
+            .flex_shrink_0()
             .min_w_0()
             .min_h_0()
-            .w(px(content_width))
-            .gap(px(24.));
+            .h_full()
+            .w(px(layout.content))
+            .gap(px(16.));
         for group in [
             PreferenceGroup::Generation,
             PreferenceGroup::Services,
@@ -1200,8 +1833,8 @@ impl Desktop {
                             .w_full()
                             .min_w_0()
                             .flex_shrink_0()
-                            .p(px(12.))
-                            .rounded(RADIUS_SMALL)
+                            .p(px(16.))
+                            .rounded(TILE_RADIUS)
                             .bg(color(DANGER_BG))
                             .child(self.group_feedback(group, cx)),
                     );
@@ -1221,8 +1854,11 @@ impl Desktop {
                         .flex_shrink_0()
                         .gap_2()
                         .flex_wrap()
-                        .p_3()
-                        .rounded(RADIUS_SMALL)
+                        .py(px(8.))
+                        .pl(px(20.))
+                        .pr(px(8.))
+                        .items_center()
+                        .rounded(TILE_RADIUS)
                         .bg(color(DANGER_BG))
                         .child(
                             accessible_text(("settings-failed-group", target.index()), message)
@@ -1233,9 +1869,8 @@ impl Desktop {
                                 .text_size(TEXT_SETTINGS_AUX),
                         )
                         .child(
-                            control(("open-failed-settings-group", target.index()))
+                            text_button(("open-failed-settings-group", target.index()), cx)
                                 .settings_text()
-                                .icon(icons::settings())
                                 .label(course2md::tr!("前往「{}」", target.label()))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.select_settings_tab(target, window, cx);
@@ -1257,6 +1892,32 @@ impl Desktop {
                 .editor
                 .as_ref()
                 .is_some_and(|editor| editor.target.is_none() && editor.repair_task.is_none());
+        let heading = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rems(6. / 14.))
+            .child(
+                div()
+                    .h(BUTTON_LARGE)
+                    .flex()
+                    .items_center()
+                    .child(theme::page_heading(
+                        "settings-category-heading",
+                        self.settings_tab.label(),
+                    )),
+            )
+            .when(self.settings_tab == SettingsTab::Generation, |view| {
+                view.child(
+                    accessible_text(
+                        "generation-default-explanation",
+                        course2md::tr!("这里是长期默认值，主页的「处理选项」可以只对单次生效"),
+                    )
+                    .px(rems(2. / 14.))
+                    .whitespace_normal()
+                    .text_size(rems(15. / 14.))
+                    .text_color(color(GRAY)),
+                )
+            });
         let panel = panel
             .child(
                 div()
@@ -1267,13 +1928,12 @@ impl Desktop {
                     .w_full()
                     .when(!editing_service, |view| view.overflow_y_scroll())
                     .track_scroll(&self.scrolls[Page::Settings as usize])
-                    .p(px(0.))
                     .child(
                         div()
                             .w_full()
                             .min_w_0()
                             .when(editing_service, |view| view.h_full().min_h_0())
-                            .when(!editing_service, |view| view.pb(px(24.)))
+                            .when(!editing_service, |view| view.pb(px(64.)))
                             // A category, or the secondary page inside it, arrives as one unit.
                             .child(crate::motion::page_enter(
                                 (
@@ -1283,75 +1943,47 @@ impl Desktop {
                                 v_flex()
                                     .w_full()
                                     .min_w_0()
-                                    .gap(px(22.))
+                                    .gap(px(28.))
                                     .when(editing_service, |view| view.h_full().min_h_0())
-                                    .when(!editing_service, |view| {
-                                        view.child(
-                                            v_flex()
-                                                .gap_2()
-                                                .child(theme::page_heading(
-                                                    "settings-category-heading",
-                                                    self.settings_tab.label(),
-                                                ))
-                                                .when(
-                                                    self.settings_tab == SettingsTab::Generation,
-                                                    |view| {
-                                                        view.child(
-                                                            accessible_text(
-                                                                "generation-default-explanation",
-                                                                course2md::tr!(
-                                                                    "这里是长期默认值，主页的「处理选项」可以只对单次生效"
-                                                                ),
-                                                            )
-                                                            .text_size(TEXT_SETTINGS_AUX)
-                                                            .text_color(color(GRAY)),
-                                                        )
-                                                    },
-                                                ),
-                                        )
-                                    })
+                                    .when(!editing_service, |view| view.child(heading))
                                     .child(content),
                             )),
                     ),
             )
             .when(!editing_service, |panel| {
-                panel.child(
-                    crate::backend::vertical_scrollbar(&self.scrolls[Page::Settings as usize]),
-                )
+                panel.child(crate::backend::vertical_scrollbar(
+                    &self.scrolls[Page::Settings as usize],
+                ))
             });
-        // Wide layouts reserve space after the content; center that complete
-        // box so the navigation and panel share the same left ruler.
-        let wide_trailing_space = if design_width(window) >= WIDE_WINDOW {
-            SETTINGS_WIDE_TRAILING * f32::from(window.rem_size()) / 14.
-        } else {
-            0.
-        };
-        let body = div()
-            .max_w(px(layout_width + wide_trailing_space))
-            .pr(px(wide_trailing_space))
+        let body = h_flex()
+            .w(px(layout.nav + layout.gap + layout.content))
+            .max_w_full()
             .mx_auto()
-            .flex()
-            .w_full()
-            .min_w_0()
+            .h_full()
             .min_h_0()
-            .flex_1()
-            .flex_row()
-            .items_stretch()
-            .gap(px(crate::views::settings_column_gap(window)))
-            .child(navigation)
+            .items_start()
+            .gap(px(layout.gap))
+            .child(
+                div()
+                    .w(px(layout.nav))
+                    .flex_shrink_0()
+                    .h_full()
+                    .min_h_0()
+                    .child(navigation),
+            )
             .child(panel);
         v_flex()
             .w_full()
             .h_full()
             .min_w_0()
             .min_h_0()
-            .pt(px(16.))
-            .child(body)
+            .pt(px(8.))
+            .child(div().flex_1().min_h_0().w_full().child(body))
             .into_any_element()
     }
 
     fn services_settings_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let mut view = v_flex().w_full().min_w_0().flex_shrink_0().gap_6();
+        let mut view = v_flex().w_full().min_w_0().flex_shrink_0().gap(px(28.));
         // Adding or editing a service is a secondary page of this category.
         if self
             .settings_ui
@@ -1369,7 +2001,6 @@ impl Desktop {
         // insets, so every row's ⋯ sits on one vertical line.
         view = view.child(
             group("account-settings-heading", course2md::tr!("来源账号"))
-                .resource_dividers()
                 .child(resource_row("bilibili-account-row").child(self.account_settings_page(cx))),
         );
         let latest = self.preferences.latest_versions();
@@ -1387,42 +2018,52 @@ impl Desktop {
                 course2md::tr!("添加语音服务"),
             ),
         ] {
-            let mut section = group(heading_id, heading).resource_dividers();
-            for version in latest.values().filter(|version| {
-                version.config.protocol.purpose() == purpose
-                    && !self
-                        .preferences
-                        .service_retired_in_snapshot(&version.service_id)
-            }) {
-                section = section.child(self.service_row(version, cx));
+            let services: Vec<_> = latest
+                .values()
+                .filter(|version| {
+                    version.config.protocol.purpose() == purpose
+                        && !self
+                            .preferences
+                            .service_retired_in_snapshot(&version.service_id)
+                })
+                .collect();
+            let count = services.len() + 1;
+            let mut section = group(heading_id, heading);
+            for (index, version) in services.iter().enumerate() {
+                let first = index == 0;
+                let row = self.service_row(version, [first, first, false, false], cx);
+                section = section.tile(move |_| row);
             }
-            section = section.child(
-                quiet(("add-service", purpose as usize))
-                    .settings_text()
-                    .w_full()
-                    .h(rems(56. / 14.))
-                    .rounded_none()
-                    .px(SETTING_ITEM_INSET)
-                    .text_color(color(ACCENT))
-                    .accessibility_label(add_label)
-                    // The plus sits in the rows' icon column, the label on their text ruler.
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .items_center()
-                            .gap(rems(16. / 14.))
-                            .child(
-                                h_flex()
-                                    .w(px(40.))
-                                    .justify_center()
-                                    .child(icons::plus().size(rems(20. / 14.))),
-                            )
-                            .child(add_label),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_settings_service_editor(purpose, None, window, cx);
-                    })),
-            );
+            let first = count == 1;
+            // Without a speech service, recognition runs on this device.
+            let hint = (purpose == ServicePurpose::Speech && services.is_empty())
+                .then(|| course2md::tr!("未添加时使用本机识别").into());
+            let add = tile_button(
+                ("add-service", purpose as usize),
+                [first, first, true, true],
+                cx,
+            )
+            .min_h(rems(72. / 14.))
+            .accessibility_label(add_label)
+            // The plus sits in the rows' icon column, the label on their text ruler.
+            .child(
+                h_flex()
+                    .size(px(48.))
+                    .flex_shrink_0()
+                    .items_center()
+                    .justify_center()
+                    .text_color(color(INK))
+                    .child(icons::plus().size(rems(24. / 14.))),
+            )
+            .child(tile_text(
+                SharedString::from(format!("add-service-label-{}", purpose as usize)),
+                add_label,
+                hint,
+            ))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_settings_service_editor(purpose, None, window, cx);
+            }));
+            section = section.tile(move |_| add.into_any_element());
             view = view.child(section);
         }
         view.into_any_element()
@@ -1430,7 +2071,12 @@ impl Desktop {
 
     /// One saved service: what it is, whether it works, and its commands in a
     /// menu that the row's ⋯ button and a right-click open alike.
-    fn service_row(&self, version: &ServiceVersion, cx: &mut Context<Self>) -> AnyElement {
+    fn service_row(
+        &self,
+        version: &ServiceVersion,
+        outer: [bool; 4],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let id = version.id.clone();
         let protocol = version.config.protocol;
         let purpose = protocol.purpose();
@@ -1466,116 +2112,123 @@ impl Desktop {
         let menu = self.service_menu(version, is_default, cx);
         let row_menu = menu.clone();
         let edit_id = id.clone();
-        resource_row(SharedString::from(format!("saved-service-{id}")))
-            // The whole row opens the editor, as「编辑…」in its menu does.
-            .cursor_pointer()
-            .hover(|style| style.bg(color(INK).opacity(0.035)))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.open_settings_service_editor(purpose, Some(edit_id.clone()), window, cx);
-            }))
-            .child(settings_resource_icon(service_form::protocol_icon(
-                protocol,
-            )))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(rems(2. / 14.))
-                    .child(
-                        h_flex()
-                            .min_w_0()
-                            .gap_2()
-                            .items_center()
-                            .flex_wrap()
-                            .child(accessible_text(
-                                SharedString::from(format!("saved-service-title-{id}")),
-                                version.config.name.clone(),
-                            ))
-                            .when(is_default, |row| {
-                                row.child(
-                                    badge(BadgeKind::Tonal)
-                                        .text_size(TEXT_AUX)
-                                        .child(course2md::tr!("默认")),
-                                )
-                            }),
+        let hover = theme::blend(color(SURFACE), color(INK), 0.08);
+        tile_corners(
+            resource_row(SharedString::from(format!("saved-service-{id}"))),
+            outer,
+        )
+        .bg(color(SURFACE))
+        .min_h(rems(88. / 14.))
+        // The whole row opens the editor, as「编辑…」in its menu does.
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.open_settings_service_editor(purpose, Some(edit_id.clone()), window, cx);
+        }))
+        .child(tinted_icon(
+            service_form::protocol_icon(protocol),
+            if purpose == ServicePurpose::Ai {
+                Tint::Purple
+            } else {
+                Tint::Teal
+            },
+            px(48.),
+        ))
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(rems(2. / 14.))
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .gap_2()
+                        .items_center()
+                        .flex_wrap()
+                        .child(tile_label(
+                            SharedString::from(format!("saved-service-title-{id}")),
+                            version.config.name.clone(),
+                        ))
+                        .when(is_default, |row| {
+                            row.child(badge(BadgeKind::Tonal).child(course2md::tr!("默认")))
+                        }),
+                )
+                .child(
+                    accessible_text(
+                        SharedString::from(format!("saved-service-description-{id}")),
+                        detail.join(" · "),
                     )
-                    .child(
+                    .truncate()
+                    .text_size(TEXT_SETTINGS_AUX)
+                    .text_color(color(GRAY)),
+                )
+                .when_some(outdated_default, |column, default| {
+                    column.child(
                         accessible_text(
-                            SharedString::from(format!("saved-service-description-{id}")),
-                            detail.join(" · "),
+                            SharedString::from(format!("saved-service-old-default-{id}")),
+                            course2md::tr!(
+                                "以后生成的笔记仍使用修改前的配置 · {}",
+                                default.config.model
+                            ),
                         )
-                        .truncate()
+                        .whitespace_normal()
                         .text_size(TEXT_SETTINGS_AUX)
                         .text_color(color(GRAY)),
                     )
-                    .when_some(outdated_default, |column, default| {
-                        column.child(
-                            accessible_text(
-                                SharedString::from(format!("saved-service-old-default-{id}")),
-                                course2md::tr!(
-                                    "以后生成的笔记仍使用修改前的配置 · {}",
-                                    default.config.model
-                                ),
-                            )
-                            .whitespace_normal()
-                            .text_size(TEXT_SETTINGS_AUX)
-                            .text_color(color(GRAY)),
+                })
+                .when_some(notice, |column, (message, failed)| {
+                    column.child(
+                        accessible_text(
+                            SharedString::from(format!("saved-service-notice-{id}")),
+                            message,
                         )
-                    })
-                    .when_some(notice, |column, (message, failed)| {
-                        column.child(
-                            accessible_text(
-                                SharedString::from(format!("saved-service-notice-{id}")),
-                                message,
-                            )
-                            .whitespace_normal()
-                            .text_size(TEXT_SETTINGS_AUX)
-                            .text_color(color(if failed {
-                                DANGER
-                            } else {
-                                GRAY
-                            })),
+                        .whitespace_normal()
+                        .text_size(TEXT_SETTINGS_AUX)
+                        .text_color(color(if failed {
+                            DANGER
+                        } else {
+                            GRAY
+                        })),
+                    )
+                })
+                .when(!failures.is_empty(), |column| {
+                    column.child(
+                        accessible_text(
+                            SharedString::from(format!("saved-service-test-status-{id}")),
+                            failures.join("\n"),
                         )
-                    })
-                    .when(!failures.is_empty(), |column| {
-                        column.child(
-                            accessible_text(
-                                SharedString::from(format!("saved-service-test-status-{id}")),
-                                failures.join("\n"),
-                            )
-                            .whitespace_normal()
-                            .text_size(TEXT_SETTINGS_AUX)
-                            .text_color(color(GRAY)),
-                        )
-                    }),
-            )
-            .child(
-                badge(kind)
-                    .flex_shrink_0()
-                    .text_size(TEXT_AUX)
-                    .child(status),
-            )
-            .child(
-                // The menu button keeps its click from also opening the row.
-                div()
-                    .id(SharedString::from(format!("service-actions-slot-{id}")))
-                    .flex_shrink_0()
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(
-                        quiet(SharedString::from(format!("service-actions-{id}")))
-                            .w(CONTROL_HEIGHT)
-                            .px_0()
-                            .icon(icons::ellipsis())
-                            .accessibility_label(course2md::tr!("{} 操作", version.config.name))
-                            .tooltip(course2md::tr!("服务操作"))
-                            .dropdown_menu_with_anchor(
-                                Anchor::TopRight,
-                                move |popup, window, cx| menu(popup, window, cx),
-                            ),
-                    ),
-            )
-            .context_menu(move |popup, window, cx| row_menu(popup, window, cx))
-            .into_any_element()
+                        .whitespace_normal()
+                        .text_size(TEXT_SETTINGS_AUX)
+                        .text_color(color(GRAY)),
+                    )
+                }),
+        )
+        .child(
+            badge(kind)
+                .flex_shrink_0()
+                .text_size(TEXT_AUX)
+                .child(status),
+        )
+        .child(
+            // The menu button keeps its click from also opening the row.
+            div()
+                .id(SharedString::from(format!("service-actions-slot-{id}")))
+                .flex_shrink_0()
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .child(
+                    quiet(SharedString::from(format!("service-actions-{id}")))
+                        .w(CONTROL_HEIGHT)
+                        .px_0()
+                        .icon(icons::ellipsis())
+                        .accessibility_label(course2md::tr!("{} 操作", version.config.name))
+                        .tooltip(course2md::tr!("服务操作"))
+                        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
+                            menu(popup, window, cx)
+                        }),
+                ),
+        )
+        .context_menu(move |popup, window, cx| row_menu(popup, window, cx))
+        .into_any_element()
     }
 
     fn service_tests(
@@ -2349,61 +3002,61 @@ impl Desktop {
         .detach();
     }
     pub(crate) fn appearance_controls(&self, cx: &mut Context<Self>) -> Div {
+        use crate::preferences::InterfaceLanguage;
+        let current = self.application_edit_base().language;
+        let label = |language: InterfaceLanguage| match language {
+            InterfaceLanguage::System => course2md::tr!("跟随系统"),
+            other => other.resolve().native_name(),
+        };
+        let value: SharedString = if current == InterfaceLanguage::System {
+            format!("{} · {}", label(current), current.resolve().native_name()).into()
+        } else {
+            label(current).into()
+        };
+        let entity = cx.weak_entity();
+        let language_menu = move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
+            InterfaceLanguage::ALL
+                .into_iter()
+                .fold(menu.min_w(px(240.)), |menu, language| {
+                    let entity = entity.clone();
+                    let menu = menu.item(
+                        PopupMenuItem::new(label(language))
+                            .checked(language == current)
+                            .on_click(move |_, _, cx| {
+                                let _ = entity.update(cx, |this, cx| {
+                                    let mut next = this.application_edit_base();
+                                    next.language = language;
+                                    if this.commit_application(next, cx) {
+                                        crate::i18n::apply(language);
+                                        cx.notify();
+                                    }
+                                });
+                            }),
+                    );
+                    // 跟随系统 stands apart from the fixed languages.
+                    if language == InterfaceLanguage::System {
+                        menu.separator()
+                    } else {
+                        menu
+                    }
+                })
+        };
+        let language = tile_button("app-language", [true, true, false, false], cx)
+            .min_h(rems(76. / 14.))
+            .accessibility_label(course2md::tr!("{}：{}", course2md::tr!("界面语言"), value))
+            .child(tile_text(
+                "app-language-label",
+                course2md::tr!("界面语言"),
+                Some(value),
+            ))
+            .child(tile_chevron())
+            .dropdown_menu_with_anchor(Anchor::TopRight, language_menu);
         v_flex()
             .w_full()
-            .gap_6()
+            .gap(px(28.))
             .child(
                 group("appearance-motion", course2md::tr!("界面偏好"))
-                    .child(settings_row(
-                        "app-language-label",
-                        course2md::tr!("界面语言"),
-                        course2md::tr!("更改后立即应用"),
-                        {
-                            let current = self.application_edit_base().language;
-                            let entity = cx.weak_entity();
-                            let label =
-                                |language: crate::preferences::InterfaceLanguage| match language {
-                                    crate::preferences::InterfaceLanguage::System => {
-                                        course2md::tr!("跟随系统")
-                                    }
-                                    other => other.resolve().native_name(),
-                                };
-                            SelectField::new("app-language", label(current), move |menu, _, _| {
-                                crate::preferences::InterfaceLanguage::ALL.into_iter().fold(
-                                    menu,
-                                    |menu, language| {
-                                        let entity = entity.clone();
-                                        let menu = menu.item(
-                                            PopupMenuItem::new(label(language))
-                                                .checked(language == current)
-                                                .on_click(move |_, _, cx| {
-                                                    let _ = entity.update(cx, |this, cx| {
-                                                        let mut next = this.application_edit_base();
-                                                        next.language = language;
-                                                        if this.commit_application(next, cx) {
-                                                            crate::i18n::apply(language);
-                                                            cx.notify();
-                                                        }
-                                                    });
-                                                }),
-                                        );
-                                        // 跟随系统 stands apart from the fixed languages.
-                                        if language == crate::preferences::InterfaceLanguage::System
-                                        {
-                                            menu.separator()
-                                        } else {
-                                            menu
-                                        }
-                                    },
-                                )
-                            })
-                            .max_w(INLINE_SELECT_WIDTH)
-                            .when(
-                                current == crate::preferences::InterfaceLanguage::System,
-                                |field| field.trailing(current.resolve().native_name()),
-                            )
-                        },
-                    ))
+                    .tile(move |_| language.into_any_element())
                     .child(settings_stacked_row(
                         "app-font-scale-label",
                         course2md::tr!("界面文字大小"),
@@ -2436,68 +3089,80 @@ impl Desktop {
                             )),
                     ))
                     .child(
-                        setting_surface()
-                            .py(rems(10. / 14.))
-                            .child(settings_switch_row(
-                                course2md::tr!("减少动态效果"),
-                                course2md::tr!("关闭过渡动画和进度条的流动效果"),
-                                Switch::new("app-reduce-motion")
-                                    .checked(self.preferences.application().desktop.reduce_motion)
-                                    .on_click(cx.listener(|this, enabled, _, cx| {
-                                        let mut next = this.application_edit_base();
-                                        next.desktop.reduce_motion = *enabled;
-                                        this.commit_application(next, cx);
-                                    })),
-                            )),
+                        setting_surface().child(settings_switch_row(
+                            course2md::tr!("减少动态效果"),
+                            course2md::tr!("关闭过渡动画和进度条的流动效果"),
+                            Switch::new("app-reduce-motion")
+                                .checked(self.preferences.application().desktop.reduce_motion)
+                                .on_click(cx.listener(|this, enabled, _, cx| {
+                                    let mut next = this.application_edit_base();
+                                    next.desktop.reduce_motion = *enabled;
+                                    this.commit_application(next, cx);
+                                })),
+                        )),
                     ),
             )
             .child(
                 group("appearance-home", course2md::tr!("主页")).child(
-                    setting_surface()
-                        .py(rems(10. / 14.))
-                        .child(settings_switch_row(
-                            course2md::tr!("显示最近的笔记"),
-                            course2md::tr!("关闭后主页不显示已完成的笔记"),
-                            Switch::new("app-home-recent-notes")
-                                .checked(self.preferences.application().desktop.home_recent_notes)
-                                .on_click(cx.listener(|this, enabled, _, cx| {
-                                    let mut next = this.application_edit_base();
-                                    next.desktop.home_recent_notes = *enabled;
-                                    this.commit_application(next, cx);
-                                })),
-                        )),
+                    setting_surface().child(settings_switch_row(
+                        course2md::tr!("显示最近的笔记"),
+                        course2md::tr!("关闭后主页不显示已完成的笔记"),
+                        Switch::new("app-home-recent-notes")
+                            .checked(self.preferences.application().desktop.home_recent_notes)
+                            .on_click(cx.listener(|this, enabled, _, cx| {
+                                let mut next = this.application_edit_base();
+                                next.desktop.home_recent_notes = *enabled;
+                                this.commit_application(next, cx);
+                            })),
+                    )),
                 ),
             )
     }
     fn application_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
+        let project = self.about_link(
+            "about-project",
+            icons::external_link(),
+            course2md::tr!("项目主页"),
+            "https://github.com/mizorewww/course2md",
+            [false; 4],
+            cx,
+        );
+        let feedback = self.about_link(
+            "about-issue",
+            icons::message_square(),
+            course2md::tr!("发送反馈"),
+            "https://github.com/mizorewww/course2md/issues",
+            [false; 4],
+            cx,
+        );
+        let licenses = self.about_licenses([false; 4], cx);
         v_flex()
             .w_full()
             .min_w_0()
-            .gap_6()
+            .gap(px(28.))
             .child(self.environment_page(cx))
             .child(
                 group("about-heading", course2md::tr!("关于"))
-                    .child(setting_surface().child(self.about_page()))
-                    .child(settings_row(
-                        "about-license-title",
-                        course2md::tr!("开源许可"),
-                        "",
-                        self.about_licenses(cx),
-                    ))
+                    .child(self.about_page())
+                    .pair(move |_| project, move |_| feedback)
+                    .tile(move |_| licenses)
                     .child(
-                        setting_surface().child(
+                        setting_surface().py(rems(12. / 14.)).child(
                             h_flex()
                                 .w_full()
                                 .min_w_0()
+                                .min_h(rems(48. / 14.))
                                 .gap_4()
                                 .items_center()
-                                .child(v_flex().flex_1().min_w_0().gap_1().child(accessible_text(
+                                .child(tile_text(
                                     "restart-onboarding-label",
                                     course2md::tr!("首次设置"),
-                                )))
+                                    None,
+                                ))
                                 .child(
                                     outline_pill("restart-onboarding", cx)
                                         .settings_text()
+                                        .pl(rems(12. / 14.))
                                         .label(course2md::tr!("重新运行"))
                                         .icon(icons::restart())
                                         .on_click(cx.listener(|this, _, window, cx| {
@@ -2566,13 +3231,14 @@ impl Desktop {
     }
 
     /// 运行检查 as on the canvas: one conclusion with the capabilities it
-    /// covers, or one row per capability while something needs repair, then
-    /// 诊断详情 with the facts behind it.
+    /// covers, then 诊断详情 with the facts behind it. Failures stay visible:
+    /// the conclusion turns to a warning and each capability says whether it
+    /// is ready.
     fn environment_page(&self, cx: &mut Context<Self>) -> SettingsGroup {
-        let mut checks = group("diagnostics-heading", course2md::tr!("运行检查"));
+        let checks = group("diagnostics-heading", course2md::tr!("运行检查"));
         let Some(e) = &self.environment else {
             return checks.child(
-                setting_surface().child(
+                setting_surface().p(px(20.)).child(
                     h_flex()
                         .gap_2()
                         .items_center()
@@ -2612,130 +3278,108 @@ impl Desktop {
             .iter()
             .filter(|(_, _, optional)| !optional)
             .count();
-        let all_ready = capabilities
+        let failed = capabilities
             .iter()
-            .all(|(_, ready, optional)| *ready || *optional);
-        let recheck = quiet("refresh-environment")
+            .filter(|(_, ready, optional)| !ready && !optional)
+            .count();
+        let all_ready = failed == 0;
+        let recheck = tonal_pill("refresh-environment", cx)
             .settings_text()
-            .mr(-QUIET_INSET)
-            .text_color(color(ACCENT))
+            .pl(rems(12. / 14.))
             .icon(icons::refresh())
             .label(course2md::tr!("重新检查"))
             .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx)));
-        if all_ready {
-            checks = checks.child(
-                setting_surface()
-                    .gap_3()
+        let summary = setting_surface()
+            .p(px(20.))
+            .gap(px(16.))
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .flex_wrap()
+                    .gap(rems(16. / 14.))
+                    .child(if all_ready {
+                        tinted_icon(icons::check_circle(), Tint::Green, px(48.))
+                    } else {
+                        tinted_icon(icons::warning(), Tint::Amber, px(48.))
+                    })
                     .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .items_center()
-                            .gap(rems(16. / 14.))
-                            .child(
-                                h_flex()
-                                    .size(px(40.))
-                                    .flex_shrink_0()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded_full()
-                                    .bg(color(SUCCESS_BG))
-                                    .child(
-                                        icons::check_circle()
-                                            .size(px(22.))
-                                            .text_color(color(SUCCESS)),
-                                    ),
-                            )
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap(rems(2. / 14.))
-                                    .child(
-                                        accessible_text(
-                                            "diagnostic-summary",
-                                            course2md::tr!("一切正常"),
-                                        )
-                                        .font_weight(FontWeight::MEDIUM),
-                                    )
-                                    .child(
-                                        accessible_text(
-                                            "diagnostic-summary-detail",
-                                            course2md::tr!("{} 项检查全部通过", checked),
-                                        )
-                                        .text_size(TEXT_SETTINGS_AUX)
-                                        .text_color(color(GRAY)),
-                                    ),
-                            )
-                            .child(recheck),
-                    )
-                    // The capabilities sit on the summary's text ruler.
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .pl(px(56.))
-                            .gap_2()
-                            .flex_wrap()
-                            .children(
-                                capabilities
-                                    .iter()
-                                    .filter(|(_, _, optional)| !optional)
-                                    .map(|(label, _, _)| {
-                                        settings_chip(h_flex())
-                                            .pr(rems(12. / 14.))
-                                            .gap(rems(6. / 14.))
-                                            .items_center()
-                                            .text_size(TEXT_SETTINGS_AUX)
-                                            .child(
-                                                icons::check()
-                                                    .size(px(16.))
-                                                    .text_color(color(SUCCESS)),
-                                            )
-                                            .child(*label)
-                                    }),
+                        tile_text(
+                            "diagnostic-summary",
+                            if all_ready {
+                                course2md::tr!("一切正常")
+                            } else {
+                                course2md::tr!("需要修复")
+                            },
+                            Some(
+                                if all_ready {
+                                    course2md::tr!("{} 项检查全部通过", checked)
+                                } else {
+                                    course2md::tr!("{} 项检查未通过", failed)
+                                }
+                                .into(),
                             ),
-                    ),
-            );
-        } else {
-            for (index, (label, ready, optional)) in capabilities.into_iter().enumerate() {
-                checks = checks.child(
-                    setting_surface().child(settings_status_row(
-                        ("diagnostic-capability", index),
-                        label,
-                        badge(if optional {
-                            BadgeKind::Neutral
-                        } else if ready {
-                            BadgeKind::Success
-                        } else {
-                            BadgeKind::Warning
-                        })
-                        .text_size(TEXT_SETTINGS_AUX)
-                        .child(if optional {
-                            course2md::tr!("当前未使用")
-                        } else if ready {
-                            course2md::tr!("可用")
-                        } else {
-                            course2md::tr!("待修复")
-                        }),
+                        )
+                        .flex_basis(rems(200. / 14.)),
+                    )
+                    .child(recheck),
+            )
+            // The capabilities sit on the summary's text ruler.
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .pl(rems(64. / 14.))
+                    .gap_2()
+                    .flex_wrap()
+                    .children(capabilities.iter().enumerate().map(
+                        |(index, (label, ready, optional))| {
+                            let (icon, tone, state) = if *optional {
+                                (icons::info(), GRAY, course2md::tr!("当前未使用"))
+                            } else if *ready {
+                                (icons::check(), SUCCESS, course2md::tr!("可用"))
+                            } else {
+                                (icons::warning(), WARNING, course2md::tr!("待修复"))
+                            };
+                            settings_chip(h_flex())
+                                .id(("diagnostic-capability", index))
+                                .role(Role::Label)
+                                .aria_label(course2md::tr!("{}：{}", *label, state))
+                                .pr(rems(12. / 14.))
+                                .gap(rems(6. / 14.))
+                                .items_center()
+                                .text_size(TEXT_SETTINGS_AUX)
+                                .text_color(color(if *ready || *optional { INK } else { WARNING }))
+                                .when(!*ready && !*optional, |chip| {
+                                    chip.border_color(color(WARNING)).bg(color(WARNING_BG))
+                                })
+                                .child(icon.size(px(16.)).text_color(color(tone)))
+                                .child(*label)
+                                .when(!*ready || *optional, |chip| {
+                                    chip.child(
+                                        div()
+                                            .text_color(color(if *optional {
+                                                GRAY
+                                            } else {
+                                                WARNING
+                                            }))
+                                            .child(format!("· {state}")),
+                                    )
+                                })
+                        },
                     )),
-                );
-            }
-            checks = checks.child(
-                setting_surface()
-                    .py(rems(10. / 14.))
-                    .child(h_flex().w_full().justify_end().child(recheck)),
             );
-        }
+        let mut checks = checks.child(summary);
         if !e.engine {
             checks = checks.child(
                 setting_surface()
-                    .child(info_callout(
+                    .child(tile_info(
                         "repair-bundled-engine",
                         course2md::tr!("转换程序无法运行，重新安装应用后笔记仍会保留"),
                     ))
                     .child(
-                        control("download-repair-app")
+                        outline_pill("download-repair-app", cx)
                             .settings_text()
                             .icon(icons::download())
                             .label(course2md::tr!("下载安装包"))
@@ -2747,45 +3391,35 @@ impl Desktop {
             );
         }
         let open = self.settings_ui.diagnostics_details_open;
-        checks
-            .child(
-                quiet("toggle-diagnostics-details")
-                    .settings_text()
-                    .w_full()
-                    .h(rems(52. / 14.))
-                    .rounded_none()
-                    .px(SETTING_ITEM_INSET)
-                    .text_color(color(INK))
-                    .accessibility_label(course2md::tr!("诊断详情"))
-                    .child(
-                        h_flex()
-                            .flex_1()
-                            .items_center()
-                            .font_weight(FontWeight::NORMAL)
-                            .child(div().flex_1().child(course2md::tr!("诊断详情")))
-                            .child(
-                                if open {
-                                    icons::chevron_up()
-                                } else {
-                                    icons::chevron_down()
-                                }
-                                .size(rems(20. / 14.))
-                                .text_color(color(GRAY)),
-                            ),
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.settings_ui.diagnostics_details_open =
-                            !this.settings_ui.diagnostics_details_open;
-                        cx.notify();
-                    })),
-            )
-            .detail(crate::motion::disclosure(
+        let toggle = tile_disclosure(
+            "toggle-diagnostics-details",
+            [false, false, !open, !open],
+            open,
+            cx,
+        )
+        .accessibility_label(course2md::tr!("诊断详情"))
+        .child(tile_text(
+            "diagnostics-details-label",
+            course2md::tr!("诊断详情"),
+            None,
+        ))
+        .child(disclosure_chevron(open))
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.settings_ui.diagnostics_details_open = !this.settings_ui.diagnostics_details_open;
+            cx.notify();
+        }));
+        checks = checks.tile(move |_| toggle.into_any_element());
+        if open {
+            checks = checks.child(crate::motion::disclosure(
                 "diagnostics-detail-content",
-                open,
+                true,
                 self.diagnostic_details(e, cx)
                     .px(SETTING_ITEM_INSET)
+                    .pt(rems(16. / 14.))
                     .pb(rems(16. / 14.)),
-            ))
+            ));
+        }
+        checks
     }
 
     fn diagnostic_details(
@@ -3129,6 +3763,21 @@ fn pending_after_save<T, E>(result: &std::result::Result<(), E>, next: T) -> Opt
     result.is_err().then_some(next)
 }
 
+impl Desktop {
+    /// Settings is a place of its own: as on the canvas, its title bar is
+    /// empty (window controls and dragging only); the way back and the 设置
+    /// title lead the navigation pane instead.
+    pub(crate) fn settings_title_bar(
+        &self,
+        bar: Div,
+        window: &mut Window,
+        _: &mut Context<Self>,
+    ) -> TitleBar {
+        crate::views::apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window)))
+            .child(bar)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{pending_after_save, success_notice_current};
@@ -3156,49 +3805,5 @@ mod tests {
     fn a_failed_save_keeps_the_staged_edit_and_a_successful_one_clears_it() {
         assert_eq!(pending_after_save::<_, ()>(&Ok(()), 7), None);
         assert_eq!(pending_after_save(&Err("disk full"), 7), Some(7));
-    }
-}
-
-impl Desktop {
-    /// Settings is a place of its own: the bar names it instead of offering
-    /// the other destinations, and its leading crumb returns where it was
-    /// opened from.
-    pub(crate) fn settings_title_bar(
-        &self,
-        bar: Div,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> TitleBar {
-        let origin = self
-            .settings_origin
-            .as_ref()
-            .map_or(Page::New, |(page, _)| *page);
-        let (icon, name) = match origin {
-            Page::Library | Page::Result => (icons::book_open(), course2md::tr!("笔记库")),
-            Page::Task => (icons::task(), course2md::tr!("任务")),
-            _ => (icons::home(), course2md::tr!("主页")),
-        };
-        let crumb = nav_action("settings-origin", false, cx)
-            .w(CONTROL_HEIGHT)
-            .px_0()
-            .icon(icon)
-            .accessibility_label(course2md::tr!("返回「{}」", name))
-            .tooltip(name)
-            .on_click(cx.listener(|this, _, window, cx| this.leave_settings(window, cx)));
-        crate::views::apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window)))
-            .child(
-                bar.child(crumb)
-                    .child(
-                        icons::chevron_right()
-                            .size(rems(18. / 14.))
-                            .text_color(color(GRAY)),
-                    )
-                    .child(
-                        accessible_text("settings-page-title", course2md::tr!("设置"))
-                            .role(Role::Heading)
-                            .text_size(rems(18. / 14.))
-                            .font_weight(FontWeight::MEDIUM),
-                    ),
-            )
     }
 }

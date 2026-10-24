@@ -424,6 +424,7 @@ impl Desktop {
         crate::settings_ui::AccountCard {
             id,
             icon: icons::sparkles(),
+            tint: Tint::Purple,
             title: course2md::tr!("ChatGPT 账号"),
             status: (kind, label),
             detail: None,

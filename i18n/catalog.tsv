@@ -1058,7 +1058,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 更换模型	更换模型	Change model	更換模型	モデルを変更
 更换视频	更换视频	Change video	更換影片	動画を変更する
 更改	更改	Change	更改	変更
-更改后立即应用	更改后立即应用	Applies immediately	變更後立即套用	変更後すぐに適用されます
 更改默认位置只影响后续生成的笔记	更改默认位置只影响后续生成的笔记	Changing the default location only affects subsequently generated notes	更改預設位置只影響後續生成的筆記	デフォルトの場所を変更すると、それ以降に生成されるノートにのみ影響します。
 更新为：{} · v{} · {}	更新为：{} · v{} · {}	Updated to: {} · v{} · {}	更新為：{} · v{} · {}	更新先: {} · v{} · {}
 更新默认服务	更新默认服务	Update default services	更新預設服務	デフォルトのサービスを更新する
@@ -2146,3 +2145,13 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 没有未分类的笔记	没有未分类的笔记	No unfiled notes	沒有未分類的筆記	未分類のノートはありません
 只使用视频自带的字幕	只使用视频自带的字幕	Only the video's own subtitles will be used	只使用影片內建的字幕	動画に付属する字幕のみを使用します
 阅读目录	目录	Contents	目錄	目次
+主题、语言、文字大小	主题、语言、文字大小	Theme, language, text size	主題、語言、文字大小	テーマ、言語、文字サイズ
+字幕、语音识别、AI 处理	字幕、语音识别、AI 处理	Subtitles, speech recognition, AI processing	字幕、語音辨識、AI 處理	字幕、音声認識、AI 処理
+来源账号、AI 与语音服务	来源账号、AI 与语音服务	Source accounts, AI and speech services	來源帳號、AI 與語音服務	ソースアカウント、AI と音声サービス
+运行检查、版本、许可	运行检查、版本、许可	Health check, version, licenses	執行檢查、版本、授權	動作チェック、バージョン、ライセンス
+搜索设置	搜索设置	Search settings	搜尋設定	設定を検索
+没有匹配的设置	没有匹配的设置	No matching settings	沒有符合的設定	一致する設定はありません
+设置分类	设置分类	Settings categories	設定分類	設定のカテゴリ
+未添加时使用本机识别	未添加时使用本机识别	Without one, speech is recognized on this device	未新增時使用本機辨識	未追加の場合はこのデバイスで認識します
+需要修复	需要修复	Needs repair	需要修復	修正が必要です
+{} 项检查未通过	{} 项检查未通过	{} checks did not pass	{} 項檢查未通過	{} 件のチェックに合格しませんでした

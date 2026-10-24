@@ -300,6 +300,7 @@ impl Desktop {
         crate::settings_ui::AccountCard {
             id: "bilibili-account",
             icon: icons::tv(),
+            tint: Tint::Pink,
             title: if onboarding {
                 course2md::tr!("账号状态")
             } else {
