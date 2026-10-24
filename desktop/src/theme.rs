@@ -242,7 +242,8 @@ fn menu_style(dark: bool) -> gpui_component::menu::MenuStyle {
         .into(),
         radius: MENU_RADIUS,
         padding: px(6.),
-        item_height: CONTROL_HEIGHT.into(),
+        // M3 menu items are 48px tall.
+        item_height: rems(48. / 14.).into(),
         item_radius: px(10.),
         item_padding: rems(12. / 14.).into(),
         gap: rems(12. / 14.).into(),
