@@ -56,7 +56,6 @@ impl Desktop {
         self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
         self.source_preview = None;
         self.source_editor_open = false;
-        self.generation_options_open = false;
         self.source_candidates.clear();
         self.source_candidate_covers.clear();
         self.source_collection_title = None;

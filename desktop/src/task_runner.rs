@@ -903,11 +903,6 @@ impl Desktop {
                 self.source_validation = Some(format!("{error:#}"));
                 self.validation_attempt = self.validation_attempt.wrapping_add(1);
                 let subtitle_attention = self.subtitle_attention_required();
-                if self.source_preview.is_some() && !subtitle_attention {
-                    // Name, destination and processing controls must exist in
-                    // the next frame before a validation error focuses them.
-                    self.generation_options_open = true;
-                }
                 let field = if self.source_preview.is_some()
                     && !subtitle_attention
                     && self.value(Field::Title, cx).trim().is_empty()
@@ -972,7 +967,6 @@ impl Desktop {
                         .take()
                         .filter(|_| self.page == Page::New)
                         .and_then(|follow| follow.submitted(self.preview_generation, id.clone()));
-                    self.generation_options_open = false;
                     self.source_editor_open = false;
                     self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
                 }

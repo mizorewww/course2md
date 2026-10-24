@@ -861,7 +861,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 收起	收起	Collapse	收合	折りたたむ
 收起准备详情	收起准备详情	Collapse preparation details	收起準備詳情	準備の詳細を折りたたむ
 收起处理详情	收起处理详情	Collapse processing details	收起處理詳情	処理の詳細を折りたたむ
-收起处理选项	收起处理选项	Collapse processing options	收起處理選項	処理オプションを折りたたむ
 收起已完成的处理	收起已完成的处理	Collapse completed processing	收起已完成的處理	完了した処理を折りたたむ
 收起技术详情	收起技术详情	Hide technical details	收合技術詳情	技術的な詳細を隠す
 收起文字	收起文字	Collapse text	收起文字	テキストを折りたたむ
@@ -1559,7 +1558,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 管理模型与下载	管理模型与下载	Manage models and downloads	管理模型與下載	モデルとダウンロードを管理する
 管理配置文件 / Manage the configuration file	管理配置文件 / Manage the configuration file	Manage the configuration file	管理設定檔案	設定ファイルを管理
 粘贴 YouTube 或 Bilibili 视频链接	粘贴 YouTube 或 Bilibili 视频链接	Paste YouTube or Bilibili video link	貼上 YouTube 或 Bilibili 影片連結	YouTube または Bilibili 動画のリンクを貼り付けます
-粘贴链接或拖入本地视频，自动生成带截图的笔记	粘贴链接或拖入本地视频，自动生成带截图的笔记	Paste a link or drag in a local video to automatically generate notes with screenshots	貼上連結或拖入本機影片，自動產生附截圖的筆記	リンクを貼り付けるかローカル動画をドラッグすると、スクリーンショット付きのノートが自動的に生成されます
 粘贴链接或拖入视频	粘贴链接或拖入视频	Paste a link or drag in a video	貼上連結或拖入影片	リンクを貼り付けるか動画をドラッグ
 系统凭据库中找不到此服务的凭据，请重新保存 API Key	系统凭据库中找不到此服务的凭据，请重新保存 API Key	Credentials for this service were not found in the system credential store. Save the API key again.	系統憑證庫中找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報がシステム認証情報ストアに見つかりませんでした。API キーを再度保存してください。
 系统提示与 response_format=json_object 同为 segments 对象契约	系统提示与 response_format=json_object 同为 segments 对象契约	The system prompt and response_format=json_object both use the segments object contract.	系統提示與 response_format=json_object 同為 segments 物件契約	システムプロンプトと response_format=json_object はどちらも segments オブジェクトの契約に従います。
@@ -2149,3 +2147,4 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 正在保存密钥…	正在保存密钥…	Saving key…	正在儲存金鑰…	キーを保存中…
 {}尚未完成，笔记的其余部分已保存	{}尚未完成，笔记的其余部分已保存	{} not finished; the rest of the note is saved	{}尚未完成，筆記的其餘部分已儲存	{}は完了していません。ノートのほかの部分は保存済みです
 没有未分类的笔记	没有未分类的笔记	No unfiled notes	沒有未分類的筆記	未分類のノートはありません
+只使用视频自带的字幕	只使用视频自带的字幕	Only the video's own subtitles will be used	只使用影片內建的字幕	動画に付属する字幕のみを使用します
