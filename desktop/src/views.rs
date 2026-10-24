@@ -502,7 +502,14 @@ impl Render for Desktop {
                                     || self_scrolling,
                                 |v| v.h_full().min_h_0(),
                             )
-                            .when(self.page != Page::Settings && !self_scrolling, |v| v.pb_6())
+                            // Lists that scroll themselves keep their trailing
+                            // space inside the list, so their last surface is
+                            // never cut off above the window edge.
+                            .when(
+                                !matches!(self.page, Page::Result | Page::Settings)
+                                    && !self_scrolling,
+                                |v| v.pb_6(),
+                            )
                             .child(content),
                     ),
             );
