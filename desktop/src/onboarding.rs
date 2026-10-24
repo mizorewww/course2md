@@ -1404,10 +1404,7 @@ impl Desktop {
                     .items_center()
                     .gap_x(rems(12. / 14.))
                     .gap_y(rems(4. / 14.))
-                    .child(crate::settings_ui::tile_label(
-                        "setup-current-model",
-                        current_model,
-                    ))
+                    .child(tile_label("setup-current-model", current_model))
                     // Readiness reads as the model's status, next to its name.
                     .child(badge(status_kind).child(model_status)),
             )
@@ -1539,7 +1536,7 @@ impl Desktop {
                     field == FormField::Key && form.draft.credential.is_some(),
                     |column| {
                         column.child(
-                            crate::settings_ui::tile_support(
+                            tile_support(
                                 format!("setup-kept-key-{}", purpose as usize),
                                 course2md::tr!("已保存密钥，留空则保留"),
                             )
@@ -1648,12 +1645,9 @@ impl Desktop {
                                 .text_color(color(GRAY)),
                         )
                         .child(
-                            crate::settings_ui::tile_label(
-                                format!("setup-ai-{id}-label"),
-                                use_kind.label(),
-                            )
-                            .flex_1()
-                            .min_w_0(),
+                            tile_label(format!("setup-ai-{id}-label"), use_kind.label())
+                                .flex_1()
+                                .min_w_0(),
                         )
                         .child(crate::focus_scroll::FocusRing::new(
                             format!("setup-ai-{id}-focus"),
@@ -1683,7 +1677,7 @@ impl Desktop {
                     .min_w_0()
                     .gap(rems(4. / 14.))
                     .child(self.setup_reveal("setup-ai-uses-reveal", uses))
-                    .child(crate::settings_ui::tile_info(
+                    .child(tile_info(
                         "setup-ai-use-scope",
                         course2md::tr!("开启后转录文字会发送到所选 AI 服务"),
                     ))
@@ -1814,13 +1808,10 @@ impl Desktop {
                 .child(motion::disclosure(
                     format!("setup-test-detail-content-{}", purpose as usize),
                     service.details_open,
-                    v_flex()
-                        .w_full()
-                        .min_w_0()
-                        .child(crate::settings_ui::tile_support(
-                            format!("setup-test-details-text-{}", purpose as usize),
-                            details,
-                        )),
+                    v_flex().w_full().min_w_0().child(tile_support(
+                        format!("setup-test-details-text-{}", purpose as usize),
+                        details,
+                    )),
                 ));
             items.push(motion::state_enter(
                 ("setup-service-feedback", service.test_serial as usize),
@@ -1846,7 +1837,7 @@ impl Desktop {
                 .asr
                 .and_then(|id| self.preferences.version(&id))
                 .cloned();
-            return setup_tile(true, true).child(crate::settings_ui::tile_info(
+            return setup_tile(true, true).child(tile_info(
                 "setup-cloud-model-description",
                 version
                     .map(|version| {
@@ -1964,10 +1955,7 @@ impl Desktop {
                                         .items_center()
                                         .gap_x(rems(12. / 14.))
                                         .gap_y(rems(4. / 14.))
-                                        .child(crate::settings_ui::tile_label(
-                                            "setup-model-identity",
-                                            model_title,
-                                        ))
+                                        .child(tile_label("setup-model-identity", model_title))
                                         .child(
                                             badge(state_kind).child(
                                                 accessible_text("setup-model-state", label)
@@ -1978,17 +1966,14 @@ impl Desktop {
                                             row.child(motion::spinner("setup-model-spinner", cx))
                                         }),
                                 )
-                                .child(crate::settings_ui::tile_support(
+                                .child(tile_support(
                                     "setup-model-engine",
                                     crate::provider_label(Some(provider)),
                                 )),
                         ),
                 )
                 .when(!hint.is_empty(), |v| {
-                    v.child(crate::settings_ui::tile_info(
-                        "setup-model-state-hint",
-                        hint,
-                    ))
+                    v.child(tile_info("setup-model-state-hint", hint))
                 }),
         );
         // Text actions start on the tile's content edge; a leading pill keeps its own.
@@ -2074,10 +2059,7 @@ impl Desktop {
                     .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx))),
             );
             if self.job.is_some() {
-                body = body.child(crate::settings_ui::tile_info(
-                    "setup-model-job-busy",
-                    job_busy(),
-                ));
+                body = body.child(tile_info("setup-model-job-busy", job_busy()));
             }
         }
         let mut details = v_flex().w_full().min_w_0().gap_3();
@@ -2092,22 +2074,13 @@ impl Desktop {
                     .role(Role::Status),
                 );
             }
-            details = details.child(crate::settings_ui::tile_info(
-                "setup-model-preparation-detail",
-                message,
-            ));
+            details = details.child(tile_info("setup-model-preparation-detail", message));
         }
         if let Some(issue) = snapshot.device_issue {
-            details = details.child(crate::settings_ui::tile_info(
-                "setup-model-device-detail",
-                issue,
-            ));
+            details = details.child(tile_info("setup-model-device-detail", issue));
         }
         if let Some(Err(error)) = &snapshot.result {
-            details = details.child(crate::settings_ui::tile_info(
-                "setup-model-error-detail",
-                error.clone(),
-            ));
+            details = details.child(tile_info("setup-model-error-detail", error.clone()));
         }
         if let Some(status) = status {
             if status.bytes > 0 {
@@ -2124,15 +2097,12 @@ impl Desktop {
                             .font_weight(FontWeight::MEDIUM),
                     )
                     .child(
-                        crate::settings_ui::tile_info(
-                            ("setup-model-path", index),
-                            part.path.display().to_string(),
-                        )
-                        .text_size(TEXT_AUX),
+                        tile_info(("setup-model-path", index), part.path.display().to_string())
+                            .text_size(TEXT_AUX),
                     );
             }
             if let Some(error) = &status.last_error {
-                details = details.child(crate::settings_ui::tile_info(
+                details = details.child(tile_info(
                     "setup-model-last-error",
                     course2md::tr!("上次准备记录：{}", error),
                 ));

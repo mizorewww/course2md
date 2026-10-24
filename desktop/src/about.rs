@@ -1,6 +1,6 @@
 //! Product identity and build provenance, kept separate from operational settings.
 use super::*;
-use crate::settings_ui::{tile_button, tile_chevron, tile_label, tile_support, tile_text};
+use crate::settings_ui::tile_button;
 use crate::theme::*;
 use gpui_component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 

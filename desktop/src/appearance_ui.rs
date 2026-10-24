@@ -403,7 +403,7 @@ impl Desktop {
                             .when(active, |row| {
                                 row.child(badge(BadgeKind::Tonal).child(course2md::tr!("使用中")))
                             })
-                            .child(crate::settings_ui::tile_chevron()),
+                            .child(tile_chevron()),
                     ),
             )
             .on_click(cx.listener(move |this, _, window, cx| {

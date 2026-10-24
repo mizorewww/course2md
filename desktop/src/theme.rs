@@ -432,6 +432,161 @@ pub fn list_tile(index: usize, count: usize) -> gpui::Div {
     tile(list_corners(index, count))
 }
 
+/// The main label of a settings tile: 17px medium, as on the canvas.
+pub const TEXT_TILE_LABEL: Rems = rems(17. / 14.);
+
+/// The text scale of a tile's content. Settings tiles read one step larger
+/// than the workbench's processing options; both share one composition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TileScale {
+    /// Settings: 17px labels over 14px supporting text.
+    Regular,
+    /// The workbench's options: 16px labels over 13px supporting text.
+    Compact,
+}
+
+impl TileScale {
+    pub fn label_size(self) -> Rems {
+        match self {
+            TileScale::Regular => TEXT_TILE_LABEL,
+            TileScale::Compact => rems(16. / 14.),
+        }
+    }
+
+    pub fn support_size(self) -> Rems {
+        match self {
+            TileScale::Regular => TEXT_SETTINGS_AUX,
+            TileScale::Compact => rems(13. / 14.),
+        }
+    }
+
+    /// A tile's main label, medium weight.
+    pub fn label(
+        self,
+        id: impl Into<gpui::ElementId>,
+        value: impl Into<gpui::SharedString>,
+    ) -> gpui::Stateful<gpui::Div> {
+        use gpui::prelude::*;
+        accessible_text(id, value)
+            .text_size(self.label_size())
+            .when(self == TileScale::Regular, |label| {
+                label.line_height(rems(24. / 14.))
+            })
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(color(INK))
+    }
+
+    /// Supporting text under a tile's label, regular gray.
+    pub fn support(
+        self,
+        id: impl Into<gpui::ElementId>,
+        value: impl Into<gpui::SharedString>,
+    ) -> gpui::Stateful<gpui::Div> {
+        use gpui::prelude::*;
+        accessible_text(id, value)
+            .min_w_0()
+            .whitespace_normal()
+            .text_size(self.support_size())
+            .when(self == TileScale::Regular, |support| {
+                support.line_height(rems(20. / 14.))
+            })
+            .font_weight(gpui::FontWeight::NORMAL)
+            .text_color(color(GRAY))
+    }
+
+    /// A tile's text column: its label and, when present, the value or
+    /// explanation under it.
+    pub fn text(
+        self,
+        id: impl Into<gpui::ElementId>,
+        label: impl Into<gpui::SharedString>,
+        support: Option<gpui::SharedString>,
+    ) -> gpui::Div {
+        use gpui::prelude::*;
+        let id = id.into();
+        gpui_component::v_flex()
+            .flex_1()
+            .min_w_0()
+            .gap(rems(2. / 14.))
+            .child(self.label(id.clone(), label))
+            .when_some(support, |column, support| {
+                column.child(
+                    self.support(gpui::SharedString::from(format!("{id:?}-support")), support),
+                )
+            })
+    }
+}
+
+/// A settings tile's main label (`TileScale::Regular`).
+pub fn tile_label(
+    id: impl Into<gpui::ElementId>,
+    value: impl Into<gpui::SharedString>,
+) -> gpui::Stateful<gpui::Div> {
+    TileScale::Regular.label(id, value)
+}
+
+/// Supporting text under a settings tile's label (`TileScale::Regular`).
+pub fn tile_support(
+    id: impl Into<gpui::ElementId>,
+    value: impl Into<gpui::SharedString>,
+) -> gpui::Stateful<gpui::Div> {
+    TileScale::Regular.support(id, value)
+}
+
+/// A settings tile's text column (`TileScale::Regular`).
+pub fn tile_text(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<gpui::SharedString>,
+    support: Option<gpui::SharedString>,
+) -> gpui::Div {
+    TileScale::Regular.text(id, label, support)
+}
+
+/// An explanation inside a tile: the information icon and supporting text.
+pub fn tile_info(id: impl Into<gpui::ElementId>, text: impl Into<gpui::SharedString>) -> gpui::Div {
+    use gpui::prelude::*;
+    gpui_component::h_flex()
+        .w_full()
+        .min_w_0()
+        .items_start()
+        .gap(rems(10. / 14.))
+        .child(
+            gpui::div()
+                .flex()
+                .flex_shrink_0()
+                .h(rems(20. / 14.))
+                .items_center()
+                .child(
+                    crate::icons::info()
+                        .size(rems(18. / 14.))
+                        .text_color(color(GRAY)),
+                ),
+        )
+        .child(tile_support(id, text).flex_1())
+}
+
+/// The trailing chevron of a tile that opens something.
+pub fn tile_chevron() -> gpui_component::Icon {
+    use gpui::Styled;
+    crate::icons::chevron_right()
+        .size(rems(20. / 14.))
+        .flex_shrink_0()
+        .text_color(color(GRAY))
+}
+
+/// The chevron of an in-place disclosure; it turns over when open.
+pub fn disclosure_chevron(open: bool) -> gpui_component::Icon {
+    use gpui::Styled;
+    if open {
+        crate::icons::chevron_up()
+    } else {
+        crate::icons::chevron_down()
+    }
+    .size(rems(20. / 14.))
+    .flex_shrink_0()
+    .text_color(color(GRAY))
+}
+
 /// A distinct color family for a category icon: a tonal container and its
 /// content color, blended from the current surface so every palette keeps
 /// its own ground and contrast.

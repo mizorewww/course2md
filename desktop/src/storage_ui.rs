@@ -1792,7 +1792,7 @@ impl Desktop {
                                                 .gap(rems(10. / 14.))
                                                 .items_center()
                                                 .flex_wrap()
-                                                .child(crate::settings_ui::tile_label(
+                                                .child(tile_label(
                                                     ("storage-location-name", index),
                                                     library.name.clone(),
                                                 ))
@@ -1804,7 +1804,7 @@ impl Desktop {
                                                 }),
                                         )
                                         .child(
-                                            crate::settings_ui::tile_support(
+                                            tile_support(
                                                 ("storage-location-path", index),
                                                 root.display().to_string(),
                                             )
@@ -1822,18 +1822,15 @@ impl Desktop {
                             check.and_then(|check| check.problem.clone()),
                             |card, problem| {
                                 card.child(
-                                    crate::settings_ui::tile_support(
-                                        ("storage-location-problem", index),
-                                        problem,
-                                    )
-                                    .pl(rems(64. / 14.))
-                                    .text_color(color(DANGER)),
+                                    tile_support(("storage-location-problem", index), problem)
+                                        .pl(rems(64. / 14.))
+                                        .text_color(color(DANGER)),
                                 )
                             },
                         )
                         .when(needs_reassociation, |card| {
                             card.child(
-                                crate::settings_ui::tile_support(
+                                tile_support(
                                     ("storage-association-needed", index),
                                     course2md::tr!("无法确认这是原来的笔记库，请检查后重新关联"),
                                 )
@@ -1842,12 +1839,10 @@ impl Desktop {
                             )
                         })
                         .when(default && several, |card| {
-                            card.child(div().pl(rems(64. / 14.)).child(
-                                crate::settings_ui::tile_info(
-                                    "storage-policy",
-                                    course2md::tr!("更改默认位置只影响后续生成的笔记"),
-                                ),
-                            ))
+                            card.child(div().pl(rems(64. / 14.)).child(tile_info(
+                                "storage-policy",
+                                course2md::tr!("更改默认位置只影响后续生成的笔记"),
+                            )))
                         }),
                 );
             }
@@ -1872,7 +1867,7 @@ impl Desktop {
                 .text_color(color(INK))
                 .child(icons::plus().size(rems(24. / 14.))),
         )
-        .child(crate::settings_ui::tile_text(
+        .child(tile_text(
             "register-storage-location-label",
             course2md::tr!("添加笔记库位置"),
             None,

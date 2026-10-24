@@ -75,7 +75,6 @@ fn option_switch_tile(
     hint: Option<&'static str>,
     switch: impl IntoElement,
 ) -> Div {
-    let id = id.into();
     h_flex()
         .w_full()
         .min_w_0()
@@ -85,26 +84,7 @@ fn option_switch_tile(
         .py(rems(12. / 14.))
         .gap(rems(12. / 14.))
         .items_center()
-        .child(
-            v_flex()
-                .flex_1()
-                .min_w_0()
-                .gap(px(2.))
-                .child(
-                    accessible_text(id.clone(), label)
-                        .text_size(TEXT_LEAD)
-                        .font_weight(FontWeight::MEDIUM)
-                        .whitespace_normal(),
-                )
-                .when_some(hint, |view, hint| {
-                    view.child(
-                        accessible_text(SharedString::from(format!("{id}-hint")), hint)
-                            .text_size(rems(13. / 14.))
-                            .text_color(color(GRAY))
-                            .whitespace_normal(),
-                    )
-                }),
-        )
+        .child(TileScale::Compact.text(id, label, hint.map(SharedString::from)))
         .child(div().flex_shrink_0().child(switch))
 }
 
@@ -2776,19 +2756,13 @@ impl Desktop {
         let library_label = v_flex()
             .flex_1()
             .min_w_0()
-            .gap(px(2.))
+            .gap(rems(2. / 14.))
+            .child(TileScale::Compact.label("import-library-label", course2md::tr!("笔记库")))
             .child(
-                accessible_text("import-library-label", course2md::tr!("笔记库"))
-                    .text_size(TEXT_LEAD)
-                    .font_weight(FontWeight::MEDIUM),
-            )
-            .child(
-                div()
-                    .text_size(rems(13. / 14.))
-                    .text_color(color(GRAY))
+                TileScale::Compact
+                    .support("import-library-name", library_name.clone())
                     .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(library_name.clone()),
+                    .text_ellipsis(),
             );
         if libraries.len() > 1 {
             let entity = cx.entity().downgrade();
@@ -2812,12 +2786,7 @@ impl Desktop {
                                 .items_center()
                                 .text_left()
                                 .child(library_label)
-                                .child(
-                                    icons::chevron_right()
-                                        .size(rems(20. / 14.))
-                                        .flex_shrink_0()
-                                        .text_color(color(GRAY)),
-                                ),
+                                .child(tile_chevron()),
                         )
                         .dropdown_menu(move |menu, _, _| {
                             libraries.iter().fold(menu, |menu, library| {
@@ -2948,11 +2917,7 @@ impl Desktop {
             .pr(rems(16. / 14.))
             .py(rems(1.))
             .gap(rems(10. / 14.))
-            .child(
-                accessible_text("import-exports-label", course2md::tr!("同时导出"))
-                    .text_size(TEXT_LEAD)
-                    .font_weight(FontWeight::MEDIUM),
-            )
+            .child(TileScale::Compact.label("import-exports-label", course2md::tr!("同时导出")))
             .child(choices)
     }
 

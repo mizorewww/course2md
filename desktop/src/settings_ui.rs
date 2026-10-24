@@ -207,81 +207,6 @@ fn setting_label(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Di
     div().child(tile_label(id, value))
 }
 
-/// The main label of a settings tile: 17px medium, as on the canvas.
-pub(crate) const TEXT_TILE_LABEL: Rems = rems(17. / 14.);
-
-pub(crate) fn tile_label(
-    id: impl Into<ElementId>,
-    value: impl Into<SharedString>,
-) -> Stateful<Div> {
-    accessible_text(id, value)
-        .text_size(TEXT_TILE_LABEL)
-        .line_height(rems(24. / 14.))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(color(INK))
-}
-
-/// Supporting text under a tile's label: 14px regular gray.
-pub(crate) fn tile_support(
-    id: impl Into<ElementId>,
-    value: impl Into<SharedString>,
-) -> Stateful<Div> {
-    accessible_text(id, value)
-        .min_w_0()
-        .whitespace_normal()
-        .text_size(TEXT_SETTINGS_AUX)
-        .line_height(rems(20. / 14.))
-        .font_weight(FontWeight::NORMAL)
-        .text_color(color(GRAY))
-}
-
-/// A tile's text column: its label and, when present, the value or
-/// explanation under it.
-pub(crate) fn tile_text(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    support: Option<SharedString>,
-) -> Div {
-    let id = id.into();
-    v_flex()
-        .flex_1()
-        .min_w_0()
-        .gap(rems(2. / 14.))
-        .child(tile_label(id.clone(), label))
-        .when_some(support, |column, support| {
-            column.child(tile_support(
-                SharedString::from(format!("{id:?}-support")),
-                support,
-            ))
-        })
-}
-
-/// The trailing chevron of a tile that opens something.
-pub(crate) fn tile_chevron() -> Icon {
-    icons::chevron_right()
-        .size(rems(20. / 14.))
-        .flex_shrink_0()
-        .text_color(color(GRAY))
-}
-
-/// An explanation inside a tile: the information icon and 14px gray text.
-pub(crate) fn tile_info(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .items_start()
-        .gap(rems(10. / 14.))
-        .child(
-            div()
-                .flex()
-                .flex_shrink_0()
-                .h(rems(20. / 14.))
-                .items_center()
-                .child(icons::info().size(rems(18. / 14.)).text_color(color(GRAY))),
-        )
-        .child(tile_support(id, text).flex_1())
-}
-
 /// A whole tile that acts: the surface with M3 state layers, the tile's
 /// corners and its padding. Callers add the label column and trailing items.
 pub(crate) fn tile_button(id: impl Into<ElementId>, outer: [bool; 4], cx: &App) -> Button {
@@ -357,18 +282,6 @@ pub(crate) fn tile_disclosure(
     cx: &App,
 ) -> Button {
     tile_button(id, outer, cx).selected(open)
-}
-
-/// The chevron of an in-place disclosure; it turns over when open.
-pub(crate) fn disclosure_chevron(open: bool) -> Icon {
-    if open {
-        icons::chevron_up()
-    } else {
-        icons::chevron_down()
-    }
-    .size(rems(20. / 14.))
-    .flex_shrink_0()
-    .text_color(color(GRAY))
 }
 
 /// A small outlined fact chip beside a tile's label, e.g. the local engine.
