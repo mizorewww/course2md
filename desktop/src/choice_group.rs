@@ -80,8 +80,8 @@ impl SingleChoiceGroup {
         self.value = Some(value.into());
         self
     }
-    /// Fill the parent's width: each option is as wide as its content plus an
-    /// equal share of the spare width.
+    /// Fill the parent's width in equal options, each at least as wide as its
+    /// label; options wrap to another row only when their labels cannot fit.
     pub fn full_width(mut self) -> Self {
         self.full_width = true;
         self
@@ -271,7 +271,9 @@ fn item_style<T: Styled + StatefulInteractiveElement + gpui::prelude::FluentBuil
         .flex()
         .items_center()
         .justify_center()
-        .min_w_0()
+        // Content-width options may shrink and ellipsize; filling options keep
+        // their automatic minimum, the width of their whole label.
+        .when(!fill, |item| item.min_w_0())
         .h(height)
         .min_h(height)
         // With the 2px focus border: 16px to the content of a content-sized
@@ -287,10 +289,11 @@ fn item_style<T: Styled + StatefulInteractiveElement + gpui::prelude::FluentBuil
         .text_size(super::TEXT_BODY)
         .font_weight(FontWeight::MEDIUM)
         // Content-width options keep the default shrink so a narrow parent
-        // ellipsizes labels instead of overflowing. Filling options start
-        // from their content and share the spare width, so a long label
-        // ("Speech recognition") never truncates beside a short one.
-        .when(fill, |item| item.flex_auto())
+        // ellipsizes labels instead of overflowing. Filling options are equal
+        // shares of the row (a zero basis), floored at their label's own
+        // width: a long label ("Speech recognition") takes what it needs and
+        // never truncates, and the others split the rest equally.
+        .when(fill, |item| item.flex_1())
         .when(!disabled, |item| {
             item.hover(move |style| style.bg(paint.hover))
                 .active(move |style| style.bg(paint.press))
@@ -383,8 +386,7 @@ impl RenderOnce for SingleChoiceGroup {
                     .insert(format!("{debug_kind}-{index}"), paint)
             });
             let content = gpui_base::h_flex()
-                .max_w_full()
-                .min_w_0()
+                .when(!fill, |content| content.max_w_full().min_w_0())
                 .gap(rems(8. / 14.))
                 .items_center()
                 // Text-only options center their label; no empty icon slot.
@@ -407,9 +409,8 @@ impl RenderOnce for SingleChoiceGroup {
                 })
                 .child(
                     div()
-                        .min_w_0()
+                        .when(!fill, |label| label.min_w_0().text_ellipsis())
                         .whitespace_nowrap()
-                        .text_ellipsis()
                         .when(cfg!(test), |label| {
                             label.debug_selector(move || {
                                 format!("{debug_kind}-choice-label-{index}")
@@ -716,8 +717,10 @@ mod tests {
             assert!((icon_before[index].center().y - options[index].center().y).abs() <= px(0.5));
             assert!((before[index].center().y - options[index].center().y).abs() <= px(0.5));
         }
-        // The longest label gets the widest option; spare width is shared.
-        assert!(options[2].size.width > options[0].size.width);
+        // Labels that fit an equal share get equal options.
+        for option in &options[1..] {
+            assert!((option.size.width - options[0].size.width).abs() <= px(0.5));
+        }
         // Separate buttons with a 2px gap that together fill the parent.
         for pair in options.windows(2) {
             assert!((pair[1].left() - pair[0].right() - px(2.)).abs() <= px(0.5));
@@ -773,6 +776,87 @@ mod tests {
         }
         cx.simulate_click(options[2].center(), Modifiers::default());
         cx.update(|_, cx| assert_eq!(view.read(cx).changes, 1));
+    }
+
+    struct LongLabelHarness {
+        width: Pixels,
+    }
+
+    const LONG_LABELS: [&str; 3] = ["Auto", "Subtitles", "Speech recognition"];
+
+    impl Render for LongLabelHarness {
+        fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            window.set_rem_size(px(14.));
+            div().w(self.width).child(
+                SingleChoiceGroup::new("long-label-choice", "Text source")
+                    .options(LONG_LABELS.map(|label| (label, label)))
+                    .icon("Auto", crate::icons::settings())
+                    .icon("Subtitles", crate::icons::article())
+                    .icon("Speech recognition", crate::icons::mic())
+                    .segmented()
+                    .selected("Auto"),
+            )
+        }
+    }
+
+    /// Equal options are floored at their label: a label wider than an equal
+    /// share keeps its whole width, the others share the rest equally, and
+    /// when even the labels cannot fit the options wrap instead of clipping.
+    #[gpui::test]
+    fn filling_options_never_truncate_a_label_wider_than_its_share(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| LongLabelHarness { width: px(480.) });
+        draw_choice(cx);
+        let required = cx.update(|window, _| {
+            let mut font = window.text_style().font();
+            font.weight = FontWeight::MEDIUM;
+            LONG_LABELS.map(|label| {
+                window
+                    .text_system()
+                    .shape_line(
+                        label.into(),
+                        px(14.),
+                        &[TextRun {
+                            len: label.len(),
+                            font: font.clone(),
+                            ..Default::default()
+                        }],
+                        None,
+                    )
+                    .width
+                    .ceil()
+            })
+        });
+        let labels = [
+            "full-choice-label-0",
+            "full-choice-label-1",
+            "full-choice-label-2",
+        ];
+        let check = |cx: &mut VisualTestContext| {
+            for (index, selector) in labels.into_iter().enumerate() {
+                let label = choice_bounds(cx, selector);
+                let option = choice_bounds(cx, OPTION_SELECTORS[index]);
+                assert!(
+                    label.size.width + px(0.5) >= required[index],
+                    "{selector} truncated"
+                );
+                assert!(label.right() <= option.right() + px(0.5));
+            }
+        };
+        check(cx);
+        let options = [0, 1, 2].map(|index| choice_bounds(cx, OPTION_SELECTORS[index]));
+        assert!(options[2].size.width > options[0].size.width);
+        assert!((options[1].size.width - options[0].size.width).abs() <= px(0.5));
+        // Too narrow for all three labels on one row: they wrap.
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.width = px(220.);
+                cx.notify();
+            })
+        });
+        draw_choice(cx);
+        check(cx);
+        let wrapped = [0, 1, 2].map(|index| choice_bounds(cx, OPTION_SELECTORS[index]));
+        assert!(wrapped[2].top() > wrapped[0].top());
     }
 
     const OPTION_SELECTORS: [&str; 4] = [
