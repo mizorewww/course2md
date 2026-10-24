@@ -928,6 +928,9 @@ impl Desktop {
                 };
                 if let Some(field) = field {
                     if field == Field::Title {
+                        // The name field is in the processing options; show
+                        // them for this fix without changing the saved choice.
+                        self.desktop_settings.home_options = true;
                         self.pending_conversion = None;
                         self.following_conversion = None;
                     }

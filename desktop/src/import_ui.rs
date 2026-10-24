@@ -3,8 +3,6 @@ use super::*;
 
 /// Hero and preview share this ruler; the lower workbench reflows independently.
 const WORKBENCH_WIDTH: f32 = 760.;
-/// The recent notes and processing options region below the hero.
-const LOWER_WIDTH: f32 = 1152.;
 /// Spacing between workbench sections and the inset of its panels.
 const SECTION_GAP: Rems = rems(24. / 14.);
 /// Rhythm inside the hero: title, link pill, drop hint and preview card.
@@ -280,6 +278,16 @@ fn submitted_input_task<'a>(
         }
         task = next;
     }
+}
+
+/// The submitted task still owns this input until it finishes. Its plan
+/// copied the options at submission, so the form cannot change them.
+fn locked_input_task<'a>(
+    draft: &workspace::Draft,
+    tasks: &'a [workspace::TaskRecord],
+    input: &str,
+) -> Option<&'a workspace::TaskRecord> {
+    submitted_input_task(draft, tasks, input).filter(|task| !task.state.finished())
 }
 
 fn completed_input_task<'a>(
@@ -1046,7 +1054,7 @@ impl Desktop {
     ) {
         let saved = self.update_task_options(edit, cx);
         if !self.task_options().uses_cloud_provider()
-            // The options panel, with its model status, is always on screen.
+            // The options panel shows this model's status.
             && (self.import_uses_speech()
                 || self.task_options().source_mode != TranscriptSource::Subtitle)
         {
@@ -1063,6 +1071,7 @@ impl Desktop {
     pub fn box_source_input(
         &self,
         preview_extra: Option<Div>,
+        options: Option<AnyElement>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -1223,8 +1232,16 @@ impl Desktop {
                         cx,
                     )),
             ));
-        } else if self.source_preview.is_some() && self.workbench_linked_task(cx).is_none() {
-            view = view.child(self.box_selected_video(preview_extra, window, cx));
+        } else if self.preview_card_shown(cx) {
+            // The options tile joins the bottom of the card it applies to.
+            view = view.child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(TILE_GAP)
+                    .child(self.box_selected_video(preview_extra, options.is_some(), window, cx))
+                    .children(options),
+            );
         }
         if let Some(title) = &self.source_collection_title {
             view = self.candidate_list_view(view, title, cx);
@@ -1764,6 +1781,7 @@ impl Desktop {
     fn box_selected_video(
         &self,
         extra: Option<Div>,
+        attached: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -1984,6 +2002,10 @@ impl Desktop {
                 .min_w_0()
                 .p(rems(16. / 14.))
                 .rounded(RADIUS_HERO)
+                .when(attached, |card| {
+                    card.rounded_bl(TILE_INNER_RADIUS)
+                        .rounded_br(TILE_INNER_RADIUS)
+                })
                 .bg(color(SURFACE))
                 .on_drop(
                     cx.listener(|this, paths: &gpui::ExternalPaths, window, cx| {
@@ -2890,55 +2912,180 @@ impl Desktop {
             .child(choices)
     }
 
-    /// The processing options beside the input: one header, then connected
-    /// tile groups for the text source, AI processing and saving.
-    fn workbench_options(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .gap(rems(20. / 14.))
+    /// The preview card is on screen (not replaced by reading or a task).
+    fn preview_card_shown(&self, cx: &App) -> bool {
+        self.preview_cancel.is_none()
+            && self.source_preview.is_some()
+            && self.workbench_linked_task(cx).is_none()
+    }
+
+    /// The current input's submitted task while it still owns that input.
+    /// Its plan was fixed at submission, so the options are not editable
+    /// until the next video replaces the input.
+    fn locked_input_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
+        let state = &self.workspace.as_ref()?.state;
+        locked_input_task(state.draft()?, &state.tasks, &self.value(Field::Source, cx))
+    }
+
+    /// Show or hide the processing options and remember the choice.
+    pub(super) fn set_home_options(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.desktop_settings.home_options = open;
+        let mut preferences = self.application_edit_base();
+        preferences.desktop.home_options = open;
+        self.commit_application(preferences, cx);
+        cx.notify();
+    }
+
+    /// Clear the submitted link so the next video starts from the saved
+    /// defaults. The submitted task keeps running.
+    pub(super) fn set_up_next_video(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The link field's observer prepares the next input and stops
+        // following the submitted task.
+        self.inputs[&Field::Source].update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.focus(window, cx);
+        });
+        self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
+        cx.notify();
+    }
+
+    /// The processing options for the current input. A header tile names the
+    /// video they apply to and shows or hides them; under a preview it is
+    /// joined to the video card. While the input's own task is in flight, the
+    /// options it was submitted with cannot change, so the panel offers to
+    /// set up the next video instead.
+    fn workbench_options(
+        &self,
+        attached: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let open = self.desktop_settings.home_options;
+        // A task shown in the card's place (its result opening, or a partial
+        // result needing attention) also owns the input.
+        let locked = self
+            .locked_input_task(cx)
+            .or_else(|| self.workbench_linked_task(cx))
+            .map(|task| {
+                if task.plan.title.trim().is_empty() {
+                    task.plan.source.title.clone()
+                } else {
+                    task.plan.title.clone()
+                }
+            });
+        let applies_to: SharedString = match (&locked, &self.source_preview) {
+            (Some(title), _) => course2md::tr!("「{}」按提交时的设置处理", title).into(),
+            (None, Some(source)) if attached => {
+                course2md::tr!("仅对「{}」生效", source.title).into()
+            }
+            _ => course2md::tr!("仅对下一个视频生效").into(),
+        };
+        let toggle_label = if open {
+            course2md::tr!("收起处理选项")
+        } else {
+            course2md::tr!("展开处理选项")
+        };
+        let header_bottom = !(open && locked.is_some());
+        let header = TileScale::Compact
+            .button(
+                "generation-options-toggle",
+                [!attached, !attached, header_bottom, header_bottom],
+                cx,
+            )
+            .accessibility_label(toggle_label)
+            .on_click(cx.listener(move |this, _, _, cx| this.set_home_options(!open, cx)))
             .child(
-                h_flex()
-                    .w_full()
-                    .min_h(rems(48. / 14.))
-                    .pl(rems(4. / 14.))
-                    .gap(rems(12. / 14.))
-                    .items_center()
+                TileScale::Compact
+                    .row()
+                    .child(
+                        icons::tune()
+                            .size(rems(22. / 14.))
+                            .flex_shrink_0()
+                            .text_color(color(GRAY)),
+                    )
                     .child(
                         v_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap(px(2.))
+                            .gap(rems(2. / 14.))
                             .child(
                                 accessible_text(
                                     "generation-options-title",
                                     course2md::tr!("处理选项"),
                                 )
                                 .role(Role::Heading)
-                                .text_size(rems(22. / 14.))
-                                .line_height(rems(28. / 14.))
-                                .font_weight(FontWeight::NORMAL),
+                                .text_size(TileScale::Compact.label_size())
+                                .font_weight(FontWeight::MEDIUM),
                             )
                             .child(
-                                div()
-                                    .text_size(rems(13. / 14.))
-                                    .text_color(color(GRAY))
-                                    .child(course2md::tr!("仅对本次生效")),
+                                TileScale::Compact
+                                    .support("generation-options-applies-to", applies_to)
+                                    .text_ellipsis()
+                                    .line_clamp(2),
                             ),
                     )
                     .child(
-                        icon_button("reset-task-overrides", CONTROL_HEIGHT, true, cx)
-                            .icon(icons::restart())
-                            .accessibility_label(course2md::tr!("恢复 AI 默认"))
-                            .tooltip(course2md::tr!("恢复 AI 默认"))
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.reset_task_ai_overrides(cx)),
-                            ),
+                        if open {
+                            icons::chevron_up()
+                        } else {
+                            icons::chevron_down()
+                        }
+                        .size(rems(20. / 14.))
+                        .flex_shrink_0()
+                        .text_color(color(GRAY)),
                     ),
-            )
+            );
+        if locked.is_some() {
+            let next = TileScale::Compact
+                .button("set-up-next-video", [false, false, true, true], cx)
+                .on_click(cx.listener(|this, _, window, cx| this.set_up_next_video(window, cx)))
+                .child(
+                    TileScale::Compact
+                        .row()
+                        .child(
+                            icons::plus()
+                                .size(rems(22. / 14.))
+                                .flex_shrink_0()
+                                .text_color(color(ACCENT)),
+                        )
+                        .child(TileScale::Compact.text(
+                            "set-up-next-video-label",
+                            course2md::tr!("设置下一个视频"),
+                            Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
+                        )),
+                );
+            return v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(TILE_GAP)
+                .child(header)
+                .child(motion::disclosure(
+                    "generation-options-body",
+                    open,
+                    v_flex().w_full().min_w_0().child(next),
+                ));
+        }
+        let body = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rems(20. / 14.))
             .child(self.import_text_mode_options(window, cx))
             .child(self.import_ai_options(cx))
             .child(self.import_destination(cx))
+            .child(
+                h_flex().w_full().justify_end().child(
+                    text_button("reset-task-overrides", cx)
+                        .icon(icons::restart())
+                        .label(course2md::tr!("恢复 AI 默认"))
+                        .on_click(cx.listener(|this, _, _, cx| this.reset_task_ai_overrides(cx))),
+                ),
+            );
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rems(20. / 14.))
+            .child(header)
+            .child(motion::disclosure("generation-options-body", open, body))
     }
 
     fn existing_source_note(&self) -> Option<&Course> {
@@ -3153,6 +3300,18 @@ impl Desktop {
         } else {
             None
         };
+        // The options belong to one input: joined to its preview card when
+        // there is one, otherwise at the end of the hero.
+        let attached = self.preview_card_shown(cx);
+        let options = motion::state_enter(
+            "generation-options-panel",
+            self.workbench_options(attached, window, cx),
+        );
+        let (attached_options, options) = if attached {
+            (Some(options), None)
+        } else {
+            (None, Some(options))
+        };
         let input = v_flex()
             .w_full()
             .min_w_0()
@@ -3160,7 +3319,7 @@ impl Desktop {
             .when(!self.online(), |input| {
                 input.child(self.source_kind_tabs(cx))
             })
-            .child(self.box_source_input(preview_extra, window, cx));
+            .child(self.box_source_input(preview_extra, attached_options, window, cx));
         let mut view = v_flex()
             .gap(HERO_GAP)
             .w_full()
@@ -3213,66 +3372,22 @@ impl Desktop {
                     .bg(color(SURFACE)),
             ));
         }
-        let scale = f32::from(window.rem_size()) / 14.;
-        let column = crate::views::shell_content_width(Page::New, window);
-        let wide = column >= 960. * scale;
-        // Options stay beside the input they apply to, except while the
-        // input's own submitted task is still in flight.
-        let show_options = self
-            .current_input_task(cx)
-            .is_none_or(|task| task.state.finished());
+        view = view.children(options);
         let active = self.workbench_active_tasks_section(window, cx);
         let recent = self
             .recent_notes_section(cx)
             .map(|recent| motion::enter("home-recent-notes", recent));
-        let options = show_options.then(|| {
-            motion::state_enter(
-                "generation-options-panel",
-                self.workbench_options(window, cx),
-            )
-        });
         // With nothing below it, the input moves toward the optical center.
-        let quiet = recent.is_none() && active.is_none() && options.is_none();
-        let gap = rems(32. / 14.);
-        // Stacked, everything below the hero shares its column.
-        let lower_width = if wide { LOWER_WIDTH } else { WORKBENCH_WIDTH };
-        let mut lower = div()
-            .flex()
+        let quiet = recent.is_none() && active.is_none() && !self.desktop_settings.home_options;
+        // Below the hero, everything shares its column, so the options stay
+        // with the video they apply to rather than beside the recent notes.
+        let lower_width = WORKBENCH_WIDTH;
+        let lower = v_flex()
             .w_full()
             .min_w_0()
             .max_w(rems(lower_width / 14.))
             .mx_auto()
-            .gap(gap)
-            .items_start();
-        if wide {
-            // Alone in the row, the options sit under the input they apply to.
-            lower = lower.when(recent.is_none(), |row| row.justify_center());
-            if let Some(recent) = recent {
-                lower = lower.child(div().flex_1().min_w_0().child(recent));
-            }
-            if let Some(options) = options {
-                lower = lower.child(
-                    div()
-                        .w(rems(if column < 1100. * scale {
-                            360. / 14.
-                        } else {
-                            400. / 14.
-                        }))
-                        .flex_shrink_0()
-                        .child(options),
-                );
-            }
-        } else {
-            // Narrow windows put the options for this input first, on the
-            // hero's column so the page keeps one left edge.
-            lower = lower.flex_col();
-            if let Some(options) = options {
-                lower = lower.child(options);
-            }
-            if let Some(recent) = recent {
-                lower = lower.child(recent);
-            }
-        }
+            .children(recent);
         let hero_top = motion::value("home-hero-top", hero_top(quiet, compact), window, cx);
         let mut view = v_flex()
             .w_full()
@@ -3645,8 +3760,8 @@ impl Desktop {
 mod tests {
     use super::{
         ConversionFollow, ConversionGate, GateInputs, automatic_subtitle_fallback,
-        completed_input_task, conversion_gate, submitted_input_task, subtitle_needs_confirmation,
-        uses_speech,
+        completed_input_task, conversion_gate, locked_input_task, submitted_input_task,
+        subtitle_needs_confirmation, uses_speech,
     };
     use crate::{source, workspace};
     use course2md::config::TranscriptSource;
@@ -3984,6 +4099,89 @@ mod tests {
         let expected = input.clone();
         ConversionFollow::interrupt_for_reader_viewer(&mut input);
         assert_eq!(input, expected);
+    }
+
+    #[test]
+    fn a_submitted_input_locks_its_options_until_the_next_video_replaces_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut workspace = workspace::Workspace::open_at_inline(
+            root.path().join("workspace.json"),
+            root.path().join("library"),
+            Default::default(),
+        )
+        .unwrap();
+        let state = &mut workspace.state;
+        let source = source::Source {
+            input: "https://www.bilibili.com/video/BVfixture".into(),
+            identity: "video-fixture".into(),
+            online: true,
+            ..Default::default()
+        };
+        let plan = workspace::TaskPlan {
+            operation: Default::default(),
+            source: source.clone(),
+            source_id: source.identity.clone(),
+            title: "已提交的标题".into(),
+            library_id: state.default_library.clone(),
+            folder: None,
+            subtitle: None,
+            config: planned_config(),
+            asr_service: None,
+            ai_service: None,
+        };
+        // Before submission the options belong to the form.
+        let draft = state.draft_mut().unwrap();
+        draft.change_source(source.input.clone());
+        draft.source = Some(source.clone());
+        assert!(locked_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none());
+        let (id, _) = state.enqueue(plan.clone(), None).unwrap();
+        state.draft_mut().unwrap().submitted_task = Some(id.clone());
+        // Leaving for the task list and coming back home keeps an in-flight
+        // input, so the options panel must offer the next video instead of
+        // vanishing.
+        for in_flight in [
+            workspace::TaskState::Queued,
+            workspace::TaskState::Running,
+            workspace::TaskState::Pausing,
+            workspace::TaskState::Paused,
+            workspace::TaskState::NeedsAttention,
+            workspace::TaskState::Uncertain,
+        ] {
+            state.task_mut(&id).unwrap().state = in_flight;
+            let draft = state.draft().unwrap();
+            assert!(super::retired_input_task(draft, &state.tasks, &source.input).is_none());
+            assert_eq!(
+                locked_input_task(draft, &state.tasks, &source.input)
+                    .unwrap()
+                    .id,
+                id
+            );
+        }
+        for finished in [
+            workspace::TaskState::Complete,
+            workspace::TaskState::Partial,
+            workspace::TaskState::Cancelled,
+        ] {
+            state.task_mut(&id).unwrap().state = finished;
+            assert!(
+                locked_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
+            );
+        }
+        // 设置下一个视频 clears the link: the next input starts from the
+        // saved defaults and the submitted task keeps its own plan.
+        state.task_mut(&id).unwrap().state = workspace::TaskState::Running;
+        let defaults = crate::ConversionOptions {
+            summarize: !state.draft().unwrap().options.summarize,
+            ..state.draft().unwrap().options.clone()
+        };
+        assert!(state.prepare_next_import("", defaults.clone()));
+        let next = state.draft().unwrap();
+        assert!(next.submitted_task.is_none());
+        assert!(next.options == defaults);
+        assert!(locked_input_task(next, &state.tasks, "").is_none());
+        let task = state.task(&id).unwrap();
+        assert_eq!(task.state, workspace::TaskState::Running);
+        assert!(task.plan == plan);
     }
 
     #[test]

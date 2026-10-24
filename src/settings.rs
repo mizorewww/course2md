@@ -87,6 +87,8 @@ pub struct DesktopSettings {
     pub reduce_motion: bool,
     /// The home page lists recent notes below the input.
     pub home_recent_notes: bool,
+    /// The home page shows the processing options below the input.
+    pub home_options: bool,
 }
 
 /// New libraries open as a card grid; a saved choice is kept as written.
@@ -99,6 +101,7 @@ impl Default for DesktopSettings {
             system_titlebar: false,
             reduce_motion: false,
             home_recent_notes: true,
+            home_options: true,
         }
     }
 }

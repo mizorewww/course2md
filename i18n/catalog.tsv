@@ -86,6 +86,9 @@ CoreML 模型加载失败 / CoreML model loading failed	CoreML 模型加载失�
 Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}; Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}
 HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}; response exceeds 128 KiB, remainder not read	HTTP {}；回應超過 128 KiB，未讀取其餘內容	HTTP {};応答が 128 KiB を超えているため、残りは読み取られていません
 Intel NPU 加速	Intel NPU 加速	Intel NPU acceleration	Intel NPU 加速	Intel NPU アクセラレーション
+「{}」按提交时的设置处理	「{}」按提交时的设置处理	“{}” uses the settings it was submitted with	「{}」按提交時的設定處理	「{}」は送信時の設定で処理されます
+仅对「{}」生效	仅对「{}」生效	Applies only to “{}”	僅對「{}」生效	「{}」にのみ適用されます
+仅对下一个视频生效	仅对下一个视频生效	Applies only to the next video	僅對下一個影片生效	次の動画にのみ適用されます
 安装 uv 后才能用 Intel NPU 识别	安装 uv 后才能用 Intel NPU 识别	Intel NPU transcription needs uv installed	安裝 uv 後才能用 Intel NPU 辨識	Intel NPU での認識には uv のインストールが必要です
 NPU 启动器	NPU 启动器	NPU launcher	NPU 啟動器	NPUランチャー
 NPU 模型准备未完成 / NPU model preparation did not complete	NPU 模型准备未完成	NPU model preparation did not complete	NPU 模型準備未完成	NPUモデルの準備が完了していません
@@ -246,7 +249,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 仅保存	仅保存	Save only	僅儲存	保存のみ
 仅发送文字 / Send text only	仅发送文字	Send text only	僅傳送文字	テキストのみを送信する
 仅字幕	仅字幕	Subtitles only	僅字幕	字幕のみ
-仅对本次生效	仅对本次生效	Applies to this time only	僅對本次生效	今回のみ有効
 仅影响以后生成的笔记	仅影响以后生成的笔记	Only affects notes generated later	僅影響以後生成的筆記	今後生成されるノートにのみ影響します
 仅用于没有字幕的视频	仅用于没有字幕的视频	Only for videos without subtitles	僅用於沒有字幕的影片	字幕のない動画のみ
 仅用于这次笔记	仅用于这次笔记	Only for this note	僅用於這次筆記	このノートのみ
@@ -594,6 +596,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 尚未验证	尚未验证	Not verified yet	尚未驗證	まだ検証されていません
 就绪 / Ready	就绪	Ready	就緒	準備完了
 展开	展开	Expand	展開	展開
+展开处理选项	展开处理选项	Expand processing options	展開處理選項	処理オプションを展開する
 工作目录不能位于已发布版本内 / Work directory overlaps published versions	工作目录不能位于已发布版本内	Work directory overlaps published versions	工作目錄不能位於已發布版本內	作業ディレクトリを公開済みのバージョン内に置くことはできません
 已下载	已下载	Downloaded	已下載	ダウンロード済み
 已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	Inputs and tasks have been restored from backup. Unable to confirm the last operation, the unfinished task has been suspended.	已從備份恢復輸入和任務。無法確認最後一次操作，未完成任務已暫停。	入力とタスクはバックアップから復元されました。最後の操作を確認できず、未完了のタスクは中断されました。
@@ -861,6 +864,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 收起	收起	Collapse	收合	折りたたむ
 收起准备详情	收起准备详情	Collapse preparation details	收起準備詳情	準備の詳細を折りたたむ
 收起处理详情	收起处理详情	Collapse processing details	收起處理詳情	処理の詳細を折りたたむ
+收起处理选项	收起处理选项	Collapse processing options	收起處理選項	処理オプションを折りたたむ
 收起已完成的处理	收起已完成的处理	Collapse completed processing	收起已完成的處理	完了した処理を折りたたむ
 收起技术详情	收起技术详情	Hide technical details	收合技術詳情	技術的な詳細を隠す
 收起文字	收起文字	Collapse text	收起文字	テキストを折りたたむ
@@ -1403,6 +1407,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 清理旧位置备份	清理旧位置备份	Clean up old location backups	清理舊位置備份	古い場所のバックアップを整理
 清理旧位置备份…	清理旧位置备份…	Clean up old location backups…	清理舊位置備份…	古い場所のバックアップを整理…
 清理旧位置备份？	清理旧位置备份？	Clean up old location backups?	清理舊位置備份？	古い場所のバックアップを整理しますか？
+清空链接，选项恢复为默认设置	清空链接，选项恢复为默认设置	Clears the link and returns the options to your defaults	清空連結，選項恢復為預設設定	リンクを消去し、オプションを既定の設定に戻します
 清除 AI 校对的地址、密钥、模型和 Codex 登录 / Clear the AI proofreading endpoint, key, model and Codex login	清除 AI 校对的地址、密钥、模型和 Codex 登录 / Clear the AI proofreading endpoint, key, model and Codex login	Clear the AI proofreading endpoint, key, model and Codex login	清除 AI 校對的網址、金鑰、模型與 Codex 登入	AI 校正のURL・キー・モデル・Codex ログインを消去
 清除 Bilibili 登录状态失败 / Could not remove Bilibili login	清除 Bilibili 登录状态失败	Could not remove Bilibili login	清除 Bilibili 登入狀態失敗	Bilibiliのログインステータスをクリアできませんでした
 清除 Codex 登录状态失败 / Could not remove Codex login	清除 Codex 登录状态失败	Could not remove Codex login	清除 Codex 登入狀態失敗	Codex ログイン ステータスのクリアに失敗しました
@@ -1479,6 +1484,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 目标文件夹无法访问，请选择已有的空文件夹	目标文件夹无法访问，请选择已有的空文件夹	The destination folder cannot be accessed. Select an existing empty folder.	目標資料夾無法存取，請選擇已有的空資料夾	宛先フォルダーにアクセスできません。既存の空のフォルダーを選択してください。
 目标文件缺少目录	目标文件缺少目录	Target file is missing directory	目標檔案缺少目錄	ターゲットファイルのディレクトリがありません
 目标缺少这次移动的识别记录，未修改目标内容	目标缺少这次移动的识别记录，未修改目标内容	The destination is missing the identification record for this move; its contents were not modified.	目標缺少這次移動的識別記錄，未修改目標內容	移動先にこの移動の識別記録がないため、内容は変更されていません。
+设置下一个视频	设置下一个视频	Set up the next video	設定下一個影片	次の動画を設定する
 跳过设置	跳过设置	Skip setup	略過設定	セットアップをスキップ
 短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	The short text says photosynthesis uses sunlight and releases oxygen; the summary did not keep this key information.	短文講述光合作用使用陽光並釋放氧氣，摘要未保留這些關鍵資訊	短い文章では光合成が太陽光を使い酸素を放出すると述べていますが、要約にはこの重要な情報が残っていません
 移动临时文件位置发生变化，未修改内容	移动临时文件位置发生变化，未修改内容	The location of the move's temporary file has changed; nothing was modified.	移動暫存檔案位置發生變化，未修改內容	移動用の一時ファイルの場所が変わったため、内容は変更されていません。
