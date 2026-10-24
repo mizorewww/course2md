@@ -292,7 +292,7 @@ fn decode(path: &Path, size: Size) -> Option<RenderImage> {
         _ => image,
     };
     let mut data = image.into_rgba8();
-    for pixel in data.chunks_exact_mut(4) {
+    for pixel in data.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Some(RenderImage::new([image::Frame::new(data)]))
