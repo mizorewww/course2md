@@ -660,51 +660,35 @@ impl Desktop {
         cx.notify();
         true
     }
-    /// Capture builds: `COURSE2MD_CAPTURE_SERVICE_EDITOR=ai|speech|dialog|confirm`
-    /// opens the service editor once Settings › 服务与账号 shows (`ai` and
-    /// `speech` as its settings page, `dialog` as the per-note dialog,
-    /// `confirm` the delete confirmation for a placeholder service), so
-    /// `PAGES=settings:services` captures it. Nothing is saved.
+    /// Capture builds: opens the service editor over Settings › 服务与账号
+    /// (`ai` and `speech` as its settings page, `dialog` as the per-note
+    /// dialog, `confirm` the delete confirmation for a placeholder service).
+    /// Nothing is saved.
     #[cfg(feature = "capture")]
-    pub(crate) fn capture_service_editor(&mut self, cx: &mut Context<Self>) {
-        thread_local! {
-            static OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) fn capture_service_editor(
+        &mut self,
+        kind: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match kind {
+            "speech" => {
+                self.open_settings_service_editor(ServicePurpose::Speech, None, window, cx);
+            }
+            "confirm" => self.confirm_delete_service("capture".into(), window, cx),
+            "dialog" => {
+                self.open_service_draft(
+                    ServiceDraft::new(ServicePurpose::Ai),
+                    Some("capture".into()),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+            _ => {
+                self.open_settings_service_editor(ServicePurpose::Ai, None, window, cx);
+            }
         }
-        if self.page != Page::Settings
-            || self.settings_tab != SettingsTab::Services
-            || self.settings_ui.editor.is_some()
-            || OPENED.get()
-        {
-            return;
-        }
-        let Ok(kind) = std::env::var("COURSE2MD_CAPTURE_SERVICE_EDITOR") else {
-            return;
-        };
-        OPENED.set(true);
-        let window = self.window;
-        cx.spawn(async move |this, cx| {
-            let _ = cx.update_window(window, |_, window, cx| {
-                let _ = this.update(cx, |this, cx| match kind.as_str() {
-                    "speech" => {
-                        this.open_settings_service_editor(ServicePurpose::Speech, None, window, cx);
-                    }
-                    "confirm" => this.confirm_delete_service("capture".into(), window, cx),
-                    "dialog" => {
-                        this.open_service_draft(
-                            ServiceDraft::new(ServicePurpose::Ai),
-                            Some("capture".into()),
-                            None,
-                            window,
-                            cx,
-                        );
-                    }
-                    _ => {
-                        this.open_settings_service_editor(ServicePurpose::Ai, None, window, cx);
-                    }
-                });
-            });
-        })
-        .detach();
     }
     fn focus_service_field(&self, field: FormField, window: &mut Window, cx: &mut App) {
         if let Some(editor) = &self.settings_ui.editor {

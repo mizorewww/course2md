@@ -2379,8 +2379,6 @@ impl Desktop {
     }
 
     pub(crate) fn onboarding_background_notice(&mut self, cx: &mut Context<Self>) -> Option<Div> {
-        #[cfg(feature = "capture")]
-        self.capture_service_editor(cx);
         if self.onboarding.active {
             return None;
         }

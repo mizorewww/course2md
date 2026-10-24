@@ -1294,7 +1294,7 @@ impl Desktop {
         cx.notify();
     }
 
-    fn open_storage_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_storage_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let desktop = cx.entity();
         let content = crate::views::DesktopView::observing(desktop, cx, |desktop, window, cx| {
             div()

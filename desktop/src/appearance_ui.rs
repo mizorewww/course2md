@@ -305,7 +305,12 @@ impl Desktop {
             )
     }
 
-    fn open_palette_picker(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_palette_picker(
+        &mut self,
+        dark: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let desktop = cx.entity();
         let scroll = ScrollHandle::new();
         let content =

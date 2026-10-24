@@ -9,6 +9,12 @@
 //! 1800) is the wait after each navigation; `COURSE2MD_CAPTURE_PALETTE`
 //! (a palette name such as `catppuccin_mocha`) and `COURSE2MD_CAPTURE_SCALE`
 //! (1, 1.25, 1.5 or 2) override the saved appearance without changing it.
+//!
+//! Dialogs open over their page: `service-editor:<ai|speech|dialog|confirm>`
+//! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
+//! `delete` and `image` (the newest note; give it a longer
+//! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage` and `login`.
+//! Nothing a dialog would change is saved unless its action is taken.
 use crate::{Desktop, Page, palettes::PaletteId, settings_ui::SettingsTab};
 use gpui::{App, AsyncWindowContext, WeakEntity, Window};
 use std::{cell::Cell, path::PathBuf, time::Duration};
@@ -101,6 +107,12 @@ impl Desktop {
                 };
                 self.select_settings_tab(tab, window, cx);
             }
+            "service-editor" => {
+                self.open_settings(window, cx);
+                self.select_settings_tab(SettingsTab::Services, window, cx);
+                self.capture_service_editor(category, window, cx);
+            }
+            "dialog" => self.capture_dialog(category, window, cx),
             "reader" => {
                 let course = self
                     .courses
@@ -114,6 +126,65 @@ impl Desktop {
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Opens one dialog over the page it belongs to, once the page has
+    /// loaded what the dialog acts on (the notes and their folders).
+    fn capture_dialog(&mut self, name: &str, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        match name {
+            "palette" | "storage" => {
+                self.open_settings(window, cx);
+                let tab = if name == "palette" {
+                    SettingsTab::Appearance
+                } else {
+                    SettingsTab::Storage
+                };
+                self.select_settings_tab(tab, window, cx);
+            }
+            "login" => self.navigate(Page::New, cx),
+            "image" => {}
+            _ => self.navigate(Page::Library, cx),
+        }
+        let name = name.to_owned();
+        cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(900))
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                let newest = this.courses.first().map(|course| (**course).clone());
+                match name.as_str() {
+                    "palette" => this.open_palette_picker(false, window, cx),
+                    "storage" => this.open_storage_dialog(window, cx),
+                    "login" => this.open_account_dialog(window, cx),
+                    "image" => {
+                        if let Some(course) = newest {
+                            this.open_course(course, cx);
+                        }
+                    }
+                    "folder" => this.begin_folder(None, window, cx),
+                    "rename" => {
+                        if let Some(course) = newest {
+                            this.begin_course_rename(course, window, cx);
+                        }
+                    }
+                    "delete" => {
+                        if let Some(course) = newest {
+                            this.confirm_course_delete(course, window, cx);
+                        }
+                    }
+                    _ => {}
+                }
+            });
+            if name == "image" {
+                // The note's screenshots load after it opens.
+                cx.background_executor()
+                    .timer(Duration::from_millis(1500))
+                    .await;
+                let _ =
+                    this.update_in(cx, |this, window, cx| this.open_reader_image(0, window, cx));
+            }
+        })
+        .detach();
     }
 
     /// Library states reached by navigation, applied without saving them.

@@ -5299,7 +5299,12 @@ impl Desktop {
         }
         panel
     }
-    fn open_reader_image(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_reader_image(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(preview) = &self.preview else {
             return;
         };
