@@ -146,11 +146,6 @@ impl AssetSource for Assets {
     }
 }
 
-/// A new folder: the outline `folder_plus`, under the name some callers use.
-pub fn create_new_folder() -> gpui_component::Icon {
-    folder_plus()
-}
-
 /// Brand colors are intrinsic to the platform mark, independent of UI themes.
 pub fn bilibili() -> gpui_component::Icon {
     bilibili_mark().text_color(gpui::rgb(0x00a1d6))

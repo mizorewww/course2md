@@ -871,19 +871,6 @@ pub fn choice_radio(selected: bool, enabled: bool) -> gpui::Div {
         })
 }
 
-/// A plain icon centred in the 40px slot of a tinted icon, so a choice
-/// without a category color starts its label on the same ruler.
-pub fn icon_slot(icon: gpui_component::Icon) -> gpui::Div {
-    use gpui::prelude::*;
-    gpui::div()
-        .flex()
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .size(rems(40. / 14.))
-        .child(icon.size(rems(22. / 14.)))
-}
-
 pub use choice_tile::ChoiceTile;
 mod choice_tile {
     use super::*;
