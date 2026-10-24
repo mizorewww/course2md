@@ -2127,7 +2127,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 这里已有同名文件夹	这里已有同名文件夹	A folder with this name already exists here	這裡已有同名資料夾	ここには同じ名前のフォルダーがすでにあります
 不能把文件夹移到它自己里面	不能把文件夹移到它自己里面	A folder cannot move into itself	不能把資料夾移到它自己裡面	フォルダーをそれ自身の中に移動することはできません
 其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	其中的 {} 个子文件夹也会删除；笔记会保留，移到未分类	Its {} subfolders are deleted too; notes are kept and move to Unfiled	其中的 {} 個子資料夾也會刪除；筆記會保留，移到未分類	中の {} 個のサブフォルダーも削除されます。ノートは残り、未分類に移動します
-{} 项	{} 项	{} items	{} 項	{} 項目
 {} 个已暂停	{} 个已暂停	{} paused	{} 個已暫停	一時停止中 {} 件
 视频摘要	视频摘要	Video summary	影片摘要	動画の概要
 核心要点	核心要点	Key points	核心要點	要点
@@ -2165,3 +2164,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 1 个需要处理	1 个需要处理	1 needs attention	1 個需要處理	対応が必要 1 件
 收起已完成的步骤	收起已完成的步骤	Hide completed steps	收起已完成的步驟	完了したステップを折りたたむ
 查看已完成的步骤	查看已完成的步骤	Show completed steps	檢視已完成的步驟	完了したステップを表示する
+找到 1 篇笔记	找到 1 篇笔记	Found 1 note	找到 1 篇筆記	1 件のノートが見つかりました
+1 篇笔记	1 篇笔记	1 note	1 篇筆記	1 件のノート
+{} 篇笔记	{} 篇笔记	{} notes	{} 篇筆記	{} 件のノート

@@ -145,6 +145,10 @@ impl Desktop {
                 self.folder_tree_open.insert((root.clone(), folder));
                 parent = organization.parent(folder);
             }
+            // A selected folder also shows the folders it holds.
+            if !organization.children(Some(id)).is_empty() {
+                self.folder_tree_open.insert((root.clone(), id));
+            }
             self.folder_tree_open.remove(&(root.clone(), 0));
         }
         self.library_root = root;
@@ -373,7 +377,8 @@ impl Desktop {
     }
 
     /// Notes per place for the navigation: every note, each library's
-    /// unfiled notes and each folder's own notes.
+    /// unfiled notes and each folder's notes including its subfolders', so
+    /// 全部笔记 is 未分类 plus the top folders and the folder page agrees.
     fn nav_counts(&self) -> NavCounts {
         let mut counts = NavCounts {
             all: self.courses.len(),
@@ -388,15 +393,29 @@ impl Desktop {
             }
             match self.course_folder(course) {
                 Some(folder) => {
-                    *counts
-                        .folders
-                        .entry((location.root.clone(), folder))
-                        .or_default() += 1
+                    let library = &self.library_indexes[&location.root];
+                    let mut current = Some(folder);
+                    while let Some(id) = current {
+                        *counts
+                            .folders
+                            .entry((location.root.clone(), id))
+                            .or_default() += 1;
+                        current = library.parent(id);
+                    }
                 }
                 None => *counts.unfiled.entry(location.root.clone()).or_default() += 1,
             }
         }
         counts
+    }
+
+    /// A folder's notes, its subfolders' included, as its navigation row counts them.
+    pub(crate) fn folder_note_count(&self, root: &Path, id: u64) -> usize {
+        self.nav_counts()
+            .folders
+            .get(&(root.to_path_buf(), id))
+            .copied()
+            .unwrap_or(0)
     }
 
     /// The selected place's name for the page title, and the library it is
@@ -437,6 +456,7 @@ impl Desktop {
         label: SharedString,
         count: Option<usize>,
         disclosure: Option<bool>,
+        trailing_slot: bool,
         menu: Option<MenuBuilder>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -483,10 +503,19 @@ impl Desktop {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
                             this.toggle_tree_node(&root, id, cx);
-                        })),
+                        }))
+                        .into_any_element(),
                 )
             }
-            _ => None,
+            // Counts share one column: while any folder shows a disclosure,
+            // every row keeps its place empty.
+            _ => trailing_slot.then(|| {
+                div()
+                    .size(TREE_DISCLOSURE)
+                    .mr(rems(-6. / 14.))
+                    .flex_shrink_0()
+                    .into_any_element()
+            }),
         };
         // Rows take keyboard focus like a file manager's sidebar: arrows move
         // and fold, Return or Space opens, ⌘⌫ deletes a folder.
@@ -699,6 +728,14 @@ impl Desktop {
         let counts = self.nav_counts();
         let libraries = self.tree_libraries();
         let several = libraries.len() > 1;
+        let nested = libraries.iter().any(|(_, _, library)| {
+            library.as_ref().is_some_and(|library| {
+                library
+                    .folders
+                    .keys()
+                    .any(|id| !library.children(Some(*id)).is_empty())
+            })
+        });
         let mut tree = v_flex()
             .id("folder-tree")
             .role(Role::Tree)
@@ -712,6 +749,7 @@ impl Desktop {
                 course2md::tr!("全部笔记").into(),
                 Some(counts.all),
                 None,
+                nested,
                 None,
                 cx,
             ));
@@ -737,6 +775,7 @@ impl Desktop {
                         .as_ref()
                         .map(|_| counts.unfiled.get(&root).copied().unwrap_or(0)),
                     None,
+                    nested,
                     Some(menu),
                     cx,
                 ),
@@ -778,6 +817,7 @@ impl Desktop {
                                 .unwrap_or(0),
                         ),
                         has_children.then_some(open),
+                        nested,
                         Some(menu),
                         cx,
                     ),
@@ -902,6 +942,7 @@ impl Desktop {
         &self,
         root: &Path,
         parent: Option<u64>,
+        width: Option<Pixels>,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let library = self.library_indexes.get(root)?;
@@ -909,19 +950,10 @@ impl Desktop {
         if children.is_empty() {
             return None;
         }
-        let mut counts: HashMap<u64, usize> = HashMap::new();
-        for course in &self.courses {
-            if self
-                .course_location(course)
-                .is_some_and(|location| location.root == root)
-                && let Some(folder) = self.course_folder(course)
-            {
-                *counts.entry(folder).or_default() += 1;
-            }
-        }
+        let counts = self.nav_counts().folders;
         let tiles = children.into_iter().map(|id| {
-            // What opening the folder shows: its folders and its own notes.
-            let items = library.children(Some(id)).len() + counts.get(&id).copied().unwrap_or(0);
+            // The same count as the folder's row in the navigation.
+            let notes = counts.get(&(root.to_path_buf(), id)).copied().unwrap_or(0);
             let name: SharedString = library.folders[&id].clone().into();
             let menu = self.folder_node_menu(root.to_path_buf(), id, cx);
             let open_root = root.to_path_buf();
@@ -936,7 +968,10 @@ impl Desktop {
                 .id(SharedString::from(format!("folder-tile-{id}")))
                 .role(Role::Button)
                 .aria_label(name.clone())
-                .w(rems(240. / 14.))
+                .map(|tile| match width {
+                    Some(width) => tile.w(width),
+                    None => tile.w(rems(240. / 14.)),
+                })
                 .min_w_0()
                 .h(rems(64. / 14.))
                 .gap(NAV_GAP)
@@ -964,7 +999,7 @@ impl Desktop {
                             div()
                                 .text_size(NAV_COUNT)
                                 .text_color(color(GRAY))
-                                .child(course2md::tr!("{} 项", items)),
+                                .child(note_count(notes)),
                         ),
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -994,5 +1029,14 @@ impl Desktop {
                 .flex_wrap()
                 .children(tiles),
         )
+    }
+}
+
+/// "1 篇笔记" / "{} 篇笔记", with the singular English form.
+pub(crate) fn note_count(count: usize) -> String {
+    if count == 1 {
+        course2md::tr!("1 篇笔记").to_owned()
+    } else {
+        course2md::tr!("{} 篇笔记", count)
     }
 }

@@ -106,7 +106,6 @@ enum LibraryItem {
     Issues(Vec<String>),
     Loading,
     Empty,
-    SearchScope(String),
     /// The folders inside the selected library top or folder.
     Folders(std::path::PathBuf, Option<u64>),
     GroupHeader(Box<LibraryGroupHeader>),
@@ -175,7 +174,6 @@ impl LibraryItem {
             LibraryItem::Issues(_) => "issues".to_owned(),
             LibraryItem::Loading => "loading".to_owned(),
             LibraryItem::Empty => "empty".to_owned(),
-            LibraryItem::SearchScope(_) => "search-scope".to_owned(),
             LibraryItem::Folders(root, parent) => {
                 format!("folders-{}-{}", root.display(), parent.unwrap_or(0))
             }
@@ -1348,15 +1346,15 @@ impl Desktop {
                     .get(&self.library_root)
                     .is_some_and(|library| !library.children(*parent).is_empty())
         });
-        let subfolders = folders
-            .and_then(|parent| {
-                self.library_indexes
-                    .get(&self.library_root)
-                    .map(|library| library.children(parent).len())
-            })
-            .unwrap_or(0);
-        // What the place holds; a search reports its matches on its own row.
-        let count = query.is_empty().then_some(courses.len() + subfolders);
+        // The place's notes, its subfolders' included as in the navigation;
+        // a search reports its matches on the same line, so nothing moves.
+        let count = Some(if !query.is_empty() {
+            found_notes(courses.len())
+        } else if let crate::FolderFilter::Folder(id) = self.folder_filter {
+            crate::folder_tree::note_count(self.folder_note_count(&self.library_root, id))
+        } else {
+            crate::folder_tree::note_count(courses.len())
+        });
         if let Some(parent) = folders {
             items.push(LibraryItem::Folders(self.library_root.clone(), parent));
         }
@@ -1372,10 +1370,6 @@ impl Desktop {
             }
             items.push(LibraryItem::Empty);
             return self.library_list_page(items, layout, rem, tree_visible, count, window, cx);
-        }
-        if !query.is_empty() {
-            let scoped = course2md::tr!("找到 {} 篇笔记", courses.len());
-            items.push(LibraryItem::SearchScope(scoped));
         }
         if self.desktop_settings.library_group_folders
             && self.folder_filter.is_all()
@@ -1484,7 +1478,7 @@ impl Desktop {
         layout: LibraryLayout,
         rem: f32,
         tree_visible: bool,
-        count: Option<usize>,
+        count: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1519,16 +1513,14 @@ impl Desktop {
 
     /// The selected place's name and item count, its folder commands and
     /// the page's main action.
-    fn library_header(&self, count: Option<usize>, cx: &mut Context<Self>) -> Div {
+    fn library_header(&self, count: Option<String>, cx: &mut Context<Self>) -> Div {
         let (place, library) = self.library_place();
-        // An empty library's own empty state explains it; no "0 项".
+        // An empty library's own empty state explains it; no "0 篇笔记".
         let count = count.filter(|_| self.library_controls_visible(cx));
         let supporting = match (library, count) {
-            (Some(library), Some(count)) => {
-                Some(format!("{library} · {}", course2md::tr!("{} 项", count)))
-            }
+            (Some(library), Some(count)) => Some(format!("{library} · {count}")),
             (Some(library), None) => Some(library),
-            (None, Some(count)) => Some(course2md::tr!("{} 项", count)),
+            (None, Some(count)) => Some(count),
             (None, None) => None,
         };
         let folder_menu = self
@@ -1780,29 +1772,15 @@ impl Desktop {
                     content.into_any_element()
                 }
             }
-            LibraryItem::SearchScope(scoped) => h_flex()
-                .items_baseline()
-                .gap_3()
-                .flex_wrap()
-                .child(
-                    accessible_text("library-search-scope", scoped.clone())
-                        .text_size(TEXT_AUX)
-                        .text_color(color(GRAY)),
-                )
-                .child(
-                    quiet("clear-search-scope")
-                        .icon(crate::icons::close())
-                        .label(course2md::tr!("清除搜索"))
-                        .min_h(rems(1.6))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.inputs[&Field::Search]
-                                .update(cx, |state, cx| state.set_value("", window, cx));
-                            cx.notify();
-                        })),
-                )
-                .into_any_element(),
             LibraryItem::Folders(root, parent) => self
-                .folder_tiles(root, *parent, cx)
+                .folder_tiles(
+                    root,
+                    *parent,
+                    // Folder tiles take the card grid's columns.
+                    (self.desktop_settings.library_cards && !layout.stacked)
+                        .then_some(px(layout.card_width)),
+                    cx,
+                )
                 .map(IntoElement::into_any_element)
                 .unwrap_or_else(|| div().into_any_element()),
             LibraryItem::GroupHeader(header) => {
@@ -1993,14 +1971,17 @@ impl Desktop {
         let can_group = self.folder_filter.is_all() && self.library_error.is_none();
         let entity = cx.entity().downgrade();
         let loading = self.loading;
-        let group = filter_chip("library-group-folders", group_on, cx)
+        // Inside one folder there is nothing to group, but the chip keeps its
+        // place (disabled) so the search field does not change width.
+        let group = filter_chip("library-group-folders", group_on && can_group, cx)
             .h(CONTROL_HEIGHT)
             .min_h(CONTROL_HEIGHT)
             .pl(rems(10. / 14.))
             .pr(rems(16. / 14.))
             .gap(ICON_GAP)
-            .when(!group_on, |chip| chip.icon(icons::folder()))
+            .when(!group_on || !can_group, |chip| chip.icon(icons::folder()))
             .label(course2md::tr!("按文件夹分组"))
+            .disabled(!can_group)
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.desktop_settings.library_group_folders = !group_on;
                 this.save_library_presentation(cx);
@@ -2049,7 +2030,7 @@ impl Desktop {
                         .flex_wrap()
                         .items_center()
                         .when(!tree_visible, |row| row.child(self.library_places_menu(cx)))
-                        .when(can_group, |row| row.child(group))
+                        .child(group)
                         .when(!layout.stacked, |row| row.child(view))
                         .child(rescan),
                 ),
@@ -3170,6 +3151,15 @@ pub(crate) fn note_has_unfinished_task(
                 && task.plan.library_id == library_id
         })
     })
+}
+
+/// "找到 1 篇笔记" / "找到 {} 篇笔记", with the singular English form.
+fn found_notes(count: usize) -> String {
+    if count == 1 {
+        course2md::tr!("找到 1 篇笔记").to_owned()
+    } else {
+        course2md::tr!("找到 {} 篇笔记", count)
+    }
 }
 
 #[cfg(test)]
