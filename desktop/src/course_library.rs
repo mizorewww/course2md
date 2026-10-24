@@ -16,6 +16,45 @@ const ROW_TITLE: Rems = rems(16. / 14.);
 const ROW_COVER: Rems = rems(128. / 14.);
 const ROW_COVER_SHARE: f32 = 0.28;
 
+/// Hover tone of a note or task row on the surface: an on-surface overlay,
+/// so dark palettes lighten the row as light ones darken it.
+fn row_state_layer() -> Rgba {
+    blend(color(SURFACE), color(INK), 0.05)
+}
+
+/// A row's main target when the row itself draws the state layer: no fill
+/// of its own, so hover and press never paint a second, smaller shape.
+fn row_target(button: Button, cx: &App) -> Button {
+    let clear = Rgba {
+        a: 0.,
+        ..color(SURFACE)
+    };
+    button.custom(
+        ButtonCustomVariant::new(cx)
+            .color(clear.into())
+            .foreground(color(INK).into())
+            .hover(clear.into())
+            .active(clear.into())
+            .shadow(false),
+    )
+}
+
+/// A whole row as one target on the surface, with the row state layer.
+fn surface_row(button: Button, cx: &App) -> Button {
+    let clear = Rgba {
+        a: 0.,
+        ..color(SURFACE)
+    };
+    button.custom(
+        ButtonCustomVariant::new(cx)
+            .color(clear.into())
+            .foreground(color(INK).into())
+            .hover(row_state_layer().into())
+            .active(blend(color(SURFACE), color(INK), 0.08).into())
+            .shadow(false),
+    )
+}
+
 /// The cover slot of a workbench row.
 fn row_cover() -> Div {
     div()
@@ -2417,8 +2456,9 @@ impl Desktop {
                         .map(|status| h_flex().pt_1().child(status)),
                 )
             });
-        let read = control(("read-course", index))
-            .ghost()
+        // The row draws the one state layer for the whole note, so the read
+        // target itself stays transparent under hover and press.
+        let read = row_target(control(("read-course", index)), cx)
             .flex_1()
             .min_w_0()
             .h_auto()
@@ -2440,13 +2480,18 @@ impl Desktop {
                 cx.listener(move |this, _, _, cx| this.open_course(course.clone(), cx))
             });
         let menu = self.course_menu(course, true, cx);
+        let read_error = self.course_read_error(course, index, cx);
+        let export_feedback = self
+            .course_export_feedback(course, cx)
+            .map(|feedback| feedback.px_4().pb_3());
+        let has_details = read_error.is_some() || export_feedback.is_some();
         v_flex()
             .id(("library-row", index))
             .w_full()
             .min_w_0()
             .bg(color(SURFACE))
-            .when(first, |row| row.rounded_t(RADIUS_HERO).pt_2())
-            .when(last, |row| row.rounded_b(RADIUS_HERO).pb_2())
+            .when(first, |row| row.rounded_t(RADIUS_HERO))
+            .when(last, |row| row.rounded_b(RADIUS_HERO))
             .when(!first, |row| {
                 row.child(
                     div()
@@ -2457,14 +2502,23 @@ impl Desktop {
                 )
             })
             .child(
+                // One state layer covers the cover, text, status and menu;
+                // the list's top and bottom padding belong to the edge rows
+                // so the layer follows the surface's corners.
                 h_flex()
+                    .id(("library-row-layer", index))
                     .w_full()
                     .min_w_0()
                     .items_center()
                     .pl_4()
                     .pr_2()
                     .py_3()
+                    .when(first, |row| row.pt(rems(20. / 14.)).rounded_t(RADIUS_HERO))
+                    .when(last && !has_details, |row| {
+                        row.pb(rems(20. / 14.)).rounded_b(RADIUS_HERO)
+                    })
                     .gap_4()
+                    .hover(|style| style.bg(row_state_layer()))
                     .child(read)
                     .when(!layout.stacked, |row| row.children(status))
                     .when(opening, |row| {
@@ -2472,11 +2526,9 @@ impl Desktop {
                     })
                     .child(self.course_actions(course, index, cx)),
             )
-            .children(self.course_read_error(course, index, cx))
-            .children(
-                self.course_export_feedback(course, cx)
-                    .map(|feedback| feedback.px_4().pb_3()),
-            )
+            .children(read_error)
+            .children(export_feedback)
+            .when(last && has_details, |row| row.pb_2())
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
             .context_menu(move |popup, window, cx| menu(popup, window, cx))
             .into_any_element()
@@ -3011,8 +3063,7 @@ impl Desktop {
             if index > 0 || has_attention {
                 list = list.child(divider());
             }
-            let row = control(("recent-note", index))
-                .ghost()
+            let row = surface_row(control(("recent-note", index)), cx)
                 .w_full()
                 .h_auto()
                 .py(rems(12. / 14.))
