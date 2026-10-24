@@ -664,6 +664,9 @@ impl Desktop {
             course2md::tr!("自定义模型").into()
         };
         let (settled, conclusion) = self.default_model_conclusion();
+        // An engine that cannot run here says why with its repair below the
+        // model tile, so the tile itself only names the model.
+        let engine_issue = self.engine_issue(provider);
         let state = self.default_model_state();
         // A finished check on a ready model is said by the badge alone.
         let ready = matches!(
@@ -680,7 +683,7 @@ impl Desktop {
             course2md::tr!("识别模型"),
             Some(model_name.clone()),
         )
-        .when(!(settled && ready), |text| {
+        .when(!(settled && ready) && engine_issue.is_none(), |text| {
             text.child(
                 h_flex()
                     .w_full()
@@ -751,6 +754,14 @@ impl Desktop {
                 ),
             )
         };
+        if let Some(issue) = engine_issue {
+            recognition = recognition.detail(
+                div()
+                    .px(SETTING_ITEM_INSET)
+                    .pb(rems(16. / 14.))
+                    .child(self.engine_obstacle("generation-engine-obstacle", issue, cx)),
+            );
+        }
         if !model_supported(provider, selected) {
             recognition = recognition.detail(
                 tile_support("unavailable-fixed-model", unsupported_model())

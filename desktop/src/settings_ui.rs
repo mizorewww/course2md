@@ -3025,7 +3025,7 @@ impl Desktop {
                                 })
                                 .child(icon.size(px(16.)).text_color(color(tone)))
                                 .child(*label)
-                                .when(!*ready || *optional, |chip| {
+                                .when(*optional, |chip| {
                                     chip.child(
                                         div()
                                             .text_color(color(if *optional {
@@ -3038,6 +3038,24 @@ impl Desktop {
                                 })
                         },
                     )),
+            )
+            .when_some(
+                (!speech_service && !local_ready)
+                    .then(|| self.engine_issue(provider))
+                    .flatten()
+                    .filter(|issue| *issue != model_diagnostics::DeviceIssue::Engine),
+                |summary, issue| {
+                    summary.child(
+                        div()
+                            .pl(RESOURCE_TEXT_INSET)
+                            .child(self.engine_obstacle_with(
+                                "diagnostic-engine-obstacle",
+                                issue,
+                                false,
+                                cx,
+                            )),
+                    )
+                },
             );
         let mut checks = checks.child(summary);
         if !e.engine {

@@ -845,6 +845,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 授权回调路径不受支持 / Unsupported authorization callback path	授权回调路径不受支持	Unsupported authorization callback path	授權回呼路徑不受支援	認可コールバックパスはサポートされていません
 排队中	排队中	Queued	排隊中	待機中
 推荐 · 音频不离开本机	推荐 · 音频不离开本机	Recommended · Audio stays on this device	推薦 · 音訊不離開本機	推奨 · 音声はこのデバイスの外に送信されません
+音频不离开本机	音频不离开本机	Audio stays on this device	音訊不離開本機	音声はこのデバイスの外に送信されません
 提取画面	提取画面	Extract frames	提取畫面	フレームを抽出
 提取音频	提取音频	Extract audio	提取音訊	音声を抽出する
 提取音频 / Extracting audio	提取音频	Extracting audio	提取音訊	音声を抽出中

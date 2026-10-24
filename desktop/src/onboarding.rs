@@ -1181,6 +1181,9 @@ impl Desktop {
         let selected = self.onboarding.provider;
         let recommended = self.recommended_local_provider();
         let local = selected != Some(AsrProvider::Api);
+        // Local recognition is recommended only where an engine can run;
+        // when none can, its obstacle and repair are shown below the engines.
+        let local_blocked = self.environment.is_some() && self.engine_issue(recommended).is_some();
         // Tinted icons follow the interface text size, like their labels.
         let icon_size = rems(40. / 14.).to_pixels(window.rem_size());
         // Where audio is processed is the outcome-level choice: two tiles.
@@ -1206,7 +1209,11 @@ impl Desktop {
                         0,
                         "setup-local-route",
                         course2md::tr!("本机识别"),
-                        course2md::tr!("推荐 · 音频不离开本机"),
+                        if local_blocked {
+                            course2md::tr!("音频不离开本机")
+                        } else {
+                            course2md::tr!("推荐 · 音频不离开本机")
+                        },
                         icons::computer(),
                         Tint::Blue,
                         local,
@@ -1290,8 +1297,24 @@ impl Desktop {
                 })),
             ),
         );
+        // An engine's own obstacle that something here can repair (a missing
+        // component) is stated below the group with that repair, after the
+        // shared one; hardware this Mac lacks is only its chip.
+        let mut repairable = Vec::new();
         for (index, engine) in engines.into_iter().enumerate() {
             let provider = Some(engine);
+            if let Some(issue) = self.engine_issue(engine)
+                && Some(issue) != obstacle
+                && matches!(
+                    issue,
+                    crate::settings_ui::model_diagnostics::DeviceIssue::AppleRuntime
+                        | crate::settings_ui::model_diagnostics::DeviceIssue::LlamaMissing
+                        | crate::settings_ui::model_diagnostics::DeviceIssue::NpuRuntime
+                )
+                && !repairable.contains(&issue)
+            {
+                repairable.push(issue);
+            }
             // A ready engine needs no chip; only checking or unavailable is status.
             let (status, unavailable) = match &self.environment {
                 None => (
@@ -1345,7 +1368,17 @@ impl Desktop {
                             .px(SETTING_ITEM_INSET)
                             .child(self.engine_obstacle("setup-engine-obstacle", issue, cx)),
                     )
-                }),
+                })
+                .children(repairable.into_iter().map(|issue| {
+                    div()
+                        .pt(px(4.))
+                        .px(SETTING_ITEM_INSET)
+                        .child(self.engine_obstacle(
+                            &format!("setup-engine-obstacle-{issue:?}"),
+                            issue,
+                            cx,
+                        ))
+                })),
         );
         let provider = selected.unwrap_or(recommended);
         let models = local_model_choices(provider, &self.onboarding.model);

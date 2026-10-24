@@ -543,7 +543,13 @@ impl Desktop {
     /// The repair an engine obstacle already has: the release download, the
     /// install guide or command, and an environment recheck where installing
     /// something here can clear it. Shared by setup and the workbench.
-    fn engine_repair_actions(&self, id: &str, issue: DeviceIssue, cx: &mut Context<Self>) -> Div {
+    fn engine_repair_actions(
+        &self,
+        id: &str,
+        issue: DeviceIssue,
+        recheck: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let mut actions = h_flex()
             .w_full()
             .min_w_0()
@@ -599,7 +605,7 @@ impl Desktop {
             }
             DeviceIssue::AppleHardware | DeviceIssue::GpuAbsent | DeviceIssue::NpuDevice => {}
         }
-        if matches!(issue, DeviceIssue::LlamaMissing | DeviceIssue::NpuRuntime) {
+        if recheck && matches!(issue, DeviceIssue::LlamaMissing | DeviceIssue::NpuRuntime) {
             actions = actions.child(
                 text_button(SharedString::from(format!("{id}-recheck")), cx)
                     .icon(icons::refresh())
@@ -618,6 +624,18 @@ impl Desktop {
         issue: DeviceIssue,
         cx: &mut Context<Self>,
     ) -> Div {
+        self.engine_obstacle_with(id, issue, true, cx)
+    }
+
+    /// The obstacle and its repair, without its own 重新检查 where the
+    /// surrounding surface already offers one (the 运行检查 summary).
+    pub(crate) fn engine_obstacle_with(
+        &self,
+        id: &str,
+        issue: DeviceIssue,
+        recheck: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
         v_flex()
             .w_full()
             .min_w_0()
@@ -628,7 +646,7 @@ impl Desktop {
                 WARNING,
                 issue.message(),
             ))
-            .child(self.engine_repair_actions(id, issue, cx))
+            .child(self.engine_repair_actions(id, issue, recheck, cx))
     }
 
     /// The workbench's model status: one quiet line under the engine field
