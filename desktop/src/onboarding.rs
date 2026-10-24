@@ -1009,6 +1009,16 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Rendering does not settle state: model_preparation results are adopted in model_preparation_finished.
+        // Capture builds only: hold the step at a scroll offset to render its lower part.
+        #[cfg(feature = "capture")]
+        if let Some(offset) = std::env::var("COURSE2MD_CAPTURE_SCROLL")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+        {
+            self.onboarding
+                .scroll
+                .set_offset(point(px(0.), px(-offset)));
+        }
         let step = self.onboarding.step;
         let (number, title, description) = match step {
             Step::Engine => (
