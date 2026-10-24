@@ -419,14 +419,26 @@ impl Desktop {
         // COURSE2MD_CAPTURE_SETUP_STEP=ai|account|model (cloud for the engine
         // step's online route). Nothing is saved by jumping.
         #[cfg(feature = "capture")]
-        match std::env::var("COURSE2MD_CAPTURE_SETUP_STEP").as_deref() {
-            Ok("cloud") => self.select_setup_route(false, cx),
-            Ok("ai") => self.setup_step(Step::Ai, cx),
-            Ok("account") => self.setup_step(Step::Account, cx),
-            Ok("model") => self.setup_step(Step::Model, cx),
-            _ => {}
+        if let Ok(step) = std::env::var("COURSE2MD_CAPTURE_SETUP_STEP") {
+            self.capture_setup_step(&step, cx);
         }
         self.root_focus.focus(window, cx);
+    }
+
+    /// Capture builds: show a later first-use step (`ai`, `account`,
+    /// `model`) or the engine step's online route (`cloud`); any other name
+    /// shows the first step, and an empty one keeps the current step.
+    /// Nothing is saved by jumping.
+    #[cfg(feature = "capture")]
+    pub(crate) fn capture_setup_step(&mut self, step: &str, cx: &mut Context<Self>) {
+        match step {
+            "cloud" => self.select_setup_route(false, cx),
+            "ai" => self.setup_step(Step::Ai, cx),
+            "account" => self.setup_step(Step::Account, cx),
+            "model" => self.setup_step(Step::Model, cx),
+            "" => {}
+            _ => self.setup_step(Step::Engine, cx),
+        }
     }
 
     fn select_setup_route(&mut self, local: bool, cx: &mut Context<Self>) {

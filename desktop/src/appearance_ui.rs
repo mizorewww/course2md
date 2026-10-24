@@ -183,6 +183,17 @@ fn palette_choice(palette: PaletteId, selected: bool, amount: f32) -> gpui_base:
 }
 
 impl Desktop {
+    /// The appearance this page shows: the saved one, or in capture builds
+    /// the palette a capture paints instead, so the page agrees with the
+    /// colors on screen.
+    fn displayed_appearance(&self) -> crate::palettes::ThemePreferences {
+        #[allow(unused_mut)]
+        let mut appearance = self.preferences.application().appearance.clone();
+        #[cfg(feature = "capture")]
+        crate::capture::override_appearance(&mut appearance);
+        appearance
+    }
+
     fn palette_grid(
         &self,
         dark: bool,
@@ -242,7 +253,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let preference = &self.preferences.application().appearance;
+        let preference = &self.displayed_appearance();
         let grid = self.palette_grid(
             dark,
             if dark {
@@ -413,7 +424,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let preference = self.preferences.application().appearance.clone();
+        let preference = self.displayed_appearance();
         let modes = SingleChoiceGroup::new("appearance-mode", course2md::tr!("外观模式"))
             .segmented()
             .full_width()

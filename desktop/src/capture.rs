@@ -2,7 +2,7 @@
 //! so native layout can be reviewed without screen-recording permission.
 //!
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
-//! `onboarding`, `home[:<state>]`, `library`, `tasks`, `settings:<category>` (appearance, generation,
+//! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]`, `library`, `tasks`, `settings:<category>` (appearance, generation,
 //! services, storage, application) and `reader[:<title text>][~end]` (the newest
 //! note, or the first whose title contains the text; it opens at the top, ignoring
 //! saved reading positions, and `~end` scrolls to its end). `library:<state>` takes
@@ -44,6 +44,19 @@ thread_local! {
 /// The palette and text scale to paint instead of the saved ones.
 pub fn palette_override() -> Option<PaletteId> {
     PALETTE.with(Cell::get)
+}
+
+/// Applies the capture palette to an appearance the way the window paints
+/// it: that palette selected, in its own light or dark mode.
+pub fn override_appearance(appearance: &mut crate::palettes::ThemePreferences) {
+    if let Some(palette) = palette_override() {
+        appearance.select(palette);
+        appearance.mode = if palette.is_dark() {
+            crate::palettes::Appearance::Dark
+        } else {
+            crate::palettes::Appearance::Light
+        };
+    }
 }
 
 pub fn scale_override() -> Option<f32> {
@@ -111,6 +124,15 @@ impl Desktop {
             self.onboarding.active = false;
         }
         match page {
+            // First use opens over the app even when it was completed (or an
+            // earlier shot left it); `onboarding:<step>` picks the step.
+            "onboarding" => {
+                if !self.onboarding.active {
+                    self.navigate(Page::New, cx);
+                    self.start_onboarding(window, cx);
+                }
+                self.capture_setup_step(category, cx);
+            }
             "home" => self.capture_home(category, window, cx),
             "library" => {
                 self.navigate(Page::Library, cx);
