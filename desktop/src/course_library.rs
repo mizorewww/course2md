@@ -2573,26 +2573,15 @@ impl Desktop {
                     cx,
                 ));
             }
-            let mut cover = row_cover()
-                .flex()
-                .flex_row()
-                .aspect_ratio(16. / 9.)
-                .flex_shrink_0()
-                .items_center()
-                .justify_center()
-                .rounded(RADIUS_SMALL)
-                .bg(color(SECONDARY_CONTAINER))
-                .overflow_hidden();
-            if queued {
-                cover = cover.child(icons::schedule().size_6().text_color(color(GRAY)));
-            } else if let Some(path) = task.plan.source.cover.clone() {
-                cover = cover.child(
-                    img(path)
-                        .size_full()
-                        .rounded(RADIUS_SMALL)
-                        .object_fit(ObjectFit::Cover),
-                );
-            }
+            let cover = cover_frame(
+                RADIUS_SMALL,
+                task.plan.source.cover.clone().filter(|_| !queued),
+            )
+            .w(ROW_COVER)
+            .max_w(relative(ROW_COVER_SHARE))
+            .when(queued, |cover| {
+                cover.child(icons::schedule().size_6().text_color(color(GRAY)))
+            });
             let menu = self.task_menu(task, cx);
             list = list.child(
                 h_flex()
@@ -3012,27 +3001,16 @@ impl Desktop {
                         .items_center()
                         .gap(rems(16. / 14.))
                         .child(
-                            row_cover()
+                            cover_frame(px(12.), course.thumbnail.clone())
+                                .w(ROW_COVER)
+                                .max_w(relative(ROW_COVER_SHARE))
                                 .relative()
-                                .aspect_ratio(16. / 9.)
-                                .rounded(px(12.))
-                                .bg(color(SECONDARY_CONTAINER))
-                                .overflow_hidden()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .map(|cover| match course.thumbnail.clone() {
-                                    Some(path) => cover.child(
-                                        img(path)
-                                            .size_full()
-                                            .rounded(px(12.))
-                                            .object_fit(ObjectFit::Cover),
-                                    ),
-                                    None => cover.child(
+                                .when(course.thumbnail.is_none(), |cover| {
+                                    cover.child(
                                         icons::file_text()
                                             .size(rems(24. / 14.))
                                             .text_color(color(ON_SECONDARY_CONTAINER)),
-                                    ),
+                                    )
                                 })
                                 .when_some(duration, |cover, duration| {
                                     cover.child(

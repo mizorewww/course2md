@@ -1801,26 +1801,13 @@ impl Desktop {
             .collect::<Vec<_>>()
             .join(" · ");
         let cover_radius = px(18.);
-        let mut cover = div()
+        let mut cover = cover_frame(cover_radius, source.cover.clone())
             .relative()
             .w(rems(if compact { 200. / 14. } else { 256. / 14. }))
             .max_w_full()
-            .flex_shrink_0()
-            .aspect_ratio(16. / 9.)
-            .self_start()
-            .rounded(cover_radius)
-            .overflow_hidden()
-            .bg(color(SECONDARY_CONTAINER))
-            .flex()
-            .items_center()
-            .justify_center();
-        cover = match source.cover.clone() {
-            Some(path) => cover.child(
-                img(path)
-                    .size_full()
-                    .rounded(cover_radius)
-                    .object_fit(ObjectFit::Cover),
-            ),
+            .self_start();
+        cover = match source.cover {
+            Some(_) => cover,
             None => cover.child(
                 h_flex()
                     .size(rems(56. / 14.))

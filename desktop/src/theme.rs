@@ -1244,15 +1244,15 @@ pub fn info_callout(
         )
 }
 
-/// A 16:9 video cover; the width scales with the text size. Without a cover
-/// the tonal slot stays, so rows keep their rhythm while covers load.
-pub fn cover_slot(width: Rems, cover: Option<std::path::PathBuf>) -> gpui::Div {
+/// A 16:9 video cover with `radius` corners. Without a cover the tonal
+/// frame stays, so rows keep their rhythm while covers load; callers place
+/// their placeholder icon in it. Callers give it its width.
+pub fn cover_frame(radius: Pixels, cover: Option<std::path::PathBuf>) -> gpui::Div {
     use gpui::{prelude::*, *};
     div()
-        .w(width)
         .aspect_ratio(16. / 9.)
         .flex_shrink_0()
-        .rounded(RADIUS_SMALL)
+        .rounded(radius)
         .overflow_hidden()
         .bg(color(SECONDARY_CONTAINER))
         .flex()
@@ -1262,10 +1262,16 @@ pub fn cover_slot(width: Rems, cover: Option<std::path::PathBuf>) -> gpui::Div {
             slot.child(
                 img(cover)
                     .size_full()
-                    .rounded(RADIUS_SMALL)
+                    .rounded(radius)
                     .object_fit(ObjectFit::Cover),
             )
         })
+}
+
+/// A small list cover: 8px corners, its width scaling with the text size.
+pub fn cover_slot(width: Rems, cover: Option<std::path::PathBuf>) -> gpui::Div {
+    use gpui::Styled;
+    cover_frame(RADIUS_SMALL, cover).w(width)
 }
 
 /// Related facts share a bounded label column and a stable value start.
