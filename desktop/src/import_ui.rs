@@ -2751,8 +2751,12 @@ impl Desktop {
                     TileScale::Compact
                         .button("import-library", [true, true, false, false], cx)
                         .accessibility_label(course2md::tr!("笔记库"))
-                        .child(library_label)
-                        .child(tile_chevron())
+                        .child(
+                            TileScale::Compact
+                                .row()
+                                .child(library_label)
+                                .child(tile_chevron()),
+                        )
                         .dropdown_menu(move |menu, _, _| {
                             libraries.iter().fold(menu, |menu, library| {
                                 let id = library.id.clone();
