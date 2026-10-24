@@ -744,7 +744,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 当前还有处理或文件移动在进行，请等候停止后再重建记录。	当前还有处理或文件移动在进行，请等候停止后再重建记录。	There is still processing or file movement in progress, please wait until it stops before rebuilding the record.	目前還有處理或檔案移動在進行，請等候停止後再重建記錄。	まだ処理中またはファイル移動中です。レコードを再構築する前に、処理が停止するまで待ってください。
 当前配置	当前配置	Current configuration	目前設定	現在の構成
 当前默认：{} · v{} · {}	当前默认：{} · v{} · {}	Current default: {} · v{} · {}	目前預設：{} · v{} · {}	現在のデフォルト: {} · v{} · {}
-待修复	待修复	To be fixed	待修復	修正予定
+待修复	待修复	Needs repair	待修復	修正予定
 待确认	待确认	Needs confirmation	待確認	確認待ち
 待确认的请求已变化，请查看最新范围后再选择是否重新发送	待确认的请求已变化，请查看最新范围后再选择是否重新发送	The request to be confirmed has changed. Please check the latest range before choosing whether to resend it.	待確認的請求已變化，請檢視最新範圍後再選擇是否重新傳送	確認待ちのリクエストが変更されました。再送信するかどうかを選択する前に、最新の範囲を確認してください。
 待确认请求已变化，请查看最新范围后再选择是否重新发送	待确认请求已变化，请查看最新范围后再选择是否重新发送	The request to be confirmed has changed. Please check the latest range before choosing whether to resend it.	待確認請求已變化，請檢視最新範圍後再選擇是否重新傳送	確認待ちのリクエストが変更されました。再送信するかどうかを選択する前に、最新の範囲を確認してください。
@@ -1248,12 +1248,13 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 概述：{}\n	概述：{}\n	Overview: {}\n	概述：{}\n	概要: {}\n
 模型	模型	Model	模型	モデル
 模型 ID	模型 ID	Model ID	模型 ID	モデルID
+模型 ID，或从服务获取列表	模型 ID，或从服务获取列表	Model ID, or fetch the list from the service	模型 ID，或從服務取得清單	モデル ID、またはサービスから一覧を取得
 模型 ID 不能包含换行或控制字符	模型 ID 不能包含换行或控制字符	Model ID cannot contain newlines or control characters	模型 ID 不能包含換行或控制字元	モデル ID には改行や制御文字を含めることはできません
 模型 ID，{}	模型 ID，{}	Model ID, {}	模型 ID，{}	モデルID、{}
 模型 {}% · {}	模型 {}% · {}	Model {}% · {}	模型 {}% · {}	モデル {}% · {}
 模型下载任务失败 / Model download task failed	模型下载任务失败	Model download task failed	模型下載任務失敗	モデルのダウンロード タスクが失敗しました
 模型下载完成或停止后再移动笔记库	模型下载完成或停止后再移动笔记库	Move the note library after the model download is completed or stopped.	模型下載完成或停止後再移動筆記庫	モデルのダウンロードが完了または停止した後で、ノート ライブラリを移動します。
-模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	The model still uses the old location. Save the model location in “Create note” before cleaning backups.	模型仍在使用舊位置，請先在「產生筆記」中儲存模型位置，再清理備份	モデルはまだ古い場所を使用しています。「ノートを作成」でモデルの場所を保存してからバックアップを整理してください
+模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	The model still uses the old location. Save the model location in “Note generation” before cleaning backups.	模型仍在使用舊位置，請先在「產生筆記」中儲存模型位置，再清理備份	モデルはまだ古い場所を使用しています。「ノートを作成」でモデルの場所を保存してからバックアップを整理してください
 模型会继续在后台准备	模型会继续在后台准备	The model will continue to be prepared in the background	模型會繼續在背景準備	モデルはバックグラウンドで引き続き準備されます
 模型位置尚未更新，修改已保留，可重试保存：{}	模型位置尚未更新，修改已保留，可重试保存：{}	The model location has not been updated. Your changes were kept; you can try saving again: {}	模型位置尚未更新，修改已保留，可重試儲存：{}	モデルの場所はまだ更新されていません。変更は保持されています。もう一度保存できます: {}
 模型准备	模型准备	Model preparation	模型準備	モデルの準備
@@ -1431,7 +1432,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 生成摘要请求失败 / Summary request failed	生成摘要请求失败	Summary request failed	生成摘要請求失敗	要約生成リクエストが失敗しました
 生成整篇摘要（{}–{}） / Generate the full summary ({}–{})	生成整篇摘要（{}–{}）	Generate the full summary ({}–{})	生成整篇摘要（{}–{}）	要約全体を生成する ({}–{})
 生成新版笔记	生成新版笔记	Generate a new version of the note	生成新版筆記	新しいバージョンのノートを生成する
-生成笔记	生成笔记	Create note	產生筆記	ノートを作成
+生成笔记	生成笔记	Note generation	產生筆記	ノートを作成
 生成笔记 / Writing notes	生成笔记	Writing notes	生成筆記	ノートを生成中
 生成笔记偏好	生成笔记偏好	Note generation preferences	生成筆記偏好	ノート生成の設定
 生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})	生成第 {}/{} 部分摘要（{}–{}）	Generate summary part {}/{} ({}–{})	生成第 {}/{} 部分摘要（{}–{}）	要約の第 {}/{} 部分を生成（{}–{}）
@@ -1454,7 +1455,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 界面语言	界面语言	Interface language	介面語言	表示言語
 界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	界面语言：auto、en、zh-Hans、zh-Hant、ja / Interface language: auto, en, zh-Hans, zh-Hant, ja	Interface language: auto, en, zh-Hans, zh-Hant, ja	介面語言：auto、en、zh-Hans、zh-Hant、ja	表示言語：auto、en、zh-Hans、zh-Hant、ja
 登录 Bilibili	登录 Bilibili	Sign in to Bilibili	登入 Bilibili	Bilibili にログイン
-登录后可读取账号有权访问的视频与字幕	登录后可读取账号有权访问的视频与字幕	After logging in, you can read the videos and subtitles that your account has access to.	登入後可讀取帳號有權存取的影片與字幕	ログイン後、アカウントがアクセスできる動画と字幕を読むことができます。
+登录后可读取账号有权访问的视频与字幕	登录后可读取账号有权访问的视频与字幕	Sign in to read the videos and subtitles your account can access.	登入後可讀取帳號有權存取的影片與字幕	ログイン後、アカウントがアクセスできる動画と字幕を読むことができます。
 登录响应未包含完整凭据，请重新扫码 / Login response did not include complete credentials; scan the QR code again	登录响应未包含完整凭据，请重新扫码	Login response did not include complete credentials; scan the QR code again	登入回應未包含完整憑證，請重新掃描 QR 碼	ログイン応答に完全な認証情報が含まれていません。QR コードをもう一度スキャンしてください。
 登录响应缺少凭据，请重新运行 course2md --login bilibili / Login response is missing credentials; run course2md --login bilibili again	登录响应缺少凭据，请重新运行 course2md --login bilibili	Login response is missing credentials; run course2md --login bilibili again	登入回應缺少憑證，請重新執行 course2md --login bilibili	ログイン応答に資格情報がありません。 course2md --login bilibili を再実行してください。
 登录回调地址无效 / Invalid login callback URL	登录回调地址无效	Invalid login callback URL	登入回呼網址無效	ログインコールバックURLが無効です
@@ -1524,7 +1525,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记库包含符号链接，尚未移动：{}。请先把需要的实际文件放入笔记库。	笔记库包含符号链接，尚未移动：{}。请先把需要的实际文件放入笔记库。	The note library contains a symbolic link, so it was not moved: {}. Put the actual files you need into the note library first.	筆記庫包含符號連結，尚未移動：{}。請先把需要的實際檔案放入筆記庫。	ノートライブラリにシンボリックリンクが含まれているため、移動していません: {}。先に必要な実際のファイルをノートライブラリに配置してください。
 笔记库已移动到 {}。旧位置保留为已核验备份。	笔记库已移动到 {}。旧位置保留为已核验备份。	The note library has been moved to {}. The old location remains as a verified backup.	筆記庫已移動到 {}。舊位置保留為已核驗備份。	ノート ライブラリは {} に移動されました。古い場所は検証済みのバックアップとして残ります。
 笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}	笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}	The note library has been moved, but the model location has not been saved. The old location backup was retained: {}	筆記庫已移動，模型位置尚未儲存。舊位置備份已保留：{}	ノートライブラリは移動されましたが、モデルの場所はまだ保存されていません。古い場所のバックアップは保持されています: {}
-笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}	笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}	The note library has been relocated, but the model location has not been saved. Try saving again in the Create note settings: {}	筆記庫已重新定位，模型位置尚未儲存。請在產生筆記設定中重試儲存：{}	ノートライブラリの場所は変更されましたが、モデルの場所はまだ保存されていません。「ノートを作成」の設定で再度保存してください: {}
+笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}	笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}	The note library has been relocated, but the model location has not been saved. Try saving again in the Note generation settings: {}	筆記庫已重新定位，模型位置尚未儲存。請在產生筆記設定中重試儲存：{}	ノートライブラリの場所は変更されましたが、モデルの場所はまだ保存されていません。「ノートを作成」の設定で再度保存してください: {}
 笔记库文件夹暂时无法访问	笔记库文件夹暂时无法访问	The note library folder is temporarily inaccessible	筆記庫資料夾暫時無法存取	ノートライブラリのフォルダーに一時的にアクセスできません
 笔记库文件夹暂时无法访问，请重新连接磁盘后再试	笔记库文件夹暂时无法访问，请重新连接磁盘后再试	The note library folder is temporarily inaccessible. Reconnect the disk and try again.	筆記庫資料夾暫時無法存取，請重新連接磁碟後再試	ノート ライブラリ フォルダーに一時的にアクセスできません。ディスクを再接続して、もう一度試してください。
 笔记库的位置在移动期间已经变化，尚未切换	笔记库的位置在移动期间已经变化，尚未切换	The location of the note library has changed during the move and has not yet been switched.	筆記庫的位置在移動期間已經變化，尚未切換	ノート ライブラリの場所は移動中に変更されましたが、まだ切り替えられていません。
@@ -1821,7 +1822,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 这张截图没有对应文字	这张截图没有对应文字	This screenshot has no corresponding text	這張截圖沒有對應文字	このスクリーンショットには対応するテキストがありません
 这段讲解：{}	这段讲解：{}	This explanation: {}	這段講解：{}	この説明: {}
 这部分无需补做	这部分无需补做	This part doesn't need reprocessing	這部分無需補做	この部分は再処理の必要がありません
-这里是长期默认值，主页的「处理选项」可以只对单次生效	这里是长期默认值，主页的「处理选项」可以只对单次生效	This is the long-term default. The “Processing options” on the home page can apply to a single run only.	這裡是長期預設值，首頁的「處理選項」可以只對單次生效	ここは長期的な既定値です。ホームの「処理オプション」では今回だけに適用できます。
+这里是长期默认值，主页的「处理选项」可以只对单次生效	这里是长期默认值，主页的「处理选项」可以只对单次生效	These are your defaults; “Processing options” on the home page can change them for a single run.	這裡是長期預設值，首頁的「處理選項」可以只對單次生效	ここは長期的な既定値です。ホームの「処理オプション」では今回だけに適用できます。
 这项任务已有后续处理，请打开对应任务继续	这项任务已有后续处理，请打开对应任务继续	This task already has follow-up processing. Open the corresponding task to continue.	這項任務已有後續處理，請開啟對應任務繼續	このタスクには後続の処理があります。続行するには対応するタスクを開いてください。
 这项任务已有后续处理，请打开对应任务继续。	这项任务已有后续处理，请打开对应任务继续。	This task already has follow-up processing. Open the corresponding task to continue.	這項任務已有後續處理，請開啟對應任務繼續。	このタスクには後続の処理があります。続行するには対応するタスクを開いてください。
 这项任务已结束，可在任务卡中补做或生成新版	这项任务已结束，可在任务卡中补做或生成新版	This task has ended. You can reprocess it or generate a new version from the task card.	這項任務已結束，可在任務卡中補做或生成新版	このタスクは終了しました。タスクカードから再処理するか、新しいバージョンを生成できます。
