@@ -398,11 +398,10 @@ pub fn page_heading(
     )
 }
 
-/// One tile of a connected group: the surface with 24px corners on the
-/// group's outside and 6px where it meets a neighbour. `outer` lists which
-/// corners are outside, as top-left, top-right, bottom-right, bottom-left.
-pub fn tile(outer: [bool; 4]) -> gpui::Div {
-    use gpui::{Styled, div};
+/// The corners of a connected tile: 24px on its group's outside and 6px
+/// where it meets a neighbour. `outer` lists which corners are outside, as
+/// top-left, top-right, bottom-right, bottom-left.
+pub fn tile_corners<E: gpui::Styled>(element: E, outer: [bool; 4]) -> E {
     let radius = |outside: bool| {
         if outside {
             TILE_RADIUS
@@ -410,21 +409,29 @@ pub fn tile(outer: [bool; 4]) -> gpui::Div {
             TILE_INNER_RADIUS
         }
     };
-    div()
-        .w_full()
-        .min_w_0()
-        .bg(color(SURFACE))
+    element
         .rounded_tl(radius(outer[0]))
         .rounded_tr(radius(outer[1]))
         .rounded_br(radius(outer[2]))
         .rounded_bl(radius(outer[3]))
 }
 
-/// The tile at `index` of a vertical connected list of `count` tiles.
-pub fn list_tile(index: usize, count: usize) -> gpui::Div {
+/// The corners of the tile at `index` of a vertical connected list of `count`.
+pub fn list_corners(index: usize, count: usize) -> [bool; 4] {
     let first = index == 0;
     let last = index + 1 >= count;
-    tile([first, first, last, last])
+    [first, first, last, last]
+}
+
+/// One tile of a connected group: the surface with `tile_corners`.
+pub fn tile(outer: [bool; 4]) -> gpui::Div {
+    use gpui::{Styled, div};
+    tile_corners(div().w_full().min_w_0().bg(color(SURFACE)), outer)
+}
+
+/// The tile at `index` of a vertical connected list of `count` tiles.
+pub fn list_tile(index: usize, count: usize) -> gpui::Div {
+    tile(list_corners(index, count))
 }
 
 /// A distinct color family for a category icon: a tonal container and its

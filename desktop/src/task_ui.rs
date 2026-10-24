@@ -177,18 +177,6 @@ fn task_column() -> Div {
     div().w_full().min_w_0().max_w(TASK_COLUMN).mx_auto()
 }
 
-/// A connected tile's corners: 24px on the group's outside, 6px between tiles.
-fn tile_corners<E: Styled>(view: E, first: bool, last: bool) -> E {
-    let radius = |outside: bool| {
-        if outside {
-            TILE_RADIUS
-        } else {
-            TILE_INNER_RADIUS
-        }
-    };
-    view.rounded_t(radius(first)).rounded_b(radius(last))
-}
-
 /// A count in the page heading: 32px, 8px corners, one color role per kind.
 fn summary_chip(id: &'static str, text: String, kind: BadgeKind) -> Div {
     let chip = h_flex()
@@ -1312,7 +1300,7 @@ impl Desktop {
             QueueItem::QueueFold { hidden, open } => {
                 let toggle = open.clone();
                 let opened = *open.read(cx);
-                tile_corners(h_flex(), false, true)
+                tile_corners(h_flex(), [false, false, true, true])
                     .w_full()
                     .justify_center()
                     .py_2()
@@ -1957,7 +1945,8 @@ impl Desktop {
             .flex_wrap()
             .child(toggle)
             .child(trailing);
-        let mut row = tile_corners(h_flex(), first, last && !expanded)
+        let bottom = last && !expanded;
+        let mut row = tile_corners(h_flex(), [first, first, bottom, bottom])
             .id(SharedString::from(format!("task-row-{id}")))
             .w_full()
             .min_w_0()
@@ -1993,7 +1982,7 @@ impl Desktop {
             row = row.pl_3();
         }
         let row = row.child(body);
-        let mut surface = tile_corners(v_flex(), first, last)
+        let mut surface = tile_corners(v_flex(), [first, first, last, last])
             .w_full()
             .min_w_0()
             .bg(color(SURFACE))
@@ -2237,7 +2226,7 @@ impl Desktop {
         let card = if single {
             card.rounded(RADIUS_HERO)
         } else {
-            tile_corners(card, place.first, place.last)
+            tile_corners(card, [place.first, place.first, place.last, place.last])
         };
         card.context_menu(move |popup, window, cx| menu(popup, window, cx))
             .into_any_element()

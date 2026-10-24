@@ -282,22 +282,6 @@ pub(crate) fn tile_info(id: impl Into<ElementId>, text: impl Into<SharedString>)
         .child(tile_support(id, text).flex_1())
 }
 
-/// The corner radii of a tile at a position in its connected group.
-fn tile_corners<E: Styled>(element: E, outer: [bool; 4]) -> E {
-    let radius = |outside: bool| {
-        if outside {
-            TILE_RADIUS
-        } else {
-            TILE_INNER_RADIUS
-        }
-    };
-    element
-        .rounded_tl(radius(outer[0]))
-        .rounded_tr(radius(outer[1]))
-        .rounded_br(radius(outer[2]))
-        .rounded_bl(radius(outer[3]))
-}
-
 /// A whole tile that acts: the surface with M3 state layers, the tile's
 /// corners and its padding. Callers add the label column and trailing items.
 pub(crate) fn tile_button(id: impl Into<ElementId>, outer: [bool; 4], cx: &App) -> Button {
@@ -996,7 +980,7 @@ impl RenderOnce for SettingsGroup {
         for (index, tile) in self.tiles.into_iter().enumerate() {
             let first = index == 0;
             let last = index + 1 == count;
-            let outer = [first, first, last, last];
+            let outer = list_corners(index, count);
             let element = match tile.main {
                 TileMain::Content(content) => settings_tile(outer)
                     .child(content)
@@ -1034,15 +1018,11 @@ impl RenderOnce for SettingsGroup {
 /// One tile of a settings group: the surface and the corners for its
 /// position (top-left, top-right, bottom-right, bottom-left; true = outside).
 pub(crate) fn settings_tile(outer: [bool; 4]) -> Div {
-    tile_corners(
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .flex_shrink_0()
-            .bg(color(SURFACE))
-            .text_size(TEXT_SETTINGS_BODY),
-        outer,
-    )
+    tile(outer)
+        .flex()
+        .flex_col()
+        .flex_shrink_0()
+        .text_size(TEXT_SETTINGS_BODY)
 }
 
 /// A standalone settings surface outside a group (a single tile).
@@ -1666,9 +1646,7 @@ impl Desktop {
                     .gap(TILE_GAP)
                     .when(first, |group| group.mt(rems(4. / 14.)))
                     .children(shown.into_iter().enumerate().map(|(index, tab)| {
-                        let top = index == 0;
-                        let bottom = index + 1 == count;
-                        self.settings_category_tile(tab, [top, top, bottom, bottom], icon_size, cx)
+                        self.settings_category_tile(tab, list_corners(index, count), icon_size, cx)
                     })),
             );
             first = false;

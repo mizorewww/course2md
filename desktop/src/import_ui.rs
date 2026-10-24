@@ -2794,7 +2794,7 @@ impl Desktop {
             let entity = cx.entity().downgrade();
             tiles.push(
                 div().child(
-                    control("import-library")
+                    tile_corners(control("import-library"), [true, true, false, false])
                         .ghost()
                         .w_full()
                         .h_auto()
@@ -2802,8 +2802,6 @@ impl Desktop {
                         .pl(rems(20. / 14.))
                         .pr(rems(16. / 14.))
                         .py(rems(12. / 14.))
-                        .rounded(TILE_INNER_RADIUS)
-                        .rounded_t(TILE_RADIUS)
                         .text_color(color(INK))
                         .accessibility_label(course2md::tr!("笔记库"))
                         .child(
