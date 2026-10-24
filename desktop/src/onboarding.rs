@@ -11,7 +11,7 @@ use crate::settings_ui::model_diagnostics::{
     unsupported_model,
 };
 use crate::settings_ui::service_form::{FormField, FormOwner, ServiceForm};
-use crate::settings_ui::{field_label, settings_detail_row, settings_value};
+use crate::settings_ui::{settings_detail_row, settings_value};
 use crate::theme::*;
 use crate::*;
 use course2md::{
@@ -211,11 +211,13 @@ impl ServiceAction {
     }
 }
 
-/// Width of the guide panel for the window and text scale.
-fn setup_panel_width(window: &Window) -> f32 {
+/// Width of the guide's column for the window and text scale: the 760px
+/// content column of settings, plus the 4px focus allowance on each side.
+fn setup_column_width(window: &Window) -> f32 {
     let scale = f32::from(window.rem_size()) / 14.;
-    (760. * scale.min(1.5))
-        .min(f32::from(window.viewport_size().width) - 48.)
+    let gutter = if is_compact(window) { 16. } else { 24. };
+    (760. * scale.min(1.5) + 8.)
+        .min(f32::from(window.viewport_size().width) - (gutter - 4.) * 2.)
         .max(280.)
 }
 
@@ -413,6 +415,17 @@ impl Desktop {
         self.onboarding.model_return_page = None;
         self.onboarding.active = true;
         self.setup_step(Step::Engine, cx);
+        // Capture builds can open a later step for review:
+        // COURSE2MD_CAPTURE_SETUP_STEP=ai|account|model (cloud for the engine
+        // step's online route). Nothing is saved by jumping.
+        #[cfg(feature = "capture")]
+        match std::env::var("COURSE2MD_CAPTURE_SETUP_STEP").as_deref() {
+            Ok("cloud") => self.select_setup_route(false, cx),
+            Ok("ai") => self.setup_step(Step::Ai, cx),
+            Ok("account") => self.setup_step(Step::Account, cx),
+            Ok("model") => self.setup_step(Step::Model, cx),
+            _ => {}
+        }
         self.root_focus.focus(window, cx);
     }
 
@@ -997,127 +1010,85 @@ impl Desktop {
     ) -> AnyElement {
         // Rendering does not settle state: model_preparation results are adopted in model_preparation_finished.
         let step = self.onboarding.step;
-        let (number, title, description, icon) = match step {
+        let (number, title, description) = match step {
             Step::Engine => (
                 1,
                 course2md::tr!("默认识别方式"),
                 Some(course2md::tr!("仅用于没有字幕的视频")),
-                icons::mic(),
             ),
-            Step::Ai => (2, course2md::tr!("连接 AI 服务"), None, icons::auto_fix()),
-            Step::Account => (3, course2md::tr!("连接 Bilibili"), None, icons::bilibili()),
+            Step::Ai => (2, course2md::tr!("连接 AI 服务"), None),
+            Step::Account => (3, course2md::tr!("连接 Bilibili"), None),
             Step::Model if self.onboarding.provider == Some(AsrProvider::Api) => {
-                (4, course2md::tr!("准备就绪"), None, icons::check_circle())
+                (4, course2md::tr!("准备就绪"), None)
             }
-            Step::Model => (4, course2md::tr!("准备识别模型"), None, icons::download()),
+            Step::Model => (4, course2md::tr!("准备识别模型"), None),
         };
         let content = match step {
             Step::Engine => self.setup_engine_content(window, cx),
-            Step::Ai => self.setup_service_content(ServicePurpose::Ai, cx),
-            Step::Account => self.account_onboarding_page(cx),
+            Step::Ai => self.setup_service_content(ServicePurpose::Ai, window, cx),
+            Step::Account => setup_tile(true, true).child(self.account_onboarding_page(cx)),
             Step::Model => self.setup_model_content(window, cx),
         };
         let scale = f32::from(window.rem_size()) / 14.;
-        let width = setup_panel_width(window);
-        let available_height =
-            (f32::from(window.viewport_size().height) - f32::from(title_bar_height(window)) - 48.)
-                .max(160.);
-        let compact = available_height < 540. * scale;
+        let narrow = is_compact(window);
+        let gutter = if narrow { 16. } else { 24. };
+        let width = setup_column_width(window);
+        let available_height = (f32::from(window.viewport_size().height)
+            - f32::from(title_bar_height(window)))
+        .max(160.);
+        let compact = available_height < 560. * scale;
         let steps = [
             course2md::tr!("识别方式"),
             course2md::tr!("AI 服务"),
             "Bilibili",
             course2md::tr!("模型准备"),
         ];
+        // As on the settings canvas: no frame around the guide, a 30px
+        // regular headline, and the step's choices as tiles on the ground.
         let heading = v_flex()
             .w_full()
             .min_w_0()
-            .gap_3()
+            .gap(px(if compact { 12. } else { 20. }))
             .when(!compact, |heading| {
-                heading.child(h_flex().w_full().min_w_0().items_center().gap_2().children(
-                    steps.into_iter().enumerate().map(|(index, label)| {
-                        let current = index + 1 == number;
-                        let finished = index + 1 < number;
-                        h_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                div()
-                                    .size(rems(24. / 14.))
-                                    .flex_shrink_0()
-                                    .rounded_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(color(if current {
-                                        ACCENT
-                                    } else if finished {
-                                        SUCCESS_BG
-                                    } else {
-                                        INSET
-                                    }))
-                                    .text_color(color(if current { ON_PRIMARY } else { GRAY }))
-                                    .text_size(TEXT_AUX)
-                                    .when(finished, |v| {
-                                        v.child(
-                                            icons::check()
-                                                .size(rems(16. / 14.))
-                                                .text_color(color(SUCCESS)),
-                                        )
-                                    })
-                                    .when(!finished, |v| v.child((index + 1).to_string())),
-                            )
-                            .when(!compact, |v| {
-                                v.child(
-                                    div()
-                                        .min_w_0()
-                                        .text_size(TEXT_AUX)
-                                        .font_weight(if current {
-                                            FontWeight::SEMIBOLD
-                                        } else {
-                                            FontWeight::MEDIUM
-                                        })
-                                        .text_color(color(if current { INK } else { GRAY }))
-                                        .child(label),
-                                )
-                            })
-                    }),
-                ))
+                heading.child(setup_steps(&steps, number))
             })
             .child(
-                h_flex()
+                v_flex()
                     .w_full()
                     .min_w_0()
-                    .gap_3()
-                    .items_center()
+                    .gap(px(4.))
                     .child(
-                        icon.size(rems(if compact { 20. } else { 28. } / 14.))
-                            .flex_shrink_0()
-                            .when(step != Step::Account, |icon| icon.text_color(color(ACCENT))),
-                    )
-                    .child(
-                        settings_value("setup-title", title)
-                            .role(Role::Heading)
-                            .flex_1()
+                        h_flex()
+                            .w_full()
                             .min_w_0()
-                            .text_size(if compact { TEXT_TITLE } else { TEXT_DISPLAY })
-                            .font_weight(FontWeight::SEMIBOLD),
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                page_heading("setup-title", title)
+                                    .flex_1()
+                                    .min_w_0()
+                                    .whitespace_normal(),
+                            )
+                            .when(compact, |row| {
+                                row.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .text_size(TEXT_BODY)
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(color(GRAY))
+                                        .child(format!("{number} / 4")),
+                                )
+                            }),
                     )
-                    .when(compact, |row| {
-                        row.child(
-                            div()
-                                .flex_shrink_0()
-                                .text_size(TEXT_AUX)
-                                .text_color(color(GRAY))
-                                .child(format!("{number} / 4")),
+                    .when_some(description, |view, description| {
+                        view.child(
+                            accessible_text("setup-description", description)
+                                .text_size(TEXT_SETTINGS_AUX)
+                                .line_height(rems(20. / 14.))
+                                .text_color(color(GRAY)),
                         )
                     }),
-            )
-            .when_some(description.filter(|_| !compact), |view, description| {
-                view.child(info_callout("setup-description", description))
-            });
+            );
         let scrolling_content = v_flex()
             .w_full()
             .min_w_0()
@@ -1127,28 +1098,27 @@ impl Desktop {
                 view.child(
                     settings_value("setup-notice", message)
                         .role(Role::Status)
+                        .px(SETTING_ITEM_INSET)
+                        .text_size(TEXT_SETTINGS_AUX)
                         .text_color(color(if error { DANGER } else { GRAY })),
                 )
             });
-        // The scroll viewport owns generous inner gutters, including the input's
-        // exterior focus ring. Natural height keeps the footer near the task.
+        // Natural height keeps the actions next to the step; the body scrolls
+        // only when the window is too short, and then a hairline marks where
+        // it passes under the actions.
+        let scrollable = self.onboarding.scroll.max_offset().y > px(0.);
         let footer = self.setup_footer(cx);
-        let panel = v_flex()
+        let column = v_flex()
             .relative()
             .w(px(width))
             .max_w_full()
             .min_w_0()
             .max_h(px(available_height))
-            .bg(color(SURFACE))
-            .rounded(RADIUS_HERO)
-            .border_1()
-            .border_color(color(HAIRLINE))
-            .shadow(shadow_popover())
             .child(
                 heading
                     .flex_shrink_0()
-                    .px(px(if compact { 20. } else { 32. }))
-                    .pt(px(if compact { 20. } else { 32. }))
+                    .px(px(4.))
+                    .pt(px(if compact { 16. } else { 32. }))
                     .pb(px(if compact { 16. } else { 24. })),
             )
             .child(
@@ -1166,8 +1136,9 @@ impl Desktop {
                             .min_h_0()
                             .overflow_y_scroll()
                             .track_scroll(&self.onboarding.scroll)
-                            .px(px(if compact { 20. } else { 32. }))
-                            .pb(px(if compact { 20. } else { 32. }))
+                            // Room for focus rings painted outside a tile.
+                            .px(px(4.))
+                            .pb(px(4.))
                             .child(motion::state_enter(
                                 ("setup-step", number),
                                 scrolling_content,
@@ -1177,10 +1148,12 @@ impl Desktop {
             )
             .child(
                 footer
-                    .px(px(if compact { 20. } else { 32. }))
-                    .py_4()
-                    .border_t_1()
-                    .border_color(color(HAIRLINE)),
+                    .px(px(4.))
+                    .pt(px(if compact { 12. } else { 20. }))
+                    .pb(px(if compact { 16. } else { 24. }))
+                    .when(scrollable, |footer| {
+                        footer.border_t_1().border_color(color(HAIRLINE))
+                    }),
             );
         v_flex()
             .flex_1()
@@ -1188,43 +1161,47 @@ impl Desktop {
             .min_h_0()
             .items_center()
             .justify_start()
-            .p(px(24.))
-            .child(panel)
+            .bg(color(CANVAS))
+            .px(px(gutter - 4.))
+            .child(column)
             .into_any_element()
     }
 
     fn setup_engine_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let selected = self.onboarding.provider;
-        let scale = f32::from(window.rem_size()) / 14.;
-        // The scroll viewport's horizontal gutters take 64px of the panel.
-        let width = setup_panel_width(window) - 64.;
-        let columns = if width >= 630. * scale {
-            3
-        } else if width >= 430. * scale {
-            2
-        } else {
-            1
-        };
         let recommended = self.recommended_local_provider();
         let local = selected != Some(AsrProvider::Api);
-        let routes = div()
-            .grid()
-            .grid_cols(if width >= 430. * scale { 2 } else { 1 })
-            .gap_3()
+        // Tinted icons follow the interface text size, like their labels.
+        let icon_size = rems(40. / 14.).to_pixels(window.rem_size());
+        // Where audio is processed is the outcome-level choice: two tiles.
+        let route = |index: usize,
+                     id: &'static str,
+                     title: &'static str,
+                     description: &'static str,
+                     icon: Icon,
+                     tint: Tint,
+                     chosen: bool| {
+            ChoiceTile::new(id, index, 2, title, chosen)
+                .icon(tinted_icon(icon, tint, icon_size))
+                .description(description)
+        };
+        let routes = v_flex()
             .w_full()
             .min_w_0()
+            .gap(TILE_GAP)
             .child(
                 self.setup_reveal(
                     "setup-local-route-reveal",
-                    described_choice(
+                    route(
+                        0,
                         "setup-local-route",
                         course2md::tr!("本机识别"),
                         course2md::tr!("推荐 · 音频不离开本机"),
                         icons::computer(),
+                        Tint::Blue,
                         local,
-                        window,
-                        cx,
                     )
+                    .render(window, cx)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.select_setup_route(true, cx);
                     })),
@@ -1233,55 +1210,80 @@ impl Desktop {
             .child(
                 self.setup_reveal(
                     "setup-cloud-route-reveal",
-                    described_choice(
+                    route(
+                        1,
                         "setup-cloud-route",
                         course2md::tr!("在线语音服务"),
                         course2md::tr!("音频会发送到所选服务"),
                         icons::cloud(),
+                        Tint::Teal,
                         !local,
-                        window,
-                        cx,
                     )
+                    .render(window, cx)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.select_setup_route(false, cx);
                     })),
                 ),
             );
-        let mut body = v_flex().w_full().min_w_0().gap_4().child(routes);
+        let mut body = v_flex().w_full().min_w_0().gap(px(24.)).child(routes);
         if !local {
-            return body.child(self.setup_service_content(ServicePurpose::Speech, cx));
+            return body.child(self.setup_service_content(ServicePurpose::Speech, window, cx));
         }
-        let engines = LOCAL_ENGINES
+        // Automatic first, then the engines it chooses between: one connected
+        // group, each engine's real availability as its status chip.
+        let engines: Vec<_> = LOCAL_ENGINES
             .into_iter()
-            .filter(|engine| engine_offered(*engine, selected));
-        let mut choices = div().grid().grid_cols(columns).gap_3().w_full().min_w_0();
-        for (index, engine) in engines.enumerate() {
+            .filter(|engine| engine_offered(*engine, selected))
+            .collect();
+        let count = engines.len() + 1;
+        let mut engine_group = v_flex().w_full().min_w_0().gap(TILE_GAP).child(
+            self.setup_reveal(
+                "setup-engine-auto-reveal",
+                ChoiceTile::new(
+                    "setup-engine-auto",
+                    0,
+                    count,
+                    course2md::tr!("自动选择引擎"),
+                    selected.is_none(),
+                )
+                .icon(choice_icon(engine_icon(None)))
+                .description(course2md::tr!(
+                    "目前使用 {}",
+                    crate::provider_label(Some(recommended))
+                ))
+                .render(window, cx)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.select_setup_provider(None, cx);
+                })),
+            ),
+        );
+        for (index, engine) in engines.into_iter().enumerate() {
             let provider = Some(engine);
-            // A ready engine needs no badge; only checking or unavailable is status.
-            let status = match &self.environment {
-                None => Some(course2md::tr!("正在检测")),
-                Some(_) => self.engine_issue(engine).map(|issue| issue.short()),
+            // A ready engine needs no chip; only checking or unavailable is status.
+            let (status, unavailable) = match &self.environment {
+                None => (
+                    Some(badge(BadgeKind::Progress).child(course2md::tr!("正在检测"))),
+                    false,
+                ),
+                Some(_) => match self.engine_issue(engine) {
+                    Some(issue) => (Some(badge(BadgeKind::Warning).child(issue.short())), true),
+                    None => (None, false),
+                },
             };
-            choices = choices.child(
+            engine_group = engine_group.child(
                 self.setup_reveal(
                     ("setup-engine-choice-reveal", index),
-                    described_choice(
+                    ChoiceTile::new(
                         ("setup-engine-choice", index),
+                        index + 1,
+                        count,
                         crate::provider_label(provider),
-                        "",
-                        engine_icon(provider),
                         selected == provider,
-                        window,
-                        cx,
                     )
-                    .when_some(status, |choice, status| {
-                        choice.child(
-                            h_flex()
-                                .pl(rems(28. / 14.))
-                                .child(badge(BadgeKind::Neutral).child(status)),
-                        )
-                    })
-                    .disabled(self.environment.is_some() && status.is_some())
+                    .icon(choice_icon(engine_icon(provider)))
+                    .status(status)
+                    .enabled(!unavailable)
+                    .render(window, cx)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.select_setup_provider(provider, cx);
                     })),
@@ -1292,26 +1294,12 @@ impl Desktop {
             v_flex()
                 .w_full()
                 .min_w_0()
-                .gap_3()
+                .gap(px(8.))
                 .child(
-                    described_choice(
-                        "setup-engine-auto",
-                        course2md::tr!("自动选择引擎"),
-                        course2md::tr!("目前使用 {}", crate::provider_label(Some(recommended))),
-                        engine_icon(None),
-                        selected.is_none(),
-                        window,
-                        cx,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.select_setup_provider(None, cx);
-                    })),
+                    section_title("setup-fixed-engine-label", course2md::tr!("本机引擎"))
+                        .pl(SETTING_ITEM_INSET),
                 )
-                .child(field_label(
-                    "setup-fixed-engine-label",
-                    course2md::tr!("指定运行方式"),
-                ))
-                .child(choices),
+                .child(engine_group),
         );
         let provider = selected.unwrap_or(recommended);
         let models = local_model_choices(provider, &self.onboarding.model);
@@ -1323,39 +1311,44 @@ impl Desktop {
         let request = self.setup_model_request();
         let snapshot =
             self.setup_model_snapshot(request.provider, Some(&request.model), &request.root);
+        let cache_state = snapshot
+            .result
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .map(|status| status.state);
         let model_ready = !snapshot.checking
             && snapshot.device_issue.is_none()
-            && matches!(
-                snapshot
-                    .result
-                    .as_ref()
-                    .and_then(|result| result.as_ref().ok())
-                    .map(|status| &status.state),
-                Some(CacheState::Loaded | CacheState::Cached)
-            );
-        let model_status = if snapshot.checking {
-            course2md::tr!("正在检查模型").to_owned()
+            && matches!(cache_state, Some(CacheState::Loaded | CacheState::Cached));
+        let (status_kind, model_status) = if snapshot.checking {
+            (
+                BadgeKind::Progress,
+                course2md::tr!("正在检查模型").to_owned(),
+            )
         } else if snapshot.device_issue.is_some() {
-            course2md::tr!("缺少识别组件").to_owned()
+            (
+                BadgeKind::Warning,
+                course2md::tr!("缺少识别组件").to_owned(),
+            )
         } else {
-            match snapshot
-                .result
-                .as_ref()
-                .and_then(|result| result.as_ref().ok())
-                .map(|status| &status.state)
-            {
-                Some(state) => crate::settings_ui::model_diagnostics::cache_state_label(*state)
-                    .1
-                    .into(),
-                None => course2md::tr!("检查未完成").into(),
+            match cache_state {
+                Some(state) => (
+                    if model_ready {
+                        BadgeKind::Success
+                    } else if state == CacheState::Unsupported {
+                        BadgeKind::Warning
+                    } else {
+                        BadgeKind::Neutral
+                    },
+                    crate::settings_ui::model_diagnostics::cache_state_label(state)
+                        .1
+                        .into(),
+                ),
+                None => (BadgeKind::Neutral, course2md::tr!("检查未完成").into()),
             }
         };
-        let mut model_grid = div()
-            .grid()
-            .grid_cols(columns.min(models.len() as u16))
-            .gap_3()
-            .w_full()
-            .min_w_0();
+        let choices_open = self.onboarding.model_choices_open;
+        let model_count = models.len();
+        let mut model_group = v_flex().w_full().min_w_0().gap(TILE_GAP);
         for (
             index,
             ModelChoice {
@@ -1365,78 +1358,97 @@ impl Desktop {
             },
         ) in models.into_iter().enumerate()
         {
-            model_grid = model_grid.child(
+            let mut choice = ChoiceTile::new(
+                ("setup-model-choice", index),
+                index,
+                model_count,
+                label,
+                self.onboarding.model == id,
+            )
+            .description(description);
+            // The choices hang below the model tile, so only the last keeps
+            // an outside corner.
+            choice.outer = [
+                false,
+                false,
+                index + 1 == model_count,
+                index + 1 == model_count,
+            ];
+            model_group = model_group.child(
                 self.setup_reveal(
                     ("setup-model-choice-reveal", index),
-                    described_choice(
-                        ("setup-model-choice", index),
-                        label,
-                        description,
-                        icons::mic(),
-                        self.onboarding.model == id,
-                        window,
-                        cx,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select_setup_model(&id, cx);
-                    })),
+                    choice
+                        .render(window, cx)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.select_setup_model(&id, cx);
+                        })),
                 ),
             );
         }
+        let summary = tile([true, true, !choices_open, !choices_open])
+            .flex()
+            .items_center()
+            .flex_wrap()
+            .gap_x(rems(16. / 14.))
+            .gap_y(rems(8. / 14.))
+            .min_h(rems(72. / 14.))
+            .pl(SETTING_ITEM_INSET)
+            .pr(rems(12. / 14.))
+            .py(rems(12. / 14.))
+            .child(tinted_icon(icons::mic(), Tint::Purple, icon_size))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_x(rems(12. / 14.))
+                    .gap_y(rems(4. / 14.))
+                    .child(crate::settings_ui::tile_label(
+                        "setup-current-model",
+                        current_model,
+                    ))
+                    // Readiness reads as the model's status, next to its name.
+                    .child(badge(status_kind).child(model_status)),
+            )
+            .child(
+                text_button("setup-change-model", cx)
+                    .icon(if choices_open {
+                        icons::chevron_up()
+                    } else {
+                        icons::tune()
+                    })
+                    .label(if choices_open {
+                        course2md::tr!("收起模型")
+                    } else {
+                        course2md::tr!("更换模型")
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.onboarding.model_choices_open = !this.onboarding.model_choices_open;
+                        cx.notify();
+                    })),
+            );
         body = body.child(
             v_flex()
                 .w_full()
                 .min_w_0()
-                .gap_3()
+                .gap(px(8.))
                 .child(
-                    h_flex()
+                    section_title("setup-model-label", course2md::tr!("识别模型"))
+                        .pl(SETTING_ITEM_INSET),
+                )
+                .child(
+                    v_flex()
                         .w_full()
                         .min_w_0()
-                        .gap_3()
-                        .items_center()
-                        .flex_wrap()
-                        .child(semantic_label(
-                            "setup-model-label",
-                            course2md::tr!("识别模型"),
-                            icons::mic(),
-                        ))
-                        .child(settings_value("setup-current-model", current_model).w_auto())
-                        // Readiness reads as the model's status, next to its name.
-                        .child(
-                            h_flex().flex_1().min_w_0().child(
-                                badge(if model_ready {
-                                    BadgeKind::Success
-                                } else {
-                                    BadgeKind::Neutral
-                                })
-                                .child(model_status),
-                            ),
-                        )
-                        .child(
-                            quiet("setup-change-model")
-                                .mr(-crate::theme::QUIET_INSET)
-                                .icon(if self.onboarding.model_choices_open {
-                                    icons::chevron_up()
-                                } else {
-                                    icons::tune()
-                                })
-                                .label(if self.onboarding.model_choices_open {
-                                    course2md::tr!("收起模型")
-                                } else {
-                                    course2md::tr!("更换模型")
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.onboarding.model_choices_open =
-                                        !this.onboarding.model_choices_open;
-                                    cx.notify();
-                                })),
-                        ),
-                )
-                .child(motion::disclosure(
-                    "setup-model-choices",
-                    self.onboarding.model_choices_open,
-                    model_grid,
-                )),
+                        .gap(TILE_GAP)
+                        .child(summary)
+                        .child(motion::disclosure(
+                            "setup-model-choices",
+                            choices_open,
+                            model_group,
+                        )),
+                ),
         );
         body
     }
@@ -1451,6 +1463,7 @@ impl Desktop {
         purpose: ServicePurpose,
         field: FormField,
         label: &'static str,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let owner = FormOwner::Setup(purpose);
@@ -1459,37 +1472,64 @@ impl Desktop {
         let busy =
             service.running.is_some() || service.vault_busy || service.pending_version.is_some();
         let id = format!("setup-{}-{field:?}", purpose as usize);
-        let field_column = if field == FormField::Model {
-            v_flex().w_full().min_w_0().child(self.service_model_field(
-                owner,
-                if purpose == ServicePurpose::Ai {
-                    "setup-ai-model"
-                } else {
-                    "setup-speech-model"
-                },
-                busy,
-                cx,
+        let state = form.input(field);
+        let focused = state.read(cx).focus_handle(cx).is_focused(window);
+        // Outlined fields with their labels on the outline, as in the
+        // service editor; status and errors stay in flow below.
+        let column = if field == FormField::Model {
+            v_flex().w_full().min_w_0().child(outlined_field_label(
+                SharedString::from(id.clone()),
+                label,
+                TEXT_AUX,
+                color(if focused { ACCENT } else { GRAY }),
+                self.service_model_field(
+                    owner,
+                    if purpose == ServicePurpose::Ai {
+                        "setup-ai-model"
+                    } else {
+                        "setup-speech-model"
+                    },
+                    busy,
+                    cx,
+                ),
             ))
         } else {
-            let input = text_input(form.input(field))
+            let error = form.error(field);
+            let input = text_input(state)
+                .settings_text()
                 .w_full()
-                .aria_label(label)
-                .disabled(busy);
+                .aria_label(
+                    error
+                        .map(|error| course2md::tr!("{}，{}", label, error))
+                        .unwrap_or_else(|| label.to_owned()),
+                )
+                .disabled(busy)
+                .when(error.is_some(), |input| input.border_color(color(DANGER)));
+            let input = labeled_input(
+                SharedString::from(id.clone()),
+                label,
+                state,
+                input,
+                window,
+                cx,
+            );
             v_flex()
                 .w_full()
                 .min_w_0()
-                .gap_2()
+                .gap(rems(4. / 14.))
                 .child(if field == FormField::Key {
                     h_flex()
                         .w_full()
                         .min_w_0()
                         .gap_2()
-                        .items_center()
+                        .items_end()
                         .child(div().flex_1().min_w_0().child(input))
-                        .child(self.service_key_visibility(
-                            owner,
-                            format!("setup-key-visibility-{}", purpose as usize),
-                            cx,
+                        .child(div().flex().items_center().h(rems(56. / 14.)).child(
+                            self.service_key_visibility(
+                                owner,
+                                format!("setup-key-visibility-{}", purpose as usize),
+                                cx,
+                            ),
                         ))
                         .into_any_element()
                 } else {
@@ -1499,79 +1539,92 @@ impl Desktop {
                     field == FormField::Key && form.draft.credential.is_some(),
                     |column| {
                         column.child(
-                            supporting_info(
+                            crate::settings_ui::tile_support(
                                 format!("setup-kept-key-{}", purpose as usize),
                                 course2md::tr!("已保存密钥，留空则保留"),
                             )
-                            .text_size(TEXT_AUX),
+                            .px(rems(16. / 14.)),
                         )
                     },
                 )
-                .when_some(form.error(field), |column, error| {
+                .when_some(error, |column, error| {
                     column.child(
-                        settings_value(SharedString::from(format!("{id}-error")), error.to_owned())
-                            .text_color(color(DANGER)),
+                        error_text(SharedString::from(format!("{id}-error")), error.to_owned())
+                            .px(rems(16. / 14.))
+                            .text_size(TEXT_SETTINGS_AUX)
+                            .whitespace_normal(),
                     )
                 })
         };
-        let icon = match field {
-            FormField::Address => icons::link(),
-            FormField::Model => icons::storage(),
-            FormField::Key => icons::shield(),
-            FormField::Name => icons::edit(),
-        };
-        let row = stacked_field(SharedString::from(id.clone()), label, icon, field_column);
         crate::focus_scroll::RevealFocus::new(
             SharedString::from(format!("{id}-reveal")),
-            row,
+            column,
             self.onboarding.scroll.clone(),
         )
         .into_any_element()
     }
 
-    fn setup_service_content(&self, purpose: ServicePurpose, cx: &mut Context<Self>) -> Div {
+    fn setup_service_content(
+        &self,
+        purpose: ServicePurpose,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let owner = FormOwner::Setup(purpose);
         let service = self.onboarding.service(purpose);
         let draft = &service.form.draft;
         let busy =
             service.running.is_some() || service.vault_busy || service.pending_version.is_some();
-        let mut body = v_flex().w_full().min_w_0().gap_4().child(self.setup_reveal(
-            format!("setup-protocol-reveal-{}", purpose as usize),
-            stacked_field(
-                format!("setup-protocol-label-{}", purpose as usize),
-                course2md::tr!("服务类型"),
-                icons::cloud(),
-                self.service_type_field(
-                    owner,
-                    SharedString::from(format!("setup-protocol-{}", purpose as usize)),
-                    busy,
-                    cx,
+        // The connection form is one tile; what the service is used for,
+        // the running check and its result follow as connected tiles.
+        let mut items: Vec<AnyElement> = Vec::new();
+        let mut form = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rems(20. / 14.))
+            .py(rems(8. / 14.))
+            .child(
+                self.setup_reveal(
+                    format!("setup-protocol-reveal-{}", purpose as usize),
+                    self.service_type_field(
+                        owner,
+                        SharedString::from(format!("setup-protocol-{}", purpose as usize)),
+                        busy,
+                        cx,
+                    )
+                    .label(course2md::tr!("服务类型")),
                 ),
-            ),
-        ));
+            );
         let codex = draft.protocol == preferences::ServiceProtocol::CodexResponses;
         if !codex {
-            body = body.child(self.setup_input_row(
+            form = form.child(self.setup_input_row(
                 purpose,
                 FormField::Address,
                 course2md::tr!("服务地址"),
+                window,
                 cx,
             ));
         }
         if !draft.protocol.keyless() {
-            body = body.child(self.setup_input_row(purpose, FormField::Key, "API Key", cx));
+            form = form.child(self.setup_input_row(purpose, FormField::Key, "API Key", window, cx));
         }
         if codex {
-            body = body.child(self.codex_account_section(
+            form = form.child(self.codex_account_section(
                 crate::codex_ui::CodexSurface::Onboarding,
                 busy,
                 cx,
             ));
         }
-        body =
-            body.child(self.setup_input_row(purpose, FormField::Model, course2md::tr!("模型"), cx));
+        form = form.child(self.setup_input_row(
+            purpose,
+            FormField::Model,
+            course2md::tr!("模型"),
+            window,
+            cx,
+        ));
+        items.push(form.into_any_element());
         if purpose == ServicePurpose::Ai {
-            let mut uses = h_flex().w_full().min_w_0().flex_wrap().gap_4();
+            let mut uses = v_flex().w_full().min_w_0().gap(rems(4. / 14.));
             for use_kind in [SetupAiUse::Proofread, SetupAiUse::Summary] {
                 let id = use_kind.id();
                 let checked = match use_kind {
@@ -1584,15 +1637,23 @@ impl Desktop {
                 };
                 uses = uses.child(
                     h_flex()
-                        .flex_1()
-                        .flex_basis(rems(240. / 14.))
+                        .w_full()
                         .min_w_0()
-                        .min_h(CONTROL_HEIGHT)
+                        .min_h(rems(48. / 14.))
                         .items_center()
-                        .gap_2()
-                        .child(icon.size_4().flex_shrink_0().text_color(color(GRAY)))
+                        .gap(rems(16. / 14.))
                         .child(
-                            field_label(format!("setup-ai-{id}-label"), use_kind.label()).min_w_0(),
+                            icon.size(rems(22. / 14.))
+                                .flex_shrink_0()
+                                .text_color(color(GRAY)),
+                        )
+                        .child(
+                            crate::settings_ui::tile_label(
+                                format!("setup-ai-{id}-label"),
+                                use_kind.label(),
+                            )
+                            .flex_1()
+                            .min_w_0(),
                         )
                         .child(crate::focus_scroll::FocusRing::new(
                             format!("setup-ai-{id}-focus"),
@@ -1600,6 +1661,7 @@ impl Desktop {
                                 Switch::new(format!("setup-ai-{id}"))
                                     .checked(checked)
                                     .disabled(busy)
+                                    .accessibility_label(use_kind.label())
                                     .on_click(cx.listener(move |this, enabled, _, cx| {
                                         match use_kind {
                                             SetupAiUse::Proofread => {
@@ -1615,28 +1677,28 @@ impl Desktop {
                         )),
                 );
             }
-            body = body
-                .child(self.setup_reveal("setup-ai-uses-reveal", uses))
-                .child(
-                    supporting_info(
+            items.push(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rems(4. / 14.))
+                    .child(self.setup_reveal("setup-ai-uses-reveal", uses))
+                    .child(crate::settings_ui::tile_info(
                         "setup-ai-use-scope",
                         course2md::tr!("开启后转录文字会发送到所选 AI 服务"),
-                    )
-                    .text_size(TEXT_AUX),
-                );
+                    ))
+                    .into_any_element(),
+            );
         }
         if let Some(cancel) = &service.running {
             let stopping = cancel.load(Ordering::Acquire);
-            body = body.child(
+            items.push(
                 h_flex()
                     .w_full()
                     .min_w_0()
                     .items_center()
                     .flex_wrap()
-                    .gap_2()
-                    .p_3()
-                    .rounded(RADIUS_CARD)
-                    .bg(color(INSET))
+                    .gap(rems(12. / 14.))
                     .child(motion::spinner(
                         format!("setup-service-check-{}", purpose as usize),
                         cx,
@@ -1652,10 +1714,10 @@ impl Desktop {
                         )
                         .flex_1()
                         .min_w_0()
-                        .font_weight(FontWeight::SEMIBOLD),
+                        .font_weight(FontWeight::MEDIUM),
                     )
                     .child(
-                        quiet(format!("setup-cancel-check-{}", purpose as usize))
+                        text_button(format!("setup-cancel-check-{}", purpose as usize), cx)
                             .icon(icons::close())
                             .label(course2md::tr!("停止检查"))
                             .disabled(stopping)
@@ -1663,17 +1725,12 @@ impl Desktop {
                                 this.onboarding.service(purpose).cancel();
                                 cx.notify();
                             })),
-                    ),
+                    )
+                    .into_any_element(),
             );
         }
         if !service.evidence.is_empty() {
-            let mut feedback = v_flex()
-                .w_full()
-                .min_w_0()
-                .gap_2()
-                .p_3()
-                .bg(color(INSET))
-                .rounded(RADIUS_CARD);
+            let mut feedback = v_flex().w_full().min_w_0().gap(rems(8. / 14.));
             for (index, (kind, evidence)) in service.evidence.iter().enumerate() {
                 let passed = evidence.outcome == TestOutcome::Passed;
                 feedback =
@@ -1682,15 +1739,15 @@ impl Desktop {
                             .w_full()
                             .min_w_0()
                             .items_start()
-                            .gap_2()
+                            .gap(rems(12. / 14.))
                             .child(
                                 if passed {
                                     icons::check_circle()
                                 } else {
                                     icons::warning()
                                 }
-                                .size_4()
-                                .mt_1()
+                                .size(rems(20. / 14.))
+                                .mt(rems(1. / 14.))
                                 .flex_shrink_0()
                                 .text_color(color(if passed { SUCCESS } else { DANGER })),
                             )
@@ -1722,20 +1779,25 @@ impl Desktop {
                         .min_w_0()
                         .gap_2()
                         .flex_wrap()
+                        .ml(rems(-12. / 14.))
                         .when(self.setup_service_passed(purpose, cx), |row| {
                             row.child(
-                                quiet(format!("setup-recheck-service-{}", purpose as usize))
-                                    .icon(icons::refresh())
-                                    .label(course2md::tr!("重新检查"))
-                                    .disabled(busy)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                text_button(
+                                    format!("setup-recheck-service-{}", purpose as usize),
+                                    cx,
+                                )
+                                .icon(icons::refresh())
+                                .label(course2md::tr!("重新检查"))
+                                .disabled(busy)
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
                                         this.start_setup_test(purpose, window, cx)
-                                    })),
+                                    },
+                                )),
                             )
                         })
                         .child(
-                            quiet(format!("setup-test-details-{}", purpose as usize))
-                                .self_start()
+                            text_button(format!("setup-test-details-{}", purpose as usize), cx)
                                 .icon(icons::info())
                                 .label(if service.details_open {
                                     course2md::tr!("收起检查详情")
@@ -1752,20 +1814,26 @@ impl Desktop {
                 .child(motion::disclosure(
                     format!("setup-test-detail-content-{}", purpose as usize),
                     service.details_open,
-                    v_flex().w_full().min_w_0().child(
-                        supporting_info(
+                    v_flex()
+                        .w_full()
+                        .min_w_0()
+                        .child(crate::settings_ui::tile_support(
                             format!("setup-test-details-text-{}", purpose as usize),
                             details,
-                        )
-                        .text_size(TEXT_AUX),
-                    ),
+                        )),
                 ));
-            body = body.child(motion::state_enter(
+            items.push(motion::state_enter(
                 ("setup-service-feedback", service.test_serial as usize),
                 feedback,
             ));
         }
-        body
+        let count = items.len();
+        v_flex().w_full().min_w_0().gap(TILE_GAP).children(
+            items
+                .into_iter()
+                .enumerate()
+                .map(|(index, item)| setup_tile(index == 0, index + 1 == count).child(item)),
+        )
     }
 
     fn setup_model_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
@@ -1778,7 +1846,7 @@ impl Desktop {
                 .asr
                 .and_then(|id| self.preferences.version(&id))
                 .cloned();
-            return v_flex().w_full().min_w_0().gap_4().child(supporting_info(
+            return setup_tile(true, true).child(crate::settings_ui::tile_info(
                 "setup-cloud-model-description",
                 version
                     .map(|version| {
@@ -1816,7 +1884,7 @@ impl Desktop {
             .result
             .as_ref()
             .and_then(|result| result.as_ref().ok());
-        let mut body = v_flex().w_full().min_w_0().gap_4();
+        let mut body = setup_tile(true, true).gap(rems(16. / 14.));
         let mut actions = h_flex()
             .w_full()
             .min_w_0()
@@ -1852,6 +1920,22 @@ impl Desktop {
             }
         };
         let model_title = course2md::config::model_label(&model);
+        // The state is the model's status chip, next to its name; a live
+        // check or preparation adds its spinner.
+        let active = (snapshot.checking && !cancelled) || snapshot.preparing;
+        let state_kind = if active {
+            BadgeKind::Progress
+        } else if cancelled {
+            BadgeKind::Neutral
+        } else if snapshot.device_issue.is_some() {
+            BadgeKind::Warning
+        } else {
+            match status.map(|status| status.state) {
+                Some(CacheState::Loaded | CacheState::Cached) => BadgeKind::Success,
+                Some(CacheState::Unsupported) => BadgeKind::Warning,
+                _ => BadgeKind::Neutral,
+            }
+        };
         body = body.child(
             v_flex()
                 .w_full()
@@ -1861,78 +1945,54 @@ impl Desktop {
                     h_flex()
                         .w_full()
                         .min_w_0()
-                        .items_start()
-                        .gap_2()
-                        .child(
-                            icons::mic()
-                                .size(rems(20. / 14.))
-                                .mt_1()
-                                .flex_shrink_0()
-                                .text_color(color(ACCENT)),
-                        )
+                        .items_center()
+                        .gap(rems(16. / 14.))
+                        .child(tinted_icon(
+                            icons::mic(),
+                            Tint::Purple,
+                            rems(40. / 14.).to_pixels(window.rem_size()),
+                        ))
                         .child(
                             v_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .gap_1()
+                                .gap(rems(2. / 14.))
                                 .child(
-                                    settings_value("setup-model-identity", model_title)
-                                        .text_size(TEXT_TITLE)
-                                        .font_weight(FontWeight::SEMIBOLD),
+                                    h_flex()
+                                        .min_w_0()
+                                        .flex_wrap()
+                                        .items_center()
+                                        .gap_x(rems(12. / 14.))
+                                        .gap_y(rems(4. / 14.))
+                                        .child(crate::settings_ui::tile_label(
+                                            "setup-model-identity",
+                                            model_title,
+                                        ))
+                                        .child(
+                                            badge(state_kind).child(
+                                                accessible_text("setup-model-state", label)
+                                                    .role(Role::Status),
+                                            ),
+                                        )
+                                        .when(active, |row| {
+                                            row.child(motion::spinner("setup-model-spinner", cx))
+                                        }),
                                 )
-                                .child(
-                                    supporting_info(
-                                        "setup-model-engine",
-                                        crate::provider_label(Some(provider)),
-                                    )
-                                    .text_size(TEXT_AUX),
-                                ),
+                                .child(crate::settings_ui::tile_support(
+                                    "setup-model-engine",
+                                    crate::provider_label(Some(provider)),
+                                )),
                         ),
                 )
-                .child(
-                    v_flex()
-                        .w_full()
-                        .min_w_0()
-                        .gap_1()
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .gap_2()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .size(rems(20. / 14.))
-                                        .flex_shrink_0()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .when(
-                                            (snapshot.checking && !cancelled) || snapshot.preparing,
-                                            |v| v.child(motion::spinner("setup-model-spinner", cx)),
-                                        )
-                                        .when(
-                                            !((snapshot.checking && !cancelled)
-                                                || snapshot.preparing),
-                                            |v| {
-                                                v.child(
-                                                    icons::storage()
-                                                        .size(rems(20. / 14.))
-                                                        .text_color(color(GRAY)),
-                                                )
-                                            },
-                                        ),
-                                )
-                                .child(
-                                    settings_value("setup-model-state", label)
-                                        .font_weight(FontWeight::SEMIBOLD),
-                                ),
-                        )
-                        .when(!hint.is_empty(), |v| {
-                            v.child(info_callout("setup-model-state-hint", hint))
-                        }),
-                ),
+                .when(!hint.is_empty(), |v| {
+                    v.child(crate::settings_ui::tile_info(
+                        "setup-model-state-hint",
+                        hint,
+                    ))
+                }),
         );
+        // Text actions start on the tile's content edge; a leading pill keeps its own.
+        let mut leading_pill = snapshot.preparing;
         if snapshot.preparing {
             body = body.child(self.setup_model_progress(window, cx));
             actions = actions.child(
@@ -1961,10 +2021,12 @@ impl Desktop {
                 matches!(status.state, CacheState::Missing | CacheState::Partial)
             });
             if allowed {
+                let loaded = status.is_some_and(|status| status.state == CacheState::Loaded);
+                leading_pill = !loaded;
                 let button = if needs_download {
                     primary_pill("setup-prepare-model")
                 } else if status.is_some_and(|status| status.state == CacheState::Loaded) {
-                    quiet("setup-prepare-model")
+                    text_button("setup-prepare-model", cx)
                 } else {
                     outline_pill("setup-prepare-model", cx)
                 };
@@ -2004,7 +2066,7 @@ impl Desktop {
                 );
             }
             actions = actions.child(
-                quiet("setup-recheck-model")
+                text_button("setup-recheck-model", cx)
                     .self_start()
                     .icon(icons::refresh())
                     .label(course2md::tr!("重新检查"))
@@ -2012,7 +2074,10 @@ impl Desktop {
                     .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx))),
             );
             if self.job.is_some() {
-                body = body.child(supporting_info("setup-model-job-busy", job_busy()));
+                body = body.child(crate::settings_ui::tile_info(
+                    "setup-model-job-busy",
+                    job_busy(),
+                ));
             }
         }
         let mut details = v_flex().w_full().min_w_0().gap_3();
@@ -2027,13 +2092,22 @@ impl Desktop {
                     .role(Role::Status),
                 );
             }
-            details = details.child(supporting_info("setup-model-preparation-detail", message));
+            details = details.child(crate::settings_ui::tile_info(
+                "setup-model-preparation-detail",
+                message,
+            ));
         }
         if let Some(issue) = snapshot.device_issue {
-            details = details.child(supporting_info("setup-model-device-detail", issue));
+            details = details.child(crate::settings_ui::tile_info(
+                "setup-model-device-detail",
+                issue,
+            ));
         }
         if let Some(Err(error)) = &snapshot.result {
-            details = details.child(supporting_info("setup-model-error-detail", error.clone()));
+            details = details.child(crate::settings_ui::tile_info(
+                "setup-model-error-detail",
+                error.clone(),
+            ));
         }
         if let Some(status) = status {
             if status.bytes > 0 {
@@ -2045,9 +2119,12 @@ impl Desktop {
             }
             for (index, part) in status.parts.iter().enumerate() {
                 details = details
-                    .child(field_label(("setup-model-part", index), part.name.clone()))
                     .child(
-                        supporting_info(
+                        settings_value(("setup-model-part", index), part.name.clone())
+                            .font_weight(FontWeight::MEDIUM),
+                    )
+                    .child(
+                        crate::settings_ui::tile_info(
                             ("setup-model-path", index),
                             part.path.display().to_string(),
                         )
@@ -2055,14 +2132,14 @@ impl Desktop {
                     );
             }
             if let Some(error) = &status.last_error {
-                details = details.child(supporting_info(
+                details = details.child(crate::settings_ui::tile_info(
                     "setup-model-last-error",
                     course2md::tr!("上次准备记录：{}", error),
                 ));
             }
         }
         actions = actions.child(
-            quiet("setup-model-details")
+            text_button("setup-model-details", cx)
                 .icon(icons::info())
                 .label(if self.onboarding.model_details_open {
                     course2md::tr!("收起详情")
@@ -2079,7 +2156,10 @@ impl Desktop {
                 .w_full()
                 .min_w_0()
                 .gap_2()
-                .child(self.setup_reveal("setup-model-actions-reveal", actions))
+                .child(self.setup_reveal(
+                    "setup-model-actions-reveal",
+                    actions.when(!leading_pill, |row| row.ml(rems(-12. / 14.))),
+                ))
                 .child(motion::disclosure(
                     "setup-model-detail-content",
                     self.onboarding.model_details_open,
@@ -2166,7 +2246,8 @@ impl Desktop {
                         .flex_wrap()
                         .gap_2()
                         .child(
-                            quiet("setup-enter-temporarily")
+                            text_button("setup-enter-temporarily", cx)
+                                .ml(rems(-12. / 14.))
                                 .label(course2md::tr!("暂时进入应用"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.leave_onboarding(window, cx)
@@ -2243,8 +2324,8 @@ impl Desktop {
             .flex_wrap();
         if step == Step::Engine && !model_review {
             row = row.child(
-                quiet("setup-later")
-                    .ml(-crate::theme::QUIET_INSET)
+                text_button("setup-later", cx)
+                    .ml(rems(-12. / 14.))
                     .icon(icons::arrow_forward())
                     .label(course2md::tr!("直接开始使用"))
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -2256,8 +2337,8 @@ impl Desktop {
         }
         if step != Step::Engine && !model_review {
             row = row.child(
-                quiet("setup-back")
-                    .ml(-crate::theme::QUIET_INSET)
+                text_button("setup-back", cx)
+                    .ml(rems(-12. / 14.))
                     .icon(icons::arrow_left())
                     .label(course2md::tr!("上一步"))
                     .disabled(step == Step::Model && model_running)
@@ -2425,7 +2506,7 @@ impl Desktop {
                         )
                         .when(!running, |row| {
                             row.child(
-                                quiet("setup-background-model-dismiss")
+                                text_button("setup-background-model-dismiss", cx)
                                     .label(course2md::tr!("关闭提示"))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if this.setup_model_job_running() {
@@ -2439,6 +2520,268 @@ impl Desktop {
                 ),
         )
     }
+}
+
+/// The guide's progress: numbered steps joined by a hairline. The current
+/// step is the accent, finished ones sit on the secondary container.
+fn setup_steps(labels: &[&'static str], current: usize) -> Div {
+    let count = labels.len();
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .items_center()
+        .gap(px(8.))
+        .children(labels.iter().enumerate().map(|(index, label)| {
+            let number = index + 1;
+            let is_current = number == current;
+            let finished = number < current;
+            h_flex()
+                .when(number < count, |item| item.flex_1())
+                .min_w_0()
+                .gap(px(8.))
+                .items_center()
+                .child(
+                    div()
+                        .size(rems(24. / 14.))
+                        .flex_shrink_0()
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(TEXT_AUX)
+                        .font_weight(FontWeight::MEDIUM)
+                        .map(|dot| {
+                            if is_current {
+                                dot.bg(color(ACCENT)).text_color(color(ON_PRIMARY))
+                            } else if finished {
+                                dot.bg(color(SECONDARY_CONTAINER))
+                                    .text_color(color(ON_SECONDARY_CONTAINER))
+                            } else {
+                                dot.border_1()
+                                    .border_color(color(CONTROL))
+                                    .text_color(color(GRAY))
+                            }
+                        })
+                        .when(finished, |dot| {
+                            dot.child(icons::check().size(rems(1.)))
+                        })
+                        .when(!finished, |dot| dot.child(number.to_string())),
+                )
+                .child(
+                    accessible_text(("setup-step-label", index), *label)
+                        .flex_shrink_0()
+                        .text_size(TEXT_BODY)
+                        .line_height(rems(20. / 14.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(color(if is_current { INK } else { GRAY })),
+                )
+                .when(number < count, |item| {
+                    item.child(div().flex_1().min_w(px(8.)).h(px(1.)).bg(color(HAIRLINE)))
+                })
+        }))
+}
+
+/// A tile of the guide on the canvas ground: the settings tile surface and
+/// insets. `first`/`last` give its outside corners in a connected group.
+fn setup_tile(first: bool, last: bool) -> Div {
+    tile([first, first, last, last])
+        .flex()
+        .flex_col()
+        .gap(rems(12. / 14.))
+        .px(SETTING_ITEM_INSET)
+        .py(rems(16. / 14.))
+}
+
+/// The M3 radio of a choice tile: an outlined ring, filled with a dot when
+/// selected.
+fn choice_radio(selected: bool, enabled: bool) -> Div {
+    let tone = if !enabled {
+        Rgba {
+            a: 0.38,
+            ..color(INK)
+        }
+    } else if selected {
+        color(ACCENT)
+    } else {
+        color(CONTROL)
+    };
+    div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .size(rems(20. / 14.))
+        .rounded_full()
+        .border_2()
+        .border_color(tone)
+        .when(selected, |ring| {
+            ring.child(div().size(rems(10. / 14.)).rounded_full().bg(tone))
+        })
+}
+
+/// One choice in a connected group of tiles, as on the canvas: tonal
+/// selection on the secondary container, a leading icon, the label with
+/// optional supporting text, a trailing status chip and a radio. An
+/// unavailable choice keeps its status chip at full strength.
+struct ChoiceTile {
+    id: ElementId,
+    outer: [bool; 4],
+    icon: Option<AnyElement>,
+    title: SharedString,
+    description: Option<SharedString>,
+    status: Option<AnyElement>,
+    selected: bool,
+    enabled: bool,
+}
+
+impl ChoiceTile {
+    fn new(
+        id: impl Into<ElementId>,
+        index: usize,
+        count: usize,
+        title: impl Into<SharedString>,
+        selected: bool,
+    ) -> Self {
+        let first = index == 0;
+        let last = index + 1 >= count;
+        Self {
+            id: id.into(),
+            outer: [first, first, last, last],
+            icon: None,
+            title: title.into(),
+            description: None,
+            status: None,
+            selected,
+            enabled: true,
+        }
+    }
+    fn icon(mut self, icon: impl IntoElement) -> Self {
+        self.icon = Some(icon.into_any_element());
+        self
+    }
+    fn description(mut self, description: impl Into<SharedString>) -> Self {
+        let description = description.into();
+        self.description = (!description.is_empty()).then_some(description);
+        self
+    }
+    fn status(mut self, status: Option<impl IntoElement>) -> Self {
+        self.status = status.map(IntoElement::into_any_element);
+        self
+    }
+    fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+    fn render(self, window: &mut Window, cx: &mut App) -> gpui_base::Button {
+        let id = self.id;
+        let selected = self.selected;
+        let enabled = self.enabled;
+        let amount = motion::selection_value(
+            SharedString::from(format!("setup-choice-{id:?}")),
+            if selected { 1. } else { 0. },
+            window,
+            cx,
+        );
+        let bg = blend(color(SURFACE), color(SECONDARY_CONTAINER), amount);
+        let ink = if selected {
+            color(ON_SECONDARY_CONTAINER)
+        } else {
+            color(INK)
+        };
+        let fg = if enabled {
+            ink
+        } else {
+            Rgba { a: 0.38, ..ink }
+        };
+        let radius = |outside: bool| {
+            if outside {
+                TILE_RADIUS
+            } else {
+                TILE_INNER_RADIUS
+            }
+        };
+        let title = self.title;
+        gpui_base::Button::new(id.clone())
+            .selected(selected)
+            .disabled(!enabled)
+            .aria_toggled(if selected {
+                gpui::accesskit::Toggled::True
+            } else {
+                gpui::accesskit::Toggled::False
+            })
+            .accessibility_label(title.clone())
+            .w_full()
+            .min_w_0()
+            .h_auto()
+            .min_h(rems(64. / 14.))
+            .justify_start()
+            .gap(rems(16. / 14.))
+            .pl(SETTING_ITEM_INSET)
+            .pr(rems(20. / 14.))
+            .py(rems(12. / 14.))
+            .rounded_tl(radius(self.outer[0]))
+            .rounded_tr(radius(self.outer[1]))
+            .rounded_br(radius(self.outer[2]))
+            .rounded_bl(radius(self.outer[3]))
+            .bg(bg)
+            // The outline is reserved for keyboard focus, so focus never
+            // moves the content.
+            .border_2()
+            .border_color(Rgba { a: 0., ..bg })
+            .text_color(fg)
+            .when(enabled, |button| {
+                button
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(blend(bg, ink, 0.08)))
+                    .active(move |style| style.bg(blend(bg, ink, 0.10)))
+            })
+            .focus(|style| style.border_color(color(ACCENT)))
+            .children(self.icon)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(rems(2. / 14.))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(TEXT_SETTINGS_BODY)
+                            .line_height(rems(22. / 14.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(title),
+                    )
+                    .when_some(self.description, |column, description| {
+                        column.child(
+                            div()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .text_size(TEXT_SETTINGS_AUX)
+                                .line_height(rems(20. / 14.))
+                                .text_color(if selected {
+                                    Rgba { a: 0.8, ..fg }
+                                } else {
+                                    color(GRAY)
+                                })
+                                .child(description),
+                        )
+                    }),
+            )
+            .children(self.status)
+            .child(choice_radio(selected, enabled))
+    }
+}
+
+/// The leading icon of a plain choice tile, centred in the 40px slot of a
+/// tinted icon so every tile's label starts on one ruler.
+fn choice_icon(icon: Icon) -> Div {
+    div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .size(rems(40. / 14.))
+        .child(icon.size(rems(22. / 14.)))
 }
 
 #[cfg(test)]

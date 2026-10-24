@@ -829,7 +829,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 技术详情	技术详情	Technical details	技術詳情	技術的な詳細
 把视频整理成笔记	把视频整理成笔记	Turn videos into notes	把影片整理成筆記	動画をノートに整理する
 拖入本地视频	拖入本地视频	Drag local video	拖入本機影片	ローカル動画をドラッグ
-指定运行方式	指定运行方式	Specify how to run	指定執行方式	実行方法を指定する
 按优先顺序填写语言代码，如 zh-Hans, en	按优先顺序填写语言代码，如 zh-Hans, en	Fill in the language codes in order of priority, such as zh-Hans, en	按優先順序填寫語言代碼，如 zh-Hans, en	優先順に言語コードを入力します（例: zh-Hans, en）
 按文件夹分组	按文件夹分组	Group by folder	按資料夾分組	フォルダーごとにグループ化
 授权回调地址无效 / Invalid authorization callback URL	授权回调地址无效	Invalid authorization callback URL	授權回呼網址無效	認可コールバック URL が無効です
