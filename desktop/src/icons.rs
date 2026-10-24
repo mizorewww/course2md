@@ -58,6 +58,7 @@ icons! {
     link => "outline" / "link";
     list => "outline" / "list";
     list_checks => "outline" / "list-checks";
+    loader_circle => "outline" / "loader-circle";
     login => "outline" / "login";
     logout => "outline" / "logout";
     maximize => "outline" / "maximize-2";
@@ -79,6 +80,7 @@ icons! {
     settings => "outline" / "settings";
     sparkles => "outline" / "sparkles";
     storage => "outline" / "storage";
+    subtitles => "outline" / "captions";
     sun => "outline" / "sun";
     text_lines => "outline" / "text-align-start";
     tune => "outline" / "tune";
@@ -96,11 +98,9 @@ icons! {
     grid_view => "material" / "grid-view";
     history => "material" / "history";
     image => "material" / "image";
-    loader_circle => "material" / "loader-circle";
     movie => "material" / "movie";
     pause => "material" / "pause";
     play_arrow => "material" / "play-arrow";
-    subtitles => "material" / "subtitles";
     summarize => "material" / "summarize";
     task => "material" / "task";
     toc => "material" / "format-list-bulleted";
