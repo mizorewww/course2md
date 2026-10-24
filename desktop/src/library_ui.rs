@@ -384,6 +384,8 @@ impl Desktop {
         self.folder_error = None;
         self.inputs[&Field::FolderName].update(cx, |state, cx| {
             state.set_value(name, window, cx);
+            // The visible field label already names the field.
+            state.set_placeholder("", window, cx);
         });
         let desktop = cx.entity();
         let title = if id.is_some() {
@@ -582,7 +584,7 @@ impl Desktop {
                                 .icon(if id.is_some() {
                                     icons::edit()
                                 } else {
-                                    icons::create_new_folder()
+                                    icons::folder_plus()
                                 })
                                 .label(if id.is_some() {
                                     course2md::tr!("保存名称")
