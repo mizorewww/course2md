@@ -207,36 +207,6 @@ fn setting_label(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Di
     div().child(tile_label(id, value))
 }
 
-/// A whole tile that acts: the surface with M3 state layers, the tile's
-/// corners and its padding. Callers add the label column and trailing items.
-pub(crate) fn tile_button(id: impl Into<ElementId>, outer: [bool; 4], cx: &App) -> Button {
-    let surface = color(SURFACE);
-    let ink = color(INK);
-    tile_corners(
-        Button::new(id)
-            .custom(
-                ButtonCustomVariant::new(cx)
-                    .color(surface.into())
-                    .foreground(ink.into())
-                    .hover(theme::blend(surface, ink, 0.08).into())
-                    .active(theme::blend(surface, ink, 0.10).into())
-                    .shadow(false),
-            )
-            .bg(surface)
-            .w_full()
-            .h_auto()
-            .min_h(rems(64. / 14.))
-            .px(SETTING_ITEM_INSET)
-            .py(rems(16. / 14.))
-            .gap(rems(16. / 14.))
-            .justify_start()
-            .text_left()
-            .whitespace_normal()
-            .font_weight(FontWeight::NORMAL),
-        outer,
-    )
-}
-
 /// A complete preference owns its label, value, help and trailing actions.
 /// Controls align to this item's trailing edge and reflow as a unit.
 pub(super) fn settings_row(
@@ -272,16 +242,6 @@ pub(super) fn settings_row(
                 .child(control),
         );
     setting_surface().child(row)
-}
-
-/// A tile that expands content in place below its row.
-pub(crate) fn tile_disclosure(
-    id: impl Into<ElementId>,
-    outer: [bool; 4],
-    open: bool,
-    cx: &App,
-) -> Button {
-    tile_button(id, outer, cx).selected(open)
 }
 
 /// A small outlined fact chip beside a tile's label, e.g. the local engine.

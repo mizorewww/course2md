@@ -18,7 +18,6 @@ use anyhow::Context as _;
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
 use gpui_component::{
-    button::ButtonVariants as _,
     checkbox::Checkbox,
     menu::{DropdownMenu, PopupMenuItem},
     switch::Switch,
@@ -2768,26 +2767,11 @@ impl Desktop {
             let entity = cx.entity().downgrade();
             tiles.push(
                 div().child(
-                    tile_corners(control("import-library"), [true, true, false, false])
-                        .ghost()
-                        .w_full()
-                        .h_auto()
-                        .min_h(rems(68. / 14.))
-                        .pl(rems(20. / 14.))
-                        .pr(rems(16. / 14.))
-                        .py(rems(12. / 14.))
-                        .text_color(color(INK))
+                    TileScale::Compact
+                        .button("import-library", [true, true, false, false], cx)
                         .accessibility_label(course2md::tr!("笔记库"))
-                        .child(
-                            h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .gap(rems(12. / 14.))
-                                .items_center()
-                                .text_left()
-                                .child(library_label)
-                                .child(tile_chevron()),
-                        )
+                        .child(library_label)
+                        .child(tile_chevron())
                         .dropdown_menu(move |menu, _, _| {
                             libraries.iter().fold(menu, |menu, library| {
                                 let id = library.id.clone();

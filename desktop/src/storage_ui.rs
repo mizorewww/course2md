@@ -1851,7 +1851,7 @@ impl Desktop {
             .workspace
             .as_ref()
             .map_or(0, |workspace| workspace.state.libraries.len());
-        let add = crate::settings_ui::tile_button(
+        let add = tile_button(
             "register-storage-location",
             [count == 0, count == 0, true, true],
             cx,

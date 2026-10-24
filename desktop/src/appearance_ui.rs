@@ -352,7 +352,7 @@ impl Desktop {
         } else {
             course2md::tr!("浅色主题")
         };
-        crate::settings_ui::tile_button(("palette-preset", usize::from(dark)), outer, cx)
+        tile_button(("palette-preset", usize::from(dark)), outer, cx)
             .p(rems(16. / 14.))
             .border_2()
             .border_color(gpui::Rgba {

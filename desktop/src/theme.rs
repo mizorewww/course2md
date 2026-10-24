@@ -494,6 +494,45 @@ impl TileScale {
             .text_color(color(GRAY))
     }
 
+    /// A whole tile that acts: the surface with M3 state layers, the tile's
+    /// corners and this scale's padding. Callers add the label column and
+    /// trailing items.
+    pub fn button(
+        self,
+        id: impl Into<gpui::ElementId>,
+        outer: [bool; 4],
+        cx: &App,
+    ) -> gpui_component::button::Button {
+        use gpui::Styled;
+        let button = custom_fill(
+            gpui_component::button::Button::new(id),
+            color(SURFACE),
+            color(INK),
+            true,
+            cx,
+        )
+        .w_full()
+        .h_auto()
+        .justify_start()
+        .text_left()
+        .whitespace_normal()
+        .font_weight(gpui::FontWeight::NORMAL);
+        let button = match self {
+            TileScale::Regular => button
+                .min_h(rems(64. / 14.))
+                .px(SETTING_ITEM_INSET)
+                .py(rems(16. / 14.))
+                .gap(rems(16. / 14.)),
+            TileScale::Compact => button
+                .min_h(rems(68. / 14.))
+                .pl(SETTING_ITEM_INSET)
+                .pr(rems(16. / 14.))
+                .py(rems(12. / 14.))
+                .gap(rems(12. / 14.)),
+        };
+        tile_corners(button, outer)
+    }
+
     /// A tile's text column: its label and, when present, the value or
     /// explanation under it.
     pub fn text(
@@ -540,6 +579,26 @@ pub fn tile_text(
     support: Option<gpui::SharedString>,
 ) -> gpui::Div {
     TileScale::Regular.text(id, label, support)
+}
+
+/// A whole settings tile that acts (`TileScale::Regular`).
+pub fn tile_button(
+    id: impl Into<gpui::ElementId>,
+    outer: [bool; 4],
+    cx: &App,
+) -> gpui_component::button::Button {
+    TileScale::Regular.button(id, outer, cx)
+}
+
+/// A settings tile that expands content in place below its row.
+pub fn tile_disclosure(
+    id: impl Into<gpui::ElementId>,
+    outer: [bool; 4],
+    open: bool,
+    cx: &App,
+) -> gpui_component::button::Button {
+    use gpui_component::Selectable;
+    tile_button(id, outer, cx).selected(open)
 }
 
 /// An explanation inside a tile: the information icon and supporting text.
