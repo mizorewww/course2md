@@ -64,14 +64,9 @@ impl Desktop {
         cx: &App,
     ) -> AnyElement {
         tile_button(id, outer, cx)
-            .gap(rems(1.))
             .accessibility_label(label)
             .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .items_center()
-                    .gap(rems(1.))
+                tile_row()
                     .child(icon.size(rems(20. / 14.)).text_color(color(GRAY)))
                     .child(tile_label(SharedString::from(format!("{id}-label")), label)),
             )
@@ -90,12 +85,15 @@ impl Desktop {
         tile_button("about-license", outer, cx)
             .min_h(rems(76. / 14.))
             .accessibility_label(course2md::tr!("开源许可"))
-            .child(tile_text(
-                "about-license-title",
-                course2md::tr!("开源许可"),
-                Some(summary.into()),
-            ))
-            .child(tile_chevron())
+            .child(
+                tile_row()
+                    .child(tile_text(
+                        "about-license-title",
+                        course2md::tr!("开源许可"),
+                        Some(summary.into()),
+                    ))
+                    .child(tile_chevron()),
+            )
             .dropdown_menu_with_anchor(
                 Anchor::TopRight,
                 |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {

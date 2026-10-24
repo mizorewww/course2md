@@ -97,19 +97,22 @@ impl Desktop {
             .min_h(rems(76. / 14.))
             .accessibility_label(course2md::tr!("{}：{}", course2md::tr!("双语翻译"), shown))
             .child(
-                tile_text(
-                    "default-ai-translate-label",
-                    course2md::tr!("双语翻译"),
-                    Some(shown.into()),
-                )
-                .when(current.is_some(), |text| {
-                    text.child(tile_support(
-                        "default-ai-translate-row-hint",
-                        course2md::tr!("每段文字下方附上译文；已是该语言的视频不翻译"),
-                    ))
-                }),
+                tile_row()
+                    .child(
+                        tile_text(
+                            "default-ai-translate-label",
+                            course2md::tr!("双语翻译"),
+                            Some(shown.into()),
+                        )
+                        .when(current.is_some(), |text| {
+                            text.child(tile_support(
+                                "default-ai-translate-row-hint",
+                                course2md::tr!("每段文字下方附上译文；已是该语言的视频不翻译"),
+                            ))
+                        }),
+                    )
+                    .child(tile_chevron()),
             )
-            .child(tile_chevron())
             .dropdown_menu_with_anchor(Anchor::TopRight, menu);
         self.reveal_setting("default-ai-translate-reveal", button)
             .into_any_element()
@@ -193,12 +196,15 @@ impl Desktop {
                     course2md::tr!("字幕语言"),
                     subtitle_value
                 ))
-                .child(tile_text(
-                    "subtitle-language-label",
-                    course2md::tr!("字幕语言"),
-                    Some(subtitle_value.into()),
-                ))
-                .child(tile_chevron())
+                .child(
+                    tile_row()
+                        .child(tile_text(
+                            "subtitle-language-label",
+                            course2md::tr!("字幕语言"),
+                            Some(subtitle_value.into()),
+                        ))
+                        .child(tile_chevron()),
+                )
                 .dropdown_menu_with_anchor(Anchor::TopRight, subtitle_menu),
         );
         let languages_open =
@@ -210,12 +216,15 @@ impl Desktop {
             cx,
         )
         .accessibility_label(course2md::tr!("自定义语言优先级"))
-        .child(tile_text(
-            "subtitle-custom-label",
-            course2md::tr!("自定义语言优先级"),
-            custom_language.then(|| value.preferred_subtitle_languages.join(" → ").into()),
-        ))
-        .child(disclosure_chevron(languages_open))
+        .child(
+            tile_row()
+                .child(tile_text(
+                    "subtitle-custom-label",
+                    course2md::tr!("自定义语言优先级"),
+                    custom_language.then(|| value.preferred_subtitle_languages.join(" → ").into()),
+                ))
+                .child(disclosure_chevron(languages_open)),
+        )
         .on_click(cx.listener(|this, _, _, cx| {
             this.settings_ui.language_details_open = !this.settings_ui.language_details_open;
             cx.notify();
@@ -330,25 +339,28 @@ impl Desktop {
                     method_value
                 ))
                 .child(
-                    tile_text(
-                        "asr-method-label",
-                        course2md::tr!("识别方式"),
-                        Some(method_value.into()),
-                    )
-                    .when(online, |text| {
-                        text.child(tile_support(
-                            "asr-method-label-hint",
-                            course2md::tr!("音频会发送到所选服务"),
-                        ))
-                    }),
+                    tile_row()
+                        .child(
+                            tile_text(
+                                "asr-method-label",
+                                course2md::tr!("识别方式"),
+                                Some(method_value.into()),
+                            )
+                            .when(online, |text| {
+                                text.child(tile_support(
+                                    "asr-method-label-hint",
+                                    course2md::tr!("音频会发送到所选服务"),
+                                ))
+                            }),
+                        )
+                        .when(!online, |row| {
+                            row.child(outlined_badge(
+                                "asr-method-engine",
+                                crate::provider_label(provider),
+                            ))
+                        })
+                        .child(tile_chevron()),
                 )
-                .when(!online, |row| {
-                    row.child(outlined_badge(
-                        "asr-method-engine",
-                        crate::provider_label(provider),
-                    ))
-                })
-                .child(tile_chevron())
                 .dropdown_menu_with_anchor(Anchor::TopRight, method_menu),
         );
         let mut recognition = group("asr-default-settings", course2md::tr!("语音识别"))
@@ -414,19 +426,22 @@ impl Desktop {
             )
             .min_h(rems(76. / 14.))
             .accessibility_label(course2md::tr!("自定义校对规则"))
-            .child(tile_text(
-                "proofread-rules-label",
-                course2md::tr!("自定义校对规则"),
-                Some(
-                    if value.ai.prompt.is_some() {
-                        course2md::tr!("已自定义")
-                    } else {
-                        course2md::tr!("使用标准规则")
-                    }
-                    .into(),
-                ),
-            ))
-            .child(disclosure_chevron(ai_open))
+            .child(
+                tile_row()
+                    .child(tile_text(
+                        "proofread-rules-label",
+                        course2md::tr!("自定义校对规则"),
+                        Some(
+                            if value.ai.prompt.is_some() {
+                                course2md::tr!("已自定义")
+                            } else {
+                                course2md::tr!("使用标准规则")
+                            }
+                            .into(),
+                        ),
+                    ))
+                    .child(disclosure_chevron(ai_open)),
+            )
             .on_click(cx.listener(|this, _, window, cx| {
                 this.settings_ui.show_prompt = !this.settings_ui.show_prompt;
                 // The standard rule is edited in place rather than printed beside an empty box.
@@ -520,24 +535,29 @@ impl Desktop {
             .min_h(rems(76. / 14.))
             .accessibility_label(course2md::tr!("保存位置"))
             .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(rems(2. / 14.))
-                    .child(tile_label(
-                        "settings-save-location",
-                        course2md::tr!("保存位置"),
-                    ))
+                tile_row()
                     .child(
-                        tile_support(
-                            "settings-current-location",
-                            location.unwrap_or_else(|| course2md::tr!("尚未设置").into()),
-                        )
-                        .text_size(rems(13. / 14.))
-                        .font_family(gpui_component::Theme::global(cx).mono_font_family.clone()),
-                    ),
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(rems(2. / 14.))
+                            .child(tile_label(
+                                "settings-save-location",
+                                course2md::tr!("保存位置"),
+                            ))
+                            .child(
+                                tile_support(
+                                    "settings-current-location",
+                                    location.unwrap_or_else(|| course2md::tr!("尚未设置").into()),
+                                )
+                                .text_size(rems(13. / 14.))
+                                .font_family(
+                                    gpui_component::Theme::global(cx).mono_font_family.clone(),
+                                ),
+                            ),
+                    )
+                    .child(tile_chevron()),
             )
-            .child(tile_chevron())
             .on_click(cx.listener(|this, _, window, cx| {
                 this.select_settings_tab(SettingsTab::Storage, window, cx);
             }));
@@ -709,9 +729,12 @@ impl Desktop {
                         course2md::tr!("识别模型"),
                         model_name
                     ))
-                    .child(model_text)
-                    .children(status_badge)
-                    .child(tile_chevron())
+                    .child(
+                        tile_row()
+                            .child(model_text)
+                            .children(status_badge)
+                            .child(tile_chevron()),
+                    )
                     .dropdown_menu_with_anchor(Anchor::TopRight, menu),
             );
             recognition.tile(move |_| model_tile.into_any_element())
@@ -765,12 +788,15 @@ impl Desktop {
         let manage_open = self.settings_ui.model_details_open;
         let manage = tile_disclosure("toggle-model-details", [false; 4], manage_open, cx)
             .accessibility_label(course2md::tr!("管理模型与下载"))
-            .child(tile_text(
-                "model-management-label",
-                course2md::tr!("管理模型与下载"),
-                None,
-            ))
-            .child(disclosure_chevron(manage_open))
+            .child(
+                tile_row()
+                    .child(tile_text(
+                        "model-management-label",
+                        course2md::tr!("管理模型与下载"),
+                        None,
+                    ))
+                    .child(disclosure_chevron(manage_open)),
+            )
             .on_click(cx.listener(|this, _, _, cx| {
                 this.settings_ui.model_details_open = !this.settings_ui.model_details_open;
                 cx.notify();
@@ -793,12 +819,15 @@ impl Desktop {
             cx,
         )
         .accessibility_label(course2md::tr!("高级识别设置"))
-        .child(tile_text(
-            "asr-advanced-label",
-            course2md::tr!("高级识别设置"),
-            None,
-        ))
-        .child(disclosure_chevron(advanced_open))
+        .child(
+            tile_row()
+                .child(tile_text(
+                    "asr-advanced-label",
+                    course2md::tr!("高级识别设置"),
+                    None,
+                ))
+                .child(disclosure_chevron(advanced_open)),
+        )
         .on_click(cx.listener(|this, _, _, cx| {
             this.settings_ui.asr_details_open = !this.settings_ui.asr_details_open;
             cx.notify();

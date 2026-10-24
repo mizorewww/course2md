@@ -80,12 +80,13 @@ impl SingleChoiceGroup {
         self.value = Some(value.into());
         self
     }
-    /// Fill the parent's width with equal segments and one moving selection surface.
+    /// Fill the parent's width: each option is as wide as its content plus an
+    /// equal share of the spare width.
     pub fn full_width(mut self) -> Self {
         self.full_width = true;
         self
     }
-    /// Connected equal-width segments with a shared outline and persistent option icons.
+    /// Connected segments that fill the parent, with persistent option icons.
     /// Radio/tab semantics, focus navigation and pointer feedback are unchanged.
     pub fn segmented(mut self) -> Self {
         self.segmented = true;
@@ -286,8 +287,10 @@ fn item_style<T: Styled + StatefulInteractiveElement + gpui::prelude::FluentBuil
         .text_size(super::TEXT_BODY)
         .font_weight(FontWeight::MEDIUM)
         // Content-width options keep the default shrink so a narrow parent
-        // ellipsizes labels instead of overflowing.
-        .when(fill, |item| item.flex_1())
+        // ellipsizes labels instead of overflowing. Filling options start
+        // from their content and share the spare width, so a long label
+        // ("Speech recognition") never truncates beside a short one.
+        .when(fill, |item| item.flex_auto())
         .when(!disabled, |item| {
             item.hover(move |style| style.bg(paint.hover))
                 .active(move |style| style.bg(paint.press))
@@ -351,6 +354,10 @@ impl RenderOnce for SingleChoiceGroup {
             .min_w_0()
             .gap(px(GAP))
             .items_center()
+            // When even the labels' own widths exceed the parent (large text
+            // in a narrow pane), options wrap to another row rather than
+            // clipping their labels.
+            .when(fill, |lane| lane.flex_wrap())
             .when(cfg!(test), |lane| {
                 lane.debug_selector(|| "full-choice-lane".into())
             });
@@ -672,7 +679,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn connected_segments_share_width_and_keep_labels_still_on_selection(cx: &mut TestAppContext) {
+    fn connected_segments_fit_their_labels_and_keep_them_still_on_selection(
+        cx: &mut TestAppContext,
+    ) {
         cx.update(|cx| cx.set_reduce_motion(true));
         let (view, cx) = cx.add_window_view(|_, _| SegmentedHarness {
             selected: 0,
@@ -699,14 +708,16 @@ mod tests {
         for index in 0..3 {
             // Each label follows its icon; the cluster is centered in a 48px button.
             assert_eq!(options[index].size.height, px(48.));
-            // Shares snap to the 2x device grid.
-            assert!((options[index].size.width - options[0].size.width).abs() <= px(0.5));
+            // Each option holds its whole label.
+            assert!(before[index].right() <= options[index].right());
             assert!(icon_before[index].right() <= before[index].left());
             let content_center = (icon_before[index].left() + before[index].right()) / 2.;
             assert!((content_center - options[index].center().x).abs() <= px(0.5));
             assert!((icon_before[index].center().y - options[index].center().y).abs() <= px(0.5));
             assert!((before[index].center().y - options[index].center().y).abs() <= px(0.5));
         }
+        // The longest label gets the widest option; spare width is shared.
+        assert!(options[2].size.width > options[0].size.width);
         // Separate buttons with a 2px gap that together fill the parent.
         for pair in options.windows(2) {
             assert!((pair[1].left() - pair[0].right() - px(2.)).abs() <= px(0.5));

@@ -144,7 +144,11 @@ fn palette_choice(palette: PaletteId, selected: bool, amount: f32) -> gpui_base:
                 .min_w_0()
                 .whitespace_normal()
                 .text_left()
-                .child(sample(palette, 120.).rounded_t(RADIUS_CARD))
+                // Inside the card's 2px border; GPUI clips to the card's
+                // bounds but not to its radius.
+                .child(sample(palette, 120.).rounded_t(RADIUS_CARD - px(2.)))
+                // The label sits on the card's own tonal fill, so nothing
+                // paints past its rounded bottom.
                 .child(
                     h_flex()
                         .w_full()
@@ -153,17 +157,12 @@ fn palette_choice(palette: PaletteId, selected: bool, amount: f32) -> gpui_base:
                         .gap(px(8.))
                         .p(px(12.))
                         .items_center()
-                        .bg(theme::blend(
-                            color(SURFACE),
-                            color(SECONDARY_CONTAINER),
-                            amount,
-                        ))
                         .child(
                             div()
                                 .flex_1()
                                 .min_w_0()
                                 .text_size(TEXT_SETTINGS_BODY)
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .font_weight(FontWeight::MEDIUM)
                                 .text_color(color(INK))
                                 .when(cfg!(test), |label| {
                                     label.debug_selector(move || {

@@ -508,8 +508,8 @@ impl TileScale {
     }
 
     /// A whole tile that acts: the surface with M3 state layers, the tile's
-    /// corners and this scale's padding. Callers add the label column and
-    /// trailing items.
+    /// corners and this scale's padding. Callers add one `row` holding the
+    /// leading slot, label column and trailing items.
     pub fn button(
         self,
         id: impl Into<gpui::ElementId>,
@@ -534,16 +534,38 @@ impl TileScale {
             TileScale::Regular => button
                 .min_h(rems(64. / 14.))
                 .px(SETTING_ITEM_INSET)
-                .py(rems(16. / 14.))
-                .gap(rems(16. / 14.)),
+                .py(rems(16. / 14.)),
             TileScale::Compact => button
                 .min_h(rems(68. / 14.))
                 .pl(SETTING_ITEM_INSET)
                 .pr(rems(16. / 14.))
-                .py(rems(12. / 14.))
-                .gap(rems(12. / 14.)),
+                .py(rems(12. / 14.)),
         };
         tile_corners(button, outer)
+    }
+
+    /// The gap between a tile's leading slot, text column and trailing items.
+    pub fn gap(self) -> Rems {
+        match self {
+            TileScale::Regular => rems(16. / 14.),
+            TileScale::Compact => rems(12. / 14.),
+        }
+    }
+
+    /// The content of a `button` tile: its leading slot, text column and
+    /// trailing items in one row at this scale's gap. The component's own
+    /// content row has a fixed 8px gap and does not wrap, so a tile's
+    /// children go in here to keep text on the rows' ruler and let long
+    /// labels wrap.
+    pub fn row(self) -> gpui::Div {
+        use gpui::prelude::*;
+        gpui_component::h_flex()
+            .flex_1()
+            .w_full()
+            .min_w_0()
+            .items_center()
+            .whitespace_normal()
+            .gap(self.gap())
     }
 
     /// A tile's text column: its label and, when present, the value or
@@ -750,7 +772,13 @@ pub fn tile_text(
     TileScale::Regular.text(id, label, support)
 }
 
-/// A whole settings tile that acts (`TileScale::Regular`).
+/// The content row of a settings tile button (`TileScale::Regular`).
+pub fn tile_row() -> gpui::Div {
+    TileScale::Regular.row()
+}
+
+/// A whole settings tile that acts (`TileScale::Regular`); its children go
+/// in one `tile_row`.
 pub fn tile_button(
     id: impl Into<gpui::ElementId>,
     outer: [bool; 4],
@@ -1084,9 +1112,20 @@ pub fn is_dark_paint() -> bool {
     luminance(color(INK)) > luminance(color(SURFACE))
 }
 
-/// A category or resource icon in a round tonal container.
-pub fn tinted_icon(icon: gpui_component::Icon, tint: Tint, size: Pixels) -> gpui::Div {
-    use gpui::{ParentElement, Styled, div};
+/// A category or resource icon in a round tonal container. Give the size in
+/// rems where the circle shares a ruler with text, so both follow the text
+/// scale.
+pub fn tinted_icon(
+    icon: gpui_component::Icon,
+    tint: Tint,
+    size: impl Into<gpui::AbsoluteLength>,
+) -> gpui::Div {
+    use gpui::{AbsoluteLength, ParentElement, Styled, div};
+    let size = size.into();
+    let glyph = match size {
+        AbsoluteLength::Pixels(size) => AbsoluteLength::Pixels(size * 0.5),
+        AbsoluteLength::Rems(size) => AbsoluteLength::Rems(rems(size.0 * 0.5)),
+    };
     div()
         .flex()
         .flex_shrink_0()
@@ -1096,7 +1135,7 @@ pub fn tinted_icon(icon: gpui_component::Icon, tint: Tint, size: Pixels) -> gpui
         .rounded_full()
         .bg(tint.container())
         .text_color(tint.content())
-        .child(icon.size(size * 0.5))
+        .child(icon.size(glyph))
 }
 
 /* ---------- Neutral shadows ---------- */
@@ -1491,7 +1530,9 @@ pub fn selection_card(
         // M3 selection is tonal: the chosen card fills with the secondary
         // container; the 2px outline is reserved for keyboard focus.
         .border_2()
-        .border_color(blend(color(CARD_LINE), color(SECONDARY_CONTAINER), amount))
+        // Unselected, the M3 outlined card's outline-variant; CARD_LINE
+        // fades into the surface of dark palettes.
+        .border_color(blend(color(HAIRLINE), color(SECONDARY_CONTAINER), amount))
         .bg(blend(color(SURFACE), color(SECONDARY_CONTAINER), amount))
         .cursor_pointer()
         .hover(|style| style.shadow_sm())
@@ -1545,6 +1586,7 @@ pub fn nav_action(
     cx: &App,
 ) -> gpui_component::button::Button {
     use gpui::Styled;
+    use gpui_component::Sizable;
     let (bg, fg) = if selected {
         (color(SECONDARY_CONTAINER), color(ON_SECONDARY_CONTAINER))
     } else {
@@ -1559,8 +1601,18 @@ pub fn nav_action(
     custom_fill(control(id), bg, fg, true, cx)
         .pl(rems(12. / 14.))
         .pr(rems(16. / 14.))
-        .gap(ICON_GAP)
         .label_text_size(rems(15. / 14.))
+        .with_size(component_icon_size(20., cx))
+}
+
+/// The component `Size` that makes a gpui-component Button draw its icon at
+/// `design` px of the 14px base, following the text scale. The Button sizes
+/// its icon to 75% of a custom size and overrides the icon's own size; every
+/// other dimension a custom size would set is replaced by our explicit
+/// height, padding and label size.
+fn component_icon_size(design: f32, cx: &App) -> gpui_component::Size {
+    let font = Theme::global(cx).font_size;
+    gpui_component::Size::Size(font * (design / 14. / 0.75))
 }
 
 /// M3 filled tonal button: a secondary action that still carries weight,
@@ -1809,6 +1861,10 @@ impl MaterialDialog for gpui_component::dialog::AlertDialog {
 /// actions. The buttons dispatch the dialog's own Cancel and Confirm, so
 /// Escape, Enter and `on_ok` keep working. A destructive confirmation
 /// (`danger`) paints its confirming action in the error color.
+///
+/// Like every main action, a dialog's confirming action carries an icon with
+/// its verb: the trash for a destructive one, the check otherwise. Dialogs
+/// that build their own actions follow the same rule.
 pub fn confirm_dialog(
     dialog: gpui_component::dialog::AlertDialog,
     title: impl Into<gpui::SharedString>,
@@ -1820,9 +1876,9 @@ pub fn confirm_dialog(
     use gpui::{ParentElement, Styled};
     use gpui_component::dialog::{Cancel, Confirm};
     let confirm_button = if danger {
-        danger_pill("material-alert-confirm", cx)
+        danger_pill("material-alert-confirm", cx).icon(crate::icons::delete())
     } else {
-        primary_pill("material-alert-confirm")
+        primary_pill("material-alert-confirm").icon(crate::icons::check())
     };
     dialog
         .material("material-alert-title", title)
@@ -1911,8 +1967,10 @@ pub fn badge(kind: BadgeKind) -> gpui::Div {
         BadgeKind::Danger => (DANGER, DANGER_BG, Some(crate::icons::error())),
         // A clock would read as waiting; work in progress needs no icon.
         BadgeKind::Progress => (ACCENT, SECONDARY_CONTAINER, None),
-        // Neutral is a plain text chip without a status icon.
-        BadgeKind::Neutral => (GRAY, INSET, None),
+        // Neutral is a plain text chip without a status icon, on the
+        // highest surface container: a step above the tile in light and dark
+        // palettes alike (INSET sinks below the surface in dark ones).
+        BadgeKind::Neutral => (GRAY, SURFACE_HIGH, None),
         BadgeKind::Tonal => (ON_SECONDARY_CONTAINER, SECONDARY_CONTAINER, None),
     };
     let mut view = div()
