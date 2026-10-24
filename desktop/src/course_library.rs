@@ -1602,7 +1602,7 @@ impl Desktop {
                     )
                     .when(!query.is_empty(), |empty| {
                         empty.child(
-                            outline_pill("clear-search")
+                            outline_pill("clear-search", cx)
                                 .icon(crate::icons::close())
                                 .label(course2md::tr!("清除搜索"))
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -1624,7 +1624,7 @@ impl Desktop {
                     })
                     .when(query.is_empty() && !self.folder_filter.is_all(), |empty| {
                         empty.child(
-                            outline_pill("empty-folder-all-notes")
+                            outline_pill("empty-folder-all-notes", cx)
                                 .icon(crate::icons::book_open())
                                 .label(course2md::tr!("浏览全部笔记"))
                                 .on_click(cx.listener(|this, _, _, cx| {
@@ -2295,7 +2295,7 @@ impl Desktop {
             .gap_2()
             .when(layout.stacked, |row| row.w_full().flex_wrap())
             .child(
-                outline_pill(("read-course-action", index))
+                outline_pill(("read-course-action", index), cx)
                     .icon(crate::icons::book_open())
                     .when(!layout.compact || layout.stacked, |button| {
                         button.label(if self.course_has_reading_position(course) {
@@ -2734,7 +2734,7 @@ impl Desktop {
                     .cloned()
             }) {
                 actions = actions.child(
-                    outline_pill(SharedString::from(format!("recent-attention-read-{id}")))
+                    outline_pill(SharedString::from(format!("recent-attention-read-{id}")), cx)
                         .icon(icons::book_open())
                         .label(if self.course_has_reading_position(&course) {
                             course2md::tr!("继续阅读")
@@ -2779,7 +2779,7 @@ impl Desktop {
             } else if !uncertain && task.state == crate::workspace::TaskState::Paused {
                 let resume_id = id.clone();
                 actions = actions.child(
-                    outline_pill(SharedString::from(format!("recent-resume-{id}")))
+                    outline_pill(SharedString::from(format!("recent-resume-{id}")), cx)
                         .icon(icons::play_arrow())
                         .label(course2md::tr!("继续生成"))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -2792,7 +2792,7 @@ impl Desktop {
                 );
             } else {
                 actions = actions.child(
-                    outline_pill(SharedString::from(format!("recent-task-{id}")))
+                    outline_pill(SharedString::from(format!("recent-task-{id}")), cx)
                         .icon(icons::task())
                         .label(course2md::tr!("查看任务"))
                         .on_click(cx.listener(move |this, _, _, cx| {

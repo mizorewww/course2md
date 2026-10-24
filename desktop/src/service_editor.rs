@@ -134,7 +134,7 @@ impl Desktop {
         let controls = if choices.is_empty() {
             // Nothing to choose yet: the one action is adding a service.
             h_flex().w_full().justify_end().child(
-                outline_pill(("configure-service", index))
+                outline_pill(("configure-service", index), cx)
                     .settings_text()
                     .icon(icons::plus())
                     .label(match purpose {
@@ -986,7 +986,7 @@ impl Desktop {
                     })),
             )
             .child(
-                outline_pill("run-service-test")
+                outline_pill("run-service-test", cx)
                     .settings_text()
                     .icon(icons::science())
                     .label(if busy {

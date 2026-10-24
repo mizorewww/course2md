@@ -575,11 +575,11 @@ enum Emphasis {
 }
 
 impl RecoveryStyle {
-    fn button(self, name: &str, task_id: &str, emphasis: Emphasis) -> Button {
+    fn button(self, name: &str, task_id: &str, emphasis: Emphasis, cx: &App) -> Button {
         let prefix = if self == Self::Workbench { "box-" } else { "" };
         let id = SharedString::from(format!("{prefix}{name}-{task_id}"));
         match (self, emphasis) {
-            (_, Emphasis::Secondary) => outline_pill(id),
+            (_, Emphasis::Secondary) => outline_pill(id, cx),
             (Self::Workbench, Emphasis::Primary) => primary_pill(id),
             (Self::Workbench, Emphasis::Quiet) => quiet(id),
             (Self::Card, _) => control(id),
@@ -879,13 +879,13 @@ impl Desktop {
             })
             .count();
         let pause = (pausable > 0).then(|| {
-            outline_pill("tasks-pause-all")
+            outline_pill("tasks-pause-all", cx)
                 .icon(icons::pause())
                 .label(course2md::tr!("全部暂停"))
                 .on_click(cx.listener(|this, _, _, cx| this.pause_all_tasks(cx)))
         });
         let resume = (resumable > 0).then(|| {
-            outline_pill("tasks-resume-all")
+            outline_pill("tasks-resume-all", cx)
                 .icon(icons::play_arrow())
                 .label(course2md::tr!("全部继续"))
                 .on_click(cx.listener(|this, _, _, cx| this.resume_all_tasks(cx)))
@@ -1001,7 +1001,7 @@ impl Desktop {
                 .child(icons::warning().size_8().text_color(color(WARNING)))
                 .child(course2md::tr!("任务记录暂时无法读取"))
                 .child(
-                    outline_pill("task-records-open-library")
+                    outline_pill("task-records-open-library", cx)
                         .icon(icons::book_open())
                         .label(course2md::tr!("前往笔记库"))
                         .self_start()
@@ -2001,7 +2001,7 @@ impl Desktop {
             .flex_wrap()
             .children(self.reassociate_action(
                 self.task_library(task),
-                style.button("reassociate", &id, Emphasis::Secondary),
+                style.button("reassociate", &id, Emphasis::Secondary, cx),
                 cx,
             ));
         if let Some(followup) = &task.handled_by {
@@ -2134,7 +2134,7 @@ impl Desktop {
     ) -> Button {
         let id = task.id.clone();
         style
-            .button("resume", &task.id, Emphasis::Primary)
+            .button("resume", &task.id, Emphasis::Primary, cx)
             .icon(icons::play_arrow())
             .label(course2md::tr!("继续生成"))
             .on_click(
@@ -2152,7 +2152,7 @@ impl Desktop {
     ) -> Button {
         let id = task.id.clone();
         style
-            .button("repair-ai", &task.id, Emphasis::Secondary)
+            .button("repair-ai", &task.id, Emphasis::Secondary, cx)
             .icon(icons::settings())
             .label(course2md::tr!("修复 AI 服务并补做"))
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -2170,7 +2170,7 @@ impl Desktop {
         let id = task.id.clone();
         let component = component.to_owned();
         style
-            .button(&format!("retry-{component}"), &task.id, Emphasis::Quiet)
+            .button(&format!("retry-{component}"), &task.id, Emphasis::Quiet, cx)
             .icon(icons::refresh())
             .label(retry_component_label(&component))
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -2187,7 +2187,7 @@ impl Desktop {
     ) -> Button {
         let id = task.id.clone();
         style
-            .button("adjust", &task.id, Emphasis::Secondary)
+            .button("adjust", &task.id, Emphasis::Secondary, cx)
             .icon(icons::tune())
             .label(adjust_label(task))
             .on_click(
@@ -2688,7 +2688,7 @@ impl Desktop {
             actions = actions
                 .children(self.reassociate_action(
                     self.task_library(task),
-                    style.button("reassociate", &id, Emphasis::Secondary),
+                    style.button("reassociate", &id, Emphasis::Secondary, cx),
                     cx,
                 ))
                 .child(self.adjust_action(task, style, cx))

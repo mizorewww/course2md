@@ -2482,7 +2482,7 @@ impl Desktop {
                         "about-license-title",
                         course2md::tr!("开源许可"),
                         "",
-                        self.about_licenses(),
+                        self.about_licenses(cx),
                     ))
                     .child(
                         setting_surface().child(
@@ -2496,7 +2496,7 @@ impl Desktop {
                                     course2md::tr!("首次设置"),
                                 )))
                                 .child(
-                                    outline_pill("restart-onboarding")
+                                    outline_pill("restart-onboarding", cx)
                                         .settings_text()
                                         .label(course2md::tr!("重新运行"))
                                         .icon(icons::restart())

@@ -1689,7 +1689,7 @@ impl Desktop {
                     })
                     .when(needs_reassociation, |row| {
                         row.child(
-                            outline_pill(("reassociate-storage-location", index))
+                            outline_pill(("reassociate-storage-location", index), cx)
                                 .settings_text()
                                 .icon(icons::storage())
                                 .label(course2md::tr!("重新关联…"))
@@ -1705,7 +1705,7 @@ impl Desktop {
                     })
                     .when(needs_relocation, |row| {
                         row.child(
-                            outline_pill(("relocate-storage-location", index))
+                            outline_pill(("relocate-storage-location", index), cx)
                                 .settings_text()
                                 .icon(icons::folder_open())
                                 .label(course2md::tr!("重新定位…"))

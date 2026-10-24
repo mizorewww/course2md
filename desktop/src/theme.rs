@@ -61,14 +61,19 @@ pub fn blend(from: Rgba, to: Rgba, t: f32) -> Rgba {
 fn palette_colors(id: PaletteId) -> [Rgba; COLOR_COUNT] {
     let p = id.colors();
     let tint = |foreground, amount| blend(rgb(p.surface), rgb(foreground), amount);
+    // The window ground is M3's surface container: the palette's canvas with
+    // a trace of its accent, so surface tiles read as a layer above it.
+    let canvas = blend(
+        rgb(p.canvas),
+        rgb(p.accent),
+        if id.is_dark() { 0.03 } else { 0.045 },
+    );
     std::array::from_fn(|index| match ALL_TOKENS[index] {
-        CANVAS => rgb(p.canvas),
+        CANVAS => canvas,
         SURFACE => rgb(p.surface),
-        SURFACE_HIGH => blend(
-            rgb(p.canvas),
-            rgb(p.text),
-            if id.is_dark() { 0.07 } else { 0.05 },
-        ),
+        // Surface container highest: unselected segments, filled search bars
+        // and tonal icon buttons.
+        SURFACE_HIGH => blend(canvas, rgb(p.text), if id.is_dark() { 0.08 } else { 0.06 }),
         INSET => rgb(p.inset),
         INK => rgb(p.text),
         GRAY => rgb(p.muted),
@@ -183,7 +188,8 @@ fn sync_component_theme(dark: bool, cx: &mut App) {
     set!(color(GRAY) => muted_foreground, description_list_label_foreground, tab_foreground);
     set!(color(FAINT) => scrollbar_thumb_hover);
     set!(color(HAIRLINE) => border, title_bar_border, sidebar_border, status_bar_border, table_row_border, window_border, muted, skeleton, tab_bar_segmented, button_active, secondary_active, button_secondary_active);
-    set!(color(CONTROL) => input, scrollbar_thumb, switch);
+    set!(color(CONTROL) => input, scrollbar_thumb);
+    set!(color(SURFACE_HIGH) => switch);
     set!(color(ACCENT) => accent_foreground, primary, button_primary, caret, ring, link, progress_bar, slider_bar, drag_border, sidebar_primary, list_active_border, table_active_border, sidebar_accent_foreground, info, info_hover, info_active, button_info_foreground);
     set!(color(ON_PRIMARY) => primary_foreground, button_primary_foreground, sidebar_primary_foreground, danger_foreground, success_foreground, warning_foreground, info_foreground);
     set!(blend(color(ACCENT), color(INK), 0.10) => primary_hover, button_primary_hover, link_hover);
@@ -243,6 +249,14 @@ pub const RADIUS_PILL: Pixels = px(999.);
 pub const RADIUS_CARD: Pixels = px(16.);
 /// Settings reference surfaces share a 24px corner radius.
 pub const SETTINGS_CARD_RADIUS: Pixels = px(24.);
+/// Connected tiles: a group keeps the 24px corners on its outside and 6px
+/// corners where tiles meet, with 2px of ground between them.
+pub const TILE_RADIUS: Pixels = SETTINGS_CARD_RADIUS;
+pub const TILE_INNER_RADIUS: Pixels = px(6.);
+pub const TILE_GAP: Pixels = px(2.);
+/// Larger M3 button heights: the hero's main action and prominent actions.
+pub const BUTTON_LARGE: Rems = rems(56. / 14.);
+pub const BUTTON_MEDIUM: Rems = rems(48. / 14.);
 pub const RADIUS_HERO: Pixels = px(28.);
 pub const RADIUS_SMALL: Pixels = px(8.);
 /// Menus and the select fields that open them.
@@ -334,6 +348,8 @@ pub const TEXT_TITLE: Rems = rems(1.286);
 pub const TEXT_READER: Rems = rems(1.143);
 /// Main page headline.
 pub const TEXT_DISPLAY: Rems = rems(2.);
+/// Page titles (M3 headline small at 30px).
+pub const TEXT_HEADLINE: Rems = rems(30. / 14.);
 /// Settings content reads one step larger than navigation and the workbench.
 pub const TEXT_SETTINGS_BODY: Rems = rems(16. / 14.);
 pub const TEXT_SETTINGS_AUX: Rems = TEXT_BODY;
@@ -360,8 +376,8 @@ impl SettingsText for SingleChoiceGroup {
 }
 
 /// Page title shared by library, tasks, settings and a non-hero workbench.
-/// As on the M3 canvas, the title is text alone; the app bar already marks
-/// the destination with its icon.
+/// As on the M3 canvas, the title is text alone in the regular-weight
+/// headline role; the app bar already marks the destination with its icon.
 pub fn page_heading(
     id: impl Into<gpui::ElementId>,
     title: impl Into<gpui::SharedString>,
@@ -370,10 +386,99 @@ pub fn page_heading(
     div().flex().items_center().min_w_0().child(
         accessible_text(id, title.into())
             .role(Role::Heading)
-            .text_size(TEXT_DISPLAY)
+            .text_size(TEXT_HEADLINE)
             .line_height(rems(36. / 14.))
-            .font_weight(FontWeight::SEMIBOLD),
+            .font_weight(FontWeight::NORMAL),
     )
+}
+
+/// One tile of a connected group: the surface with 24px corners on the
+/// group's outside and 6px where it meets a neighbour. `outer` lists which
+/// corners are outside, as top-left, top-right, bottom-right, bottom-left.
+pub fn tile(outer: [bool; 4]) -> gpui::Div {
+    use gpui::{Styled, div};
+    let radius = |outside: bool| {
+        if outside {
+            TILE_RADIUS
+        } else {
+            TILE_INNER_RADIUS
+        }
+    };
+    div()
+        .w_full()
+        .min_w_0()
+        .bg(color(SURFACE))
+        .rounded_tl(radius(outer[0]))
+        .rounded_tr(radius(outer[1]))
+        .rounded_br(radius(outer[2]))
+        .rounded_bl(radius(outer[3]))
+}
+
+/// The tile at `index` of a vertical connected list of `count` tiles.
+pub fn list_tile(index: usize, count: usize) -> gpui::Div {
+    let first = index == 0;
+    let last = index + 1 >= count;
+    tile([first, first, last, last])
+}
+
+/// A distinct color family for a category icon: a tonal container and its
+/// content color, blended from the current surface so every palette keeps
+/// its own ground and contrast.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tint {
+    Orange,
+    Blue,
+    Teal,
+    Amber,
+    Green,
+    Pink,
+    Purple,
+}
+
+impl Tint {
+    fn hue(self) -> Rgba {
+        rgb(match self {
+            Tint::Orange => 0xd9692b,
+            Tint::Blue => 0x2f6fe0,
+            Tint::Teal => 0x1b8ea6,
+            Tint::Amber => 0xc79a12,
+            Tint::Green => 0x2f9a52,
+            Tint::Pink => 0xc7428a,
+            Tint::Purple => 0x7a5cc7,
+        })
+    }
+
+    pub fn container(self) -> Rgba {
+        let dark = is_dark_paint();
+        blend(color(SURFACE), self.hue(), if dark { 0.30 } else { 0.24 })
+    }
+
+    pub fn content(self) -> Rgba {
+        let dark = is_dark_paint();
+        blend(self.hue(), color(INK), if dark { 0.35 } else { 0.45 })
+    }
+}
+
+/// Whether the palette currently painted is a dark one: its text is lighter
+/// than its surface.
+pub fn is_dark_paint() -> bool {
+    let luminance = |c: Rgba| 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    luminance(color(INK)) > luminance(color(SURFACE))
+}
+
+/// A category or resource icon in a round tonal container.
+pub fn tinted_icon(icon: gpui_component::Icon, tint: Tint, size: Pixels) -> gpui::Div {
+    use gpui::{ParentElement, Styled, div};
+    div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .size(size)
+        .rounded_full()
+        .bg(tint.container())
+        .text_color(tint.content())
+        .child(icon.size(size * 0.5))
 }
 
 /* ---------- Neutral shadows ---------- */
@@ -450,7 +555,7 @@ pub fn semantic_label(
                 .min_w_0()
                 .whitespace_normal()
                 .text_size(TEXT_BODY)
-                .font_weight(FontWeight::SEMIBOLD),
+                .font_weight(FontWeight::MEDIUM),
         )
 }
 
@@ -702,7 +807,7 @@ pub fn control(id: impl Into<gpui::ElementId>) -> gpui_component::button::Button
         .rounded(RADIUS_PILL)
         .py_0()
         .flex_shrink_0()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .font_weight(gpui::FontWeight::MEDIUM)
 }
 
 /// A framed single-line field. Multiline editors and embedded find text use
@@ -758,14 +863,14 @@ pub fn section_heading(
         .min_w_0()
         .items_center()
         .gap(ICON_GAP)
-        .text_color(color(ACCENT))
+        .text_color(color(GRAY))
         .child(icon.size(rems(18. / 14.)).flex_shrink_0())
         .child(section_title(id, title))
 }
 
-/// M3 list section title: primary-colored, semibold, above the list it names.
-/// Shared by settings groups, task groups, diagnostic groups, the workbench's
-/// processing options and its recent notes.
+/// M3 list section title: a quiet medium-weight label above the list it
+/// names, on the list's text inset. Shared by settings groups, task groups,
+/// diagnostic groups, the workbench's processing options and its recent notes.
 pub fn section_title(
     id: impl Into<gpui::ElementId>,
     title: impl Into<gpui::SharedString>,
@@ -773,10 +878,10 @@ pub fn section_title(
     use gpui::prelude::*;
     accessible_text(id, title)
         .role(gpui::Role::Heading)
-        .text_size(rems(15. / 14.))
-        .line_height(rems(22. / 14.))
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(color(ACCENT))
+        .text_size(TEXT_BODY)
+        .line_height(rems(20. / 14.))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(color(GRAY))
 }
 
 /// M3 search bar: a filled, borderless pill with a leading search icon. The
@@ -921,7 +1026,7 @@ pub fn described_choice(
                         .flex_1()
                         .min_w_0()
                         .text_size(TEXT_BODY)
-                        .font_weight(FontWeight::SEMIBOLD)
+                        .font_weight(FontWeight::MEDIUM)
                         .child(title),
                 )
                 .child(
@@ -991,7 +1096,7 @@ pub fn stacked_field(
                 .child(
                     accessible_text(id, label)
                         .text_size(TEXT_BODY)
-                        .font_weight(FontWeight::SEMIBOLD),
+                        .font_weight(FontWeight::MEDIUM),
                 ),
         )
         .child(field)
@@ -1051,12 +1156,14 @@ pub fn nav_action(
                 a: 0.,
                 ..color(CANVAS)
             },
-            color(GRAY),
+            color(INK),
         )
     };
     custom_fill(control(id), bg, fg, true, cx)
-        .px(rems(1.))
+        .pl(rems(12. / 14.))
+        .pr(rems(16. / 14.))
         .gap(ICON_GAP)
+        .label_text_size(rems(15. / 14.))
 }
 
 /// M3 filled tonal button: a secondary action that still carries weight,
@@ -1135,10 +1242,69 @@ pub fn filter_chip(
     }
 }
 
-/// Meaningful secondary action with a control-strength border.
-pub fn outline_pill(id: impl Into<gpui::ElementId>) -> gpui_component::button::Button {
+/// M3 outlined button: accent label inside an outline-colored border, with
+/// accent state layers.
+pub fn outline_pill(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_component::button::Button {
     use gpui::Styled;
-    control(id).outline().px(rems(16. / 14.)).gap(ICON_GAP)
+    custom_fill(
+        control(id),
+        gpui::Rgba {
+            a: 0.,
+            ..color(SURFACE)
+        },
+        color(ACCENT),
+        true,
+        cx,
+    )
+    .border_1()
+    .border_color(color(CONTROL))
+    .px(rems(16. / 14.))
+    .gap(ICON_GAP)
+}
+
+/// M3 text button: an accent label with accent state layers and no container.
+pub fn text_button(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_component::button::Button {
+    use gpui::Styled;
+    custom_fill(
+        control(id),
+        gpui::Rgba {
+            a: 0.,
+            ..color(SURFACE)
+        },
+        color(ACCENT),
+        true,
+        cx,
+    )
+    .px(rems(12. / 14.))
+    .gap(ICON_GAP)
+}
+
+/// M3 icon button: a round target with a centered icon. Tonal buttons (back,
+/// reset) sit on surface-container-highest; standard ones are transparent.
+pub fn icon_button(
+    id: impl Into<gpui::ElementId>,
+    size: Rems,
+    tonal: bool,
+    cx: &App,
+) -> gpui_component::button::Button {
+    use gpui::Styled;
+    let (bg, fg) = if tonal {
+        (color(SURFACE_HIGH), color(INK))
+    } else {
+        (
+            gpui::Rgba {
+                a: 0.,
+                ..color(SURFACE)
+            },
+            color(GRAY),
+        )
+    };
+    custom_fill(control(id), bg, fg, true, cx)
+        .h(size)
+        .min_h(size)
+        .w(size)
+        .min_w(size)
+        .px_0()
 }
 
 /// gpui-component's medium button inline padding (`px_2p5`). A quiet action
@@ -1268,11 +1434,11 @@ pub fn badge(kind: BadgeKind) -> gpui::Div {
         .flex()
         .items_center()
         .flex_shrink_0()
-        .gap(px(6.))
+        .gap(px(4.))
         .min_h(px(24.))
-        .px(px(8.))
+        .px(px(10.))
         .py(px(3.))
-        .rounded_full()
+        .rounded(RADIUS_SMALL)
         .bg(color(bg))
         .text_color(color(text))
         .text_size(TEXT_AUX)
@@ -1314,16 +1480,20 @@ pub fn outlined_field_label(
         )
 }
 
-/// Preference switches share the accent and scale their geometry with UI text.
+/// Every preference switch is the M3 switch with icons: a 52×32 track that
+/// scales with UI text, a check on the selected thumb and a cross on the
+/// unselected one.
 pub fn preference_switch(switch: gpui_component::switch::Switch) -> gpui_component::switch::Switch {
-    switch.color(color(ACCENT)).track_height(rems(20. / 14.))
+    switch
+        .color(color(ACCENT))
+        .reference_geometry()
+        .thumb_icons(crate::icons::check(), crate::icons::close())
+        .track_height(rems(32. / 14.))
 }
 
-/// Larger switches for a full-width processing panel's preference rows.
+/// Switches in the processing panel's preference rows.
 pub fn processing_switch(switch: gpui_component::switch::Switch) -> gpui_component::switch::Switch {
     preference_switch(switch)
-        .reference_geometry()
-        .track_height(rems(32. / 14.))
 }
 
 /// GPUI Component's Root resets rem size from Theme on every render. Update that

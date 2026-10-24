@@ -1936,7 +1936,7 @@ impl Desktop {
         if snapshot.preparing {
             body = body.child(self.setup_model_progress(window, cx));
             actions = actions.child(
-                outline_pill("setup-pause-model")
+                outline_pill("setup-pause-model", cx)
                     .self_start()
                     .icon(icons::pause())
                     .label(if self.cancelling {
@@ -1966,7 +1966,7 @@ impl Desktop {
                 } else if status.is_some_and(|status| status.state == CacheState::Loaded) {
                     quiet("setup-prepare-model")
                 } else {
-                    outline_pill("setup-prepare-model")
+                    outline_pill("setup-prepare-model", cx)
                 };
                 let target = root.clone();
                 actions = actions.child(
@@ -2276,13 +2276,13 @@ impl Desktop {
         row = row.child(div().flex_1());
         if step == Step::Ai {
             row = row.child(
-                outline_pill("setup-skip-ai")
+                outline_pill("setup-skip-ai", cx)
                     .label(course2md::tr!("稍后配置 AI"))
                     .on_click(cx.listener(|this, _, _, cx| this.skip_setup_ai(cx))),
             );
         }
         let next = if emphasize_model_preparation {
-            outline_pill("setup-next")
+            outline_pill("setup-next", cx)
         } else {
             primary_pill("setup-next")
         };

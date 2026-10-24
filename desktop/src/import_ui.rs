@@ -1233,7 +1233,7 @@ impl Desktop {
                     .text_color(color(GRAY)),
             )
             .child(
-                outline_pill("choose-local-video")
+                outline_pill("choose-local-video", cx)
                     .icon(icons::file_upload())
                     .label(course2md::tr!("选择文件"))
                     .text_color(color(ACCENT))
@@ -1586,7 +1586,7 @@ impl Desktop {
                             .gap_2()
                             .flex_wrap()
                             .child(
-                                outline_pill("retry-source")
+                                outline_pill("retry-source", cx)
                                     .icon(icons::refresh())
                                     .label(course2md::tr!("重试预览"))
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1601,7 +1601,7 @@ impl Desktop {
                                     ),
                                 |row| {
                                     row.child(
-                                        outline_pill("source-login-repair")
+                                        outline_pill("source-login-repair", cx)
                                             .icon(icons::bilibili())
                                             .label(course2md::tr!("登录 Bilibili"))
                                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1710,7 +1710,7 @@ impl Desktop {
                             .flex_wrap()
                             .items_center()
                             .child(
-                                outline_pill("choose-video")
+                                outline_pill("choose-video", cx)
                                     .icon(crate::icons::folder_open())
                                     .label(course2md::tr!("更换视频"))
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -2062,7 +2062,7 @@ impl Desktop {
             ));
             if let Some(old) = &source.selected_subtitle {
                 view = view.child(
-                    outline_pill("use-previous-subtitle")
+                    outline_pill("use-previous-subtitle", cx)
                         .self_start()
                         .icon(icons::subtitles())
                         .label(course2md::tr!("继续使用之前的字幕"))
@@ -2172,7 +2172,7 @@ impl Desktop {
                     .gap_2()
                     .flex_wrap()
                     .child(
-                        outline_pill("retry-subtitles")
+                        outline_pill("retry-subtitles", cx)
                             .icon(icons::refresh())
                             .label(course2md::tr!("重新读取字幕"))
                             .disabled(self.subtitle_loading)
@@ -2180,7 +2180,7 @@ impl Desktop {
                     )
                     .when(!source.online, |view| {
                         view.child(
-                            outline_pill("attach-subtitles")
+                            outline_pill("attach-subtitles", cx)
                                 .icon(icons::file_upload())
                                 .label(course2md::tr!("选择字幕文件"))
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -2201,7 +2201,7 @@ impl Desktop {
                                 .is_some_and(source::legacy_login_failure_from_text),
                         |view| {
                             view.child(
-                                outline_pill("login-for-subtitles")
+                                outline_pill("login-for-subtitles", cx)
                                     .icon(icons::bilibili())
                                     .label(course2md::tr!("登录 Bilibili"))
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -2503,7 +2503,7 @@ impl Desktop {
                                     )),
                             )
                             .child(
-                                outline_pill("import-prepare-model")
+                                outline_pill("import-prepare-model", cx)
                                     .icon(icons::download())
                                     .label(course2md::tr!("下载模型"))
                                     .disabled(self.job.is_some())
@@ -2705,7 +2705,7 @@ impl Desktop {
                 .items_end()
                 .child(div().flex_1().min_w_0().child(self.folder_picker(cx)))
                 .child(
-                    outline_pill("import-new-folder")
+                    outline_pill("import-new-folder", cx)
                         .icon(icons::create_new_folder())
                         .mb(rems(4. / 14.))
                         .w(HERO_CONTROL)
@@ -3307,7 +3307,7 @@ impl Desktop {
                 || (self.online() && !environment.ytdlp)
         }) {
             actions = actions.child(
-                outline_pill("repair-conversion-components")
+                outline_pill("repair-conversion-components", cx)
                     .icon(icons::settings())
                     .label(course2md::tr!("检查所需组件"))
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -3322,7 +3322,7 @@ impl Desktop {
         }
         if let Some(issue) = preferences_issue {
             actions = actions.child(
-                outline_pill("repair-generation-preferences")
+                outline_pill("repair-generation-preferences", cx)
                     .icon(icons::refresh())
                     .label(if issue.can_retry {
                         course2md::tr!("重试保存处理选项")
@@ -3353,7 +3353,7 @@ impl Desktop {
         });
         actions = actions.children(self.reassociate_action(
             draft_library,
-            outline_pill("reassociate-import-location"),
+            outline_pill("reassociate-import-location", cx),
             cx,
         ));
         if let Some((id, title, location)) = matching_task.clone() {
@@ -3399,7 +3399,7 @@ impl Desktop {
                             })),
                     )
                     .child(
-                        outline_pill("generate-new-version")
+                        outline_pill("generate-new-version", cx)
                             .icon(icons::refresh())
                             .track_focus(&self.import_submit_focus)
                             .label(course2md::tr!("生成新版笔记"))
@@ -3439,7 +3439,7 @@ impl Desktop {
             && matching_task.is_none()
         {
             actions = actions.child(
-                outline_pill("retry-conversion-validation")
+                outline_pill("retry-conversion-validation", cx)
                     .icon(icons::refresh())
                     .label(course2md::tr!("重试转换"))
                     .on_click(cx.listener(|this, _, window, cx| {

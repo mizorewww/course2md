@@ -17,6 +17,11 @@ separate reading hierarchy from blue actions, not claims about upstream text
 roles. The upstream Day background `#e1e2e7`, blue `#2e7de9` and selection
 `#b7c1e3` remain the palette's basis.
 
+Every palette's window ground is painted as Material 3's surface container:
+its canvas color mixed with 4.5% (light) or 3% (dark) of its accent, so the
+surface-colored tiles of grouped settings and lists read as a layer above it.
+The stored canvas colors above are unchanged.
+
 Original licenses are in `licenses/` and included in distributed bundles. They
 cover the palette source material; upstream projects do not endorse course2md.
 Brand artwork has separate provenance in `../brands/SOURCES.md`.

@@ -66,13 +66,13 @@ impl Desktop {
     }
 
     /// The licenses the app ships under, each opening its text.
-    pub fn about_licenses(&self) -> AnyElement {
+    pub fn about_licenses(&self, cx: &App) -> AnyElement {
         h_flex()
             .gap_2()
             .flex_wrap()
             .justify_end()
             .child(
-                settings_chip(outline_pill("about-license").settings_text())
+                settings_chip(outline_pill("about-license", cx).settings_text())
                     .icon(icons::code())
                     .label("course2md · MIT")
                     .on_click(|_, _, cx| {
@@ -80,7 +80,7 @@ impl Desktop {
                     }),
             )
             .child(
-                settings_chip(outline_pill("about-lucide-license").settings_text())
+                settings_chip(outline_pill("about-lucide-license", cx).settings_text())
                     .icon(icons::code())
                     .label("Lucide · ISC")
                     .on_click(|_, _, cx| {
@@ -88,7 +88,7 @@ impl Desktop {
                     }),
             )
             .child(
-                settings_chip(outline_pill("about-icons-license").settings_text())
+                settings_chip(outline_pill("about-icons-license", cx).settings_text())
                     .icon(icons::code())
                     .label("Material Icons · Apache 2.0")
                     .on_click(|_, _, cx| {

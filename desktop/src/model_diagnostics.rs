@@ -852,7 +852,7 @@ impl Desktop {
         let device_issue = self.engine_issue(provider);
         let active = self.is_preparing(key);
         let request_for_check = request.clone();
-        let recheck = outline_pill(SharedString::from(format!("recheck-model-{key}")))
+        let recheck = outline_pill(SharedString::from(format!("recheck-model-{key}")), cx)
             .settings_text()
             .icon(icons::refresh())
             .label(course2md::tr!("重新检查模型"))

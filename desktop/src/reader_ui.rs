@@ -3045,7 +3045,7 @@ impl Desktop {
                             .gap_2()
                             .items_center()
                             .child(
-                                outline_pill(SharedString::from(format!("{id}:retry")))
+                                outline_pill(SharedString::from(format!("{id}:retry")), cx)
                                     .icon(icons::refresh())
                                     .label(course2md::tr!("重试导出"))
                                     .disabled(self.reader_exporting())
@@ -3876,7 +3876,7 @@ impl Desktop {
         let export_folder = self.reader_ui.export_folder.clone();
         if !short_reader {
             toolbar = toolbar.child(
-                outline_pill("export-note")
+                outline_pill("export-note", cx)
                     .flex_shrink_0()
                     .icon(icons::download())
                     .label(if exporting_current {
@@ -4338,7 +4338,7 @@ impl Desktop {
                 )
                 .child(reveal(
                     "reveal-open-newer-version",
-                    (outline_pill("open-newer-version")
+                    (outline_pill("open-newer-version", cx)
                         .icon(icons::history())
                         .label(course2md::tr!("查看新版"))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -4415,7 +4415,7 @@ impl Desktop {
                     let retry = id.clone();
                     let label = crate::task_ui::retry_components_label(&components);
                     actions = actions.child(
-                        outline_pill("reader-retry-incomplete")
+                        outline_pill("reader-retry-incomplete", cx)
                             .icon(icons::refresh())
                             .label(label)
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -4446,7 +4446,7 @@ impl Desktop {
                 {
                     let repair = id.clone();
                     actions = actions.child(
-                        outline_pill("reader-repair-ai")
+                        outline_pill("reader-repair-ai", cx)
                             .icon(icons::settings())
                             .label(course2md::tr!("检查 AI 服务后重试"))
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -4567,7 +4567,7 @@ impl Desktop {
                     .child(messages)
                     .child(reveal(
                         "reveal-reload-reader-files",
-                        (outline_pill("reload-reader-files")
+                        (outline_pill("reload-reader-files", cx)
                             .icon(icons::refresh())
                             .label(course2md::tr!("重新读取"))
                             .loading(self.reading)
@@ -4745,7 +4745,7 @@ impl Desktop {
                         },
                     )
                     .child(
-                        outline_pill("empty-images-to-note")
+                        outline_pill("empty-images-to-note", cx)
                             .icon(icons::article())
                             .label(course2md::tr!("阅读笔记"))
                             .on_click(cx.listener(|this, _, window, cx| {

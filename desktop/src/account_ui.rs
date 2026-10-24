@@ -252,7 +252,7 @@ impl Desktop {
         let mut actions = Vec::new();
         if let Some(login) = self.account.login_action() {
             actions.push(
-                outline_pill("account-login")
+                outline_pill("account-login", cx)
                     .settings_text()
                     .icon(icons::bilibili())
                     .label(login)

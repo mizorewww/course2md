@@ -285,7 +285,7 @@ impl Desktop {
             .settings_group_notice(PreferenceGroup::Application)
             .is_some_and(|(_, error)| error);
         let finish = if save_failed {
-            outline_pill("finish-palette-picker")
+            outline_pill("finish-palette-picker", cx)
                 .settings_text()
                 .icon(icons::close())
                 .label(course2md::tr!("关闭"))

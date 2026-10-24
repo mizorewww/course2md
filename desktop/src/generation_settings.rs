@@ -265,7 +265,7 @@ impl Desktop {
                                     ),
                                 )
                                 .child(
-                                    outline_pill("apply-languages")
+                                    outline_pill("apply-languages", cx)
                                         .settings_text()
                                         .icon(icons::check_circle())
                                         .label(course2md::tr!("应用"))
@@ -469,7 +469,7 @@ impl Desktop {
                                 .gap_2()
                                 .flex_wrap()
                                 .child(
-                                    outline_pill("apply-proofread-rules")
+                                    outline_pill("apply-proofread-rules", cx)
                                         .settings_text()
                                         .icon(icons::save())
                                         .label(course2md::tr!("应用校对规则"))
@@ -573,7 +573,7 @@ impl Desktop {
                                         ),
                                 )
                                 .child(
-                                    outline_pill("settings-manage-storage")
+                                    outline_pill("settings-manage-storage", cx)
                                         .settings_text()
                                         .label(course2md::tr!("更改"))
                                         .on_click(cx.listener(|this, _, window, cx| {
