@@ -53,7 +53,7 @@ With existing reduced motion, show settled state directly, suppress decorative m
 | Preview ready | Video card, editable options and an explicit “开始转换” | Submit only on that action |
 | Confirmed prerequisites | Keep the confirmed task context and actionable obstacles visible | Continue the confirmed intent once checks succeed |
 | Decision needed | Exact obstacle/consequence, current values and a direct choice/repair | Resume the original intent with its data intact |
-| Processing | Real phase and one primary loading/progress treatment | Permit background continuation and navigation |
+| Processing | The task replaces the video card with its real phase and one loading/progress treatment; the options become its read-only plan with 设置下一个视频 | Permit background continuation and navigation; the next video starts from saved defaults |
 | Partial / failed | Existing input/results, specific reason and scoped recovery | Retry failed work when supported |
 | Complete | Open the usable note when still following this task; otherwise update its status quietly | No planning approval or completion landing page before reading |
 
