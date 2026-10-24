@@ -674,9 +674,10 @@ impl Desktop {
         cx.notify();
         true
     }
-    /// Capture builds: `COURSE2MD_CAPTURE_SERVICE_EDITOR=ai|speech|dialog`
+    /// Capture builds: `COURSE2MD_CAPTURE_SERVICE_EDITOR=ai|speech|dialog|confirm`
     /// opens the service editor once Settings › 服务与账号 shows (`ai` and
-    /// `speech` as its settings page, `dialog` as the per-note dialog), so
+    /// `speech` as its settings page, `dialog` as the per-note dialog,
+    /// `confirm` the delete confirmation for a placeholder service), so
     /// `PAGES=settings:services` captures it. Nothing is saved.
     #[cfg(feature = "capture")]
     pub(crate) fn capture_service_editor(&mut self, cx: &mut Context<Self>) {
@@ -701,6 +702,7 @@ impl Desktop {
                     "speech" => {
                         this.open_settings_service_editor(ServicePurpose::Speech, None, window, cx);
                     }
+                    "confirm" => this.confirm_delete_service("capture".into(), window, cx),
                     "dialog" => {
                         this.open_service_draft(
                             ServiceDraft::new(ServicePurpose::Ai),
@@ -1852,56 +1854,55 @@ impl Desktop {
             version.config.model
         );
         let weak = cx.weak_entity();
-        window.open_alert_dialog(cx, move |dialog, _, _| {
+        window.open_alert_dialog(cx, move |dialog, _, cx| {
             let weak = weak.clone();
             let id = version_id.clone();
-            dialog
-                .title(course2md::tr!("更新默认服务"))
-                .child(accessible_text(
-                    "default-service-previous",
-                    previous.clone(),
-                ))
-                .child(accessible_text("default-service-next", next.clone()))
-                .child(
-                    accessible_text(
-                        "default-service-consequence",
-                        course2md::tr!("仅影响以后生成的笔记"),
-                    )
-                    .text_sm()
-                    .text_color(color(GRAY)),
+            material_alert(
+                dialog,
+                course2md::tr!("更新默认服务"),
+                course2md::tr!("保留原默认"),
+                course2md::tr!("用于以后生成"),
+                cx,
+            )
+            .child(accessible_text(
+                "default-service-previous",
+                previous.clone(),
+            ))
+            .child(accessible_text("default-service-next", next.clone()))
+            .child(
+                accessible_text(
+                    "default-service-consequence",
+                    course2md::tr!("仅影响以后生成的笔记"),
                 )
-                .button_props(
-                    gpui_component::dialog::DialogButtonProps::default()
-                        .ok_text(course2md::tr!("用于以后生成"))
-                        .cancel_text(course2md::tr!("保留原默认"))
-                        .show_cancel(true),
-                )
-                .on_ok(move |_, _, cx| {
-                    weak.update(cx, |this, cx| {
-                        match this.preferences.set_default_service(purpose, Some(&id)) {
-                            Ok(()) => this.set_settings_feedback(
+                .text_size(TEXT_SETTINGS_AUX)
+                .text_color(color(GRAY)),
+            )
+            .on_ok(move |_, _, cx| {
+                weak.update(cx, |this, cx| {
+                    match this.preferences.set_default_service(purpose, Some(&id)) {
+                        Ok(()) => this.set_settings_feedback(
+                            PreferenceGroup::Services,
+                            course2md::tr!("已更新默认服务").into(),
+                            false,
+                            cx,
+                        ),
+                        Err(error) => {
+                            this.set_settings_feedback(
                                 PreferenceGroup::Services,
-                                course2md::tr!("已更新默认服务").into(),
-                                false,
+                                course2md::tr!("默认服务尚未更改，请重试").into(),
+                                true,
                                 cx,
-                            ),
-                            Err(error) => {
-                                this.set_settings_feedback(
-                                    PreferenceGroup::Services,
-                                    course2md::tr!("默认服务尚未更改，请重试").into(),
-                                    true,
-                                    cx,
-                                );
-                                this.settings_ui
-                                    .feedback_details
-                                    .insert(PreferenceGroup::Services, format!("{error:#}"));
-                            }
+                            );
+                            this.settings_ui
+                                .feedback_details
+                                .insert(PreferenceGroup::Services, format!("{error:#}"));
                         }
-                        cx.notify();
-                        true
-                    })
-                    .unwrap_or(false)
+                    }
+                    cx.notify();
+                    true
                 })
+                .unwrap_or(false)
+            })
         });
     }
     pub(super) fn confirm_delete_service(
@@ -1940,70 +1941,69 @@ impl Desktop {
             })
             .unwrap_or(0);
         let weak = cx.weak_entity();
-        window.open_alert_dialog(cx, move |dialog, _, _| {
+        window.open_alert_dialog(cx, move |dialog, _, cx| {
             let weak = weak.clone();
             let id = service_id.clone();
-            dialog
-                .title(course2md::tr!("删除此服务"))
-                .child(accessible_text(
-                    "delete-service-consequence",
-                    course2md::tr!("将删除此服务配置，已有笔记不受影响"),
+            material_alert(
+                dialog,
+                course2md::tr!("删除此服务"),
+                course2md::tr!("保留服务"),
+                course2md::tr!("删除服务"),
+                cx,
+            )
+            .child(accessible_text(
+                "delete-service-consequence",
+                course2md::tr!("将删除此服务配置，已有笔记不受影响"),
+            ))
+            .when(affected > 0, |dialog| {
+                dialog.child(accessible_text(
+                    "delete-service-affected",
+                    course2md::tr!(
+                        "有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续",
+                        affected
+                    ),
                 ))
-                .when(affected > 0, |dialog| {
-                    dialog.child(accessible_text(
-                        "delete-service-affected",
-                        course2md::tr!(
-                            "有 {} 个未完成任务引用此服务；这些任务中用到此服务的步骤将不再继续",
-                            affected
-                        ),
-                    ))
+            })
+            .on_ok(move |_, _, cx| {
+                weak.update(cx, |this, cx| match this.preferences.retire_service(&id) {
+                    Ok(released) => {
+                        this.forget_credentials(released);
+                        this.refresh_dispatch_controls(cx);
+                        this.set_settings_feedback(
+                            PreferenceGroup::Services,
+                            course2md::tr!("已删除此服务").into(),
+                            false,
+                            cx,
+                        );
+                        cx.notify();
+                        true
+                    }
+                    Err(error) => {
+                        // The retire marker is written before the group is persisted,
+                        // so a mid-failure can leave dispatch blocked without a visible
+                        // deletion; say so instead of claiming nothing happened.
+                        let blocked = this.preferences.is_service_retired(&id);
+                        this.set_settings_feedback(
+                            PreferenceGroup::Services,
+                            course2md::tr!(
+                                "{}：{}",
+                                if blocked {
+                                    course2md::tr!("已停止使用此服务，但删除尚未完整保存")
+                                } else {
+                                    course2md::tr!("尚未删除此服务")
+                                },
+                                format!("{error:#}")
+                            ),
+                            true,
+                            cx,
+                        );
+                        this.refresh_dispatch_controls(cx);
+                        cx.notify();
+                        true
+                    }
                 })
-                .button_props(
-                    gpui_component::dialog::DialogButtonProps::default()
-                        .ok_text(course2md::tr!("删除服务"))
-                        .cancel_text(course2md::tr!("保留服务"))
-                        .show_cancel(true),
-                )
-                .on_ok(move |_, _, cx| {
-                    weak.update(cx, |this, cx| match this.preferences.retire_service(&id) {
-                        Ok(released) => {
-                            this.forget_credentials(released);
-                            this.refresh_dispatch_controls(cx);
-                            this.set_settings_feedback(
-                                PreferenceGroup::Services,
-                                course2md::tr!("已删除此服务").into(),
-                                false,
-                                cx,
-                            );
-                            cx.notify();
-                            true
-                        }
-                        Err(error) => {
-                            // The retire marker is written before the group is persisted,
-                            // so a mid-failure can leave dispatch blocked without a visible
-                            // deletion; say so instead of claiming nothing happened.
-                            let blocked = this.preferences.is_service_retired(&id);
-                            this.set_settings_feedback(
-                                PreferenceGroup::Services,
-                                course2md::tr!(
-                                    "{}：{}",
-                                    if blocked {
-                                        course2md::tr!("已停止使用此服务，但删除尚未完整保存")
-                                    } else {
-                                        course2md::tr!("尚未删除此服务")
-                                    },
-                                    format!("{error:#}")
-                                ),
-                                true,
-                                cx,
-                            );
-                            this.refresh_dispatch_controls(cx);
-                            cx.notify();
-                            true
-                        }
-                    })
-                    .unwrap_or(false)
-                })
+                .unwrap_or(false)
+            })
         });
     }
 
@@ -2093,6 +2093,59 @@ struct PublishPlan {
 /// Where a published service applies. A repair, or a service chosen while
 /// editing one input, binds to that task alone unless the person also made it
 /// the default; a service saved in settings is the default only when chosen so.
+/// A confirmation as an M3 basic dialog: a 28px-radius surface with 24px
+/// padding, a 24px regular headline, body text, and actions at the trailing
+/// edge (a text button to keep things as they are, a filled button for the
+/// consequential choice). The actions dispatch the dialog's own Cancel and
+/// Confirm, so Escape, Enter and `on_ok` behave as before. Candidate for a
+/// shared theme primitive alongside the service editor's dialog chrome.
+fn material_alert(
+    dialog: gpui_component::dialog::AlertDialog,
+    title: &'static str,
+    cancel: &'static str,
+    confirm: &'static str,
+    cx: &App,
+) -> gpui_component::dialog::AlertDialog {
+    use gpui_component::dialog::{Cancel, Confirm};
+    dialog
+        .title(
+            accessible_text("material-alert-title", title)
+                .role(Role::Heading)
+                .text_size(rems(24. / 14.))
+                .line_height(rems(32. / 14.))
+                .font_weight(FontWeight::NORMAL)
+                .text_color(color(INK)),
+        )
+        .p(px(24.))
+        .rounded(RADIUS_HERO)
+        .bg(color(SURFACE))
+        .border_0()
+        .gap(px(16.))
+        .text_size(TEXT_SETTINGS_BODY)
+        .footer(
+            h_flex()
+                .w_full()
+                .pt(px(8.))
+                .gap_2()
+                .flex_wrap()
+                .justify_end()
+                .child(
+                    text_button("material-alert-cancel", cx)
+                        .settings_text()
+                        .label(cancel)
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx)),
+                )
+                .child(
+                    primary_pill("material-alert-confirm")
+                        .settings_text()
+                        .label(confirm)
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
+                        }),
+                ),
+        )
+}
+
 fn publish_scope(repairing: bool, from_input: bool, also_default: bool) -> BindingScope {
     if repairing || (from_input && !also_default) {
         BindingScope::CurrentTask
