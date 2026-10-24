@@ -204,10 +204,10 @@ impl DeviceIssue {
             Self::AppleRuntime => {
                 course2md::tr!("缺少 Apple 识别组件，请重新安装应用或改用其他方式")
             }
-            Self::LlamaMissing => course2md::tr!("缺少 GPU/CPU 识别组件 llama.cpp，安装后重新检查"),
+            Self::LlamaMissing => course2md::tr!("安装 llama.cpp 后才能用 GPU 或 CPU 识别"),
             Self::GpuAbsent => course2md::tr!("未检测到可用显卡，可改用 CPU"),
             Self::NpuDevice => course2md::tr!("未检测到 Intel NPU，请改用其他方式"),
-            Self::NpuRuntime => course2md::tr!("Intel NPU 识别需要 Python（uv），安装后重新检查"),
+            Self::NpuRuntime => course2md::tr!("安装 uv 后才能用 Intel NPU 识别"),
         }
     }
 }
@@ -540,7 +540,100 @@ impl Desktop {
         }
         view
     }
-    pub fn model_readiness_panel(
+    /// The repair an engine obstacle already has: the release download, the
+    /// install guide or command, and an environment recheck where installing
+    /// something here can clear it. Shared by setup and the workbench.
+    fn engine_repair_actions(&self, id: &str, issue: DeviceIssue, cx: &mut Context<Self>) -> Div {
+        let mut actions = h_flex()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .items_center()
+            .gap_x(rems(4. / 14.))
+            // Text buttons carry their own inset; their labels start on the
+            // hint's text ruler.
+            .pl(rems((20. + 8. - 12.) / 14.));
+        match issue {
+            DeviceIssue::Engine | DeviceIssue::AppleRuntime => {
+                actions = actions.child(
+                    text_button(SharedString::from(format!("{id}-reinstall")), cx)
+                        .icon(icons::download())
+                        .label(course2md::tr!("下载完整应用"))
+                        .on_click(|_, _, cx| {
+                            cx.open_url("https://github.com/mizorewww/course2md/releases")
+                        }),
+                );
+            }
+            DeviceIssue::LlamaMissing => {
+                if cfg!(target_os = "macos") {
+                    actions = actions.child(
+                        text_button(SharedString::from(format!("{id}-copy-llama")), cx)
+                            .icon(icons::content_copy())
+                            .label(course2md::tr!("复制 Homebrew 安装命令"))
+                            .on_click(|_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    "brew install llama.cpp".into(),
+                                ))
+                            }),
+                    );
+                } else {
+                    actions = actions.child(
+                        text_button(SharedString::from(format!("{id}-llama-help")), cx)
+                            .icon(icons::external_link())
+                            .label(course2md::tr!("查看 llama.cpp 安装说明"))
+                            .on_click(|_, _, cx| {
+                                cx.open_url("https://github.com/ggml-org/llama.cpp#quick-start")
+                            }),
+                    );
+                }
+            }
+            DeviceIssue::NpuRuntime => {
+                actions = actions.child(
+                    text_button(SharedString::from(format!("{id}-uv-help")), cx)
+                        .icon(icons::external_link())
+                        .label(course2md::tr!("查看 uv 安装说明"))
+                        .on_click(|_, _, cx| {
+                            cx.open_url("https://docs.astral.sh/uv/getting-started/installation/")
+                        }),
+                );
+            }
+            DeviceIssue::AppleHardware | DeviceIssue::GpuAbsent | DeviceIssue::NpuDevice => {}
+        }
+        if matches!(issue, DeviceIssue::LlamaMissing | DeviceIssue::NpuRuntime) {
+            actions = actions.child(
+                text_button(SharedString::from(format!("{id}-recheck")), cx)
+                    .icon(icons::refresh())
+                    .label(course2md::tr!("重新检查"))
+                    .disabled(self.environment.is_none())
+                    .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx))),
+            );
+        }
+        actions
+    }
+
+    /// Why no engine can run, in one quiet line, followed by its repair.
+    pub(crate) fn engine_obstacle(
+        &self,
+        id: &str,
+        issue: DeviceIssue,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rems(4. / 14.))
+            .child(hint_line(
+                SharedString::from(format!("{id}-message")),
+                icons::warning(),
+                WARNING,
+                issue.message(),
+            ))
+            .child(self.engine_repair_actions(id, issue, cx))
+    }
+
+    /// The workbench's model status: one quiet line under the engine field
+    /// and the action that moves it on. Settings keeps the full table.
+    pub(crate) fn model_status_line(
         &self,
         provider: AsrProvider,
         model: Option<&str>,
@@ -548,16 +641,99 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        self.model_readiness_panel_with(provider, model, root, true, window, cx)
+        let request = Request::new(provider, model, root);
+        let key = request.key();
+        if let Some(issue) = self.engine_issue(provider) {
+            return self.engine_obstacle(&format!("import-engine-{key}"), issue, cx);
+        }
+        let entry = self.settings_ui.model_diagnostics.entries.get(&key);
+        let checking = self.environment.is_none() || entry.is_none_or(Entry::checking);
+        let result = entry.and_then(Entry::result);
+        let status = result.and_then(|result| result.as_ref().ok());
+        let active = self.is_preparing(&key);
+        let (actions, extras) = self.model_prepare_actions(&request, checking, status, window, cx);
+        let mut view = v_flex().w_full().min_w_0().gap(rems(8. / 14.));
+        // Preparation reports itself, with its transfers, in the extras.
+        if !active {
+            let line = if checking {
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(ICON_GAP)
+                    .items_center()
+                    .child(
+                        h_flex()
+                            .w(ICON_SLOT)
+                            .flex_shrink_0()
+                            .justify_center()
+                            .child(crate::motion::spinner(
+                                SharedString::from(format!("import-model-spinner-{key}")),
+                                cx,
+                            )),
+                    )
+                    .child(
+                        accessible_text(
+                            SharedString::from(format!("import-model-checking-{key}")),
+                            course2md::tr!("正在检查模型…"),
+                        )
+                        .role(Role::Status)
+                        .text_size(TEXT_AUX)
+                        .text_color(color(GRAY)),
+                    )
+            } else {
+                match (result, status) {
+                    (Some(Err(error)), _) => hint_line(
+                        SharedString::from(format!("import-model-error-{key}")),
+                        icons::warning(),
+                        DANGER,
+                        course2md::tr!("检查失败：{}", error),
+                    ),
+                    (_, Some(status)) => {
+                        let (_, label) = cache_state_label(status.state);
+                        let mut text = label.to_owned();
+                        if status.state == CacheState::Unsupported {
+                            text = format!(
+                                "{text} · {}",
+                                course2md::tr!("请选择这种识别方式支持的模型")
+                            );
+                        }
+                        if let Some(error) = &status.last_error {
+                            text = format!("{text} · {}", course2md::tr!("未完成：{}", error));
+                        }
+                        let problem =
+                            status.state == CacheState::Unsupported || status.last_error.is_some();
+                        hint_line(
+                            SharedString::from(format!("import-model-state-{key}")),
+                            if problem {
+                                icons::warning()
+                            } else {
+                                icons::info()
+                            },
+                            if problem { WARNING } else { GRAY },
+                            text,
+                        )
+                    }
+                    _ => hint_line(
+                        SharedString::from(format!("import-model-unchecked-{key}")),
+                        icons::info(),
+                        GRAY,
+                        course2md::tr!("检查未完成"),
+                    ),
+                }
+            };
+            view = view.child(line);
+        }
+        for extra in extras {
+            view = view.child(extra);
+        }
+        view.child(actions.w_auto())
     }
-    /// `provider_row`：是否展示「本机引擎」行。工作台的选择器已是方式事实来源，传 false；
-    /// 设置页的模型管理面板传 true（面板独立承担状态摘要）。
-    pub fn model_readiness_panel_with(
+
+    pub fn model_readiness_panel(
         &self,
         provider: AsrProvider,
         model: Option<&str>,
         root: &Path,
-        provider_row: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -569,7 +745,7 @@ impl Desktop {
             .and_then(Entry::result)
             .and_then(|result| result.as_ref().ok());
         let (mut view, cache_action, cache_details) =
-            self.model_status_section(provider, &request, provider_row, cx);
+            self.model_status_section(provider, &request, cx);
         let (actions, extras) = self.model_prepare_actions(&request, checking, status, window, cx);
         for extra in extras {
             view = view.child(extra);
@@ -593,7 +769,6 @@ impl Desktop {
         &self,
         provider: AsrProvider,
         request: &Request,
-        provider_row: bool,
         cx: &mut Context<Self>,
     ) -> (Div, Option<Div>, Option<AnyElement>) {
         let key = request.key();
@@ -601,19 +776,16 @@ impl Desktop {
         let device_issue = self.model_device_issue(provider);
         let mut cache_details = None;
         let mut cache_action = None;
-        let mut view = v_flex().w_full().min_w_0();
-        if provider_row {
-            view = view.child(model_status_row(
-                SharedString::from(format!("model-provider-label-{key}")),
-                course2md::tr!("本机引擎"),
-                settings_value(
-                    SharedString::from(format!("model-provider-{key}")),
-                    crate::provider_label(Some(provider)),
-                )
-                .w_auto(),
-                true,
-            ));
-        }
+        let mut view = v_flex().w_full().min_w_0().child(model_status_row(
+            SharedString::from(format!("model-provider-label-{key}")),
+            course2md::tr!("本机引擎"),
+            settings_value(
+                SharedString::from(format!("model-provider-{key}")),
+                crate::provider_label(Some(provider)),
+            )
+            .w_auto(),
+            true,
+        ));
         view = view.child(model_status_row(
             SharedString::from(format!("model-name-label-{key}")),
             course2md::tr!("模型"),
@@ -1248,4 +1420,38 @@ impl Desktop {
             None => (true, course2md::tr!("尚未检查识别模型").into()),
         }
     }
+}
+
+/// A quiet status line in the canvas's hint role: a 16px icon in the label
+/// slot and 13px supporting text, so it starts on the same ruler as hints.
+fn hint_line(
+    id: impl Into<ElementId>,
+    icon: Icon,
+    icon_color: ColorToken,
+    text: impl Into<SharedString>,
+) -> Div {
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .items_start()
+        .gap(ICON_GAP)
+        .child(
+            h_flex()
+                .w(ICON_SLOT)
+                .h(rems(18. / 14.))
+                .flex_shrink_0()
+                .justify_center()
+                .items_center()
+                .child(icon.size(rems(16. / 14.)).text_color(color(icon_color))),
+        )
+        .child(
+            accessible_text(id, text)
+                .role(Role::Status)
+                .flex_1()
+                .min_w_0()
+                .whitespace_normal()
+                .text_size(TEXT_AUX)
+                .line_height(rems(18. / 14.))
+                .text_color(color(GRAY)),
+        )
 }

@@ -86,7 +86,7 @@ CoreML 模型加载失败 / CoreML model loading failed	CoreML 模型加载失�
 Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}; Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}
 HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}; response exceeds 128 KiB, remainder not read	HTTP {}；回應超過 128 KiB，未讀取其餘內容	HTTP {};応答が 128 KiB を超えているため、残りは読み取られていません
 Intel NPU 加速	Intel NPU 加速	Intel NPU acceleration	Intel NPU 加速	Intel NPU アクセラレーション
-Intel NPU 识别需要 Python（uv），安装后重新检查	Intel NPU 识别需要 Python（uv），安装后重新检查	Intel NPU transcription requires Python (uv); install it and check again	Intel NPU 辨識需要 Python（uv），安裝後重新檢查	Intel NPU の認識には Python (uv) が必要です。インストール後に再確認してください
+安装 uv 后才能用 Intel NPU 识别	安装 uv 后才能用 Intel NPU 识别	Intel NPU transcription needs uv installed	安裝 uv 後才能用 Intel NPU 辨識	Intel NPU での認識には uv のインストールが必要です
 NPU 启动器	NPU 启动器	NPU launcher	NPU 啟動器	NPUランチャー
 NPU 模型准备未完成 / NPU model preparation did not complete	NPU 模型准备未完成	NPU model preparation did not complete	NPU 模型準備未完成	NPUモデルの準備が完了していません
 NPU 缓存版本记录无效 / Invalid NPU cache version record	NPU 缓存版本记录无效	Invalid NPU cache version record	NPU 快取版本記錄無效	NPU キャッシュ バージョン レコードが無効です
@@ -518,6 +518,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 复制与导出	复制与导出	Copy and export	複製與匯出	コピーとエクスポート
 复制内容未通过校验，尚未切换笔记库：{}	复制内容未通过校验，尚未切换笔记库：{}	The copied content failed the verification and the note library has not been switched yet: {}	複製內容未通過校驗，尚未切換筆記庫：{}	コピーされたコンテンツは検証に失敗し、ノート ライブラリはまだ切り替えられていません: {}
 复制安装命令	复制安装命令	Copy install command	複製安裝指令	インストールコマンドをコピー
+复制 Homebrew 安装命令	复制 Homebrew 安装命令	Copy Homebrew install command	複製 Homebrew 安裝指令	Homebrew のインストールコマンドをコピー
 复制或导出整份笔记	复制或导出整份笔记	Copy or export an entire note	複製或匯出整份筆記	ノート全体をコピーまたはエクスポートする
 复制整份笔记 · Markdown 文本	复制整份笔记 · Markdown 文本	Copy entire note · Markdown text	複製整份筆記 · Markdown 文字	ノート全体をコピー · Markdown テキスト
 复制整份笔记 · 纯文本	复制整份笔记 · 纯文本	Copy entire note · Plain text	複製整份筆記 · 純文字	ノート全体をコピー · プレーンテキスト
@@ -1579,7 +1580,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 缺失：{}	缺失：{}	Missing: {}	缺失：{}	欠落：{}
 缺少 Apple 识别所需的组件，请重新安装 course2md / Apple speech component missing; reinstall course2md	缺少 Apple 识别所需的组件，请重新安装 course2md	Apple speech component missing; reinstall course2md	缺少 Apple 辨識所需的元件，請重新安裝 course2md	Apple 音声認識に必要なコンポーネントがありません。course2md を再インストールしてください。
 缺少 Apple 识别组件，请重新安装应用或改用其他方式	缺少 Apple 识别组件，请重新安装应用或改用其他方式	The Apple transcription component is missing. Reinstall the app or use another method.	缺少 Apple 辨識元件，請重新安裝應用程式或改用其他方式	Apple 音声認識コンポーネントがありません。アプリを再インストールするか、別の方法を使用してください。
-缺少 GPU/CPU 识别组件 llama.cpp，安装后重新检查	缺少 GPU/CPU 识别组件 llama.cpp，安装后重新检查	The GPU/CPU transcription component llama.cpp is missing; check again after installing it	缺少 GPU/CPU 辨識元件 llama.cpp，安裝後重新檢查	GPU/CPU 音声認識コンポーネント llama.cpp がありません。インストール後に再確認してください
+安装 llama.cpp 后才能用 GPU 或 CPU 识别	安装 llama.cpp 后才能用 GPU 或 CPU 识别	GPU and CPU transcription need llama.cpp installed	安裝 llama.cpp 後才能用 GPU 或 CPU 辨識	GPU と CPU での認識には llama.cpp のインストールが必要です
 缺少 stderr 管道	缺少 stderr 管道	Missing stderr pipe	缺少 stderr 管道	stderr パイプがありません
 缺少 stdout 管道	缺少 stdout 管道	Missing stdout pipe	缺少 stdout 管道	stdout パイプがありません
 缺少可核验的原任务身份 / Original task identity is missing	缺少可核验的原任务身份	Original task identity is missing	缺少可核驗的原任務身份	検証可能な元のタスクの識別情報がありません
@@ -1596,6 +1597,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 自动字幕	自动字幕	Automatic subtitles	自動字幕	自動字幕
 自动校对文字	自动校对文字	Automatically proofread text	自動校對文字	テキストを自動的に校正する
 自动选择引擎	自动选择引擎	Automatic engine selection	自動選擇引擎	エンジンの自動選択
+暂无可用的本机引擎	暂无可用的本机引擎	No local engine is available	暫無可用的本機引擎	利用できるローカル エンジンがありません
 自定义优先级	自定义优先级	Custom priority	自訂優先順序	カスタム優先度
 自定义校对规则	自定义校对规则	Custom proofreading rules	自訂校對規則	カスタム校正ルール
 自定义模型	自定义模型	Custom model	自訂模型	カスタムモデル

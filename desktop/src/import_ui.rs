@@ -2559,7 +2559,7 @@ impl Desktop {
                 })
             {
                 // A routine first download needs one status line and one action.
-                // Checks, failures and active transfers retain the full recovery panel below.
+                // Checks, failures and active transfers use the status line below.
                 let prepare_model = model.clone();
                 let prepare_root = root.clone();
                 let details = cx.weak_entity();
@@ -2631,14 +2631,15 @@ impl Desktop {
                         view.child(aux_text(course2md::tr!("当前任务完成后才能下载模型")))
                     });
             } else {
-                view = view.child(self.model_readiness_panel_with(
+                // One quiet status line and its action; Settings keeps the table.
+                // On the source hint's ruler.
+                view = view.child(div().px(rems(4. / 14.)).child(self.model_status_line(
                     provider,
                     Some(&model),
                     &root,
-                    false,
                     window,
                     cx,
-                ));
+                )));
             }
         }
         view

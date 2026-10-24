@@ -1236,21 +1236,44 @@ impl Desktop {
             .filter(|engine| engine_offered(*engine, selected))
             .collect();
         let count = engines.len() + 1;
+        // Automatic falls back to CPU even when CPU cannot run; then no engine
+        // is usable, and that one obstacle is said once below the group.
+        let obstacle = self
+            .environment
+            .is_some()
+            .then(|| self.engine_issue(recommended))
+            .flatten();
+        let automatic = if self.environment.is_none() {
+            course2md::tr!("正在检测").to_owned()
+        } else if obstacle.is_some() {
+            course2md::tr!("暂无可用的本机引擎").to_owned()
+        } else {
+            course2md::tr!("目前使用 {}", crate::provider_label(Some(recommended)))
+        };
+        // Engines are local resources: tinted circles like the routes above,
+        // one family so they read as one group.
+        let engine_tile = |tile: ChoiceTile, provider: Option<AsrProvider>, enabled: bool| {
+            if enabled {
+                tile.tinted_icon(engine_icon(provider), Tint::Blue, icon_size)
+            } else {
+                tile.icon(tinted_icon(engine_icon(provider), Tint::Blue, icon_size).opacity(0.38))
+            }
+        };
         let mut engine_group = v_flex().w_full().min_w_0().gap(TILE_GAP).child(
             self.setup_reveal(
                 "setup-engine-auto-reveal",
-                ChoiceTile::new(
-                    "setup-engine-auto",
-                    0,
-                    count,
-                    course2md::tr!("自动选择引擎"),
-                    selected.is_none(),
+                engine_tile(
+                    ChoiceTile::new(
+                        "setup-engine-auto",
+                        0,
+                        count,
+                        course2md::tr!("自动选择引擎"),
+                        selected.is_none(),
+                    ),
+                    None,
+                    true,
                 )
-                .icon(icon_slot(engine_icon(None)))
-                .description(course2md::tr!(
-                    "目前使用 {}",
-                    crate::provider_label(Some(recommended))
-                ))
+                .description(automatic)
                 .render(window, cx)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.select_setup_provider(None, cx);
@@ -1266,6 +1289,8 @@ impl Desktop {
                     false,
                 ),
                 Some(_) => match self.engine_issue(engine) {
+                    // The shared obstacle is stated once, not on every tile.
+                    Some(issue) if Some(issue) == obstacle => (None, true),
                     Some(issue) => (Some(badge(BadgeKind::Warning).child(issue.short())), true),
                     None => (None, false),
                 },
@@ -1273,14 +1298,17 @@ impl Desktop {
             engine_group = engine_group.child(
                 self.setup_reveal(
                     ("setup-engine-choice-reveal", index),
-                    ChoiceTile::new(
-                        ("setup-engine-choice", index),
-                        index + 1,
-                        count,
-                        crate::provider_label(provider),
-                        selected == provider,
+                    engine_tile(
+                        ChoiceTile::new(
+                            ("setup-engine-choice", index),
+                            index + 1,
+                            count,
+                            crate::provider_label(provider),
+                            selected == provider,
+                        ),
+                        provider,
+                        !unavailable,
                     )
-                    .icon(icon_slot(engine_icon(provider)))
                     .status(status)
                     .enabled(!unavailable)
                     .render(window, cx)
@@ -1299,7 +1327,15 @@ impl Desktop {
                     section_title("setup-fixed-engine-label", course2md::tr!("本机引擎"))
                         .pl(SETTING_ITEM_INSET),
                 )
-                .child(engine_group),
+                .child(engine_group)
+                .when_some(obstacle, |group, issue| {
+                    group.child(
+                        div()
+                            .pt(px(4.))
+                            .px(SETTING_ITEM_INSET)
+                            .child(self.engine_obstacle("setup-engine-obstacle", issue, cx)),
+                    )
+                }),
         );
         let provider = selected.unwrap_or(recommended);
         let models = local_model_choices(provider, &self.onboarding.model);
