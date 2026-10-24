@@ -2,7 +2,7 @@
 //! so native layout can be reviewed without screen-recording permission.
 //!
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
-//! `onboarding`, `home`, `library`, `tasks`, `settings:<category>` (appearance, generation,
+//! `onboarding`, `home[:<state>]`, `library`, `tasks`, `settings:<category>` (appearance, generation,
 //! services, storage, application) and `reader[:<title text>][~end]` (the newest
 //! note, or the first whose title contains the text; `~end` scrolls to its end). `library:<state>` takes
 //! `,`-separated states: `list`, `group`, `unfiled`, `folder~<name>` and
@@ -36,6 +36,8 @@ thread_local! {
     /// The saved library presentation (cards, grouped), restored before each
     /// library shot so one shot's state does not leak into the next.
     static LIBRARY_PRESENTATION: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
+    /// The saved processing-options visibility, restored before each home shot.
+    static HOME_OPTIONS: Cell<Option<bool>> = const { Cell::new(None) };
 }
 
 /// The palette and text scale to paint instead of the saved ones.
@@ -108,7 +110,7 @@ impl Desktop {
             self.onboarding.active = false;
         }
         match page {
-            "home" => self.navigate(Page::New, cx),
+            "home" => self.capture_home(category, window, cx),
             "library" => {
                 self.navigate(Page::Library, cx);
                 self.capture_library_state(category, window, cx);
@@ -217,6 +219,32 @@ impl Desktop {
             }
         })
         .detach();
+    }
+
+    /// Home enters the workbench the way the app bar does. `home:<state>`
+    /// takes `,`-separated states, applied without saving: `options-hidden`
+    /// and `options-shown` set the processing options' visibility, `submit`
+    /// presses 开始转换 for the previewed video (`COURSE2MD_CAPTURE_SOURCE`),
+    /// and `next` presses 设置下一个视频.
+    fn capture_home(&mut self, states: &str, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        let current = self.desktop_settings.home_options;
+        self.desktop_settings.home_options = HOME_OPTIONS.with(|cell| {
+            let saved = cell.get().unwrap_or(current);
+            cell.set(Some(saved));
+            saved
+        });
+        if self.prepare_workbench_input(window, cx) {
+            self.navigate(Page::New, cx);
+        }
+        for state in states.split(',').filter(|state| !state.is_empty()) {
+            match state {
+                "options-hidden" => self.desktop_settings.home_options = false,
+                "options-shown" => self.desktop_settings.home_options = true,
+                "submit" => self.start_conversion(window, cx),
+                "next" => self.set_up_next_video(window, cx),
+                _ => {}
+            }
+        }
     }
 
     /// Library states reached by navigation, applied without saving them.
