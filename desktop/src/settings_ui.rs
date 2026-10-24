@@ -540,7 +540,9 @@ pub(crate) fn resource_layout(icon: impl IntoElement, text: Div, trailing: Div) 
 }
 
 /// One row of a resource list (an account or a saved service): icon, text,
-/// status and a ⋯ menu, on the shared insets that line the menus up.
+/// status and actions, on the same trailing inset as a tile's chevron, so a
+/// pill ends where the chevrons do. A ⋯ menu (`resource_menu`) reaches out
+/// past that inset by its own padding, so its dots line up across rows.
 fn resource_row(id: impl Into<ElementId>) -> Stateful<Div> {
     h_flex()
         .id(id)
@@ -549,8 +551,19 @@ fn resource_row(id: impl Into<ElementId>) -> Stateful<Div> {
         .gap(RESOURCE_GAP)
         .items_center()
         .py(rems(16. / 14.))
-        .pl(SETTING_ITEM_INSET)
-        .pr(rems(12. / 14.))
+        .px(SETTING_ITEM_INSET)
+}
+
+/// How far a resource row's ⋯ button reaches past the row's trailing inset:
+/// its round target ends 12px from the tile's edge, as on the canvas.
+const RESOURCE_MENU_OUTSET: f32 = (20. - 12.) / 14.;
+
+/// The ⋯ button at the end of a resource row (an account, a saved service,
+/// a library location). Callers attach its label, tooltip and menu.
+pub(crate) fn resource_menu(id: impl Into<ElementId>, cx: &App) -> gpui_component::button::Button {
+    icon_button(id, CONTROL_HEIGHT, false, cx)
+        .mr(rems(-RESOURCE_MENU_OUTSET))
+        .icon(icons::more_vertical())
 }
 
 /// Diagnostic values begin on a common reading axis. They can wrap and grow
@@ -1880,10 +1893,7 @@ impl Desktop {
                 .flex_shrink_0()
                 .on_click(|_, _, cx| cx.stop_propagation())
                 .child(
-                    quiet(SharedString::from(format!("service-actions-{id}")))
-                        .w(CONTROL_HEIGHT)
-                        .px_0()
-                        .icon(icons::more_vertical())
+                    resource_menu(SharedString::from(format!("service-actions-{id}")), cx)
                         .accessibility_label(course2md::tr!("{} 操作", version.config.name))
                         .tooltip(course2md::tr!("服务操作"))
                         .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {

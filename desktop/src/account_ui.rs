@@ -268,10 +268,7 @@ impl Desktop {
             let entity = cx.weak_entity();
             let checking = self.account.checking;
             actions.push(
-                quiet("account-actions")
-                    .w(CONTROL_HEIGHT)
-                    .px_0()
-                    .icon(icons::more_vertical())
+                crate::settings_ui::resource_menu("account-actions", cx)
                     .accessibility_label(course2md::tr!("{} 操作", course2md::tr!("Bilibili 账号")))
                     .tooltip(course2md::tr!("账号操作"))
                     .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
