@@ -37,6 +37,7 @@ pub struct SingleChoiceGroup {
     full_width: bool,
     segmented: bool,
     label_text_size: Option<Rems>,
+    height: Option<Rems>,
     tabs: bool,
     provided_focus: Vec<FocusHandle>,
     disabled: bool,
@@ -54,6 +55,7 @@ impl SingleChoiceGroup {
             full_width: false,
             segmented: false,
             label_text_size: None,
+            height: None,
             tabs: false,
             provided_focus: Vec::new(),
             disabled: false,
@@ -91,6 +93,12 @@ impl SingleChoiceGroup {
         self
     }
     /// Override option text for a page-specific typography role.
+    /// Override the option height (48px segmented, 40px otherwise), e.g. for
+    /// a page's view tabs.
+    pub fn height(mut self, height: Rems) -> Self {
+        self.height = Some(height);
+        self
+    }
     pub fn label_text_size(mut self, size: Rems) -> Self {
         self.label_text_size = Some(size);
         self
@@ -331,7 +339,10 @@ impl RenderOnce for SingleChoiceGroup {
         let last = navigation;
         let count = self.options.len();
         let scale = f32::from(window.rem_size()) / 14.;
-        let item_height = px(if self.segmented { 48. } else { 40. } * scale);
+        let item_height = match self.height {
+            Some(height) => height.to_pixels(window.rem_size()),
+            None => px(if self.segmented { 48. } else { 40. } * scale),
+        };
         let fill = self.full_width;
         let icon_size = rems(18. / 14.);
         let debug_kind = if fill { "full" } else { "content" };

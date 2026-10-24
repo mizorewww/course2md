@@ -3419,6 +3419,7 @@ impl Desktop {
                 div().flex_shrink_0().child(
                     SingleChoiceGroup::new("reader-tabs", course2md::tr!("阅读视图"))
                         .tabs()
+                        .height(rems(44. / 14.))
                         .options([
                             ("note", course2md::tr!("笔记").to_owned()),
                             (
