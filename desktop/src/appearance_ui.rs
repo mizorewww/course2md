@@ -2,7 +2,6 @@
 use super::*;
 use crate::palettes::{ALL, Appearance, PaletteId};
 use crate::preferences::PreferenceGroup;
-use crate::settings_ui::{field_label, settings_stacked_row};
 use crate::theme::*;
 
 const PALETTE_GAP: f32 = 16.;
@@ -50,83 +49,66 @@ fn palette_columns(width: f32, minimum_width: f32, maximum: u16) -> u16 {
     (((width + PALETTE_GAP) / (minimum_width + PALETTE_GAP)).floor() as u16).clamp(1, maximum)
 }
 
-fn sample(palette: PaletteId) -> Div {
+/// A miniature window in the palette's own colors (not application chrome):
+/// window controls, a sidebar and a page with a title, text and a button.
+fn sample(palette: PaletteId, height: f32) -> Div {
     let p = palette.colors();
-    // These are the selected palette's actual preview colors, not application chrome.
-    div()
+    let bar = |height: f32, width: gpui::DefiniteLength, fill: u32| {
+        div()
+            .h(px(height))
+            .w(width)
+            .flex_shrink_0()
+            .rounded_full()
+            .bg(rgb(fill))
+    };
+    v_flex()
         .w_full()
-        .h(px(120.))
+        .h(px(height))
         .flex_shrink_0()
-        .rounded_t(RADIUS_CARD)
         .overflow_hidden()
         .bg(rgb(p.canvas))
-        .p(px(12.))
+        .p(px(10.))
+        .gap(px(8.))
         .child(
-            h_flex()
-                .h(px(16.))
-                .items_center()
-                .gap(px(4.))
-                .children(
-                    [p.accent, p.success, p.warning]
-                        .into_iter()
-                        .map(|c| div().size(px(5.)).rounded_full().bg(rgb(c))),
-                )
-                .child(
-                    div()
-                        .ml(px(8.))
-                        .h(px(4.))
-                        .w(px(36.))
-                        .rounded_full()
-                        .bg(rgb(p.muted)),
-                ),
+            h_flex().gap(px(4.)).children(
+                [p.danger, p.warning, p.success]
+                    .into_iter()
+                    .map(|c| div().size(px(6.)).rounded_full().bg(rgb(c))),
+            ),
         )
         .child(
             h_flex()
-                .mt(px(8.))
+                .flex_1()
+                .min_h_0()
                 .gap(px(8.))
-                .items_start()
+                .items_stretch()
                 .child(
-                    div()
-                        .w(px(36.))
-                        .h(px(80.))
-                        .rounded(px(5.))
+                    v_flex()
+                        .w(relative(0.26))
+                        .rounded(px(8.))
                         .bg(rgb(p.inset))
-                        .child(
-                            div()
-                                .mx(px(5.))
-                                .mt(px(7.))
-                                .h(px(5.))
-                                .rounded(px(2.))
-                                .bg(rgb(p.accent)),
-                        ),
+                        .p(px(8.))
+                        .gap(px(6.))
+                        .child(bar(6., relative(1.), p.accent))
+                        .child(bar(6., relative(1.), p.subtle))
+                        .child(bar(6., relative(1.), p.subtle)),
                 )
                 .child(
                     v_flex()
                         .flex_1()
-                        .h(px(80.))
-                        .p(px(6.))
-                        .gap(px(4.))
-                        .rounded(px(6.))
+                        .rounded(px(8.))
                         .bg(rgb(p.surface))
+                        .p(px(10.))
+                        .gap(px(7.))
+                        .child(bar(7., relative(0.7), p.text))
+                        .child(bar(5., relative(0.9), p.border))
+                        .child(bar(5., relative(0.8), p.border))
+                        .child(div().flex_1())
                         .child(
                             div()
-                                .h(px(5.))
-                                .w(relative(0.65))
-                                .rounded_full()
-                                .bg(rgb(p.text)),
-                        )
-                        .child(
-                            div()
-                                .h(px(4.))
-                                .w(relative(0.9))
-                                .rounded_full()
-                                .bg(rgb(p.border)),
-                        )
-                        .child(
-                            div()
-                                .h(px(12.))
-                                .w(px(32.))
-                                .rounded(px(3.))
+                                .h(px(16.))
+                                .w(px(40.))
+                                .rounded(px(8.))
                                 .bg(rgb(p.accent)),
                         ),
                 ),
@@ -161,7 +143,7 @@ fn palette_choice(palette: PaletteId, selected: bool, amount: f32) -> gpui_base:
                 .min_w_0()
                 .whitespace_normal()
                 .text_left()
-                .child(sample(palette))
+                .child(sample(palette, 120.).rounded_t(RADIUS_CARD))
                 .child(
                     h_flex()
                         .w_full()
@@ -354,56 +336,80 @@ impl Desktop {
         });
     }
 
-    fn palette_preset(&self, dark: bool, palette: PaletteId, cx: &mut Context<Self>) -> Div {
-        let label = if dark {
+    /// One saved palette as a tile of the 主题 group: its real preview, which
+    /// mode it serves and its name. The palette in use carries 使用中 and an
+    /// accent ring; the tile opens the palette chooser.
+    fn palette_preset(
+        &self,
+        dark: bool,
+        palette: PaletteId,
+        active: bool,
+        outer: [bool; 4],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let caption = if dark {
             course2md::tr!("深色主题")
         } else {
             course2md::tr!("浅色主题")
         };
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .gap(px(8.))
+        crate::settings_ui::tile_button(("palette-preset", usize::from(dark)), outer, cx)
+            .p(rems(16. / 14.))
+            .border_2()
+            .border_color(gpui::Rgba {
+                a: if active { 1. } else { 0. },
+                ..color(ACCENT)
+            })
+            .accessibility_label(course2md::tr!("{}：{}", caption, palette.name()))
             .child(
-                h_flex()
-                    .gap(px(8.))
-                    .items_center()
-                    .child(
-                        if dark { icons::moon() } else { icons::sun() }
-                            .size(px(18.))
-                            .text_color(color(GRAY)),
-                    )
-                    .child(field_label(
-                        ("palette-preset-label", usize::from(dark)),
-                        label,
-                    )),
-            )
-            .child(
-                div()
-                    .rounded(RADIUS_SMALL)
-                    .overflow_hidden()
-                    .child(sample(palette).rounded(RADIUS_CARD)),
-            )
-            .child(outlined_field_label(
-                ("palette-preset-field", usize::from(dark)),
-                course2md::tr!("主题"),
-                TEXT_SETTINGS_AUX,
-                color(GRAY),
-                control(("palette-preset", usize::from(dark)))
-                    .settings_text()
+                v_flex()
                     .w_full()
-                    .h(px(56.))
-                    .rounded(FIELD_RADIUS)
-                    .text_size(rems(16. / 14.))
-                    .font_weight(FontWeight::NORMAL)
-                    .accessibility_label(course2md::tr!("{}：{}", label, palette.name()))
-                    .label(palette.name())
-                    .child(div().flex_1())
-                    .child(icons::chevron_down().size(px(18.)))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_palette_picker(dark, window, cx);
-                    })),
-            ))
+                    .min_w_0()
+                    .gap(rems(1.))
+                    .child(
+                        div()
+                            .w_full()
+                            .rounded(px(16.))
+                            .overflow_hidden()
+                            .child(sample(palette, 128.).rounded(px(16.))),
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .items_center()
+                            .gap(rems(12. / 14.))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap(rems(2. / 14.))
+                                    .child(
+                                        div()
+                                            .text_size(rems(13. / 14.))
+                                            .line_height(rems(18. / 14.))
+                                            .text_color(color(GRAY))
+                                            .child(caption),
+                                    )
+                                    .child(
+                                        div()
+                                            .whitespace_normal()
+                                            .text_size(TEXT_SETTINGS_BODY)
+                                            .line_height(rems(22. / 14.))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(color(INK))
+                                            .child(palette.name()),
+                                    ),
+                            )
+                            .when(active, |row| {
+                                row.child(badge(BadgeKind::Tonal).child(course2md::tr!("使用中")))
+                            })
+                            .child(crate::settings_ui::tile_chevron()),
+                    ),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_palette_picker(dark, window, cx);
+            }))
+            .into_any_element()
     }
 
     pub(crate) fn appearance_page(
@@ -412,9 +418,9 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let preference = self.preferences.application().appearance.clone();
-        let width = crate::views::settings_content_width(window);
         let modes = SingleChoiceGroup::new("appearance-mode", course2md::tr!("外观模式"))
             .segmented()
+            .full_width()
             .settings_text()
             .options([
                 ("system", course2md::tr!("跟随系统")),
@@ -445,44 +451,39 @@ impl Desktop {
                     window.refresh();
                 }
             }));
-        // Both stored values remain in place in every appearance mode. Measure
-        // against every supported name so selecting a longer one cannot move
-        // the preference rows below these two fields.
-        // The palette grid sits inside the group's card padding.
-        let columns = palette_columns(
-            (width - 42. * f32::from(window.rem_size()) / 14.).max(0.),
-            palette_minimum_width(&ALL, window),
-            2,
-        );
+        // The palette in use is the one painted now: the mode's choice, or
+        // the system's when following it.
+        let dark_active = theme::is_dark_paint();
+        // Both tiles always stay in place, whatever the mode, so a mode change
+        // never moves the preference groups below them. They sit side by side
+        // below the mode tile, or stack when the pane is narrow.
+        let side_by_side = crate::settings_ui::settings_layout(window).content
+            >= 440. * f32::from(window.rem_size()) / 14.;
+        let (light_corners, dark_corners) = if side_by_side {
+            ([false, false, false, true], [false, false, true, false])
+        } else {
+            ([false; 4], [false, false, true, true])
+        };
+        let light = self.palette_preset(false, preference.light, !dark_active, light_corners, cx);
+        let dark = self.palette_preset(true, preference.dark, dark_active, dark_corners, cx);
+        let group =
+            crate::settings_ui::SettingsGroup::new("appearance-theme", course2md::tr!("主题"))
+                .child(crate::settings_ui::settings_stacked_row(
+                    "appearance-mode-row",
+                    course2md::tr!("外观模式"),
+                    "",
+                    modes,
+                ));
+        let presets = if side_by_side {
+            group.pair(move |_| light, move |_| dark)
+        } else {
+            group.tile(move |_| light).tile(move |_| dark)
+        };
         v_flex()
             .w_full()
             .min_w_0()
-            .gap(px(23.))
-            .child(
-                crate::settings_ui::SettingsGroup::new("appearance-theme", course2md::tr!("主题"))
-                    .child(settings_stacked_row(
-                        "appearance-mode-row",
-                        course2md::tr!("外观模式"),
-                        "",
-                        modes,
-                    ))
-                    .child(
-                        crate::settings_ui::setting_surface()
-                            .pt(rems(11. / 14.))
-                            .pb(rems(24. / 14.))
-                            .gap(px(12.))
-                            .child(
-                                div()
-                                    .grid()
-                                    .grid_cols(columns)
-                                    .w_full()
-                                    .min_w_0()
-                                    .gap(px(PALETTE_GAP))
-                                    .child(self.palette_preset(false, preference.light, cx))
-                                    .child(self.palette_preset(true, preference.dark, cx)),
-                            ),
-                    ),
-            )
+            .gap(px(28.))
+            .child(presets)
             .child(self.appearance_controls(cx))
             .into_any_element()
     }
