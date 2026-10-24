@@ -170,8 +170,6 @@ const QUEUE_PREVIEW: usize = 5;
 const TASK_COLUMN: Rems = rems(832. / 14.);
 /// Between the page heading and each section.
 const TASK_SECTION_GAP: Pixels = px(28.);
-/// Between a section title and its first tile.
-const SECTION_TITLE_GAP: Pixels = px(10.);
 
 fn task_column() -> Div {
     div().w_full().min_w_0().max_w(TASK_COLUMN).mx_auto()

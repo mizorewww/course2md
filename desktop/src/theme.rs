@@ -494,6 +494,19 @@ impl TileScale {
             .text_color(color(GRAY))
     }
 
+    /// One content tile of a connected group at this scale: the surface,
+    /// its corners, and the reading size settings content inherits.
+    pub fn surface(self, outer: [bool; 4]) -> gpui::Div {
+        use gpui::prelude::*;
+        tile(outer)
+            .flex()
+            .flex_col()
+            .flex_shrink_0()
+            .when(self == TileScale::Regular, |tile| {
+                tile.text_size(TEXT_SETTINGS_BODY)
+            })
+    }
+
     /// A whole tile that acts: the surface with M3 state layers, the tile's
     /// corners and this scale's padding. Callers add the label column and
     /// trailing items.
@@ -553,6 +566,162 @@ impl TileScale {
                     self.support(gpui::SharedString::from(format!("{id:?}-support")), support),
                 )
             })
+    }
+}
+
+/// Between a section title and its group's first tile.
+pub const SECTION_TITLE_GAP: Pixels = px(10.);
+
+pub use tile_group::TileGroup;
+mod tile_group {
+    use super::{SECTION_TITLE_GAP, SETTING_ITEM_INSET, TILE_GAP, TileScale, list_corners};
+    use gpui::{AnyElement, App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
+    use gpui_component::v_flex;
+
+    /// Builds a tile's content once the group knows which corners are outside.
+    type TileBuilder = Box<dyn FnOnce([bool; 4]) -> AnyElement>;
+
+    enum TileMain {
+        /// Content on the plain surface; the group draws the tile.
+        Content(AnyElement),
+        /// A tile that draws itself (a button), given its corners.
+        Built(TileBuilder),
+        /// Two tiles side by side in one row of the group.
+        Pair(TileBuilder, TileBuilder),
+    }
+
+    struct GroupTile {
+        main: TileMain,
+        details: Vec<AnyElement>,
+    }
+
+    /// One section as on the M3 canvas: a quiet title above a connected group
+    /// of tiles, each item on its own surface with 24px outer and 6px inner
+    /// corners and 2px between tiles. Settings pages and the workbench's
+    /// processing options share it at their own `TileScale`.
+    #[derive(IntoElement)]
+    pub struct TileGroup {
+        id: &'static str,
+        title: &'static str,
+        scale: TileScale,
+        tiles: Vec<GroupTile>,
+    }
+
+    impl TileGroup {
+        pub fn new(id: &'static str, title: &'static str) -> Self {
+            Self {
+                id,
+                title,
+                scale: TileScale::Regular,
+                tiles: Vec::new(),
+            }
+        }
+
+        /// The text scale of the group's content tiles.
+        pub fn scale(mut self, scale: TileScale) -> Self {
+            self.scale = scale;
+            self
+        }
+
+        /// A tile that draws its own surface (a button row), given its corners
+        /// as top-left, top-right, bottom-right, bottom-left (true = outside).
+        pub fn tile(mut self, build: impl FnOnce([bool; 4]) -> AnyElement + 'static) -> Self {
+            self.tiles.push(GroupTile {
+                main: TileMain::Built(Box::new(build)),
+                details: Vec::new(),
+            });
+            self
+        }
+
+        /// Two tiles sharing one row of the group.
+        pub fn pair(
+            mut self,
+            leading: impl FnOnce([bool; 4]) -> AnyElement + 'static,
+            trailing: impl FnOnce([bool; 4]) -> AnyElement + 'static,
+        ) -> Self {
+            self.tiles.push(GroupTile {
+                main: TileMain::Pair(Box::new(leading), Box::new(trailing)),
+                details: Vec::new(),
+            });
+            self
+        }
+
+        /// Content that belongs to the previous item (a disclosure, a summary
+        /// line): it stays inside that item's tile.
+        pub fn detail(mut self, element: impl IntoElement) -> Self {
+            match self.tiles.last_mut() {
+                Some(tile) => tile.details.push(element.into_any_element()),
+                None => self.tiles.push(GroupTile {
+                    main: TileMain::Content(element.into_any_element()),
+                    details: Vec::new(),
+                }),
+            }
+            self
+        }
+    }
+
+    impl ParentElement for TileGroup {
+        fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+            self.tiles
+                .extend(elements.into_iter().map(|element| GroupTile {
+                    main: TileMain::Content(element),
+                    details: Vec::new(),
+                }));
+        }
+    }
+
+    impl RenderOnce for TileGroup {
+        fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+            let count = self.tiles.len();
+            let scale = self.scale;
+            let mut group = v_flex()
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .gap(TILE_GAP)
+                .child(
+                    super::section_title(self.id, self.title)
+                        .px(SETTING_ITEM_INSET)
+                        .mb(SECTION_TITLE_GAP - TILE_GAP),
+                );
+            for (index, tile) in self.tiles.into_iter().enumerate() {
+                let first = index == 0;
+                let last = index + 1 == count;
+                let outer = list_corners(index, count);
+                let element = match tile.main {
+                    TileMain::Content(content) => scale
+                        .surface(outer)
+                        .child(content)
+                        .children(tile.details)
+                        .into_any_element(),
+                    TileMain::Built(build) if tile.details.is_empty() => build(outer),
+                    // Details continue below the built tile inside the same
+                    // surface, so its own bottom corners stay inner.
+                    TileMain::Built(build) => scale
+                        .surface(outer)
+                        .child(build([outer[0], outer[1], false, false]))
+                        .children(tile.details)
+                        .into_any_element(),
+                    TileMain::Pair(leading, trailing) => v_flex()
+                        .w_full()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .grid()
+                                .grid_cols(2)
+                                .w_full()
+                                .min_w_0()
+                                .gap(TILE_GAP)
+                                .child(leading([first, false, false, last]))
+                                .child(trailing([false, first, last, false])),
+                        )
+                        .children(tile.details)
+                        .into_any_element(),
+                };
+                group = group.child(element);
+            }
+            group
+        }
     }
 }
 

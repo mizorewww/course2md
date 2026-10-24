@@ -45,26 +45,11 @@ fn import_option_label(
         .child(content)
 }
 
-/// A titled group of connected option tiles: 2px apart, 24px outer and 6px
-/// inner corners.
-fn option_group(id: impl Into<ElementId>, title: &'static str, tiles: Vec<Div>) -> Div {
-    let count = tiles.len();
-    v_flex()
-        .w_full()
-        .min_w_0()
-        .gap(TILE_GAP)
-        .child(
-            div()
-                .px(rems(20. / 14.))
-                .pb(rems(8. / 14.))
-                .child(section_title(id, title)),
-        )
-        .children(
-            tiles
-                .into_iter()
-                .enumerate()
-                .map(|(index, content)| list_tile(index, count).child(content)),
-        )
+/// A titled group of the workbench's connected option tiles.
+fn option_group(id: &'static str, title: &'static str, tiles: Vec<Div>) -> TileGroup {
+    TileGroup::new(id, title)
+        .scale(TileScale::Compact)
+        .children(tiles)
 }
 
 /// A label (with optional hint) on the left and a switch on the right.
@@ -2316,7 +2301,7 @@ impl Desktop {
 
     /// 文字来源: the route selector with a line saying what it will use, and
     /// the speech recognition route beneath it when speech may be used.
-    fn import_text_mode_options(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+    fn import_text_mode_options(&self, window: &mut Window, cx: &mut Context<Self>) -> TileGroup {
         let mode = self.task_options().source_mode;
         let selector =
             SingleChoiceGroup::new("conversion-text-mode", course2md::tr!("文字来源方式"))
@@ -2381,7 +2366,7 @@ impl Desktop {
 
     /// AI 处理: one switch tile per step, then the translation target and
     /// the service the text is sent to.
-    fn import_ai_options(&self, cx: &mut Context<Self>) -> Div {
+    fn import_ai_options(&self, cx: &mut Context<Self>) -> TileGroup {
         let custom_rule = self.task_options().llm
             && self
                 .import_base_config()
@@ -2732,7 +2717,7 @@ impl Desktop {
 
     /// 保存: the library, the note's name and folder, extra exports and
     /// whether the original video is kept.
-    fn import_destination(&self, cx: &mut Context<Self>) -> Div {
+    fn import_destination(&self, cx: &mut Context<Self>) -> TileGroup {
         let current = self
             .workspace
             .as_ref()
