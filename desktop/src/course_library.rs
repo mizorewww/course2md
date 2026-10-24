@@ -2706,8 +2706,8 @@ impl Desktop {
                 .justify_center()
                 .py(rems(40. / 14.))
                 .px_4()
-                .gap_4()
-                .rounded(RADIUS_CARD)
+                .gap(rems(16. / 14.))
+                .rounded(RADIUS_HERO)
                 .bg(color(SURFACE))
                 .child(
                     h_flex()
@@ -2719,7 +2719,7 @@ impl Desktop {
                         .child(
                             icons::book_open()
                                 .size(rems(32. / 14.))
-                                .text_color(color(GRAY)),
+                                .text_color(color(ON_SECONDARY_CONTAINER)),
                         ),
                 )
                 .child(
@@ -2728,8 +2728,9 @@ impl Desktop {
                         .gap_2()
                         .child(
                             div()
-                                .text_size(SECTION_TITLE)
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_size(rems(22. / 14.))
+                                .line_height(rems(28. / 14.))
+                                .font_weight(FontWeight::NORMAL)
                                 .child(title),
                         )
                         .children(description.map(|description| {
@@ -2742,7 +2743,7 @@ impl Desktop {
                 );
             if unavailable && !checking {
                 empty = empty.child(
-                    quiet("recent-unavailable-library")
+                    text_button("recent-unavailable-library", cx)
                         .label(course2md::tr!("查看笔记库"))
                         .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Library, cx))),
                 );
@@ -2762,7 +2763,7 @@ impl Desktop {
                                 .pl_1()
                                 .pr_3()
                                 .py_1()
-                                .rounded_full()
+                                .rounded(RADIUS_SMALL)
                                 .border_1()
                                 .border_color(color(HAIRLINE))
                                 .text_size(TEXT_BODY)
@@ -2781,14 +2782,31 @@ impl Desktop {
                     ),
                 );
             }
-            return Some(empty);
+            return Some(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rems(20. / 14.))
+                    .child(
+                        h_flex().min_h(rems(48. / 14.)).pl(rems(4. / 14.)).child(
+                            theme::accessible_text("recent-title", course2md::tr!("最近的笔记"))
+                                .role(Role::Heading)
+                                .text_size(rems(22. / 14.))
+                                .line_height(rems(28. / 14.))
+                                .font_weight(FontWeight::NORMAL),
+                        ),
+                    )
+                    .child(empty),
+            );
         }
-        let mut section = v_flex().w_full().min_w_0().gap(ROW_TITLE);
+        let mut section = v_flex().w_full().min_w_0().gap(rems(20. / 14.));
         section = section.child(
             h_flex()
                 .w_full()
+                .min_h(rems(48. / 14.))
+                .pl(rems(4. / 14.))
                 .items_center()
-                .gap_2()
+                .gap(rems(12. / 14.))
                 .child(
                     theme::accessible_text(
                         "recent-title",
@@ -2799,28 +2817,39 @@ impl Desktop {
                         },
                     )
                     .role(Role::Heading)
-                    .text_size(SECTION_TITLE)
-                    .line_height(SECTION_TITLE_LINE)
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_size(rems(22. / 14.))
+                    .line_height(rems(28. / 14.))
+                    .font_weight(FontWeight::NORMAL)
                     .flex_1(),
                 )
                 .child(
-                    quiet("recent-all")
-                        .mr(-crate::theme::QUIET_INSET)
-                        .label(course2md::tr!("查看全部"))
-                        .child(crate::icons::chevron_right().size_4())
-                        .text_color(color(ACCENT))
+                    text_button("recent-all", cx)
+                        .pl(rems(1.))
+                        .pr(rems(8. / 14.))
+                        .gap(rems(4. / 14.))
+                        .label(course2md::tr!("笔记库"))
+                        .child(crate::icons::chevron_right().size(rems(18. / 14.)))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.folder_filter = crate::FolderFilter::All;
                             this.navigate(Page::Library, cx);
                         })),
                 ),
         );
+        // One surface; rows keep an 8px inset so their hover shape stays
+        // inside its corners, and dividers start on the title column.
         let mut list = v_flex()
             .w_full()
             .min_w_0()
-            .rounded(RADIUS_CARD)
+            .p(rems(8. / 14.))
+            .rounded(RADIUS_HERO)
             .bg(color(SURFACE));
+        let divider = || {
+            div()
+                .h(px(1.))
+                .ml(rems(152. / 14.))
+                .mr(rems(8. / 14.))
+                .bg(color(HAIRLINE))
+        };
         let has_attention = !attention.is_empty();
         for task in attention {
             let id = task.id.clone();
@@ -2850,16 +2879,19 @@ impl Desktop {
                     .cloned()
             }) {
                 actions = actions.child(
-                    outline_pill(SharedString::from(format!("recent-attention-read-{id}")), cx)
-                        .icon(icons::book_open())
-                        .label(if self.course_has_reading_position(&course) {
-                            course2md::tr!("继续阅读")
-                        } else {
-                            course2md::tr!("阅读笔记")
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_course(course.clone(), cx);
-                        })),
+                    outline_pill(
+                        SharedString::from(format!("recent-attention-read-{id}")),
+                        cx,
+                    )
+                    .icon(icons::book_open())
+                    .label(if self.course_has_reading_position(&course) {
+                        course2md::tr!("继续阅读")
+                    } else {
+                        course2md::tr!("阅读笔记")
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_course(course.clone(), cx);
+                    })),
                 );
             }
             if requires_repair {
@@ -2923,9 +2955,9 @@ impl Desktop {
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .p_3()
+                    .py(rems(12. / 14.))
+                    .px(rems(8. / 14.))
                     .gap_2()
-                    .bg(color(SURFACE))
                     // Same order as every task and note row: title, status, actions.
                     .child(
                         h_flex()
@@ -2966,35 +2998,45 @@ impl Desktop {
                 .map(course2md::render::fmt_ts);
             let metadata = meta.short_line();
             if index > 0 || has_attention {
-                list = list.child(inset_divider());
+                list = list.child(divider());
             }
             let row = control(("recent-note", index))
                 .ghost()
                 .w_full()
                 .h_auto()
-                .p_4()
-                .rounded(RADIUS_CARD)
+                .py(rems(12. / 14.))
+                .pl(rems(8. / 14.))
+                .pr(rems(4. / 14.))
+                .rounded(px(20.))
                 .accessibility_label(course2md::tr!("阅读 {}", course.title))
                 .child(
                     h_flex()
                         .w_full()
                         .min_w_0()
                         .items_center()
-                        .gap_4()
+                        .gap(rems(16. / 14.))
                         .child(
                             row_cover()
                                 .relative()
                                 .aspect_ratio(16. / 9.)
-                                .rounded(RADIUS_SMALL)
+                                .rounded(px(12.))
                                 .bg(color(SECONDARY_CONTAINER))
                                 .overflow_hidden()
-                                .when_some(course.thumbnail.clone(), |cover, path| {
-                                    cover.child(
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .map(|cover| match course.thumbnail.clone() {
+                                    Some(path) => cover.child(
                                         img(path)
                                             .size_full()
-                                            .rounded(RADIUS_SMALL)
+                                            .rounded(px(12.))
                                             .object_fit(ObjectFit::Cover),
-                                    )
+                                    ),
+                                    None => cover.child(
+                                        icons::file_text()
+                                            .size(rems(24. / 14.))
+                                            .text_color(color(ON_SECONDARY_CONTAINER)),
+                                    ),
                                 })
                                 .when_some(duration, |cover, duration| {
                                     cover.child(
@@ -3017,19 +3059,20 @@ impl Desktop {
                             v_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .gap_2()
+                                .gap(rems(4. / 14.))
                                 .child(
                                     div()
                                         .w_full()
-                                        .text_size(ROW_TITLE)
+                                        .text_size(rems(16. / 14.))
+                                        .line_height(rems(22. / 14.))
                                         .whitespace_nowrap()
                                         .text_ellipsis()
-                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .font_weight(FontWeight::MEDIUM)
                                         .child(course.title.clone()),
                                 )
                                 .child(
                                     div()
-                                        .text_size(TEXT_BODY)
+                                        .text_size(rems(13. / 14.))
                                         .font_weight(FontWeight::NORMAL)
                                         .text_color(color(GRAY))
                                         .child(metadata),
@@ -3038,7 +3081,7 @@ impl Desktop {
                         )
                         .child(
                             crate::icons::chevron_right()
-                                .size_4()
+                                .size(rems(20. / 14.))
                                 .flex_shrink_0()
                                 .text_color(color(GRAY)),
                         ),

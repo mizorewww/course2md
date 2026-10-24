@@ -1198,7 +1198,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 查看{}	查看{}	View {}	檢視{}	{} を表示
 查看任务	查看任务	View task	檢視任務	タスクを表示
 查看任务详情	查看任务详情	View task details	檢視任務詳情	タスクの詳細を表示する
-查看全部	查看全部	View all	檢視全部	すべて見る
 查看准备详情	查看准备详情	View preparation details	檢視準備詳情	準備の詳細を表示する
 查看后续处理任务	查看后续处理任务	View follow-up tasks	檢視後續處理任務	フォローアップタスクを表示する
 查看处理详情	查看处理详情	View processing details	檢視處理詳情	処理の詳細を表示する
