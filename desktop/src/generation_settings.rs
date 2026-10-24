@@ -24,6 +24,34 @@ use course2md::config::{AsrProvider, local_models, model_label};
 
 impl Desktop {
     /// The bilingual target menu shared by Settings and the per-task options.
+    fn translation_menu(
+        &self,
+        current: Option<&'static str>,
+        pick: impl Fn(&mut Self, Option<&'static str>, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+        let entity = cx.weak_entity();
+        let pick = std::rc::Rc::new(pick);
+        move |menu, _, _| {
+            std::iter::once((None, course2md::tr!("不翻译")))
+                .chain(
+                    course2md::language::TARGETS
+                        .iter()
+                        .map(|(code, _)| (Some(*code), course2md::language::native_name(code))),
+                )
+                .fold(menu, |menu, (code, label)| {
+                    let entity = entity.clone();
+                    let pick = pick.clone();
+                    menu.item(PopupMenuItem::new(label).checked(code == current).on_click(
+                        move |_, _, cx| {
+                            let _ = entity.update(cx, |this, cx| pick(this, code, cx));
+                        },
+                    ))
+                })
+        }
+    }
+
+    /// The bilingual target select of the per-task options.
     pub(crate) fn translation_select(
         &self,
         id: &'static str,
@@ -31,30 +59,12 @@ impl Desktop {
         pick: impl Fn(&mut Self, Option<&'static str>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> SelectField {
-        let entity = cx.weak_entity();
-        let pick = std::rc::Rc::new(pick);
         SelectField::new(
             id,
             current
                 .map(course2md::language::native_name)
                 .unwrap_or(course2md::tr!("不翻译")),
-            move |menu, _, _| {
-                std::iter::once((None, course2md::tr!("不翻译")))
-                    .chain(
-                        course2md::language::TARGETS
-                            .iter()
-                            .map(|(code, _)| (Some(*code), course2md::language::native_name(code))),
-                    )
-                    .fold(menu, |menu, (code, label)| {
-                        let entity = entity.clone();
-                        let pick = pick.clone();
-                        menu.item(PopupMenuItem::new(label).checked(code == current).on_click(
-                            move |_, _, cx| {
-                                let _ = entity.update(cx, |this, cx| pick(this, code, cx));
-                            },
-                        ))
-                    })
-            },
+            self.translation_menu(current, pick, cx),
         )
         .label(course2md::tr!("双语翻译"))
     }
@@ -63,31 +73,46 @@ impl Desktop {
     fn translation_setting(
         &self,
         value: &crate::preferences::GenerationPreferences,
+        outer: [bool; 4],
         cx: &mut Context<Self>,
-    ) -> Div {
+    ) -> AnyElement {
         let current = value
             .ai
             .translate
             .as_deref()
             .and_then(course2md::language::target);
-        settings_outlined_row(
-            "default-ai-translate-row",
-            if current.is_some() {
-                course2md::tr!("每段文字下方附上译文；已是该语言的视频不翻译")
-            } else {
-                ""
+        let shown = current
+            .map(course2md::language::native_name)
+            .unwrap_or(course2md::tr!("不翻译"));
+        let menu = self.translation_menu(
+            current,
+            |this, code, cx| {
+                let mut next = this.generation_edit_base();
+                next.ai.translate = code.map(str::to_owned);
+                this.commit_generation(next, cx);
             },
-            self.translation_select(
-                "default-ai-translate",
-                current,
-                |this, code, cx| {
-                    let mut next = this.generation_edit_base();
-                    next.ai.translate = code.map(str::to_owned);
-                    this.commit_generation(next, cx);
-                },
-                cx,
-            ),
-        )
+            cx,
+        );
+        let button = tile_button("default-ai-translate", outer, cx)
+            .min_h(rems(76. / 14.))
+            .accessibility_label(course2md::tr!("{}：{}", course2md::tr!("双语翻译"), shown))
+            .child(
+                tile_text(
+                    "default-ai-translate-label",
+                    course2md::tr!("双语翻译"),
+                    Some(shown.into()),
+                )
+                .when(current.is_some(), |text| {
+                    text.child(tile_support(
+                        "default-ai-translate-row-hint",
+                        course2md::tr!("每段文字下方附上译文；已是该语言的视频不翻译"),
+                    ))
+                }),
+            )
+            .child(tile_chevron())
+            .dropdown_menu_with_anchor(Anchor::TopRight, menu);
+        self.reveal_setting("default-ai-translate-reveal", button)
+            .into_any_element()
     }
 
     pub(super) fn generation_settings_page(
@@ -122,7 +147,80 @@ impl Desktop {
                 .preferred_subtitle_languages
                 .first()
                 .is_some_and(|one| !SUBTITLE_LANGUAGES.iter().any(|(id, _)| id == one));
-        let languages = group("language-settings", course2md::tr!("字幕与识别"))
+        let subtitle_value = if custom_language {
+            course2md::tr!("自定义优先级")
+        } else {
+            subtitle_language_label(language)
+        };
+        let subtitle_menu = {
+            let current = language.to_owned();
+            let entity = cx.weak_entity();
+            move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
+                SUBTITLE_LANGUAGES
+                    .into_iter()
+                    .map(|(id, label)| (id, course2md::tr!(label)))
+                    .fold(menu.min_w(px(240.)), |menu, (id, label)| {
+                        let entity = entity.clone();
+                        menu.item(PopupMenuItem::new(label).checked(id == current).on_click(
+                            move |_, window, cx| {
+                                let _ = entity.update(cx, |this, cx| {
+                                    let mut next = this.generation_edit_base();
+                                    next.preferred_subtitle_languages = if id.is_empty() {
+                                        Vec::new()
+                                    } else {
+                                        vec![id.to_owned()]
+                                    };
+                                    next.subtitle_languages_draft = None;
+                                    if this.commit_generation(next, cx) {
+                                        this.settings_ui.language_details_open = false;
+                                        this.settings_ui.inputs[&EditField::Languages]
+                                            .update(cx, |input, cx| {
+                                                input.set_value(id, window, cx)
+                                            });
+                                    }
+                                });
+                            },
+                        ))
+                    })
+            }
+        };
+        let subtitle_language = self.reveal_setting(
+            "default-subtitle-language-reveal",
+            tile_button("default-subtitle-language", [false; 4], cx)
+                .min_h(rems(76. / 14.))
+                .accessibility_label(course2md::tr!(
+                    "{}：{}",
+                    course2md::tr!("字幕语言"),
+                    subtitle_value
+                ))
+                .child(tile_text(
+                    "subtitle-language-label",
+                    course2md::tr!("字幕语言"),
+                    Some(subtitle_value.into()),
+                ))
+                .child(tile_chevron())
+                .dropdown_menu_with_anchor(Anchor::TopRight, subtitle_menu),
+        );
+        let languages_open =
+            self.settings_ui.language_details_open || value.subtitle_languages_draft.is_some();
+        let priority = tile_disclosure(
+            "toggle-language-details",
+            [false, false, !languages_open, !languages_open],
+            languages_open,
+            cx,
+        )
+        .accessibility_label(course2md::tr!("自定义语言优先级"))
+        .child(tile_text(
+            "subtitle-custom-label",
+            course2md::tr!("自定义语言优先级"),
+            custom_language.then(|| value.preferred_subtitle_languages.join(" → ").into()),
+        ))
+        .child(disclosure_chevron(languages_open))
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.settings_ui.language_details_open = !this.settings_ui.language_details_open;
+            cx.notify();
+        }));
+        let mut languages = group("language-settings", course2md::tr!("字幕与识别"))
             .child(settings_stacked_row(
                 "default-text-source-label",
                 course2md::tr!("文字来源"),
@@ -160,302 +258,194 @@ impl Desktop {
                         this.commit_generation(next, cx);
                     })),
             ))
-            .child(settings_outlined_row(
-                "subtitle-language-label",
-                "",
-                v_flex()
+            .tile(move |_| subtitle_language.into_any_element())
+            .tile(move |_| priority.into_any_element());
+        if languages_open {
+            languages = languages.detail(crate::motion::disclosure(
+                "subtitle-language-details",
+                true,
+                h_flex()
                     .w_full()
                     .min_w_0()
-                    .gap_2()
-                    .child(self.reveal_setting("default-subtitle-language-reveal", {
-                        let current = language.to_owned();
-                        let entity = cx.weak_entity();
-                        SelectField::new(
-                            "default-subtitle-language",
-                            if custom_language {
-                                course2md::tr!("自定义优先级")
-                            } else {
-                                subtitle_language_label(language)
-                            },
-                            move |menu, _, _| {
-                                SUBTITLE_LANGUAGES
-                                    .into_iter()
-                                    .map(|(id, label)| (id, course2md::tr!(label)))
-                                    .fold(menu, |menu, (id, label)| {
-                                        let entity = entity.clone();
-                                        menu.item(
-                                            PopupMenuItem::new(label)
-                                                .checked(id == current)
-                                                .on_click(move |_, window, cx| {
-                                                    let _ = entity.update(cx, |this, cx| {
-                                                        let mut next = this.generation_edit_base();
-                                                        next.preferred_subtitle_languages =
-                                                            if id.is_empty() {
-                                                                Vec::new()
-                                                            } else {
-                                                                vec![id.to_owned()]
-                                                            };
-                                                        next.subtitle_languages_draft = None;
-                                                        if this.commit_generation(next, cx) {
-                                                            this.settings_ui
-                                                                .language_details_open = false;
-                                                            this.settings_ui.inputs
-                                                                [&EditField::Languages]
-                                                                .update(cx, |input, cx| {
-                                                                    input.set_value(id, window, cx)
-                                                                });
-                                                        }
-                                                    });
-                                                }),
-                                        )
-                                    })
-                            },
-                        )
-                        .label(course2md::tr!("字幕语言"))
-                    }))
+                    .px(SETTING_ITEM_INSET)
+                    .pb(rems(16. / 14.))
+                    .gap_3()
+                    .flex_wrap()
                     .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .gap_3()
-                            .items_center()
-                            .flex_wrap()
-                            .child(
-                                crate::theme::item_disclosure(
-                                    "toggle-language-details",
-                                    course2md::tr!("自定义语言优先级"),
-                                    self.settings_ui.language_details_open,
-                                )
+                        div().flex_1().min_w(rems(16.)).child(
+                            text_input(&self.settings_ui.inputs[&EditField::Languages])
                                 .settings_text()
-                                .on_click(cx.listener(
-                                    |this, _, _, cx| {
-                                        this.settings_ui.language_details_open =
-                                            !this.settings_ui.language_details_open;
-                                        cx.notify();
-                                    },
-                                )),
-                            )
-                            .when(custom_language, |row| {
-                                row.child(
-                                    accessible_text(
-                                        "subtitle-custom-summary",
-                                        value.preferred_subtitle_languages.join(" → "),
-                                    )
-                                    .text_size(TEXT_SETTINGS_AUX)
-                                    .text_color(color(GRAY)),
-                                )
+                                .w_full()
+                                .aria_label(course2md::tr!("语言优先级")),
+                        ),
+                    )
+                    .child(
+                        outline_pill("apply-languages", cx)
+                            .settings_text()
+                            .icon(icons::check_circle())
+                            .label(course2md::tr!("应用"))
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.apply_language_preferences(cx)),
+                            ),
+                    ),
+            ));
+        }
+        // 识别方式: where speech is recognized; the local engine shows as a chip.
+        let method_value = if online {
+            course2md::tr!("在线语音服务")
+        } else {
+            course2md::tr!("本机识别")
+        };
+        let method_menu = {
+            let entity = cx.weak_entity();
+            move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
+                [
+                    (false, course2md::tr!("本机识别")),
+                    (true, course2md::tr!("在线语音服务")),
+                ]
+                .into_iter()
+                .fold(menu.min_w(px(240.)), |menu, (use_online, label)| {
+                    let entity = entity.clone();
+                    menu.item(
+                        PopupMenuItem::new(label)
+                            .checked(online == use_online)
+                            .on_click(move |_, _, cx| {
+                                let _ = entity.update(cx, |this, cx| {
+                                    let mut next = this.generation_edit_base();
+                                    next.select_recognition_location(use_online);
+                                    this.commit_generation(next, cx);
+                                });
                             }),
                     )
-                    .child(crate::motion::disclosure(
-                        "subtitle-language-details",
-                        self.settings_ui.language_details_open
-                            || value.subtitle_languages_draft.is_some(),
-                        v_flex().child(
-                            h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .gap_3()
-                                .flex_wrap()
-                                .child(
-                                    div().flex_1().min_w(rems(16.)).child(
-                                        text_input(&self.settings_ui.inputs[&EditField::Languages])
-                                            .settings_text()
-                                            .w_full()
-                                            .aria_label(course2md::tr!("语言优先级")),
-                                    ),
-                                )
-                                .child(
-                                    outline_pill("apply-languages", cx)
-                                        .settings_text()
-                                        .icon(icons::check_circle())
-                                        .label(course2md::tr!("应用"))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.apply_language_preferences(cx)
-                                        })),
-                                ),
-                        ),
-                    )),
-            ));
-        let mut recognition =
-            group("asr-default-settings", course2md::tr!("语音识别")).child(settings_outlined_row(
-                "asr-method-label",
-                if online {
-                    course2md::tr!("音频会发送到所选服务")
-                } else {
-                    ""
-                },
-                self.reveal_setting("default-asr-device-reveal", {
-                    let entity = cx.weak_entity();
-                    SelectField::new(
-                        "default-asr-device",
-                        if online {
-                            course2md::tr!("在线语音服务")
-                        } else {
-                            course2md::tr!("本机识别")
-                        },
-                        move |menu, _, _| {
-                            [
-                                (false, course2md::tr!("本机识别")),
-                                (true, course2md::tr!("在线语音服务")),
-                            ]
-                            .into_iter()
-                            .fold(menu, |menu, (use_online, label)| {
-                                let entity = entity.clone();
-                                menu.item(
-                                    PopupMenuItem::new(label)
-                                        .checked(online == use_online)
-                                        .on_click(move |_, _, cx| {
-                                            let _ = entity.update(cx, |this, cx| {
-                                                let mut next = this.generation_edit_base();
-                                                next.select_recognition_location(use_online);
-                                                this.commit_generation(next, cx);
-                                            });
-                                        }),
-                                )
-                            })
-                        },
+                })
+            }
+        };
+        let method = self.reveal_setting(
+            "default-asr-device-reveal",
+            tile_button("default-asr-device", [true, true, false, false], cx)
+                .min_h(rems(76. / 14.))
+                .accessibility_label(course2md::tr!(
+                    "{}：{}",
+                    course2md::tr!("识别方式"),
+                    method_value
+                ))
+                .child(
+                    tile_text(
+                        "asr-method-label",
+                        course2md::tr!("识别方式"),
+                        Some(method_value.into()),
                     )
-                    .label(course2md::tr!("识别方式"))
-                    .when(!online, |field| {
-                        field.trailing(crate::provider_label(provider))
-                    })
-                }),
-            ));
+                    .when(online, |text| {
+                        text.child(tile_support(
+                            "asr-method-label-hint",
+                            course2md::tr!("音频会发送到所选服务"),
+                        ))
+                    }),
+                )
+                .when(!online, |row| {
+                    row.child(outlined_chip(
+                        "asr-method-engine",
+                        crate::provider_label(provider),
+                    ))
+                })
+                .child(tile_chevron())
+                .dropdown_menu_with_anchor(Anchor::TopRight, method_menu),
+        );
+        let mut recognition = group("asr-default-settings", course2md::tr!("语音识别"))
+            .tile(move |_| method.into_any_element());
         if online {
             recognition = recognition.child(self.service_picker(ServicePurpose::Speech, false, cx));
         } else {
-            let engines: Vec<Option<AsrProvider>> = std::iter::once(None)
-                .chain(
-                    LOCAL_ENGINES
-                        .into_iter()
-                        .filter(|engine| engine_offered(*engine, provider))
-                        .map(Some),
-                )
-                .collect();
-            recognition =
-                recognition
-                    .child(self.local_model_picker(cx))
-                    .detail(crate::motion::disclosure(
-                        "asr-advanced-settings",
-                        self.settings_ui.asr_details_open,
-                        settings_stacked_row(
-                            "asr-hardware-heading",
-                            course2md::tr!("本机引擎"),
-                            "",
-                            engines
-                                .iter()
-                                .fold(
-                                    self.setting_choices(
-                                        "default-asr-hardware",
-                                        course2md::tr!("本机引擎"),
-                                    )
-                                    .options(
-                                        engines.iter().map(|engine| {
-                                            (engine_id(*engine), crate::provider_label(*engine))
-                                        }),
-                                    ),
-                                    |choices, engine| {
-                                        choices.icon(engine_id(*engine), engine_icon(*engine))
-                                    },
-                                )
-                                .full_width()
-                                .selected(engine_id(provider))
-                                .on_change(cx.listener(|this, id: &SharedString, _, cx| {
-                                    let mut next = this.generation_edit_base();
-                                    next.select_provider(engine_from_id(id));
-                                    this.commit_generation(next, cx);
-                                })),
-                        ),
-                    ));
-            // The panel belongs to the model item above and shares its insets.
-            let model_panel = setting_surface()
-                .pt_0()
-                .child(self.model_management_panel(window, cx));
-            recognition = recognition.detail(crate::motion::disclosure(
-                "default-model-management",
-                self.settings_ui.model_details_open,
-                model_panel,
-            ));
+            recognition = self.local_model_tiles(recognition, window, cx);
         }
+        let ai_open = self.settings_ui.show_prompt;
         let mut ai = group("ai-default-settings", course2md::tr!("AI 处理"))
             .child(
-                setting_surface()
-                    .child(settings_switch_row(
-                        course2md::tr!("校对文字和标点"),
-                        "",
-                        Switch::new("default-ai-proofread")
-                            .checked(value.ai.enabled)
-                            .on_click(cx.listener(|this, enabled, _, cx| {
-                                let mut next = this.generation_edit_base();
-                                next.ai.enabled = *enabled;
-                                this.commit_generation(next, cx);
-                            })),
-                    ))
-                    .child(settings_switch_row(
-                        course2md::tr!("在开头生成摘要"),
-                        "",
-                        Switch::new("default-ai-summary")
-                            .checked(value.ai.summarize)
-                            .on_click(cx.listener(|this, enabled, _, cx| {
-                                let mut next = this.generation_edit_base();
-                                next.ai.summarize = *enabled;
-                                this.commit_generation(next, cx);
-                            })),
-                    ))
-                    .child(settings_switch_row(
-                        course2md::tr!("校对时附带对应截图"),
-                        "",
-                        Switch::new("default-ai-vision")
-                            .checked(value.ai.vision)
-                            .disabled(!value.ai.enabled)
-                            .on_click(cx.listener(|this, enabled, _, cx| {
-                                let mut next = this.generation_edit_base();
-                                next.ai.vision = *enabled;
-                                this.commit_generation(next, cx);
-                            })),
-                    )),
+                setting_surface().child(settings_switch_row(
+                    course2md::tr!("校对文字和标点"),
+                    "",
+                    Switch::new("default-ai-proofread")
+                        .checked(value.ai.enabled)
+                        .on_click(cx.listener(|this, enabled, _, cx| {
+                            let mut next = this.generation_edit_base();
+                            next.ai.enabled = *enabled;
+                            this.commit_generation(next, cx);
+                        })),
+                )),
             )
-            .child(self.translation_setting(value, cx))
-            .child(self.service_picker(ServicePurpose::Ai, false, cx));
+            .child(
+                setting_surface().child(settings_switch_row(
+                    course2md::tr!("在开头生成摘要"),
+                    "",
+                    Switch::new("default-ai-summary")
+                        .checked(value.ai.summarize)
+                        .on_click(cx.listener(|this, enabled, _, cx| {
+                            let mut next = this.generation_edit_base();
+                            next.ai.summarize = *enabled;
+                            this.commit_generation(next, cx);
+                        })),
+                )),
+            )
+            .child(
+                setting_surface().child(settings_switch_row(
+                    course2md::tr!("校对时附带对应截图"),
+                    "",
+                    Switch::new("default-ai-vision")
+                        .checked(value.ai.vision)
+                        .disabled(!value.ai.enabled)
+                        .on_click(cx.listener(|this, enabled, _, cx| {
+                            let mut next = this.generation_edit_base();
+                            next.ai.vision = *enabled;
+                            this.commit_generation(next, cx);
+                        })),
+                )),
+            );
+        let translation = self.translation_setting(value, [false; 4], cx);
+        ai =
+            ai.tile(move |_| translation)
+                .child(self.service_picker(ServicePurpose::Ai, false, cx));
         // The rule only applies to proofreading, so it appears with it.
         if value.ai.enabled {
-            ai = ai
-                // As on the canvas, the rule is a list item showing its current value.
-                .child(settings_row(
-                    "proofread-rules-label",
-                    course2md::tr!("自定义校对规则"),
-                    "",
-                    quiet("show-proofread-rules")
-                        .settings_text()
-                        .mr(-crate::theme::QUIET_INSET)
-                        .label(if value.ai.prompt.is_some() {
-                            course2md::tr!("已自定义")
-                        } else {
-                            course2md::tr!("使用标准规则")
-                        })
-                        .icon(if self.settings_ui.show_prompt {
-                            icons::chevron_up()
-                        } else {
-                            icons::chevron_down()
-                        })
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.settings_ui.show_prompt = !this.settings_ui.show_prompt;
-                            // The standard rule is edited in place rather than printed beside an empty box.
-                            if this.settings_ui.show_prompt
-                                && this.settings_ui.prompt.read(cx).value().trim().is_empty()
-                            {
-                                this.settings_ui.prompt.update(cx, |input, cx| {
-                                    input.set_value(course2md::llm::DEFAULT_PROMPT, window, cx)
-                                });
-                            }
-                            cx.notify();
-                        })),
-                ))
-                .detail(crate::motion::disclosure(
+            let rules = tile_disclosure(
+                "show-proofread-rules",
+                [false, false, !ai_open, !ai_open],
+                ai_open,
+                cx,
+            )
+            .min_h(rems(76. / 14.))
+            .accessibility_label(course2md::tr!("自定义校对规则"))
+            .child(tile_text(
+                "proofread-rules-label",
+                course2md::tr!("自定义校对规则"),
+                Some(
+                    if value.ai.prompt.is_some() {
+                        course2md::tr!("已自定义")
+                    } else {
+                        course2md::tr!("使用标准规则")
+                    }
+                    .into(),
+                ),
+            ))
+            .child(disclosure_chevron(ai_open))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.settings_ui.show_prompt = !this.settings_ui.show_prompt;
+                // The standard rule is edited in place rather than printed beside an empty box.
+                if this.settings_ui.show_prompt
+                    && this.settings_ui.prompt.read(cx).value().trim().is_empty()
+                {
+                    this.settings_ui.prompt.update(cx, |input, cx| {
+                        input.set_value(course2md::llm::DEFAULT_PROMPT, window, cx)
+                    });
+                }
+                cx.notify();
+            }));
+            ai = ai.tile(move |_| rules.into_any_element());
+            if ai_open {
+                ai = ai.detail(crate::motion::disclosure(
                     "proofread-rules-content",
-                    self.settings_ui.show_prompt,
+                    true,
                     v_flex()
-                        .px(rems(20. / 14.))
+                        .px(SETTING_ITEM_INSET)
                         .pb(rems(16. / 14.))
                         .gap_3()
                         .child(
@@ -490,7 +480,7 @@ impl Desktop {
                                         })),
                                 )
                                 .child(
-                                    quiet("restore-proofread-rules")
+                                    text_button("restore-proofread-rules", cx)
                                         .settings_text()
                                         .icon(icons::refresh())
                                         .label(course2md::tr!("恢复标准规则"))
@@ -512,124 +502,106 @@ impl Desktop {
                                 ),
                         ),
                 ));
+            }
         }
         let selected = value.options.formats.clone().unwrap_or_default();
+        let location = self
+            .workspace
+            .as_ref()
+            .and_then(|workspace| {
+                workspace
+                    .state
+                    .libraries
+                    .iter()
+                    .find(|library| library.id == workspace.state.default_library)
+            })
+            .map(|library| library.root.display().to_string());
+        let manage_storage = tile_button("settings-manage-storage", [true, true, false, false], cx)
+            .min_h(rems(76. / 14.))
+            .accessibility_label(course2md::tr!("保存位置"))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(rems(2. / 14.))
+                    .child(tile_label(
+                        "settings-save-location",
+                        course2md::tr!("保存位置"),
+                    ))
+                    .child(
+                        tile_support(
+                            "settings-current-location",
+                            location.unwrap_or_else(|| course2md::tr!("尚未设置").into()),
+                        )
+                        .text_size(rems(13. / 14.))
+                        .font_family(gpui_component::Theme::global(cx).mono_font_family.clone()),
+                    ),
+            )
+            .child(tile_chevron())
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.select_settings_tab(SettingsTab::Storage, window, cx);
+            }));
         v_flex()
             .w_full()
             .min_w_0()
             .flex_shrink_0()
-            .gap(px(32.))
+            .gap(px(28.))
             .child(languages)
             .child(recognition)
             .child(ai)
             .child(
                 group("export-default-settings", course2md::tr!("保存与导出"))
+                    .tile(move |_| manage_storage.into_any_element())
                     .child(
                         setting_surface().child(
-                            h_flex()
+                            v_flex()
                                 .w_full()
                                 .min_w_0()
-                                .gap_3()
-                                .items_center()
+                                .gap(rems(1.))
+                                .child(tile_label(
+                                    "export-format-label",
+                                    course2md::tr!("同时导出"),
+                                ))
                                 .child(
-                                    v_flex()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .gap_1()
-                                        .child(accessible_text(
-                                            "settings-save-location",
-                                            course2md::tr!("保存位置"),
-                                        ))
-                                        .child(
-                                            accessible_text(
-                                                "settings-current-location",
-                                                self.workspace
-                                                    .as_ref()
-                                                    .and_then(|workspace| {
-                                                        workspace.state.libraries.iter().find(
-                                                            |library| {
-                                                                library.id
-                                                                    == workspace
-                                                                        .state
-                                                                        .default_library
-                                                            },
-                                                        )
-                                                    })
-                                                    .map(|library| {
-                                                        library.root.display().to_string()
-                                                    })
-                                                    .unwrap_or_else(|| {
-                                                        course2md::tr!("尚未设置").into()
-                                                    }),
-                                            )
-                                            .text_size(TEXT_SETTINGS_AUX)
-                                            .text_color(color(GRAY))
-                                            .font_family(
-                                                gpui_component::Theme::global(cx)
-                                                    .mono_font_family
-                                                    .clone(),
-                                            )
-                                            .min_w_0(),
+                                    h_flex().w_full().gap_2().flex_wrap().children(
+                                        [
+                                            (course2md::config::OutputFormat::Md, "Markdown"),
+                                            (
+                                                course2md::config::OutputFormat::Html,
+                                                course2md::tr!("网页"),
+                                            ),
+                                            (course2md::config::OutputFormat::Json, "JSON"),
+                                        ]
+                                        .into_iter()
+                                        .enumerate()
+                                        .map(
+                                            |(index, (format, label))| {
+                                                filter_chip(
+                                                    ("default-export", index),
+                                                    selected.contains(&format),
+                                                    cx,
+                                                )
+                                                .settings_text()
+                                                .label(label)
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    let mut next = this.generation_edit_base();
+                                                    let formats = next
+                                                        .options
+                                                        .formats
+                                                        .get_or_insert_with(Vec::new);
+                                                    if formats.contains(&format) {
+                                                        formats.retain(|value| *value != format);
+                                                    } else {
+                                                        formats.push(format);
+                                                    }
+                                                    this.commit_generation(next, cx);
+                                                }))
+                                            },
                                         ),
-                                )
-                                .child(
-                                    outline_pill("settings-manage-storage", cx)
-                                        .settings_text()
-                                        .label(course2md::tr!("更改"))
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.select_settings_tab(
-                                                SettingsTab::Storage,
-                                                window,
-                                                cx,
-                                            );
-                                        })),
+                                    ),
                                 ),
                         ),
                     )
-                    .child(settings_row(
-                        "export-format-label",
-                        course2md::tr!("同时导出"),
-                        "",
-                        h_flex()
-                            .w_full()
-                            .justify_end()
-                            .gap_3()
-                            .flex_wrap()
-                            .children(
-                                [
-                                    (course2md::config::OutputFormat::Md, "Markdown"),
-                                    (
-                                        course2md::config::OutputFormat::Html,
-                                        course2md::tr!("网页"),
-                                    ),
-                                    (course2md::config::OutputFormat::Json, "JSON"),
-                                ]
-                                .into_iter()
-                                .enumerate()
-                                .map(|(index, (format, label))| {
-                                    filter_chip(
-                                        ("default-export", index),
-                                        selected.contains(&format),
-                                        cx,
-                                    )
-                                    .settings_text()
-                                    .label(label)
-                                    .on_click(cx.listener(
-                                        move |this, _, _, cx| {
-                                            let mut next = this.generation_edit_base();
-                                            let formats =
-                                                next.options.formats.get_or_insert_with(Vec::new);
-                                            if formats.contains(&format) {
-                                                formats.retain(|value| *value != format);
-                                            } else {
-                                                formats.push(format);
-                                            }
-                                            this.commit_generation(next, cx);
-                                        },
-                                    ))
-                                }),
-                            ),
-                    ))
                     .child(
                         setting_surface().child(settings_switch_row(
                             course2md::tr!("保留下载的视频"),
@@ -647,12 +619,16 @@ impl Desktop {
             .into_any_element()
     }
 
-    fn local_model_picker(&self, cx: &mut Context<Self>) -> Div {
+    /// 识别模型, 管理模型与下载 and 高级识别设置 as tiles of the 语音识别 group.
+    fn local_model_tiles(
+        &self,
+        mut recognition: SettingsGroup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> SettingsGroup {
         let preferences = self.preferences.generation();
-        let provider = preferences
-            .options
-            .provider
-            .unwrap_or_else(|| self.recommended_local_provider());
+        let selected_provider = preferences.options.provider;
+        let provider = selected_provider.unwrap_or_else(|| self.recommended_local_provider());
         let selected = preferences
             .options
             .asr_model
@@ -660,157 +636,217 @@ impl Desktop {
             .unwrap_or(course2md::config::DEFAULT_ASR_MODEL);
         let canonical = course2md::config::canonical_model(provider, selected).ok();
         let models = local_models(provider);
-        let picker = if let [only] = models {
-            settings_value("default-local-model-single", only.label).into_any_element()
-        } else if models.len() > 3 {
-            let current = canonical.clone();
-            let label = if canonical.is_some() {
-                model_label(canonical.as_deref().unwrap_or(selected))
-            } else {
-                course2md::tr!("自定义模型")
-            };
-            let entity = cx.entity().downgrade();
-            self.reveal_setting(
-                "default-local-model-menu-reveal",
-                SelectField::new(
-                    "default-local-model-menu",
-                    label.to_owned(),
-                    move |menu, _, _| {
-                        models.iter().fold(menu, |menu, model| {
-                            let id = model.id;
-                            let entity = entity.clone();
-                            menu.item(
-                                PopupMenuItem::new(model.label)
-                                    .checked(current.as_deref() == Some(id))
-                                    .on_click(move |_, window, cx| {
-                                        let _ = entity.update(cx, |this, cx| {
-                                            this.select_local_model(id, window, cx)
-                                        });
-                                    }),
-                            )
-                        })
-                    },
-                ),
-            )
-            .into_any_element()
+        let model_name: SharedString = if canonical.is_some() {
+            model_label(canonical.as_deref().unwrap_or(selected)).into()
+        } else if let [only] = models {
+            only.label.into()
         } else {
-            models
-                .iter()
-                .fold(
-                    self.setting_choices("default-local-model", course2md::tr!("默认识别模型"))
-                        .options(models.iter().map(|model| (model.id, model.label))),
-                    |choices, _| choices,
-                )
-                .full_width()
-                .selected(canonical.clone().unwrap_or_default())
-                .on_change(cx.listener(move |this, id: &SharedString, window, cx| {
-                    this.select_local_model(id, window, cx)
-                }))
-                .into_any_element()
+            course2md::tr!("自定义模型").into()
         };
         let (settled, conclusion) = self.default_model_conclusion();
-        // Keep cached readiness and recovery actions on the model control ruler.
-        let model_footer = h_flex()
-            .w_full()
-            .min_w_0()
-            .gap_3()
-            .items_center()
-            .flex_wrap()
-            .child(
+        let state = self.default_model_state();
+        // A finished check on a ready model is said by the badge alone.
+        let ready = matches!(
+            state,
+            Some(course2md::models::status::CacheState::Loaded)
+                | Some(course2md::models::status::CacheState::Cached)
+        );
+        let status_badge = state.map(|state| {
+            let (kind, label) = super::model_diagnostics::cache_state_label(state);
+            badge(kind).child(label)
+        });
+        let model_text = tile_text(
+            "local-model-heading",
+            course2md::tr!("识别模型"),
+            Some(model_name.clone()),
+        )
+        .when(!(settled && ready), |text| {
+            text.child(
                 h_flex()
                     .w_full()
                     .min_w_0()
-                    .gap_2()
-                    .items_center()
-                    .when(!settled, |status| {
-                        status.child(
-                            icons::warning()
-                                .size(rems(16. / 14.))
-                                .text_color(color(WARNING)),
+                    .gap(rems(6. / 14.))
+                    .items_start()
+                    .when(!settled, |line| {
+                        line.child(
+                            div().h(rems(20. / 14.)).flex().items_center().child(
+                                icons::warning()
+                                    .size(rems(16. / 14.))
+                                    .text_color(color(WARNING)),
+                            ),
                         )
                     })
                     .child(
-                        accessible_text("model-readiness-conclusion", conclusion)
-                            .text_size(TEXT_SETTINGS_AUX)
+                        tile_support("model-readiness-conclusion", conclusion)
+                            .flex_1()
                             .text_color(color(if settled { GRAY } else { WARNING })),
                     ),
             )
-            .child(
-                quiet("toggle-model-details")
-                    .settings_text()
-                    .icon(if self.settings_ui.model_details_open {
-                        icons::chevron_up()
-                    } else {
-                        icons::download()
-                    })
-                    .label(if self.settings_ui.model_details_open {
-                        course2md::tr!("收起模型管理")
-                    } else {
-                        course2md::tr!("管理模型与下载")
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.settings_ui.model_details_open = !this.settings_ui.model_details_open;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                quiet("toggle-asr-advanced")
-                    .settings_text()
-                    .mr(-crate::theme::QUIET_INSET)
-                    .icon(icons::tune())
-                    .label(if self.settings_ui.asr_details_open {
-                        course2md::tr!("收起高级设置")
-                    } else {
-                        course2md::tr!("高级识别设置")
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.settings_ui.asr_details_open = !this.settings_ui.asr_details_open;
-                        cx.notify();
-                    })),
+        });
+        recognition = if models.len() > 1 {
+            let current = canonical.clone();
+            let entity = cx.entity().downgrade();
+            let menu = move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
+                models.iter().fold(menu.min_w(px(240.)), |menu, model| {
+                    let id = model.id;
+                    let entity = entity.clone();
+                    menu.item(
+                        PopupMenuItem::new(model.label)
+                            .checked(current.as_deref() == Some(id))
+                            .on_click(move |_, window, cx| {
+                                let _ = entity
+                                    .update(cx, |this, cx| this.select_local_model(id, window, cx));
+                            }),
+                    )
+                })
+            };
+            let model_tile = self.reveal_setting(
+                "default-local-model-menu-reveal",
+                tile_button("default-local-model-menu", [false; 4], cx)
+                    .min_h(rems(76. / 14.))
+                    .accessibility_label(course2md::tr!(
+                        "{}：{}",
+                        course2md::tr!("识别模型"),
+                        model_name
+                    ))
+                    .child(model_text)
+                    .children(status_badge)
+                    .child(tile_chevron())
+                    .dropdown_menu_with_anchor(Anchor::TopRight, menu),
             );
-        let mut view = v_flex().w_full().min_w_0().child(settings_stacked_row(
-            "local-model-heading",
-            course2md::tr!("识别模型"),
-            "",
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .gap_2()
-                .child(picker)
-                .child(model_footer),
-        ));
+            recognition.tile(move |_| model_tile.into_any_element())
+        } else {
+            recognition.child(
+                setting_surface().child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .items_center()
+                        .gap(rems(16. / 14.))
+                        .child(model_text)
+                        .children(status_badge),
+                ),
+            )
+        };
         if !model_supported(provider, selected) {
-            view = view.child(
-                accessible_text("unavailable-fixed-model", unsupported_model())
-                    .text_size(TEXT_SETTINGS_AUX)
+            recognition = recognition.detail(
+                tile_support("unavailable-fixed-model", unsupported_model())
+                    .px(SETTING_ITEM_INSET)
+                    .pb(rems(16. / 14.))
                     .text_color(color(DANGER)),
             );
         }
         if provider == AsrProvider::Npu {
-            view = view
-                .child(self.setting_field(
-                    EditField::LocalModel,
-                    course2md::tr!("模型名称或 Hugging Face 仓库（如 org/model）"),
-                ))
-                .child(
-                    control("apply-custom-npu-model")
-                        .settings_text()
-                        .icon(icons::check_circle())
-                        .label(course2md::tr!("应用模型选择"))
-                        .self_start()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let model = this
-                                .setting_value(EditField::LocalModel, cx)
-                                .trim()
-                                .to_owned();
-                            let mut next = this.generation_edit_base();
-                            next.options.asr_model = (!model.is_empty()).then_some(model);
-                            next.local_model_draft = None;
-                            this.commit_generation(next, cx);
-                        })),
-                );
+            recognition = recognition.child(
+                setting_surface()
+                    .child(self.setting_field(
+                        EditField::LocalModel,
+                        course2md::tr!("模型名称或 Hugging Face 仓库（如 org/model）"),
+                    ))
+                    .child(
+                        outline_pill("apply-custom-npu-model", cx)
+                            .settings_text()
+                            .icon(icons::check_circle())
+                            .label(course2md::tr!("应用模型选择"))
+                            .self_start()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let model = this
+                                    .setting_value(EditField::LocalModel, cx)
+                                    .trim()
+                                    .to_owned();
+                                let mut next = this.generation_edit_base();
+                                next.options.asr_model = (!model.is_empty()).then_some(model);
+                                next.local_model_draft = None;
+                                this.commit_generation(next, cx);
+                            })),
+                    ),
+            );
         }
-        view
+        let manage_open = self.settings_ui.model_details_open;
+        let manage = tile_disclosure("toggle-model-details", [false; 4], manage_open, cx)
+            .accessibility_label(course2md::tr!("管理模型与下载"))
+            .child(tile_text(
+                "model-management-label",
+                course2md::tr!("管理模型与下载"),
+                None,
+            ))
+            .child(disclosure_chevron(manage_open))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.settings_ui.model_details_open = !this.settings_ui.model_details_open;
+                cx.notify();
+            }));
+        recognition = recognition.tile(move |_| manage.into_any_element());
+        if manage_open {
+            recognition = recognition.detail(crate::motion::disclosure(
+                "default-model-management",
+                true,
+                setting_surface()
+                    .pt_0()
+                    .child(self.model_management_panel(window, cx)),
+            ));
+        }
+        let advanced_open = self.settings_ui.asr_details_open;
+        let advanced = tile_disclosure(
+            "toggle-asr-advanced",
+            [false, false, !advanced_open, !advanced_open],
+            advanced_open,
+            cx,
+        )
+        .accessibility_label(course2md::tr!("高级识别设置"))
+        .child(tile_text(
+            "asr-advanced-label",
+            course2md::tr!("高级识别设置"),
+            None,
+        ))
+        .child(disclosure_chevron(advanced_open))
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.settings_ui.asr_details_open = !this.settings_ui.asr_details_open;
+            cx.notify();
+        }));
+        recognition = recognition.tile(move |_| advanced.into_any_element());
+        if advanced_open {
+            let engines: Vec<Option<AsrProvider>> = std::iter::once(None)
+                .chain(
+                    LOCAL_ENGINES
+                        .into_iter()
+                        .filter(|engine| engine_offered(*engine, selected_provider))
+                        .map(Some),
+                )
+                .collect();
+            recognition =
+                recognition.detail(crate::motion::disclosure(
+                    "asr-advanced-settings",
+                    true,
+                    settings_stacked_row(
+                        "asr-hardware-heading",
+                        course2md::tr!("本机引擎"),
+                        "",
+                        engines
+                            .iter()
+                            .fold(
+                                self.setting_choices(
+                                    "default-asr-hardware",
+                                    course2md::tr!("本机引擎"),
+                                )
+                                .options(engines.iter().map(|engine| {
+                                    (engine_id(*engine), crate::provider_label(*engine))
+                                })),
+                                |choices, engine| {
+                                    choices.icon(engine_id(*engine), engine_icon(*engine))
+                                },
+                            )
+                            .full_width()
+                            .selected(engine_id(selected_provider))
+                            .on_change(cx.listener(|this, id: &SharedString, _, cx| {
+                                let mut next = this.generation_edit_base();
+                                next.select_provider(engine_from_id(id));
+                                this.commit_generation(next, cx);
+                            })),
+                    )
+                    .pt_0(),
+                ));
+        }
+        recognition
     }
 
     fn select_local_model(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {

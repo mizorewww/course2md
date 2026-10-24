@@ -866,12 +866,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 收起检查详情	收起检查详情	Collapse inspection details	收起檢查詳情	チェックの詳細を折りたたむ
 收起模型	收起模型	Collapse model	收起模型	モデルを折りたたむ
 收起模型文件	收起模型文件	Collapse model file	收起模型檔案	モデルファイルを折りたたむ
-收起模型管理	收起模型管理	Collapse model management	收起模型管理	モデル管理を折りたたむ
 收起测试详情	收起测试详情	Collapse test details	收起測試詳情	テストの詳細を折りたたむ
 收起目录	收起目录	Collapse table of contents	收起目錄	目次を折りたたむ
 收起笔记详情	收起笔记详情	Hide note details	收起筆記詳情	ノートの詳細を非表示にする
 收起详情	收起详情	Collapse details	收起詳情	詳細を折りたたむ
-收起高级设置	收起高级设置	Collapse advanced settings	收起進階設定	詳細設定を折りたたむ
 改用云端 API / Use cloud API	改用云端 API	Use cloud API	改用雲端 API	クラウドAPIに切り替える
 改用浏览器授权登录（ChatGPT 账号）？/ Authorize with a ChatGPT account in the browser instead?	改用浏览器授权登录（ChatGPT 账号）？/ Authorize with a ChatGPT account in the browser instead?	Authorize with a ChatGPT account in the browser instead?	改用瀏覽器授權登入（ChatGPT 帳號）？/ Authorize with a ChatGPT account in the browser instead?	代わりにブラウザで ChatGPT アカウントを使って認可しますか？
 放到 GPU 上运行的层数（0–99，默认全部）；核显不稳定时调低 / Layers run on the GPU (0–99, all by default); lower on unstable integrated GPUs	放到 GPU 上运行的层数（0–99，默认全部）；核显不稳定时调低	Layers run on the GPU (0–99, all by default); lower on unstable integrated GPUs	放到 GPU 上執行的層數（0–99，預設全部）；內顯不穩定時調低	GPU で実行するレイヤー数（0–99、デフォルトはすべて）。内蔵 GPU が不安定な場合は下げてください
@@ -1057,7 +1055,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 更换	更换	Replace	更換	交換する
 更换模型	更换模型	Change model	更換模型	モデルを変更
 更换视频	更换视频	Change video	更換影片	動画を変更する
-更改	更改	Change	更改	変更
 更改默认位置只影响后续生成的笔记	更改默认位置只影响后续生成的笔记	Changing the default location only affects subsequently generated notes	更改預設位置只影響後續生成的筆記	デフォルトの場所を変更すると、それ以降に生成されるノートにのみ影響します。
 更新为：{} · v{} · {}	更新为：{} · v{} · {}	Updated to: {} · v{} · {}	更新為：{} · v{} · {}	更新先: {} · v{} · {}
 更新默认服务	更新默认服务	Update default services	更新預設服務	デフォルトのサービスを更新する
@@ -1978,7 +1975,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 默认设置已保存，当前视频的选项尚未同步：{}	默认设置已保存，当前视频的选项尚未同步：{}	Default settings saved, options for current video not yet synced: {}	預設設定已儲存，目前影片的選項尚未同步：{}	デフォルト設定が保存されました。現在の動画のオプションはまだ同期されていません: {}
 默认设置已保存，当前选项尚未同步。请重试。	默认设置已保存，当前选项尚未同步。请重试。	The default settings have been saved and the current options have not yet been synced. Please try again.	預設設定已儲存，目前選項尚未同步。請重試。	デフォルト設定は保存されていますが、現在のオプションはまだ同期されていません。もう一度試してください。
 默认识别方式	默认识别方式	Default recognition method	預設辨識方式	デフォルトの認識方法
-默认识别模型	默认识别模型	Default recognition model	預設辨識模型	デフォルトの認識モデル
 默认选项尚未保存，可重试	默认选项尚未保存，可重试	The default options have not been saved, you can try again	預設選項尚未儲存，可重試	デフォルトのオプションは保存されていません。もう一度試してください。
 （低功耗，约 1GB / Low power, ~1GB）	（低功耗，约 1GB）	(low power, ~1GB)	（低功耗，約 1GB）	（低消費電力、約 1GB）
 （多语种 / Multilingual）	（多语种）	(multilingual)	（多語種）	（多言語）

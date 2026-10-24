@@ -1186,6 +1186,23 @@ impl Desktop {
             ),
         )
     }
+    /// The checked cache state of the default model, when a check finished
+    /// and the recognition method can run.
+    pub(super) fn default_model_state(&self) -> Option<CacheState> {
+        let request = self.default_model_request();
+        if request.provider == AsrProvider::Api
+            || self.model_device_issue(request.provider).is_some()
+        {
+            return None;
+        }
+        self.settings_ui
+            .model_diagnostics
+            .entries
+            .get(&request.key())
+            .and_then(Entry::result)
+            .and_then(|result| result.as_ref().ok())
+            .map(|status| status.state)
+    }
     /// One-line readiness conclusion for the generation group main flow; the full
     /// panel stays behind 技术详情.
     pub(super) fn default_model_conclusion(&self) -> (bool, String) {

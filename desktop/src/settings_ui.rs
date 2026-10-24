@@ -406,33 +406,6 @@ pub(crate) fn outlined_chip(
         .whitespace_nowrap()
 }
 
-/// A setting's hint, identified after its row.
-fn setting_hint(id: &ElementId, hint: &'static str) -> Stateful<Div> {
-    theme::row_hint(
-        SharedString::from(format!("{id:?}-hint")),
-        hint,
-        RowScale::Settings,
-    )
-}
-
-/// A full-width control that labels itself (an outlined field), with an
-/// optional hint below it.
-pub(super) fn settings_outlined_row(
-    id: impl Into<ElementId>,
-    hint: &'static str,
-    control: impl IntoElement,
-) -> Div {
-    let id = id.into();
-    setting_surface().child(
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .gap_2()
-            .child(control)
-            .when(!hint.is_empty(), |view| view.child(setting_hint(&id, hint))),
-    )
-}
-
 /// Editing fields use a top label: errors and related actions stay with the
 /// input without forcing long values into the preference label/control grid.
 pub(super) fn settings_field_row(
