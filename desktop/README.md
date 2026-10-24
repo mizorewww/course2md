@@ -52,6 +52,7 @@ Test-only environment variables read by the desktop binary (the validation bundl
 | `COURSE2MD_VALIDATION_PANIC_LOG` | Debug builds on Unix: append panics to this file. |
 | `COURSE2MD_VALIDATION_OPEN_NOTE` | Debug builds: after the first library scan, open the note whose title or version directory contains this text. |
 | `COURSE2MD_VALIDATION_READER` | Debug builds, with the note above: reader panels to show once it loads, comma-separated (`find`, `info`). Lets native layout be checked without synthetic input. |
+| `COURSE2MD_CAPTURE` | Builds with `--features capture`: render pages to PNG files (`page=path.png;…`) and quit; see `src/capture.rs` for pages and the palette/scale overrides. Needs no screen-recording permission. |
 | `COURSE2MD_TOOL_PATH` | Search path for ffmpeg, yt-dlp and other tools, replacing the bundled directory and PATH. |
 | `COURSE2MD_PERFORMANCE_LOG` | Builds with `--features performance`: write per-second frame and input-latency histograms to this file. |
 | `COURSE2MD_FRAME_TRACE` | With the performance log: also record GPUI's per-frame trace. |

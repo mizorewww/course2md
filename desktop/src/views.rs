@@ -432,8 +432,24 @@ impl Desktop {
 
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        theme::apply_preference(&self.preferences.application().appearance, window, cx);
-        theme::apply_scale(self.preferences.application().font_scale, window, cx);
+        #[allow(unused_mut)]
+        let mut appearance = self.preferences.application().appearance.clone();
+        #[allow(unused_mut)]
+        let mut font_scale = self.preferences.application().font_scale;
+        #[cfg(feature = "capture")]
+        {
+            if let Some(palette) = crate::capture::palette_override() {
+                appearance.select(palette);
+                appearance.mode = if palette.is_dark() {
+                    crate::palettes::Appearance::Dark
+                } else {
+                    crate::palettes::Appearance::Light
+                };
+            }
+            font_scale = crate::capture::scale_override().unwrap_or(font_scale);
+        }
+        theme::apply_preference(&appearance, window, cx);
+        theme::apply_scale(font_scale, window, cx);
         if self.onboarding.active {
             let content = self.onboarding_page(window, cx);
             return div()

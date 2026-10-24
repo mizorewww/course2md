@@ -6,6 +6,8 @@ mod activity;
 mod appearance_ui;
 mod backend;
 mod bounded_http;
+#[cfg(feature = "capture")]
+mod capture;
 mod codex_ui;
 mod conversion;
 mod course_library;
@@ -1644,6 +1646,8 @@ fn main() {
                     .observe_window_appearance(|window, _| window.refresh())
                     .detach();
                 let view = cx.new(|cx| Desktop::new(window, cx));
+                #[cfg(feature = "capture")]
+                capture::start(view.downgrade(), window, cx);
                 let weak = view.downgrade();
                 let quit_view = weak.clone();
                 let settings_view = weak.clone();

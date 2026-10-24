@@ -12,6 +12,8 @@ exclude = [".deps/zed", ".deps/component"]
 # Explicitly opt in when investigating native frame pacing. Ordinary builds
 # neither collect nor write performance data.
 performance = ["gpui/profiler"]
+# Render named pages to PNG files for layout review (src/capture.rs).
+capture = ["gpui/test-support", "gpui_platform/test-support"]
 
 [dependencies]
 course2md = { path = ".." }
