@@ -70,14 +70,23 @@ fn palette_colors(id: PaletteId) -> [Rgba; COLOR_COUNT] {
     );
     std::array::from_fn(|index| match ALL_TOKENS[index] {
         CANVAS => canvas,
-        SURFACE => rgb(p.surface),
+        // Dark palettes' surfaces sit only a step above their canvas; lift
+        // them as M3 lifts dark surface containers, so tiles and cards read
+        // as layers.
+        SURFACE => {
+            if id.is_dark() {
+                blend(rgb(p.surface), rgb(p.text), 0.045)
+            } else {
+                rgb(p.surface)
+            }
+        }
         // Surface container highest: unselected segments, filled search bars
         // and tonal icon buttons.
         // Dark palettes raise surfaces by lightening them, so their highest
         // container builds on the surface rather than the darker ground.
         SURFACE_HIGH => {
             if id.is_dark() {
-                blend(rgb(p.surface), rgb(p.text), 0.10)
+                blend(rgb(p.surface), rgb(p.text), 0.13)
             } else {
                 blend(canvas, rgb(p.text), 0.06)
             }
