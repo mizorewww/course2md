@@ -1777,12 +1777,24 @@ impl Desktop {
                 let key = key.clone();
                 let collapsed = *collapsed;
                 let index = *index;
+                // A section title over its notes: quiet medium text on the
+                // list's 20px text inset, the chevron in the shared icon slot.
+                let clear = Rgba {
+                    a: 0.,
+                    ..color(CANVAS)
+                };
                 control(("library-group", index))
-                    .ghost()
+                    .custom(
+                        ButtonCustomVariant::new(cx)
+                            .color(clear.into())
+                            .foreground(color(GRAY).into())
+                            .hover(blend(color(CANVAS), color(INK), 0.08).into())
+                            .active(blend(color(CANVAS), color(INK), 0.10).into())
+                            .shadow(false),
+                    )
                     .w_full()
                     .justify_start()
-                    .min_h(rems(1.6))
-                    .p_0()
+                    .px(SETTING_ITEM_INSET)
                     .accessibility_label(course2md::tr!(
                         "{} {}，{} 篇笔记",
                         if collapsed {
@@ -1796,30 +1808,41 @@ impl Desktop {
                     .child(
                         h_flex()
                             .w_full()
-                            .gap_2()
-                            .items_baseline()
+                            .min_w_0()
+                            .gap(ICON_GAP)
+                            .items_center()
                             .child(
-                                Icon::new(if collapsed {
-                                    crate::icons::chevron_right()
-                                } else {
-                                    crate::icons::chevron_down()
-                                })
-                                .size(px(12.))
-                                .text_color(color(GRAY))
-                                .flex_shrink_0(),
+                                h_flex()
+                                    .size(ICON_SLOT)
+                                    .flex_shrink_0()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        Icon::new(if collapsed {
+                                            crate::icons::chevron_right()
+                                        } else {
+                                            crate::icons::chevron_down()
+                                        })
+                                        .size(rems(18. / 14.))
+                                        .text_color(color(GRAY)),
+                                    ),
                             )
                             .child(
                                 div()
                                     .min_w_0()
                                     .whitespace_nowrap()
                                     .text_ellipsis()
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(TEXT_BODY)
+                                    .line_height(rems(20. / 14.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(color(GRAY))
                                     .child(name.clone()),
                             )
                             .child(
                                 div()
                                     .flex_shrink_0()
-                                    .text_size(TEXT_AUX)
+                                    .text_size(rems(13. / 14.))
+                                    .font_weight(FontWeight::NORMAL)
                                     .text_color(color(GRAY))
                                     .child(count.to_string()),
                             ),
@@ -1875,7 +1898,8 @@ impl Desktop {
         let mut wrapper = v_flex().w_full().min_w_0();
         if !last {
             wrapper = match item {
-                LibraryItem::GroupHeader { .. } => wrapper.pb_2(),
+                // The header's own height leaves the section-title gap below its text.
+                LibraryItem::GroupHeader { .. } => wrapper,
                 LibraryItem::GroupBody { .. } => wrapper.pb(px(20.)),
                 LibraryItem::CardRow(_) => wrapper.pb(rems(12. / 14.)),
                 // List rows join into one surface.
