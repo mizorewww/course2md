@@ -682,7 +682,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已登录 Bilibili	已登录 Bilibili	Signed in to Bilibili	已登入 Bilibili	Bilibili にログイン済み
 已登录 Ollama（{}），模型 {}，配置已保存并启用：{}	已登录 Ollama（{}），模型 {}，配置已保存并启用：{}	Logged in to Ollama ({}), model {}, settings saved and enabled: {}	已登入 Ollama（{}），模型 {}，設定已儲存並啟用：{}	Ollama にログインしました（{}）。モデル {}、設定を保存して有効にしました：{}
 已登录 · {}	已登录 · {}	Signed in · {}	已登入 · {}	ログイン済み · {}
-已结束	已结束	Ended	已結束	終了
+已结束	已结束	Finished	已結束	終了
 已缓存（未验证加载）/ Cached (load not verified)	已缓存（未验证加载）/ Cached (load not verified)	Cached (load not verified)	已快取（未驗證載入）/ Cached (load not verified)	キャッシュ済み（読み込み未検証）
 已自定义	已自定义	Customized	已自訂	カスタマイズ済み
 已设为默认保存位置	已设为默认保存位置	Set as default save location	已設為預設儲存位置	デフォルトの保存場所として設定
@@ -866,7 +866,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 收起准备详情	收起准备详情	Collapse preparation details	收起準備詳情	準備の詳細を折りたたむ
 收起处理详情	收起处理详情	Collapse processing details	收起處理詳情	処理の詳細を折りたたむ
 收起处理选项	收起处理选项	Collapse processing options	收起處理選項	処理オプションを折りたたむ
-收起已完成的处理	收起已完成的处理	Collapse completed processing	收起已完成的處理	完了した処理を折りたたむ
+收起已完成的处理	收起已完成的处理	Hide finished tasks	收起已完成的處理	完了した処理を折りたたむ
 收起技术详情	收起技术详情	Hide technical details	收合技術詳情	技術的な詳細を隠す
 收起文字	收起文字	Collapse text	收起文字	テキストを折りたたむ
 收起检查详情	收起检查详情	Collapse inspection details	收起檢查詳情	チェックの詳細を折りたたむ
@@ -1202,7 +1202,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 查看准备详情	查看准备详情	View preparation details	檢視準備詳情	準備の詳細を表示する
 查看后续处理任务	查看后续处理任务	View follow-up tasks	檢視後續處理任務	フォローアップタスクを表示する
 查看处理详情	查看处理详情	View processing details	檢視處理詳情	処理の詳細を表示する
-查看已完成的处理	查看已完成的处理	View completed processing	檢視已完成的處理	完了した処理を表示する
+查看已完成的处理	查看已完成的处理	Show finished tasks	檢視已完成的處理	完了した処理を表示する
 查看技术详情	查看技术详情	View technical details	檢視技術詳情	技術的な詳細を表示する
 查看文字	查看文字	View text	檢視文字	テキストを表示する
 查看新版	查看新版	View new version	檢視新版	新しいバージョンを表示
@@ -2162,3 +2162,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 需要修复	需要修复	Needs repair	需要修復	修正が必要です
 {} 项检查未通过	{} 项检查未通过	Failed checks: {}	{} 項檢查未通過	{} 件のチェックに合格しませんでした
 应用 / Application	应用	Application	應用程式	アプリ
+1 个需要处理	1 个需要处理	1 needs attention	1 個需要處理	対応が必要 1 件
+收起已完成的步骤	收起已完成的步骤	Hide completed steps	收起已完成的步驟	完了したステップを折りたたむ
+查看已完成的步骤	查看已完成的步骤	Show completed steps	檢視已完成的步驟	完了したステップを表示する

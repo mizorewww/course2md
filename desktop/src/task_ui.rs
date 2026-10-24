@@ -93,6 +93,8 @@ enum QueueItem {
     GroupLabel {
         group: TaskGroup,
         count: usize,
+        /// Members waiting to run, as opposed to paused.
+        queued: usize,
     },
     /// The task being processed, with its stages, settings and controls.
     Running(usize),
@@ -722,8 +724,8 @@ impl TaskPanel {
 
     fn label(self, open: bool) -> &'static str {
         match (self, open) {
-            (Self::Stages, true) => course2md::tr!("收起已完成的处理"),
-            (Self::Stages, false) => course2md::tr!("查看已完成的处理"),
+            (Self::Stages, true) => course2md::tr!("收起已完成的步骤"),
+            (Self::Stages, false) => course2md::tr!("查看已完成的步骤"),
             (Self::RawLog, true) => course2md::tr!("收起技术详情"),
             (Self::RawLog, false) => course2md::tr!("技术详情"),
         }
@@ -885,10 +887,17 @@ impl Desktop {
             if matches!(group, TaskGroup::Finished | TaskGroup::History) && !completed_open {
                 continue;
             }
-            items.push(QueueItem::GroupLabel {
-                group,
-                count: members.len(),
-            });
+            // The fold tile just above already names finished work.
+            if group != TaskGroup::Finished {
+                items.push(QueueItem::GroupLabel {
+                    group,
+                    count: members.len(),
+                    queued: members
+                        .iter()
+                        .filter(|&&index| tasks[index].state == TaskState::Queued)
+                        .count(),
+                });
+            }
             if group == TaskGroup::Running {
                 items.extend(members.into_iter().map(QueueItem::Running));
                 continue;
@@ -990,7 +999,11 @@ impl Desktop {
                 attention,
                 "tasks-summary-attention",
                 BadgeKind::Danger,
-                course2md::tr!("{} 个需要处理", attention),
+                if attention == 1 {
+                    course2md::tr!("1 个需要处理").to_owned()
+                } else {
+                    course2md::tr!("{} 个需要处理", attention)
+                },
             ),
             (
                 queued,
@@ -1207,7 +1220,18 @@ impl Desktop {
                         })),
                 )
                 .into_any_element(),
-            QueueItem::GroupLabel { group, count } => {
+            QueueItem::GroupLabel {
+                group,
+                count,
+                queued,
+            } => {
+                // Paused work keeps its place in the queue; when nothing in it
+                // is waiting to run, the section says so.
+                let label = if *group == TaskGroup::Queued && *queued == 0 {
+                    course2md::tr!("已暂停")
+                } else {
+                    group.label()
+                };
                 gap_after = SECTION_TITLE_GAP;
                 h_flex()
                     .w_full()
@@ -1218,18 +1242,21 @@ impl Desktop {
                     .flex_wrap()
                     .child(theme::section_title(
                         SharedString::from(format!("task-group-{group:?}")),
-                        group.label(),
+                        label,
                     ))
-                    .when(*group == TaskGroup::Queued && *count > 1, |row| {
-                        row.child(
-                            accessible_text(
-                                "task-queue-order-hint",
-                                course2md::tr!("拖动可以调整顺序"),
+                    .when(
+                        *group == TaskGroup::Queued && *count > 1 && *queued > 0,
+                        |row| {
+                            row.child(
+                                accessible_text(
+                                    "task-queue-order-hint",
+                                    course2md::tr!("拖动可以调整顺序"),
+                                )
+                                .text_size(rems(13. / 14.))
+                                .text_color(color(GRAY)),
                             )
-                            .text_size(rems(13. / 14.))
-                            .text_color(color(GRAY)),
-                        )
-                    })
+                        },
+                    )
                     .into_any_element()
             }
             QueueItem::Running(task_index) => {
@@ -1801,9 +1828,12 @@ impl Desktop {
             .gap_3()
             .items_center()
             .child(
-                task_row_cover(self.task_cover(task), group == TaskGroup::Queued)
-                    .w(rems(96. / 14.))
-                    .rounded(px(10.)),
+                task_row_cover(
+                    self.task_cover(task),
+                    (group == TaskGroup::Queued).then_some(task.state),
+                )
+                .w(rems(96. / 14.))
+                .rounded(px(10.)),
             )
             .child(
                 v_flex()
@@ -2264,7 +2294,7 @@ impl Desktop {
             .items_start()
             .flex_wrap()
             .child(
-                task_row_cover(self.task_cover(task), false)
+                task_row_cover(self.task_cover(task), None)
                     .w(rems(160. / 14.))
                     .max_w_full()
                     .rounded(RADIUS_CARD),
@@ -2337,23 +2367,25 @@ impl Desktop {
                     cx,
                 ))
                 .when(detail.is_some() || clock.is_some(), |view| {
+                    // One of the two is shown, and it starts on the left
+                    // either way: a step's measurement carries its own clock,
+                    // and the job's clock stands in only without one.
                     view.child(
                         h_flex()
                             .w_full()
                             .min_w_0()
                             .gap_3()
-                            .justify_between()
                             .flex_wrap()
                             .text_size(rems(13. / 14.))
                             .text_color(color(GRAY))
-                            .child(
+                            .children(detail.map(|detail| {
                                 accessible_text(
                                     SharedString::from(format!("task-measure-{id}")),
-                                    detail.unwrap_or_default(),
+                                    detail,
                                 )
                                 .min_w_0()
-                                .whitespace_normal(),
-                            )
+                                .whitespace_normal()
+                            }))
                             .children(clock.map(|clock| {
                                 accessible_text(
                                     SharedString::from(format!("task-clock-{id}")),
@@ -2458,13 +2490,16 @@ impl Desktop {
             .pt_3()
             .border_t_1()
             .border_color(color(HAIRLINE));
-        let destination = self
-            .task_library(task)
-            .map(|lib| lib.name.clone())
-            .unwrap_or_else(|| course2md::tr!("保存位置暂时不可用").into());
+        // A row's supporting line already says where it saves; only the
+        // attention card, which has no such line, repeats it here.
+        let destination = card.then(|| {
+            self.task_library(task)
+                .map(|lib| lib.name.clone())
+                .unwrap_or_else(|| course2md::tr!("保存位置暂时不可用").into())
+        });
         let facts = self.task_facts(task, destination);
         let (progress, mut history) = self.task_progress_sections(task, cx);
-        // A card that needs the person keeps only what they can act on; destination and text source move into 「查看已完成的处理」.
+        // A card that needs the person keeps only what they can act on; destination and text source move into 「查看已完成的步骤」.
         let recovery = matches!(
             task.state,
             TaskState::NeedsAttention | TaskState::Partial | TaskState::Uncertain
@@ -2996,7 +3031,7 @@ impl Desktop {
 
     /// Where a task saves and how it processes: one set of facts shared by the
     /// running card and the expanded record.
-    fn task_facts(&self, task: &TaskRecord, destination: impl Into<SharedString>) -> Div {
+    fn task_facts(&self, task: &TaskRecord, destination: Option<String>) -> Div {
         let source = task_text_source(task);
         let fact_value =
             |value: SharedString| div().text_size(TEXT_BODY).whitespace_normal().child(value);
@@ -3004,14 +3039,16 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .gap_2()
-            .child(detail_row(
-                SharedString::from(format!("task-destination-{}", task.id)),
-                course2md::tr!("保存到"),
-                icons::folder_open()
-                    .size(rems(20. / 14.))
-                    .text_color(color(GRAY)),
-                fact_value(destination.into()),
-            ))
+            .children(destination.map(|destination| {
+                detail_row(
+                    SharedString::from(format!("task-destination-{}", task.id)),
+                    course2md::tr!("保存到"),
+                    icons::folder_open()
+                        .size(rems(20. / 14.))
+                        .text_color(color(GRAY)),
+                    fact_value(destination.into()),
+                )
+            }))
             .child(detail_row(
                 SharedString::from(format!("task-text-source-{}", task.id)),
                 course2md::tr!("文字来源"),
@@ -3260,16 +3297,17 @@ fn task_log_box(id: &str, text: String) -> Stateful<Div> {
 }
 
 /// A 16:9 cover slot; queued and coverless tasks show what they wait for.
-fn task_row_cover(cover: Option<PathBuf>, queued: bool) -> Div {
+/// A cover, or a placeholder whose icon says how waiting work waits.
+fn task_row_cover(cover: Option<PathBuf>, waiting: Option<TaskState>) -> Div {
     let placeholder = cover.is_none();
     cover_slot(rems(96. / 14.), cover)
         .max_w(relative(0.3))
         .when(placeholder, |slot| {
             slot.child(
-                if queued {
-                    icons::schedule()
-                } else {
-                    icons::movie()
+                match waiting {
+                    Some(TaskState::Paused) => icons::pause(),
+                    Some(_) => icons::schedule(),
+                    None => icons::movie(),
                 }
                 .size(rems(20. / 14.))
                 .text_color(color(ON_SECONDARY_CONTAINER)),
@@ -3437,6 +3475,7 @@ mod tests {
                 QueueItem::GroupLabel {
                     group: TaskGroup::Queued,
                     count: 1,
+                    queued: 1,
                 },
                 QueueItem::Running(0),
                 row(0),
