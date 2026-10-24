@@ -5367,6 +5367,7 @@ impl Desktop {
             let content = content.clone();
             let top = task_dialog_top(window);
             dialog
+                .material_frame()
                 .w(px(ImageDialogMetrics::new(window).width))
                 .h((window.bounds().size.height - top - px(24.)).max(px(0.)))
                 .min_h_0()

@@ -482,14 +482,8 @@ impl Desktop {
                 f32::from(window.rem_size()),
             );
             dialog
-                .title(
-                    crate::settings_ui::settings_value(
-                        "bilibili-dialog-title",
-                        course2md::tr!("登录 Bilibili"),
-                    )
-                    .text_size(TEXT_TITLE)
-                    .font_weight(FontWeight::SEMIBOLD),
-                )
+                .material("bilibili-dialog-title", course2md::tr!("登录 Bilibili"))
+                .close_button(false)
                 .w(px(layout.dialog_width))
                 .margin_top(task_dialog_top(window))
                 .overlay_closable(false)
@@ -812,19 +806,14 @@ impl Desktop {
         );
         let success = matches!(self.account.dialog, Some(QrDialogState::Success(_)));
         let retry_source = success && self.can_retry_account_source(cx);
-        h_flex()
-            .w_full()
-            .justify_end()
-            .gap_3()
-            .flex_wrap()
+        let close = if success {
+            primary_pill("account-qr-close").icon(icons::check_circle())
+        } else {
+            text_button("account-qr-close", cx)
+        };
+        dialog_actions()
             .child(
-                control("account-qr-close")
-                    .when(success, |button| button.primary())
-                    .icon(if success {
-                        icons::check_circle()
-                    } else {
-                        icons::close()
-                    })
+                close
                     .label(if retry_source {
                         course2md::tr!("重新预览")
                     } else if success {

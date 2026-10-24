@@ -1307,7 +1307,7 @@ impl Desktop {
         let title = self.storage_ui.title();
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
-                .title(title)
+                .material("storage-dialog-title", title)
                 .w(px(540.))
                 .overlay_closable(false)
                 .close_button(false)
@@ -1384,27 +1384,33 @@ impl Desktop {
                 ));
             }
             view = view.child(
-                control("cancel-library-move")
-                    .icon(icons::close())
-                    .disabled(cancelling)
-                    .loading(cancelling)
-                    .label(if cancelling {
-                        course2md::tr!("正在结束…")
-                    } else {
-                        self.storage_ui.cancel_label()
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.storage_ui.request_cancel();
-                        cx.notify();
-                    })),
+                dialog_actions().child(
+                    text_button("cancel-library-move", cx)
+                        .disabled(cancelling)
+                        .loading(cancelling)
+                        .label(if cancelling {
+                            course2md::tr!("正在结束…")
+                        } else {
+                            self.storage_ui.cancel_label()
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.storage_ui.request_cancel();
+                            cx.notify();
+                        })),
+                ),
             );
         } else {
+            let mut actions = dialog_actions().child(
+                text_button("close-storage-operation", cx)
+                    .label(course2md::tr!("关闭"))
+                    .on_click(|_, window, cx| window.close_dialog(cx)),
+            );
             if let StorageOp::Relocate(id) = &self.storage_ui.op
                 && self.storage_ui.error.is_some()
                 && self.storage_ui.progress.completed == 0
             {
                 let id = id.clone();
-                view = view.child(
+                actions = actions.child(
                     primary_pill("retry-library-relocation")
                         .label(course2md::tr!("重新选择文件夹…"))
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -1413,12 +1419,7 @@ impl Desktop {
                         })),
                 );
             }
-            view = view.child(
-                control("close-storage-operation")
-                    .icon(icons::close())
-                    .label(course2md::tr!("关闭"))
-                    .on_click(|_, window, cx| window.close_dialog(cx)),
-            );
+            view = view.child(actions);
         }
         view
     }

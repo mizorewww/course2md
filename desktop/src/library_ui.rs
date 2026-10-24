@@ -1,9 +1,6 @@
 use super::*;
 use crate::theme::*;
-use gpui_component::{
-    button::*,
-    menu::{PopupMenu, PopupMenuItem},
-};
+use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -408,7 +405,7 @@ impl Desktop {
         window.open_dialog(cx, move |dialog, _, _| {
             let weak = weak.clone();
             dialog
-                .title(title)
+                .material("folder-dialog-title", title)
                 .w(px(420.))
                 .overlay_closable(false)
                 .close_button(false)
@@ -568,15 +565,9 @@ impl Desktop {
                     )
                 })
                 .child(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
+                    dialog_actions()
                         .child(
-                            control("cancel-folder")
-                                .icon(crate::icons::close())
-                                .h_auto()
-                                .min_h(rems(2.6))
-                                .ghost()
+                            text_button("cancel-folder", cx)
                                 .label(course2md::tr!("取消"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.folder_editor = None;
@@ -587,15 +578,12 @@ impl Desktop {
                                 })),
                         )
                         .child(
-                            control("save-folder")
+                            primary_pill("save-folder")
                                 .icon(if id.is_some() {
                                     icons::edit()
                                 } else {
                                     icons::create_new_folder()
                                 })
-                                .h_auto()
-                                .min_h(rems(2.6))
-                                .primary()
                                 .label(if id.is_some() {
                                     course2md::tr!("保存名称")
                                 } else {

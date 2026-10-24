@@ -637,22 +637,8 @@ impl Desktop {
             let closed = weak.clone();
             let cancel = weak.clone();
             let submit = weak.clone();
-            // M3 dialog: a 28px-radius surface, 24px padding and a 24px
-            // regular headline; the body scrolls between title and actions.
             sheet
-                .title(
-                    accessible_text("service-editor-dialog-title", title)
-                        .role(Role::Heading)
-                        .text_size(rems(24. / 14.))
-                        .line_height(rems(32. / 14.))
-                        .font_weight(FontWeight::NORMAL)
-                        .text_color(color(INK)),
-                )
-                .p(px(24.))
-                .rounded(RADIUS_HERO)
-                .bg(color(SURFACE))
-                .border_0()
-                .shadow(shadow_popover())
+                .material("service-editor-dialog-title", title)
                 .w((window.rem_size() * (620. / 14.)).min(window.viewport_size().width - px(48.)))
                 .margin_top(task_dialog_top(window))
                 .overlay_closable(false)
@@ -1857,11 +1843,12 @@ impl Desktop {
         window.open_alert_dialog(cx, move |dialog, _, cx| {
             let weak = weak.clone();
             let id = version_id.clone();
-            material_alert(
+            confirm_dialog(
                 dialog,
                 course2md::tr!("更新默认服务"),
                 course2md::tr!("保留原默认"),
                 course2md::tr!("用于以后生成"),
+                false,
                 cx,
             )
             .child(accessible_text(
@@ -1944,11 +1931,12 @@ impl Desktop {
         window.open_alert_dialog(cx, move |dialog, _, cx| {
             let weak = weak.clone();
             let id = service_id.clone();
-            material_alert(
+            confirm_dialog(
                 dialog,
                 course2md::tr!("删除此服务"),
                 course2md::tr!("保留服务"),
                 course2md::tr!("删除服务"),
+                true,
                 cx,
             )
             .child(accessible_text(
@@ -2093,59 +2081,6 @@ struct PublishPlan {
 /// Where a published service applies. A repair, or a service chosen while
 /// editing one input, binds to that task alone unless the person also made it
 /// the default; a service saved in settings is the default only when chosen so.
-/// A confirmation as an M3 basic dialog: a 28px-radius surface with 24px
-/// padding, a 24px regular headline, body text, and actions at the trailing
-/// edge (a text button to keep things as they are, a filled button for the
-/// consequential choice). The actions dispatch the dialog's own Cancel and
-/// Confirm, so Escape, Enter and `on_ok` behave as before. Candidate for a
-/// shared theme primitive alongside the service editor's dialog chrome.
-fn material_alert(
-    dialog: gpui_component::dialog::AlertDialog,
-    title: &'static str,
-    cancel: &'static str,
-    confirm: &'static str,
-    cx: &App,
-) -> gpui_component::dialog::AlertDialog {
-    use gpui_component::dialog::{Cancel, Confirm};
-    dialog
-        .title(
-            accessible_text("material-alert-title", title)
-                .role(Role::Heading)
-                .text_size(rems(24. / 14.))
-                .line_height(rems(32. / 14.))
-                .font_weight(FontWeight::NORMAL)
-                .text_color(color(INK)),
-        )
-        .p(px(24.))
-        .rounded(RADIUS_HERO)
-        .bg(color(SURFACE))
-        .border_0()
-        .gap(px(16.))
-        .text_size(TEXT_SETTINGS_BODY)
-        .footer(
-            h_flex()
-                .w_full()
-                .pt(px(8.))
-                .gap_2()
-                .flex_wrap()
-                .justify_end()
-                .child(
-                    text_button("material-alert-cancel", cx)
-                        .settings_text()
-                        .label(cancel)
-                        .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx)),
-                )
-                .child(
-                    primary_pill("material-alert-confirm")
-                        .settings_text()
-                        .label(confirm)
-                        .on_click(|_, window, cx| {
-                            window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
-                        }),
-                ),
-        )
-}
-
 fn publish_scope(repairing: bool, from_input: bool, also_default: bool) -> BindingScope {
     if repairing || (from_input && !also_default) {
         BindingScope::CurrentTask

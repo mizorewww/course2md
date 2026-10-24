@@ -332,7 +332,7 @@ pub fn hero_top(quiet: bool, compact: bool) -> f32 {
 pub const IMAGE_DIALOG_MARGIN: Pixels = px(24.);
 pub const IMAGE_DIALOG_MAX_WIDTH: Pixels = px(1180.);
 pub const IMAGE_DIALOG_MIN_WIDTH: Pixels = px(280.);
-pub const IMAGE_DIALOG_PADDING: Pixels = px(17.);
+pub const IMAGE_DIALOG_PADDING: Pixels = px(16.);
 
 /// Controls drawn over a screenshot sit on a fixed dark scrim with white text:
 /// the image beneath is not themed, so palette roles cannot promise contrast.
@@ -1720,6 +1720,125 @@ pub fn input_action(id: impl Into<gpui::ElementId>) -> gpui_component::button::B
     use gpui::Styled;
     let size = rems(28. / 14.);
     quiet(id).h(size).min_h(size).w(size).min_w(size).px_0()
+}
+
+/* ---------- Dialogs ---------- */
+
+/// The M3 dialog headline: 24px regular on-surface text.
+pub fn dialog_title(
+    id: impl Into<gpui::ElementId>,
+    title: impl Into<gpui::SharedString>,
+) -> gpui::Stateful<gpui::Div> {
+    use gpui::prelude::*;
+    accessible_text(id, title)
+        .role(gpui::Role::Heading)
+        .text_size(rems(24. / 14.))
+        .line_height(rems(32. / 14.))
+        .font_weight(gpui::FontWeight::NORMAL)
+        .text_color(color(INK))
+}
+
+/// A dialog's actions at its trailing edge, wrapping when narrow: a text
+/// button to leave things as they are, then an optional outlined secondary
+/// action, then the filled (or error) confirming action.
+pub fn dialog_actions() -> gpui::Div {
+    use gpui::prelude::*;
+    gpui_component::h_flex()
+        .w_full()
+        .pt(px(8.))
+        .gap_2()
+        .flex_wrap()
+        .justify_end()
+}
+
+/// M3 error button: the destructive confirming action of a dialog.
+pub fn danger_pill(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_component::button::Button {
+    use gpui::Styled;
+    custom_fill(control(id), color(DANGER), color(ON_PRIMARY), true, cx)
+        .px(rems(16. / 14.))
+        .gap(ICON_GAP)
+}
+
+/// Every dialog shares one M3 chrome: a 28px-radius surface without an
+/// outline, raised by the popover shadow, with 24px padding and the 24px
+/// regular headline. Its body scrolls between the headline and the pinned
+/// actions (the component's footer).
+pub trait MaterialDialog: gpui::Styled + Sized {
+    fn headline(self, title: gpui::Stateful<gpui::Div>) -> Self;
+
+    /// The surface alone, for a dialog that lays out its own content (the
+    /// image viewer).
+    fn material_frame(self) -> Self {
+        self.rounded(RADIUS_HERO)
+            .bg(color(SURFACE))
+            .border_0()
+            .shadow(shadow_popover())
+    }
+
+    /// The surface, its padding and the headline.
+    fn material(
+        self,
+        id: impl Into<gpui::ElementId>,
+        title: impl Into<gpui::SharedString>,
+    ) -> Self {
+        self.headline(dialog_title(id, title))
+            .material_frame()
+            .p(px(24.))
+    }
+}
+
+impl MaterialDialog for gpui_component::dialog::Dialog {
+    fn headline(self, title: gpui::Stateful<gpui::Div>) -> Self {
+        self.title(title)
+    }
+}
+
+impl MaterialDialog for gpui_component::dialog::AlertDialog {
+    fn headline(self, title: gpui::Stateful<gpui::Div>) -> Self {
+        self.title(title)
+    }
+}
+
+/// A confirmation as an M3 basic dialog: headline, body text and the
+/// actions. The buttons dispatch the dialog's own Cancel and Confirm, so
+/// Escape, Enter and `on_ok` keep working. A destructive confirmation
+/// (`danger`) paints its confirming action in the error color.
+pub fn confirm_dialog(
+    dialog: gpui_component::dialog::AlertDialog,
+    title: impl Into<gpui::SharedString>,
+    cancel: impl Into<gpui::SharedString>,
+    confirm: impl Into<gpui::SharedString>,
+    danger: bool,
+    cx: &App,
+) -> gpui_component::dialog::AlertDialog {
+    use gpui::{ParentElement, Styled};
+    use gpui_component::dialog::{Cancel, Confirm};
+    let confirm_button = if danger {
+        danger_pill("material-alert-confirm", cx)
+    } else {
+        primary_pill("material-alert-confirm")
+    };
+    dialog
+        .material("material-alert-title", title)
+        .gap(px(16.))
+        .text_size(TEXT_SETTINGS_BODY)
+        .footer(
+            dialog_actions()
+                .child(
+                    text_button("material-alert-cancel", cx)
+                        .settings_text()
+                        .label(cancel.into())
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx)),
+                )
+                .child(
+                    confirm_button
+                        .settings_text()
+                        .label(confirm.into())
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
+                        }),
+                ),
+        )
 }
 
 pub enum NoticeKind {

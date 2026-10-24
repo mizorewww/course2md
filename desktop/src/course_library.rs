@@ -480,19 +480,15 @@ impl Render for CourseRenameDialog {
                 )
             })
             .child(
-                h_flex()
-                    .justify_end()
-                    .gap_2()
+                dialog_actions()
                     .child(
-                        control("cancel-note-rename")
-                            .icon(crate::icons::close())
+                        text_button("cancel-note-rename", cx)
                             .label(course2md::tr!("取消"))
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        control("save-note-rename")
+                        primary_pill("save-note-rename")
                             .icon(icons::edit())
-                            .primary()
                             .label(course2md::tr!("保存名称"))
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                     ),
@@ -669,7 +665,8 @@ impl Desktop {
         });
         window.open_dialog(cx, move |dialog, _, _| {
             dialog
-                .title(course2md::tr!("重命名笔记"))
+                .material("rename-note-title", course2md::tr!("重命名笔记"))
+                .close_button(false)
                 .w(px(480.))
                 .overlay_closable(false)
                 .child(content.clone())
@@ -713,29 +710,28 @@ impl Desktop {
         let title = self.course_display_title(&course);
         let trash = organize::trash_name();
         let weak = cx.weak_entity();
-        window.open_alert_dialog(cx, move |dialog, _, _| {
+        window.open_alert_dialog(cx, move |dialog, _, cx| {
             let weak = weak.clone();
             let course = course.clone();
             let root = root.clone();
-            dialog
-                .title(course2md::tr!("删除笔记"))
-                .child(accessible_text(
-                    "delete-note-consequence",
-                    course2md::tr!("《{}》将移到{}，可以从那里恢复。", title, trash),
-                ))
-                .button_props(
-                    gpui_component::dialog::DialogButtonProps::default()
-                        .ok_text(course2md::tr!("移到{}", trash))
-                        .ok_variant(ButtonVariant::Danger)
-                        .cancel_text(course2md::tr!("保留笔记"))
-                        .show_cancel(true),
-                )
-                .on_ok(move |_, _, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.delete_course(root.clone(), course.clone(), cx)
-                    });
-                    true
-                })
+            confirm_dialog(
+                dialog,
+                course2md::tr!("删除笔记"),
+                course2md::tr!("保留笔记"),
+                course2md::tr!("移到{}", trash),
+                true,
+                cx,
+            )
+            .child(accessible_text(
+                "delete-note-consequence",
+                course2md::tr!("《{}》将移到{}，可以从那里恢复。", title, trash),
+            ))
+            .on_ok(move |_, _, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.delete_course(root.clone(), course.clone(), cx)
+                });
+                true
+            })
         });
     }
 

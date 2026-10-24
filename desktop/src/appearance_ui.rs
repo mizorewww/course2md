@@ -7,7 +7,8 @@ use crate::theme::*;
 const PALETTE_GAP: f32 = 16.;
 const PICKER_GUTTER: f32 = 24.;
 const PICKER_PADDING: f32 = 24.;
-const PICKER_BORDER: f32 = 1.;
+/// The M3 dialog surface has no outline.
+const PICKER_BORDER: f32 = 0.;
 const PICKER_MAX_WIDTH: f32 = 920.;
 
 fn picker_width(window: &Window) -> f32 {
@@ -298,9 +299,7 @@ impl Desktop {
                     .child(grid),
             )
             .child(
-                h_flex()
-                    .w_full()
-                    .justify_end()
+                dialog_actions()
                     .flex_shrink_0()
                     .child(finish.on_click(|_, window, cx| window.close_dialog(cx))),
             )
@@ -317,20 +316,17 @@ impl Desktop {
             });
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
-                .title(
-                    crate::settings_ui::settings_value(
-                        "palette-dialog-title",
-                        if dark {
-                            course2md::tr!("深色主题")
-                        } else {
-                            course2md::tr!("浅色主题")
-                        },
-                    )
-                    .text_size(TEXT_TITLE)
-                    .font_weight(FontWeight::SEMIBOLD),
+                .material(
+                    "palette-dialog-title",
+                    if dark {
+                        course2md::tr!("深色主题")
+                    } else {
+                        course2md::tr!("浅色主题")
+                    },
                 )
                 .w(px(picker_width(window)))
                 .p(px(PICKER_PADDING))
+                .close_button(false)
                 .margin_top(task_dialog_top(window))
                 .child(content.clone())
         });
