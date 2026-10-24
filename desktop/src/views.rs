@@ -20,7 +20,7 @@ fn shell_column_width(page: Page) -> AbsoluteLength {
     match page {
         // Each task gets a useful content width: a gallery needs room for covers.
         Page::Settings => rems(SETTINGS_SHELL_WIDTH / 14.).into(),
-        Page::Library => rems(1168. / 14.).into(),
+        Page::Library => rems(1280. / 14.).into(),
         Page::New => rems(1200. / 14.).into(),
         // Sections set the screenshot beside the text, as on the canvas.
         Page::Result => rems(1180. / 14.).into(),
@@ -310,58 +310,6 @@ impl Desktop {
             ),
         ))
     }
-    fn page_title(&self) -> String {
-        match self.page {
-            Page::New => course2md::tr!("生成笔记").into(),
-            Page::Library => course2md::tr!("笔记库").into(),
-            Page::Task => course2md::tr!("任务").into(),
-            Page::Settings => course2md::tr!("设置").into(),
-            Page::Result => self
-                .preview
-                .as_ref()
-                .map(|p| p.course.title.clone())
-                .unwrap_or_else(|| course2md::tr!("笔记").into()),
-        }
-    }
-    fn page_header(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let row = h_flex()
-            .w_full()
-            .min_w_0()
-            .gap_3()
-            .flex_wrap()
-            .h_auto()
-            .min_h(rems(3.5))
-            .items_center()
-            .justify_between()
-            .child(
-                theme::page_heading("page-title", self.page_title())
-                    .flex_1()
-                    .min_w_0(),
-            )
-            .when(self.library_controls_visible(cx), |row| {
-                let available = shell_content_width(Page::Library, window);
-                let scale = f32::from(window.rem_size()) / 14.;
-                row.child(
-                    self.library_search(window, cx)
-                        .w(px(if available < 600. * scale {
-                            available
-                        } else {
-                            360. * scale
-                        })),
-                )
-                .child(
-                    primary_pill("library-new-note")
-                        .icon(icons::plus())
-                        .label(course2md::tr!("新笔记"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            if this.prepare_workbench_input(window, cx) {
-                                this.navigate(Page::New, cx);
-                            }
-                        })),
-                )
-            });
-        v_flex().pt(px(40.)).pb(px(16.)).child(row)
-    }
 }
 
 impl Render for Desktop {
@@ -479,13 +427,6 @@ impl Render for Desktop {
             .when_some(task_notice, |body, notice| body.child(notice))
             .when_some(model_notice, |body, notice| {
                 body.child(shell_column_for(self.page).py_2().child(notice))
-            })
-            .when(self.page == Page::Library, |v| {
-                v.child(
-                    shell_column_for(self.page)
-                        .flex_shrink_0()
-                        .child(self.page_header(window, cx)),
-                )
             })
             .when(
                 self.page == Page::Library

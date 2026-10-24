@@ -696,7 +696,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 平台暂时限制了字幕读取，请稍后重试，或选择其他文字来源。	平台暂时限制了字幕读取，请稍后重试，或选择其他文字来源。	The platform has temporarily restricted subtitle reading. Please try again later or choose another text source.	平台暫時限制了字幕讀取，請稍後重試，或選擇其他文字來源。	プラットフォームは一時的に字幕の読み取りを制限しています。後でもう一度試すか、別のテキスト ソースを選択してください。
 平台暂时限制读取，请稍后重试	平台暂时限制读取，请稍后重试	The platform is temporarily limiting access. Try again later.	平台暫時限制讀取，請稍後重試	プラットフォームが一時的に読み取りを制限しています。後で再試行してください
 平台要求登录后读取字幕，请登录对应账号后重试。	平台要求登录后读取字幕，请登录对应账号后重试。	The platform requires logging in to read subtitles. Please log in to the corresponding account and try again.	平台要求登入後讀取字幕，請登入對應帳號後重試。	このプラットフォームでは、字幕を読むためにログインする必要があります。対応するアカウントにログインして、もう一度お試しください。
-平铺	平铺	Tile	平鋪	タイル
 应用	应用	Apply	套用	適用
 应用偏好	应用偏好	Application preferences	應用程式偏好設定	アプリケーションの設定
 应用文字大小	应用文字大小	App text size	應用程式文字大小	アプリの文字サイズ
@@ -923,7 +922,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 文字转写	文字转写	Transcript	文字轉寫	文字起こし
 新建文件夹	新建文件夹	New folder	新增資料夾	新しいフォルダー
 新的视频输入尚未建立：{}	新的视频输入尚未建立：{}	The new video input has not been created yet: {}	新的影片輸入尚未建立：{}	新しい動画入力はまだ作成されていません: {}
-新笔记	新笔记	New note	新增筆記	新しいノート
 新链接未能保存：{}	新链接未能保存：{}	New link failed to save: {}	新連結未能儲存：{}	新しいリンクを保存できませんでした: {}
 无匹配	无匹配	No match	無匹配	一致なし
 无权读取这份笔记，请检查保存位置的访问权限	无权读取这份笔记，请检查保存位置的访问权限	No permission to read this note, please check the access permissions of the save location	無權讀取這份筆記，請檢查儲存位置的存取權限	このノートを読む権限がありません。保存場所のアクセス権限を確認してください。
@@ -2150,3 +2148,4 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 传递任务参数失败：{}	传递任务参数失败：{}	Could not pass the task input: {}	傳遞任務參數失敗：{}	タスク入力を渡せませんでした：{}
 正在保存密钥…	正在保存密钥…	Saving key…	正在儲存金鑰…	キーを保存中…
 {}尚未完成，笔记的其余部分已保存	{}尚未完成，笔记的其余部分已保存	{} not finished; the rest of the note is saved	{}尚未完成，筆記的其餘部分已儲存	{}は完了していません。ノートのほかの部分は保存済みです
+没有未分类的笔记	没有未分类的笔记	No unfiled notes	沒有未分類的筆記	未分類のノートはありません

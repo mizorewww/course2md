@@ -51,7 +51,9 @@ fn incomplete_badge() -> Div {
 #[derive(Clone, Copy)]
 struct LibraryLayout {
     columns: usize,
-    compact: bool,
+    /// One grid column's width in pixels: padding would otherwise make a
+    /// short final row's cards wider than the full rows above it.
+    card_width: f32,
     stacked: bool,
 }
 
@@ -79,6 +81,8 @@ enum LibraryItem {
 struct LibraryRow {
     key: String,
     courses: Vec<usize>,
+    /// A list row's place in the one list surface: (first, last).
+    edges: (bool, bool),
 }
 
 impl LibraryRow {
@@ -88,14 +92,18 @@ impl LibraryRow {
             .map(|row| Self {
                 key: format!("row-{columns}-{}-{}", row.len(), all[row[0]].dir.display()),
                 courses: row.to_vec(),
+                edges: (false, false),
             })
             .collect()
     }
 
-    fn list(all: &[Rc<Course>], index: usize) -> Self {
+    /// The surface's rounded ends change a row's height, so they are part
+    /// of its identity.
+    fn list(all: &[Rc<Course>], index: usize, first: bool, last: bool) -> Self {
         Self {
-            key: format!("card-{}", all[index].dir.display()),
+            key: format!("card-{}-{first}-{last}", all[index].dir.display()),
             courses: vec![index],
+            edges: (first, last),
         }
     }
 }
@@ -272,11 +280,6 @@ struct CourseMeta {
 }
 
 impl CourseMeta {
-    /// Folder · author · duration · 本地视频 · date.
-    fn line(&self) -> String {
-        self.parts(true, |date| date.format("%Y-%m-%d").to_string())
-    }
-
     /// The recent-notes row shows the duration on the cover and a short date.
     fn short_line(&self) -> String {
         use chrono::Datelike;
@@ -784,10 +787,8 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let menu = self.course_menu(course, false, cx);
-        control(("course-actions", index))
-            .ghost()
-            .icon(crate::icons::ellipsis())
-            .min_h(rems(2.))
+        icon_button(("course-actions", index), CONTROL_HEIGHT, false, cx)
+            .icon(crate::icons::more_vertical())
             .tooltip(course2md::tr!("笔记操作"))
             .accessibility_label(course2md::tr!("《{}》的笔记操作", course.title))
             .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
@@ -1151,7 +1152,6 @@ impl Desktop {
     }
 
     pub fn library_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let scale = self.preferences.application().font_scale;
         let rem = f32::from(window.rem_size());
         let tree_visible = self.folder_sidebar_visible(window, cx);
         let content = crate::views::shell_content_width(Page::Library, window)
@@ -1163,18 +1163,21 @@ impl Desktop {
             } else {
                 0.
             };
-        // gap_4 is one rem, and card padding/menu spacing scales with that rem.
-        let columns = ((content + 24.) / (17. * rem + 24.)).floor().max(1.) as usize;
+        // auto-fill minmax(240px, 1fr) with 12px gaps; both scale with text.
+        let card_gap = 12. / 14. * rem;
+        let columns = ((content + card_gap) / (240. / 14. * rem + card_gap))
+            .floor()
+            .max(1.) as usize;
         let layout = LibraryLayout {
             columns,
-            compact: content < 336. * scale,
+            card_width: ((content - card_gap * (columns as f32 - 1.)) / columns as f32).max(0.),
             stacked: content < 36. * rem + 24.,
         };
         let query = self.value(Field::Search, cx).to_lowercase();
         let mut items = Vec::new();
         let Some(all_access) = self.cached_library_access() else {
             items.push(LibraryItem::Checking);
-            return self.library_list_page(items, layout, rem, tree_visible, cx);
+            return self.library_list_page(items, layout, rem, tree_visible, None, window, cx);
         };
         let in_scope = |root: &&PathBuf| self.folder_filter.is_all() || **root == self.library_root;
         let scope = crate::storage::LibraryAccess {
@@ -1230,9 +1233,7 @@ impl Desktop {
                                 || match filter {
                                     // Searching a place covers everything below it, as
                                     // in a file manager; browsing shows its own notes.
-                                    crate::FolderFilter::Unfiled => {
-                                        !query.is_empty() || folder.is_none()
-                                    }
+                                    crate::FolderFilter::Unfiled => folder.is_none(),
                                     crate::FolderFilter::Folder(id) => match &searched {
                                         Some(inside) => folder.is_some_and(|f| inside.contains(&f)),
                                         None => folder == Some(id),
@@ -1294,15 +1295,15 @@ impl Desktop {
             items.push(LibraryItem::Loading);
         }
         if self.loading && courses.is_empty() {
-            return self.library_list_page(items, layout, rem, tree_visible, cx);
+            return self.library_list_page(items, layout, rem, tree_visible, None, window, cx);
         }
         if coverage == crate::storage::LibraryCoverage::Unavailable {
-            return self.library_list_page(items, layout, rem, tree_visible, cx);
+            return self.library_list_page(items, layout, rem, tree_visible, None, window, cx);
         }
-        // Inside a library top or a folder, its folders come before its notes.
+        // Inside a folder, its folders come before its notes. Top-level
+        // folders are in the navigation (or the places menu), not 未分类.
         let folders = match self.folder_filter {
-            FolderFilter::All => None,
-            FolderFilter::Unfiled => Some(None),
+            FolderFilter::All | FolderFilter::Unfiled => None,
             FolderFilter::Folder(id) => Some(Some(id)),
         }
         .filter(|parent| {
@@ -1312,21 +1313,30 @@ impl Desktop {
                     .get(&self.library_root)
                     .is_some_and(|library| !library.children(*parent).is_empty())
         });
+        let subfolders = folders
+            .and_then(|parent| {
+                self.library_indexes
+                    .get(&self.library_root)
+                    .map(|library| library.children(parent).len())
+            })
+            .unwrap_or(0);
+        // What the place holds; a search reports its matches on its own row.
+        let count = query.is_empty().then_some(courses.len() + subfolders);
         if let Some(parent) = folders {
             items.push(LibraryItem::Folders(self.library_root.clone(), parent));
         }
         if courses.is_empty() && folders.is_some() {
-            return self.library_list_page(items, layout, rem, tree_visible, cx);
+            return self.library_list_page(items, layout, rem, tree_visible, count, window, cx);
         }
         if courses.is_empty() {
             if query.is_empty()
                 && (coverage == crate::storage::LibraryCoverage::Partial
                     || !self.library_issues.is_empty())
             {
-                return self.library_list_page(items, layout, rem, tree_visible, cx);
+                return self.library_list_page(items, layout, rem, tree_visible, count, window, cx);
             }
             items.push(LibraryItem::Empty);
-            return self.library_list_page(items, layout, rem, tree_visible, cx);
+            return self.library_list_page(items, layout, rem, tree_visible, count, window, cx);
         }
         if !query.is_empty() {
             let scoped = course2md::tr!("找到 {} 篇笔记", courses.len());
@@ -1406,11 +1416,15 @@ impl Desktop {
                 })));
             }
         } else if !self.desktop_settings.library_cards || layout.stacked {
-            items.extend(
-                courses
-                    .into_iter()
-                    .map(|index| LibraryItem::ListRow(LibraryRow::list(&self.courses, index))),
-            );
+            let count = courses.len();
+            items.extend(courses.into_iter().enumerate().map(|(position, index)| {
+                LibraryItem::ListRow(LibraryRow::list(
+                    &self.courses,
+                    index,
+                    position == 0,
+                    position + 1 == count,
+                ))
+            }));
         } else {
             items.extend(
                 LibraryRow::cards(&self.courses, &courses, layout.columns)
@@ -1421,18 +1435,22 @@ impl Desktop {
         if !items.iter().any(|item| matches!(item, LibraryItem::Empty)) {
             self.entered.remove("library-empty-state");
         }
-        self.library_list_page(items, layout, rem, tree_visible, cx)
+        self.library_list_page(items, layout, rem, tree_visible, count, window, cx)
     }
 
     /// The library's variable-height list: notices, folder groups and card
     /// rows share one scroll region, spliced by identity so measured heights
-    /// and the scroll anchor survive content updates.
+    /// and the scroll anchor survive content updates. The title row and the
+    /// toolbar stay above it; the folder navigation sits beside them.
+    #[allow(clippy::too_many_arguments)]
     fn library_list_page(
         &mut self,
         items: Vec<LibraryItem>,
         layout: LibraryLayout,
         rem: f32,
         tree_visible: bool,
+        count: Option<usize>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let notes = self.library_notes(items, layout, rem, cx);
@@ -1441,19 +1459,98 @@ impl Desktop {
             .min_w_0()
             .h_full()
             .min_h_0()
-            .child(self.library_toolbar(tree_visible, cx))
+            .gap(rems(20. / 14.))
+            .child(self.library_header(count, cx))
+            .children(self.library_toolbar(tree_visible, layout, window, cx))
             .child(notes);
-        if !tree_visible {
-            return pane.into_any_element();
-        }
-        h_flex()
+        let page = if tree_visible {
+            h_flex()
+                .size_full()
+                .min_h_0()
+                .items_start()
+                .gap(crate::folder_tree::FOLDER_SIDEBAR_GAP)
+                .child(self.folder_sidebar(cx))
+                .child(pane)
+        } else {
+            h_flex().size_full().min_h_0().child(pane)
+        };
+        v_flex()
             .size_full()
             .min_h_0()
-            .items_start()
-            .gap(crate::folder_tree::FOLDER_SIDEBAR_GAP)
-            .child(self.folder_sidebar(cx))
-            .child(pane)
+            .pt(rems(16. / 14.))
+            .child(page)
             .into_any_element()
+    }
+
+    /// The selected place's name and item count, its folder commands and
+    /// the page's main action.
+    fn library_header(&self, count: Option<usize>, cx: &mut Context<Self>) -> Div {
+        let (place, library) = self.library_place();
+        // An empty library's own empty state explains it; no "0 项".
+        let count = count.filter(|_| self.library_controls_visible(cx));
+        let supporting = match (library, count) {
+            (Some(library), Some(count)) => {
+                Some(format!("{library} · {}", course2md::tr!("{} 项", count)))
+            }
+            (Some(library), None) => Some(library),
+            (None, Some(count)) => Some(course2md::tr!("{} 项", count)),
+            (None, None) => None,
+        };
+        let folder_menu = self
+            .folder_filter
+            .folder_id()
+            .map(|id| self.folder_node_menu(self.library_root.clone(), id, cx));
+        h_flex()
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
+            .gap_4()
+            .flex_wrap()
+            .items_center()
+            .min_h(BUTTON_LARGE)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w(rems(160. / 14.))
+                    .gap(px(2.))
+                    .child(page_heading("page-title", place))
+                    .children(supporting.map(|text| {
+                        accessible_text("library-place-count", text)
+                            .text_size(TEXT_BODY)
+                            .text_color(color(GRAY))
+                    })),
+            )
+            .when_some(folder_menu, |row, menu| {
+                row.child(
+                    icon_button("manage-folder", CONTROL_HEIGHT, false, cx)
+                        .icon(icons::more_vertical())
+                        .accessibility_label(course2md::tr!("文件夹操作"))
+                        .tooltip(course2md::tr!("文件夹操作"))
+                        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
+                            menu(popup, window, cx)
+                        }),
+                )
+            })
+            .when(self.library_controls_visible(cx), |row| {
+                // M3 FAB-sized tonal action: 56px, 16px corners.
+                row.child(
+                    tonal_pill("library-new-note", cx)
+                        .h(BUTTON_LARGE)
+                        .min_h(BUTTON_LARGE)
+                        .rounded(RADIUS_CARD)
+                        .pl(rems(18. / 14.))
+                        .pr(rems(24. / 14.))
+                        .gap(rems(10. / 14.))
+                        .label_text_size(rems(15. / 14.))
+                        .icon(icons::plus().size(rems(22. / 14.)))
+                        .label(course2md::tr!("导入视频"))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if this.prepare_workbench_input(window, cx) {
+                                this.navigate(Page::New, cx);
+                            }
+                        })),
+                )
+            })
     }
 
     fn library_notes(
@@ -1575,30 +1672,35 @@ impl Desktop {
                 .into_any_element(),
             LibraryItem::Empty => {
                 let query = self.value(Field::Search, cx).to_lowercase();
+                let (icon, heading) = if !query.is_empty() {
+                    (icons::search(), course2md::tr!("没有匹配的笔记"))
+                } else {
+                    match self.folder_filter {
+                        FolderFilter::All => (icons::notebook(), course2md::tr!("还没有笔记")),
+                        FolderFilter::Unfiled => {
+                            (icons::inbox(), course2md::tr!("没有未分类的笔记"))
+                        }
+                        FolderFilter::Folder(_) => {
+                            (icons::folder(), course2md::tr!("这个文件夹还没有笔记"))
+                        }
+                    }
+                };
                 let content = v_flex()
+                    .w_full()
                     .py_12()
                     .px_6()
                     .gap_4()
                     .items_center()
                     .text_center()
+                    .rounded(RADIUS_HERO)
+                    .bg(color(SURFACE))
+                    .child(tinted_icon(icon, Tint::Blue, px(56.)))
                     .child(
-                        crate::icons::book_open()
-                            .size(px(32.))
-                            .text_color(color(GRAY)),
-                    )
-                    .child(
-                        accessible_text(
-                            "library-empty-heading",
-                            if !query.is_empty() {
-                                course2md::tr!("没有匹配的笔记")
-                            } else if !self.folder_filter.is_all() {
-                                course2md::tr!("这个文件夹还没有笔记")
-                            } else {
-                                course2md::tr!("还没有笔记")
-                            },
-                        )
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD),
+                        accessible_text("library-empty-heading", heading)
+                            .role(Role::Heading)
+                            .text_size(rems(22. / 14.))
+                            .line_height(rems(28. / 14.))
+                            .font_weight(FontWeight::NORMAL),
                     )
                     .when(!query.is_empty(), |empty| {
                         empty.child(
@@ -1625,7 +1727,7 @@ impl Desktop {
                     .when(query.is_empty() && !self.folder_filter.is_all(), |empty| {
                         empty.child(
                             outline_pill("empty-folder-all-notes", cx)
-                                .icon(crate::icons::book_open())
+                                .icon(crate::icons::notebook())
                                 .label(course2md::tr!("浏览全部笔记"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.folder_filter = crate::FolderFilter::All;
@@ -1768,7 +1870,7 @@ impl Desktop {
                 .library_card_row(&row.courses, layout, cx)
                 .into_any_element(),
             LibraryItem::ListRow(row) => self
-                .library_list_row(row.courses[0], layout, cx)
+                .library_list_row(row.courses[0], row.edges, layout, cx)
                 .into_any_element(),
         };
         // Each item carries its trailing spacing as padding: the virtual
@@ -1779,8 +1881,9 @@ impl Desktop {
             wrapper = match item {
                 LibraryItem::GroupHeader { .. } => wrapper.pb_2(),
                 LibraryItem::GroupBody { .. } => wrapper.pb(px(20.)),
-                LibraryItem::CardRow(_) => wrapper.pb_4(),
-                LibraryItem::ListRow(..) => wrapper.pb_2(),
+                LibraryItem::CardRow(_) => wrapper.pb(rems(12. / 14.)),
+                // List rows join into one surface.
+                LibraryItem::ListRow(row) if !row.edges.1 => wrapper,
                 _ => wrapper.pb_6(),
             };
         }
@@ -1803,136 +1906,95 @@ impl Desktop {
             && !self.loading)
     }
 
-    /// Library controls share Material action icons and theme-aware state surfaces.
+    /// The filled M3 search bar above the notes.
     pub fn library_search(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         theme::search_field(
             &self.inputs[&Field::Search],
             course2md::tr!("搜索笔记标题"),
-            rems(48. / 14.),
+            BUTTON_LARGE,
             window,
             cx,
         )
     }
 
-    /// The path to the notes shown, the selected folder's commands and the
-    /// presentation menu, above the notes.
-    pub fn library_toolbar(&self, tree_visible: bool, cx: &mut Context<Self>) -> Div {
+    /// Search, the places menu on narrow windows, grouping, the card/list
+    /// choice and a manual rescan, above the notes.
+    fn library_toolbar(
+        &self,
+        tree_visible: bool,
+        layout: LibraryLayout,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Div> {
         if !self.library_controls_visible(cx) {
-            return div();
+            return None;
         }
         let group_on = self.desktop_settings.library_group_folders;
         let cards_on = self.desktop_settings.library_cards;
         let can_group = self.folder_filter.is_all() && self.library_error.is_none();
         let entity = cx.entity().downgrade();
         let loading = self.loading;
-        // Presentation choices are infrequent: one menu instead of two
-        // segmented controls competing with the filters.
-        let display = control("library-display")
-            .ghost()
-            .icon(if cards_on {
-                icons::dashboard()
-            } else {
-                icons::task()
-            })
-            .label(course2md::tr!("显示"))
-            .mr(-crate::theme::QUIET_INSET)
-            .text_color(color(GRAY))
-            .dropdown_menu(move |menu, _, _| {
-                let set_cards = |cards: bool| {
-                    let entity = entity.clone();
-                    move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                        let _ = entity.update(cx, |this, cx| {
-                            this.desktop_settings.library_cards = cards;
-                            this.save_library_presentation(cx);
-                        });
-                    }
-                };
-                let set_group = |group: bool| {
-                    let entity = entity.clone();
-                    move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                        let _ = entity.update(cx, |this, cx| {
-                            this.desktop_settings.library_group_folders = group;
-                            this.save_library_presentation(cx);
-                        });
-                    }
-                };
-                let menu = menu
-                    .item(
-                        PopupMenuItem::new(course2md::tr!("卡片"))
-                            .checked(cards_on)
-                            .on_click(set_cards(true)),
-                    )
-                    .item(
-                        PopupMenuItem::new(course2md::tr!("列表"))
-                            .checked(!cards_on)
-                            .on_click(set_cards(false)),
-                    );
-                let menu = if can_group {
-                    menu.separator()
-                        .item(
-                            PopupMenuItem::new(course2md::tr!("平铺"))
-                                .checked(!group_on)
-                                .on_click(set_group(false)),
-                        )
-                        .item(
-                            PopupMenuItem::new(course2md::tr!("按文件夹分组"))
-                                .checked(group_on)
-                                .on_click(set_group(true)),
-                        )
-                } else {
-                    menu
-                };
-                // The library refreshes itself; a manual rescan is a rare menu command.
-                let refresh = entity.clone();
-                menu.separator().item(
-                    PopupMenuItem::new(course2md::tr!("重新扫描笔记库"))
-                        .icon(icons::refresh())
-                        .disabled(loading)
-                        .on_click(move |_, _, cx| {
-                            let _ = refresh.update(cx, |this, cx| this.refresh_library(cx));
-                        }),
-                )
+        let group = filter_chip("library-group-folders", group_on, cx)
+            .h(CONTROL_HEIGHT)
+            .min_h(CONTROL_HEIGHT)
+            .pl(rems(10. / 14.))
+            .pr(rems(16. / 14.))
+            .gap(ICON_GAP)
+            .when(!group_on, |chip| chip.icon(icons::folder()))
+            .label(course2md::tr!("按文件夹分组"))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.desktop_settings.library_group_folders = !group_on;
+                this.save_library_presentation(cx);
+            }));
+        // Narrow windows always list notes, so the choice only shows where it applies.
+        let view = SingleChoiceGroup::new("library-view", course2md::tr!("显示"))
+            .options([
+                ("cards", course2md::tr!("卡片")),
+                ("list", course2md::tr!("列表")),
+            ])
+            .icon("cards", icons::layout_grid())
+            .icon("list", icons::list())
+            .selected(if cards_on { "cards" } else { "list" })
+            .on_change(move |value, _, cx| {
+                let cards = value.as_ref() == "cards";
+                let _ = entity.update(cx, |this, cx| {
+                    this.desktop_settings.library_cards = cards;
+                    this.save_library_presentation(cx);
+                });
             });
-        let folder_menu = self
-            .folder_filter
-            .folder_id()
-            .map(|id| self.folder_node_menu(self.library_root.clone(), id, cx));
-        let create_root = self.library_root.clone();
-        let create_parent = self.folder_filter.folder_id();
-        let filters = h_flex()
-            .w_full()
-            .min_w_0()
-            .gap_2()
-            .items_center()
-            .child(self.library_path_bar(tree_visible, cx))
-            .when(!self.folder_filter.is_all(), |row| {
-                row.child(
-                    quiet("library-new-folder")
-                        .icon(icons::folder_plus())
-                        .accessibility_label(course2md::tr!("新建文件夹"))
-                        .tooltip(course2md::tr!("新建文件夹"))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.begin_folder_at(
-                                create_root.clone(),
-                                None,
-                                create_parent,
-                                window,
-                                cx,
-                            )
-                        })),
+        // The library refreshes itself; a manual rescan is a rare command.
+        let rescan = icon_button("library-rescan", CONTROL_HEIGHT, false, cx)
+            .icon(icons::refresh())
+            .accessibility_label(course2md::tr!("重新扫描笔记库"))
+            .tooltip(course2md::tr!("重新扫描笔记库"))
+            .loading(loading)
+            .disabled(loading)
+            .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx)));
+        Some(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .gap_3()
+                .flex_wrap()
+                .items_center()
+                .child(
+                    self.library_search(window, cx)
+                        .flex_1()
+                        .flex_basis(rems(280. / 14.))
+                        .min_w(rems(200. / 14.)),
                 )
-            })
-            .when_some(folder_menu, |row, menu| {
-                row.child(
-                    quiet("manage-folder")
-                        .icon(icons::ellipsis())
-                        .accessibility_label(course2md::tr!("文件夹操作"))
-                        .tooltip(course2md::tr!("文件夹操作"))
-                        .dropdown_menu(move |popup, window, cx| menu(popup, window, cx)),
-                )
-            })
-            .child(display);
-        v_flex().w_full().min_w_0().gap_4().pb_3().child(filters)
+                .child(
+                    h_flex()
+                        .gap_3()
+                        .flex_wrap()
+                        .items_center()
+                        .when(!tree_visible, |row| row.child(self.library_places_menu(cx)))
+                        .when(can_group, |row| row.child(group))
+                        .when(!layout.stacked, |row| row.child(view))
+                        .child(rescan),
+                ),
+        )
     }
 
     /// Source identity helps readers recognize a note; routine revision numbers
@@ -2040,7 +2102,7 @@ impl Desktop {
         )
     }
 
-    /// A folder group's notes, as list rows or card rows like the flat view.
+    /// A folder group's notes, as one list surface or card rows like the flat view.
     fn course_collection(
         &self,
         courses: &[usize],
@@ -2051,18 +2113,17 @@ impl Desktop {
         let collection_id = courses.first().copied().unwrap_or(0);
         let collection = v_flex().w_full();
         if !self.desktop_settings.library_cards || layout.stacked {
-            let rows = v_flex().gap_2().children(
-                courses
-                    .iter()
-                    .map(|index| self.library_list_row(*index, layout, cx)),
-            );
+            let count = courses.len();
+            let rows = v_flex().children(courses.iter().enumerate().map(|(position, index)| {
+                self.library_list_row(*index, (position == 0, position + 1 == count), layout, cx)
+            }));
             return if animate {
                 collection.child(crate::motion::enter(("library-list", collection_id), rows))
             } else {
                 collection.child(rows)
             };
         }
-        let cards = v_flex().gap_4().children(
+        let cards = v_flex().gap(rems(12. / 14.)).children(
             courses
                 .chunks(layout.columns)
                 .map(|row| self.library_card_row(row, layout, cx)),
@@ -2074,28 +2135,91 @@ impl Desktop {
         }
     }
 
-    /// One row of course cards: equal-height columns, and trailing spacers keep
-    /// the final row's column widths aligned with the rest.
+    /// One row of note cards: equal-height columns of the grid's width.
     fn library_card_row(
         &self,
         row: &[usize],
         layout: LibraryLayout,
         cx: &mut Context<Self>,
     ) -> Div {
-        let spacers = layout.columns.saturating_sub(row.len());
         h_flex()
-            .gap_6()
+            .gap(rems(12. / 14.))
             .items_stretch()
             .children(row.iter().filter_map(|index| {
                 let course = self.courses.get(*index)?;
-                Some(self.note_card(course, *index, "library", true, cx))
+                Some(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .w(px(layout.card_width))
+                        .child(self.note_card(course, *index, "library", true, cx)),
+                )
             }))
-            .children((0..spacers).map(|_| div().flex_1().min_w_0()))
     }
 
-    /// The one note card used by the library grid and the workbench's recent
-    /// notes: a 16:9 cover (or a tonal placeholder), the title and one meta line.
-    /// Cover and title both open the note; the card needs no separate read button.
+    /// A note's real state worth flagging on its cover or row: a task still
+    /// writing a version of it, or content that still needs completing.
+    fn note_status(&self, course: &Course) -> Option<Div> {
+        let busy = self
+            .course_location(course)
+            .zip(self.workspace.as_ref())
+            .is_some_and(|(location, workspace)| {
+                note_has_unfinished_task(
+                    &workspace.state.tasks,
+                    &location.id,
+                    course
+                        .manifest
+                        .as_ref()
+                        .map(|manifest| manifest.source_id.as_str()),
+                )
+            });
+        if busy {
+            Some(badge(BadgeKind::Progress).child(course2md::tr!("正在处理")))
+        } else if course.incomplete() {
+            Some(badge(BadgeKind::Warning).child(course2md::tr!("部分内容待补全")))
+        } else {
+            None
+        }
+    }
+
+    /// Folder · date. The folder is named only where the place does not
+    /// already say it: all notes, ungrouped.
+    fn library_meta(&self, course: &Course) -> String {
+        let meta = self.course_meta(course);
+        let folder = (self.folder_filter.is_all() && !self.desktop_settings.library_group_folders)
+            .then(|| {
+                meta.folder.clone().or_else(|| {
+                    self.course_location(course)
+                        .is_some_and(|location| self.library_indexes.contains_key(&location.root))
+                        .then(|| course2md::tr!("未分类").to_owned())
+                })
+            })
+            .flatten();
+        folder
+            .into_iter()
+            .chain(meta.date.map(|date| date.format("%Y-%m-%d").to_string()))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+
+    /// A note's cover, or a tonal placeholder with a document icon.
+    fn note_cover_content(course: &Course, radius: Pixels, icon: Rems) -> AnyElement {
+        match &course.thumbnail {
+            Some(thumbnail) => img(thumbnail.clone())
+                .size_full()
+                .rounded(radius)
+                .object_fit(ObjectFit::Cover)
+                .into_any_element(),
+            None => icons::file_text()
+                .size(icon)
+                .text_color(color(ON_SECONDARY_CONTAINER))
+                .into_any_element(),
+        }
+    }
+
+    /// The library grid's note card: a 16:9 cover carrying the note's status,
+    /// the title, folder · date and the note menu, on a 24px surface. Cover
+    /// and title both open the note; the card needs no separate read button.
     pub(crate) fn note_card(
         &self,
         course: &Rc<Course>,
@@ -2109,8 +2233,10 @@ impl Desktop {
             let course = Rc::clone(course);
             cx.listener(move |this: &mut Self, _, _, cx| this.open_course(course.clone(), cx))
         };
+        let opening = self.opening_course.as_ref() == Some(&course.dir);
         let cover = control(SharedString::from(format!("{scope}-cover-{index}")))
             .ghost()
+            .relative()
             .w_full()
             .h_auto()
             .p_0()
@@ -2119,20 +2245,31 @@ impl Desktop {
             .tab_stop(false)
             .accessibility_label(course2md::tr!("阅读 {}", course.title))
             .bg(color(SECONDARY_CONTAINER))
-            .map(|cover| match &course.thumbnail {
-                Some(thumbnail) => cover.child(
-                    img(thumbnail.clone())
-                        .size_full()
-                        .rounded(RADIUS_CARD)
-                        .object_fit(ObjectFit::Cover),
-                ),
-                None => cover,
+            .child(Self::note_cover_content(
+                course,
+                RADIUS_CARD,
+                rems(28. / 14.),
+            ))
+            .children(
+                self.note_status(course)
+                    .map(|status| div().absolute().left(px(8.)).top(px(8.)).child(status)),
+            )
+            .when(opening, |cover| {
+                cover.child(
+                    div()
+                        .absolute()
+                        .right(px(8.))
+                        .top(px(8.))
+                        .p(px(4.))
+                        .rounded_full()
+                        .bg(color(SURFACE))
+                        .child(crate::motion::spinner(("library-card-opening", index), cx)),
+                )
             })
             .on_click(open(course));
         let title = control(SharedString::from(format!("{scope}-title-{index}")))
             .ghost()
-            .flex_1()
-            .min_w_0()
+            .w_full()
             .h_auto()
             .min_h(px(0.))
             .p_0()
@@ -2145,9 +2282,9 @@ impl Desktop {
                     .whitespace_normal()
                     .text_ellipsis()
                     .line_clamp(2)
-                    .text_size(TEXT_BODY)
-                    .line_height(rems(20. / 14.))
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_size(rems(16. / 14.))
+                    .line_height(rems(22. / 14.))
+                    .font_weight(FontWeight::MEDIUM)
                     .text_color(color(INK))
                     .child(course.title.clone()),
             )
@@ -2156,124 +2293,110 @@ impl Desktop {
             .id(SharedString::from(format!("{scope}-card-{index}")))
             .flex_1()
             .min_w_0()
+            .p(rems(10. / 14.))
+            .pb(rems(1.))
+            .gap(rems(12. / 14.))
+            .rounded(TILE_RADIUS)
+            .bg(color(SURFACE))
             .child(cover)
             .child(
-                v_flex()
+                h_flex()
                     .w_full()
                     .min_w_0()
-                    .pt(rems(10. / 14.))
-                    .pb(rems(8. / 14.))
-                    .gap(px(2.))
+                    .pl(rems(6. / 14.))
+                    .gap_1()
+                    .items_start()
                     .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .gap_1()
-                            .items_center()
-                            .child(
-                                v_flex().flex_1().min_w_0().gap(px(2.)).child(title).child(
-                                    div()
-                                        .w_full()
-                                        .whitespace_nowrap()
-                                        .text_ellipsis()
-                                        .text_size(TEXT_AUX)
-                                        .font_weight(FontWeight::NORMAL)
-                                        .text_color(color(GRAY))
-                                        .child(self.course_meta(course).line()),
-                                ),
-                            )
-                            .when(with_actions, |row| {
-                                row.child(self.course_actions(course, index, cx))
-                            }),
+                        v_flex().flex_1().min_w_0().gap_1().child(title).child(
+                            div()
+                                .w_full()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(rems(13. / 14.))
+                                .text_color(color(GRAY))
+                                .child(self.library_meta(course)),
+                        ),
                     )
-                    .when(course.incomplete(), |view| {
-                        view.child(incomplete_badge().pt_1())
-                    })
-                    .when(with_actions, |view| {
-                        view.children(self.course_read_error(course, index, cx))
-                            .children(self.course_export_feedback(course, cx))
+                    .when(with_actions, |row| {
+                        row.child(
+                            div()
+                                .mt(rems(-6. / 14.))
+                                .child(self.course_actions(course, index, cx)),
+                        )
                     }),
             )
+            .when(with_actions, |view| {
+                view.children(self.course_read_error(course, index, cx))
+                    .children(self.course_export_feedback(course, cx))
+            })
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
             .context_menu(move |popup, window, cx| menu(popup, window, cx))
             .into_any_element()
     }
 
-    fn course_row_thumbnail(thumbnail: &std::path::Path) -> gpui::Img {
-        img(thumbnail.to_path_buf())
-            .w(rems(6.857))
-            .h(rems(3.857))
-            .object_fit(ObjectFit::Cover)
-            .rounded(RADIUS_SMALL)
-            .flex_shrink_0()
-    }
-
-    /// Title, caller-built meta line and the incomplete badge of a list row.
-    fn course_row_text(&self, course: &Course, clamp_title: bool, meta: Div) -> Div {
-        v_flex()
-            .flex_1()
-            .min_w_0()
-            .gap_2()
-            .child(
-                div()
-                    .w_full()
-                    .whitespace_normal()
-                    .when(clamp_title, |title| title.text_ellipsis().line_clamp(2))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(course.title.clone()),
-            )
-            .child(meta)
-            .when(course.incomplete(), |view| view.child(incomplete_badge()))
-    }
-
-    /// One course row in the list presentation.
+    /// One note in the list presentation: a segment of the single list
+    /// surface, with a 128×72 cover, title, folder · date, status and the
+    /// note menu, and a divider inset past the cover from the previous note.
     fn library_list_row(
         &self,
         index: usize,
+        (first, last): (bool, bool),
         layout: LibraryLayout,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(course) = self.courses.get(index) else {
             return div().into_any_element();
         };
-        let mut read = h_flex().w_full().min_w_0().items_center().gap(px(12.));
-        // Every row reserves the cover slot so titles share one left edge.
-        read = read.child(
-            div()
-                .w(rems(6.857))
-                .h(rems(3.857))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(RADIUS_SMALL)
-                .bg(color(SECONDARY_CONTAINER))
-                .map(|cover| match &course.thumbnail {
-                    Some(thumbnail) => cover.child(Self::course_row_thumbnail(thumbnail)),
-                    None => cover.child(
-                        icons::movie()
-                            .size(rems(20. / 14.))
-                            .text_color(color(ON_SECONDARY_CONTAINER)),
-                    ),
-                }),
-        );
-        read = read.child(
-            self.course_row_text(
+        let cover_w = rems(128. / 14.);
+        let status = self.note_status(course);
+        let opening = self.opening_course.as_ref() == Some(&course.dir);
+        let cover = div()
+            .w(cover_w)
+            .max_w(relative(ROW_COVER_SHARE))
+            .aspect_ratio(16. / 9.)
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .overflow_hidden()
+            .rounded(FIELD_RADIUS)
+            .bg(color(SECONDARY_CONTAINER))
+            .child(Self::note_cover_content(
                 course,
-                !layout.stacked,
+                FIELD_RADIUS,
+                rems(24. / 14.),
+            ));
+        let text = v_flex()
+            .flex_1()
+            .min_w_0()
+            .gap_1()
+            .child(
                 div()
                     .w_full()
                     .whitespace_normal()
-                    .text_size(TEXT_AUX)
-                    .font_weight(FontWeight::NORMAL)
+                    .text_ellipsis()
+                    .line_clamp(2)
+                    .text_size(rems(16. / 14.))
+                    .line_height(rems(22. / 14.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(color(INK))
+                    .child(course.title.clone()),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .whitespace_normal()
+                    .text_size(rems(13. / 14.))
                     .text_color(color(GRAY))
-                    .child(format!(
-                        "{} · {}",
-                        self.course_meta(course).line(),
-                        course.content_description()
-                    )),
-            ),
-        );
+                    .child(self.library_meta(course)),
+            )
+            // Narrow rows keep the status with the text instead of squeezing it.
+            .when(layout.stacked, |text| {
+                text.children(
+                    self.note_status(course)
+                        .map(|status| h_flex().pt_1().child(status)),
+                )
+            });
         let read = control(("read-course", index))
             .ghost()
             .flex_1()
@@ -2281,60 +2404,53 @@ impl Desktop {
             .h_auto()
             .p_0()
             .justify_start()
-            .when(layout.stacked, |button| button.w_full().flex_none())
+            .rounded(FIELD_RADIUS)
             .accessibility_label(course2md::tr!("阅读 {}", course.title))
-            .child(read)
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_4()
+                    .items_center()
+                    .child(cover)
+                    .child(text),
+            )
             .on_click({
                 let course = course.clone();
                 cx.listener(move |this, _, _, cx| this.open_course(course.clone(), cx))
             });
-        let actions = h_flex()
-            .min_w_0()
-            .flex_shrink_0()
-            .items_center()
-            .gap_2()
-            .when(layout.stacked, |row| row.w_full().flex_wrap())
-            .child(
-                outline_pill(("read-course-action", index), cx)
-                    .icon(crate::icons::book_open())
-                    .when(!layout.compact || layout.stacked, |button| {
-                        button.label(if self.course_has_reading_position(course) {
-                            course2md::tr!("继续阅读")
-                        } else {
-                            course2md::tr!("阅读笔记")
-                        })
-                    })
-                    .loading(self.opening_course.as_ref() == Some(&course.dir))
-                    .disabled(self.opening_course.as_ref() == Some(&course.dir))
-                    .accessibility_label(course2md::tr!("阅读 {}", course.title))
-                    .when(layout.compact && !layout.stacked, |button| {
-                        button.tooltip(course2md::tr!("阅读笔记"))
-                    })
-                    .on_click({
-                        let course = course.clone();
-                        cx.listener(move |this, _, _, cx| this.open_course(course.clone(), cx))
-                    }),
-            )
-            .child(self.course_actions(course, index, cx));
         let menu = self.course_menu(course, true, cx);
         v_flex()
             .id(("library-row", index))
             .w_full()
             .min_w_0()
             .bg(color(SURFACE))
-            .border_1()
-            .border_color(color(CARD_LINE))
-            .rounded(RADIUS_CARD)
+            .when(first, |row| row.rounded_t(RADIUS_HERO).pt_2())
+            .when(last, |row| row.rounded_b(RADIUS_HERO).pb_2())
+            .when(!first, |row| {
+                row.child(
+                    div()
+                        .h(px(1.))
+                        .ml(rems(160. / 14.))
+                        .mr(rems(16. / 14.))
+                        .bg(color(HAIRLINE)),
+                )
+            })
             .child(
                 h_flex()
                     .w_full()
                     .min_w_0()
                     .items_center()
-                    .p_4()
+                    .pl_4()
+                    .pr_2()
+                    .py_3()
                     .gap_4()
-                    .when(layout.stacked, |row| row.flex_col().items_start().gap_3())
                     .child(read)
-                    .child(actions),
+                    .when(!layout.stacked, |row| row.children(status))
+                    .when(opening, |row| {
+                        row.child(crate::motion::spinner(("library-row-opening", index), cx))
+                    })
+                    .child(self.course_actions(course, index, cx)),
             )
             .children(self.course_read_error(course, index, cx))
             .children(
@@ -3035,7 +3151,7 @@ mod tests {
         let items = [
             LibraryItem::Coverage("m".into()),
             LibraryItem::CardRow(row(3)),
-            LibraryItem::ListRow(LibraryRow::list(&all, 0)),
+            LibraryItem::ListRow(LibraryRow::list(&all, 0, true, false)),
             LibraryItem::GroupHeader(Box::new(LibraryGroupHeader {
                 index: 0,
                 key: "lib:0".into(),
