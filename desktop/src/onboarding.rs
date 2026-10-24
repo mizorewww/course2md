@@ -1182,7 +1182,7 @@ impl Desktop {
                      tint: Tint,
                      chosen: bool| {
             ChoiceTile::new(id, index, 2, title, chosen)
-                .icon(tinted_icon(icon, tint, icon_size))
+                .tinted_icon(icon, tint, icon_size)
                 .description(description)
         };
         let routes = v_flex()
@@ -1246,7 +1246,7 @@ impl Desktop {
                     course2md::tr!("自动选择引擎"),
                     selected.is_none(),
                 )
-                .icon(choice_icon(engine_icon(None)))
+                .icon(icon_slot(engine_icon(None)))
                 .description(course2md::tr!(
                     "目前使用 {}",
                     crate::provider_label(Some(recommended))
@@ -1280,7 +1280,7 @@ impl Desktop {
                         crate::provider_label(provider),
                         selected == provider,
                     )
-                    .icon(choice_icon(engine_icon(provider)))
+                    .icon(icon_slot(engine_icon(provider)))
                     .status(status)
                     .enabled(!unavailable)
                     .render(window, cx)
@@ -1358,22 +1358,18 @@ impl Desktop {
             },
         ) in models.into_iter().enumerate()
         {
-            let mut choice = ChoiceTile::new(
+            // The choices hang below the model tile, so only the last keeps
+            // an outside corner.
+            let last = index + 1 == model_count;
+            let choice = ChoiceTile::new(
                 ("setup-model-choice", index),
                 index,
                 model_count,
                 label,
                 self.onboarding.model == id,
             )
-            .description(description);
-            // The choices hang below the model tile, so only the last keeps
-            // an outside corner.
-            choice.outer = [
-                false,
-                false,
-                index + 1 == model_count,
-                index + 1 == model_count,
-            ];
+            .description(description)
+            .corners([false, false, last, last]);
             model_group = model_group.child(
                 self.setup_reveal(
                     ("setup-model-choice-reveal", index),
@@ -2560,198 +2556,6 @@ fn setup_tile(first: bool, last: bool) -> Div {
         .gap(rems(12. / 14.))
         .px(SETTING_ITEM_INSET)
         .py(rems(16. / 14.))
-}
-
-/// The M3 radio of a choice tile: an outlined ring, filled with a dot when
-/// selected.
-fn choice_radio(selected: bool, enabled: bool) -> Div {
-    let tone = if !enabled {
-        Rgba {
-            a: 0.38,
-            ..color(INK)
-        }
-    } else if selected {
-        color(ACCENT)
-    } else {
-        color(CONTROL)
-    };
-    div()
-        .flex()
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .size(rems(20. / 14.))
-        .rounded_full()
-        .border_2()
-        .border_color(tone)
-        .when(selected, |ring| {
-            ring.child(div().size(rems(10. / 14.)).rounded_full().bg(tone))
-        })
-}
-
-/// One choice in a connected group of tiles, as on the canvas: tonal
-/// selection on the secondary container, a leading icon, the label with
-/// optional supporting text, a trailing status chip and a radio. An
-/// unavailable choice keeps its status chip at full strength.
-struct ChoiceTile {
-    id: ElementId,
-    outer: [bool; 4],
-    icon: Option<AnyElement>,
-    title: SharedString,
-    description: Option<SharedString>,
-    status: Option<AnyElement>,
-    selected: bool,
-    enabled: bool,
-}
-
-impl ChoiceTile {
-    fn new(
-        id: impl Into<ElementId>,
-        index: usize,
-        count: usize,
-        title: impl Into<SharedString>,
-        selected: bool,
-    ) -> Self {
-        let first = index == 0;
-        let last = index + 1 >= count;
-        Self {
-            id: id.into(),
-            outer: [first, first, last, last],
-            icon: None,
-            title: title.into(),
-            description: None,
-            status: None,
-            selected,
-            enabled: true,
-        }
-    }
-    fn icon(mut self, icon: impl IntoElement) -> Self {
-        self.icon = Some(icon.into_any_element());
-        self
-    }
-    fn description(mut self, description: impl Into<SharedString>) -> Self {
-        let description = description.into();
-        self.description = (!description.is_empty()).then_some(description);
-        self
-    }
-    fn status(mut self, status: Option<impl IntoElement>) -> Self {
-        self.status = status.map(IntoElement::into_any_element);
-        self
-    }
-    fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
-        self
-    }
-    fn render(self, window: &mut Window, cx: &mut App) -> gpui_base::Button {
-        let id = self.id;
-        let selected = self.selected;
-        let enabled = self.enabled;
-        let amount = motion::selection_value(
-            SharedString::from(format!("setup-choice-{id:?}")),
-            if selected { 1. } else { 0. },
-            window,
-            cx,
-        );
-        let bg = blend(color(SURFACE), color(SECONDARY_CONTAINER), amount);
-        let ink = if selected {
-            color(ON_SECONDARY_CONTAINER)
-        } else {
-            color(INK)
-        };
-        let fg = if enabled {
-            ink
-        } else {
-            Rgba { a: 0.38, ..ink }
-        };
-        let radius = |outside: bool| {
-            if outside {
-                TILE_RADIUS
-            } else {
-                TILE_INNER_RADIUS
-            }
-        };
-        let title = self.title;
-        gpui_base::Button::new(id.clone())
-            .selected(selected)
-            .disabled(!enabled)
-            .aria_toggled(if selected {
-                gpui::accesskit::Toggled::True
-            } else {
-                gpui::accesskit::Toggled::False
-            })
-            .accessibility_label(title.clone())
-            .w_full()
-            .min_w_0()
-            .h_auto()
-            .min_h(rems(64. / 14.))
-            .justify_start()
-            .gap(rems(16. / 14.))
-            .pl(SETTING_ITEM_INSET)
-            .pr(rems(20. / 14.))
-            .py(rems(12. / 14.))
-            .rounded_tl(radius(self.outer[0]))
-            .rounded_tr(radius(self.outer[1]))
-            .rounded_br(radius(self.outer[2]))
-            .rounded_bl(radius(self.outer[3]))
-            .bg(bg)
-            // The outline is reserved for keyboard focus, so focus never
-            // moves the content.
-            .border_2()
-            .border_color(Rgba { a: 0., ..bg })
-            .text_color(fg)
-            .when(enabled, |button| {
-                button
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(blend(bg, ink, 0.08)))
-                    .active(move |style| style.bg(blend(bg, ink, 0.10)))
-            })
-            .focus(|style| style.border_color(color(ACCENT)))
-            .children(self.icon)
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(rems(2. / 14.))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .whitespace_normal()
-                            .text_size(TEXT_SETTINGS_BODY)
-                            .line_height(rems(22. / 14.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(title),
-                    )
-                    .when_some(self.description, |column, description| {
-                        column.child(
-                            div()
-                                .min_w_0()
-                                .whitespace_normal()
-                                .text_size(TEXT_SETTINGS_AUX)
-                                .line_height(rems(20. / 14.))
-                                .text_color(if selected {
-                                    Rgba { a: 0.8, ..fg }
-                                } else {
-                                    color(GRAY)
-                                })
-                                .child(description),
-                        )
-                    }),
-            )
-            .children(self.status)
-            .child(choice_radio(selected, enabled))
-    }
-}
-
-/// The leading icon of a plain choice tile, centred in the 40px slot of a
-/// tinted icon so every tile's label starts on one ruler.
-fn choice_icon(icon: Icon) -> Div {
-    div()
-        .flex()
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .size(rems(40. / 14.))
-        .child(icon.size(rems(22. / 14.)))
 }
 
 #[cfg(test)]
