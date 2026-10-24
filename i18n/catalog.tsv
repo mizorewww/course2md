@@ -1478,7 +1478,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 目标文件夹无法访问，请选择已有的空文件夹	目标文件夹无法访问，请选择已有的空文件夹	The destination folder cannot be accessed. Select an existing empty folder.	目標資料夾無法存取，請選擇已有的空資料夾	宛先フォルダーにアクセスできません。既存の空のフォルダーを選択してください。
 目标文件缺少目录	目标文件缺少目录	Target file is missing directory	目標檔案缺少目錄	ターゲットファイルのディレクトリがありません
 目标缺少这次移动的识别记录，未修改目标内容	目标缺少这次移动的识别记录，未修改目标内容	The destination is missing the identification record for this move; its contents were not modified.	目標缺少這次移動的識別記錄，未修改目標內容	移動先にこの移動の識別記録がないため、内容は変更されていません。
-直接开始使用	直接开始使用	Get started	直接開始使用	すぐに使い始める
+跳过设置	跳过设置	Skip setup	略過設定	セットアップをスキップ
 短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	The short text says photosynthesis uses sunlight and releases oxygen; the summary did not keep this key information.	短文講述光合作用使用陽光並釋放氧氣，摘要未保留這些關鍵資訊	短い文章では光合成が太陽光を使い酸素を放出すると述べていますが、要約にはこの重要な情報が残っていません
 移动临时文件位置发生变化，未修改内容	移动临时文件位置发生变化，未修改内容	The location of the move's temporary file has changed; nothing was modified.	移動暫存檔案位置發生變化，未修改內容	移動用の一時ファイルの場所が変わったため、内容は変更されていません。
 移动位置已经变化，原数据和副本已保留	移动位置已经变化，原数据和副本已保留	The move location has changed; the original data and the copy were retained.	移動位置已經變化，原資料和副本已保留	移動先が変わりました。元のデータとコピーは保持されています。

@@ -2326,10 +2326,10 @@ impl Desktop {
             .flex_wrap();
         if step == Step::Engine && !model_review {
             row = row.child(
+                // Skipping is not the way forward, so it carries no arrow.
                 text_button("setup-later", cx)
                     .ml(rems(-12. / 14.))
-                    .icon(icons::arrow_forward())
-                    .label(course2md::tr!("直接开始使用"))
+                    .label(course2md::tr!("跳过设置"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if this.save_setup_engine(window, cx) {
                             this.finish_onboarding(window, cx);
