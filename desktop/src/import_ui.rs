@@ -2598,7 +2598,7 @@ impl Desktop {
                             )
                             .child(
                                 quiet("import-model-details")
-                                    .icon(icons::ellipsis())
+                                    .icon(icons::more_vertical())
                                     .w(CONTROL_HEIGHT)
                                     .px_0()
                                     .accessibility_label(course2md::tr!("模型检查与设置"))

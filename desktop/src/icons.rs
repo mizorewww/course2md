@@ -95,7 +95,6 @@ icons! {
 
     arrow_down => "material" / "arrow-down";
     arrow_up => "material" / "arrow-up";
-    ellipsis => "material" / "ellipsis";
     fit_screen => "material" / "fit-screen";
     history => "material" / "history";
     image => "material" / "image";

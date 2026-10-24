@@ -15,7 +15,6 @@
     "fit-screen": "action/fit_screen",
     "arrow-up": "navigation/arrow_upward",
     "arrow-down": "navigation/arrow_downward",
-    "ellipsis": "navigation/more_horiz",
     "summarize": "action/subject"
   }
 }
