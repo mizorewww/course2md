@@ -6,7 +6,7 @@ const WORKBENCH_WIDTH: f32 = 760.;
 /// Spacing between workbench sections and the inset of its panels.
 const SECTION_GAP: Rems = rems(24. / 14.);
 /// Rhythm inside the hero: title, link pill, drop hint and preview card.
-const HERO_GAP: Rems = rems(20. / 14.);
+const HERO_GAP: Rems = rems(16. / 14.);
 /// Square icon buttons beside the hero input.
 const HERO_CONTROL: Rems = rems(48. / 14.);
 /// Option labels and the selected video title.
@@ -3606,7 +3606,7 @@ impl Desktop {
             .max_w(rems(WORKBENCH_WIDTH / 14.))
             .mx_auto()
             .child(
-                h_flex().w_full().justify_center().pb(rems(8. / 14.)).child(
+                h_flex().w_full().justify_center().pb(rems(4. / 14.)).child(
                     accessible_text("workbench-title", course2md::tr!("把视频整理成笔记"))
                         .role(Role::Heading)
                         .text_center()

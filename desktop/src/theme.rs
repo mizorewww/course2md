@@ -322,8 +322,8 @@ pub fn hero_top(quiet: bool, compact: bool) -> f32 {
     match (quiet, compact) {
         (true, true) => 96.,
         (true, false) => 160.,
-        (false, true) => 40.,
-        (false, false) => 56.,
+        (false, true) => 24.,
+        (false, false) => 48.,
     }
 }
 
