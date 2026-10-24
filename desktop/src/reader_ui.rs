@@ -2932,11 +2932,9 @@ impl Desktop {
         })
         .detach();
     }
-    /// Debug validation: open the requested note after the first scan.
-    /// Capture review: the end of the open note, where its card closes.
-    #[cfg(feature = "capture")]
     /// Capture harness: the screenshot tab, a screenshot in the viewer and
-    /// the end of the current view, as `capture.rs` names them.
+    /// the end of the current view (where the note's card closes), as
+    /// `capture.rs` names them.
     #[cfg(feature = "capture")]
     pub(crate) fn capture_reader_view(
         &mut self,
@@ -2972,6 +2970,7 @@ impl Desktop {
         cx.notify();
     }
 
+    /// Debug validation: open the requested note after the first scan.
     pub(crate) fn open_validation_note(&mut self, cx: &mut Context<Self>) {
         let Some(wanted) = self.validation.as_mut().and_then(|v| v.note.take()) else {
             return;
@@ -5557,6 +5556,34 @@ impl Desktop {
             self.notify_image_viewer(cx);
         }
     }
+    /// Moves the enlarged image with a held pointer, within its edges.
+    fn pan_reader_image(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(viewer) = &mut self.reader_ui.viewer else {
+            return;
+        };
+        let Some((start, offset)) = viewer.drag else {
+            return;
+        };
+        if event.pressed_button != Some(MouseButton::Left) {
+            // The button was released where no event reached the window.
+            self.end_reader_image_pan(cx);
+            return;
+        }
+        let max = viewer.viewport_scroll.max_offset();
+        let moved = offset + (event.position - start);
+        viewer.viewport_scroll.set_offset(point(
+            moved.x.clamp(-max.x, px(0.)),
+            moved.y.clamp(-max.y, px(0.)),
+        ));
+        self.notify_image_viewer(cx);
+    }
+    fn end_reader_image_pan(&mut self, cx: &mut Context<Self>) {
+        if let Some(viewer) = &mut self.reader_ui.viewer
+            && viewer.drag.take().is_some()
+        {
+            self.notify_image_viewer(cx);
+        }
+    }
     fn image_fit(viewer: &ImageViewer) -> f32 {
         let Some(image) = &viewer.frames[viewer.index].image else {
             return 0.;
@@ -5744,7 +5771,13 @@ impl Desktop {
         let details_open = Self::image_details_open(viewer, &metrics);
         let text_only = metrics.separate_modes && details_open;
         let time = course2md::render::fmt_ts(frame.seconds);
-        let readable = frame.image.is_some();
+        // A file that exists but cannot be decoded is as unreadable as a missing one.
+        let readable = frame.image.as_ref().is_some_and(|image| {
+            !self
+                .reader_ui
+                .images
+                .failed(&image.path, crate::reader_images::Size::Original)
+        });
         let heading = if text_only {
             course2md::tr!("文字 · {}", time)
         } else if compact {
@@ -5889,6 +5922,7 @@ impl Desktop {
         let height = px(image.height as f32 * scale);
         let viewport = viewer.viewport_size;
         let pannable = width > viewport.width + px(1.) || height > viewport.height + px(1.);
+        let dragging = viewer.drag.is_some();
         let images = &mut self.reader_ui.images;
         images.pin(
             std::iter::once(image.path.clone())
@@ -5953,46 +5987,48 @@ impl Desktop {
             .when(viewer.drag.is_some(), |viewport| viewport.cursor_grabbing())
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
                     if let Some(viewer) = &mut this.reader_ui.viewer {
                         let max = viewer.viewport_scroll.max_offset();
                         if max.x > px(0.) || max.y > px(0.) {
                             viewer.drag = Some((event.position, viewer.viewport_scroll.offset()));
+                            // The press pans the image; it must not also start
+                            // selecting the transcript below it.
+                            window.prevent_default();
+                            gpui_component::global_state::GlobalState::suppress_text_selection(cx);
                             this.notify_image_viewer(cx);
                         }
                     }
                 }),
             )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                let Some(viewer) = &mut this.reader_ui.viewer else {
-                    return;
-                };
-                let Some((start, offset)) = viewer.drag else {
-                    return;
-                };
-                if event.pressed_button != Some(MouseButton::Left) {
-                    viewer.drag = None;
-                    this.notify_image_viewer(cx);
-                    return;
-                }
-                let max = viewer.viewport_scroll.max_offset();
-                let moved = offset + (event.position - start);
-                viewer.viewport_scroll.set_offset(point(
-                    moved.x.clamp(-max.x, px(0.)),
-                    moved.y.clamp(-max.y, px(0.)),
-                ));
-                this.notify_image_viewer(cx);
-            }))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _: &MouseUpEvent, _, cx| {
-                    if let Some(viewer) = &mut this.reader_ui.viewer
-                        && viewer.drag.take().is_some()
-                    {
-                        this.notify_image_viewer(cx);
-                    }
-                }),
-            )
+            // While a pan is held, the whole window follows the pointer, so
+            // leaving the image (or the dialog) neither stops nor drops it.
+            .when(dragging, |viewport| {
+                let owner = cx.weak_entity();
+                viewport.child(
+                    canvas(
+                        |_, _, _| {},
+                        move |_, _, window, _| {
+                            let moved = owner.clone();
+                            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                                if phase == DispatchPhase::Bubble {
+                                    let _ = moved
+                                        .update(cx, |this, cx| this.pan_reader_image(event, cx));
+                                }
+                            });
+                            let released = owner.clone();
+                            window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                                if phase == DispatchPhase::Bubble {
+                                    let _ = released
+                                        .update(cx, |this, cx| this.end_reader_image_pan(cx));
+                                }
+                            });
+                        },
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
             .on_pinch(cx.listener(|this, event: &PinchEvent, window, cx| {
                 this.zoom_reader_image(Some(1. + event.delta), window, cx);
             }))

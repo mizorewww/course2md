@@ -135,6 +135,14 @@ impl ReaderImages {
         Loaded::Pending
     }
 
+    /// Whether decoding `path` at `size` has failed.
+    pub(crate) fn failed(&self, path: &Path, size: Size) -> bool {
+        matches!(
+            self.entries.get(&(path.to_path_buf(), size)),
+            Some(Entry::Failed)
+        )
+    }
+
     /// A ready image at any size, preferring the original, without decoding.
     pub(crate) fn any_ready(&mut self, path: &Path) -> Option<Arc<RenderImage>> {
         let tick = self.tick;
