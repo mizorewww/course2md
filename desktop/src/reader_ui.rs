@@ -2950,11 +2950,21 @@ impl Desktop {
             self.select_reader_view(1, window, cx);
         }
         if end {
-            if self.result_tab == 0 {
-                self.reader_ui.note_list.scroll_to_end();
-            } else {
-                self.reader_ui.gallery.list.scroll_to_end();
-            }
+            // After the tab's saved position has been restored.
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(800))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.result_tab == 0 {
+                        this.reader_ui.note_list.scroll_to_end();
+                    } else {
+                        this.reader_ui.gallery.list.scroll_to_end();
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
         }
         if let Some(index) = shot {
             self.open_reader_image(index, window, cx);
