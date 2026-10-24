@@ -48,7 +48,6 @@ Downloaded icons and the upstream license are pinned to Lucide commit `d672fc43d
 | `sun.svg` | `sun` | desktop/.deps/component/crates/assets/assets/icons/sun.svg |
 | `moon.svg` | `moon` | desktop/.deps/component/crates/assets/assets/icons/moon.svg |
 | `restart.svg` | `rotate-ccw` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/rotate-ccw.svg |
-| `shield.svg` | `shield` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/shield.svg |
 | `sparkles.svg` | `sparkles` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/sparkles.svg |
 | `server.svg` | `server` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/server.svg |
 | `tv.svg` | `tv` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/tv.svg |

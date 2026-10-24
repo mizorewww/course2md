@@ -77,7 +77,6 @@ icons! {
     search => "outline" / "search";
     server => "outline" / "server";
     settings => "outline" / "settings";
-    shield => "outline" / "shield";
     sparkles => "outline" / "sparkles";
     storage => "outline" / "storage";
     sun => "outline" / "sun";

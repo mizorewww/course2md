@@ -1025,11 +1025,6 @@ pub(crate) fn settings_tile(outer: [bool; 4]) -> Div {
         .text_size(TEXT_SETTINGS_BODY)
 }
 
-/// A standalone settings surface outside a group (a single tile).
-pub(crate) fn settings_card() -> Div {
-    settings_tile([true; 4])
-}
-
 /// The settings arrangement for the current window: a navigation pane (or a
 /// compact rail), the gap after it and the content width. As on the canvas,
 /// the whole layout is centered and at most 1180px wide with 24px gutters;

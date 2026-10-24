@@ -352,8 +352,6 @@ pub const TEXT_AUX: Rems = rems(0.857);
 pub const TEXT_BODY: Rems = rems(1.);
 pub const TEXT_TITLE: Rems = rems(1.286);
 pub const TEXT_READER: Rems = rems(1.143);
-/// Main page headline.
-pub const TEXT_DISPLAY: Rems = rems(2.);
 /// Page titles (M3 headline small at 30px).
 pub const TEXT_HEADLINE: Rems = rems(30. / 14.);
 /// Settings content reads one step larger than navigation and the workbench.
@@ -886,129 +884,6 @@ pub fn selection_card(
         .hover(|style| style.shadow_sm())
         .active(|style| style.opacity(0.9).shadow_none())
         .focus(|style| style.border_color(color(ACCENT)))
-}
-
-/// A choice that needs a short explanation stays visible as one interactive
-/// object. The title, description and indicator share the same content bounds.
-pub fn described_choice(
-    id: impl Into<gpui::ElementId>,
-    title: impl Into<gpui::SharedString>,
-    description: impl Into<gpui::SharedString>,
-    icon: gpui_component::Icon,
-    selected: bool,
-    window: &mut Window,
-    cx: &mut App,
-) -> gpui_base::Button {
-    use gpui::{prelude::*, *};
-    let id = id.into();
-    let amount = crate::motion::selection_value(
-        SharedString::from(format!("choice-card-{id:?}")),
-        if selected { 1. } else { 0. },
-        window,
-        cx,
-    );
-    let title = title.into();
-    let description = description.into();
-    selection_card(id, selected, amount)
-        .accessibility_label(title.clone())
-        .w_full()
-        .h_full()
-        .justify_start()
-        .items_stretch()
-        .p(rems(12. / 14.))
-        .gap(rems(8. / 14.))
-        .text_color(color(INK))
-        .child(
-            div()
-                .flex()
-                .w_full()
-                .min_w_0()
-                .items_center()
-                .gap(rems(8. / 14.))
-                .child(
-                    icon.size(rems(20. / 14.))
-                        .flex_shrink_0()
-                        .text_color(color(if selected { ACCENT } else { GRAY })),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(TEXT_BODY)
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .size(rems(18. / 14.))
-                        .rounded_full()
-                        .border_1()
-                        .border_color(color(if selected { ACCENT } else { CONTROL }))
-                        .bg(if selected {
-                            color(ACCENT)
-                        } else {
-                            color(SURFACE)
-                        })
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .when(selected, |v| {
-                            v.child(
-                                crate::icons::check()
-                                    .size(rems(1.))
-                                    .text_color(color(ON_PRIMARY)),
-                            )
-                        }),
-                ),
-        )
-        .when(!description.is_empty(), |card| {
-            card.child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .pl(LABEL_INSET)
-                    .whitespace_normal()
-                    .text_size(TEXT_AUX)
-                    .line_height(rems(18. / 14.))
-                    .text_color(color(GRAY))
-                    .child(description),
-            )
-        })
-}
-
-/// Compact forms use a leading label above the field. Padding belongs to the
-/// enclosing scroll viewport so focus effects never meet its clipping edge.
-pub fn stacked_field(
-    id: impl Into<gpui::ElementId>,
-    label: impl Into<gpui::SharedString>,
-    icon: gpui_component::Icon,
-    field: impl gpui::IntoElement,
-) -> gpui::Div {
-    use gpui::{prelude::*, *};
-    div()
-        .flex()
-        .flex_col()
-        .w_full()
-        .min_w_0()
-        .gap(rems(8. / 14.))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(rems(8. / 14.))
-                .child(
-                    icon.size(rems(18. / 14.))
-                        .flex_shrink_0()
-                        .text_color(color(GRAY)),
-                )
-                .child(
-                    accessible_text(id, label)
-                        .text_size(TEXT_BODY)
-                        .font_weight(FontWeight::MEDIUM),
-                ),
-        )
-        .child(field)
 }
 
 /// The single forward action of a page or region, in the active theme's accent.
