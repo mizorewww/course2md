@@ -129,8 +129,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 字节	{} 字节	{} bytes	{} 位元組	{}バイト
 {} 小时 {} 分	{} 小时 {} 分	{} hours {} minutes	{} 小時 {} 分	{}時間 {}分
 {} 已准备完成	{} 已准备完成	{} is ready	{} 已準備完成	{} の準備ができました
-{} 张	{} 张	{} screenshots	{} 張	{} 枚
-{} 张截图 / {} 段文字	{} 张截图 / {} 段文字	{} screenshots / {} paragraphs of text	{} 張截圖 / {} 段文字	スクリーンショット {} 枚 / テキスト {} 段落
+{} 张	{} 张	{} matched	{} 張	{} 枚
+{} 张截图 / {} 段文字	{} 张截图 / {} 段文字	Screenshots: {} / text paragraphs: {}	{} 張截圖 / {} 段文字	スクリーンショット {} 枚 / テキスト {} 段落
 {} 暂时无法访问	{} 暂时无法访问	{} is temporarily inaccessible	{} 暫時無法存取	{} は一時的にアクセスできません
 {} 的任务参数仍无法读取，材料已保留	{} 的任务参数仍无法读取，材料已保留	Task parameters for {} still cannot be read; the materials have been kept.	{} 的任務參數仍無法讀取，材料已保留	{} のタスク パラメータをまだ読み取れません。素材は保持されています。
 {} 的准备已暂停	{} 的准备已暂停	{} preparation is paused	{} 的準備已暫停	{} の準備は一時停止中です
@@ -490,6 +490,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 后台文件校验中断 / Background file check interrupted	后台文件校验中断	Background file check interrupted	背景檔案校驗中斷	バックグラウンドでのファイル検証が中断されました
 后续任务记录缺失，请先恢复任务记录	后续任务记录缺失，请先恢复任务记录	Subsequent task records are missing, please restore the task records first	後續任務記錄缺失，請先恢復任務記錄	後続のタスク レコードが欠落しています。最初にタスク レコードを復元してください。
 含 {} 张截图	含 {} 张截图	Contains {} screenshots	含 {} 張截圖	スクリーンショット {} 枚を含む
+含 1 张截图	含 1 张截图	Contains 1 screenshot	含 1 張截圖	スクリーンショット 1 枚を含む
 启动 yt-dlp 失败 / Failed to start yt-dlp	启动 yt-dlp 失败	Failed to start yt-dlp	啟動 yt-dlp 失敗	yt-dlp の起動に失敗しました
 启动 {} 失败	启动 {} 失败	Failed to start {}	啟動 {} 失敗	{} の起動に失敗しました
 呃	呃	Uh	呃	えー
@@ -598,7 +599,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	Inputs and tasks have been restored from backup. Unable to confirm the last operation, the unfinished task has been suspended.	已從備份恢復輸入和任務。無法確認最後一次操作，未完成任務已暫停。	入力とタスクはバックアップから復元されました。最後の操作を確認できず、未完了のタスクは中断されました。
 已使用环境变量中的密钥，点击保存后生效	已使用环境变量中的密钥，点击保存后生效	The key in the environment variable has been used and will take effect after clicking Save.	已使用環境變數中的金鑰，點選儲存後生效	環境変数のキーが使用されており、[保存] をクリックすると有効になります。
 已保存	已保存	Saved	已儲存	保存済み
-已保存 {} / {} 张截图	已保存 {} / {} 张截图	{} / {} screenshots saved	已儲存 {} / {} 張截圖	{} / {} 枚のスクリーンショットを保存しました
+已保存 {} / {} 张截图	已保存 {} / {} 张截图	Screenshots saved: {} / {}	已儲存 {} / {} 張截圖	{} / {} 枚のスクリーンショットを保存しました
 已保存密钥，留空则保留	已保存密钥，留空则保留	Key saved; leave blank to keep it	已儲存金鑰，留空則保留	キーは保存されました。保持するには空白のままにしておきます
 已保存登录信息	已保存登录信息	Login information saved	已儲存登入資訊	ログイン情報が保存されました
 已保存登录信息，尚未验证	已保存登录信息，尚未验证	Login information saved, not verified yet	已儲存登入資訊，尚未驗證	ログイン情報は保存されましたが、まだ検証されていません
@@ -756,7 +757,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 或把本地视频拖进窗口	或把本地视频拖进窗口	Or drag a local video into the window	或把本機影片拖進視窗	または、ローカル動画をウィンドウにドラッグします
 截图	截图	Screenshots	截圖	スクリーンショット
 截图 / Slides	截图	Slides	截圖	スクリーンショット
-截图 · {}	截图 · {}	Screenshot · {}	截圖 · {}	スクリーンショット · {}
+截图 · {}	截图 · {}	Screenshots · {}	截圖 · {}	スクリーンショット · {}
 截图不是可识别的图片，原文件已保留 / Screenshot is not a recognized image; original file kept	截图不是可识别的图片，原文件已保留	Screenshot is not a recognized image; original file kept	截圖不是可辨識的圖片，原檔案已保留	スクリーンショットは認識可能な画像ではなく、元のファイルは保持されています
 截图任务异常终止 / Slide extraction stopped unexpectedly	截图任务异常终止	Screenshot extraction stopped unexpectedly	截圖任務異常終止	スクリーンショットタスクが異常終了しました
 截图失败，原笔记不受影响 / Screenshot extraction failed; the original note is unaffected	截图失败，原笔记不受影响	Screenshot extraction failed; the original note is unaffected	截圖失敗，原筆記不受影響	スクリーンショットは失敗しました。元のノートは影響を受けません

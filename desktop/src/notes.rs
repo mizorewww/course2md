@@ -41,7 +41,10 @@ impl Course {
         }
     }
     pub fn content_description(&self) -> String {
-        if self.slides > 0 {
+        if self.slides == 1 {
+            // English counts its noun; the catalog keeps the singular apart.
+            course2md::tr!("含 1 张截图").to_owned()
+        } else if self.slides > 0 {
             course2md::tr!("含 {} 张截图", self.slides)
         } else {
             course2md::tr!("文字笔记").to_owned()
