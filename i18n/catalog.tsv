@@ -1361,7 +1361,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 此任务尚无可补做的笔记正文	此任务尚无可补做的笔记正文	This task has no note text for reprocessing yet	此任務尚無可補做的筆記正文	このタスクには再処理できるノート本文がまだありません
 此任务已有后续处理，请打开对应任务继续	此任务已有后续处理，请打开对应任务继续	This task already has follow-up processing. Open that task to continue.	此任務已有後續處理，請開啟對應任務繼續	このタスクにはすでに追加処理があります。対応するタスクを開いて続行してください。
 此前处理记录	此前处理记录	Earlier tasks	先前處理記錄	以前の処理記録
-此前处理记录 · {}	此前处理记录 · {}	Earlier tasks · {}	先前處理記錄 · {}	以前の処理記録 · {}
 此文件夹里有无法确认来源的旧进度，请换一个位置 / This folder contains earlier progress of unknown origin; choose another location	此文件夹里有无法确认来源的旧进度，请换一个位置	This folder contains earlier progress of unknown origin; choose another location	此資料夾裡有無法確認來源的舊進度，請換一個位置	このフォルダーには出所を確認できない古い進行状況があります。別の場所を選択してください。
 此服务不支持所选用途	此服务不支持所选用途	This service does not support the selected purpose	此服務不支援所選用途	このサービスは選択した用途をサポートしていません
 此服务已删除。请添加新的服务，原任务不会自动恢复外发	此服务已删除。请添加新的服务，原任务不会自动恢复外发	This service has been deleted. Add a new service; the original task will not automatically resume sending.	此服務已刪除。請新增新的服務，原任務不會自動恢復外發	このサービスは削除されました。新しいサービスを追加してください。元のタスクの送信は自動的には再開されません。
@@ -2116,10 +2115,8 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 上移	上移	Move up	上移	上へ移動
 下移	下移	Move down	下移	下へ移動
 移到最后	移到最后	Move to bottom	移到最後	末尾へ移動
-{} 添加	{} 添加	Added {}	{} 新增	{} に追加
 更多操作	更多操作	More actions	更多操作	その他の操作
 保存到 {}	保存到 {}	Saved to {}	儲存到 {}	保存先: {}
-这次的设置	这次的设置	Settings for this task	這次的設定	このタスクの設定
 只能调整排队中的任务	只能调整排队中的任务	Only queued tasks can be reordered	只能調整排隊中的任務	並べ替えられるのは待機中のタスクだけです
 第 {} 步 · {}	第 {} 步 · {}	Step {} · {}	第 {} 步 · {}	ステップ {} · {}
 笔记只能移到它所在保存位置里的文件夹	笔记只能移到它所在保存位置里的文件夹	A note can only move to folders in its own storage location	筆記只能移到它所在儲存位置裡的資料夾	ノートは保存場所内のフォルダーにのみ移動できます
@@ -2152,3 +2149,4 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 在浏览器中打开	在浏览器中打开	Open in browser	在瀏覽器中開啟	ブラウザで開く
 传递任务参数失败：{}	传递任务参数失败：{}	Could not pass the task input: {}	傳遞任務參數失敗：{}	タスク入力を渡せませんでした：{}
 正在保存密钥…	正在保存密钥…	Saving key…	正在儲存金鑰…	キーを保存中…
+{}尚未完成，笔记的其余部分已保存	{}尚未完成，笔记的其余部分已保存	{} not finished; the rest of the note is saved	{}尚未完成，筆記的其餘部分已儲存	{}は完了していません。ノートのほかの部分は保存済みです

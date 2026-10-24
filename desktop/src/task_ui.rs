@@ -17,6 +17,81 @@ use std::rc::Rc;
 /// Request purpose of a remote speech recognition call.
 const TRANSCRIPTION_PURPOSE: &str = "transcription";
 
+/// One reached pipeline step as a 32px chip: done steps are quiet with a
+/// check, the current one is tonal with its spinner, and a step that stopped
+/// names its state with color and icon.
+fn step_chip(stage: &TaskStage, cx: &App) -> Stateful<Div> {
+    let icon_size = rems(16. / 14.);
+    let chip = h_flex()
+        .id(stage.id.clone())
+        .flex_shrink_0()
+        .h(rems(32. / 14.))
+        .pl_2()
+        .pr_3()
+        .gap(px(6.))
+        .items_center()
+        .rounded(RADIUS_SMALL)
+        .text_size(rems(13. / 14.))
+        .whitespace_nowrap();
+    let label = accessible_text(
+        SharedString::from(format!("{}-chip", stage.id)),
+        stage.title.clone(),
+    );
+    let (chip, icon): (Stateful<Div>, AnyElement) = match stage.status {
+        StageStatus::Complete => (
+            chip.bg(color(CANVAS)).text_color(color(INK)),
+            icons::check()
+                .size(icon_size)
+                .text_color(color(SUCCESS))
+                .into_any_element(),
+        ),
+        StageStatus::Running | StageStatus::Stopping | StageStatus::Pausing => (
+            chip.bg(color(SECONDARY_CONTAINER))
+                .text_color(color(ON_SECONDARY_CONTAINER))
+                .font_weight(FontWeight::MEDIUM),
+            if stage.status == StageStatus::Pausing {
+                icons::pause()
+                    .size(icon_size)
+                    .text_color(color(ON_SECONDARY_CONTAINER))
+                    .into_any_element()
+            } else {
+                crate::motion::icon_spinner(
+                    SharedString::from(format!("{}-spinner", stage.id)),
+                    icon_size,
+                    cx,
+                )
+            },
+        ),
+        StageStatus::Failed => (
+            chip.bg(color(DANGER_BG)).text_color(color(DANGER)),
+            icons::warning()
+                .size(icon_size)
+                .text_color(color(DANGER))
+                .into_any_element(),
+        ),
+        StageStatus::Uncertain => (
+            chip.bg(color(WARNING_BG)).text_color(color(WARNING)),
+            icons::warning()
+                .size(icon_size)
+                .text_color(color(WARNING))
+                .into_any_element(),
+        ),
+        _ => (
+            chip.border_1()
+                .border_color(color(HAIRLINE))
+                .text_color(color(GRAY)),
+            div()
+                .mx_1()
+                .size(px(8.))
+                .rounded_full()
+                .border(px(1.5))
+                .border_color(color(CONTROL))
+                .into_any_element(),
+        ),
+    };
+    chip.child(icon).child(label)
+}
+
 /// One row of the virtualized task queue. Task rows carry their index into
 /// the task snapshot captured for the frame.
 enum QueueItem {
@@ -34,8 +109,6 @@ enum QueueItem {
         group: TaskGroup,
         /// Place among the waiting tasks, for reordering.
         number: Option<usize>,
-        /// Run order, shown for queued tasks.
-        runs: Option<usize>,
         first: bool,
         last: bool,
     },
@@ -44,9 +117,11 @@ enum QueueItem {
         hidden: usize,
         open: Entity<bool>,
     },
-    HistoryToggle {
+    /// Folds finished work and earlier records behind one tile.
+    CompletedToggle {
         count: usize,
-        open: Entity<bool>,
+        open: bool,
+        state: Entity<bool>,
     },
 }
 
@@ -61,7 +136,7 @@ impl QueueItem {
             QueueItem::Running(index) => format!("running-{}", tasks[*index].id),
             QueueItem::Row { task, .. } => format!("task-{}", tasks[*task].id),
             QueueItem::QueueFold { .. } => "queue-fold".to_owned(),
-            QueueItem::HistoryToggle { .. } => "history-toggle".to_owned(),
+            QueueItem::CompletedToggle { .. } => "completed-toggle".to_owned(),
         }
     }
 }
@@ -71,7 +146,6 @@ impl QueueItem {
 struct RowPlace {
     group: TaskGroup,
     number: Option<usize>,
-    runs: Option<usize>,
     first: bool,
     last: bool,
 }
@@ -87,6 +161,117 @@ struct QueueFrame<'a> {
 
 /// Queued rows shown before the rest of the queue folds.
 const QUEUE_PREVIEW: usize = 5;
+
+/// The task page's content column, inside the shell's gutters.
+const TASK_COLUMN: Rems = rems(832. / 14.);
+/// Between the page heading and each section.
+const TASK_SECTION_GAP: Pixels = px(28.);
+/// Between a section title and its first tile.
+const SECTION_TITLE_GAP: Pixels = px(10.);
+
+fn task_column() -> Div {
+    div().w_full().min_w_0().max_w(TASK_COLUMN).mx_auto()
+}
+
+/// A connected tile's corners: 24px on the group's outside, 6px between tiles.
+fn tile_corners<E: Styled>(view: E, first: bool, last: bool) -> E {
+    let radius = |outside: bool| {
+        if outside {
+            TILE_RADIUS
+        } else {
+            TILE_INNER_RADIUS
+        }
+    };
+    view.rounded_t(radius(first)).rounded_b(radius(last))
+}
+
+/// A count in the page heading: 32px, 8px corners, one color role per kind.
+fn summary_chip(id: &'static str, text: String, kind: BadgeKind) -> Div {
+    let chip = h_flex()
+        .flex_shrink_0()
+        .h(rems(32. / 14.))
+        .px(rems(12. / 14.))
+        .items_center()
+        .rounded(RADIUS_SMALL)
+        .text_size(rems(13. / 14.))
+        .font_weight(FontWeight::MEDIUM)
+        .whitespace_nowrap();
+    let chip = match kind {
+        BadgeKind::Progress => chip
+            .bg(color(SECONDARY_CONTAINER))
+            .text_color(color(ON_SECONDARY_CONTAINER)),
+        BadgeKind::Danger => chip.bg(color(DANGER_BG)).text_color(color(DANGER)),
+        _ => chip
+            .border_1()
+            .border_color(color(HAIRLINE))
+            .text_color(color(GRAY)),
+    };
+    chip.child(accessible_text(id, text))
+}
+
+/// M3 linear progress: an 8px active indicator, a 4px gap, the track, and a
+/// stop dot at the track's end. Only a measured fraction draws it; unmeasured
+/// work shows the shared indeterminate indicator.
+fn linear_progress(
+    id: SharedString,
+    fraction: Option<f32>,
+    paused: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let Some(fraction) = fraction else {
+        return div()
+            .w_full()
+            .h(px(8.))
+            .flex()
+            .items_center()
+            .child(crate::motion::indeterminate_progress(id, cx))
+            .into_any_element();
+    };
+    let target = if fraction.is_finite() {
+        fraction.clamp(0., 1.)
+    } else {
+        0.
+    };
+    let amount = crate::motion::value(id, target, window, cx);
+    let ink = color(if paused { CONTROL } else { ACCENT });
+    h_flex()
+        .w_full()
+        .h(px(8.))
+        .gap(px(4.))
+        .items_center()
+        .when(amount > 0.005, |bar| {
+            bar.child(
+                div()
+                    .flex_shrink_0()
+                    .h_full()
+                    .w(relative(amount))
+                    .rounded(px(4.))
+                    .bg(ink),
+            )
+        })
+        .when(amount < 0.995, |bar| {
+            bar.child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .rounded(px(4.))
+                    .bg(color(SECONDARY_CONTAINER))
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(2.))
+                            .right(px(2.))
+                            .size(px(4.))
+                            .rounded_full()
+                            .bg(ink),
+                    ),
+            )
+        })
+        .into_any_element()
+}
 
 /// A queued task being dragged to a new place in the queue.
 #[derive(Clone)]
@@ -116,13 +301,13 @@ impl Render for QueueDrag {
     }
 }
 
-/// Page order: the work in progress and what follows it, then what waits on
-/// the person, then the record.
+/// Page order: the work in progress, what waits on the person, what follows,
+/// then the record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TaskGroup {
     Running,
-    Queued,
     Attention,
+    Queued,
     Finished,
     History,
 }
@@ -130,8 +315,8 @@ pub(crate) enum TaskGroup {
 impl TaskGroup {
     const ORDER: [Self; 5] = [
         Self::Running,
-        Self::Queued,
         Self::Attention,
+        Self::Queued,
         Self::Finished,
         Self::History,
     ];
@@ -560,11 +745,21 @@ fn disclosure_toggle(id: SharedString) -> Button {
 /// Same minimum height as the card's `detail_row`.
 const DISCLOSURE_ROW: Rems = rems(32. / 14.);
 
-/// Where recovery actions appear: the task list card or the workbench box.
+/// Where recovery actions appear: the task list card, the filled action of
+/// an attention card, or the workbench box.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecoveryStyle {
     Card,
+    Lead,
     Workbench,
+}
+
+/// The recovery an attention card raises to its filled action.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Lead {
+    Repair,
+    Resume,
+    Retry(String),
 }
 
 #[derive(Clone, Copy)]
@@ -576,13 +771,23 @@ enum Emphasis {
 
 impl RecoveryStyle {
     fn button(self, name: &str, task_id: &str, emphasis: Emphasis, cx: &App) -> Button {
-        let prefix = if self == Self::Workbench { "box-" } else { "" };
+        let prefix = match self {
+            Self::Workbench => "box-",
+            Self::Lead => "lead-",
+            Self::Card => "",
+        };
         let id = SharedString::from(format!("{prefix}{name}-{task_id}"));
         match (self, emphasis) {
+            (Self::Lead, _) => primary_pill(id)
+                .h(BUTTON_MEDIUM)
+                .min_h(BUTTON_MEDIUM)
+                .px(rems(22. / 14.))
+                .label_text_size(rems(15. / 14.)),
             (_, Emphasis::Secondary) => outline_pill(id, cx),
             (Self::Workbench, Emphasis::Primary) => primary_pill(id),
             (Self::Workbench, Emphasis::Quiet) => quiet(id),
-            (Self::Card, _) => control(id),
+            (Self::Card, Emphasis::Primary) => tonal_pill(id, cx),
+            (Self::Card, Emphasis::Quiet) => text_button(id, cx),
         }
     }
 }
@@ -731,8 +936,17 @@ impl Desktop {
                 }
             }
         };
-        let history_open = window.use_keyed_state("task-history-open", cx, |_, _| false);
+        let completed_state = window.use_keyed_state("task-history-open", cx, |_, _| false);
         let queue_open = window.use_keyed_state("task-queue-open", cx, |_, _| false);
+        // Finished work and earlier records fold behind one tile; a task the
+        // person went to (from the library or a notice) stays visible.
+        let expanded_done = self.expanded_task.as_ref().is_some_and(|id| {
+            tasks.iter().any(|task| {
+                &task.id == id
+                    && matches!(task_group(task), TaskGroup::Finished | TaskGroup::History)
+            })
+        });
+        let completed_open = *completed_state.read(cx) || expanded_done;
         for group in TaskGroup::ORDER {
             let members: Vec<usize> = tasks
                 .iter()
@@ -740,23 +954,31 @@ impl Desktop {
                 .filter(|(_, task)| task_group(task) == group)
                 .map(|(index, _)| index)
                 .collect();
+            if group == TaskGroup::Finished {
+                let count = tasks
+                    .iter()
+                    .filter(|task| {
+                        matches!(task_group(task), TaskGroup::Finished | TaskGroup::History)
+                    })
+                    .count();
+                if count > 0 {
+                    items.push(QueueItem::CompletedToggle {
+                        count,
+                        open: completed_open,
+                        state: completed_state.clone(),
+                    });
+                }
+            }
             if members.is_empty() {
                 continue;
             }
-            if group == TaskGroup::History {
-                items.push(QueueItem::HistoryToggle {
-                    count: members.len(),
-                    open: history_open.clone(),
-                });
-                if !*history_open.read(cx) {
-                    continue;
-                }
-            } else {
-                items.push(QueueItem::GroupLabel {
-                    group,
-                    count: members.len(),
-                });
+            if matches!(group, TaskGroup::Finished | TaskGroup::History) && !completed_open {
+                continue;
             }
+            items.push(QueueItem::GroupLabel {
+                group,
+                count: members.len(),
+            });
             if group == TaskGroup::Running {
                 items.extend(members.into_iter().map(QueueItem::Running));
                 continue;
@@ -768,17 +990,12 @@ impl Desktop {
             } else {
                 members.len()
             };
-            // Queued tasks are numbered in the order they will run; paused
-            // ones keep their place without a number.
-            let mut next = 0;
+            // The tile order is the run order; paused tasks keep their place.
             for (position, &task) in members.iter().take(shown).enumerate() {
-                let runs = tasks[task].state == TaskState::Queued;
-                next += usize::from(runs);
                 items.push(QueueItem::Row {
                     task,
                     group,
                     number: (group == TaskGroup::Queued).then_some(position + 1),
-                    runs: runs.then_some(next),
                     first: position == 0,
                     last: position + 1 == shown && !folds,
                 });
@@ -802,13 +1019,16 @@ impl Desktop {
             self.queue_list.remeasure();
             self.queue_rem = rem;
         }
-        // Group headings carry the counts; the page heading stays a heading.
-        let header = (!tasks.is_empty()).then(|| self.queue_page_header(&tasks, cx));
+        // The page heading summarizes the counts; group headings stay names.
+        let header = self
+            .workspace
+            .is_some()
+            .then(|| self.queue_page_header(&tasks, cx));
         let focus: Rc<Vec<FocusHandle>> = Rc::new(self.queue_focus.clone());
         let state = self.queue_list.clone();
         let items = Rc::new(items);
         let desktop = cx.weak_entity();
-        let queue = list(state, move |index, _, cx| {
+        let queue = list(state, move |index, window, cx| {
             let Some(item) = items.get(index) else {
                 return div().into_any_element();
             };
@@ -821,7 +1041,7 @@ impl Desktop {
                         last,
                         focus: focus.get(index),
                     };
-                    this.queue_item(item, frame, cx)
+                    this.queue_item(item, frame, window, cx)
                 })
                 .unwrap_or_else(|_| div().into_any_element())
         })
@@ -829,20 +1049,22 @@ impl Desktop {
         .h_full()
         .flex_1()
         .min_h_0()
-        .pb_6();
+        .pb(px(72.));
         v_flex()
             .w_full()
             .h_full()
             .min_h_0()
-            .pt(px(24.))
-            .gap_4()
-            .when_some(header, |view, header| view.child(header))
+            .pt(px(16.))
+            .gap(TASK_SECTION_GAP)
+            .when_some(header, |view, header| {
+                view.child(task_column().child(header))
+            })
             .child(queue)
             .into_any_element()
     }
 
-    /// The page title with a summary of the work, and the action that stops
-    /// or resumes all of it.
+    /// The page title with a chip for each kind of work there is, and the
+    /// action that stops or resumes all of it.
     fn queue_page_header(&self, tasks: &[TaskRecord], cx: &mut Context<Self>) -> Div {
         let count = |group: TaskGroup| {
             tasks
@@ -857,17 +1079,36 @@ impl Desktop {
             .filter(|task| task.state == TaskState::Queued)
             .count();
         let resumable = tasks.iter().filter(|task| resumable(task)).count();
-        let summary = [
-            (running, course2md::tr!("{} 个正在处理", running)),
-            (queued, course2md::tr!("{} 个排队中", queued)),
-            (resumable, course2md::tr!("{} 个已暂停", resumable)),
-            (attention, course2md::tr!("{} 个需要处理", attention)),
+        let chips: Vec<Div> = [
+            (
+                running,
+                "tasks-summary-running",
+                BadgeKind::Progress,
+                course2md::tr!("{} 个正在处理", running),
+            ),
+            (
+                attention,
+                "tasks-summary-attention",
+                BadgeKind::Danger,
+                course2md::tr!("{} 个需要处理", attention),
+            ),
+            (
+                queued,
+                "tasks-summary-queued",
+                BadgeKind::Neutral,
+                course2md::tr!("{} 个排队中", queued),
+            ),
+            (
+                resumable,
+                "tasks-summary-paused",
+                BadgeKind::Neutral,
+                course2md::tr!("{} 个已暂停", resumable),
+            ),
         ]
         .into_iter()
-        .filter(|(count, _)| *count > 0)
-        .map(|(_, text)| text)
-        .collect::<Vec<_>>()
-        .join(" · ");
+        .filter(|(count, ..)| *count > 0)
+        .map(|(_, id, kind, text)| summary_chip(id, text, kind))
+        .collect();
         // Pausing applies to work that is still meant to run; a task already
         // stopping has nothing left to pause.
         let pausable = tasks
@@ -878,14 +1119,22 @@ impl Desktop {
                     && task.handled_by.is_none()
             })
             .count();
+        let all_button = |id: &'static str, cx: &mut Context<Self>| {
+            outline_pill(id, cx)
+                .h(BUTTON_MEDIUM)
+                .min_h(BUTTON_MEDIUM)
+                .pl(rems(16. / 14.))
+                .pr(rems(20. / 14.))
+                .label_text_size(rems(15. / 14.))
+        };
         let pause = (pausable > 0).then(|| {
-            outline_pill("tasks-pause-all", cx)
+            all_button("tasks-pause-all", cx)
                 .icon(icons::pause())
                 .label(course2md::tr!("全部暂停"))
                 .on_click(cx.listener(|this, _, _, cx| this.pause_all_tasks(cx)))
         });
         let resume = (resumable > 0).then(|| {
-            outline_pill("tasks-resume-all", cx)
+            all_button("tasks-resume-all", cx)
                 .icon(icons::play_arrow())
                 .label(course2md::tr!("全部继续"))
                 .on_click(cx.listener(|this, _, _, cx| this.resume_all_tasks(cx)))
@@ -893,24 +1142,22 @@ impl Desktop {
         h_flex()
             .w_full()
             .min_w_0()
+            .min_h(rems(56. / 14.))
             .gap_4()
             .items_center()
             .flex_wrap()
             .child(
                 v_flex()
                     .flex_1()
+                    .flex_basis(rems(320. / 14.))
                     .min_w_0()
-                    .gap_1()
+                    .gap(px(10.))
                     .child(theme::page_heading(
                         "tasks-page-title",
                         course2md::tr!("任务"),
                     ))
-                    .when(!summary.is_empty(), |heading| {
-                        heading.child(
-                            accessible_text("tasks-page-summary", summary)
-                                .text_size(TEXT_BODY)
-                                .text_color(color(GRAY)),
-                        )
+                    .when(!chips.is_empty(), |heading| {
+                        heading.child(h_flex().gap_2().flex_wrap().children(chips))
                     }),
             )
             .child(h_flex().gap_2().children(pause).children(resume))
@@ -986,6 +1233,7 @@ impl Desktop {
         &mut self,
         item: &QueueItem,
         frame: QueueFrame,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let QueueFrame {
@@ -994,7 +1242,8 @@ impl Desktop {
             last,
             focus,
         } = frame;
-        let mut gap = !last;
+        // Tiles of a group sit 2px apart; sections are 28px apart.
+        let mut gap_after = TASK_SECTION_GAP;
         let content = match item {
             QueueItem::Unavailable => v_flex()
                 .gap_3()
@@ -1009,18 +1258,40 @@ impl Desktop {
                 )
                 .into_any_element(),
             QueueItem::Empty => v_flex()
-                .gap_3()
-                .py_12()
+                .w_full()
+                .gap_4()
+                .px_5()
+                .py(px(40.))
                 .items_center()
-                .child(icons::task().size_8().text_color(color(GRAY)))
+                .rounded(RADIUS_HERO)
+                .bg(color(SURFACE))
+                .child(
+                    div()
+                        .size(px(64.))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(color(SECONDARY_CONTAINER))
+                        .child(
+                            icons::list_checks()
+                                .size(px(28.))
+                                .text_color(color(ON_SECONDARY_CONTAINER)),
+                        ),
+                )
                 .child(
                     accessible_text("task-empty-title", course2md::tr!("还没有生成任务"))
                         .role(Role::Heading)
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD),
+                        .text_size(rems(18. / 14.))
+                        .line_height(rems(26. / 14.))
+                        .font_weight(FontWeight::MEDIUM),
                 )
                 .child(
                     primary_pill("task-new")
+                        .h(BUTTON_MEDIUM)
+                        .min_h(BUTTON_MEDIUM)
+                        .px(rems(22. / 14.))
+                        .label_text_size(rems(15. / 14.))
                         .icon(icons::plus())
                         .label(course2md::tr!("导入视频"))
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -1031,22 +1302,17 @@ impl Desktop {
                 )
                 .into_any_element(),
             QueueItem::GroupLabel { group, count } => {
-                let title = if *group == TaskGroup::Running {
-                    group.label().to_owned()
-                } else {
-                    format!("{} · {count}", group.label())
-                };
+                gap_after = SECTION_TITLE_GAP;
                 h_flex()
                     .w_full()
                     .min_w_0()
-                    .pt_4()
-                    .px_4()
-                    .gap_4()
-                    .items_end()
-                    .justify_between()
+                    .px(SETTING_ITEM_INSET)
+                    .gap_x_3()
+                    .items_baseline()
+                    .flex_wrap()
                     .child(theme::section_title(
                         SharedString::from(format!("task-group-{group:?}")),
-                        title,
+                        group.label(),
                     ))
                     .when(*group == TaskGroup::Queued && *count > 1, |row| {
                         row.child(
@@ -1054,7 +1320,7 @@ impl Desktop {
                                 "task-queue-order-hint",
                                 course2md::tr!("拖动可以调整顺序"),
                             )
-                            .text_size(TEXT_AUX)
+                            .text_size(rems(13. / 14.))
                             .text_color(color(GRAY)),
                         )
                     })
@@ -1066,7 +1332,7 @@ impl Desktop {
                 div()
                     .id(SharedString::from(format!("task-menu-{}", task.id)))
                     .w_full()
-                    .child(self.running_task_card(task, cx))
+                    .child(self.running_task_card(task, window, cx))
                     .context_menu(move |popup, window, cx| menu(popup, window, cx))
                     .into_any_element()
             }
@@ -1074,32 +1340,34 @@ impl Desktop {
                 task,
                 group,
                 number,
-                runs,
                 first,
                 last: last_row,
             } => {
-                gap = *last_row && !last;
+                if !*last_row {
+                    gap_after = TILE_GAP;
+                }
                 let place = RowPlace {
                     group: *group,
                     number: *number,
-                    runs: *runs,
                     first: *first,
                     last: *last_row,
                 };
-                self.task_row(&tasks[*task], place, cx)
+                if *group == TaskGroup::Attention {
+                    self.attention_task_card(&tasks[*task], place, cx)
+                } else {
+                    self.task_row(&tasks[*task], place, cx)
+                }
             }
             QueueItem::QueueFold { hidden, open } => {
                 let toggle = open.clone();
                 let opened = *open.read(cx);
-                h_flex()
+                tile_corners(h_flex(), false, true)
                     .w_full()
                     .justify_center()
                     .py_2()
                     .bg(color(SURFACE))
-                    .rounded_b(RADIUS_CARD)
                     .child(
-                        quiet("toggle-task-queue")
-                            .text_color(color(ACCENT))
+                        text_button("toggle-task-queue", cx)
                             .label(if opened {
                                 course2md::tr!("收起").to_owned()
                             } else {
@@ -1122,34 +1390,97 @@ impl Desktop {
                     )
                     .into_any_element()
             }
-            QueueItem::HistoryToggle { count, open } => {
-                let toggle = open.clone();
-                quiet("toggle-task-history")
-                    .self_start()
-                    .mt_4()
-                    .icon(if *open.read(cx) {
-                        icons::chevron_up()
-                    } else {
-                        icons::chevron_down()
-                    })
-                    .label(course2md::tr!("此前处理记录 · {}", count))
-                    .on_click(move |_, _, cx| {
-                        toggle.update(cx, |open, cx| {
-                            *open = !*open;
+            QueueItem::CompletedToggle { count, open, state } => {
+                let toggle = state.clone();
+                let open = *open;
+                // The tile names what it folds; the count is the record's size.
+                control("toggle-task-history")
+                    .text()
+                    .w_full()
+                    .h_auto()
+                    .min_h(rems(64. / 14.))
+                    .px(SETTING_ITEM_INSET)
+                    .py_4()
+                    .justify_start()
+                    .rounded(TILE_RADIUS)
+                    .bg(color(SURFACE))
+                    .accessibility_label(course2md::tr!(
+                        "{}，{}",
+                        if open {
+                            course2md::tr!("收起已完成的处理")
+                        } else {
+                            course2md::tr!("查看已完成的处理")
+                        },
+                        count
+                    ))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .gap_4()
+                            .items_center()
+                            .child(icons::history().size(px(22.)).text_color(color(GRAY)))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(rems(16. / 14.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(color(INK))
+                                    .child(if open {
+                                        course2md::tr!("收起已完成的处理")
+                                    } else {
+                                        course2md::tr!("查看已完成的处理")
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_size(rems(13. / 14.))
+                                    .text_color(color(GRAY))
+                                    .child(count.to_string()),
+                            )
+                            .child(
+                                if open {
+                                    icons::chevron_up()
+                                } else {
+                                    icons::chevron_down()
+                                }
+                                .size(ICON_SLOT)
+                                .text_color(color(GRAY)),
+                            ),
+                    )
+                    // Folding also closes a finished task that was opened
+                    // from elsewhere, or the fold could not close.
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if open
+                            && let Some(id) = this.expanded_task.clone()
+                            && this
+                                .workspace
+                                .as_ref()
+                                .and_then(|workspace| workspace.state.task(&id))
+                                .is_some_and(|task| {
+                                    matches!(
+                                        task_group(task),
+                                        TaskGroup::Finished | TaskGroup::History
+                                    )
+                                })
+                        {
+                            this.clear_task_card_motion(&id);
+                            this.expanded_task = None;
+                        }
+                        toggle.update(cx, |state, cx| {
+                            *state = !open;
                             cx.notify();
                         });
-                    })
+                    }))
                     .into_any_element()
             }
         };
-        let gap_after = match item {
-            QueueItem::GroupLabel { .. } => rems(8. / 14.),
-            _ => rems(12. / 14.),
-        };
-        let mut wrapper = v_flex()
-            .w_full()
-            .min_w_0()
-            .when(gap, |view| view.pb(gap_after))
+        let mut wrapper = task_column()
+            .flex()
+            .flex_col()
+            .when(!last, |view| view.pb(gap_after))
             .child(content)
             .id(("queue-item", index))
             .tab_stop(false);
@@ -1533,8 +1864,17 @@ impl Desktop {
         (pause, cancel)
     }
 
-    /// A row of a group's surface: identity, status and the row's commands.
-    /// Clicking it folds its details out below, inside the same surface.
+    /// Where a task saves, as its supporting line.
+    fn task_destination(&self, task: &TaskRecord) -> String {
+        match self.task_library(task) {
+            Some(location) => course2md::tr!("保存到 {}", location.name),
+            None => course2md::tr!("保存位置暂时不可用").to_owned(),
+        }
+    }
+
+    /// One tile of a group: a grip for queued work, the cover, the title with
+    /// where it saves, and the row's commands. Clicking it folds its details
+    /// out below, inside the same tile.
     fn task_row(
         &mut self,
         task: &TaskRecord,
@@ -1544,55 +1884,48 @@ impl Desktop {
         let RowPlace {
             group,
             number,
-            runs,
             first,
             last,
         } = place;
         let id = task.id.clone();
         let expanded = self.expanded_task.as_ref() == Some(&id);
-        let reason = (group == TaskGroup::Attention && !expanded)
-            .then(|| attention_reason(task))
-            .flatten();
-        let added = course2md::tr!(
-            "{} 添加",
-            crate::reader_navigation::timestamp_local(task.created * 1000)
-        );
         let identity = h_flex()
             .flex_1()
             .min_w_0()
-            .gap_4()
+            .gap_3()
             .items_center()
-            .child(task_row_cover(
-                self.task_cover(task),
-                group == TaskGroup::Queued,
-            ))
+            .child(
+                task_row_cover(self.task_cover(task), group == TaskGroup::Queued)
+                    .w(rems(96. / 14.))
+                    .rounded(px(10.)),
+            )
             .child(
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap_1()
+                    .gap(px(2.))
                     .child(
                         accessible_text(
                             SharedString::from(format!("task-title-{id}")),
                             task.plan.title.clone(),
                         )
-                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_size(rems(16. / 14.))
+                        .line_height(rems(22. / 14.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(color(INK))
                         .whitespace_normal()
                         .text_ellipsis()
                         .line_clamp(2),
                     )
                     .child(
-                        accessible_text(SharedString::from(format!("task-created-{id}")), added)
-                            .text_size(TEXT_AUX)
-                            .whitespace_normal()
-                            .text_color(color(GRAY)),
-                    )
-                    .children(reason.map(|reason| {
-                        accessible_text(SharedString::from(format!("task-reason-{id}")), reason)
-                            .text_size(TEXT_AUX)
-                            .whitespace_normal()
-                            .text_color(color(DANGER))
-                    })),
+                        accessible_text(
+                            SharedString::from(format!("task-created-{id}")),
+                            self.task_destination(task),
+                        )
+                        .text_size(rems(13. / 14.))
+                        .whitespace_normal()
+                        .text_color(color(GRAY)),
+                    ),
             );
         // The row carries the pointer feedback, so the whole row reads as one target.
         let toggle = control(SharedString::from(format!("select-{id}")))
@@ -1624,7 +1957,7 @@ impl Desktop {
             .flex_shrink_0()
             .gap_2()
             .items_center()
-            // A queued row's number already says it waits.
+            // A queued tile's place in the queue already says it waits.
             .when(task.state != TaskState::Queued, |trailing| {
                 trailing.child(badge(task_badge_kind(task.state)).child(task_status_label(task)))
             });
@@ -1635,9 +1968,7 @@ impl Desktop {
         {
             let title = task.plan.title.clone();
             trailing = trailing.child(
-                quiet(SharedString::from(format!("task-read-direct-{id}")))
-                    .text_color(color(ACCENT))
-                    .icon(icons::book_open())
+                text_button(SharedString::from(format!("task-read-direct-{id}")), cx)
                     .label(course2md::tr!("阅读笔记"))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_course(
@@ -1654,56 +1985,47 @@ impl Desktop {
         let menu = self.task_menu(task, cx);
         let dropdown = menu.clone();
         trailing = trailing.child(
-            quiet(SharedString::from(format!("task-more-{id}")))
-                .icon(icons::ellipsis())
-                .accessibility_label(course2md::tr!("更多操作"))
-                .tooltip(course2md::tr!("更多操作"))
-                .dropdown_menu(move |popup, window, cx| dropdown(popup, window, cx)),
+            icon_button(
+                SharedString::from(format!("task-more-{id}")),
+                CONTROL_HEIGHT,
+                false,
+                cx,
+            )
+            .icon(icons::more_vertical())
+            .accessibility_label(course2md::tr!("更多操作"))
+            .tooltip(course2md::tr!("更多操作"))
+            .dropdown_menu(move |popup, window, cx| dropdown(popup, window, cx)),
         );
-        // The divider spans the row's identity and commands, from the cover on.
         // At narrow widths or large text the commands move under the identity.
         let body = h_flex()
             .flex_1()
             .min_w_0()
-            .gap_x_4()
+            .gap_x_3()
             .gap_y_2()
-            .py_3()
             .items_center()
             .flex_wrap()
-            .when(!first, |body| {
-                body.border_t_1().border_color(color(HAIRLINE))
-            })
             .child(toggle)
             .child(trailing);
-        let mut row = h_flex()
+        let mut row = tile_corners(h_flex(), first, last && !expanded)
             .id(SharedString::from(format!("task-row-{id}")))
             .w_full()
             .min_w_0()
-            .pl_4()
+            .py_3()
             .pr_2()
             .gap_3()
             .items_center()
-            .when(first, |row| row.rounded_t(RADIUS_CARD))
-            .when(last && !expanded, |row| row.rounded_b(RADIUS_CARD))
             .hover(|style| style.bg(blend(color(SURFACE), color(INK), 0.05)));
         if let Some(number) = number {
-            row = row.child(
+            row = row.pl_2().child(
                 h_flex()
                     .flex_shrink_0()
-                    .gap_2()
-                    .items_center()
+                    .w(rems(32. / 14.))
+                    .justify_center()
                     .cursor_grab()
                     .child(
                         icons::grip_vertical()
                             .size(ICON_SLOT)
-                            .text_color(color(GRAY)),
-                    )
-                    .child(
-                        div()
-                            .min_w(rems(20. / 14.))
-                            .text_size(TEXT_BODY)
-                            .text_color(color(GRAY))
-                            .children(runs.map(|runs| runs.to_string())),
+                            .text_color(color(CONTROL)),
                     ),
             );
             let drag = QueueDrag {
@@ -1716,18 +2038,22 @@ impl Desktop {
                 .on_drop(cx.listener(move |this, drag: &QueueDrag, _, cx| {
                     this.move_waiting_task(&drag.id, number - 1, cx)
                 }));
+        } else {
+            row = row.pl_3();
         }
         let row = row.child(body);
-        let mut surface = v_flex()
+        let mut surface = tile_corners(v_flex(), first, last)
             .w_full()
             .min_w_0()
             .bg(color(SURFACE))
-            .when(first, |view| view.rounded_t(RADIUS_CARD))
-            .when(last, |view| view.rounded_b(RADIUS_CARD))
             .child(row);
         if expanded {
             // Padding outside the detail keeps its divider on the rows' inset.
-            let detail = div().pl_4().pr_2().pb_4().child(self.task_detail(task, cx));
+            let detail = div()
+                .pl(SETTING_ITEM_INSET)
+                .pr_4()
+                .pb_4()
+                .child(self.task_detail(task, None, cx));
             let detail_id = format!("task-detail-{id}");
             surface = surface.child(if self.enter_once(detail_id.clone()) {
                 crate::motion::enter(SharedString::from(detail_id), detail)
@@ -1741,183 +2067,449 @@ impl Desktop {
             .into_any_element()
     }
 
-    /// The task being processed: its identity, the step it is on, every step
-    /// so far, the settings it was submitted with, and its controls.
-    fn running_task_card(&mut self, task: &TaskRecord, cx: &mut Context<Self>) -> AnyElement {
+    /// The one recovery that resolves this task, raised to the card's filled
+    /// action; the expanded detail keeps the others.
+    fn attention_lead(&self, task: &TaskRecord) -> Option<Lead> {
+        if task.handled_by.is_some() || task.has_uncertain() {
+            return None;
+        }
+        let requires_repair = task_requires_service_repair(task);
+        if task.artifact.is_some() && requires_repair {
+            return Some(Lead::Repair);
+        }
+        if matches!(task.state, TaskState::Paused | TaskState::NeedsAttention) {
+            return Some(Lead::Resume);
+        }
+        if task.artifact.is_some() {
+            return task_component_failures(task)
+                .into_iter()
+                .find(|(component, ..)| !(requires_repair && ai_component(component).is_some()))
+                .map(|(component, ..)| Lead::Retry(component));
+        }
+        None
+    }
+
+    /// A task that needs the person: what went wrong, what it means for the
+    /// note, and the action that fixes it.
+    fn attention_task_card(
+        &mut self,
+        task: &TaskRecord,
+        place: RowPlace,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let id = task.id.clone();
-        let active = self.is_running_task(&id);
-        let library: SharedString = self
-            .task_library(task)
-            .map(|location| location.name.clone().into())
-            .unwrap_or_else(|| course2md::tr!("保存位置暂时不可用").into());
-        let header = h_flex()
-            .w_full()
+        let expanded = self.expanded_task.as_ref() == Some(&id);
+        let single = place.first && place.last;
+        let requires_repair = task_requires_service_repair(task);
+        let failures = if task.artifact.is_some() {
+            task_component_failures(task)
+        } else {
+            Vec::new()
+        };
+        let uncertain = task.has_uncertain();
+        let (tone_bg, tone) = if uncertain || task.state == TaskState::Uncertain {
+            (WARNING_BG, WARNING)
+        } else {
+            (DANGER_BG, DANGER)
+        };
+        // A partial note names each unfinished part; any other task has one reason.
+        let mut reasons: Vec<String> = Vec::new();
+        if task.state == TaskState::Partial && !failures.is_empty() {
+            if let Some(reason) = task_service_repair_reason(task) {
+                reasons.push(reason.to_owned());
+            }
+            reasons.extend(
+                failures
+                    .iter()
+                    .filter(|(component, ..)| {
+                        !(requires_repair && ai_component(component).is_some())
+                    })
+                    .map(|(_, label, outcome)| activity::outcome_failure_message(label, outcome)),
+            );
+        } else if !uncertain {
+            reasons.push(task_attention_summary(task));
+        }
+        let consequence = (!failures.is_empty()).then(|| {
+            course2md::tr!(
+                "{}尚未完成，笔记的其余部分已保存",
+                failures
+                    .iter()
+                    .map(|(_, label, _)| label.as_str())
+                    .collect::<Vec<_>>()
+                    .join(course2md::tr!("、"))
+            )
+        });
+        let lead = self.attention_lead(task);
+        let lead_button = lead.as_ref().map(|lead| match lead {
+            Lead::Repair => self.repair_ai_action(task, RecoveryStyle::Lead, cx),
+            Lead::Resume => self.resume_action(task, RecoveryStyle::Lead, cx),
+            Lead::Retry(component) => {
+                self.retry_component_action(task, component, RecoveryStyle::Lead, cx)
+            }
+        });
+        let read = task.artifact.clone().map(|path| {
+            let title = task.plan.title.clone();
+            text_button(SharedString::from(format!("task-read-direct-{id}")), cx)
+                .label(course2md::tr!("阅读笔记"))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_course(
+                        Course::from_completed(&Done {
+                            out_dir: path.clone(),
+                            title: title.clone(),
+                            ..Default::default()
+                        }),
+                        cx,
+                    );
+                }))
+        });
+        let details = text_button(SharedString::from(format!("select-{id}")), cx)
+            .label(if expanded {
+                course2md::tr!("收起详情")
+            } else {
+                course2md::tr!("查看详情")
+            })
+            .accessibility_label(course2md::tr!(
+                "{}，{}，{}",
+                task.plan.title,
+                task_status_label(task),
+                if expanded {
+                    course2md::tr!("收起详情")
+                } else {
+                    course2md::tr!("查看详情")
+                }
+            ))
+            .on_click(cx.listener({
+                let id = id.clone();
+                move |this, _, _, cx| this.toggle_task_row(&id, cx)
+            }));
+        let menu = self.task_menu(task, cx);
+        let dropdown = menu.clone();
+        let more = icon_button(
+            SharedString::from(format!("task-more-{id}")),
+            CONTROL_HEIGHT,
+            false,
+            cx,
+        )
+        .icon(icons::more_vertical())
+        .accessibility_label(course2md::tr!("更多操作"))
+        .tooltip(course2md::tr!("更多操作"))
+        .dropdown_menu(move |popup, window, cx| dropdown(popup, window, cx));
+        let mut text = v_flex()
+            .flex_1()
+            .flex_basis(rems(300. / 14.))
             .min_w_0()
-            .gap_4()
-            .items_center()
-            .child(task_row_cover(self.task_cover(task), false))
+            .gap(px(6.))
             .child(
-                v_flex()
-                    .flex_1()
+                h_flex()
+                    .w_full()
                     .min_w_0()
-                    .gap_1()
+                    .gap_2()
+                    .items_start()
                     .child(
                         accessible_text(
                             SharedString::from(format!("task-title-{id}")),
                             task.plan.title.clone(),
                         )
-                        .text_size(TEXT_TITLE)
-                        .font_weight(FontWeight::SEMIBOLD)
+                        .flex_1()
+                        .min_w_0()
+                        .pt(px(10.))
+                        .text_size(rems(17. / 14.))
+                        .line_height(rems(24. / 14.))
+                        .font_weight(FontWeight::MEDIUM)
                         .whitespace_normal()
                         .text_ellipsis()
                         .line_clamp(2),
                     )
-                    .child(
-                        accessible_text(
-                            SharedString::from(format!("task-created-{id}")),
-                            format!(
-                                "{} · {}",
-                                course2md::tr!(
-                                    "{} 添加",
-                                    crate::reader_navigation::timestamp_local(task.created * 1000)
-                                ),
-                                course2md::tr!("保存到 {}", library)
-                            ),
-                        )
-                        .text_size(TEXT_AUX)
-                        .whitespace_normal()
-                        .text_color(color(GRAY)),
-                    ),
+                    .child(more),
             )
-            .child(badge(task_badge_kind(task.state)).child(task_status_label(task)));
-        let stages = self.task_stage_rows(task);
-        // The step in progress and the job's clock, on one line that never
-        // wraps under a neighbour.
-        // Later steps depend on what the video turns out to need, so the
-        // position counts the steps reached so far, without a total.
-        let current = stages
-            .iter()
-            .position(|stage| {
-                matches!(
-                    stage.status,
-                    StageStatus::Running | StageStatus::Pausing | StageStatus::Stopping
+            .children(reasons.into_iter().enumerate().map(|(index, reason)| {
+                accessible_text(
+                    SharedString::from(format!("task-feedback-{id}-{index}")),
+                    reason,
                 )
-            })
-            .map(|index| course2md::tr!("第 {} 步 · {}", index + 1, stages[index].title));
+                .role(Role::Alert)
+                .text_size(TEXT_BODY)
+                .line_height(rems(20. / 14.))
+                .text_color(color(INK))
+                .whitespace_normal()
+            }))
+            .children(consequence.map(|consequence| {
+                accessible_text(
+                    SharedString::from(format!("task-consequence-{id}")),
+                    consequence,
+                )
+                .text_size(rems(13. / 14.))
+                .text_color(color(GRAY))
+                .whitespace_normal()
+            }))
+            .children(self.uncertain_block(task, cx).map(|block| block.mt_2()))
+            .child(
+                h_flex()
+                    .mt(px(10.))
+                    .gap_2()
+                    .items_center()
+                    .flex_wrap()
+                    .children(lead_button)
+                    .children(read)
+                    .child(details),
+            );
+        if expanded {
+            let detail = div().pt_2().child(self.task_detail(task, Some(lead), cx));
+            let detail_id = format!("task-detail-{id}");
+            text = text.child(if self.enter_once(detail_id.clone()) {
+                crate::motion::enter(SharedString::from(detail_id), detail)
+            } else {
+                detail.into_any_element()
+            });
+        }
+        let card = h_flex()
+            .id(SharedString::from(format!("task-menu-{id}")))
+            .w_full()
+            .min_w_0()
+            .p_5()
+            .gap_4()
+            .items_start()
+            .flex_wrap()
+            .bg(color(SURFACE))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .size(px(48.))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(color(tone_bg))
+                    .child(icons::warning().size(px(24.)).text_color(color(tone))),
+            )
+            .child(text);
+        let card = if single {
+            card.rounded(RADIUS_HERO)
+        } else {
+            tile_corners(card, place.first, place.last)
+        };
+        card.context_menu(move |popup, window, cx| menu(popup, window, cx))
+            .into_any_element()
+    }
+
+    /// The task being processed: its identity, the step it is on with its
+    /// measured progress, the steps reached so far, and its controls.
+    fn running_task_card(
+        &mut self,
+        task: &TaskRecord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = task.id.clone();
+        let active = self.is_running_task(&id);
+        let stages = self.task_stage_rows(task);
+        let current = stages.iter().position(|stage| {
+            matches!(
+                stage.status,
+                StageStatus::Running | StageStatus::Pausing | StageStatus::Stopping
+            )
+        });
         let waiting = worker_wait_state(
             active,
             self.pending_done.is_some(),
             task.intent,
             self.progress.iter().map(|(name, item)| (name, item.done)),
         );
-        let step = current.or_else(|| waiting.map(|waiting| waiting.label().to_owned()));
+        // Later steps depend on what the video turns out to need, so the
+        // position counts the steps reached so far, without a total.
+        let step = current
+            .map(|index| course2md::tr!("第 {} 步 · {}", index + 1, stages[index].title))
+            .or_else(|| waiting.map(|waiting| waiting.label().to_owned()));
+        let generating = task.state == TaskState::Running && task.intent == Intent::Run;
+        let title = if generating {
+            course2md::tr!("正在生成《{}》", task.plan.title)
+        } else {
+            task.plan.title.clone()
+        };
+        // Where it saves, where its text comes from and which service
+        // receives it: the facts that were the settings panel, on one line.
+        let mut facts = vec![
+            self.task_destination(task),
+            task_text_source(task).to_owned(),
+        ];
+        if task.plan.config.llm.uses_service()
+            && let Some(version) = task
+                .plan
+                .ai_service
+                .as_ref()
+                .and_then(|id| self.preferences.version(id))
+        {
+            facts.push(course2md::tr!(
+                "{}发送到「{}」",
+                if task.plan.options().vision {
+                    course2md::tr!("文字与截图")
+                } else {
+                    course2md::tr!("文字")
+                },
+                version.config.name,
+            ));
+        }
+        let header = h_flex()
+            .w_full()
+            .min_w_0()
+            .gap_4()
+            .items_start()
+            .flex_wrap()
+            .child(
+                task_row_cover(self.task_cover(task), false)
+                    .w(rems(160. / 14.))
+                    .max_w_full()
+                    .rounded(RADIUS_CARD),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .flex_basis(rems(260. / 14.))
+                    .min_w_0()
+                    .gap(px(6.))
+                    .child(
+                        accessible_text(SharedString::from(format!("task-title-{id}")), title)
+                            .text_size(rems(18. / 14.))
+                            .line_height(rems(26. / 14.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .whitespace_normal()
+                            .text_ellipsis()
+                            .line_clamp(2),
+                    )
+                    .children(step.map(|step| {
+                        accessible_text(SharedString::from(format!("task-step-{id}")), step)
+                            .role(Role::Status)
+                            .text_size(TEXT_BODY)
+                            .text_color(color(GRAY))
+                            .whitespace_normal()
+                    }))
+                    .child(
+                        accessible_text(
+                            SharedString::from(format!("task-created-{id}")),
+                            facts.join(" · "),
+                        )
+                        .text_size(rems(13. / 14.))
+                        .text_color(color(GRAY))
+                        .whitespace_normal(),
+                    ),
+            )
+            .child(badge(task_badge_kind(task.state)).child(task_status_label(task)));
+        // One indicator for the step in progress: its measured fraction when
+        // the worker reports one, motion otherwise. The counts line carries
+        // the step's own measurement and the job's clock, never an estimate.
+        let measured = current.and_then(|index| stages[index].fraction);
+        let detail = current
+            .map(|index| stages[index].detail.clone())
+            .filter(|detail| !detail.is_empty());
+        // A step's measurement already carries its own clock; the job's
+        // clock fills the line only while no step reports one.
         let clock = self
             .job_started
-            .filter(|_| active && self.job.is_some())
+            .filter(|_| active && self.job.is_some() && detail.is_none())
             .map(|started| activity::elapsed_label(started.elapsed()));
-        let status = (step.is_some() || clock.is_some()).then(|| {
+        let stopping = task.state == TaskState::Pausing || task.intent != Intent::Run;
+        let show_bar = active && (current.is_some() || waiting.is_some());
+        let progress = show_bar.then(|| {
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap_2()
+                .child(linear_progress(
+                    SharedString::from(format!("task-progress-{id}")),
+                    measured,
+                    stopping,
+                    window,
+                    cx,
+                ))
+                .when(detail.is_some() || clock.is_some(), |view| {
+                    view.child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .gap_3()
+                            .justify_between()
+                            .flex_wrap()
+                            .text_size(rems(13. / 14.))
+                            .text_color(color(GRAY))
+                            .child(
+                                accessible_text(
+                                    SharedString::from(format!("task-measure-{id}")),
+                                    detail.unwrap_or_default(),
+                                )
+                                .min_w_0()
+                                .whitespace_normal(),
+                            )
+                            .children(clock.map(|clock| {
+                                accessible_text(
+                                    SharedString::from(format!("task-clock-{id}")),
+                                    clock,
+                                )
+                                .flex_shrink_0()
+                                .whitespace_nowrap()
+                            })),
+                    )
+                })
+        });
+        let chips = (!stages.is_empty()).then(|| {
             h_flex()
                 .w_full()
                 .min_w_0()
-                .gap_4()
-                .items_center()
-                .children(step.map(|step| {
-                    accessible_text(SharedString::from(format!("task-step-{id}")), step)
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(TEXT_BODY)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .truncate()
-                }))
-                .children(clock.map(|clock| {
-                    accessible_text(SharedString::from(format!("task-clock-{id}")), clock)
-                        .flex_shrink_0()
-                        .whitespace_nowrap()
-                        .text_size(TEXT_AUX)
-                        .text_color(color(GRAY))
-                }))
+                .gap_2()
+                .flex_wrap()
+                .children(stages.iter().map(|stage| step_chip(stage, cx)))
         });
-        let steps = v_flex()
-            .flex_1()
-            .flex_basis(rems(24.))
-            .min_w(rems(18.))
-            .gap_3()
-            .when(!stages.is_empty(), |view| {
-                view.child(TaskStages { rows: stages })
-            })
-            .when_some(waiting, |view, waiting| {
-                view.child(
-                    semantic_label(
-                        SharedString::from(format!("task-waiting-{id}")),
-                        waiting.label(),
-                        crate::motion::spinner(
-                            SharedString::from(format!("task-waiting-spinner-{id}")),
-                            cx,
-                        ),
-                    )
-                    .text_color(color(GRAY)),
-                )
-            });
-        let body = h_flex()
-            .w_full()
-            .min_w_0()
-            .gap_6()
-            .items_start()
-            .flex_wrap()
-            .child(steps)
-            .child(self.task_settings_panel(task, &library));
         let log_open = self
             .task_panels_open
             .contains(&(TaskPanel::RawLog, id.clone()));
         let log = task_log_text(task);
-        let mut footer = h_flex()
+        let (pause, cancel) = self.task_stop_buttons(
+            task,
+            tonal_pill(SharedString::from(format!("pause-{id}")), cx)
+                .h(BUTTON_MEDIUM)
+                .min_h(BUTTON_MEDIUM)
+                .pl(rems(16. / 14.))
+                .pr(rems(22. / 14.))
+                .label_text_size(rems(15. / 14.)),
+            text_button(SharedString::from(format!("cancel-{id}")), cx),
+            cx,
+        );
+        let log_toggle = log.is_some().then(|| {
+            text_button(SharedString::from(format!("task-log-toggle-{id}")), cx)
+                .label(if log_open {
+                    course2md::tr!("收起日志")
+                } else {
+                    course2md::tr!("查看日志")
+                })
+                .on_click(cx.listener({
+                    let id = id.clone();
+                    move |this, _, _, cx| {
+                        this.toggle_task_panel(TaskPanel::RawLog, &id);
+                        cx.notify();
+                    }
+                }))
+        });
+        let footer = h_flex()
             .w_full()
             .min_w_0()
             .gap_2()
-            .pt_3()
             .items_center()
+            .justify_end()
             .flex_wrap()
-            .border_t_1()
-            .border_color(color(HAIRLINE));
-        let (pause, cancel) = self.task_stop_buttons(
-            task,
-            tonal_pill(SharedString::from(format!("pause-{id}")), cx),
-            quiet(SharedString::from(format!("cancel-{id}"))).text_color(color(DANGER)),
-            cx,
-        );
-        footer = footer.children(pause);
-        if log.is_some() {
-            footer = footer.child(
-                quiet(SharedString::from(format!("task-log-toggle-{id}")))
-                    .text_color(color(ACCENT))
-                    .icon(icons::file_text())
-                    .label(if log_open {
-                        course2md::tr!("收起日志")
-                    } else {
-                        course2md::tr!("查看日志")
-                    })
-                    .on_click(cx.listener({
-                        let id = id.clone();
-                        move |this, _, _, cx| {
-                            this.toggle_task_panel(TaskPanel::RawLog, &id);
-                            cx.notify();
-                        }
-                    })),
-            );
-        }
-        footer = footer.child(div().flex_1()).child(cancel);
+            .children(log_toggle)
+            .child(cancel)
+            .children(pause);
         v_flex()
             .w_full()
             .min_w_0()
-            .gap_4()
+            .gap(px(18.))
             .p_5()
-            .rounded(RADIUS_CARD)
+            .rounded(RADIUS_HERO)
             .bg(color(SURFACE))
             .child(header)
-            .children(status)
             .children(self.task_feedback_view(task))
             .children(self.uncertain_block(task, cx))
-            .child(body)
+            .children(progress)
+            .children(chips)
             .child(footer)
             .when_some(log.filter(|_| log_open), |card, log| {
                 card.child(task_log_box(&id, log))
@@ -1925,32 +2517,19 @@ impl Desktop {
             .into_any_element()
     }
 
-    /// The running card's side panel: where the task saves, where its text
-    /// comes from, and which service receives its content.
-    fn task_settings_panel(&self, task: &TaskRecord, library: &SharedString) -> Div {
-        v_flex()
-            .flex_1()
-            .flex_basis(rems(16.))
-            .min_w(rems(14.))
-            .max_w(rems(22.))
-            .gap_3()
-            .p_4()
-            .rounded(RADIUS_CARD)
-            .border_1()
-            .border_color(color(HAIRLINE))
-            .child(
-                div()
-                    .text_size(TEXT_BODY)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(course2md::tr!("这次的设置")),
-            )
-            .child(self.task_facts(task, library.clone()))
-    }
-
     /// The expanded part of a row: what happened, the recovery that applies,
-    /// and the record of finished steps and the raw log.
-    fn task_detail(&mut self, task: &TaskRecord, cx: &mut Context<Self>) -> Div {
+    /// and the record of finished steps and the raw log. On an attention card
+    /// (`attention` is set) the card already shows the reason, the uncertain
+    /// requests and the raised recovery, so the detail leaves them out.
+    fn task_detail(
+        &mut self,
+        task: &TaskRecord,
+        attention: Option<Option<Lead>>,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let id = task.id.clone();
+        let card = attention.is_some();
+        let lead = attention.flatten();
         let failures = if task.artifact.is_some() {
             task_component_failures(task)
         } else {
@@ -1988,11 +2567,11 @@ impl Desktop {
         let uncertain: Vec<_> = task.blocked.iter().filter(|b| b.is_uncertain()).collect();
         if let Some(message) = self
             .task_feedback_view(task)
-            .filter(|_| task.state != TaskState::Partial)
+            .filter(|_| task.state != TaskState::Partial && !card)
         {
             details = details.child(message);
         }
-        if let Some(block) = self.uncertain_block(task, cx) {
+        if let Some(block) = self.uncertain_block(task, cx).filter(|_| !card) {
             details = details.child(block);
         }
         let style = RecoveryStyle::Card;
@@ -2026,14 +2605,15 @@ impl Desktop {
         if task.handled_by.is_none()
             && matches!(task.state, TaskState::Paused | TaskState::NeedsAttention)
             && uncertain.is_empty()
+            && lead != Some(Lead::Resume)
         {
             actions = actions.child(self.resume_action(task, style, cx));
         }
         if task.artifact.is_some() {
             let requires_repair = task_requires_service_repair(task);
             // Outside a partial result the feedback line already carries the reason.
-            if let Some(reason) =
-                task_service_repair_reason(task).filter(|_| task.state == TaskState::Partial)
+            if let Some(reason) = task_service_repair_reason(task)
+                .filter(|_| task.state == TaskState::Partial && !card)
             {
                 details = details.child(
                     accessible_text(
@@ -2045,7 +2625,11 @@ impl Desktop {
             }
             // Repair is offered only when the service rejected its
             // configuration; any other failure is retried as it is.
-            if requires_repair && uncertain.is_empty() && task.handled_by.is_none() {
+            if requires_repair
+                && uncertain.is_empty()
+                && task.handled_by.is_none()
+                && lead != Some(Lead::Repair)
+            {
                 actions = actions.child(self.repair_ai_action(task, style, cx));
             }
             for (component, label, outcome) in &failures {
@@ -2061,7 +2645,7 @@ impl Desktop {
                 }
                 let reason = activity::outcome_failure_message(label, outcome);
                 let ai_component = ai_component(component).is_some();
-                if !(requires_repair && ai_component) {
+                if !(requires_repair && ai_component) && !card {
                     details = details.child(
                         accessible_text(
                             SharedString::from(format!("outcome-{id}-{component}")),
@@ -2073,6 +2657,7 @@ impl Desktop {
                 if uncertain.is_empty()
                     && task.handled_by.is_none()
                     && !(requires_repair && ai_component)
+                    && lead.as_ref() != Some(&Lead::Retry(component.clone()))
                 {
                     actions =
                         actions.child(self.retry_component_action(task, component, style, cx));
@@ -2776,12 +3361,6 @@ fn task_row_cover(cover: Option<PathBuf>, queued: bool) -> Div {
         })
 }
 
-/// The reason a task needs the person, when it differs from its badge.
-fn attention_reason(task: &TaskRecord) -> Option<String> {
-    let reason = task_attention_summary(task);
-    (reason != task_status_label(task)).then_some(reason)
-}
-
 fn task_text_source(task: &TaskRecord) -> &'static str {
     if task.plan.options().source_mode != TranscriptSource::Asr
         && task.plan.source.selected_subtitle.is_some()
@@ -2935,7 +3514,6 @@ mod tests {
                 task,
                 group: TaskGroup::Queued,
                 number: Some(task + 1),
-                runs: Some(task + 1),
                 first: task == 0,
                 last: false,
             };
@@ -2946,7 +3524,11 @@ mod tests {
                 },
                 QueueItem::Running(0),
                 row(0),
-                QueueItem::HistoryToggle { count: 1, open },
+                QueueItem::CompletedToggle {
+                    count: 1,
+                    open: false,
+                    state: open,
+                },
                 row(1),
             ];
             let keys: Vec<String> = items.iter().map(|item| item.key(&tasks)).collect();
