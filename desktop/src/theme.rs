@@ -1909,7 +1909,8 @@ pub fn badge(kind: BadgeKind) -> gpui::Div {
         BadgeKind::Success => (SUCCESS, SUCCESS_BG, Some(crate::icons::check_circle())),
         BadgeKind::Warning => (WARNING, WARNING_BG, Some(crate::icons::warning())),
         BadgeKind::Danger => (DANGER, DANGER_BG, Some(crate::icons::error())),
-        BadgeKind::Progress => (ACCENT, SECONDARY_CONTAINER, Some(crate::icons::schedule())),
+        // A clock would read as waiting; work in progress needs no icon.
+        BadgeKind::Progress => (ACCENT, SECONDARY_CONTAINER, None),
         // Neutral is a plain text chip without a status icon.
         BadgeKind::Neutral => (GRAY, INSET, None),
         BadgeKind::Tonal => (ON_SECONDARY_CONTAINER, SECONDARY_CONTAINER, None),
