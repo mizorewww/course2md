@@ -73,6 +73,14 @@ fn option_switch_tile(
 }
 
 /// Secondary text below a control.
+/// The preview action keeps its label until the link field itself runs out of
+/// room: the field is the hero's measured width, not the window's breakpoint.
+fn preview_field_tight(window: &Window) -> bool {
+    let scale = f32::from(window.rem_size()) / 14.;
+    let field = crate::views::shell_content_width(Page::New, window) / scale;
+    field.min(WORKBENCH_WIDTH) < 520.
+}
+
 pub(crate) fn aux_text(content: impl IntoElement) -> Div {
     div()
         .text_size(TEXT_AUX)
@@ -1124,7 +1132,7 @@ impl Desktop {
                                         .text_color(color(DANGER)),
                                 )
                             })
-                            .child(self.preview_source_button(is_compact(window), cx)),
+                            .child(self.preview_source_button(preview_field_tight(window), cx)),
                     )
                     .when_some(validation, |view, message| {
                         view.child(issue("import-validation", message).px(rems(24. / 14.)))
@@ -3221,11 +3229,13 @@ impl Desktop {
         // With nothing below it, the input moves toward the optical center.
         let quiet = recent.is_none() && active.is_none() && options.is_none();
         let gap = rems(32. / 14.);
+        // Stacked, everything below the hero shares its column.
+        let lower_width = if wide { LOWER_WIDTH } else { WORKBENCH_WIDTH };
         let mut lower = div()
             .flex()
             .w_full()
             .min_w_0()
-            .max_w(rems(LOWER_WIDTH / 14.))
+            .max_w(rems(lower_width / 14.))
             .mx_auto()
             .gap(gap)
             .items_start();
@@ -3248,7 +3258,8 @@ impl Desktop {
                 );
             }
         } else {
-            // Narrow windows put the options for this input first.
+            // Narrow windows put the options for this input first, on the
+            // hero's column so the page keeps one left edge.
             lower = lower.flex_col();
             if let Some(options) = options {
                 lower = lower.child(options);
@@ -3270,7 +3281,7 @@ impl Desktop {
                     div()
                         .w_full()
                         .min_w_0()
-                        .max_w(rems(LOWER_WIDTH / 14.))
+                        .max_w(rems(lower_width / 14.))
                         .mx_auto()
                         .child(active),
                 )
@@ -3281,7 +3292,7 @@ impl Desktop {
                 text_id("workspace-error", error),
                 v_flex()
                     .w_full()
-                    .max_w(rems(LOWER_WIDTH / 14.))
+                    .max_w(rems(lower_width / 14.))
                     .mx_auto()
                     .p_4()
                     .rounded(RADIUS_CARD)
