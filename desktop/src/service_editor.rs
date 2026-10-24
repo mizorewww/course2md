@@ -19,16 +19,14 @@ impl Desktop {
         };
         // A secondary page: the way back names where it leads.
         let parent = editor.origin_tab.unwrap_or(SettingsTab::Services).label();
+        // As in the settings pane: a tonal round back button, then the title
+        // in the page headline role under the category it returns to.
         let header = h_flex()
             .flex_shrink_0()
             .items_center()
-            .gap_2()
-            .ml(-QUIET_INSET)
+            .gap(rems(16. / 14.))
             .child(
-                quiet("service-editor-back")
-                    .w(CONTROL_HEIGHT)
-                    .px_0()
-                    .text_color(color(INK))
+                icon_button("service-editor-back", rems(48. / 14.), true, cx)
                     .icon(icons::arrow_left())
                     .accessibility_label(course2md::tr!("返回「{}」", parent))
                     .on_click(
@@ -43,12 +41,7 @@ impl Desktop {
                             .text_size(TEXT_AUX)
                             .text_color(color(GRAY)),
                     )
-                    .child(
-                        accessible_text("service-editor-inline-title", title)
-                            .role(Role::Heading)
-                            .text_size(rems(24. / 14.))
-                            .line_height(rems(32. / 14.)),
-                    ),
+                    .child(page_heading("service-editor-inline-title", title)),
             );
         v_flex()
             .w_full()
@@ -644,8 +637,22 @@ impl Desktop {
             let closed = weak.clone();
             let cancel = weak.clone();
             let submit = weak.clone();
+            // M3 dialog: a 28px-radius surface, 24px padding and a 24px
+            // regular headline; the body scrolls between title and actions.
             sheet
-                .title(title)
+                .title(
+                    accessible_text("service-editor-dialog-title", title)
+                        .role(Role::Heading)
+                        .text_size(rems(24. / 14.))
+                        .line_height(rems(32. / 14.))
+                        .font_weight(FontWeight::NORMAL)
+                        .text_color(color(INK)),
+                )
+                .p(px(24.))
+                .rounded(RADIUS_HERO)
+                .bg(color(SURFACE))
+                .border_0()
+                .shadow(shadow_popover())
                 .w((window.rem_size() * (620. / 14.)).min(window.viewport_size().width - px(48.)))
                 .margin_top(task_dialog_top(window))
                 .overlay_closable(false)
@@ -666,6 +673,50 @@ impl Desktop {
         self.focus_service_field(FormField::Address, window, cx);
         cx.notify();
         true
+    }
+    /// Capture builds: `COURSE2MD_CAPTURE_SERVICE_EDITOR=ai|speech|dialog`
+    /// opens the service editor once Settings › 服务与账号 shows (`ai` and
+    /// `speech` as its settings page, `dialog` as the per-note dialog), so
+    /// `PAGES=settings:services` captures it. Nothing is saved.
+    #[cfg(feature = "capture")]
+    pub(crate) fn capture_service_editor(&mut self, cx: &mut Context<Self>) {
+        thread_local! {
+            static OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+        if self.page != Page::Settings
+            || self.settings_tab != SettingsTab::Services
+            || self.settings_ui.editor.is_some()
+            || OPENED.get()
+        {
+            return;
+        }
+        let Ok(kind) = std::env::var("COURSE2MD_CAPTURE_SERVICE_EDITOR") else {
+            return;
+        };
+        OPENED.set(true);
+        let window = self.window;
+        cx.spawn(async move |this, cx| {
+            let _ = cx.update_window(window, |_, window, cx| {
+                let _ = this.update(cx, |this, cx| match kind.as_str() {
+                    "speech" => {
+                        this.open_settings_service_editor(ServicePurpose::Speech, None, window, cx);
+                    }
+                    "dialog" => {
+                        this.open_service_draft(
+                            ServiceDraft::new(ServicePurpose::Ai),
+                            Some("capture".into()),
+                            None,
+                            window,
+                            cx,
+                        );
+                    }
+                    _ => {
+                        this.open_settings_service_editor(ServicePurpose::Ai, None, window, cx);
+                    }
+                });
+            });
+        })
+        .detach();
     }
     fn focus_service_field(&self, field: FormField, window: &mut Window, cx: &mut App) {
         if let Some(editor) = &self.settings_ui.editor {
@@ -736,7 +787,7 @@ impl Desktop {
             // The scroll container leaves room for the first and last cards' shadow and focus paint (system.md: clipped containers reserve outward paint).
             .pt_1()
             .pb_3();
-        use crate::settings_ui::{settings_card, settings_switch_row};
+        use crate::settings_ui::settings_switch_row;
         // One card as on the canvas: the type select, the fields that type
         // needs, then whether new notes use this service.
         let hint = |id: &'static str, message: String| {
@@ -745,13 +796,6 @@ impl Desktop {
                 .text_size(TEXT_SETTINGS_AUX)
                 .text_color(color(GRAY))
         };
-        let divider = || {
-            div()
-                .h(px(1.))
-                .mx(SETTING_ITEM_INSET)
-                .flex_shrink_0()
-                .bg(color(HAIRLINE))
-        };
         let mut fields = v_flex().w_full().min_w_0().gap(rems(24. / 14.));
         // Codex account connection: the login decides the model catalog and availability.
         if protocol == ServiceProtocol::CodexResponses {
@@ -759,7 +803,6 @@ impl Desktop {
                 div()
                     .p(rems(16. / 14.))
                     .rounded(RADIUS_CARD)
-                    .bg(blend(color(SURFACE), color(INK), 0.03))
                     .border_1()
                     .border_color(color(HAIRLINE))
                     .child(self.codex_account_section(
@@ -841,7 +884,7 @@ impl Desktop {
                     .enumerate()
             {
                 key = key.child(
-                    quiet(("capture-environment-key", index))
+                    text_button(("capture-environment-key", index), cx)
                         .settings_text()
                         .icon(icons::content_copy())
                         .label(course2md::tr!("使用环境变量 {}", name))
@@ -906,52 +949,52 @@ impl Desktop {
                 self.service_model_field(FormOwner::Editor, "service-models", awaiting_binding, cx),
             ),
         ));
-        let mut connection = settings_card()
-            .child(
-                div()
-                    .px(SETTING_ITEM_INSET)
-                    .pt(rems(24. / 14.))
-                    .pb(rems(20. / 14.))
-                    .child(
-                        self.reveal_setting(
-                            "service-protocol-reveal",
-                            self.service_type_field(
-                                FormOwner::Editor,
-                                "service-protocol",
-                                awaiting_binding,
-                                cx,
-                            )
-                            .label(course2md::tr!("服务类型")),
-                        ),
-                    ),
+        // Settings shows the form as connected tiles on the ground: the type,
+        // the fields that type needs, then whether new notes use it. A dialog
+        // is already one surface, so there the same parts are plain sections.
+        let protocol_field = self.reveal_setting(
+            "service-protocol-reveal",
+            self.service_type_field(FormOwner::Editor, "service-protocol", awaiting_binding, cx)
+                .label(course2md::tr!("服务类型")),
+        );
+        let default_switch = (editor.repair_task.is_none()).then(|| {
+            settings_switch_row(
+                course2md::tr!("设为默认服务"),
+                course2md::tr!("新笔记默认使用这个服务"),
+                Switch::new("service-also-default")
+                    .checked(editor.also_default)
+                    .disabled(awaiting_binding)
+                    .on_click(cx.listener(|this, value, _, cx| {
+                        if let Some(editor) = &mut this.settings_ui.editor {
+                            editor.also_default = *value;
+                        }
+                        cx.notify();
+                    })),
             )
-            .child(divider())
-            .child(
-                div()
-                    .px(SETTING_ITEM_INSET)
-                    .py(rems(24. / 14.))
-                    .child(fields),
-            );
-        if editor.repair_task.is_none() {
-            connection = connection.child(divider()).child(
-                div()
-                    .px(SETTING_ITEM_INSET)
-                    .py(rems(10. / 14.))
-                    .child(settings_switch_row(
-                        course2md::tr!("设为默认服务"),
-                        course2md::tr!("新笔记默认使用这个服务"),
-                        Switch::new("service-also-default")
-                            .checked(editor.also_default)
-                            .disabled(awaiting_binding)
-                            .on_click(cx.listener(|this, value, _, cx| {
-                                if let Some(editor) = &mut this.settings_ui.editor {
-                                    editor.also_default = *value;
-                                }
-                                cx.notify();
-                            })),
-                    )),
-            );
-        }
+        });
+        let mut parts = vec![div().pt(rems(8. / 14.)).child(protocol_field), fields];
+        parts.extend(default_switch.map(|row| div().child(row)));
+        let count = parts.len();
+        let connection = if inline {
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .gap(TILE_GAP)
+                .children(parts.into_iter().enumerate().map(|(index, part)| {
+                    list_tile(index, count)
+                        .px(SETTING_ITEM_INSET)
+                        .py(rems(16. / 14.))
+                        .child(part)
+                }))
+        } else {
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .gap(rems(24. / 14.))
+                .children(parts)
+        };
         view = view.child(connection);
         if let Some(testing) = self.service_test_section(cx) {
             view = view.child(testing);
@@ -970,9 +1013,8 @@ impl Desktop {
             .flex_wrap()
             .justify_end()
             .child(
-                quiet("close-service-editor")
+                text_button("close-service-editor", cx)
                     .settings_text()
-                    .text_color(color(ACCENT))
                     .label(if configuration_saved {
                         course2md::tr!("关闭")
                     } else {
@@ -1020,7 +1062,7 @@ impl Desktop {
             )
             .when(editor.repair_task.is_some(), |row| {
                 row.child(
-                    quiet("save-repair-service-only")
+                    text_button("save-repair-service-only", cx)
                         .settings_text()
                         .icon(icons::save())
                         .label(course2md::tr!("仅保存"))
@@ -1032,6 +1074,7 @@ impl Desktop {
             })
             .child(
                 primary_pill("save-service")
+                    .settings_text()
                     .label(if editor.repair_task.is_some() {
                         repair_submit_label
                     } else if awaiting_binding {
@@ -1082,7 +1125,8 @@ impl Desktop {
                     .child(view)
                     .child(crate::backend::vertical_scrollbar(&editor.scroll)),
             )
-            .child(footer)
+            // The dialog's own 24px padding already ends the surface.
+            .child(footer.when(!inline, |footer| footer.pb_0()))
             .into_any_element()
     }
 
@@ -1227,7 +1271,7 @@ impl Desktop {
             );
             if !evidence.details.is_empty() {
                 result = result.child(
-                    quiet("service-test-details")
+                    text_button("service-test-details", cx)
                         .settings_text()
                         .icon(icons::info())
                         .self_start()
@@ -1294,6 +1338,11 @@ impl Desktop {
                 )
             })
             .unwrap_or((false, false));
+        let scrollable = self
+            .settings_ui
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.scroll.max_offset().y > px(0.));
         v_flex()
             .w_full()
             .min_w_0()
@@ -1302,8 +1351,11 @@ impl Desktop {
             .pt_3()
             // Keep the bottom buttons off the window's lower edge.
             .pb_4()
-            .border_t_1()
-            .border_color(color(CARD_LINE))
+            // The actions and the request notice stay put; a hairline marks
+            // where a scrolling body passes under them.
+            .when(scrollable, |footer| {
+                footer.border_t_1().border_color(color(HAIRLINE))
+            })
             .when_some(fixed_test_failure, |footer, (kind, evidence)| {
                 footer.child(
                     accessible_text(

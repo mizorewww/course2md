@@ -2413,6 +2413,8 @@ impl Desktop {
     }
 
     pub(crate) fn onboarding_background_notice(&mut self, cx: &mut Context<Self>) -> Option<Div> {
+        #[cfg(feature = "capture")]
+        self.capture_service_editor(cx);
         if self.onboarding.active {
             return None;
         }
@@ -2562,9 +2564,7 @@ fn setup_steps(labels: &[&'static str], current: usize) -> Div {
                                     .text_color(color(GRAY))
                             }
                         })
-                        .when(finished, |dot| {
-                            dot.child(icons::check().size(rems(1.)))
-                        })
+                        .when(finished, |dot| dot.child(icons::check().size(rems(1.))))
                         .when(!finished, |dot| dot.child(number.to_string())),
                 )
                 .child(

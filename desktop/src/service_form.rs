@@ -424,8 +424,8 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Button {
         let shown = self.service_form(owner).is_some_and(|form| form.show_key);
-        quiet(id)
-            .mr(-crate::theme::QUIET_INSET)
+        // An M3 text button beside the outlined field.
+        text_button(id, cx)
             .icon(if shown {
                 icons::eye_off()
             } else {
