@@ -1880,62 +1880,73 @@ impl Desktop {
             );
         let can_start = self.can_start_input(cx);
         let start_disabled = self.pending_conversion.is_some() || self.preview_cancel.is_some();
-        let actions = h_flex()
-            .w_full()
-            .min_w_0()
-            .mt_auto()
-            .pt(rems(6. / 14.))
-            .gap(rems(8. / 14.))
-            .items_center()
-            .flex_wrap()
-            .child(self.options_toggle("card-options-toggle", cx))
-            .when(self.online(), |row| {
-                row.child(
-                    icon_button("reread-source", CONTROL_HEIGHT, false, cx)
-                        .icon(icons::refresh())
-                        .accessibility_label(course2md::tr!("重新读取"))
-                        .tooltip(course2md::tr!("重新读取"))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.inspect_source(window, cx)),
-                        ),
-                )
-            })
-            .child(div().flex_1())
-            .child(
-                outline_pill("replace-source", cx)
-                    .h(BUTTON_MEDIUM)
-                    .min_h(BUTTON_MEDIUM)
-                    .px(rems(20. / 14.))
-                    .label_text_size(rems(15. / 14.))
-                    .label(course2md::tr!("更换视频"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        if this.online() {
-                            // A new link replaces this preview once it is read.
-                            this.inputs[&Field::Source]
-                                .update(cx, |input, cx| input.focus(window, cx));
-                        } else {
-                            this.pick_video(window, cx);
-                        }
-                    })),
-            )
-            .when(can_start, |row| {
-                row.child(
-                    theme::disabled_when(primary_pill("start-conversion"), start_disabled, cx)
-                        .h(BUTTON_LARGE)
-                        .min_h(BUTTON_LARGE)
-                        .pl(rems(22. / 14.))
-                        .pr(rems(28. / 14.))
-                        .gap(rems(10. / 14.))
-                        .label_text_size(TEXT_LEAD)
-                        .icon(icons::play_arrow())
-                        .label(course2md::tr!("开始转换"))
-                        .track_focus(&self.import_submit_focus)
-                        .disabled(start_disabled)
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.start_conversion(window, cx)),
-                        ),
-                )
-            });
+        let actions =
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .mt_auto()
+                .pt(rems(6. / 14.))
+                .gap(rems(8. / 14.))
+                .items_center()
+                .flex_wrap()
+                .when(self.online(), |row| {
+                    row.child(
+                        icon_button("reread-source", CONTROL_HEIGHT, false, cx)
+                            .icon(icons::refresh())
+                            .accessibility_label(course2md::tr!("重新读取"))
+                            .tooltip(course2md::tr!("重新读取"))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.inspect_source(window, cx)),
+                            ),
+                    )
+                })
+                .child(div().flex_1())
+                // The trailing actions wrap together and stay at the end.
+                .child(
+                    h_flex()
+                        .ml_auto()
+                        .gap(rems(8. / 14.))
+                        .items_center()
+                        .child(
+                            outline_pill("replace-source", cx)
+                                .h(BUTTON_MEDIUM)
+                                .min_h(BUTTON_MEDIUM)
+                                .px(rems(20. / 14.))
+                                .label_text_size(rems(15. / 14.))
+                                .label(course2md::tr!("更换视频"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if this.online() {
+                                        // A new link replaces this preview once it is read.
+                                        this.inputs[&Field::Source]
+                                            .update(cx, |input, cx| input.focus(window, cx));
+                                    } else {
+                                        this.pick_video(window, cx);
+                                    }
+                                })),
+                        )
+                        .when(can_start, |row| {
+                            row.child(
+                                theme::disabled_when(
+                                    primary_pill("start-conversion"),
+                                    start_disabled,
+                                    cx,
+                                )
+                                .h(BUTTON_LARGE)
+                                .min_h(BUTTON_LARGE)
+                                .pl(rems(22. / 14.))
+                                .pr(rems(28. / 14.))
+                                .gap(rems(10. / 14.))
+                                .label_text_size(TEXT_LEAD)
+                                .icon(icons::play_arrow())
+                                .label(course2md::tr!("开始转换"))
+                                .track_focus(&self.import_submit_focus)
+                                .disabled(start_disabled)
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| this.start_conversion(window, cx),
+                                )),
+                            )
+                        }),
+                );
         let info = v_flex()
             .flex_1()
             .min_w(rems(240. / 14.))
@@ -2971,33 +2982,10 @@ impl Desktop {
             .or_else(|| self.workbench_linked_task(cx))
     }
 
-    /// The labelled toggle for the processing options, in the video card's
-    /// action row so it is visible next to the video it configures.
-    fn options_toggle(
-        &self,
-        id: &'static str,
-        cx: &mut Context<Self>,
-    ) -> gpui_component::button::Button {
-        let open = self.desktop_settings.home_options;
-        nav_action(id, open, cx)
-            .icon(icons::tune())
-            .label(course2md::tr!("处理选项"))
-            .accessibility_label(if open {
-                course2md::tr!("收起处理选项")
-            } else {
-                course2md::tr!("展开处理选项")
-            })
-            .on_click(cx.listener(move |this, _, _, cx| this.set_home_options(!open, cx)))
-    }
-
     /// What a submitted task was planned with, read from its saved plan.
     fn submitted_options_summary(&self, task: &workspace::TaskRecord) -> Div {
         let options = task.plan.options();
-        let source = text_source_choices()
-            .into_iter()
-            .find(|(mode, _)| *mode == options.source_mode)
-            .map(|(_, label)| label)
-            .unwrap_or_default();
+        let source = crate::task_ui::task_text_source(task);
         let mut ai: Vec<String> = [
             ConversionAiOption::Proofread,
             ConversionAiOption::Summary,
@@ -3034,13 +3022,20 @@ impl Desktop {
             None => folder,
         };
         let row = |id: &'static str, label: &'static str, value: String| {
-            h_flex()
+            v_flex()
                 .w_full()
                 .min_w_0()
                 .pl(SETTING_ITEM_INSET)
                 .pr(rems(16. / 14.))
                 .py(rems(10. / 14.))
-                .child(TileScale::Compact.text(id, label, Some(value.into())))
+                .gap(rems(2. / 14.))
+                .child(TileScale::Compact.label(id, label))
+                .child(
+                    accessible_text(SharedString::from(format!("{id}-value")), value)
+                        .text_size(TEXT_BODY)
+                        .text_color(color(INK))
+                        .whitespace_normal(),
+                )
         };
         v_flex()
             .w_full()
@@ -3244,44 +3239,29 @@ impl Desktop {
             .min_w(rems(240. / 14.))
             .gap(rems(10. / 14.))
             .child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .items_start()
-                    .gap_2()
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap_1()
-                            .child(
-                                accessible_text("running-task-title", title)
-                                    .text_size(rems(20. / 14.))
-                                    .line_height(rems(28. / 14.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .whitespace_normal()
-                                    .text_ellipsis()
-                                    .line_clamp(2),
+                h_flex().w_full().min_w_0().items_start().gap_2().child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1()
+                        .child(
+                            accessible_text("running-task-title", title)
+                                .text_size(rems(20. / 14.))
+                                .line_height(rems(28. / 14.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .whitespace_normal()
+                                .text_ellipsis()
+                                .line_clamp(2),
+                        )
+                        .when(!metadata.is_empty(), |view| {
+                            view.child(
+                                div()
+                                    .text_size(TEXT_BODY)
+                                    .text_color(color(GRAY))
+                                    .child(metadata),
                             )
-                            .when(!metadata.is_empty(), |view| {
-                                view.child(
-                                    div()
-                                        .text_size(TEXT_BODY)
-                                        .text_color(color(GRAY))
-                                        .child(metadata),
-                                )
-                            }),
-                    )
-                    .child(
-                        icon_button("running-task-cancel", CONTROL_HEIGHT, false, cx)
-                            .icon(icons::close())
-                            .tooltip(course2md::tr!("取消任务"))
-                            .accessibility_label(course2md::tr!("取消任务"))
-                            .disabled(cancelling)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.set_task_intent(id.clone(), workspace::Intent::Cancel, cx);
-                            })),
-                    ),
+                        }),
+                ),
             )
             .children(self.task_status_lines(task, "running-task", window, cx))
             .child(
@@ -3293,7 +3273,17 @@ impl Desktop {
                     .gap(rems(8. / 14.))
                     .items_center()
                     .flex_wrap()
-                    .child(self.options_toggle("running-options-toggle", cx))
+                    .child(
+                        quiet("running-task-cancel")
+                            .h(BUTTON_MEDIUM)
+                            .min_h(BUTTON_MEDIUM)
+                            .icon(icons::close())
+                            .label(course2md::tr!("取消任务"))
+                            .disabled(cancelling)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set_task_intent(id.clone(), workspace::Intent::Cancel, cx);
+                            })),
+                    )
                     .child(div().flex_1())
                     // The trailing actions wrap together and stay at the end.
                     .child(

@@ -3315,7 +3315,7 @@ fn task_row_cover(cover: Option<PathBuf>, waiting: Option<TaskState>) -> Div {
         })
 }
 
-fn task_text_source(task: &TaskRecord) -> &'static str {
+pub(crate) fn task_text_source(task: &TaskRecord) -> &'static str {
     if task.plan.options().source_mode != TranscriptSource::Asr
         && task.plan.source.selected_subtitle.is_some()
     {
