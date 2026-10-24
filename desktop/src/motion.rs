@@ -171,36 +171,48 @@ fn spin(icon: gpui_component::Icon, id: impl Into<ElementId>, cx: &App) -> AnyEl
 
 /// Unmeasured work uses motion, never a fabricated completion percentage.
 pub fn indeterminate_progress(id: impl Into<ElementId>, cx: &App) -> AnyElement {
-    indeterminate_bar(id, px(4.), cx)
+    indeterminate_bar(id, px(4.), false, cx)
 }
 
-fn indeterminate_bar(id: impl Into<ElementId>, thickness: Pixels, cx: &App) -> AnyElement {
-    let segment = div()
-        .absolute()
-        .h_full()
-        .w(relative(0.3))
-        .rounded_full()
-        .bg(color(ACCENT));
-    let segment = if cx.reduce_motion() {
-        segment.left(relative(0.35)).into_any_element()
-    } else {
-        segment
-            .with_animation(
-                id,
-                Animation::new(Duration::from_millis(INDETERMINATE_SWEEP_MS)).repeat(),
-                |segment, t| segment.left(relative(t * 1.3 - 0.3)),
-            )
-            .into_any_element()
+/// One active segment sweeping across the track, kept 4px apart from the
+/// track on both sides as in Material 3 linear progress.
+fn indeterminate_bar(
+    id: impl Into<ElementId>,
+    thickness: Pixels,
+    muted: bool,
+    cx: &App,
+) -> AnyElement {
+    let ink = color(if muted { CONTROL } else { ACCENT });
+    let pieces = move |bar: gpui::Div, start: f32| {
+        let end = (start + 0.3).min(1.);
+        let start = start.max(0.);
+        let piece = |width: f32, fill| {
+            div()
+                .flex_shrink_0()
+                .h_full()
+                .w(relative(width))
+                .rounded_full()
+                .bg(fill)
+        };
+        let track = color(SECONDARY_CONTAINER);
+        bar.when(start > 0.005, |bar| bar.child(piece(start, track)))
+            .when(end - start > 0.005, |bar| {
+                bar.child(piece(end - start, ink))
+            })
+            .when(end < 0.995, |bar| {
+                bar.child(div().flex_1().min_w_0().h_full().rounded_full().bg(track))
+            })
     };
-    div()
-        .relative()
-        .w_full()
-        .h(thickness)
-        .rounded_full()
-        .overflow_hidden()
-        .bg(color(SECONDARY_CONTAINER))
-        .child(segment)
-        .into_any_element()
+    let bar = h_flex().w_full().h(thickness).gap(px(4.)).items_center();
+    if cx.reduce_motion() {
+        return pieces(bar, 0.35).into_any_element();
+    }
+    bar.with_animation(
+        id,
+        Animation::new(Duration::from_millis(INDETERMINATE_SWEEP_MS)).repeat(),
+        move |bar, t| pieces(bar, t * 1.3 - 0.3),
+    )
+    .into_any_element()
 }
 
 pub fn value(id: impl Into<ElementId>, target: f32, window: &mut Window, cx: &mut App) -> f32 {
@@ -265,13 +277,7 @@ pub fn linear_progress(
     cx: &mut App,
 ) -> AnyElement {
     let Some(fraction) = fraction else {
-        return div()
-            .w_full()
-            .h(thickness)
-            .flex()
-            .items_center()
-            .child(indeterminate_bar(id, thickness, cx))
-            .into_any_element();
+        return indeterminate_bar(id, thickness, muted, cx);
     };
     let target = if fraction.is_finite() {
         fraction.clamp(0., 1.)
