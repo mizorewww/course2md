@@ -432,6 +432,8 @@ pub(crate) struct State {
     note_items: Rc<Vec<NoteItem>>,
     note_focus: Rc<Vec<FocusHandle>>,
     viewer: Option<ImageViewer>,
+    /// Screenshot thumbnails and originals, decoded off the UI thread.
+    images: crate::reader_images::ReaderImages,
     exports: BTreeMap<PathBuf, PathBuf>,
     export_folder: Option<PathBuf>,
     export_state: ExportState,
@@ -634,6 +636,7 @@ impl State {
             note_items: Rc::default(),
             note_focus: Rc::default(),
             viewer: None,
+            images: Default::default(),
             exports: BTreeMap::new(),
             export_folder: None,
             export_state: ExportState::default(),
@@ -2292,6 +2295,7 @@ impl Desktop {
             .information_scroll
             .set_offset(point(px(0.), px(0.)));
         self.reader_ui.frames = Rc::default();
+        self.reader_ui.images.clear(cx);
         self.reader_ui.frame_by_path = Rc::default();
         self.reader_ui.missing_by_block = Rc::default();
         self.reader_ui.gallery.matches = Rc::default();
@@ -3242,6 +3246,7 @@ impl Desktop {
         let Some(preview) = self.preview.clone() else {
             return (self.reader_opening(cx), None);
         };
+        self.reader_ui.images.next_frame();
         self.schedule_reader_restore(window, cx);
         let outline = self.reader_ui.outline.clone();
         let metrics = ReaderMetrics::new(window, self.result_tab, !outline.is_empty());
@@ -4826,6 +4831,12 @@ impl Desktop {
         // three-line height so enlarged text cannot run into the action row.
         let excerpt_line_height =
             px((f32::from(TEXT_BODY.to_pixels(window.rem_size())) * 1.5).round());
+        // Cards draw a thumbnail decoded at their own device width, inside
+        // the card's 10px padding.
+        let card_width = (metrics.reader_width - GALLERY_GAP * (columns as f32 - 1.))
+            / columns as f32
+            - 20. * metrics.rem / 14.;
+        let thumbnail = crate::reader_images::Size::thumbnail(card_width * window.scale_factor());
         let items = self.reader_ui.gallery.items.clone();
         let focus = self.reader_ui.gallery.focus.clone();
         let layout = self.reader_ui.gallery.layout.clone();
@@ -4843,7 +4854,13 @@ impl Desktop {
                         .gallery_header(&preview_for_items, metrics, cx)
                         .into_any_element(),
                     GalleryItem::Row(row) => this
-                        .gallery_row(&matches[row.clone()], columns, excerpt_line_height, cx)
+                        .gallery_row(
+                            &matches[row.clone()],
+                            columns,
+                            excerpt_line_height,
+                            thumbnail,
+                            cx,
+                        )
                         .into_any_element(),
                 })
                 .unwrap_or_else(|_| div().into_any_element());
@@ -5033,104 +5050,119 @@ impl Desktop {
 
     /// One grid row of screenshot cards with equal column widths.
     fn gallery_row(
-        &self,
+        &mut self,
         frames: &[usize],
         columns: usize,
         excerpt_line_height: Pixels,
+        thumbnail: crate::reader_images::Size,
         cx: &mut Context<Self>,
     ) -> Div {
+        let cards: Vec<_> = frames
+            .iter()
+            .map(|&index| {
+                div().w_full().min_w_0().h_full().child(self.gallery_card(
+                    index,
+                    excerpt_line_height,
+                    thumbnail,
+                    cx,
+                ))
+            })
+            .collect();
         div()
             .grid()
             .grid_cols(columns as u16)
             .w_full()
             .min_w_0()
             .gap(px(GALLERY_GAP))
-            .children(frames.iter().map(|&index| {
-                div().w_full().min_w_0().h_full().child(self.gallery_card(
-                    index,
-                    excerpt_line_height,
-                    cx,
-                ))
-            }))
+            .children(cards)
     }
 
     /// One screenshot card: the 16:9 image with its time, a jump to the
-    /// note, and a three-line excerpt of what was said.
+    /// note, and a three-line excerpt of what was said. The whole card opens
+    /// the viewer, as its corner button does for the keyboard.
     fn gallery_card(
-        &self,
+        &mut self,
         index: usize,
         excerpt_line_height: Pixels,
+        thumbnail: crate::reader_images::Size,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let reveal = |id: ElementId, child: AnyElement| {
-            crate::focus_scroll::RevealFocus::in_list(
-                id,
-                child,
-                self.reader_ui.gallery.list.clone(),
-            )
+        use crate::reader_images::Loaded;
+        let list = self.reader_ui.gallery.list.clone();
+        let reveal = move |id: ElementId, child: AnyElement| {
+            crate::focus_scroll::RevealFocus::in_list(id, child, list.clone())
         };
-        let frame = &self.reader_ui.frames[index];
+        let frames = self.reader_ui.frames.clone();
+        let frame = &frames[index];
         let label = frame_label(frame);
         let time = course2md::render::fmt_ts(frame.seconds);
-        let mut image = div()
+        let loaded = frame.image.as_ref().map(|file| {
+            self.reader_ui
+                .images
+                .get(&file.path, thumbnail, Self::reader_images, cx)
+        });
+        let openable = matches!(loaded, Some(Loaded::Pending | Loaded::Ready(_)));
+        let unreadable = || {
+            v_flex()
+                .absolute()
+                .inset_0()
+                .justify_center()
+                .p_4()
+                .bg(color(WARNING_BG))
+                .child(
+                    theme::accessible_text(
+                        ("missing-frame", index),
+                        course2md::tr!("截图无法读取"),
+                    )
+                    .text_size(TEXT_AUX)
+                    .text_color(color(WARNING)),
+                )
+        };
+        let image = div()
             .id(("screenshot-frame", index))
             .relative()
             .w_full()
             .aspect_ratio(16. / 9.)
             .rounded(GALLERY_IMAGE_RADIUS)
             .overflow_hidden()
-            .bg(color(SURFACE_HIGH));
-        if let Some(file) = &frame.image {
-            image = image
-                .cursor_pointer()
-                .on_click(
-                    cx.listener(move |this, _, window, cx| {
-                        this.open_reader_image(index, window, cx)
-                    }),
-                )
-                .child(
-                    img(file.path.clone())
+            .bg(color(SURFACE_HIGH))
+            .map(|image| match loaded {
+                Some(Loaded::Ready(thumbnail)) => image.child(
+                    img(thumbnail)
                         .absolute()
                         .inset_0()
                         .size_full()
-                        .rounded(GALLERY_IMAGE_RADIUS)
-                        .object_fit(ObjectFit::Contain)
-                        .with_fallback(move || {
-                            missing_image_notice(
-                                ("failed-gallery-image", index),
-                                course2md::tr!("截图无法读取"),
-                            )
-                            .into_any_element()
-                        }),
-                )
-                .child(
-                    h_flex()
-                        .absolute()
-                        .right(rems(8. / 14.))
-                        .bottom(rems(8. / 14.))
-                        .gap_2()
-                        .when_some(frame.body_index, |row, body_index| {
-                            row.child(
-                                reveal(
-                                    ("reveal-frame-to-body", index).into(),
-                                    image_corner_button(
-                                        ("frame-to-body", index),
-                                        icons::article(),
-                                        cx,
-                                    )
+                        .object_fit(ObjectFit::Contain),
+                ),
+                // A blank tile until the thumbnail arrives, like the article.
+                Some(Loaded::Pending) => image,
+                Some(Loaded::Failed) | None => image.child(unreadable()),
+            })
+            .child(
+                h_flex()
+                    .absolute()
+                    .right(rems(8. / 14.))
+                    .bottom(rems(8. / 14.))
+                    .gap_2()
+                    .when_some(frame.body_index, |row, body_index| {
+                        row.child(
+                            reveal(
+                                ("reveal-frame-to-body", index).into(),
+                                image_corner_button(("frame-to-body", index), icons::article(), cx)
                                     .accessibility_label(course2md::tr!("在笔记中查看"))
                                     .tooltip(course2md::tr!("在笔记中查看"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                        // The image under the button opens the viewer.
+                                        // The card under the button opens the viewer.
                                         cx.stop_propagation();
                                         this.jump_reader_block(body_index, 0., cx)
                                     }))
                                     .into_any_element(),
-                                )
-                                .inline(),
                             )
-                        })
-                        .child(
+                            .inline(),
+                        )
+                    })
+                    .when(openable, |row| {
+                        row.child(
                             reveal(
                                 ("reveal-screenshot", index).into(),
                                 image_corner_button(("screenshot", index), icons::maximize(), cx)
@@ -5143,25 +5175,9 @@ impl Desktop {
                                     .into_any_element(),
                             )
                             .inline(),
-                        ),
-                );
-        } else {
-            image = image.child(
-                v_flex()
-                    .size_full()
-                    .justify_center()
-                    .p_4()
-                    .bg(color(WARNING_BG))
-                    .child(
-                        theme::accessible_text(
-                            ("missing-frame", index),
-                            course2md::tr!("截图无法读取"),
                         )
-                        .text_size(TEXT_AUX)
-                        .text_color(color(WARNING)),
-                    ),
+                    }),
             );
-        }
         let image = image.child(
             image_time_chip(time.clone())
                 .left(rems(8. / 14.))
@@ -5222,6 +5238,13 @@ impl Desktop {
             .gap(rems(10. / 14.))
             .bg(color(SURFACE))
             .rounded(SETTINGS_CARD_RADIUS)
+            .when(openable, |card| {
+                card.cursor_pointer()
+                    .hover(|card| card.bg(blend(color(SURFACE), color(INK), 0.08)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_reader_image(index, window, cx)
+                    }))
+            })
             .child(image)
             .child(excerpt)
             .into_any_element()
@@ -5449,6 +5472,21 @@ impl Desktop {
         focus.focus(window, cx);
         cx.notify();
     }
+    /// A screenshot finished decoding: repaint what draws screenshots.
+    pub(crate) fn reader_image_loaded(&mut self, cx: &mut Context<Self>) {
+        if self.page == Page::Result {
+            cx.notify();
+            self.notify_image_viewer(cx);
+        }
+    }
+    /// Leaving the reader releases its decoded screenshots.
+    pub(crate) fn release_reader_images(&mut self, cx: &mut Context<Self>) {
+        self.reader_ui.images.clear(cx);
+    }
+    /// Where the reader keeps its decoded screenshots.
+    fn reader_images(this: &mut Self) -> &mut crate::reader_images::ReaderImages {
+        &mut this.reader_ui.images
+    }
     /// The dialog renders from the viewer state; only its changes repaint it.
     fn notify_image_viewer(&self, cx: &mut Context<Self>) {
         if let Some(viewer) = &self.reader_ui.viewer {
@@ -5458,6 +5496,7 @@ impl Desktop {
         }
     }
     fn restore_reader_image_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reader_ui.images.pin(Vec::new());
         if let Some(focus) = self
             .reader_ui
             .viewer
@@ -5787,19 +5826,62 @@ impl Desktop {
     }
 
     /// The zoomable image, or a notice when its file cannot be read.
-    fn image_viewer_media(&self, scale: f32, label: String, cx: &mut Context<Self>) -> AnyElement {
+    fn image_viewer_media(
+        &mut self,
+        scale: f32,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use crate::reader_images::{Loaded, Size};
         let Some(viewer) = &self.reader_ui.viewer else {
             return div().into_any_element();
         };
-        let Some(image) = &viewer.frames[viewer.index].image else {
-            return theme::accessible_text("image-unreadable", course2md::tr!("截图无法读取"))
+        let Some(image) = viewer.frames[viewer.index].image.clone() else {
+            return missing_image_notice("image-unreadable", course2md::tr!("截图无法读取"))
                 .into_any_element();
         };
+        // The neighbours decode ahead so stepping through shows them at once.
+        let neighbours: Vec<PathBuf> = [viewer.index.checked_sub(1), Some(viewer.index + 1)]
+            .into_iter()
+            .flatten()
+            .filter_map(|index| Some(viewer.frames.get(index)?.image.as_ref()?.path.clone()))
+            .collect();
         let viewport_scroll = viewer.viewport_scroll.clone();
         let owner = cx.weak_entity();
         let version = viewer.version.clone();
         let width = px(image.width as f32 * scale);
         let height = px(image.height as f32 * scale);
+        let images = &mut self.reader_ui.images;
+        images.pin(
+            std::iter::once(image.path.clone())
+                .chain(neighbours.iter().cloned())
+                .collect(),
+        );
+        for path in &neighbours {
+            images.get(path, Size::Original, Self::reader_images, cx);
+        }
+        let picture = match images.get(&image.path, Size::Original, Self::reader_images, cx) {
+            Loaded::Ready(original) => Some(original),
+            // The gallery's thumbnail stands in while the original decodes.
+            Loaded::Pending => images.any_ready(&image.path),
+            Loaded::Failed => {
+                return missing_image_notice("image-unreadable", course2md::tr!("截图无法读取"))
+                    .into_any_element();
+            }
+        };
+        let picture = match picture {
+            Some(picture) => img(picture)
+                .size_full()
+                .object_fit(ObjectFit::Contain)
+                .into_any_element(),
+            None => div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(crate::motion::spinner("reader-image-loading", cx))
+                .into_any_element(),
+        };
         div()
             .on_children_prepainted(move |_, window, cx| {
                 let size = viewport_scroll.bounds().size;
@@ -5847,19 +5929,7 @@ impl Desktop {
                             .h(height)
                             .role(Role::Image)
                             .aria_label(label)
-                            .child(
-                                img(image.path.clone())
-                                    .size_full()
-                                    .object_fit(ObjectFit::Contain)
-                                    .with_fallback(|| {
-                                        // One viewer exists at a time, so the id is unique.
-                                        theme::accessible_text(
-                                            "failed-reader-image-enlarged",
-                                            course2md::tr!("截图无法读取"),
-                                        )
-                                        .into_any_element()
-                                    }),
-                            ),
+                            .child(picture),
                     ),
             )
             .into_any_element()

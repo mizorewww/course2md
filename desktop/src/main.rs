@@ -30,6 +30,7 @@ mod palettes;
 mod performance;
 mod preferences;
 mod provider_serde;
+mod reader_images;
 mod reader_navigation;
 mod reader_ui;
 mod scroll;
@@ -886,6 +887,9 @@ impl Desktop {
         self.opening_course = None;
         if self.page == Page::New {
             self.save_current_draft(cx);
+        }
+        if page != Page::Result {
+            self.release_reader_images(cx);
         }
         self.page = page;
         self.message = None;
