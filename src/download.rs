@@ -97,6 +97,10 @@ impl Default for Downloader {
     }
 }
 
+/// Terminal bar for model downloads; Apple model preparation uses it too.
+pub(crate) const MODEL_BAR: &str =
+    "{spinner:.green} {msg} [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})";
+
 fn fetch(
     downloader: &Downloader,
     remote: &Remote,
@@ -110,7 +114,8 @@ fn fetch(
     let stage = Stage::ModelFile(remote.file.to_owned());
     crate::progress::start(stage.clone());
     let bar = Bar::new(stage.clone(), remote.size)
-        .with_template("{spinner:.green} {msg} [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})");
+        .with_unit(crate::progress::Unit::Bytes)
+        .with_template(MODEL_BAR);
     let mut failures = Vec::new();
     for host in &crate::hub::endpoints().hosts {
         control.check()?;

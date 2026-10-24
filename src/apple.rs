@@ -67,6 +67,7 @@ extern "C" fn c2m_model_progress(
             total: 10000,
             message: Some(message.into_owned()),
             phase: Some(phase),
+            unit: None,
         });
     } else if !crate::progress::is_quiet() {
         // 终端只在整百分比变化时打印一行，避免下载回调刷屏

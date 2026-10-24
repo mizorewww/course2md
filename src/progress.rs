@@ -143,6 +143,15 @@ pub enum Phase {
     Load,
 }
 
+/// What `current` and `total` count when the stage alone does not say.
+/// Apple model preparation reports bytes while downloading and a weighted
+/// fraction (out of 10000) otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Unit {
+    Bytes,
+}
+
 /// Why a task stopped at a safe boundary instead of sending the next request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -278,6 +287,8 @@ pub enum Event {
         message: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         phase: Option<Phase>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<Unit>,
     },
     /// Running LLM token totals for the stage.
     Tokens {
@@ -436,6 +447,7 @@ pub fn download_progress(current: u64, total: u64) {
         total,
         message: None,
         phase: None,
+        unit: Some(Unit::Bytes),
     });
 }
 
@@ -455,6 +467,7 @@ pub struct Bar {
     total: u64,
     message: Mutex<String>,
     phase: Mutex<Option<Phase>>,
+    unit: Option<Unit>,
     last_emit: Mutex<std::time::Instant>,
 }
 
@@ -472,6 +485,7 @@ impl Bar {
             total: len,
             message: Mutex::new(String::new()),
             phase: Mutex::new(None),
+            unit: None,
             last_emit: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1)),
         }
     }
@@ -481,6 +495,22 @@ impl Bar {
         if !is_json() {
             self.bar.set_style(progress_style(template));
         }
+        self
+    }
+
+    /// Names what the counter counts in progress events.
+    pub fn with_unit(mut self, unit: Unit) -> Self {
+        self.unit = Some(unit);
+        self
+    }
+
+    /// Starts the counter at `pos` without an event, so the first sample
+    /// already includes work done before this run and is not read as speed.
+    pub fn with_position(self, pos: u64) -> Self {
+        self.bar.set_position(pos);
+        // The terminal bar's own estimate must not count it as speed either.
+        self.bar.reset_eta();
+        self.current.store(pos, Ordering::Relaxed);
         self
     }
 
@@ -497,6 +527,17 @@ impl Bar {
         if is_json() {
             self.current.store(pos, Ordering::Relaxed);
             self.emit_progress(pos, false);
+        }
+    }
+
+    /// Like [`Self::set_position`] but never throttled, for producers that
+    /// already report coarsely: a dropped sample before a quiet spell would
+    /// leave the count stale until the next one.
+    pub fn report_position(&self, pos: u64) {
+        self.bar.set_position(pos);
+        if is_json() {
+            self.current.store(pos, Ordering::Relaxed);
+            self.emit_progress(pos, true);
         }
     }
 
@@ -548,6 +589,7 @@ impl Bar {
             total: self.total,
             message: Some(message).filter(|m| !m.is_empty()),
             phase,
+            unit: self.unit,
         });
     }
 }

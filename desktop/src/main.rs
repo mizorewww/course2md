@@ -1074,6 +1074,7 @@ impl Desktop {
                     total,
                     message,
                     phase,
+                    ..
                 } => {
                     let activity = self
                         .progress

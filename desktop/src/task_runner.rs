@@ -1739,6 +1739,7 @@ impl Desktop {
                 total,
                 message,
                 phase,
+                ..
             } => {
                 let value = task.stages.entry(stage.clone()).or_default();
                 value.current = *current;
