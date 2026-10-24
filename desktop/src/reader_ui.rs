@@ -2903,11 +2903,29 @@ impl Desktop {
     /// Debug validation: open the requested note after the first scan.
     /// Capture review: the end of the open note, where its card closes.
     #[cfg(feature = "capture")]
-    pub(crate) fn capture_reader_end(&mut self, cx: &mut Context<Self>) {
-        if self.result_tab == 0 {
-            self.reader_ui.note_list.scroll_to_end();
-        } else {
-            self.reader_ui.gallery.list.scroll_to_end();
+    /// Capture harness: the screenshot tab, a screenshot in the viewer and
+    /// the end of the current view, as `capture.rs` names them.
+    #[cfg(feature = "capture")]
+    pub(crate) fn capture_reader_view(
+        &mut self,
+        shots: bool,
+        shot: Option<usize>,
+        end: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if shots || shot.is_some() {
+            self.select_reader_view(1, window, cx);
+        }
+        if end {
+            if self.result_tab == 0 {
+                self.reader_ui.note_list.scroll_to_end();
+            } else {
+                self.reader_ui.gallery.list.scroll_to_end();
+            }
+        }
+        if let Some(index) = shot {
+            self.open_reader_image(index, window, cx);
         }
         cx.notify();
     }

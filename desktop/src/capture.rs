@@ -3,9 +3,11 @@
 //!
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
 //! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]`, `library`, `tasks`, `settings:<category>` (appearance, generation,
-//! services, storage, application) and `reader[:<title text>][~end]` (the newest
-//! note, or the first whose title contains the text; it opens at the top, ignoring
-//! saved reading positions, and `~end` scrolls to its end). `library:<state>` takes
+//! services, storage, application) and `reader[:<title text>][~shots][~shot:<n>][~end]`
+//! (the newest note, or the first whose title contains the text; it opens at
+//! the top, ignoring saved reading positions; `~shots` opens the screenshot
+//! tab, `~shot:<n>` opens the image viewer on the 0-based screenshot `n` of
+//! that tab, `~end` scrolls the view to its end). `library:<state>` takes
 //! `,`-separated states: `list`, `group`, `unfiled`, `folder~<name>` and
 //! `search~<text>` (`:` also separates a state from its value, as in
 //! `library:search:<text>`); each shot starts from the saved presentation,
@@ -13,6 +15,10 @@
 //! 1800) is the wait after each navigation; `COURSE2MD_CAPTURE_PALETTE`
 //! (a palette name such as `catppuccin_mocha`) and `COURSE2MD_CAPTURE_SCALE`
 //! (1, 1.25, 1.5 or 2) override the saved appearance without changing it.
+//!
+//! `input:<steps>` dispatches simulated pointer and keyboard input to the
+//! window as it is (see `simulate_input`), steps joined by `+`, then
+//! captures; it neither navigates nor closes dialogs.
 //!
 //! Dialogs open over their page: `service-editor:<ai|speech|dialog|confirm>`
 //! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
@@ -96,9 +102,16 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
             // Let the library load first, so a leading `reader` shot finds its note.
             cx.background_executor().timer(delay).await;
             for (page, path) in shots {
-                let _ = cx.update(|window, cx| {
-                    view.update(cx, |this, cx| this.capture_navigate(&page, window, cx))
-                });
+                if let Some(steps) = page.strip_prefix("input:") {
+                    // Simulated input on whatever the previous shot left open.
+                    for step in steps.split('+') {
+                        simulate_input(step, cx).await;
+                    }
+                } else {
+                    let _ = cx.update(|window, cx| {
+                        view.update(cx, |this, cx| this.capture_navigate(&page, window, cx))
+                    });
+                }
                 cx.background_executor().timer(delay).await;
                 let _ = cx.update(|window, _| match window.render_to_image() {
                     Ok(image) => {
@@ -112,6 +125,121 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
             let _ = cx.update(|_, cx| cx.quit());
         })
         .detach();
+}
+
+/// One simulated input step, `kind~args` with `~`-separated arguments in
+/// window pixels: `move~x~y`, `click~x~y`, `drag~x1~y1~x2~y2`, `wheel~x~y~dy` (positive scrolls
+/// the content up, as a downward wheel turn), `key~<keystroke>` (GPUI
+/// syntax, e.g. `escape`, `right`, `cmd-f`; `equal` and `plus` name the
+/// keys the spec reserves) and `wait~ms`. Each platform
+/// event is dispatched in its own update, as native input arrives.
+async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
+    use gpui::{
+        Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+        PlatformInput, ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
+    };
+    let mut parts = step.split('~');
+    let kind = parts.next().unwrap_or_default();
+    let numbers: Vec<f32> = parts.filter_map(|part| part.parse().ok()).collect();
+    let position = (numbers.len() >= 2).then(|| point(px(numbers[0]), px(numbers[1])));
+    let moved = |position| {
+        PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
+        })
+    };
+    let events = match (kind, position) {
+        ("move", Some(position)) => vec![moved(position)],
+        ("click", Some(position)) => vec![
+            moved(position),
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            }),
+        ],
+        ("drag", Some(from)) if numbers.len() >= 4 => {
+            let to = point(px(numbers[2]), px(numbers[3]));
+            let mut events = vec![
+                moved(from),
+                PlatformInput::MouseDown(MouseDownEvent {
+                    button: MouseButton::Left,
+                    position: from,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+            ];
+            events.extend((1..=8).map(|step| {
+                PlatformInput::MouseMove(MouseMoveEvent {
+                    position: from + (to - from) * (step as f32 / 8.),
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                })
+            }));
+            events.push(PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position: to,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            }));
+            events
+        }
+        ("wheel", Some(position)) if numbers.len() >= 3 => vec![
+            moved(position),
+            PlatformInput::ScrollWheel(ScrollWheelEvent {
+                position,
+                delta: ScrollDelta::Pixels(point(px(0.), px(-numbers[2]))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+            }),
+        ],
+        ("key", _) => {
+            // `=`, `;` and `+` separate the capture spec; name them instead.
+            let key = match step.split_once('~').map(|(_, key)| key).unwrap_or_default() {
+                "equal" => "=",
+                "plus" => "+",
+                key => key,
+            };
+            match Keystroke::parse(key) {
+                Ok(keystroke) => {
+                    let _ = cx.update(|window, cx| window.dispatch_keystroke(keystroke, cx));
+                }
+                Err(error) => eprintln!("capture input {step}: {error}"),
+            }
+            Vec::new()
+        }
+        ("wait", _) if !numbers.is_empty() => {
+            cx.background_executor()
+                .timer(Duration::from_millis(numbers[0] as u64))
+                .await;
+            return;
+        }
+        _ => {
+            eprintln!("capture input: unknown step {step}");
+            Vec::new()
+        }
+    };
+    for event in events {
+        let _ = cx.update(|window, cx| {
+            window.dispatch_event(event, cx);
+        });
+        cx.background_executor()
+            .timer(Duration::from_millis(60))
+            .await;
+    }
+    cx.background_executor()
+        .timer(Duration::from_millis(400))
+        .await;
 }
 
 impl Desktop {
@@ -157,10 +285,19 @@ impl Desktop {
             }
             "dialog" => self.capture_dialog(category, window, cx),
             "reader" => {
-                let (title, end) = match category.strip_suffix("~end") {
-                    Some(title) => (title, true),
-                    None => (category, false),
-                };
+                // `<title>[~shots][~shot:<n>][~end]`: the screenshot tab, the
+                // image viewer on frame `n` (0-based), the end of the view.
+                let mut parts = category.split('~');
+                let title = parts.next().unwrap_or_default();
+                let (mut shots, mut shot, mut end) = (false, None, false);
+                for part in parts {
+                    match part.split_once(':') {
+                        Some(("shot", index)) => shot = index.parse::<usize>().ok(),
+                        _ if part == "shots" => shots = true,
+                        _ if part == "end" => end = true,
+                        _ => {}
+                    }
+                }
                 let course = self
                     .courses
                     .iter()
@@ -178,13 +315,15 @@ impl Desktop {
                 if let Some(course) = course {
                     self.open_course(course, cx);
                 }
-                if end {
-                    // The note's blocks load after it opens.
+                if end || shots || shot.is_some() {
+                    // The note's blocks and screenshots load after it opens.
                     cx.spawn_in(window, async move |this, cx| {
                         cx.background_executor()
                             .timer(Duration::from_millis(1200))
                             .await;
-                        let _ = this.update(cx, |this, cx| this.capture_reader_end(cx));
+                        let _ = this.update_in(cx, |this, window, cx| {
+                            this.capture_reader_view(shots, shot, end, window, cx)
+                        });
                     })
                     .detach();
                 }
