@@ -4,7 +4,8 @@
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
 //! `onboarding`, `home`, `library`, `tasks`, `settings:<category>` (appearance, generation,
 //! services, storage, application) and `reader[:<title text>]` (the newest
-//! note, or the first whose title contains the text). `COURSE2MD_CAPTURE_DELAY_MS` (default
+//! note, or the first whose title contains the text). `library:<state>` takes
+//! `,`-separated states: `list`, `group`, `unfiled`, `folder~<name>`, `search~<text>`. `COURSE2MD_CAPTURE_DELAY_MS` (default
 //! 1800) is the wait after each navigation; `COURSE2MD_CAPTURE_PALETTE`
 //! (a palette name such as `catppuccin_mocha`) and `COURSE2MD_CAPTURE_SCALE`
 //! (1, 1.25, 1.5 or 2) override the saved appearance without changing it.
@@ -84,7 +85,10 @@ impl Desktop {
         }
         match page {
             "home" => self.navigate(Page::New, cx),
-            "library" => self.navigate(Page::Library, cx),
+            "library" => {
+                self.navigate(Page::Library, cx);
+                self.capture_library_state(category, window, cx);
+            }
             "tasks" => self.navigate(Page::Task, cx),
             "settings" => {
                 self.open_settings(window, cx);
@@ -110,5 +114,48 @@ impl Desktop {
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Library states reached by navigation, applied without saving them.
+    fn capture_library_state(
+        &mut self,
+        states: &str,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        // Each shot starts from all notes and no search.
+        let root = self.library_root.clone();
+        self.select_library_scope(root, crate::FolderFilter::All, cx);
+        self.inputs[&crate::Field::Search].update(cx, |input, cx| input.set_value("", window, cx));
+        for state in states.split(',').filter(|state| !state.is_empty()) {
+            let (state, value) = state.split_once('~').unwrap_or((state, ""));
+            match state {
+                "list" => self.desktop_settings.library_cards = false,
+                "group" => self.desktop_settings.library_group_folders = true,
+                "unfiled" => {
+                    let root = self.library_root.clone();
+                    self.select_library_scope(root, crate::FolderFilter::Unfiled, cx);
+                }
+                "folder" => {
+                    let root = self.library_root.clone();
+                    let found = self.library_indexes.get(&root).and_then(|library| {
+                        library
+                            .folders
+                            .iter()
+                            .find(|(_, name)| name.as_str() == value)
+                            .map(|(id, _)| *id)
+                    });
+                    if let Some(id) = found {
+                        self.select_library_scope(root, crate::FolderFilter::Folder(id), cx);
+                    }
+                }
+                "search" => {
+                    let value = value.to_owned();
+                    self.inputs[&crate::Field::Search]
+                        .update(cx, |input, cx| input.set_value(value, window, cx));
+                }
+                _ => {}
+            }
+        }
     }
 }
