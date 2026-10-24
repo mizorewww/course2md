@@ -1724,6 +1724,7 @@ pub fn icon_button(
     cx: &App,
 ) -> gpui_component::button::Button {
     use gpui::Styled;
+    use gpui_component::Sizable;
     let (bg, fg) = if tonal {
         (color(SURFACE_HIGH), color(INK))
     } else {
@@ -1735,7 +1736,14 @@ pub fn icon_button(
             color(GRAY),
         )
     };
+    // gpui-component sizes a button's icon from the button's size and
+    // ignores the icon's own; an icon-only button sizes it at three quarters
+    // of an explicit size. Give it the glyph the canvas uses (22px in a 48px
+    // button, 20px in 40px), in the current text scale.
+    let rem = gpui_component::Theme::global(cx).font_size;
+    let glyph = rem * (size.0 / 4. + 10. / 14.);
     custom_fill(control(id), bg, fg, true, cx)
+        .with_size(gpui_component::Size::Size(glyph / 0.75))
         .h(size)
         .min_h(size)
         .w(size)
@@ -1964,10 +1972,10 @@ pub fn badge(kind: BadgeKind) -> gpui::Div {
         .flex()
         .items_center()
         .flex_shrink_0()
-        .gap(px(4.))
-        .min_h(px(24.))
-        .px(px(10.))
-        .py(px(3.))
+        .gap(rems(4. / 14.))
+        .min_h(rems(24. / 14.))
+        .px(rems(10. / 14.))
+        .py(rems(3. / 14.))
         .rounded(RADIUS_SMALL)
         .bg(color(bg))
         .text_color(color(text))
@@ -1989,8 +1997,8 @@ pub fn outlined_badge(
     use gpui::prelude::*;
     accessible_text(id, label)
         .flex_shrink_0()
-        .px(px(10.))
-        .py(px(4.))
+        .px(rems(10. / 14.))
+        .py(rems(4. / 14.))
         .rounded(RADIUS_SMALL)
         .border_1()
         .border_color(color(HAIRLINE))

@@ -1175,7 +1175,7 @@ impl Desktop {
             _ => course2md::tr!("主页"),
         };
         icon_button("settings-back", BUTTON_MEDIUM, true, cx)
-            .icon(icons::arrow_left().size(rems(22. / 14.)))
+            .icon(icons::arrow_left())
             .accessibility_label(course2md::tr!("返回「{}」", name))
             .tooltip(course2md::tr!("返回「{}」", name))
             .on_click(cx.listener(|this, _, window, cx| this.leave_settings(window, cx)))
