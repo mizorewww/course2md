@@ -1657,55 +1657,78 @@ impl Desktop {
                 let needs_relocation =
                     check.is_some_and(|check| !check.available || check.problem.is_some());
                 let needs_reassociation = check.is_some_and(|check| check.needs_reassociation);
-                // As on the account cards: badge and actions share one trailing slot on the title row and wrap together.
-                // Emphasis follows the other cards: the outlined main action first, the quiet 「打开位置」 after it.
-                let trailing = h_flex()
-                    .gap_2()
-                    .items_center()
-                    .flex_wrap()
-                    .child(
-                        tonal_pill(("open-storage-location", index), cx)
+                // A healthy location: 打开位置 and the ⋯ menu at the row's end,
+                // as on the canvas. A location that needs repair says why
+                // under its path and puts the repair first, as the tonal
+                // action on the text ruler; 打开位置 follows it as a text button.
+                let repair = needs_reassociation || needs_relocation;
+                let open_location = {
+                    let root = root.clone();
+                    move |button: gpui_component::button::Button| {
+                        let root = root.clone();
+                        button
                             .settings_text()
-                            .pl(rems(12. / 14.))
                             .icon(icons::folder_open())
                             .label(course2md::tr!("打开位置"))
                             .disabled(offline)
-                            .on_click({
-                                let root = root.clone();
-                                move |_, _, cx| cx.open_with_system(&root)
-                            }),
-                    )
-                    .when(offline, |row| {
-                        row.child(badge(BadgeKind::Warning).child(course2md::tr!("暂时不可访问")))
-                    })
-                    .when(needs_reassociation, |row| {
-                        row.child(
-                            outline_pill(("reassociate-storage-location", index), cx)
-                                .settings_text()
-                                .icon(icons::storage())
-                                .label(course2md::tr!("重新关联…"))
-                                .disabled(self.storage_ui.busy)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.begin_library_reassociation(
-                                        reassociate_id.clone(),
-                                        window,
-                                        cx,
-                                    )
-                                })),
-                        )
-                    })
-                    .when(needs_relocation, |row| {
-                        row.child(
-                            outline_pill(("relocate-storage-location", index), cx)
-                                .settings_text()
-                                .icon(icons::folder_open())
-                                .label(course2md::tr!("重新定位…"))
-                                .disabled(self.storage_ui.busy)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.begin_library_relocation(relocate_id.clone(), window, cx)
-                                })),
-                        )
-                    });
+                            .on_click(move |_, _, cx| cx.open_with_system(&root))
+                    }
+                };
+                let trailing = h_flex().gap_2().items_center().when(!repair, |row| {
+                    row.child(open_location(
+                        tonal_pill(("open-storage-location", index), cx).pl(rems(12. / 14.)),
+                    ))
+                });
+                let repair_actions = repair.then(|| {
+                    h_flex()
+                        .pt(rems(8. / 14.))
+                        .gap_2()
+                        .items_center()
+                        .flex_wrap()
+                        .when(needs_reassociation, |row| {
+                            row.child(
+                                tonal_pill(("reassociate-storage-location", index), cx)
+                                    .settings_text()
+                                    .pl(rems(12. / 14.))
+                                    .icon(icons::storage())
+                                    .label(course2md::tr!("重新关联…"))
+                                    .disabled(self.storage_ui.busy)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.begin_library_reassociation(
+                                            reassociate_id.clone(),
+                                            window,
+                                            cx,
+                                        )
+                                    })),
+                            )
+                        })
+                        .when(needs_relocation, |row| {
+                            let relocate = if needs_reassociation {
+                                outline_pill(("relocate-storage-location", index), cx)
+                            } else {
+                                tonal_pill(("relocate-storage-location", index), cx)
+                                    .pl(rems(12. / 14.))
+                            };
+                            row.child(
+                                relocate
+                                    .settings_text()
+                                    .icon(icons::folder_open())
+                                    .label(course2md::tr!("重新定位…"))
+                                    .disabled(self.storage_ui.busy)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.begin_library_relocation(
+                                            relocate_id.clone(),
+                                            window,
+                                            cx,
+                                        )
+                                    })),
+                            )
+                        })
+                        .child(open_location(text_button(
+                            ("open-storage-location", index),
+                            cx,
+                        )))
+                });
                 let menu = {
                     let entity = cx.weak_entity();
                     let root = root.clone();
@@ -1756,10 +1779,7 @@ impl Desktop {
                 };
                 let row_menu = menu.clone();
                 let trailing = trailing.child(
-                    quiet(("storage-location-actions", index))
-                        .w(CONTROL_HEIGHT)
-                        .px_0()
-                        .icon(icons::more_vertical())
+                    crate::settings_ui::resource_menu(("storage-location-actions", index), cx)
                         .accessibility_label(course2md::tr!("{} 操作", library.name))
                         .tooltip(course2md::tr!("笔记库操作"))
                         .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
@@ -1772,14 +1792,22 @@ impl Desktop {
                         .min_w_0()
                         .min_h(rems(88. / 14.))
                         .justify_center()
-                        .pr(rems(12. / 14.))
+                        .px(SETTING_ITEM_INSET)
                         .context_menu(move |popup, window, cx| row_menu(popup, window, cx))
                         .child(
                             h_flex()
                                 .w_full()
                                 .min_w_0()
                                 .gap(crate::settings_ui::RESOURCE_GAP)
-                                .items_center()
+                                // A location with a problem has several lines;
+                                // its icon and menu stay with the first.
+                                .map(|row| {
+                                    if repair || offline {
+                                        row.items_start()
+                                    } else {
+                                        row.items_center()
+                                    }
+                                })
                                 .flex_wrap()
                                 .child(crate::settings_ui::resource_icon(
                                     icons::folder(),
@@ -1805,6 +1833,12 @@ impl Desktop {
                                                         badge(BadgeKind::Tonal)
                                                             .child(course2md::tr!("默认保存位置")),
                                                     )
+                                                })
+                                                .when(offline, |row| {
+                                                    row.child(
+                                                        badge(BadgeKind::Warning)
+                                                            .child(course2md::tr!("暂时不可访问")),
+                                                    )
                                                 }),
                                         )
                                         .child(
@@ -1826,26 +1860,25 @@ impl Desktop {
                                         .when_some(
                                             check.and_then(|check| check.problem.clone()),
                                             |text, problem| {
-                                                text.child(
-                                                    tile_support(
-                                                        ("storage-location-problem", index),
-                                                        problem,
-                                                    )
-                                                    .text_color(color(DANGER)),
-                                                )
+                                                text.child(location_status(
+                                                    ("storage-location-problem", index),
+                                                    icons::error(),
+                                                    DANGER,
+                                                    problem,
+                                                ))
                                             },
                                         )
                                         .when(needs_reassociation, |text| {
-                                            text.child(
-                                                tile_support(
-                                                    ("storage-association-needed", index),
-                                                    course2md::tr!(
-                                                        "无法确认这是原来的笔记库，请检查后重新关联"
-                                                    ),
-                                                )
-                                                .text_color(color(WARNING)),
-                                            )
+                                            text.child(location_status(
+                                                ("storage-association-needed", index),
+                                                icons::warning(),
+                                                WARNING,
+                                                course2md::tr!(
+                                                    "无法确认这是原来的笔记库，请检查后重新关联"
+                                                ),
+                                            ))
                                         })
+                                        .children(repair_actions)
                                         .when(default && several, |text| {
                                             text.child(tile_info(
                                                 "storage-policy",
@@ -1853,7 +1886,12 @@ impl Desktop {
                                             ))
                                         }),
                                 )
-                                .child(trailing.ml_auto().flex_shrink_0()),
+                                .child(
+                                    trailing
+                                        .ml_auto()
+                                        .flex_shrink_0()
+                                        .min_h(crate::settings_ui::RESOURCE_ICON),
+                                ),
                         ),
                 );
             }
@@ -1992,6 +2030,30 @@ impl Desktop {
         })
         .detach();
     }
+}
+
+/// A location's problem under its path: the status icon on the first line,
+/// then the text in the status color.
+fn location_status(
+    id: impl Into<ElementId>,
+    icon: Icon,
+    tone: crate::theme::ColorToken,
+    text: impl Into<SharedString>,
+) -> Div {
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .items_start()
+        .gap(rems(6. / 14.))
+        .child(
+            div()
+                .h(rems(20. / 14.))
+                .flex()
+                .items_center()
+                .flex_shrink_0()
+                .child(icon.size(rems(16. / 14.)).text_color(color(tone))),
+        )
+        .child(tile_support(id, text).flex_1().text_color(color(tone)))
 }
 
 #[cfg(test)]
