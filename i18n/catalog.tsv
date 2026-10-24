@@ -87,7 +87,7 @@ CoreML 模型加载失败 / CoreML model loading failed	CoreML 模型加载失�
 Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}; Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}
 HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}; response exceeds 128 KiB, remainder not read	HTTP {}；回應超過 128 KiB，未讀取其餘內容	HTTP {};応答が 128 KiB を超えているため、残りは読み取られていません
 Intel NPU 加速	Intel NPU 加速	Intel NPU acceleration	Intel NPU 加速	Intel NPU アクセラレーション
-「{}」按提交时的设置处理	「{}」按提交时的设置处理	“{}” uses the settings it was submitted with	「{}」按提交時的設定處理	「{}」は送信時の設定で処理されます
+不使用 AI	不使用 AI	No AI processing	不使用 AI	AI 処理なし
 仅对「{}」生效	仅对「{}」生效	Applies only to “{}”	僅對「{}」生效	「{}」にのみ適用されます
 仅对下一个视频生效	仅对下一个视频生效	Applies only to the next video	僅對下一個影片生效	次の動画にのみ適用されます
 安装 uv 后才能用 Intel NPU 识别	安装 uv 后才能用 Intel NPU 识别	Intel NPU transcription needs uv installed	安裝 uv 後才能用 Intel NPU 辨識	Intel NPU での認識には uv のインストールが必要です
@@ -666,7 +666,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已更新默认服务	已更新默认服务	Default services updated	已更新預設服務	デフォルトのサービスが更新されました
 已有后续处理任务	已有后续处理任务	There are follow-up processing tasks	已有後續處理任務	フォローアップ処理タスクがあります
 已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	既存の要約の形式が不完全です。元のテキストを保持します
-已有相同任务，未重复加入	已有相同任务，未重复加入	The same task already exists and has not been added repeatedly.	已有相同任務，未重複加入	同じタスクがすでに存在しており、繰り返し追加されていません。
+已有相同任务，未重复加入	已有相同任务，未重复加入	This task is already in the queue.	已有相同任務，未重複加入	このタスクはすでにキューにあります。
 已有相同处理任务：《{}》（{}）	已有相同处理任务：《{}》（{}）	The same processing task already exists: "{}" ({})	已有相同處理任務：《{}》（{}）	同じ処理タスクがすでに存在します: "{}" ({})
 已有笔记	已有笔记	Notes already exist	已有筆記	ノートあり
 已有笔记，保存在「{}」	已有笔记，保存在「{}」	Notes already exist, saved in "{}"	已有筆記，儲存在「{}」	すでにノートがあり、「{}」に保存されています
@@ -845,6 +845,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 授权回调路径不受支持 / Unsupported authorization callback path	授权回调路径不受支持	Unsupported authorization callback path	授權回呼路徑不受支援	認可コールバックパスはサポートされていません
 排队中	排队中	Queued	排隊中	待機中
 推荐 · 音频不离开本机	推荐 · 音频不离开本机	Recommended · Audio stays on this device	推薦 · 音訊不離開本機	推奨 · 音声はこのデバイスの外に送信されません
+提交时已确定，不能再更改	提交时已确定，不能再更改	Set when the task was submitted; can't be changed	提交時已確定，不能再更改	タスクの送信時に確定しており、変更できません
 音频不离开本机	音频不离开本机	Audio stays on this device	音訊不離開本機	音声はこのデバイスの外に送信されません
 提取画面	提取画面	Extract frames	提取畫面	フレームを抽出
 提取音频	提取音频	Extract audio	提取音訊	音声を抽出する

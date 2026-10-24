@@ -70,6 +70,25 @@ fn option_switch_tile(
         .child(div().flex_shrink_0().child(switch))
 }
 
+/// A queued or running task is shown by `box_running_task` in the video
+/// card's place.
+fn task_runs_in_card(task: &workspace::TaskRecord) -> bool {
+    matches!(
+        task.state,
+        workspace::TaskState::Queued
+            | workspace::TaskState::Running
+            | workspace::TaskState::Pausing
+    )
+}
+
+/// The mark on a cover slot whose video has no cover image, shared by the
+/// home page's video card, running task and task rows.
+pub(crate) fn cover_placeholder(size: Rems) -> gpui_component::Icon {
+    icons::movie()
+        .size(size)
+        .text_color(color(ON_SECONDARY_CONTAINER))
+}
+
 /// Secondary text below a control.
 /// The preview action keeps its label until the link field itself runs out of
 /// room: the field is the hero's measured width, not the window's breakpoint.
@@ -1832,22 +1851,9 @@ impl Desktop {
             .w(rems(if compact { 200. / 14. } else { 256. / 14. }))
             .max_w_full()
             .self_start();
-        cover = match source.cover {
-            Some(_) => cover,
-            None => cover.child(
-                h_flex()
-                    .size(rems(56. / 14.))
-                    .rounded_full()
-                    .items_center()
-                    .justify_center()
-                    .bg(color(SURFACE).opacity(0.85))
-                    .child(
-                        icons::play_arrow()
-                            .size(rems(26. / 14.))
-                            .text_color(color(ON_SECONDARY_CONTAINER)),
-                    ),
-            ),
-        };
+        if source.cover.is_none() {
+            cover = cover.child(cover_placeholder(rems(32. / 14.)));
+        }
         if let Some(duration) = duration {
             cover = cover.child(
                 div()
@@ -1882,20 +1888,7 @@ impl Desktop {
             .gap(rems(8. / 14.))
             .items_center()
             .flex_wrap()
-            .child(
-                icon_button("source-details", CONTROL_HEIGHT, false, cx)
-                    .icon(if self.show_preview_details {
-                        crate::icons::chevron_up()
-                    } else {
-                        crate::icons::chevron_down()
-                    })
-                    .accessibility_label(course2md::tr!("来源详情"))
-                    .tooltip(course2md::tr!("来源详情"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.show_preview_details = !this.show_preview_details;
-                        cx.notify();
-                    })),
-            )
+            .child(self.options_toggle("card-options-toggle", cx))
             .when(self.online(), |row| {
                 row.child(
                     icon_button("reread-source", CONTROL_HEIGHT, false, cx)
@@ -1967,14 +1960,36 @@ impl Desktop {
                                     .text_ellipsis()
                                     .line_clamp(2),
                             )
-                            .when(!metadata.is_empty(), |view| {
-                                view.child(
-                                    div()
-                                        .text_size(TEXT_BODY)
-                                        .text_color(color(GRAY))
-                                        .child(metadata),
-                                )
-                            }),
+                            .child(
+                                h_flex()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .items_center()
+                                    .when(!metadata.is_empty(), |row| {
+                                        row.child(
+                                            div()
+                                                .min_w_0()
+                                                .text_size(TEXT_BODY)
+                                                .text_color(color(GRAY))
+                                                .child(metadata),
+                                        )
+                                    })
+                                    .child(
+                                        input_action("source-details")
+                                            .icon(if self.show_preview_details {
+                                                crate::icons::chevron_up()
+                                            } else {
+                                                crate::icons::chevron_down()
+                                            })
+                                            .accessibility_label(course2md::tr!("来源详情"))
+                                            .tooltip(course2md::tr!("来源详情"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.show_preview_details =
+                                                    !this.show_preview_details;
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
                     )
                     .child(
                         icon_button("clear-source-preview", CONTROL_HEIGHT, false, cx)
@@ -2339,23 +2354,22 @@ impl Desktop {
                         this.set_task_option(|o| o.source_mode = mode, cx);
                     }
                 }));
-        // The hint follows the previewed source when there is one.
-        let confirmed_subtitle = self.source_preview.as_ref().is_some_and(|source| {
-            !self.subtitle_loading
-                && source.selected_subtitle.is_some()
-                && !subtitle_needs_confirmation(source, mode)
-        });
+        // The hint describes the mode; the video card states what this
+        // video will actually use.
         let hint = match mode {
             TranscriptSource::Subtitle => course2md::tr!("只使用视频自带的字幕"),
             TranscriptSource::Asr => course2md::tr!("将使用语音识别"),
-            TranscriptSource::Auto if confirmed_subtitle => course2md::tr!("有字幕，将直接使用"),
-            TranscriptSource::Auto if self.import_uses_speech() => {
-                course2md::tr!("将使用语音识别")
-            }
             TranscriptSource::Auto => {
                 course2md::tr!("有字幕时直接用字幕，没有字幕时使用语音识别")
             }
         };
+        // Speech settings matter only when this video may need speech:
+        // a previewed video whose subtitles will be used does not.
+        let speech_relevant = mode == TranscriptSource::Asr
+            || (mode == TranscriptSource::Auto
+                && self.source_preview.as_ref().is_none_or(|source| {
+                    self.subtitle_loading || subtitle_needs_confirmation(source, mode)
+                }));
         let mut tiles = vec![
             v_flex()
                 .p(rems(16. / 14.))
@@ -2367,7 +2381,7 @@ impl Desktop {
                         .child(supporting_info("conversion-text-mode-hint", hint)),
                 ),
         ];
-        if mode != TranscriptSource::Subtitle {
+        if speech_relevant {
             tiles.push(
                 v_flex()
                     .p(rems(16. / 14.))
@@ -2949,11 +2963,107 @@ impl Desktop {
         cx.notify();
     }
 
-    /// The processing options for the current input. A header tile names the
-    /// video they apply to and shows or hides them; under a preview it is
-    /// joined to the video card. While the input's own task is in flight, the
-    /// options it was submitted with cannot change, so the panel offers to
-    /// set up the next video instead.
+    /// The submitted task that owns the current input: still in flight, or
+    /// shown in the video card's place (its result opening, or a result that
+    /// needs attention). Its options were fixed when it was submitted.
+    fn owning_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
+        self.locked_input_task(cx)
+            .or_else(|| self.workbench_linked_task(cx))
+    }
+
+    /// The labelled toggle for the processing options, in the video card's
+    /// action row so it is visible next to the video it configures.
+    fn options_toggle(
+        &self,
+        id: &'static str,
+        cx: &mut Context<Self>,
+    ) -> gpui_component::button::Button {
+        let open = self.desktop_settings.home_options;
+        nav_action(id, open, cx)
+            .icon(icons::tune())
+            .label(course2md::tr!("处理选项"))
+            .accessibility_label(if open {
+                course2md::tr!("收起处理选项")
+            } else {
+                course2md::tr!("展开处理选项")
+            })
+            .on_click(cx.listener(move |this, _, _, cx| this.set_home_options(!open, cx)))
+    }
+
+    /// What a submitted task was planned with, read from its saved plan.
+    fn submitted_options_summary(&self, task: &workspace::TaskRecord) -> Div {
+        let options = task.plan.options();
+        let source = text_source_choices()
+            .into_iter()
+            .find(|(mode, _)| *mode == options.source_mode)
+            .map(|(_, label)| label)
+            .unwrap_or_default();
+        let mut ai: Vec<String> = [
+            ConversionAiOption::Proofread,
+            ConversionAiOption::Summary,
+            ConversionAiOption::Vision,
+        ]
+        .into_iter()
+        .filter(|option| conversion_ai_option_enabled(&options, *option))
+        .map(|option| conversion_ai_option_label(option).to_owned())
+        .collect();
+        if options.translate.is_some() {
+            ai.push(course2md::tr!("双语翻译").to_owned());
+        }
+        let ai = if ai.is_empty() {
+            course2md::tr!("不使用 AI").to_owned()
+        } else {
+            ai.join(course2md::tr!("、"))
+        };
+        let library = self
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.state.library(&task.plan.library_id));
+        let folder = task
+            .plan
+            .folder
+            .and_then(|id| {
+                library
+                    .and_then(|library| self.library_indexes.get(&library.root))
+                    .and_then(|index| index.folders.get(&id))
+                    .cloned()
+            })
+            .unwrap_or_else(|| course2md::tr!("未分类").to_owned());
+        let destination = match library {
+            Some(library) => format!("{} · {folder}", library.name),
+            None => folder,
+        };
+        let row = |id: &'static str, label: &'static str, value: String| {
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .pl(SETTING_ITEM_INSET)
+                .pr(rems(16. / 14.))
+                .py(rems(10. / 14.))
+                .child(TileScale::Compact.text(id, label, Some(value.into())))
+        };
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .py(rems(6. / 14.))
+            .child(row(
+                "submitted-text-source",
+                course2md::tr!("文字来源"),
+                source.to_owned(),
+            ))
+            .child(row("submitted-ai", course2md::tr!("AI 处理"), ai))
+            .child(row(
+                "submitted-destination",
+                course2md::tr!("保存到"),
+                destination,
+            ))
+    }
+
+    /// The processing options as one panel: a header row that shows or hides
+    /// them, then the options. Under a video card it joins the card's bottom
+    /// (2px apart, inner corners), so the options read as that video's.
+    /// While a submitted task owns the input, the panel shows what that task
+    /// was planned with, read-only, and always offers the next video.
     fn workbench_options(
         &self,
         attached: bool,
@@ -2961,20 +3071,9 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Div {
         let open = self.desktop_settings.home_options;
-        // A task shown in the card's place (its result opening, or a partial
-        // result needing attention) also owns the input.
-        let locked = self
-            .locked_input_task(cx)
-            .or_else(|| self.workbench_linked_task(cx))
-            .map(|task| {
-                if task.plan.title.trim().is_empty() {
-                    task.plan.source.title.clone()
-                } else {
-                    task.plan.title.clone()
-                }
-            });
-        let applies_to: SharedString = match (&locked, &self.source_preview) {
-            (Some(title), _) => course2md::tr!("「{}」按提交时的设置处理", title).into(),
+        let owner = self.owning_task(cx).cloned();
+        let applies_to: SharedString = match (&owner, &self.source_preview) {
+            (Some(_), _) => course2md::tr!("提交时已确定，不能再更改").into(),
             (None, Some(source)) if attached => {
                 course2md::tr!("仅对「{}」生效", source.title).into()
             }
@@ -2985,11 +3084,12 @@ impl Desktop {
         } else {
             course2md::tr!("展开处理选项")
         };
-        let header_bottom = !(open && locked.is_some());
+        let top = !attached;
+        let header_bottom = !open && owner.as_ref().is_none_or(task_runs_in_card);
         let header = TileScale::Compact
             .button(
                 "generation-options-toggle",
-                [!attached, !attached, header_bottom, header_bottom],
+                [top, top, header_bottom, header_bottom],
                 cx,
             )
             .accessibility_label(toggle_label)
@@ -3035,7 +3135,28 @@ impl Desktop {
                         .text_color(color(GRAY)),
                     ),
             );
-        if locked.is_some() {
+        let divider = || div().h(px(1.)).mx(SETTING_ITEM_INSET).bg(color(HAIRLINE));
+        let panel = tile([top, top, true, true])
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(header);
+        if let Some(task) = owner {
+            // The way to the next video stays visible whether or not the
+            // summary is open: a running task's card carries it; otherwise it
+            // sits right under this header.
+            let summary = motion::disclosure(
+                "generation-options-body",
+                open,
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .child(divider())
+                    .child(self.submitted_options_summary(&task)),
+            );
+            if task_runs_in_card(&task) {
+                return panel.child(summary);
+            }
             let next = TileScale::Compact
                 .button("set-up-next-video", [false, false, true, true], cx)
                 .on_click(cx.listener(|this, _, window, cx| this.set_up_next_video(window, cx)))
@@ -3054,38 +3175,176 @@ impl Desktop {
                             Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
                         )),
                 );
-            return v_flex()
-                .w_full()
-                .min_w_0()
-                .gap(TILE_GAP)
-                .child(header)
-                .child(motion::disclosure(
-                    "generation-options-body",
-                    open,
-                    v_flex().w_full().min_w_0().child(next),
-                ));
+            return panel.child(divider()).child(next).child(summary);
         }
         let body = v_flex()
             .w_full()
             .min_w_0()
-            .gap(rems(20. / 14.))
-            .child(self.import_text_mode_options(window, cx))
+            .pb(rems(8. / 14.))
+            .child(divider())
+            .child(
+                div()
+                    .pt(rems(16. / 14.))
+                    .child(self.import_text_mode_options(window, cx)),
+            )
+            .child(div().py(rems(16. / 14.)).child(divider()))
             .child(self.import_ai_options(cx))
+            .child(div().py(rems(16. / 14.)).child(divider()))
             .child(self.import_destination(cx))
             .child(
-                h_flex().w_full().justify_end().child(
+                h_flex().w_full().justify_end().px(rems(8. / 14.)).child(
                     text_button("reset-task-overrides", cx)
                         .icon(icons::restart())
                         .label(course2md::tr!("恢复 AI 默认"))
                         .on_click(cx.listener(|this, _, _, cx| this.reset_task_ai_overrides(cx))),
                 ),
             );
+        panel.child(motion::disclosure("generation-options-body", open, body))
+    }
+
+    /// The current input's own task while it runs, in the video card's place:
+    /// cover, title, live status and cancel, with its options attached below.
+    fn box_running_task(
+        &self,
+        task: &workspace::TaskRecord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let compact = is_compact(window);
+        let source = &task.plan.source;
+        let mut cover = cover_frame(px(18.), source.cover.clone())
+            .w(rems(if compact { 200. / 14. } else { 256. / 14. }))
+            .max_w_full()
+            .self_start();
+        if source.cover.is_none() {
+            cover = cover.child(cover_placeholder(rems(32. / 14.)));
+        }
+        let platform = if !source.online {
+            course2md::tr!("本地视频").to_owned()
+        } else {
+            crate::views::video_site_name(&source.input)
+                .map(str::to_owned)
+                .unwrap_or_default()
+        };
+        let metadata = [platform, source.author.clone()]
+            .into_iter()
+            .filter(|part| !part.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let title = if task.plan.title.trim().is_empty() {
+            source.title.clone()
+        } else {
+            task.plan.title.clone()
+        };
+        let id = task.id.clone();
+        let cancelling = task.intent == workspace::Intent::Cancel;
+        let details_id = task.id.clone();
+        let info = v_flex()
+            .flex_1()
+            .min_w(rems(240. / 14.))
+            .gap(rems(10. / 14.))
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .items_start()
+                    .gap_2()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_1()
+                            .child(
+                                accessible_text("running-task-title", title)
+                                    .text_size(rems(20. / 14.))
+                                    .line_height(rems(28. / 14.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .whitespace_normal()
+                                    .text_ellipsis()
+                                    .line_clamp(2),
+                            )
+                            .when(!metadata.is_empty(), |view| {
+                                view.child(
+                                    div()
+                                        .text_size(TEXT_BODY)
+                                        .text_color(color(GRAY))
+                                        .child(metadata),
+                                )
+                            }),
+                    )
+                    .child(
+                        icon_button("running-task-cancel", CONTROL_HEIGHT, false, cx)
+                            .icon(icons::close())
+                            .tooltip(course2md::tr!("取消任务"))
+                            .accessibility_label(course2md::tr!("取消任务"))
+                            .disabled(cancelling)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set_task_intent(id.clone(), workspace::Intent::Cancel, cx);
+                            })),
+                    ),
+            )
+            .children(self.task_status_lines(task, "running-task", window, cx))
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .mt_auto()
+                    .pt(rems(6. / 14.))
+                    .gap(rems(8. / 14.))
+                    .items_center()
+                    .flex_wrap()
+                    .child(self.options_toggle("running-options-toggle", cx))
+                    .child(div().flex_1())
+                    // The trailing actions wrap together and stay at the end.
+                    .child(
+                        h_flex()
+                            .ml_auto()
+                            .gap(rems(8. / 14.))
+                            .items_center()
+                            .child(
+                                text_button("running-task-details", cx)
+                                    .h(BUTTON_MEDIUM)
+                                    .min_h(BUTTON_MEDIUM)
+                                    .label_text_size(rems(15. / 14.))
+                                    .label(course2md::tr!("查看任务"))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.select_task(&details_id, cx);
+                                        this.navigate(Page::Task, cx);
+                                    })),
+                            )
+                            // The work continues in the background; the next
+                            // video starts from the saved defaults.
+                            .child(
+                                primary_pill("set-up-next-video")
+                                    .h(BUTTON_MEDIUM)
+                                    .min_h(BUTTON_MEDIUM)
+                                    .px(rems(20. / 14.))
+                                    .label_text_size(rems(15. / 14.))
+                                    .icon(icons::plus())
+                                    .label(course2md::tr!("设置下一个视频"))
+                                    .tooltip(course2md::tr!("清空链接，选项恢复为默认设置"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.set_up_next_video(window, cx)
+                                    })),
+                            ),
+                    ),
+            );
         v_flex()
             .w_full()
             .min_w_0()
-            .gap(rems(20. / 14.))
-            .child(header)
-            .child(motion::disclosure("generation-options-body", open, body))
+            .p(rems(16. / 14.))
+            .rounded(RADIUS_HERO)
+            .bg(color(SURFACE))
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .flex_wrap()
+                    .items_stretch()
+                    .gap(rems(20. / 14.))
+                    .child(cover)
+                    .child(info),
+            )
     }
 
     fn existing_source_note(&self) -> Option<&Course> {
@@ -3126,7 +3385,9 @@ impl Desktop {
     /// The input's own action only reads metadata; conversion starts from
     /// the preview card's 「开始转换」.
     fn preview_source_button(&self, compact: bool, cx: &mut Context<Self>) -> Div {
-        let disabled = self.preview_cancel.is_some() || self.value(Field::Source, cx).is_empty();
+        let disabled = self.preview_cancel.is_some()
+            || self.value(Field::Source, cx).is_empty()
+            || self.owning_task(cx).is_some();
         let label = course2md::tr!("预览视频");
         let start_shown = self.source_preview.is_some() && self.can_start_input(cx);
         h_flex().flex_shrink_0().items_center().child(
@@ -3300,14 +3561,42 @@ impl Desktop {
         } else {
             None
         };
-        // The options belong to one input: joined to its preview card when
-        // there is one, otherwise at the end of the hero.
-        let attached = self.preview_card_shown(cx);
+        // The current input's own task takes the preview card's place and
+        // shape: a running task shows its live status, a settled one what it
+        // needs or what opens.
+        let linked_task = self.workbench_linked_task(cx).cloned();
+        let task_card = linked_task.map(|task| {
+            let card = match task.state {
+                _ if task_runs_in_card(&task) => self.box_running_task(&task, window, cx),
+                workspace::TaskState::Complete | workspace::TaskState::Partial
+                    if opening_result =>
+                {
+                    self.box_task_opening_result(&task, cx)
+                        .p(rems(24. / 14.))
+                        .rounded(RADIUS_HERO)
+                        .bg(color(SURFACE))
+                }
+                _ => self
+                    .box_task_attention(&task, cx)
+                    .p(rems(24. / 14.))
+                    .rounded(RADIUS_HERO)
+                    .bg(color(SURFACE)),
+            };
+            motion::state_enter(
+                SharedString::from(format!("workbench-task-{}", task.id)),
+                card.rounded_bl(TILE_INNER_RADIUS)
+                    .rounded_br(TILE_INNER_RADIUS),
+            )
+        });
+        // The options belong to one input: joined to its video card (the
+        // preview or the task in its place), otherwise at the end of the hero.
+        let preview_card = self.preview_card_shown(cx);
+        let attached = preview_card || task_card.is_some();
         let options = motion::state_enter(
             "generation-options-panel",
             self.workbench_options(attached, window, cx),
         );
-        let (attached_options, options) = if attached {
+        let (preview_options, options) = if preview_card {
             (Some(options), None)
         } else {
             (None, Some(options))
@@ -3319,7 +3608,7 @@ impl Desktop {
             .when(!self.online(), |input| {
                 input.child(self.source_kind_tabs(cx))
             })
-            .child(self.box_source_input(preview_extra, attached_options, window, cx));
+            .child(self.box_source_input(preview_extra, preview_options, window, cx));
         let mut view = v_flex()
             .gap(HERO_GAP)
             .w_full()
@@ -3343,36 +3632,17 @@ impl Desktop {
                 message,
             ));
         }
-        // Queued and running tasks are shown by the active task list below.
-        let settled_task = linked_state
-            .filter(|state| {
-                !matches!(
-                    state,
-                    workspace::TaskState::Queued
-                        | workspace::TaskState::Running
-                        | workspace::TaskState::Pausing
-                )
-            })
-            .and_then(|_| self.workbench_linked_task(cx).cloned());
-        if let Some(task) = settled_task {
-            let task_view = match task.state {
-                workspace::TaskState::Complete | workspace::TaskState::Partial
-                    if opening_result =>
-                {
-                    self.box_task_opening_result(&task, cx)
-                }
-                _ => self.box_task_attention(&task, cx),
-            };
-            view = view.child(motion::state_enter(
-                SharedString::from(format!("workbench-task-{}", task.id)),
-                // The current task takes the preview card's place and shape.
-                task_view
-                    .p(rems(24. / 14.))
-                    .rounded(RADIUS_HERO)
-                    .bg(color(SURFACE)),
-            ));
-        }
-        view = view.children(options);
+        view = match task_card {
+            Some(card) => view.child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(TILE_GAP)
+                    .child(card)
+                    .children(options),
+            ),
+            None => view.children(options),
+        };
         let active = self.workbench_active_tasks_section(window, cx);
         let recent = self
             .recent_notes_section(cx)

@@ -8,8 +8,8 @@ use gpui_component::{
 use std::rc::Rc;
 
 /// Section headings on the workbench ("正在处理", "最近的笔记").
-const SECTION_TITLE: Rems = rems(24. / 14.);
-const SECTION_TITLE_LINE: Rems = rems(32. / 14.);
+const SECTION_TITLE: Rems = rems(22. / 14.);
+const SECTION_TITLE_LINE: Rems = rems(28. / 14.);
 /// Title of a workbench row.
 const ROW_TITLE: Rems = rems(16. / 14.);
 /// Cover column of workbench rows; narrow windows shrink it to a share of the row.
@@ -2525,6 +2525,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         use crate::workspace::{Intent, TaskState};
+        let linked = self.current_input_task(cx).map(|task| task.id.clone());
         let tasks: Vec<_> = self
             .workspace
             .as_ref()?
@@ -2532,7 +2533,8 @@ impl Desktop {
             .tasks
             .iter()
             .filter(|task| {
-                task.handled_by.is_none()
+                Some(&task.id) != linked.as_ref()
+                    && task.handled_by.is_none()
                     && (matches!(
                         task.state,
                         TaskState::Queued | TaskState::Running | TaskState::Pausing
@@ -2551,25 +2553,6 @@ impl Desktop {
             let id = task.id.clone();
             let queued = task.state == TaskState::Queued && !self.is_running_task(&id);
             let cancelling = task.intent == Intent::Cancel;
-            let progress = self.compact_task_progress(task);
-            let status = if cancelling {
-                course2md::tr!("正在取消…").to_owned()
-            } else if task.state == TaskState::Pausing {
-                course2md::tr!("正在保存进度…").to_owned()
-            } else if queued {
-                course2md::tr!("排队中").to_owned()
-            } else {
-                progress
-                    .as_ref()
-                    .map(|(label, _)| label.clone())
-                    .unwrap_or_else(|| {
-                        if self.is_running_task(&id) {
-                            self.with_job_clock(course2md::tr!("正在准备…"))
-                        } else {
-                            course2md::tr!("正在准备…").into()
-                        }
-                    })
-            };
             if index > 0 {
                 list = list.child(inset_divider());
             }
@@ -2588,7 +2571,7 @@ impl Desktop {
                             .text_left()
                             .text_color(color(INK))
                             .text_size(ROW_TITLE)
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .font_weight(FontWeight::MEDIUM)
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .child(task.plan.title.clone()),
@@ -2601,38 +2584,12 @@ impl Desktop {
                         }
                     })),
             );
-            // Measured work gets a bar under the status; unmeasured work a
-            // spinner leading the status line, never one on a line of its own.
-            let active = !queued && !cancelling;
-            let fraction = progress.and_then(|(_, fraction)| fraction);
-            detail = detail.child(
-                h_flex()
-                    .min_w_0()
-                    .gap_2()
-                    .items_center()
-                    .when(active && fraction.is_none(), |row| {
-                        row.child(crate::motion::spinner(
-                            SharedString::from(format!("workbench-task-spinner-{id}")),
-                            cx,
-                        ))
-                    })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .whitespace_normal()
-                            .text_size(TEXT_BODY)
-                            .text_color(color(GRAY))
-                            .child(status),
-                    ),
-            );
-            if let Some(fraction) = fraction.filter(|_| active) {
-                detail = detail.child(crate::motion::progress(
-                    SharedString::from(format!("workbench-task-progress-{id}")),
-                    fraction,
-                    window,
-                    cx,
-                ));
-            }
+            detail = detail.children(self.task_status_lines(
+                task,
+                &format!("workbench-task-{id}"),
+                window,
+                cx,
+            ));
             let cover = cover_frame(
                 RADIUS_SMALL,
                 task.plan.source.cover.clone().filter(|_| !queued),
@@ -2641,6 +2598,9 @@ impl Desktop {
             .max_w(relative(ROW_COVER_SHARE))
             .when(queued, |cover| {
                 cover.child(icons::schedule().size_6().text_color(color(GRAY)))
+            })
+            .when(!queued && task.plan.source.cover.is_none(), |cover| {
+                cover.child(crate::import_ui::cover_placeholder(rems(24. / 14.)))
             });
             let menu = self.task_menu(task, cx);
             list = list.child(
@@ -2669,16 +2629,91 @@ impl Desktop {
             v_flex()
                 .w_full()
                 .min_w_0()
-                .gap_3()
+                .gap(rems(20. / 14.))
                 .child(
-                    theme::accessible_text("workbench-active-title", course2md::tr!("正在处理"))
+                    h_flex().min_h(rems(48. / 14.)).pl(rems(4. / 14.)).child(
+                        theme::accessible_text(
+                            "workbench-active-title",
+                            course2md::tr!("正在处理"),
+                        )
                         .role(Role::Heading)
                         .text_size(SECTION_TITLE)
                         .line_height(SECTION_TITLE_LINE)
-                        .font_weight(FontWeight::SEMIBOLD),
+                        .font_weight(FontWeight::NORMAL),
+                    ),
                 )
                 .child(list),
         )
+    }
+
+    /// A queued or running task's live status: the status line (a spinner
+    /// on its first line for unmeasured work) and, for measured work, a bar.
+    pub(crate) fn task_status_lines(
+        &self,
+        task: &crate::workspace::TaskRecord,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        use crate::workspace::{Intent, TaskState};
+        let id = &task.id;
+        let queued = task.state == TaskState::Queued && !self.is_running_task(id);
+        let cancelling = task.intent == Intent::Cancel;
+        let progress = self.compact_task_progress(task);
+        let status = if cancelling {
+            course2md::tr!("正在取消…").to_owned()
+        } else if task.state == TaskState::Pausing {
+            course2md::tr!("正在保存进度…").to_owned()
+        } else if queued {
+            course2md::tr!("排队中").to_owned()
+        } else {
+            progress
+                .as_ref()
+                .map(|(label, _)| label.clone())
+                .unwrap_or_else(|| {
+                    if self.is_running_task(id) {
+                        self.with_job_clock(course2md::tr!("正在准备…"))
+                    } else {
+                        course2md::tr!("正在准备…").into()
+                    }
+                })
+        };
+        // Measured work gets a bar under the status; unmeasured work a
+        // spinner leading the status line, never one on a line of its own.
+        let active = !queued && !cancelling;
+        let fraction = progress.and_then(|(_, fraction)| fraction);
+        let line = rems(20. / 14.);
+        let mut lines = vec![
+            h_flex()
+                .min_w_0()
+                .gap_2()
+                .items_start()
+                .when(active && fraction.is_none(), |row| {
+                    // Centred on the first line when the status wraps.
+                    row.child(h_flex().h(line).flex_shrink_0().items_center().child(
+                        crate::motion::spinner(SharedString::from(format!("{key}-spinner")), cx),
+                    ))
+                })
+                .child(
+                    div()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .text_size(TEXT_BODY)
+                        .line_height(line)
+                        .text_color(color(GRAY))
+                        .child(status),
+                )
+                .into_any_element(),
+        ];
+        if let Some(fraction) = fraction.filter(|_| active) {
+            lines.push(crate::motion::progress(
+                SharedString::from(format!("{key}-progress")),
+                fraction,
+                window,
+                cx,
+            ));
+        }
+        lines
     }
 
     /// Workbench "最近笔记": attention tasks first, then recent readable notes.
@@ -2836,8 +2871,8 @@ impl Desktop {
                         h_flex().min_h(rems(48. / 14.)).pl(rems(4. / 14.)).child(
                             theme::accessible_text("recent-title", course2md::tr!("最近的笔记"))
                                 .role(Role::Heading)
-                                .text_size(rems(22. / 14.))
-                                .line_height(rems(28. / 14.))
+                                .text_size(SECTION_TITLE)
+                                .line_height(SECTION_TITLE_LINE)
                                 .font_weight(FontWeight::NORMAL),
                         ),
                     )
@@ -2862,8 +2897,8 @@ impl Desktop {
                         },
                     )
                     .role(Role::Heading)
-                    .text_size(rems(22. / 14.))
-                    .line_height(rems(28. / 14.))
+                    .text_size(SECTION_TITLE)
+                    .line_height(SECTION_TITLE_LINE)
                     .font_weight(FontWeight::NORMAL)
                     .flex_1(),
                 )
