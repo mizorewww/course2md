@@ -773,7 +773,7 @@ impl SettingsTab {
             Self::Generation => course2md::tr!("生成笔记"),
             Self::Services => course2md::tr!("服务与账号"),
             Self::Storage => course2md::tr!("存储"),
-            Self::Application => course2md::tr!("应用"),
+            Self::Application => course2md::tr!("应用 / Application"),
         }
     }
     /// The narrow rail has room for two characters.
@@ -1390,11 +1390,21 @@ impl Desktop {
         {
             self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(-offset)));
         }
+        // Capture builds can review every disclosure expanded.
+        #[cfg(feature = "capture")]
+        if std::env::var_os("COURSE2MD_CAPTURE_SETTINGS_EXPANDED").is_some() {
+            let ui = &mut self.settings_ui;
+            ui.diagnostics_details_open = true;
+            ui.model_details_open = true;
+            ui.asr_details_open = true;
+            ui.language_details_open = true;
+        }
         #[cfg(feature = "capture")]
         if let Ok(query) = std::env::var("COURSE2MD_CAPTURE_SETTINGS_SEARCH") {
             self.settings_ui
                 .search
                 .update(cx, |search, cx| search.set_value(query, window, cx));
+            self.settings_search_changed(cx);
         }
         self.settings_ui.tab_focus[tab.index()].focus(window, cx);
         self.ensure_account_cards(cx);
@@ -1541,6 +1551,7 @@ impl Desktop {
         &self,
         tab: SettingsTab,
         outer: [bool; 4],
+        icon_size: Pixels,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let index = tab.index();
@@ -1551,7 +1562,7 @@ impl Desktop {
             SURFACE
         });
         let hover = theme::blend(fill, color(INK), 0.08);
-        let icon = tinted_icon(tab.icon(), tab.tint(), px(40.))
+        let icon = tinted_icon(tab.icon(), tab.tint(), icon_size)
             .when(selected, |circle| circle.bg(color(SURFACE)));
         tile_corners(
             gpui_base::Tab::new(("settings-tab", index))
@@ -1612,6 +1623,8 @@ impl Desktop {
     /// categories as connected tile groups. It scrolls on its own.
     fn settings_navigation(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let visible = self.visible_settings_tabs(cx);
+        // Category icons grow with the interface text.
+        let icon_size = rems(40. / 14.).to_pixels(window.rem_size());
         let mut navigation = v_flex()
             .w_full()
             .min_w_0()
@@ -1655,7 +1668,7 @@ impl Desktop {
                     .children(shown.into_iter().enumerate().map(|(index, tab)| {
                         let top = index == 0;
                         let bottom = index + 1 == count;
-                        self.settings_category_tile(tab, [top, top, bottom, bottom], cx)
+                        self.settings_category_tile(tab, [top, top, bottom, bottom], icon_size, cx)
                     })),
             );
             first = false;
@@ -1680,7 +1693,8 @@ impl Desktop {
     }
 
     /// Narrow windows keep the categories in a compact rail beside the content.
-    fn settings_rail(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn settings_rail(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let icon_size = rems(40. / 14.).to_pixels(window.rem_size());
         let mut rail = v_flex()
             .w_full()
             .items_center()
@@ -1725,7 +1739,7 @@ impl Desktop {
                             .items_center()
                             .gap(rems(4. / 14.))
                             .child(
-                                tinted_icon(tab.icon(), tab.tint(), px(40.))
+                                tinted_icon(tab.icon(), tab.tint(), icon_size)
                                     .when(selected, |circle| circle.bg(color(SURFACE))),
                             )
                             .child(
@@ -1762,7 +1776,7 @@ impl Desktop {
         // open_settings, select_settings_tab and restore_settings_group.
         let layout = settings_layout(window);
         let navigation = if layout.compact {
-            self.settings_rail(cx)
+            self.settings_rail(window, cx)
         } else {
             self.settings_navigation(window, cx)
         };
