@@ -95,6 +95,9 @@ fn step_chip(stage: &TaskStage, cx: &App) -> Stateful<Div> {
 /// One row of the virtualized task queue. Task rows carry their index into
 /// the task snapshot captured for the frame.
 enum QueueItem {
+    /// The page heading with its counts; it scrolls with the sections and
+    /// shares their column.
+    Header,
     Unavailable,
     Empty,
     GroupLabel {
@@ -130,6 +133,7 @@ impl QueueItem {
     /// the row in place, so measured heights and scroll anchors survive.
     fn key(&self, tasks: &[TaskRecord]) -> String {
         match self {
+            QueueItem::Header => "header".to_owned(),
             QueueItem::Unavailable => "unavailable".to_owned(),
             QueueItem::Empty => "empty".to_owned(),
             QueueItem::GroupLabel { group, .. } => format!("group-{group:?}"),
@@ -936,6 +940,9 @@ impl Desktop {
                 }
             }
         };
+        if self.workspace.is_some() {
+            items.insert(0, QueueItem::Header);
+        }
         let completed_state = window.use_keyed_state("task-history-open", cx, |_, _| false);
         let queue_open = window.use_keyed_state("task-queue-open", cx, |_, _| false);
         // Finished work and earlier records fold behind one tile; a task the
@@ -1019,11 +1026,6 @@ impl Desktop {
             self.queue_list.remeasure();
             self.queue_rem = rem;
         }
-        // The page heading summarizes the counts; group headings stay names.
-        let header = self
-            .workspace
-            .is_some()
-            .then(|| self.queue_page_header(&tasks, cx));
         let focus: Rc<Vec<FocusHandle>> = Rc::new(self.queue_focus.clone());
         let state = self.queue_list.clone();
         let items = Rc::new(items);
@@ -1054,11 +1056,6 @@ impl Desktop {
             .w_full()
             .h_full()
             .min_h_0()
-            .pt(px(16.))
-            .gap(TASK_SECTION_GAP)
-            .when_some(header, |view, header| {
-                view.child(task_column().child(header))
-            })
             .child(queue)
             .into_any_element()
     }
@@ -1245,6 +1242,12 @@ impl Desktop {
         // Tiles of a group sit 2px apart; sections are 28px apart.
         let mut gap_after = TASK_SECTION_GAP;
         let content = match item {
+            // The page heading summarizes the counts; group headings stay names.
+            QueueItem::Header => div()
+                .w_full()
+                .pt(px(16.))
+                .child(self.queue_page_header(tasks, cx))
+                .into_any_element(),
             QueueItem::Unavailable => v_flex()
                 .gap_3()
                 .child(icons::warning().size_8().text_color(color(WARNING)))
