@@ -12,7 +12,7 @@
 | `component-button-text-size.patch` | Opt-in `label_text_size` for button labels. |
 | `component-menu-style.patch` | Opt-in global `MenuStyle` for popup, dropdown and context menus: container and row geometry, one highlight layer, tonal checked rows with a trailing check, danger items, hairline separators, group labels and a fade-in entrance. Without the global, menus are unchanged. |
 | `component-selectable-text-highlights.patch` | Opt-in `highlights` style runs and an `on_layout` measurement callback for `SelectableText`, used by reader find; runs outside the current selection skip collecting the selected text. |
-| `zed-cjk-line-break.patch` | Text wrapping never starts a line with full-width closing punctuation such as `，`, `。` or `）` (UAX #14 no-break-before classes for Chinese and Japanese). |
+| `zed-cjk-line-break.patch` | Text wrapping (`LineWrapper` and the duplicated wrap in `LineLayout`, used by `StyledText`) never starts a line with full-width closing punctuation such as `，`, `。` or `）` (UAX #14 no-break-before classes for Chinese and Japanese). |
 | `zed-metal-frame-lifetime.patch` | One autorelease pool per Metal frame so drawables are returned promptly. |
 | `zed-metal-present-stages.patch` | Opt-in profiler spans for each Metal presentation stage; compiled out of non-profiler builds. |
 

@@ -1,5 +1,52 @@
+diff --git a/crates/gpui/src/text_system/line_layout.rs b/crates/gpui/src/text_system/line_layout.rs
+index e7362f71e5..a6dfc2a82e 100644
+--- a/crates/gpui/src/text_system/line_layout.rs
++++ b/crates/gpui/src/text_system/line_layout.rs
+@@ -203,6 +203,9 @@ impl LineLayout {
+         };
+         let mut last_boundary_x = px(0.);
+         let mut prev_ch = '\0';
++        // The previous glyph, for a forced break that must not leave closing
++        // punctuation at the start of a line.
++        let mut prev_glyph: Option<(WrapBoundary, Pixels)> = None;
+         let mut glyphs = self
+             .runs
+             .iter()
+@@ -232,7 +235,10 @@ impl LineLayout {
+                     last_candidate_x = x;
+                 }
+             } else {
+-                if ch != ' ' && first_non_whitespace_ix.is_some() {
++                if ch != ' '
++                    && !LineWrapper::is_cjk_closing_punctuation(ch)
++                    && first_non_whitespace_ix.is_some()
++                {
+                     last_candidate_ix = Some(boundary);
+                     last_candidate_x = x;
+                 }
+@@ -244,6 +250,7 @@ impl LineLayout {
+ 
+             let next_x = glyphs.peek().map_or(self.width, |(_, _, x)| *x);
+             let width = next_x - last_boundary_x;
++            let previous = prev_glyph.replace((boundary, x));
+ 
+             if width > wrap_width && boundary > last_boundary {
+                 // When used line_clamp, we should limit the number of lines.
+@@ -256,6 +263,12 @@ impl LineLayout {
+                 if let Some(last_candidate_ix) = last_candidate_ix.take() {
+                     last_boundary = last_candidate_ix;
+                     last_boundary_x = last_candidate_x;
++                } else if let Some((previous, previous_x)) = previous.filter(|(previous, _)| {
++                    LineWrapper::is_cjk_closing_punctuation(ch) && *previous > last_boundary
++                }) {
++                    // Carry the previous glyph down with the punctuation.
++                    last_boundary = previous;
++                    last_boundary_x = previous_x;
+                 } else {
+                     last_boundary = boundary;
+                     last_boundary_x = x;
 diff --git a/crates/gpui/src/text_system/line_wrapper.rs b/crates/gpui/src/text_system/line_wrapper.rs
-index 678e9e0f18..cf4d0748d2 100644
+index 678e9e0f18..1a5861bbc0 100644
 --- a/crates/gpui/src/text_system/line_wrapper.rs
 +++ b/crates/gpui/src/text_system/line_wrapper.rs
 @@ -49,6 +49,9 @@ impl LineWrapper {
@@ -94,3 +141,45 @@ index 678e9e0f18..cf4d0748d2 100644
      #[test]
      fn test_wrap_line() {
          let mut wrapper = build_wrapper();
+@@ -1206,6 +1250,41 @@ mod tests {
+     #[cfg(target_os = "macos")]
+     use crate as gpui;
+ 
++    #[cfg(target_os = "macos")]
++    #[crate::test]
++    fn test_wrap_shaped_line_keeps_cjk_closing_punctuation(cx: &mut TestAppContext) {
++        cx.update(|cx| {
++            let text_system = WindowTextSystem::new(cx.text_system().clone());
++            let text = "缺少识别组件 llama.cpp，安装后重新检查。你好（世界）、再见！好的，谢谢。";
++            let run = TextRun {
++                len: text.len(),
++                font: font("PingFang SC"),
++                ..Default::default()
++            };
++            for width in 40..240 {
++                let lines = text_system
++                    .shape_text(
++                        text.into(),
++                        px(16.),
++                        &[run.clone()],
++                        Some(px(width as f32)),
++                        None,
++                    )
++                    .unwrap();
++                let layout = &lines[0].layout;
++                for boundary in layout.wrap_boundaries() {
++                    let glyph =
++                        &layout.unwrapped_layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix];
++                    let next = text[glyph.index..].chars().next().unwrap();
++                    assert!(
++                        !LineWrapper::is_cjk_closing_punctuation(next),
++                        "line starts with {next:?} at width {width}"
++                    );
++                }
++            }
++        });
++    }
++
+     // These seem to vary wildly based on the text system.
+     #[cfg(target_os = "macos")]
+     #[crate::test]
