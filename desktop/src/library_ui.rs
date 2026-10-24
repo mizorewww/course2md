@@ -404,11 +404,14 @@ impl Desktop {
                 .into_any_element()
         });
         let weak = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, window, _| {
             let weak = weak.clone();
             dialog
                 .material("folder-dialog-title", title)
-                .w(px(420.))
+                .w(crate::theme::dialog_width(
+                    crate::theme::DIALOG_WIDTH,
+                    window,
+                ))
                 .overlay_closable(false)
                 .close_button(false)
                 .child(content.clone())
@@ -582,10 +585,17 @@ impl Desktop {
                         .child(
                             primary_pill("save-folder")
                                 .icon(if id.is_some() {
-                                    icons::edit()
+                                    icons::check()
                                 } else {
                                     icons::folder_plus()
                                 })
+                                .disabled(
+                                    self.inputs[&Field::FolderName]
+                                        .read(cx)
+                                        .value()
+                                        .trim()
+                                        .is_empty(),
+                                )
                                 .label(if id.is_some() {
                                     course2md::tr!("保存名称")
                                 } else {

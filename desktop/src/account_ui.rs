@@ -57,7 +57,8 @@ struct QrLayout {
 /// title/footer budget. The QR itself never belongs to a scrolling region.
 fn qr_layout(viewport_width: f32, viewport_height: f32, rem_size: f32) -> QrLayout {
     let scale = rem_size / 14.;
-    let dialog_width = (420. * scale).min((viewport_width - 48.).max(0.));
+    let dialog_width = (crate::theme::DIALOG_WIDTH.0 * rem_size)
+        .min((viewport_width - f32::from(crate::theme::DIALOG_MARGIN) * 2.).max(0.));
     let content_width = (dialog_width - 34.).max(0.);
     let content_height = (viewport_height - rem_size * (180. / 14.) - 64.).max(80.);
     let gap = 16. * scale;
@@ -808,7 +809,10 @@ impl Desktop {
         } else {
             text_button("account-qr-close", cx)
         };
+        // The dialog already spaces its footer from the body; the actions'
+        // own top inset would leave a hole under the countdown.
         dialog_actions()
+            .pt_0()
             .child(
                 close
                     .label(if retry_source {
@@ -854,7 +858,7 @@ mod tests {
 
         let regular = qr_layout(1068., 768., 14.);
         assert!(!regular.side_by_side);
-        assert_eq!(regular.dialog_width, 420.);
+        assert_eq!(regular.dialog_width, 448.);
         assert!(regular.code_size >= 240.);
 
         for (width, height) in [(860., 620.), (1068., 768.), (1600., 1000.)] {

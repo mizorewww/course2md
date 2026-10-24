@@ -525,7 +525,7 @@ impl Render for CourseRenameDialog {
                     )
                     .child(
                         primary_pill("save-note-rename")
-                            .icon(icons::edit())
+                            .icon(icons::check())
                             .label(course2md::tr!("保存名称"))
                             .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                     ),
@@ -700,11 +700,14 @@ impl Desktop {
                 _subscription: subscription,
             }
         });
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, window, _| {
             dialog
                 .material("rename-note-title", course2md::tr!("重命名笔记"))
                 .close_button(false)
-                .w(px(480.))
+                .w(crate::theme::dialog_width(
+                    crate::theme::DIALOG_WIDTH,
+                    window,
+                ))
                 .overlay_closable(false)
                 .child(content.clone())
         });

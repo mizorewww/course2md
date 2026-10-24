@@ -1777,6 +1777,22 @@ pub fn input_action(id: impl Into<gpui::ElementId>) -> gpui_component::button::B
 
 /* ---------- Dialogs ---------- */
 
+/// A basic dialog with a short form or a single status (rename, new folder,
+/// sign-in). In rems so it grows with the text it holds.
+pub const DIALOG_WIDTH: Rems = rems(448. / 14.);
+/// A dialog that reports a multi-step operation (storage moves).
+pub const DIALOG_WIDE_WIDTH: Rems = rems(560. / 14.);
+/// Dialogs keep this margin to the window's sides.
+pub const DIALOG_MARGIN: Pixels = px(24.);
+
+/// A dialog width token at the current text scale, narrowed to fit the
+/// window with its side margins.
+pub fn dialog_width(width: Rems, window: &Window) -> Pixels {
+    width
+        .to_pixels(window.rem_size())
+        .min((window.viewport_size().width - DIALOG_MARGIN * 2.).max(px(0.)))
+}
+
 /// The M3 dialog headline: 24px regular on-surface text.
 pub fn dialog_title(
     id: impl Into<gpui::ElementId>,

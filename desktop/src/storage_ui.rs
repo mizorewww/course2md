@@ -1305,10 +1305,10 @@ impl Desktop {
                 .into_any_element()
         });
         let title = self.storage_ui.title();
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, window, _| {
             dialog
                 .material("storage-dialog-title", title)
-                .w(px(540.))
+                .w(dialog_width(DIALOG_WIDE_WIDTH, window))
                 .overlay_closable(false)
                 .close_button(false)
                 .keyboard(false)
