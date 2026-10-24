@@ -337,8 +337,9 @@ impl Desktop {
     }
 
     /// One saved palette as a tile of the 主题 group: its real preview, which
-    /// mode it serves and its name. The palette in use carries 使用中 and an
-    /// accent ring; the tile opens the palette chooser.
+    /// mode it serves and its name. The palette in use carries 使用中, as on
+    /// the canvas; keyboard focus keeps the button's own focus ring. The tile
+    /// opens the palette chooser.
     fn palette_preset(
         &self,
         dark: bool,
@@ -354,11 +355,6 @@ impl Desktop {
         };
         tile_button(("palette-preset", usize::from(dark)), outer, cx)
             .p(rems(16. / 14.))
-            .border_2()
-            .border_color(gpui::Rgba {
-                a: if active { 1. } else { 0. },
-                ..color(ACCENT)
-            })
             .accessibility_label(course2md::tr!("{}：{}", caption, palette.name()))
             .child(
                 v_flex()
