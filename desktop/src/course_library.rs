@@ -2615,8 +2615,10 @@ impl Desktop {
                     .child(detail)
                     .child(
                         quiet(SharedString::from(format!("workbench-task-cancel-{id}")))
+                            .flex_shrink_0()
                             .icon(icons::close())
-                            .tooltip(course2md::tr!("取消任务"))
+                            // Labelled as on the running card and the Tasks page.
+                            .label(course2md::tr!("取消任务"))
                             .disabled(cancelling)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.set_task_intent(id.clone(), Intent::Cancel, cx);
