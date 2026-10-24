@@ -73,7 +73,15 @@ fn palette_colors(id: PaletteId) -> [Rgba; COLOR_COUNT] {
         SURFACE => rgb(p.surface),
         // Surface container highest: unselected segments, filled search bars
         // and tonal icon buttons.
-        SURFACE_HIGH => blend(canvas, rgb(p.text), if id.is_dark() { 0.08 } else { 0.06 }),
+        // Dark palettes raise surfaces by lightening them, so their highest
+        // container builds on the surface rather than the darker ground.
+        SURFACE_HIGH => {
+            if id.is_dark() {
+                blend(rgb(p.surface), rgb(p.text), 0.10)
+            } else {
+                blend(canvas, rgb(p.text), 0.06)
+            }
+        }
         INSET => rgb(p.inset),
         INK => rgb(p.text),
         GRAY => rgb(p.muted),
