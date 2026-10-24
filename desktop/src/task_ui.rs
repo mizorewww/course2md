@@ -1325,7 +1325,7 @@ impl Desktop {
                             .min_w_0()
                             .gap_4()
                             .items_center()
-                            .child(icons::history().size(px(22.)).text_color(color(GRAY)))
+                            .child(icons::check_circle().size(px(22.)).text_color(color(GRAY)))
                             .child(
                                 div()
                                     .flex_1()
@@ -1946,7 +1946,8 @@ impl Desktop {
                     this.move_waiting_task(&drag.id, number - 1, cx)
                 }));
         } else {
-            row = row.pl_3();
+            // The cover starts on the same inset as the detail folded out below.
+            row = row.pl(SETTING_ITEM_INSET);
         }
         let row = row.child(body);
         let mut surface = tile_corners(v_flex(), [first, first, last, last])
@@ -2300,7 +2301,13 @@ impl Desktop {
                         .whitespace_normal(),
                     ),
             )
-            .child(badge(task_badge_kind(task.state)).child(task_status_label(task)));
+            // The title already says what is being generated; the chip only
+            // carries the state.
+            .child(badge(task_badge_kind(task.state)).child(if generating {
+                course2md::tr!("处理中").to_owned()
+            } else {
+                task_status_label(task)
+            }));
         // One indicator for the step in progress: its measured fraction when
         // the worker reports one, motion otherwise. The counts line carries
         // the step's own measurement and the job's clock, never an estimate.
@@ -2358,7 +2365,8 @@ impl Desktop {
                     )
                 })
         });
-        let chips = (!stages.is_empty()).then(|| {
+        // A single reached step is already the step line above.
+        let chips = (stages.len() > 1).then(|| {
             h_flex()
                 .w_full()
                 .min_w_0()
