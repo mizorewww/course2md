@@ -451,6 +451,100 @@ pub fn download_progress(current: u64, total: u64) {
     });
 }
 
+/// The files a multi-repository download will fetch, in transfer order, and
+/// how much of each was on disk before it started. Planned by the Apple
+/// downloader, which reports only a byte-weighted fraction per repository.
+#[derive(Clone, Debug, Deserialize)]
+pub struct TransferPlan {
+    /// The host the bytes come from.
+    pub host: String,
+    pub repos: Vec<RepoTransfer>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct RepoTransfer {
+    pub repo: String,
+    /// `[size, bytes already on disk]` per file.
+    pub files: Vec<(u64, u64)>,
+}
+
+/// Turns per-repository fractions into bytes for the whole model.
+///
+/// The library counts a file it finds complete, or the staged chunks of one it
+/// resumes, as soon as it reaches it. Counted that way, cached bytes would
+/// arrive mid-transfer and read as speed. Here they are counted once, up front,
+/// so the counter only grows by bytes that crossed the network.
+#[cfg_attr(not(apple_native), allow(dead_code))]
+pub(crate) struct TransferLedger {
+    plan: TransferPlan,
+    reported: u64,
+}
+
+#[cfg_attr(not(apple_native), allow(dead_code))]
+impl TransferLedger {
+    pub fn new(plan: TransferPlan) -> Self {
+        let mut ledger = Self { plan, reported: 0 };
+        ledger.reported = ledger.present();
+        ledger
+    }
+    pub fn host(&self) -> &str {
+        &self.plan.host
+    }
+    pub fn total(&self) -> u64 {
+        self.plan.repos.iter().map(repo_size).sum()
+    }
+    /// Bytes on disk as last reported.
+    pub fn reported(&self) -> u64 {
+        self.reported
+    }
+    /// Bytes on disk before the transfer started.
+    pub fn present(&self) -> u64 {
+        self.plan.repos.iter().map(repo_present).sum()
+    }
+    /// Bytes on disk once repository `repo` has reported `fraction`. Never
+    /// decreases: a retry re-walks files this run already fetched.
+    pub fn advance(&mut self, repo: usize, fraction: f64) -> u64 {
+        let Some(files) = self.plan.repos.get(repo).map(|r| &r.files) else {
+            return self.reported;
+        };
+        let size: u64 = files.iter().map(|(size, _)| size).sum();
+        let fraction = if fraction.is_finite() {
+            fraction.clamp(0., 1.)
+        } else {
+            0.
+        };
+        let reached = (fraction * size as f64).round() as u64;
+        // Bytes the library has passed that were already on disk.
+        let mut start = 0;
+        let mut passed_present = 0;
+        for &(size, present) in files {
+            let into = reached.saturating_sub(start).min(size);
+            passed_present += into.min(present.min(size));
+            start += size;
+        }
+        let earlier: u64 = self.plan.repos[..repo]
+            .iter()
+            .map(|r| repo_size(r) - repo_present(r))
+            .sum();
+        let value = self.present() + earlier + reached.saturating_sub(passed_present);
+        self.reported = self.reported.max(value.min(self.total()));
+        self.reported
+    }
+}
+
+#[cfg_attr(not(apple_native), allow(dead_code))]
+fn repo_size(repo: &RepoTransfer) -> u64 {
+    repo.files.iter().map(|(size, _)| size).sum()
+}
+
+#[cfg_attr(not(apple_native), allow(dead_code))]
+fn repo_present(repo: &RepoTransfer) -> u64 {
+    repo.files
+        .iter()
+        .map(|&(size, present)| present.min(size))
+        .sum()
+}
+
 /// 共享进度条样式：模板均为静态字符串，解析失败是编程错误。
 fn progress_style(template: &str) -> ProgressStyle {
     ProgressStyle::with_template(template)
@@ -690,6 +784,80 @@ mod tests {
             s.trim().parse::<serde_json::Value>().unwrap(),
             serde_json::json!({"type": "log", "level": "info", "message": "hi"})
         );
+    }
+
+    fn ledger(repos: &[&[(u64, u64)]]) -> TransferLedger {
+        TransferLedger::new(TransferPlan {
+            host: "huggingface.co".into(),
+            repos: repos
+                .iter()
+                .enumerate()
+                .map(|(index, files)| RepoTransfer {
+                    repo: format!("r{index}"),
+                    files: files.to_vec(),
+                })
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn transfer_ledger_counts_whole_model_bytes_across_repositories() {
+        let mut ledger = ledger(&[&[(100, 0), (300, 0)], &[(600, 0)]]);
+        assert_eq!((ledger.present(), ledger.total()), (0, 1000));
+        assert_eq!(ledger.advance(0, 0.25), 100);
+        assert_eq!(ledger.advance(0, 1.0), 400);
+        assert_eq!(ledger.advance(1, 0.0), 400);
+        assert_eq!(ledger.advance(1, 0.5), 700);
+        assert_eq!(ledger.advance(1, 1.0), 1000);
+    }
+
+    #[test]
+    fn transfer_ledger_counts_cached_and_staged_bytes_before_the_transfer() {
+        // r0: a complete file, then a fresh one. r1: a resumed file with 200
+        // staged bytes, then a complete one.
+        let mut ledger = ledger(&[&[(100, 100), (300, 0)], &[(400, 200), (200, 200)]]);
+        assert_eq!(ledger.present(), 500);
+        // Reaching the cached file adds nothing.
+        assert_eq!(ledger.advance(0, 0.25), 500);
+        assert_eq!(ledger.advance(0, 0.5), 600);
+        assert_eq!(ledger.advance(0, 1.0), 800);
+        // The staged chunks are reported first; they were already counted.
+        assert_eq!(ledger.advance(1, 200. / 600.), 800);
+        assert_eq!(ledger.advance(1, 300. / 600.), 900);
+        assert_eq!(ledger.advance(1, 400. / 600.), 1000);
+        // The trailing cached file arrives at once and adds nothing.
+        assert_eq!(ledger.advance(1, 1.0), 1000);
+        assert_eq!(ledger.total(), 1000);
+    }
+
+    #[test]
+    fn transfer_ledger_never_runs_backwards_or_past_the_total() {
+        let mut ledger = ledger(&[&[(100, 0), (300, 0)]]);
+        assert_eq!(ledger.advance(0, 0.75), 300);
+        // A retry restarts the library's count from zero.
+        assert_eq!(ledger.advance(0, 0.0), 300);
+        assert_eq!(ledger.advance(0, 0.5), 300);
+        assert_eq!(ledger.advance(0, 2.0), 400);
+        assert_eq!(ledger.advance(0, f64::NAN), 400);
+        assert_eq!(ledger.advance(7, 1.0), 400);
+        let event = Event::Progress {
+            stage: Stage::ModelApple,
+            current: 300,
+            total: 400,
+            message: Some(ledger.host().into()),
+            phase: Some(Phase::Download),
+            unit: Some(Unit::Bytes),
+        };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            serde_json::json!({"type": "progress", "stage": "model/apple", "current": 300,
+                "total": 400, "message": "huggingface.co", "phase": "download", "unit": "bytes"})
+        );
+        let plan: TransferPlan = serde_json::from_str(
+            r#"{"host":"hf-mirror.com","repos":[{"repo":"a/b","files":[[10,10],[5,0]]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(TransferLedger::new(plan).present(), 10);
     }
 
     #[test]

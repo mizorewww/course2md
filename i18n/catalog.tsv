@@ -54,6 +54,7 @@ Apple 平台	Apple 平台	Apple platform	Apple 平臺	Apple プラットフォ�
 Apple 芯片	Apple 芯片	Apple chip	Apple 晶片	Apple チップ
 Apple 芯片 (arm64)	Apple 芯片 (arm64)	Apple chip (arm64)	Apple 晶片 (arm64)	Appleチップ(arm64)
 Apple 芯片本机识别	Apple 芯片本机识别	On-device recognition on Apple silicon	Apple 晶片本機辨識	Apple チップでのローカル音声認識
+Apple 识别模型 · {}	Apple 识别模型 · {}	Apple speech model · {}	Apple 辨識模型 · {}	Apple 音声認識モデル · {}
 Apple 识别程序	Apple 识别程序	Apple speech recognizer	Apple 辨識程式	Apple 音声認識プログラム
 Apple 识别组件不可用，请选择其他识别方式	Apple 识别组件不可用，请选择其他识别方式	Apple speech recognition is unavailable; choose another recognition method	Apple 辨識元件不可用，請選擇其他辨識方式	Apple 音声認識コンポーネントは利用できません。別の認識方式を選択してください
 Apple 识别结果过长，部分文字被截断 / Apple transcript exceeded the size limit; some text was truncated	Apple 识别结果过长，部分文字被截断	Apple transcript exceeded the size limit; some text was truncated	Apple 辨識結果過長，部分文字被截斷	Apple の認識結果が長すぎるため、テキストの一部が切り捨てられました

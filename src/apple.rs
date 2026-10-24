@@ -79,6 +79,63 @@ extern "C" fn c2m_model_progress(
     }
 }
 
+/// The whole-model byte download in progress, once Swift has planned it.
+static TRANSFER: std::sync::Mutex<Option<(crate::progress::TransferLedger, crate::progress::Bar)>> =
+    std::sync::Mutex::new(None);
+
+/// Swift resolved every file the download will fetch. Returns 0 when byte
+/// progress follows, so Swift stops reporting bare fractions.
+#[unsafe(no_mangle)]
+extern "C" fn c2m_model_transfer_plan(plan: *const std::ffi::c_char) -> std::ffi::c_int {
+    if plan.is_null() {
+        return -1;
+    }
+    let plan = unsafe { CStr::from_ptr(plan) }.to_string_lossy();
+    let plan: crate::progress::TransferPlan = match serde_json::from_str(&plan) {
+        Ok(plan) => plan,
+        Err(error) => {
+            tracing::debug!("Apple download plan unreadable: {error}");
+            return -1;
+        }
+    };
+    let ledger = crate::progress::TransferLedger::new(plan);
+    let bar = crate::progress::Bar::new(Stage::ModelApple, ledger.total())
+        .with_unit(crate::progress::Unit::Bytes)
+        .with_template(crate::download::MODEL_BAR)
+        .with_position(ledger.present());
+    bar.set_phase(
+        crate::progress::Phase::Download,
+        ledger.host(),
+        crate::tr!("Apple 识别模型 · {}", ledger.host()),
+    );
+    *crate::runtime::lock_recover(&TRANSFER) = Some((ledger, bar));
+    0
+}
+
+/// Repository `repo` of the plan has fetched `fraction` of its bytes.
+#[unsafe(no_mangle)]
+extern "C" fn c2m_model_transfer_progress(repo: std::ffi::c_int, fraction: f64) {
+    let mut transfer = crate::runtime::lock_recover(&TRANSFER);
+    if let Some((ledger, bar)) = transfer.as_mut()
+        && let Ok(repo) = usize::try_from(repo)
+    {
+        // speech-swift reports at most once per landed range, so every
+        // change is sent; cached files and repeats change nothing.
+        let before = ledger.reported();
+        let now = ledger.advance(repo, fraction);
+        if now != before {
+            bar.report_position(now);
+        }
+    }
+}
+
+/// Reports the last byte count and clears the terminal bar.
+fn finish_transfer() {
+    if let Some((_, bar)) = crate::runtime::lock_recover(&TRANSFER).take() {
+        bar.finish();
+    }
+}
+
 fn last_error() -> String {
     unsafe {
         let p = ffi::c2m_last_error();
@@ -294,6 +351,7 @@ pub fn prepare_cache_here(model: &str) -> Result<()> {
     let name = CString::new(model)?;
     let manifest = CString::new(cache_manifest(model)?)?;
     let status = unsafe { ffi::c2m_asr_prepare_cache(name.as_ptr(), manifest.as_ptr()) };
+    finish_transfer();
     if status != 0 {
         anyhow::bail!("{}", last_error());
     }
