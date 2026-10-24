@@ -35,7 +35,7 @@ APPLIED = ROOT / ".deps" / "applied"
 
 def gpui_platform_features(manifest=ROOT / "Cargo.toml"):
     """gpui_platform features are defined once, in desktop/Cargo.toml."""
-    dependency = tomllib.loads(manifest.read_text())["dependencies"]["gpui_platform"]
+    dependency = tomllib.loads(manifest.read_text(encoding="utf-8"))["dependencies"]["gpui_platform"]
     return dependency.get("features", [])
 
 
@@ -52,7 +52,7 @@ def remembered_developer_dir(requested, mark=DEVELOPER_MARK):
     if requested is not None:
         return Path(requested)
     if mark.is_file():
-        return Path(mark.read_text().strip())
+        return Path(mark.read_text(encoding="utf-8").strip())
     return None
 
 
@@ -77,7 +77,7 @@ def source_patches(name):
 def patch_paths(patches):
     paths = set()
     for patch in patches:
-        for line in patch.read_text().splitlines():
+        for line in patch.read_text(encoding="utf-8").splitlines():
             if line.startswith("+++ b/"):
                 path = line[6:]
                 if Path(path).is_absolute() or ".." in Path(path).parts:
@@ -228,10 +228,10 @@ def main():
     lock_path = ROOT / "sources.lock.json"
     if args.freeze:
         revisions = {name: git(ROOT / ".deps" / name, "rev-parse", "HEAD", capture=True) for name in REPOS}
-        lock_path.write_text(json.dumps(revisions, indent=2) + "\n")
+        lock_path.write_text(json.dumps(revisions, indent=2) + "\n", encoding="utf-8")
         print(f"Recorded tested revisions in {lock_path}")
         return
-    locked = json.loads(lock_path.read_text()) if args.locked else {}
+    locked = json.loads(lock_path.read_text(encoding="utf-8")) if args.locked else {}
     if args.locked and (set(locked) != set(REPOS) or
                         any(not re.fullmatch(r"[0-9a-f]{40}", value) for value in locked.values())):
         raise SystemExit("Release source lock must contain a full commit hash for each dependency")
@@ -275,7 +275,7 @@ def main():
                 raise SystemExit(f"Could not apply reviewed patch {patch.name}:\n{result.stderr}")
         record_applied(name, patches)
     if args.developer_dir is not None:
-        DEVELOPER_MARK.write_text(str(args.developer_dir.resolve()) + "\n")
+        DEVELOPER_MARK.write_text(str(args.developer_dir.resolve()) + "\n", encoding="utf-8")
     print("Prepared GPUI and GPUI Component sources with reviewed patches")
 
 
