@@ -1759,7 +1759,7 @@ impl Desktop {
                     quiet(("storage-location-actions", index))
                         .w(CONTROL_HEIGHT)
                         .px_0()
-                        .icon(icons::ellipsis())
+                        .icon(icons::more_vertical())
                         .accessibility_label(course2md::tr!("{} 操作", library.name))
                         .tooltip(course2md::tr!("笔记库操作"))
                         .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
@@ -1778,10 +1778,13 @@ impl Desktop {
                             h_flex()
                                 .w_full()
                                 .min_w_0()
-                                .gap(rems(16. / 14.))
+                                .gap(crate::settings_ui::RESOURCE_GAP)
                                 .items_center()
                                 .flex_wrap()
-                                .child(tinted_icon(icons::folder(), Tint::Amber, px(48.)))
+                                .child(crate::settings_ui::resource_icon(
+                                    icons::folder(),
+                                    Tint::Amber,
+                                ))
                                 .child(
                                     v_flex()
                                         .flex_1()
@@ -1815,36 +1818,43 @@ impl Desktop {
                                                     .clone(),
                                             )
                                             .text_size(rems(13. / 14.)),
-                                        ),
+                                        )
+                                        // What is wrong with the location and
+                                        // what changing the default does stay in
+                                        // its text column, under the path, before
+                                        // the actions wrap below.
+                                        .when_some(
+                                            check.and_then(|check| check.problem.clone()),
+                                            |text, problem| {
+                                                text.child(
+                                                    tile_support(
+                                                        ("storage-location-problem", index),
+                                                        problem,
+                                                    )
+                                                    .text_color(color(DANGER)),
+                                                )
+                                            },
+                                        )
+                                        .when(needs_reassociation, |text| {
+                                            text.child(
+                                                tile_support(
+                                                    ("storage-association-needed", index),
+                                                    course2md::tr!(
+                                                        "无法确认这是原来的笔记库，请检查后重新关联"
+                                                    ),
+                                                )
+                                                .text_color(color(WARNING)),
+                                            )
+                                        })
+                                        .when(default && several, |text| {
+                                            text.child(tile_info(
+                                                "storage-policy",
+                                                course2md::tr!("更改默认位置只影响后续生成的笔记"),
+                                            ))
+                                        }),
                                 )
                                 .child(trailing.ml_auto().flex_shrink_0()),
-                        )
-                        .when_some(
-                            check.and_then(|check| check.problem.clone()),
-                            |card, problem| {
-                                card.child(
-                                    tile_support(("storage-location-problem", index), problem)
-                                        .pl(rems(64. / 14.))
-                                        .text_color(color(DANGER)),
-                                )
-                            },
-                        )
-                        .when(needs_reassociation, |card| {
-                            card.child(
-                                tile_support(
-                                    ("storage-association-needed", index),
-                                    course2md::tr!("无法确认这是原来的笔记库，请检查后重新关联"),
-                                )
-                                .pl(rems(64. / 14.))
-                                .text_color(color(WARNING)),
-                            )
-                        })
-                        .when(default && several, |card| {
-                            card.child(div().pl(rems(64. / 14.)).child(tile_info(
-                                "storage-policy",
-                                course2md::tr!("更改默认位置只影响后续生成的笔记"),
-                            )))
-                        }),
+                        ),
                 );
             }
         }
@@ -1860,19 +1870,14 @@ impl Desktop {
         .min_h(rems(72. / 14.))
         .accessibility_label(course2md::tr!("添加笔记库位置"))
         .child(
-            h_flex()
-                .size(px(48.))
-                .flex_shrink_0()
-                .items_center()
-                .justify_center()
-                .text_color(color(INK))
-                .child(icons::plus().size(rems(24. / 14.))),
+            tile_row()
+                .child(crate::settings_ui::add_slot())
+                .child(tile_text(
+                    "register-storage-location-label",
+                    course2md::tr!("添加笔记库位置"),
+                    None,
+                )),
         )
-        .child(tile_text(
-            "register-storage-location-label",
-            course2md::tr!("添加笔记库位置"),
-            None,
-        ))
         .on_click(cx.listener(|this, _, window, cx| this.register_storage_location(window, cx)));
         locations = locations.tile(move |_| add.into_any_element());
         view.child(locations).into_any_element()

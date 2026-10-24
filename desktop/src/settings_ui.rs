@@ -479,7 +479,7 @@ impl AccountCard {
                 .text_color(color(if error { DANGER } else { GRAY }))
         };
         resource_layout(
-            tinted_icon(self.icon, self.tint, px(48.)),
+            resource_icon(self.icon, self.tint),
             v_flex()
                 .child(identity)
                 .when_some(self.detail, |view, detail| {
@@ -502,11 +502,37 @@ impl AccountCard {
 
 /// A resource item's layout (an account or a library location): its icon,
 /// its text column, and trailing status or actions on the item's edge.
+/// The leading icon circle of a resource row (an account, a service, a
+/// library location). It, the gap after it and the rows' insets are all in
+/// rems, so the text ruler holds at every text scale.
+pub(crate) const RESOURCE_ICON: Rems = rems(48. / 14.);
+/// Between a resource's icon and its text.
+pub(crate) const RESOURCE_GAP: Rems = rems(16. / 14.);
+/// Where a resource's text starts, measured from its icon's leading edge:
+/// later lines of the same resource (a problem, a policy) start here.
+pub(crate) const RESOURCE_TEXT_INSET: Rems = rems(RESOURCE_ICON.0 + RESOURCE_GAP.0);
+
+/// A resource's tinted icon circle.
+pub(crate) fn resource_icon(icon: Icon, tint: Tint) -> Div {
+    tinted_icon(icon, tint, RESOURCE_ICON)
+}
+
+/// The plus of an 「添加…」 tile, in the resource rows' icon column.
+pub(crate) fn add_slot() -> Div {
+    h_flex()
+        .size(RESOURCE_ICON)
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .text_color(color(INK))
+        .child(icons::plus().size(rems(24. / 14.)))
+}
+
 pub(crate) fn resource_layout(icon: impl IntoElement, text: Div, trailing: Div) -> Div {
     h_flex()
         .w_full()
         .min_w_0()
-        .gap(px(16.))
+        .gap(RESOURCE_GAP)
         .items_center()
         .child(icon)
         .child(text.flex_1().min_w_0().gap_1())
@@ -520,7 +546,7 @@ fn resource_row(id: impl Into<ElementId>) -> Stateful<Div> {
         .id(id)
         .w_full()
         .min_w_0()
-        .gap(rems(16. / 14.))
+        .gap(RESOURCE_GAP)
         .items_center()
         .py(rems(16. / 14.))
         .pl(SETTING_ITEM_INSET)
@@ -1399,7 +1425,7 @@ impl Desktop {
                     .h_auto()
                     .py(rems(8. / 14.))
                     .px(rems(2. / 14.))
-                    .rounded(px(16.))
+                    .rounded(TILE_RADIUS)
                     .bg(fill)
                     .border_2()
                     .border_color(gpui::transparent_black())
@@ -1694,20 +1720,11 @@ impl Desktop {
             .min_h(rems(72. / 14.))
             .accessibility_label(add_label)
             // The plus sits in the rows' icon column, the label on their text ruler.
-            .child(
-                h_flex()
-                    .size(px(48.))
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_center()
-                    .text_color(color(INK))
-                    .child(icons::plus().size(rems(24. / 14.))),
-            )
-            .child(tile_text(
+            .child(tile_row().child(add_slot()).child(tile_text(
                 SharedString::from(format!("add-service-label-{}", purpose as usize)),
                 add_label,
                 hint,
-            ))
+            )))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_settings_service_editor(purpose, None, window, cx);
             }));
@@ -1773,14 +1790,13 @@ impl Desktop {
         .on_click(cx.listener(move |this, _, window, cx| {
             this.open_settings_service_editor(purpose, Some(edit_id.clone()), window, cx);
         }))
-        .child(tinted_icon(
+        .child(resource_icon(
             service_form::protocol_icon(protocol),
             if purpose == ServicePurpose::Ai {
                 Tint::Purple
             } else {
                 Tint::Teal
             },
-            px(48.),
         ))
         .child(
             v_flex()
@@ -1867,7 +1883,7 @@ impl Desktop {
                     quiet(SharedString::from(format!("service-actions-{id}")))
                         .w(CONTROL_HEIGHT)
                         .px_0()
-                        .icon(icons::ellipsis())
+                        .icon(icons::more_vertical())
                         .accessibility_label(course2md::tr!("{} 操作", version.config.name))
                         .tooltip(course2md::tr!("服务操作"))
                         .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
@@ -2692,12 +2708,15 @@ impl Desktop {
         let language = tile_button("app-language", [true, true, false, false], cx)
             .min_h(rems(76. / 14.))
             .accessibility_label(course2md::tr!("{}：{}", course2md::tr!("界面语言"), value))
-            .child(tile_text(
-                "app-language-label",
-                course2md::tr!("界面语言"),
-                Some(value),
-            ))
-            .child(tile_chevron())
+            .child(
+                tile_row()
+                    .child(tile_text(
+                        "app-language-label",
+                        course2md::tr!("界面语言"),
+                        Some(value),
+                    ))
+                    .child(tile_chevron()),
+            )
             .dropdown_menu_with_anchor(Anchor::TopRight, language_menu);
         v_flex()
             .w_full()
@@ -2938,19 +2957,19 @@ impl Desktop {
             .label(course2md::tr!("重新检查"))
             .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx)));
         let summary = setting_surface()
-            .p(px(20.))
-            .gap(px(16.))
+            .p(rems(20. / 14.))
+            .gap(rems(16. / 14.))
             .child(
                 h_flex()
                     .w_full()
                     .min_w_0()
                     .items_center()
                     .flex_wrap()
-                    .gap(rems(16. / 14.))
+                    .gap(RESOURCE_GAP)
                     .child(if all_ready {
-                        tinted_icon(icons::check_circle(), Tint::Green, px(48.))
+                        resource_icon(icons::check_circle(), Tint::Green)
                     } else {
-                        tinted_icon(icons::warning(), Tint::Amber, px(48.))
+                        resource_icon(icons::warning(), Tint::Amber)
                     })
                     .child(
                         tile_text(
@@ -2978,7 +2997,7 @@ impl Desktop {
                 h_flex()
                     .w_full()
                     .min_w_0()
-                    .pl(rems(64. / 14.))
+                    .pl(RESOURCE_TEXT_INSET)
                     .gap_2()
                     .flex_wrap()
                     .children(capabilities.iter().enumerate().map(
@@ -3045,12 +3064,15 @@ impl Desktop {
             cx,
         )
         .accessibility_label(course2md::tr!("诊断详情"))
-        .child(tile_text(
-            "diagnostics-details-label",
-            course2md::tr!("诊断详情"),
-            None,
-        ))
-        .child(disclosure_chevron(open))
+        .child(
+            tile_row()
+                .child(tile_text(
+                    "diagnostics-details-label",
+                    course2md::tr!("诊断详情"),
+                    None,
+                ))
+                .child(disclosure_chevron(open)),
+        )
         .on_click(cx.listener(|this, _, _, cx| {
             this.settings_ui.diagnostics_details_open = !this.settings_ui.diagnostics_details_open;
             cx.notify();
