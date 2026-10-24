@@ -1729,7 +1729,7 @@ impl Desktop {
                     .text_center()
                     .rounded(RADIUS_HERO)
                     .bg(color(SURFACE))
-                    .child(tinted_icon(icon, Tint::Blue, px(56.)))
+                    .child(tinted_icon(icon, Tint::Blue, rems(56. / 14.)))
                     .child(
                         accessible_text("library-empty-heading", heading)
                             .role(Role::Heading)
