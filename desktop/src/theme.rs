@@ -146,10 +146,10 @@ pub fn apply_preference(preference: &ThemePreferences, window: &mut Window, cx: 
             1.
         } else {
             (now.duration_since(paint.started).as_secs_f32()
-                / (crate::motion::PALETTE_MS as f32 / 1000.))
-                .min(1.)
+                / crate::motion::SLOW_EFFECTS.duration().as_secs_f32())
+            .min(1.)
         };
-        let eased = crate::motion::ease_out(t);
+        let eased = crate::motion::SLOW_EFFECTS.ease()(t);
         let next = std::array::from_fn(|i| blend(paint.from[i], target[i], eased));
         let changed = next != paint.current;
         paint.current = next;

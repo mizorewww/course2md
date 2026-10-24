@@ -8,12 +8,88 @@ use gpui_component::{Sizable, h_flex, v_flex};
 use std::time::Duration;
 
 pub const ENTER_MS: u64 = 160;
-/// Value changes and state entrances share the overlay show/dismiss range.
-pub const VALUE_MS: u64 = 200;
-pub const SELECTION_MS: u64 = 180;
-pub const PALETTE_MS: u64 = 280;
 const SPINNER_TURN_MS: u64 = 1000;
 const INDETERMINATE_SWEEP_MS: u64 = 1400;
+
+/// A Material 3 spring: the Standard motion scheme's tokens
+/// (`motionSpring*` in Material Components for Android). Spatial springs
+/// move or reshape something and may settle with a barely visible overshoot;
+/// effects springs fade color and opacity and never overshoot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spring {
+    pub damping: f32,
+    pub stiffness: f32,
+}
+
+/// Small components: a button's shape, a switch thumb, a selection indicator.
+pub const FAST_SPATIAL: Spring = Spring {
+    damping: 0.9,
+    stiffness: 1400.,
+};
+/// Small components' color and opacity.
+pub const FAST_EFFECTS: Spring = Spring {
+    damping: 1.,
+    stiffness: 3800.,
+};
+/// Partly covering surfaces: a page region arriving, a disclosure opening.
+pub const DEFAULT_SPATIAL: Spring = Spring {
+    damping: 0.9,
+    stiffness: 700.,
+};
+pub const DEFAULT_EFFECTS: Spring = Spring {
+    damping: 1.,
+    stiffness: 1600.,
+};
+/// Whole-window color changes, such as switching palettes.
+pub const SLOW_EFFECTS: Spring = Spring {
+    damping: 1.,
+    stiffness: 800.,
+};
+
+impl Spring {
+    fn omega(self) -> f32 {
+        self.stiffness.sqrt()
+    }
+
+    /// Time until the remaining distance stays under 0.1% of the change.
+    pub fn duration(self) -> Duration {
+        let rate = self.damping.min(1.) * self.omega();
+        // A critically damped spring decays as (1 + ωt)·e^(-ωt), slower than
+        // its envelope alone; 9.23/ω is where that falls below 0.001.
+        let seconds = if self.damping >= 1. {
+            9.23 / self.omega()
+        } else {
+            1000_f32.ln() / rate
+        };
+        Duration::from_secs_f32(seconds)
+    }
+
+    /// Position from rest at 0 toward 1 after `seconds`.
+    pub fn position(self, seconds: f32) -> f32 {
+        let t = seconds.max(0.);
+        let omega = self.omega();
+        let zeta = self.damping;
+        if zeta >= 1. {
+            1. - (1. + omega * t) * (-omega * t).exp()
+        } else {
+            let damped = omega * (1. - zeta * zeta).sqrt();
+            1. - (-zeta * omega * t).exp()
+                * ((damped * t).cos() + zeta * omega / damped * (damped * t).sin())
+        }
+    }
+
+    /// The spring as an easing over its own `duration`, ending exactly at 1.
+    pub fn ease(self) -> impl Fn(f32) -> f32 + Copy + 'static {
+        let seconds = self.duration().as_secs_f32();
+        move |t| {
+            if t >= 1. {
+                1.
+            } else {
+                self.position(t * seconds)
+            }
+        }
+    }
+}
 
 pub fn ease_out(t: f32) -> f32 {
     1. - (1. - t.clamp(0., 1.)).powi(3)
@@ -26,7 +102,7 @@ pub fn enter<E: IntoElement + Styled + 'static>(id: impl Into<ElementId>, view: 
     // under reduce-motion; removing it here remounts every keyed child.
     view.with_animation(
         id,
-        Animation::new(Duration::from_millis(ENTER_MS)).with_easing(ease_out),
+        Animation::new(DEFAULT_EFFECTS.duration()).with_easing(DEFAULT_EFFECTS.ease()),
         |view, t| view.opacity(t),
     )
     .into_any_element()
@@ -50,7 +126,8 @@ pub fn page_enter<E: IntoElement + Styled + 'static>(
     rise_in(id, view, 12.)
 }
 
-/// Fades in while rising `distance` px into place.
+/// Fades in while rising `distance` px into place: the offset follows the
+/// default spatial spring and the opacity its effects spring, on one clock.
 fn rise_in<E: IntoElement + Styled + 'static>(
     id: impl Into<ElementId>,
     view: E,
@@ -59,15 +136,23 @@ fn rise_in<E: IntoElement + Styled + 'static>(
     let id = id.into();
     #[cfg(feature = "performance")]
     let trace_id = id.clone();
-    view.with_animation(
-        id,
-        Animation::new(Duration::from_millis(VALUE_MS)).with_easing(ease_out),
-        move |view, t| {
-            #[cfg(feature = "performance")]
-            crate::performance::record_motion(trace_id.clone(), 1., t);
-            view.relative().top(px(distance * (1. - t))).opacity(t)
-        },
-    )
+    let total = DEFAULT_SPATIAL.duration().max(DEFAULT_EFFECTS.duration());
+    let seconds = total.as_secs_f32();
+    view.with_animation(id, Animation::new(total), move |view, t| {
+        #[cfg(feature = "performance")]
+        crate::performance::record_motion(trace_id.clone(), 1., t);
+        let (offset, opacity) = if t >= 1. {
+            (1., 1.)
+        } else {
+            (
+                DEFAULT_SPATIAL.position(t * seconds),
+                DEFAULT_EFFECTS.position(t * seconds),
+            )
+        };
+        view.relative()
+            .top(px(distance * (1. - offset)))
+            .opacity(opacity.clamp(0., 1.))
+    })
     .into_any_element()
 }
 
@@ -130,7 +215,7 @@ pub fn value(id: impl Into<ElementId>, target: f32, window: &mut Window, cx: &mu
     let value = gpui_base::transition(
         id,
         target,
-        gpui_base::Transition::new(Duration::from_millis(VALUE_MS)).ease(ease_out),
+        gpui_base::Transition::new(DEFAULT_SPATIAL.duration()).ease(DEFAULT_SPATIAL.ease()),
         window,
         cx,
     );
@@ -139,7 +224,8 @@ pub fn value(id: impl Into<ElementId>, target: f32, window: &mut Window, cx: &mu
     value
 }
 
-/// Selection starts and ends at rest; no overshoot or abrupt launch.
+/// A selection moves and reshapes on the fast spatial spring, retargeting
+/// from wherever it is when the choice changes again.
 pub fn selection_value(
     id: impl Into<ElementId>,
     target: f32,
@@ -152,8 +238,7 @@ pub fn selection_value(
     let amount = gpui_base::transition(
         id,
         target,
-        gpui_base::Transition::new(Duration::from_millis(SELECTION_MS))
-            .ease(|t| t * t * (3. - 2. * t)),
+        gpui_base::Transition::new(FAST_SPATIAL.duration()).ease(FAST_SPATIAL.ease()),
         window,
         cx,
     );
@@ -511,6 +596,30 @@ mod tests {
         assert_eq!(footer.top(), root.top() + px(28.));
         assert!(cx.debug_bounds("motion-reveal-surface").is_none());
         assert!(cx.debug_bounds("motion-reveal-content").is_none());
+    }
+
+    #[test]
+    fn springs_settle_on_their_target() {
+        use super::{DEFAULT_EFFECTS, DEFAULT_SPATIAL, FAST_EFFECTS, FAST_SPATIAL, SLOW_EFFECTS};
+        for spring in [
+            FAST_SPATIAL,
+            FAST_EFFECTS,
+            DEFAULT_SPATIAL,
+            DEFAULT_EFFECTS,
+            SLOW_EFFECTS,
+        ] {
+            let ease = spring.ease();
+            assert_eq!(ease(0.), 0.);
+            assert_eq!(ease(1.), 1.);
+            assert!((ease(0.999) - 1.).abs() < 0.002, "{spring:?}");
+            let duration = spring.duration().as_secs_f32();
+            assert!((0.1..0.5).contains(&duration), "{spring:?}: {duration}");
+        }
+        // Effects springs never overshoot; spatial ones barely do.
+        let effects = (0..=200).map(|i| FAST_EFFECTS.ease()(i as f32 / 200.));
+        assert!(effects.clone().all(|v| v <= 1.));
+        assert!(effects.collect::<Vec<_>>().windows(2).all(|p| p[0] <= p[1]));
+        assert!((0..=200).all(|i| FAST_SPATIAL.ease()(i as f32 / 200.) < 1.003));
     }
 
     #[test]
