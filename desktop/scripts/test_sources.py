@@ -108,6 +108,14 @@ class SourceLocationTests(unittest.TestCase):
         for mode in ({"locked": True}, {"no_pull": True}):
             self.assertFalse(sources.should_pull(True, **mode))
 
+    def test_developer_dir_is_remembered_until_overridden(self):
+        with tempfile.TemporaryDirectory() as temp:
+            mark = Path(temp) / "developer-dir"
+            self.assertIsNone(sources.remembered_developer_dir(None, mark))
+            mark.write_text("/work/checkouts\n")
+            self.assertEqual(sources.remembered_developer_dir(None, mark), Path("/work/checkouts"))
+            self.assertEqual(sources.remembered_developer_dir("/other", mark), Path("/other"))
+
     def test_overlay_takes_gpui_platform_features_from_the_desktop_manifest(self):
         features = sources.gpui_platform_features()
         self.assertTrue(features)

@@ -6,11 +6,23 @@ install:
         echo "just install is macOS-only." >&2
         exit 1
     fi
-    if [[ ! -d desktop/.deps/zed || ! -d desktop/.deps/component ]]; then
-        echo "Run python3 desktop/scripts/sources.py first." >&2
+    # The scripts need tomllib (Python 3.11+); macOS's own python3 is older.
+    python=""
+    for candidate in python3.14 python3.13 python3.12 python3.11 python3; do
+        if command -v "$candidate" >/dev/null &&
+            "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
+            python="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$python" ]]; then
+        echo "just install needs Python 3.11 or later (brew install python)." >&2
         exit 1
     fi
-    app="$(python3 desktop/scripts/package.py --app-only | tail -1)"
+    # Prepare or refresh the GPUI sources at the locked revisions, replaying the
+    # current reviewed patches; a remembered --developer-dir is reused.
+    "$python" desktop/scripts/sources.py --locked
+    app="$("$python" desktop/scripts/package.py --app-only | tail -1)"
 
     dest=/Applications/course2md.app
     if pgrep -f "$dest/Contents/MacOS/course2md-desktop" >/dev/null; then

@@ -8,7 +8,9 @@ after checkout.
 
 Upstream clones live in the ignored desktop/.deps/upstream and are fast-forwarded
 to main. --developer-dir uses your own zed and gpui-component checkouts instead;
-they are never modified, and only pulled with --pull-developer.
+they are never modified, and only pulled with --pull-developer. The directory is
+remembered in desktop/.deps/developer-dir; delete desktop/.deps to return to the
+managed clones.
 """
 import argparse
 import json
@@ -23,6 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REPOS = {"zed": "zed-industries/zed", "component": "longbridge/gpui-component"}
 CHECKOUT_NAMES = {"zed": "zed", "component": "gpui-component"}
 UPSTREAM = ROOT / ".deps" / "upstream"
+# The --developer-dir that created the worktrees, so later runs keep using it.
+DEVELOPER_MARK = ROOT / ".deps" / "developer-dir"
 
 
 def gpui_platform_features(manifest=ROOT / "Cargo.toml"):
@@ -36,6 +40,16 @@ def source_checkout(name, developer_dir=None):
     if developer_dir is None:
         return UPSTREAM / CHECKOUT_NAMES[name], True
     return Path(developer_dir) / CHECKOUT_NAMES[name], False
+
+
+def remembered_developer_dir(requested, mark=DEVELOPER_MARK):
+    """An explicit --developer-dir wins; otherwise reuse the one that created the
+    worktrees, so `just install` and plain reruns keep the same checkouts."""
+    if requested is not None:
+        return Path(requested)
+    if mark.is_file():
+        return Path(mark.read_text().strip())
+    return None
 
 
 def should_pull(owned, *, locked=False, no_pull=False, pull_developer=False):
@@ -164,6 +178,7 @@ def main():
     parser.add_argument("--pull-developer", action="store_true",
                         help="Fast-forward the --developer-dir checkouts to main first")
     args = parser.parse_args()
+    args.developer_dir = remembered_developer_dir(args.developer_dir)
     if args.pull_developer and (args.developer_dir is None or args.no_pull or args.locked):
         parser.error("--pull-developer needs --developer-dir, without --no-pull or --locked")
     lock_path = ROOT / "sources.lock.json"
@@ -214,6 +229,8 @@ def main():
             result = apply_patch(dest, patch)
             if result.returncode:
                 raise SystemExit(f"Could not apply reviewed patch {patch.name}:\n{result.stderr}")
+    if args.developer_dir is not None:
+        DEVELOPER_MARK.write_text(str(args.developer_dir.resolve()) + "\n")
     print("Prepared GPUI and GPUI Component sources with reviewed patches")
 
 
