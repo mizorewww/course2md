@@ -18,6 +18,9 @@ class SourcePatchTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.repo = self.root / "source"
         self.repo.mkdir()
+        applied = sources.APPLIED
+        sources.APPLIED = self.root / "applied"
+        self.addCleanup(setattr, sources, "APPLIED", applied)
         self.run_git("init", "--quiet")
         (self.repo / "input.rs").write_text("fn focus() { old(); }\n\nfn unrelated() {}\n")
         (self.repo / "other.rs").write_text("untouched\n")
@@ -56,6 +59,15 @@ class SourcePatchTests(unittest.TestCase):
         sources.verify_and_restore_overlay(worktree, "zed", [self.patch])
         self.assertNotIn(b'\r\n', (worktree / "input.rs").read_bytes())
         self.assertEqual(self.run_git("config", "core.autocrlf").strip(), "true")
+
+    def test_recorded_older_patch_is_removed_after_the_patch_changes(self):
+        self.apply()
+        sources.record_applied("zed", [self.patch])
+        self.patch.write_text("--- a/input.rs\n+++ b/input.rs\n@@ -1,2 +1,2 @@\n-fn focus() { old(); }\n+fn focus() { newer(); }\n \n")
+        sources.verify_and_restore_overlay(self.repo, "zed", [self.patch])
+        self.assertEqual(self.run_git("diff", "--name-only"), "")
+        self.apply()
+        self.assertIn("newer()", (self.repo / "input.rs").read_text())
 
     def test_edit_outside_patch_is_preserved_and_rejected(self):
         self.apply()
