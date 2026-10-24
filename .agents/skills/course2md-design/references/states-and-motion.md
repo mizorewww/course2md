@@ -29,14 +29,14 @@ Before animating, state what changed and what remains a landmark. Use a shared m
 
 | Intent | Animate | Starting range | Stable elements |
 | --- | --- | --- | --- |
-| Hover/press | One low-emphasis state layer | 100–150ms | Bounds, text and icon |
-| Choice changes | Shared selection indicator | 180–220ms | Labels, segment widths and neighboring layout |
-| Theme changes | Semantic color roles | 200–300ms | Text geometry, chooser height and page location |
-| Expand detail | One content region's reveal/extent | 160–220ms | Group heading and initial reading anchor |
-| Show/dismiss overlay | Overlay as one unit | About 150–220ms; dismissal may be shorter | Background location and initiating control |
+| Hover/press | One low-emphasis state layer | Immediate | Bounds, text and icon |
+| Choice changes | Selected option's shape and color | Fast spatial spring (0.9 / 1400) | Labels, segment widths and neighboring layout |
+| Theme changes | Semantic color roles | Slow effects spring (1 / 800) | Text geometry, chooser height and page location |
+| Expand detail / page region arrives | One content region's reveal/extent or offset, its opacity separately | Default spatial (0.9 / 700) + default effects (1 / 1600) | Group heading and initial reading anchor |
+| Show/dismiss overlay | Overlay as one unit | About 160ms; dismissal may be shorter | Background location and initiating control |
 | Active process | Real loading/progress indicator | While its process is active | Input context, state text and actions |
 
-Use a Standard-style smooth start and settle. If the renderer uses easing instead of springs, M3's legacy Standard curve `cubic-bezier(0.2, 0, 0, 1)` is an available reference; a matching constant does not prove good motion. Selectors and gestures retarget from their current presentation value immediately. Do not finish an obsolete animation, queue a new one or restart from an old endpoint after a rapid click.
+The springs are Material's Standard motion scheme tokens (damping / stiffness, from [Material Android motion](material/offline/android-motion.md)), implemented once in `motion.rs` (`Spring`, `FAST_SPATIAL`, `DEFAULT_SPATIAL`, `DEFAULT_EFFECTS`, `SLOW_EFFECTS`); spatial springs move and reshape, effects springs fade color and opacity and never overshoot. A matching constant does not prove good motion. Selectors and gestures retarget from their current presentation value immediately. Do not finish an obsolete animation, queue a new one or restart from an old endpoint after a rapid click.
 
 Use one principal animated response per intent. A theme click must not also re-enter/fade the whole page, move every label and resize the preset grid. Ordinary category navigation retains stable composition with restrained feedback. A disclosure stays subordinate to its heading; do not vertically recenter the whole panel when detail height changes.
 

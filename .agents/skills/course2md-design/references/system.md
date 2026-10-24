@@ -18,10 +18,13 @@ Material's official layout guidance uses global alignment lines, consistent arra
 
 | Role | Composition | Implementation |
 | --- | --- | --- |
-| Main action | Filled accent, icon + short verb; one per active region | `primary_pill` |
-| Secondary action | Neutral outline; same shape and height | `outline_pill` / `control` |
-| Inline action | Quiet label; stays beside the information it acts on | `quiet` |
-| Peer selection | Subtle shared track, tonal moving selection, fixed labels | `SingleChoiceGroup` |
+| Main action | Filled accent, icon + short verb; one per active region | `primary_pill` (40/48/56px) |
+| Weighted secondary action | Tonal secondary container | `tonal_pill` |
+| Secondary action | Outline border with accent label; same shape and height | `outline_pill` |
+| Inline action | Accent text button, or quiet gray label beside the information it acts on | `text_button` / `quiet` |
+| Icon action | Round 40–48px target; tonal for back/reset | `icon_button` |
+| Peer selection | Connected button group: 2px gaps, outer ends round, 8px inner corners; the selected option morphs into an accent pill | `SingleChoiceGroup` |
+| Grouped items | Connected surface tiles on the surface-container ground: 24px outside corners, 6px inside, 2px gaps | `tile` / `list_tile` / `SettingsGroup` |
 | Peer navigation | Same capsule geometry and state layers; tab semantics | `SingleChoiceGroup::tabs` |
 | Sidebar | Leading label, shared tonal capsule, no external underline/side stripe | Vertical navigation variant |
 | Data entry | Visible rounded field; label/value distinction, errors below | Single-line `Input`, shared control height |
@@ -30,7 +33,7 @@ Material's official layout guidance uses global alignment lines, consistent arra
 | Status | Icon and short text together; adjacent to the thing described | `badge` |
 | Information panel | Quiet tonal surface, one information icon, short regular-weight prose | Shared help treatment, natural height; optional explanation rather than a modal interruption |
 
-The 40px control baseline, UI type scale, spacing steps, preview geometry and transition durations are project decisions. The complete [type table](layout-and-type.md#type-and-weight) defines size, line box, weight and icon roles. Main UI labels use meaningful icons and semibold weight; values, explanatory prose and note-reading text stay regular. Do not present these as exact official requirements. Sizes scale with type; radii and decorative borders do not determine text measurement. Ordinary controls need at least `max(40 × scale, actual line-box height + top/bottom padding)`; multiline surfaces grow naturally.
+The 40px control baseline, UI type scale, spacing steps, preview geometry and transition durations are project decisions. The complete [type table](layout-and-type.md#type-and-weight) defines size, line box, weight and icon roles. Main UI labels use meaningful icons and medium weight; values, explanatory prose and note-reading text stay regular. Do not present these as exact official requirements. Sizes scale with type; radii and decorative borders do not determine text measurement. Ordinary controls need at least `max(40 × scale, actual line-box height + top/bottom padding)`; multiline surfaces grow naturally.
 
 ## Theme roles and painted bounds
 

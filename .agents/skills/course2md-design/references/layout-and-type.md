@@ -39,9 +39,9 @@ At 100% interface scale, use these project roles. Specify **size, line height an
 
 | Role | Size / line box | Weight | Icon treatment |
 | --- | --- | --- | --- |
-| Page heading | 28 / 36px | Semibold, about 600 | Meaningful page icon if it clarifies the task; shared heading slot |
-| Section heading | 18 / 26px | Semibold, about 600 | Meaningful category icon; same treatment for peer sections |
-| Action, navigation, main field label | 14 / 22px (settings: 16px) | Semibold, about 600 | Meaningful icon plus 8px gap |
+| Page heading | 30 / 36px (hero 40 / 48px) | Regular, about 400 | Text only; the app bar or settings navigation marks the destination |
+| Section title above a group | 14 / 20px, secondary text color | Medium, about 500 | None; 20px inset to the tiles' text |
+| Action, navigation, main field label | 14–15 / 22px (settings tiles: 16–17px) | Medium, about 500 | Meaningful icon plus 8px gap |
 | Field value / ordinary UI body | 14 / 22px (settings: 16px) | Regular, about 400 | No compulsory decorative icon |
 | Necessary metadata / support | 12 / 18px (settings: 14px) | Regular, about 400 | Status icon only when it communicates state |
 | Note-reading body | Start at 16 / 26px, adapt to the reader's scale | Regular, about 400 | Preserve semantic Markdown formatting; no icon per paragraph |
@@ -73,7 +73,7 @@ The Material icon source allows 20dp optical icons and a 40dp target for mouse/k
 
 Use a shared 20px icon slot for normal 14px UI labels, judged as a component cluster. For inline glyph-style Symbols, M3 describes matching size/weight and lowering the symbol baseline by roughly 11.5% of text size. Apply that only to an inline-symbol renderer with relevant metrics. An SVG centered by flex must not also receive that baseline correction. Shared optical adjustments need native checks with multiple shapes.
 
-Choose recognizable icons with optical weight that fits semibold labels. Do not simulate boldness by scaling the bounding box or mixing stroke families. Compare a narrow icon, a circle and a wide icon beside the same label. Their slots agree; their ink need not occupy identical shapes.
+Choose recognizable icons with optical weight that fits medium-weight labels. Do not simulate boldness by scaling the bounding box or mixing stroke families. Compare a narrow icon, a circle and a wide icon beside the same label. Their slots agree; their ink need not occupy identical shapes.
 
 ## Explanation and reading
 
