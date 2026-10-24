@@ -459,10 +459,22 @@ fn task_stage_progress(
     } else {
         live.and_then(|stage| stage.fraction())
     };
-    // Unmeasured running work shows its clock instead of a bar.
+    // Unmeasured running work shows its clock instead of a bar. Without a
+    // total, the stage's own metrics end in an elapsed note; the live counter
+    // carries that clock once, with any returned tokens.
     let detail = match live.filter(|_| !done && fraction.is_none()) {
-        Some(live) if detail.is_empty() => live.live_counter(),
-        Some(live) => format!("{detail} · {}", live.live_counter()),
+        Some(live) => {
+            let mut metrics = live.transfer_metrics(name, true);
+            if matches!(metrics.eta, Some(activity::TransferEta::Note(_))) {
+                metrics.eta = None;
+            }
+            let rest = metrics.summary();
+            if rest.is_empty() {
+                live.live_counter()
+            } else {
+                format!("{rest} · {}", live.live_counter())
+            }
+        }
         None => detail,
     };
     (detail, fraction)
