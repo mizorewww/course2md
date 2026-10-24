@@ -4,7 +4,8 @@
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
 //! `onboarding`, `home[:<state>]`, `library`, `tasks`, `settings:<category>` (appearance, generation,
 //! services, storage, application) and `reader[:<title text>][~end]` (the newest
-//! note, or the first whose title contains the text; `~end` scrolls to its end). `library:<state>` takes
+//! note, or the first whose title contains the text; it opens at the top, ignoring
+//! saved reading positions, and `~end` scrolls to its end). `library:<state>` takes
 //! `,`-separated states: `list`, `group`, `unfiled`, `folder~<name>` and
 //! `search~<text>` (`:` also separates a state from its value, as in
 //! `library:search:<text>`); each shot starts from the saved presentation,
@@ -143,6 +144,15 @@ impl Desktop {
                     .iter()
                     .find(|course| title.is_empty() || course.title.contains(title))
                     .cloned();
+                // A shot opens the note at its top unless it asks for the end:
+                // record the open note's position now (so opening does not
+                // record it again afterwards), then forget the loaded reading
+                // positions so an earlier `~end` shot or a review session does
+                // not leak in.
+                self.save_reading_position(cx);
+                if let Some(workspace) = &mut self.workspace {
+                    workspace.state.positions.clear();
+                }
                 if let Some(course) = course {
                     self.open_course(course, cx);
                 }
