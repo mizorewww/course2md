@@ -70,6 +70,19 @@ fn update_published_course(
     courses.sort_by_key(|course| std::cmp::Reverse(course.modified));
 }
 
+/// A plan check still waiting for background work (a location check, a
+/// folder index); the workbench shows it as progress, not as a failure.
+#[derive(Debug)]
+pub(crate) struct PlanPending(pub(crate) &'static str);
+
+impl std::fmt::Display for PlanPending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for PlanPending {}
+
 fn validate_plan_storage(
     validation: PlanValidation,
     library: &workspace::LibraryLocation,
@@ -79,7 +92,7 @@ fn validate_plan_storage(
 ) -> Result<()> {
     let folder_exists = match validation {
         PlanValidation::Preview => {
-            let check = cached.context(course2md::tr!("正在检查保存位置，请稍候"))?;
+            let check = cached.ok_or(PlanPending(course2md::tr!("正在检查保存位置，请稍候")))?;
             ensure!(
                 check.available,
                 course2md::tr!("保存位置不可访问，请连接磁盘或选择其他位置")
@@ -93,7 +106,7 @@ fn validate_plan_storage(
             }
             match folder {
                 Some(folder) => index
-                    .context(course2md::tr!("正在读取文件夹信息，请稍候"))?
+                    .ok_or(PlanPending(course2md::tr!("正在读取文件夹信息，请稍候")))?
                     .folders
                     .contains_key(&folder),
                 None => true,
@@ -2365,11 +2378,12 @@ pub(crate) mod tests {
             .is_err(),
             "a removed folder cannot be authorized by an old preview"
         );
+        let waiting = validate_plan_storage(PlanValidation::Preview, &location, None, None, None)
+            .unwrap_err();
+        assert!(waiting.to_string().contains("正在检查"));
         assert!(
-            validate_plan_storage(PlanValidation::Preview, &location, None, None, None)
-                .unwrap_err()
-                .to_string()
-                .contains("正在检查")
+            waiting.downcast_ref::<super::PlanPending>().is_some(),
+            "an unfinished location check is waiting, not a failure"
         );
     }
 

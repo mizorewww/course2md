@@ -299,7 +299,9 @@ struct Desktop {
     queue_cache: Option<(u64, Rc<Vec<workspace::TaskRecord>>)>,
     event_wake_tx: smol::channel::Sender<()>,
     event_wake_rx: smol::channel::Receiver<()>,
-    preview_plan_cache: Option<(u64, u64, u64, Result<workspace::TaskPlan, String>)>,
+    /// The derived preview plan; an error carries whether it is only waiting
+    /// on background checks (`task_runner::PlanPending`).
+    preview_plan_cache: Option<(u64, u64, u64, Result<workspace::TaskPlan, (String, bool)>)>,
     queue_keys: Vec<String>,
     queue_focus: Vec<FocusHandle>,
     queue_rem: f32,

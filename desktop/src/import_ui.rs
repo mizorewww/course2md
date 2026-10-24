@@ -3454,13 +3454,19 @@ impl Desktop {
                 plan.clone()
             }
             _ => {
-                let plan = self.preview_plan().map_err(|error| format!("{error:#}"));
+                let plan = self.preview_plan().map_err(|error| {
+                    let pending = error
+                        .downcast_ref::<crate::task_runner::PlanPending>()
+                        .is_some();
+                    (format!("{error:#}"), pending)
+                });
                 self.preview_plan_cache =
                     Some((cache_key.0, cache_key.1, cache_key.2, plan.clone()));
                 plan
             }
-        }
-        .map_err(anyhow::Error::msg);
+        };
+        let plan_pending = matches!(&preview_plan, Err((_, true)));
+        let preview_plan = preview_plan.map_err(|(message, _)| anyhow::Error::msg(message));
         let matching_task = preview_plan
             .as_ref()
             .ok()
@@ -3485,8 +3491,10 @@ impl Desktop {
                     None
                 }
             });
-        let checking_components =
-            !preferences_blocked && self.environment.is_none() && submission_error.is_some();
+        // Waiting for the component or location checks is progress, not a failure.
+        let checking_components = !preferences_blocked
+            && (self.environment.is_none() || plan_pending)
+            && submission_error.is_some();
         let mut inset = v_flex().w_full().min_w_0().gap_3();
         // Whether anything needs showing; an empty block would add a gap.
         let mut any = false;
