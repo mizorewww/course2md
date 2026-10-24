@@ -1,7 +1,7 @@
 //! Small, shared motion vocabulary: entrances, retargetable values and live work.
 use crate::activity::{TransferEta, TransferMetrics};
 use crate::theme::{
-    ACCENT, GRAY, INK, SECONDARY_CONTAINER, TEXT_AUX, TEXT_BODY, accessible_text, color,
+    ACCENT, CONTROL, GRAY, INK, SECONDARY_CONTAINER, TEXT_AUX, TEXT_BODY, accessible_text, color,
 };
 use gpui::{prelude::*, *};
 use gpui_component::{Sizable, h_flex, v_flex};
@@ -180,6 +180,10 @@ fn spin(icon: gpui_component::Icon, id: impl Into<ElementId>, cx: &App) -> AnyEl
 
 /// Unmeasured work uses motion, never a fabricated completion percentage.
 pub fn indeterminate_progress(id: impl Into<ElementId>, cx: &App) -> AnyElement {
+    indeterminate_bar(id, px(4.), cx)
+}
+
+fn indeterminate_bar(id: impl Into<ElementId>, thickness: Pixels, cx: &App) -> AnyElement {
     let segment = div()
         .absolute()
         .h_full()
@@ -200,7 +204,7 @@ pub fn indeterminate_progress(id: impl Into<ElementId>, cx: &App) -> AnyElement 
     div()
         .relative()
         .w_full()
-        .h(px(3.))
+        .h(thickness)
         .rounded_full()
         .overflow_hidden()
         .bg(color(SECONDARY_CONTAINER))
@@ -247,31 +251,80 @@ pub fn selection_value(
     amount
 }
 
+/// A measured fraction as Material 3 linear progress, 4px thick.
 pub fn progress(
     id: impl Into<ElementId>,
     progress: f32,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    let target = if progress.is_finite() {
-        progress.clamp(0., 1.)
+    linear_progress(id, Some(progress), px(4.), false, window, cx)
+}
+
+/// Material 3 linear progress: the active indicator, a 4px gap, the track
+/// and a stop dot at the track's end. Only a measured fraction draws it;
+/// `None` shows the indeterminate indicator at the same thickness. A paused
+/// or stopping process (`muted`) keeps its fraction in the outline color.
+pub fn linear_progress(
+    id: impl Into<ElementId>,
+    fraction: Option<f32>,
+    thickness: Pixels,
+    muted: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let Some(fraction) = fraction else {
+        return div()
+            .w_full()
+            .h(thickness)
+            .flex()
+            .items_center()
+            .child(indeterminate_bar(id, thickness, cx))
+            .into_any_element();
+    };
+    let target = if fraction.is_finite() {
+        fraction.clamp(0., 1.)
     } else {
         0.
     };
     let amount = value(id, target, window, cx);
-    div()
+    let ink = color(if muted { CONTROL } else { ACCENT });
+    let dot = (thickness / 2.).max(px(4.)).min(thickness);
+    h_flex()
         .w_full()
-        .h(px(6.))
-        .rounded_full()
-        .overflow_hidden()
-        .bg(color(SECONDARY_CONTAINER))
-        .child(
-            div()
-                .h_full()
-                .w(relative(amount))
-                .rounded_full()
-                .bg(color(ACCENT)),
-        )
+        .h(thickness)
+        .gap(px(4.))
+        .items_center()
+        .when(amount > 0.005, |bar| {
+            bar.child(
+                div()
+                    .flex_shrink_0()
+                    .h_full()
+                    .w(relative(amount))
+                    .rounded_full()
+                    .bg(ink),
+            )
+        })
+        .when(amount < 0.995, |bar| {
+            bar.child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .rounded_full()
+                    .bg(color(SECONDARY_CONTAINER))
+                    .child(
+                        div()
+                            .absolute()
+                            .top((thickness - dot) / 2.)
+                            .right((thickness - dot) / 2.)
+                            .size(dot)
+                            .rounded_full()
+                            .bg(ink),
+                    ),
+            )
+        })
         .into_any_element()
 }
 

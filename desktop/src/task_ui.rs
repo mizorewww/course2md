@@ -213,70 +213,6 @@ fn summary_chip(id: &'static str, text: String, kind: BadgeKind) -> Div {
     chip.child(accessible_text(id, text))
 }
 
-/// M3 linear progress: an 8px active indicator, a 4px gap, the track, and a
-/// stop dot at the track's end. Only a measured fraction draws it; unmeasured
-/// work shows the shared indeterminate indicator.
-fn linear_progress(
-    id: SharedString,
-    fraction: Option<f32>,
-    paused: bool,
-    window: &mut Window,
-    cx: &mut App,
-) -> AnyElement {
-    let Some(fraction) = fraction else {
-        return div()
-            .w_full()
-            .h(px(8.))
-            .flex()
-            .items_center()
-            .child(crate::motion::indeterminate_progress(id, cx))
-            .into_any_element();
-    };
-    let target = if fraction.is_finite() {
-        fraction.clamp(0., 1.)
-    } else {
-        0.
-    };
-    let amount = crate::motion::value(id, target, window, cx);
-    let ink = color(if paused { CONTROL } else { ACCENT });
-    h_flex()
-        .w_full()
-        .h(px(8.))
-        .gap(px(4.))
-        .items_center()
-        .when(amount > 0.005, |bar| {
-            bar.child(
-                div()
-                    .flex_shrink_0()
-                    .h_full()
-                    .w(relative(amount))
-                    .rounded(px(4.))
-                    .bg(ink),
-            )
-        })
-        .when(amount < 0.995, |bar| {
-            bar.child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .rounded(px(4.))
-                    .bg(color(SECONDARY_CONTAINER))
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(2.))
-                            .right(px(2.))
-                            .size(px(4.))
-                            .rounded_full()
-                            .bg(ink),
-                    ),
-            )
-        })
-        .into_any_element()
-}
-
 /// A queued task being dragged to a new place in the queue.
 #[derive(Clone)]
 struct QueueDrag {
@@ -2417,9 +2353,10 @@ impl Desktop {
                 .w_full()
                 .min_w_0()
                 .gap_2()
-                .child(linear_progress(
+                .child(crate::motion::linear_progress(
                     SharedString::from(format!("task-progress-{id}")),
                     measured,
+                    px(8.),
                     stopping,
                     window,
                     cx,
