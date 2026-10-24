@@ -3,9 +3,12 @@
 //!
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
 //! `onboarding`, `home`, `library`, `tasks`, `settings:<category>` (appearance, generation,
-//! services, storage, application) and `reader[:<title text>]` (the newest
-//! note, or the first whose title contains the text). `library:<state>` takes
-//! `,`-separated states: `list`, `group`, `unfiled`, `folder~<name>`, `search~<text>`. `COURSE2MD_CAPTURE_DELAY_MS` (default
+//! services, storage, application) and `reader[:<title text>][~end]` (the newest
+//! note, or the first whose title contains the text; `~end` scrolls to its end). `library:<state>` takes
+//! `,`-separated states: `list`, `group`, `unfiled`, `folder~<name>` and
+//! `search~<text>` (`:` also separates a state from its value, as in
+//! `library:search:<text>`); each shot starts from the saved presentation,
+//! all notes and an empty search. `COURSE2MD_CAPTURE_DELAY_MS` (default
 //! 1800) is the wait after each navigation; `COURSE2MD_CAPTURE_PALETTE`
 //! (a palette name such as `catppuccin_mocha`) and `COURSE2MD_CAPTURE_SCALE`
 //! (1, 1.25, 1.5 or 2) override the saved appearance without changing it.
@@ -13,15 +16,26 @@
 //! Dialogs open over their page: `service-editor:<ai|speech|dialog|confirm>`
 //! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
 //! `delete` and `image` (the newest note; give it a longer
-//! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage` and `login`.
-//! Nothing a dialog would change is saved unless its action is taken.
+//! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage` and `login`. Each
+//! capture first closes the dialogs an earlier one opened, so one shot shows
+//! one dialog. Nothing a dialog would change is saved unless its action is
+//! taken.
+//!
+//! `dialog:storage` opens the operation dialog without starting a move, so it
+//! shows the idle result state ("操作已完成"). Its progress, cancelling and
+//! failure states only exist while a real move, relocation or cleanup runs
+//! (from Settings › 存储 against a fixture library); the harness does not fake them.
 use crate::{Desktop, Page, palettes::PaletteId, settings_ui::SettingsTab};
 use gpui::{App, AsyncWindowContext, WeakEntity, Window};
+use gpui_component::WindowExt as _;
 use std::{cell::Cell, path::PathBuf, time::Duration};
 
 thread_local! {
     static PALETTE: Cell<Option<PaletteId>> = const { Cell::new(None) };
     static SCALE: Cell<Option<f32>> = const { Cell::new(None) };
+    /// The saved library presentation (cards, grouped), restored before each
+    /// library shot so one shot's state does not leak into the next.
+    static LIBRARY_PRESENTATION: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
 }
 
 /// The palette and text scale to paint instead of the saved ones.
@@ -63,6 +77,8 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
         .collect();
     window
         .spawn(cx, async move |cx: &mut AsyncWindowContext| {
+            // Let the library load first, so a leading `reader` shot finds its note.
+            cx.background_executor().timer(delay).await;
             for (page, path) in shots {
                 let _ = cx.update(|window, cx| {
                     view.update(cx, |this, cx| this.capture_navigate(&page, window, cx))
@@ -85,6 +101,8 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
 impl Desktop {
     fn capture_navigate(&mut self, page: &str, window: &mut Window, cx: &mut gpui::Context<Self>) {
         let (page, category) = page.split_once(':').unwrap_or((page, ""));
+        // One dialog per shot: close whatever the previous capture opened.
+        window.close_all_dialogs(cx);
         // First use is reviewed on its own; captured pages show the app behind it.
         if page != "onboarding" {
             self.onboarding.active = false;
@@ -114,13 +132,27 @@ impl Desktop {
             }
             "dialog" => self.capture_dialog(category, window, cx),
             "reader" => {
+                let (title, end) = match category.strip_suffix("~end") {
+                    Some(title) => (title, true),
+                    None => (category, false),
+                };
                 let course = self
                     .courses
                     .iter()
-                    .find(|course| category.is_empty() || course.title.contains(category))
+                    .find(|course| title.is_empty() || course.title.contains(title))
                     .cloned();
                 if let Some(course) = course {
                     self.open_course(course, cx);
+                }
+                if end {
+                    // The note's blocks load after it opens.
+                    cx.spawn_in(window, async move |this, cx| {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(1200))
+                            .await;
+                        let _ = this.update(cx, |this, cx| this.capture_reader_end(cx));
+                    })
+                    .detach();
                 }
             }
             _ => {}
@@ -194,12 +226,25 @@ impl Desktop {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        // Each shot starts from all notes and no search.
+        // Each shot starts from the saved presentation, all notes and no search.
+        let current = (
+            self.desktop_settings.library_cards,
+            self.desktop_settings.library_group_folders,
+        );
+        let saved = LIBRARY_PRESENTATION.with(|cell| {
+            let saved = cell.get().unwrap_or(current);
+            cell.set(Some(saved));
+            saved
+        });
+        (
+            self.desktop_settings.library_cards,
+            self.desktop_settings.library_group_folders,
+        ) = saved;
         let root = self.library_root.clone();
         self.select_library_scope(root, crate::FolderFilter::All, cx);
         self.inputs[&crate::Field::Search].update(cx, |input, cx| input.set_value("", window, cx));
         for state in states.split(',').filter(|state| !state.is_empty()) {
-            let (state, value) = state.split_once('~').unwrap_or((state, ""));
+            let (state, value) = state.split_once(['~', ':']).unwrap_or((state, ""));
             match state {
                 "list" => self.desktop_settings.library_cards = false,
                 "group" => self.desktop_settings.library_group_folders = true,

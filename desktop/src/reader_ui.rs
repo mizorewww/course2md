@@ -2882,6 +2882,17 @@ impl Desktop {
         .detach();
     }
     /// Debug validation: open the requested note after the first scan.
+    /// Capture review: the end of the open note, where its card closes.
+    #[cfg(feature = "capture")]
+    pub(crate) fn capture_reader_end(&mut self, cx: &mut Context<Self>) {
+        if self.result_tab == 0 {
+            self.reader_ui.note_list.scroll_to_end();
+        } else {
+            self.reader_ui.gallery.list.scroll_to_end();
+        }
+        cx.notify();
+    }
+
     pub(crate) fn open_validation_note(&mut self, cx: &mut Context<Self>) {
         let Some(wanted) = self.validation.as_mut().and_then(|v| v.note.take()) else {
             return;
