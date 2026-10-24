@@ -208,13 +208,31 @@ impl Desktop {
                     .child(tools),
                 );
         }
-        // Home is the workbench; its icon is the leading destination.
-        let home = nav_action("nav-home", page == Page::New, cx)
-            .w(CONTROL_HEIGHT)
-            .px_0()
-            .icon(icons::home())
+        // The brand leads the bar and returns to the workbench, as on the M3
+        // canvas; destinations follow on the trailing edge with icon and label.
+        let compact = is_compact(window);
+        let home = nav_action("nav-home", false, cx)
+            .pl(px(4.))
+            .pr(px(12.))
             .accessibility_label(course2md::tr!("主页"))
-            .tooltip(course2md::tr!("主页"))
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .child(
+                        img("images/course2md.png")
+                            .size(px(32.))
+                            .rounded(px(10.))
+                            .flex_shrink_0(),
+                    )
+                    .child(
+                        div()
+                            .text_size(rems(20. / 14.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(color(INK))
+                            .child("course2md"),
+                    ),
+            )
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.prepare_workbench_input(window, cx) {
                     this.navigate(Page::New, cx);
@@ -225,10 +243,8 @@ impl Desktop {
             matches!(page, Page::Library | Page::Result),
             cx,
         )
-        .icon(icons::book_open())
-        .when(!is_compact(window), |button| {
-            button.label(course2md::tr!("笔记库"))
-        })
+        .icon(icons::library())
+        .when(!compact, |button| button.label(course2md::tr!("笔记库")))
         .accessibility_label(course2md::tr!("笔记库"))
         .on_click(cx.listener(|this, _, _, cx| {
             this.folder_filter = crate::FolderFilter::All;
@@ -240,7 +256,7 @@ impl Desktop {
                 .icon(if tasks_need_attention {
                     icons::warning()
                 } else {
-                    icons::task()
+                    icons::list_checks()
                 })
                 .label(if task_count > 0 {
                     course2md::tr!("任务 · {}", task_count)
@@ -255,6 +271,7 @@ impl Desktop {
             } else {
                 icons::settings()
             })
+            .when(!compact, |button| button.label(course2md::tr!("设置")))
             .accessibility_label(course2md::tr!("设置"))
             .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)));
         let bar = bar
