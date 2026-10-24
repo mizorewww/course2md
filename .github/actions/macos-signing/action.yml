@@ -3,7 +3,9 @@ description: >-
   Import the Developer ID certificate into a temporary keychain and export
   APPLE_SIGNING_IDENTITY. Does nothing when no certificate is configured.
   Run the cleanup step of the calling job with `security delete-keychain
-  "$RUNNER_TEMP/signing.keychain"` under `if: always()`.
+  "$RUNNER_TEMP/signing.keychain"` under `if: always()`, then restore the
+  keychain search list saved in "$RUNNER_TEMP/keychains.orig" (the
+  self-hosted Mac keeps its user keychains between jobs).
 inputs:
   certificate:
     description: Base64-encoded Developer ID Application .p12
@@ -31,7 +33,11 @@ runs:
         security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASS" -T /usr/bin/codesign
         rm -f "$RUNNER_TEMP/cert.p12"
         security set-key-partition-list -S apple-tool:,apple: -k build "$keychain"
-        security list-keychains -d user -s "$keychain" login.keychain-db
+        # Prepend to the user's search list and keep the original for cleanup.
+        security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//' > "$RUNNER_TEMP/keychains.orig"
+        user_keychains=()
+        while IFS= read -r path; do user_keychains+=("$path"); done < "$RUNNER_TEMP/keychains.orig"
+        security list-keychains -d user -s "$keychain" "${user_keychains[@]}"
         curl -fsSL -o "$RUNNER_TEMP/g2.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
         security import "$RUNNER_TEMP/g2.cer" -k "$keychain"
         identity="$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)"

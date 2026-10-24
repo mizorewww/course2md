@@ -45,7 +45,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-26, ubuntu-24.04, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # macOS jobs run on the maintainer's self-hosted Mac. Pull requests from
+    # forks never reach it; they use GitHub's macos-26 runner instead.
+    runs-on: ${{ matrix.os != 'macos-26' && matrix.os || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "macOS", "ARM64", "course2md"]') || 'macos-26') }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/desktop-deps

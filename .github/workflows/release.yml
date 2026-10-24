@@ -55,9 +55,15 @@ jobs:
             target: x86_64-pc-windows-msvc
             asset: course2md-windows-x86_64.exe
             exe: true
-    runs-on: ${{ matrix.os }}
+    # macOS builds run on the maintainer's self-hosted Mac.
+    runs-on: ${{ matrix.os == 'macos-26' && fromJSON('["self-hosted", "macOS", "ARM64", "course2md"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Require the Metal compiler on macOS
+        # Without Xcode's Metal toolchain build.rs skips the Apple speech
+        # module, which would ship a macOS build without CoreML recognition.
+        if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
+        run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is missing on this runner; install Xcode (xcode-select -s /Applications/Xcode.app) before releasing."; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -104,7 +110,13 @@ jobs:
 
       - name: Remove signing material
         if: always() && runner.os == 'macOS'
-        run: security delete-keychain "$RUNNER_TEMP/signing.keychain" 2>/dev/null || true
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain" 2>/dev/null || true
+          if [ -f "$RUNNER_TEMP/keychains.orig" ]; then
+            user_keychains=()
+            while IFS= read -r path; do user_keychains+=("$path"); done < "$RUNNER_TEMP/keychains.orig"
+            security list-keychains -d user -s "${user_keychains[@]}"
+          fi
 
   desktop:
     needs: validate
@@ -112,13 +124,19 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-26, ubuntu-24.04, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # macOS builds run on the maintainer's self-hosted Mac.
+    runs-on: ${{ matrix.os == 'macos-26' && fromJSON('["self-hosted", "macOS", "ARM64", "course2md"]') || matrix.os }}
     env:
       APPLE_API_P8: ${{ secrets.APPLE_API_KEY }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - uses: actions/checkout@v4
+      - name: Require the Metal compiler on macOS
+        # Without Xcode's Metal toolchain build.rs skips the Apple speech
+        # module, which would ship a macOS build without CoreML recognition.
+        if: runner.os == 'macOS'
+        run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is missing on this runner; install Xcode (xcode-select -s /Applications/Xcode.app) before releasing."; exit 1; }
       - uses: ./.github/actions/desktop-deps
       # Tag builds package the locked inputs; pull-request desktop tests are not implied here.
       - name: Build CLI engine and desktop app
@@ -152,6 +170,11 @@ jobs:
         if: always() && runner.os == 'macOS'
         run: |
           security delete-keychain "$RUNNER_TEMP/signing.keychain" 2>/dev/null || true
+          if [ -f "$RUNNER_TEMP/keychains.orig" ]; then
+            user_keychains=()
+            while IFS= read -r path; do user_keychains+=("$path"); done < "$RUNNER_TEMP/keychains.orig"
+            security list-keychains -d user -s "${user_keychains[@]}"
+          fi
           rm -f "$RUNNER_TEMP"/AuthKey_*.p8
 
   release:

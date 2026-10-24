@@ -15,6 +15,8 @@ GUI packages contain a matching private CLI engine and do not install a terminal
 3. Push tag `v<version>`, or run the `release` workflow with that version. It builds every CLI and desktop asset first, then publishes the GitHub Release with `SHA256SUMS`. Prerelease versions are marked as pre-releases and do not replace Latest.
 4. `brew-tap` and `aur` run after a successful release. Homebrew updates only the release's channel; AUR skips prereleases and builds and checks the GUI package on Arch before pushing. Each pushes with its own key: `brew-tap` uses the `HOMEBREW_TAP_DEPLOY_KEY` secret (a deploy key with write access to `mizorewww/homebrew-tap` only) and `aur` uses `AUR_SSH_PRIVATE_KEY`.
 
+macOS jobs of `ci`, `native desktop` and `release` run on the maintainer's self-hosted Mac (runner labels `self-hosted, macOS, ARM64, course2md`; installed under `~/actions-runners/course2md` as a launchd service). Pull requests from forks never reach it and use GitHub's `macos-26` instead. Release builds require Xcode's Metal compiler on that Mac and stop otherwise, because without it `build.rs` leaves out the Apple speech module. The signing step prepends a temporary keychain to the user's keychain search list and restores the list afterwards.
+
 macOS bundles keep the full SemVer in `Course2mdVersion` and use Apple's numeric form for bundle versions (RC2 → `2.0.0` / `2.0.0fc2`).
 
 Recipes are rendered from `packaging/homebrew/` and `packaging/aur/`. Change these templates, not the external repositories, which later releases overwrite. To retry a channel, run `brew-tap` or `aur` manually with `version`; `aur` accepts `dry_run: true`, and `packaging/aur/update-aur.sh <version> --dry-run` runs the same validation locally on Arch.
