@@ -28,7 +28,6 @@ icons! {
     auto_fix => "outline" / "auto-fix";
     book_open => "outline" / "book-open";
     braces => "outline" / "braces";
-    captions => "outline" / "captions";
     check => "outline" / "check";
     check_circle => "outline" / "circle-check";
     chevron_down => "outline" / "chevron-down";
@@ -52,7 +51,6 @@ icons! {
     folder_plus => "outline" / "folder-plus";
     globe => "outline" / "globe";
     grip_vertical => "outline" / "grip-vertical";
-    home => "outline" / "house";
     inbox => "outline" / "inbox";
     info => "outline" / "info";
     layout_grid => "outline" / "layout-grid";
@@ -84,7 +82,6 @@ icons! {
     storage => "outline" / "storage";
     sun => "outline" / "sun";
     text_lines => "outline" / "text-align-start";
-    trash => "outline" / "trash";
     tune => "outline" / "tune";
     tv => "outline" / "tv";
     warning => "outline" / "triangle-alert";
@@ -92,7 +89,6 @@ icons! {
     arrow_down => "material" / "arrow-down";
     arrow_up => "material" / "arrow-up";
     create_new_folder => "material" / "create-new-folder";
-    dashboard => "material" / "dashboard";
     delete => "material" / "delete";
     ellipsis => "material" / "ellipsis";
     eye => "material" / "eye";

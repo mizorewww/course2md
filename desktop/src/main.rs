@@ -181,6 +181,9 @@ impl ValidationOpen {
     }
 }
 
+/// A derived preview plan, or its message and whether it is only waiting.
+type PreviewPlan = Result<workspace::TaskPlan, (String, bool)>;
+
 struct Desktop {
     preferences: preferences::Store,
     settings_ui: settings_ui::State,
@@ -301,7 +304,7 @@ struct Desktop {
     event_wake_rx: smol::channel::Receiver<()>,
     /// The derived preview plan; an error carries whether it is only waiting
     /// on background checks (`task_runner::PlanPending`).
-    preview_plan_cache: Option<(u64, u64, u64, Result<workspace::TaskPlan, (String, bool)>)>,
+    preview_plan_cache: Option<(u64, u64, u64, PreviewPlan)>,
     queue_keys: Vec<String>,
     queue_focus: Vec<FocusHandle>,
     queue_rem: f32,

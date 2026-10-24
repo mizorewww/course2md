@@ -24,7 +24,6 @@ Downloaded icons and the upstream license are pinned to Lucide commit `d672fc43d
 | `circle-check.svg` | `circle-check` | desktop/.deps/component/crates/assets/assets/icons/circle-check.svg |
 | `info.svg` | `info` | desktop/.deps/component/crates/assets/assets/icons/info.svg |
 | `triangle-alert.svg` | `triangle-alert` | desktop/.deps/component/crates/assets/assets/icons/triangle-alert.svg |
-| `house.svg` | `house` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/house.svg |
 | `link.svg` | `link` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/link.svg |
 | `search.svg` | `search` | desktop/.deps/component/crates/assets/assets/icons/search.svg |
 | `download.svg` | `download` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/download.svg |
@@ -58,7 +57,6 @@ Downloaded icons and the upstream license are pinned to Lucide commit `d672fc43d
 | `folder-input.svg` | `folder-input` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/folder-input.svg |
 | `file-text.svg` | `file-text` | desktop/.deps/component/crates/assets/assets/icons/file-text.svg |
 | `braces.svg` | `braces` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/braces.svg |
-| `captions.svg` | `captions` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/captions.svg |
 | `ellipsis-vertical.svg` | `ellipsis-vertical` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/ellipsis-vertical.svg |
 | `globe.svg` | `globe` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/globe.svg |
 | `inbox.svg` | `inbox` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/inbox.svg |
@@ -71,4 +69,3 @@ Downloaded icons and the upstream license are pinned to Lucide commit `d672fc43d
 | `notebook.svg` | `notebook` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/notebook.svg |
 | `play.svg` | `play` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/play.svg |
 | `text-align-start.svg` | `text-align-start` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/text-align-start.svg |
-| `trash.svg` | `trash` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/trash.svg |

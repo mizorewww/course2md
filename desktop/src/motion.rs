@@ -26,11 +26,6 @@ pub const FAST_SPATIAL: Spring = Spring {
     damping: 0.9,
     stiffness: 1400.,
 };
-/// Small components' color and opacity.
-pub const FAST_EFFECTS: Spring = Spring {
-    damping: 1.,
-    stiffness: 3800.,
-};
 /// Partly covering surfaces: a page region arriving, a disclosure opening.
 pub const DEFAULT_SPATIAL: Spring = Spring {
     damping: 0.9,
@@ -89,10 +84,6 @@ impl Spring {
             }
         }
     }
-}
-
-pub fn ease_out(t: f32) -> f32 {
-    1. - (1. - t.clamp(0., 1.)).powi(3)
 }
 
 /// IDs belong to a logical state, not a frame or a progress value.
@@ -438,7 +429,7 @@ pub fn disclosure(id: impl Into<ElementId>, open: bool, content: Div) -> AnyElem
 
 #[cfg(test)]
 mod tests {
-    use super::{ease_out, enter, value};
+    use super::{enter, value};
     use gpui::{
         App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
         Render, RenderOnce, Styled as _, TestAppContext, VisualTestContext, Window, div, px, size,
@@ -653,14 +644,8 @@ mod tests {
 
     #[test]
     fn springs_settle_on_their_target() {
-        use super::{DEFAULT_EFFECTS, DEFAULT_SPATIAL, FAST_EFFECTS, FAST_SPATIAL, SLOW_EFFECTS};
-        for spring in [
-            FAST_SPATIAL,
-            FAST_EFFECTS,
-            DEFAULT_SPATIAL,
-            DEFAULT_EFFECTS,
-            SLOW_EFFECTS,
-        ] {
+        use super::{DEFAULT_EFFECTS, DEFAULT_SPATIAL, FAST_SPATIAL, SLOW_EFFECTS};
+        for spring in [FAST_SPATIAL, DEFAULT_SPATIAL, DEFAULT_EFFECTS, SLOW_EFFECTS] {
             let ease = spring.ease();
             assert_eq!(ease(0.), 0.);
             assert_eq!(ease(1.), 1.);
@@ -669,19 +654,9 @@ mod tests {
             assert!((0.1..0.5).contains(&duration), "{spring:?}: {duration}");
         }
         // Effects springs never overshoot; spatial ones barely do.
-        let effects = (0..=200).map(|i| FAST_EFFECTS.ease()(i as f32 / 200.));
+        let effects = (0..=200).map(|i| DEFAULT_EFFECTS.ease()(i as f32 / 200.));
         assert!(effects.clone().all(|v| v <= 1.));
         assert!(effects.collect::<Vec<_>>().windows(2).all(|p| p[0] <= p[1]));
         assert!((0..=200).all(|i| FAST_SPATIAL.ease()(i as f32 / 200.) < 1.003));
-    }
-
-    #[test]
-    fn easing_finishes_exactly_and_preserves_forward_motion() {
-        assert_eq!(ease_out(0.), 0.);
-        assert_eq!(ease_out(1.), 1.);
-        let samples = (0..=100)
-            .map(|i| ease_out(i as f32 / 100.))
-            .collect::<Vec<_>>();
-        assert!(samples.windows(2).all(|p| p[0] <= p[1]));
     }
 }

@@ -22,7 +22,6 @@
     "arrow-up": "navigation/arrow_upward",
     "arrow-down": "navigation/arrow_downward",
     "ellipsis": "navigation/more_horiz",
-    "dashboard": "action/dashboard",
     "grid-view": "action/view_module",
     "summarize": "action/subject"
   }

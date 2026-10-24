@@ -303,11 +303,9 @@ pub fn task_dialog_top(window: &Window) -> Pixels {
     title_bar_height(window) + px(24.)
 }
 
-/// Window widths, in 100%-scale pixels, where page arrangements change.
-/// Below `COMPACT_WINDOW` pages use narrow gutters, an icon-only navigation
-/// rail and stacked controls; from `WIDE_WINDOW` they use their widest form.
+/// The window width, in 100%-scale pixels, where page arrangements change:
+/// below it pages use narrow gutters, compact navigation and stacked controls.
 pub const COMPACT_WINDOW: f32 = 960.;
-pub const WIDE_WINDOW: f32 = 1200.;
 
 /// The window width in 100%-scale pixels, so breakpoints follow the text scale.
 pub fn design_width(window: &Window) -> f32 {
@@ -317,15 +315,6 @@ pub fn design_width(window: &Window) -> f32 {
 pub fn is_compact(window: &Window) -> bool {
     design_width(window) < COMPACT_WINDOW
 }
-
-/// Settings navigation width (100%-scale pixels) at wide, medium and compact
-/// windows; the compact rail widens a little once text is enlarged.
-pub const SETTINGS_NAV_WIDE: f32 = 260.;
-pub const SETTINGS_NAV_MEDIUM: f32 = 220.;
-pub const SETTINGS_NAV_RAIL: f32 = 64.;
-pub const SETTINGS_NAV_RAIL_ENLARGED: f32 = 72.;
-/// Space wide settings layouts keep after their content (100%-scale pixels).
-pub const SETTINGS_WIDE_TRAILING: f32 = 56.;
 
 /// Space above the workbench hero (100%-scale pixels). A quiet workbench, with
 /// nothing in progress, lets the hero sit lower.
@@ -357,7 +346,6 @@ pub fn on_image_scrim() -> Rgba {
 
 /* ---------- Column widths (rems; structure that scales with text) ---------- */
 pub const COLUMN: Rems = rems(65.714);
-pub const TOC_PANEL: Rems = rems(16.);
 
 /* ---------- Type scale (rems; 14px is 1rem) ---------- */
 pub const TEXT_AUX: Rems = rems(0.857);
@@ -503,13 +491,6 @@ pub fn tinted_icon(icon: gpui_component::Icon, tint: Tint, size: Pixels) -> gpui
 fn shadow_color(alpha: f32) -> gpui::Hsla {
     gpui::hsla(0., 0., 0., alpha)
 }
-/// Hero input card: near 0/1/2 @5% + far 0/16/40 @8%.
-pub fn shadow_hero() -> Vec<gpui::BoxShadow> {
-    vec![
-        gpui::BoxShadow::new(px(0.), px(1.), shadow_color(0.05)).blur_radius(px(2.)),
-        gpui::BoxShadow::new(px(0.), px(16.), shadow_color(0.08)).blur_radius(px(40.)),
-    ]
-}
 /// M3 level-1 card elevation: 0/1/2 @6%, kept faint so tone carries the layer.
 pub fn shadow_card() -> Vec<gpui::BoxShadow> {
     vec![gpui::BoxShadow::new(px(0.), px(1.), shadow_color(0.06)).blur_radius(px(2.))]
@@ -617,24 +598,6 @@ pub fn supporting_info(
         )
 }
 
-/// A supporting fact of an icon-labelled item (an address, a path, a status
-/// sentence). It starts on the item's label text ruler, not under its icon.
-pub fn item_detail(
-    id: impl Into<gpui::ElementId>,
-    text: impl Into<gpui::SharedString>,
-    tone: ColorToken,
-) -> gpui::Stateful<gpui::Div> {
-    use gpui::prelude::*;
-    accessible_text(id, text)
-        .w_full()
-        .min_w_0()
-        .pl(LABEL_INSET)
-        .whitespace_normal()
-        .text_size(TEXT_AUX)
-        .line_height(rems(18. / 14.))
-        .text_color(color(tone))
-}
-
 /// Standalone guidance has its own boundary. Inside a setting, use supporting_info.
 pub fn info_callout(
     id: impl Into<gpui::ElementId>,
@@ -667,85 +630,6 @@ pub fn info_callout(
                 .line_height(rems(18. / 14.))
                 .text_color(color(GRAY)),
         )
-}
-
-/// The type scale of a labelled row: settings content reads one step larger
-/// than the workbench's processing panel.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum RowScale {
-    Settings,
-    Panel,
-}
-
-impl RowScale {
-    pub fn label(self) -> Rems {
-        TEXT_SETTINGS_BODY
-    }
-
-    pub fn hint(self) -> Rems {
-        match self {
-            RowScale::Settings => TEXT_SETTINGS_AUX,
-            RowScale::Panel => TEXT_AUX,
-        }
-    }
-
-    /// A switch row's height; it scales with the text so rows line up at
-    /// every interface size.
-    fn switch_height(self) -> Rems {
-        match self {
-            RowScale::Settings => rems(56. / 14.),
-            RowScale::Panel => rems(44. / 14.),
-        }
-    }
-}
-
-/// Supporting text under a row's label.
-pub fn row_hint(
-    id: impl Into<gpui::ElementId>,
-    hint: impl Into<gpui::SharedString>,
-    scale: RowScale,
-) -> gpui::Stateful<gpui::Div> {
-    use gpui::Styled;
-    accessible_text(id, hint)
-        .text_size(scale.hint())
-        .text_color(color(GRAY))
-}
-
-/// Label and optional hint on the left, a switch on the trailing edge.
-pub fn switch_row(
-    label: &'static str,
-    hint: &'static str,
-    switch: impl gpui::IntoElement,
-    scale: RowScale,
-) -> gpui::Div {
-    use gpui::{prelude::*, *};
-    div()
-        .flex()
-        .w_full()
-        .min_w_0()
-        .min_h(scale.switch_height())
-        .items_center()
-        .gap_4()
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_w_0()
-                .gap_1()
-                .child(
-                    accessible_text(SharedString::from(format!("switch-label-{label}")), label)
-                        .text_size(scale.label()),
-                )
-                .when(!hint.is_empty(), |view| {
-                    view.child(row_hint(
-                        SharedString::from(format!("switch-hint-{label}")),
-                        hint,
-                        scale,
-                    ))
-                }),
-        )
-        .child(div().flex_shrink_0().child(switch))
 }
 
 /// A 16:9 video cover; the width scales with the text size. Without a cover
@@ -1339,38 +1223,6 @@ pub fn quiet(id: impl Into<gpui::ElementId>) -> gpui_component::button::Button {
     use gpui::Styled;
     use gpui_component::button::ButtonVariants;
     control(id).ghost().text_color(color(GRAY))
-}
-
-/// Disclosure under an icon-labelled item: the chevron takes the item's icon
-/// slot and the label starts on the item's label ruler, so the button's own
-/// inline padding hangs outside the content edge.
-pub fn item_disclosure(
-    id: impl Into<gpui::ElementId>,
-    label: impl Into<gpui::SharedString>,
-    open: bool,
-) -> gpui_component::button::Button {
-    use gpui::{prelude::*, *};
-    let chevron = if open {
-        crate::icons::chevron_up()
-    } else {
-        crate::icons::chevron_down()
-    };
-    quiet(id).self_start().ml(-QUIET_INSET).child(
-        div()
-            .flex()
-            .items_center()
-            .gap(ICON_GAP)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(ICON_SLOT)
-                    .flex_shrink_0()
-                    .child(chevron.size(rems(16. / 14.))),
-            )
-            .child(label.into()),
-    )
 }
 
 /// An icon action inside a field shares that field's boundary. Its compact

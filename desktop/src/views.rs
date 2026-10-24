@@ -42,40 +42,6 @@ pub(super) fn shell_content_width(page: Page, window: &Window) -> f32 {
         .max(0.)
 }
 
-pub(super) fn settings_sidebar_width(window: &Window) -> f32 {
-    let scale = f32::from(window.rem_size()) / 14.;
-    let width = design_width(window);
-    (if width >= WIDE_WINDOW {
-        SETTINGS_NAV_WIDE
-    } else if width >= COMPACT_WINDOW {
-        SETTINGS_NAV_MEDIUM
-    } else if scale > 1.0 {
-        SETTINGS_NAV_RAIL_ENLARGED
-    } else {
-        SETTINGS_NAV_RAIL
-    }) * scale
-}
-
-pub(super) fn settings_column_gap(window: &Window) -> f32 {
-    let scale = f32::from(window.rem_size()) / 14.;
-    let width = design_width(window);
-    (if width >= WIDE_WINDOW {
-        40.
-    } else if width >= COMPACT_WINDOW {
-        24.
-    } else {
-        8.
-    }) * scale
-}
-
-/// Shared by settings panels and grids; use the same sidebar, gap and gutters.
-pub(super) fn settings_content_width(window: &Window) -> f32 {
-    (shell_content_width(Page::Settings, window)
-        - settings_sidebar_width(window)
-        - settings_column_gap(window))
-    .max(0.)
-}
-
 /// Entrance motion replays when the notice text changes, not on every frame.
 fn notice_key(text: &str) -> usize {
     use std::hash::{Hash, Hasher};
