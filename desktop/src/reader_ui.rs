@@ -14,14 +14,8 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 
-/// The article's width: two section columns, or one column of reading copy.
-const READER_MEASURE: Rems = rems(1100. / 14.);
-/// Reading copy is set in a serif, as on the canvas; the platform's CJK serif.
-const READER_SERIF: &str = if cfg!(target_os = "macos") {
-    "Songti SC"
-} else {
-    "Noto Serif CJK SC"
-};
+/// Reading copy: 17px with a 1.8 line, in the interface face.
+const READER_BODY: Rems = rems(17. / 14.);
 /// Space kept between scrolled text and an always-visible scrollbar.
 const SCROLLBAR_GUTTER: Pixels = px(14.);
 /// The icon of an empty state.
@@ -63,8 +57,6 @@ struct FrameImage {
     width: u32,
     height: u32,
 }
-/// Shape reserved for a screenshot whose file cannot be read.
-const MISSING_FRAME_ASPECT: f32 = 16. / 9.;
 #[derive(Clone)]
 struct Frame {
     anchor: String,
@@ -109,11 +101,6 @@ impl Frame {
             body_index,
         }
     }
-}
-fn frame_aspect(frame: &Frame) -> f32 {
-    frame.image.as_ref().map_or(MISSING_FRAME_ASPECT, |image| {
-        image.width as f32 / image.height as f32
-    })
 }
 #[derive(Clone)]
 struct Version {
@@ -334,14 +321,14 @@ fn reader_export_items(
     }
     for (markdown, label, icon) in [
         (
-            false,
-            course2md::tr!("复制整份笔记 · 纯文本"),
+            true,
+            course2md::tr!("复制整份笔记 · Markdown 文本"),
             icons::content_copy(),
         ),
         (
-            true,
-            course2md::tr!("复制整份笔记 · Markdown 文本"),
-            icons::article(),
+            false,
+            course2md::tr!("复制整份笔记 · 纯文本"),
+            icons::text_lines(),
         ),
     ] {
         let weak = desktop.clone();
@@ -377,25 +364,28 @@ fn reader_export_items(
         );
     }
     menu = menu.separator();
-    for (format, label) in [
+    for (format, label, icon) in [
         (
             course2md::config::OutputFormat::Md,
             course2md::tr!("导出 Markdown（含截图，.zip）…"),
+            icons::download(),
         ),
         (
             course2md::config::OutputFormat::Html,
             course2md::tr!("导出网页文件…"),
+            icons::globe(),
         ),
         (
             course2md::config::OutputFormat::Json,
             course2md::tr!("导出 JSON 数据…"),
+            icons::braces(),
         ),
     ] {
         let weak = desktop.clone();
         let version = version.clone();
         menu = menu.item(
             PopupMenuItem::new(label)
-                .icon(icons::download())
+                .icon(icon)
                 .disabled(exporting)
                 .on_click(move |_, window, cx| {
                     let _ = weak.update(cx, |this, cx| {
@@ -1180,12 +1170,11 @@ fn paragraph(
         .id(id.clone())
         .role(Role::Paragraph)
         .aria_label(text.clone())
-        .font_family(READER_SERIF)
-        .text_size(TEXT_READER)
+        .text_size(READER_BODY)
         .font_weight(FontWeight::NORMAL)
-        .line_height(relative(1.88));
+        .line_height(relative(1.8));
     if crate::math::has_math(&text) {
-        return view.child(math_paragraph(&text, TEXT_READER, color(INK).into()));
+        return view.child(math_paragraph(&text, READER_BODY, color(INK).into()));
     }
     view.child(reader_text(
         id,
@@ -1326,8 +1315,8 @@ struct NoteFlow {
     data_loading: bool,
     compact: bool,
     short: bool,
-    /// Sections put the screenshot and text side by side; narrow, they stack.
-    wide: bool,
+    /// The article card's inline padding.
+    inset: Rems,
     layout: Rc<RefCell<nav::ReadingLayout>>,
     restore_target: Rc<Cell<Option<usize>>>,
     note_list: ListState,
@@ -1342,12 +1331,10 @@ impl NoteFlow {
             .into_iter()
             .flatten()
             .map(|&frame_index| {
-                theme::accessible_text(
+                missing_image_notice(
                     ("missing-body-image", frame_index),
                     course2md::tr!("{}无法读取", frame_label(&self.frames[frame_index])),
                 )
-                .text_sm()
-                .text_color(color(WARNING))
             })
     }
 
@@ -1408,12 +1395,36 @@ impl NoteFlow {
     /// paragraphs resolves to an offset within this item.
     fn item_wrapper(&self, index: usize, content: AnyElement) -> Stateful<Div> {
         let item = self.items[index];
+        let (first, last) = (index == 0, index + 1 == self.items.len());
+        // Items paint the article card together: the first rounds its top,
+        // the last its bottom, and the 28px rhythm is padding inside the card.
+        // Virtual list measurements include padding, not external margins.
+        let card = div()
+            .w_full()
+            .min_w_0()
+            .bg(color(SURFACE))
+            .px(self.inset)
+            .pb(rems(28. / 14.))
+            .when(first, |card| {
+                card.rounded_t(RADIUS_HERO).pt(if self.compact {
+                    rems(24. / 14.)
+                } else {
+                    rems(40. / 14.)
+                })
+            })
+            .when(last, |card| {
+                card.rounded_b(RADIUS_HERO).pb(if self.compact {
+                    rems(32. / 14.)
+                } else {
+                    rems(56. / 14.)
+                })
+            })
+            .child(content);
         let mut wrapper = div()
             .w_full()
             .min_w_0()
             .flex_shrink_0()
-            // Virtual list measurements include padding, not external margins.
-            .pb_8();
+            .when(last, |wrapper| wrapper.pb(rems(48. / 14.)));
         let blocks = item.blocks();
         if !blocks.is_empty() {
             let positions = self.layout.clone();
@@ -1445,7 +1456,7 @@ impl NoteFlow {
             });
         }
         wrapper
-            .child(content)
+            .child(card)
             .id(("note-item", index))
             .track_focus(&self.focus[index])
             .tab_stop(false)
@@ -1471,16 +1482,15 @@ fn render_note_item(flow: &NoteFlow, item_ix: usize, cx: &mut App) -> AnyElement
                     preview,
                     flow.compact,
                     flow.short,
-                    HeaderContainer::List(flow.note_list.clone()),
+                    flow.note_list.clone(),
                     cx,
                 );
-                // Short windows show the facts in the information panel.
                 v_flex()
                     .w_full()
                     .min_w_0()
                     .gap_3()
                     .child(title)
-                    .when(!flow.short, |header| header.children(meta))
+                    .children(meta)
                     .into_any_element()
             })
             .unwrap_or_else(|_| div().into_any_element()),
@@ -1489,14 +1499,14 @@ fn render_note_item(flow: &NoteFlow, item_ix: usize, cx: &mut App) -> AnyElement
             heading,
             end,
             ordinal,
-        } => render_note_section(flow, heading, end, ordinal),
-        NoteItem::Block(index) => render_note_block(flow, index),
+        } => render_note_section(flow, heading, end, ordinal, cx),
+        NoteItem::Block(index) => render_note_block(flow, index, cx),
     };
     flow.item_wrapper(item_ix, content).into_any_element()
 }
 
 /// One block on its own: a paragraph, heading or screenshot outside any section.
-fn render_note_block(flow: &NoteFlow, index: usize) -> AnyElement {
+fn render_note_block(flow: &NoteFlow, index: usize, cx: &App) -> AnyElement {
     match &flow.preview.blocks[index] {
         PreviewBlock::Heading {
             text,
@@ -1509,10 +1519,11 @@ fn render_note_block(flow: &NoteFlow, index: usize) -> AnyElement {
             anchor,
             *seconds,
             flow.preview.blocks[index].is_timestamp_heading(),
+            cx,
         ),
         PreviewBlock::Paragraph { text, anchor } => note_paragraph(flow, index, text, anchor),
         PreviewBlock::Translation { text, anchor } => note_translation(flow, index, text, anchor),
-        PreviewBlock::Image(path) => render_note_image(flow, index, path),
+        PreviewBlock::Image(path) => render_note_image(flow, index, path, cx),
     }
 }
 
@@ -1545,8 +1556,8 @@ fn note_translation(
     .into_any_element()
 }
 
-/// The summary as one card: its overview, then the key points in two columns
-/// on wide windows.
+/// The summary as a tinted panel inside the article: its overview, then the
+/// key points as a list.
 fn render_note_summary(flow: &NoteFlow, blocks: std::ops::Range<usize>) -> AnyElement {
     let preview = &flow.preview;
     let mut overview = Vec::new();
@@ -1562,70 +1573,152 @@ fn render_note_summary(flow: &NoteFlow, blocks: std::ops::Range<usize>) -> AnyEl
                         .gap_3()
                         .child(
                             div()
-                                .mt(rems(11. / 14.))
-                                .size(px(6.))
+                                .mt(rems(12. / 14.))
+                                .size(px(5.))
                                 .flex_shrink_0()
                                 .rounded_full()
-                                .bg(color(ACCENT)),
+                                .bg(color(ON_SECONDARY_CONTAINER)),
                         )
-                        .child(div().flex_1().min_w_0().child(paragraph(
-                            SharedString::from(anchor.clone()),
-                            point.into(),
-                            index,
-                            flow.highlight_runs(index),
-                            flow.search_target(index),
-                        )))
+                        .child(
+                            div().flex_1().min_w_0().child(
+                                paragraph(
+                                    SharedString::from(anchor.clone()),
+                                    point.into(),
+                                    index,
+                                    flow.highlight_runs(index),
+                                    flow.search_target(index),
+                                )
+                                .text_size(rems(16. / 14.)),
+                            ),
+                        )
                         .into_any_element(),
                 );
             } else {
-                overview.push(note_paragraph(flow, index, text, anchor));
+                overview.push(
+                    paragraph(
+                        SharedString::from(anchor.to_owned()),
+                        text.clone(),
+                        index,
+                        flow.highlight_runs(index),
+                        flow.search_target(index),
+                    )
+                    .text_size(rems(16. / 14.))
+                    .into_any_element(),
+                );
             }
         }
     }
     v_flex()
         .w_full()
         .min_w_0()
-        .p(rems(28. / 14.))
-        .gap(rems(18. / 14.))
-        .rounded(rems(24. / 14.))
-        .bg(color(SURFACE))
+        .px(if flow.compact {
+            rems(16. / 14.)
+        } else {
+            rems(24. / 14.)
+        })
+        .py(rems(20. / 14.))
+        .gap(rems(12. / 14.))
+        .rounded(rems(20. / 14.))
+        .bg(summary_tint())
         .child(
             h_flex()
                 .gap_2()
                 .items_center()
-                .text_color(color(ACCENT))
-                .child(icons::sparkles().size(rems(16. / 14.)))
+                .text_color(color(ON_SECONDARY_CONTAINER))
+                .child(icons::sparkles().size(rems(18. / 14.)))
                 .child(
                     theme::accessible_text("reader-summary-label", course2md::tr!("摘要"))
                         .role(Role::Heading)
-                        .text_size(TEXT_AUX)
-                        .font_weight(FontWeight::MEDIUM),
+                        .text_size(TEXT_BODY)
+                        .font_weight(FontWeight::SEMIBOLD),
                 ),
         )
-        .child(
-            v_flex()
-                .gap_2()
-                .text_size(rems(18. / 14.))
-                .children(overview),
-        )
+        .child(v_flex().gap_2().children(overview))
         .when(!points.is_empty(), |card| {
-            card.child(
-                div()
-                    .grid()
-                    .grid_cols(if flow.wide { 2 } else { 1 })
-                    .gap_x(rems(40. / 14.))
-                    .gap_y(rems(10. / 14.))
-                    .children(points),
-            )
+            card.child(v_flex().gap(rems(6. / 14.)).children(points))
         })
         .into_any_element()
 }
 
-/// A section as on the canvas: the screenshot on one side with a chip that
-/// plays the source from its time, and on the other the time, the chapter
-/// title where one begins, and the paragraphs. Sides alternate; narrow
-/// windows stack them.
-fn render_note_section(flow: &NoteFlow, heading: usize, end: usize, ordinal: usize) -> AnyElement {
+/// The summary panel: the secondary container lightened toward the article.
+fn summary_tint() -> Rgba {
+    blend(color(SURFACE), color(SECONDARY_CONTAINER), 0.55)
+}
+
+/// A chip that plays the source from a moment, or the bare time when the
+/// source cannot seek there. `marks` are find highlights on the time.
+fn watch_from_chip(
+    flow: &NoteFlow,
+    heading: usize,
+    seconds: f64,
+    marks: Vec<(Range<usize>, HighlightStyle)>,
+    cx: &App,
+) -> AnyElement {
+    let time = course2md::render::fmt_ts(seconds);
+    let time_text = if marks.is_empty() {
+        div().child(time.clone()).into_any_element()
+    } else {
+        reader_text(
+            ("reader-heading-marks", heading),
+            SharedString::from(time.clone()),
+            heading as u64,
+            marks,
+            flow.search_target(heading),
+        )
+        .into_any_element()
+    };
+    let height = rems(36. / 14.);
+    match flow
+        .source
+        .as_ref()
+        .and_then(|source| nav::seek_url(source, seconds))
+    {
+        Some(url) => flow
+            .reveal(
+                ("reveal-watch-from", heading).into(),
+                tonal_pill(("watch-from", heading), cx)
+                    .h(height)
+                    .min_h(height)
+                    .flex_shrink_0()
+                    .rounded(RADIUS_PILL)
+                    .pl(rems(10. / 14.))
+                    .pr(rems(1.))
+                    .gap(rems(6. / 14.))
+                    .text_size(rems(13. / 14.))
+                    .icon(icons::play())
+                    .child(time_text)
+                    .child(course2md::tr!("从此处观看"))
+                    .accessibility_label(course2md::tr!("从 {} 播放原视频", time))
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+                    .into_any_element(),
+            )
+            .inline()
+            .into_any_element(),
+        None => h_flex()
+            .id(("section-time", heading))
+            .flex_shrink_0()
+            .items_center()
+            .h(rems(30. / 14.))
+            .px(rems(10. / 14.))
+            .rounded(RADIUS_SMALL)
+            .bg(color(CANVAS))
+            .text_size(rems(13. / 14.))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(color(GRAY))
+            .child(time_text)
+            .into_any_element(),
+    }
+}
+
+/// A section: the chapter title where one begins with the chip that plays
+/// the source from its time, the paragraphs, then the screenshot.
+fn render_note_section(
+    flow: &NoteFlow,
+    heading: usize,
+    end: usize,
+    _ordinal: usize,
+    cx: &App,
+) -> AnyElement {
     let preview = &flow.preview;
     let (anchor, seconds) = match &preview.blocks[heading] {
         PreviewBlock::Heading {
@@ -1633,8 +1726,8 @@ fn render_note_section(flow: &NoteFlow, heading: usize, end: usize, ordinal: usi
         } => (anchor.clone(), *seconds),
         _ => (String::new(), None),
     };
-    let image = (heading + 1..end).find_map(|index| match &preview.blocks[index] {
-        PreviewBlock::Image(path) => Some(render_note_image(flow, index, path)),
+    let images = (heading + 1..end).filter_map(|index| match &preview.blocks[index] {
+        PreviewBlock::Image(path) => Some(render_note_image(flow, index, path, cx)),
         _ => None,
     });
     let paragraphs = (heading + 1..end).filter_map(|index| match &preview.blocks[index] {
@@ -1647,12 +1740,12 @@ fn render_note_section(flow: &NoteFlow, heading: usize, end: usize, ordinal: usi
     let chapter = flow.chapter_starts.get(&heading);
     let marks = flow.highlight_runs(heading);
     let time = seconds.map(course2md::render::fmt_ts);
-    let missing = flow.missing_images(heading);
     let title_row = h_flex()
         .id(SharedString::from(anchor))
+        .w_full()
         .flex_wrap()
-        .items_baseline()
-        .gap_x_3()
+        .items_center()
+        .gap_3()
         .role(Role::Heading)
         .aria_label(
             chapter
@@ -1660,66 +1753,29 @@ fn render_note_section(flow: &NoteFlow, heading: usize, end: usize, ordinal: usi
                 .or(time.clone())
                 .unwrap_or_default(),
         )
-        .children(time.map(|time| {
-            div()
-                .text_size(TEXT_BODY)
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(color(ACCENT))
-                .child(if marks.is_empty() {
-                    time.into_any_element()
-                } else {
-                    reader_text(
-                        ("reader-heading-marks", heading),
-                        SharedString::from(time),
-                        heading as u64,
-                        marks,
-                        flow.search_target(heading),
-                    )
-                    .into_any_element()
-                })
-        }))
         .children(chapter.map(|chapter| {
             div()
-                .font_family(READER_SERIF)
-                .text_size(rems(26. / 14.))
-                .line_height(rems(36. / 14.))
-                .font_weight(FontWeight::SEMIBOLD)
+                .flex_1()
+                .flex_basis(rems(240. / 14.))
+                .min_w_0()
+                .text_size(rems(24. / 14.))
+                .line_height(rems(32. / 14.))
+                .font_weight(FontWeight::MEDIUM)
                 .child(chapter.clone())
-        }));
-    let text = v_flex()
-        .flex_1()
-        .min_w_0()
-        .gap_4()
-        .child(title_row)
-        .children(missing)
-        .children(paragraphs);
-    let image_first = !flow.wide || ordinal.is_multiple_of(2);
-    let row = if flow.wide {
-        h_flex()
-            .w_full()
-            .min_w_0()
-            .items_center()
-            .gap(rems(48. / 14.))
-    } else {
-        v_flex().w_full().min_w_0().gap_5()
-    };
-    let image = image.map(|image| div().flex_1().min_w_0().child(image));
+        }))
+        .children(seconds.map(|seconds| watch_from_chip(flow, heading, seconds, marks, cx)));
     v_flex()
         .w_full()
         .min_w_0()
-        .pb_8()
-        .border_b_1()
-        .border_color(color(CARD_LINE))
-        .child(if image_first {
-            row.children(image).child(text)
-        } else {
-            row.child(text).children(image)
-        })
+        .gap_4()
+        .child(title_row)
+        .children(flow.missing_images(heading))
+        .children(paragraphs)
+        .children(images.map(|image| div().w_full().mt_2().child(image)))
         .into_any_element()
 }
 
-/// A section heading: its time chip, the chapter title where a new chapter of
-/// the summary outline begins, and notices for screenshots that cannot be read.
+/// A heading outside the sections, with its time chip when it has one.
 fn render_note_heading(
     flow: &NoteFlow,
     index: usize,
@@ -1727,166 +1783,201 @@ fn render_note_heading(
     anchor: &str,
     seconds: Option<f64>,
     timestamp_only: bool,
+    cx: &App,
 ) -> AnyElement {
     let marks = flow.highlight_runs(index);
     let chapter = flow.chapter_starts.get(&index);
     // Without a chapter title, a heading that is only its time is the chip itself.
     let bare_timestamp = chapter.is_none() && timestamp_only;
-    let heading = if !marks.is_empty() {
-        Some(
-            div()
-                .id(("reader-heading-wrap", index))
-                .role(Role::Heading)
-                .aria_label(text.clone())
-                .text_size(TEXT_TITLE)
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(reader_text(
-                    ("reader-heading-marks", index),
-                    text.clone(),
-                    index as u64,
-                    marks,
-                    flow.search_target(index),
+    let heading_style = |view: Stateful<Div>| {
+        view.role(Role::Heading)
+            .flex_1()
+            .flex_basis(rems(240. / 14.))
+            .min_w_0()
+            .text_size(rems(24. / 14.))
+            .line_height(rems(32. / 14.))
+            .font_weight(FontWeight::MEDIUM)
+    };
+    let (heading, chip_marks) = if bare_timestamp {
+        (None, marks)
+    } else if !marks.is_empty() {
+        (
+            Some(
+                heading_style(div().id(("reader-heading-wrap", index)))
+                    .aria_label(text.clone())
+                    .child(reader_text(
+                        ("reader-heading-marks", index),
+                        text.clone(),
+                        index as u64,
+                        marks,
+                        flow.search_target(index),
+                    ))
+                    .into_any_element(),
+            ),
+            Vec::new(),
+        )
+    } else {
+        (
+            Some(
+                heading_style(theme::accessible_text(
+                    ("reader-heading", index),
+                    chapter
+                        .cloned()
+                        .map_or_else(|| text.clone(), SharedString::from),
                 ))
                 .into_any_element(),
-        )
-    } else if bare_timestamp {
-        None
-    } else {
-        Some(
-            theme::accessible_text(
-                ("reader-heading", index),
-                chapter
-                    .cloned()
-                    .map_or_else(|| text.clone(), SharedString::from),
-            )
-            .role(Role::Heading)
-            .text_size(TEXT_TITLE)
-            .font_weight(FontWeight::SEMIBOLD)
-            .into_any_element(),
+            ),
+            Vec::new(),
         )
     };
-    let chip = seconds.map(|seconds| {
-        let chip = div()
-            .text_size(TEXT_READER)
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(color(GRAY))
-            .flex_shrink_0()
-            .whitespace_nowrap()
-            .child(course2md::render::fmt_ts(seconds));
-        if bare_timestamp {
-            chip.id(("reader-heading", index))
-                .role(Role::Heading)
-                .aria_label(text.clone())
-        } else {
-            chip.id(("reader-heading-chip", index))
-        }
-    });
-    let missing = flow.missing_images(index);
+    let chip = seconds.map(|seconds| watch_from_chip(flow, index, seconds, chip_marks, cx));
     v_flex()
         .id(SharedString::from(anchor.to_owned()))
         .gap_2()
-        .when(index > 0, |view| view.pt_4())
+        .when(bare_timestamp, |view| {
+            view.role(Role::Heading).aria_label(text.clone())
+        })
         .child(
             h_flex()
+                .w_full()
                 .flex_wrap()
-                .gap_2()
+                .gap_3()
                 .items_center()
-                .children(chip)
-                .children(heading),
+                .children(heading)
+                .children(chip),
         )
-        .children(missing)
+        .children(flow.missing_images(index))
         .into_any_element()
 }
 
-/// A screenshot inside the article: 16:9 and rounded, opening the viewer, with
-/// a chip over its corner that plays the source from its moment.
-fn render_note_image(flow: &NoteFlow, index: usize, path: &std::path::Path) -> AnyElement {
+/// A screenshot inside the article: a 16:9 figure with its time in the
+/// corner and a button that opens the viewer.
+fn render_note_image(
+    flow: &NoteFlow,
+    index: usize,
+    path: &std::path::Path,
+    cx: &App,
+) -> AnyElement {
     let frame_index = flow.frame_by_path.get(path).copied();
     let frame = frame_index.map(|i| &flow.frames[i]);
     if frame.is_none() && !flow.data_loading {
-        return theme::accessible_text(
+        return missing_image_notice(
             ("unreadable-inline-image", index),
             course2md::tr!("截图无法读取"),
         )
-        .text_sm()
-        .text_color(color(WARNING))
         .into_any_element();
     }
     let label = frame
         .map(frame_label)
         .unwrap_or_else(|| course2md::tr!("截图").into());
-    let desktop = flow.desktop.clone();
-    let seek = frame.and_then(|frame| {
-        let url = nav::seek_url(flow.source.as_ref()?, frame.seconds)?;
-        let time = course2md::render::fmt_ts(frame.seconds);
-        Some(
-            control(("seek-image", index))
-                .absolute()
-                .left(rems(12. / 14.))
-                .bottom(rems(12. / 14.))
-                .h(rems(32. / 14.))
-                .min_h(rems(32. / 14.))
-                .pl(rems(8. / 14.))
-                .pr(rems(12. / 14.))
-                .rounded_full()
-                .bg(image_scrim())
-                .text_color(on_image_scrim())
-                .text_size(TEXT_AUX)
-                .icon(icons::play_arrow())
-                .label(time.clone())
-                .accessibility_label(course2md::tr!("从 {} 播放原视频", time))
-                .on_click(move |_, _, cx| cx.open_url(&url)),
-        )
-    });
+    let open = {
+        let desktop = flow.desktop.clone();
+        move |window: &mut Window, cx: &mut App| {
+            if let Some(frame_index) = frame_index {
+                let _ = desktop.update(cx, |this, cx| {
+                    this.open_reader_image(frame_index, window, cx);
+                });
+            }
+        }
+    };
+    let open_click = open.clone();
+    let time = frame.map(|frame| course2md::render::fmt_ts(frame.seconds));
     flow.reveal(
         ("reveal-note-image", index).into(),
         div()
+            .id(("note-figure", index))
             .relative()
             .w_full()
+            .aspect_ratio(16. / 9.)
+            .rounded(FIGURE_RADIUS)
+            .overflow_hidden()
+            .bg(color(SURFACE_HIGH))
+            .when(frame.is_some(), |figure| {
+                figure
+                    .cursor_pointer()
+                    .on_click(move |_, window, cx| open_click(window, cx))
+            })
             .child(
-                control(("note-image", index))
-                    .ghost()
-                    .p_0()
-                    .w_full()
-                    .h_auto()
-                    .min_h(px(0.))
-                    .border_0()
-                    .rounded(RADIUS_CARD)
-                    .overflow_hidden()
-                    .aspect_ratio(16. / 9.)
-                    .bg(color(SURFACE_HIGH))
-                    .accessibility_label(course2md::tr!("放大{}", label))
-                    .disabled(frame.is_none())
-                    // The image fills the frame itself, not the button's centered
-                    // content box, and shows the whole slide.
-                    .relative()
-                    .child(
-                        img(path.to_path_buf())
-                            .absolute()
-                            .inset_0()
-                            .size_full()
-                            .rounded(RADIUS_CARD)
-                            .object_fit(ObjectFit::Contain)
-                            .with_fallback(move || {
-                                theme::accessible_text(
-                                    ("failed-reader-image", index),
-                                    course2md::tr!("截图无法读取"),
-                                )
-                                .into_any_element()
-                            }),
-                    )
-                    .on_click(move |_, window, cx| {
-                        if let Some(frame_index) = frame_index {
-                            let _ = desktop.update(cx, |this, cx| {
-                                this.open_reader_image(frame_index, window, cx);
-                            });
-                        }
+                img(path.to_path_buf())
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .rounded(FIGURE_RADIUS)
+                    .object_fit(ObjectFit::Contain)
+                    .with_fallback(move || {
+                        missing_image_notice(
+                            ("failed-reader-image", index),
+                            course2md::tr!("截图无法读取"),
+                        )
+                        .into_any_element()
                     }),
             )
-            .children(seek)
+            .children(time.map(image_time_chip))
+            .when(frame.is_some(), |figure| {
+                figure.child(
+                    div()
+                        .absolute()
+                        .right(rems(12. / 14.))
+                        .bottom(rems(12. / 14.))
+                        .child(
+                            image_corner_button(("note-image", index), icons::maximize(), cx)
+                                .accessibility_label(course2md::tr!("放大{}", label))
+                                .tooltip(course2md::tr!("放大"))
+                                .on_click(move |_, window, cx| open(window, cx)),
+                        ),
+                )
+            })
             .into_any_element(),
     )
     .into_any_element()
+}
+
+/// Screenshot figures in the article.
+const FIGURE_RADIUS: Pixels = px(20.);
+
+/// A screenshot's time over its lower-left corner, on the image scrim.
+fn image_time_chip(time: String) -> Div {
+    div()
+        .absolute()
+        .left(rems(12. / 14.))
+        .bottom(rems(12. / 14.))
+        .px(rems(10. / 14.))
+        .py(rems(3. / 14.))
+        .rounded(RADIUS_SMALL)
+        .bg(image_scrim())
+        .text_color(on_image_scrim())
+        .text_size(TEXT_AUX)
+        .font_weight(FontWeight::MEDIUM)
+        .child(time)
+}
+
+/// A 40px round action over a screenshot's corner, on a near-opaque surface.
+fn image_corner_button(id: impl Into<ElementId>, icon: Icon, cx: &App) -> Button {
+    icon_button(id, rems(40. / 14.), true, cx)
+        .bg(Rgba {
+            a: 0.92,
+            ..color(SURFACE)
+        })
+        .text_color(color(INK))
+        .icon(icon)
+}
+
+/// A screenshot that could not be read, in place of its figure.
+fn missing_image_notice(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Stateful<Div> {
+    h_flex()
+        .id(id)
+        .w_full()
+        .min_w_0()
+        .items_center()
+        .gap_2()
+        .px(rems(16. / 14.))
+        .py(rems(12. / 14.))
+        .rounded(rems(12. / 14.))
+        .bg(color(WARNING_BG))
+        .text_color(color(WARNING))
+        .text_size(TEXT_AUX)
+        .child(icons::image().size(ICON_SLOT).flex_shrink_0())
+        .child(div().flex_1().min_w_0().child(text.into()))
 }
 
 impl Desktop {
@@ -2820,6 +2911,11 @@ impl Desktop {
             match panel {
                 "find" => self.reader_ui.find.open = true,
                 "info" => self.reader_ui.info_open = true,
+                "toc" => self.reader_ui.toc_open = Some(true),
+                "images" => {
+                    self.result_tab = 1;
+                    self.sync_reader_tab_stops();
+                }
                 _ => {}
             }
         }
@@ -3096,12 +3192,9 @@ impl Desktop {
         };
         self.schedule_reader_restore(window, cx);
         let outline = self.reader_ui.outline.clone();
-        let metrics = ReaderMetrics::new(
-            window,
-            self.reader_ui.toc_open == Some(true),
-            !outline.is_empty(),
-        );
+        let metrics = ReaderMetrics::new(window, self.result_tab, !outline.is_empty());
         let (controls, tools) = self.reader_controls(&preview, &outline, metrics, window, cx);
+        let tabs = (!metrics.short).then(|| self.reader_tabs_row(&preview, &outline, metrics, cx));
         let article = if self.result_tab == 0 {
             self.reader_note_article(&preview, metrics, cx)
         } else {
@@ -3112,37 +3205,49 @@ impl Desktop {
             crate::motion::state_enter(
                 SharedString::from(format!("reader-open:{}", preview.course.dir.display())),
                 self.reader_root(metrics, cx)
-                    .child(controls)
+                    .children(controls)
+                    .children(tabs)
                     .child(v_flex().flex_1().min_h_0().w_full().child(body)),
             ),
             Some(tools.into_any_element()),
         )
     }
 
+    /// Opening a note: the return stays available beside a quiet progress card.
     fn reader_opening(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let origin = self.reader_origin_label();
         crate::motion::enter(
             "reader-opening",
             v_flex()
                 .w_full()
-                .gap_4()
-                .py_4()
+                .max_w(ARTICLE_MAX)
+                .mx_auto()
+                .gap(rems(20. / 14.))
+                .pt_2()
                 .child(
-                    quiet("reader-loading-back")
+                    icon_button("reader-loading-back", BUTTON_MEDIUM, true, cx)
                         .icon(crate::icons::arrow_left())
-                        .label(course2md::tr!("返回"))
+                        .accessibility_label(course2md::tr!("返回「{}」", origin))
+                        .tooltip(course2md::tr!("返回「{}」", origin))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.navigate(this.result_origin, cx);
                         })),
                 )
                 .child(
                     h_flex()
+                        .w_full()
                         .items_center()
-                        .gap_2()
+                        .gap_3()
+                        .px(rems(48. / 14.))
+                        .py(rems(40. / 14.))
+                        .rounded(RADIUS_HERO)
+                        .bg(color(SURFACE))
                         .child(crate::motion::spinner("reader-opening-spinner", cx))
-                        .child(theme::accessible_text(
-                            "opening-note",
-                            course2md::tr!("正在打开笔记…"),
-                        )),
+                        .child(
+                            theme::accessible_text("opening-note", course2md::tr!("正在打开笔记…"))
+                                .role(Role::Status)
+                                .text_color(color(GRAY)),
+                        ),
                 ),
         )
     }
@@ -3202,12 +3307,14 @@ impl Desktop {
             .w_full()
             .max_w(px(metrics.reader_width))
             .mx_auto()
-            .gap_3()
-            .when(metrics.compact, |view| view.gap_2())
+            .pt_2()
+            .gap(rems(20. / 14.))
+            .when(metrics.compact, |view| view.gap_3())
     }
 
-    /// Tool bar, title, facts, export feedback, notices and the details panel.
-    /// Compact layouts leave the title to scroll with the screenshot grid.
+    /// Export feedback, version loading, notices and the details panel above
+    /// the views, and the tools the title bar shows. Narrow windows also put
+    /// the open note search here.
     fn reader_controls(
         &mut self,
         preview: &Rc<notes::Preview>,
@@ -3215,123 +3322,223 @@ impl Desktop {
         metrics: ReaderMetrics,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> (AnyElement, Div) {
+    ) -> (Option<AnyElement>, Div) {
         let ReaderMetrics {
             compact,
-            short,
             available_height,
             ..
         } = metrics;
-        // Short windows reserve fixed space for reading controls. Document
-        // identity scrolls with the content instead of consuming a second header.
         let controls_scroll = self.reader_ui.controls_scroll.clone();
-        let mut page = v_flex()
-            .id("reader-controls")
-            .w_full()
-            .min_w_0()
-            .gap_3()
-            .flex_shrink_0()
-            .when(compact, |view| view.gap_1())
-            // The header is as tall as its content; only the details panel
-            // below it is bounded.
-            .when(!compact, |view| view.pt_2().pb(rems(32. / 14.)));
-        let ReaderHeaderParts { title, meta } = self.reader_metadata_row(
-            preview,
-            compact,
-            short,
-            if compact {
-                HeaderContainer::Fixed
-            } else {
-                HeaderContainer::Scroll(controls_scroll.clone())
-            },
-            cx,
-        );
-        // Compact windows draw the title as the first gallery item instead.
-        let heading = (!compact).then_some(title);
         let toolbar = self.reader_toolbar(preview, outline, &metrics, window, cx);
+        let mut items: Vec<AnyElement> = Vec::new();
         if toolbar.compact_search.is_some() || toolbar.short_matches.is_some() {
-            page = page.child(
+            items.push(
                 v_flex()
                     .w_full()
                     .min_w_0()
                     .gap_2()
-                    .pb_2()
                     .children(toolbar.compact_search)
-                    .children(toolbar.short_matches),
+                    .children(toolbar.short_matches)
+                    .into_any_element(),
             );
         }
-        // The return leads the tool bar; title and facts share the article's
-        // left edge below it.
-        // The note tab draws its header as the list's first item, so it
-        // scrolls away with the text instead of collapsing above it, which
-        // would move every line by the header's height.
-        let header_in_list = self.result_tab == 0;
-        let (inline_meta, panel_meta) = if short { (None, meta) } else { (meta, None) };
-        if header_in_list {
-            page = page.pb_2();
-        } else {
-            page = page.children(heading).children(inline_meta);
+        if let Some(feedback) = self.course_export_feedback(&preview.course, cx) {
+            items.push(feedback.into_any_element());
         }
-        let (fixed_header, mut page) = if compact {
-            (
-                Some(page),
-                v_flex()
-                    .id("reader-extra-controls")
-                    .w_full()
-                    .min_w_0()
-                    .min_h_0()
-                    .flex_shrink_0()
-                    .gap_2()
-                    .max_h(px(available_height * 0.28))
-                    .overflow_y_scroll()
-                    .track_scroll(&controls_scroll),
-            )
-        } else {
-            (None, page)
-        };
-        page = page.children(self.course_export_feedback(&preview.course, cx));
         if self.reading {
-            page = page.child(crate::motion::enter(
+            items.push(crate::motion::enter(
                 "reader-version-loading",
                 h_flex()
                     .items_center()
                     .gap_2()
                     .child(crate::motion::spinner("reader-version-spinner", cx))
-                    .child(theme::accessible_text(
-                        "reader-version-loading-label",
-                        course2md::tr!("正在切换版本…"),
-                    )),
+                    .child(
+                        theme::accessible_text(
+                            "reader-version-loading-label",
+                            course2md::tr!("正在切换版本…"),
+                        )
+                        .role(Role::Status)
+                        .text_color(color(GRAY)),
+                    ),
             ));
         }
-        page = page.children(self.reader_notices(preview, &controls_scroll, cx));
-        let information_panel =
-            self.reader_info_panel(preview, compact, panel_meta, available_height, window, cx);
+        items.extend(self.reader_notices(preview, &controls_scroll, cx));
+        let information_panel = if self.reader_ui.info_open {
+            self.reader_info_panel(preview, compact, None, available_height, window, cx)
+        } else {
+            None
+        };
+        if items.is_empty() && information_panel.is_none() {
+            return (None, toolbar.bar);
+        }
+        // Notices scroll in a bounded region on small windows so the views
+        // and the text below them keep most of the height.
+        let notices = (!items.is_empty()).then(|| {
+            v_flex()
+                .id("reader-controls")
+                .w_full()
+                .min_w_0()
+                .min_h_0()
+                .flex_shrink_0()
+                .gap_3()
+                .when(compact, |view| view.max_h(px(available_height * 0.28)))
+                .overflow_y_scroll()
+                .track_scroll(&controls_scroll)
+                .children(items)
+        });
         let controls = v_flex()
             .w_full()
             .min_w_0()
             .min_h_0()
             .flex_shrink_0()
-            .children(fixed_header)
-            .child(page)
-            .when(self.reader_ui.info_open, |view| {
-                view.gap_2().children(information_panel)
-            });
-        (controls.into_any_element(), toolbar.bar)
+            .gap_3()
+            .children(notices)
+            .children(information_panel);
+        (Some(controls.into_any_element()), toolbar.bar)
+    }
+
+    /// The views as connected tabs, the contents toggle when the contents
+    /// cannot sit beside the article, and the version choice.
+    fn reader_tabs_row(
+        &mut self,
+        preview: &Rc<notes::Preview>,
+        outline: &[(usize, String, Option<f64>)],
+        metrics: ReaderMetrics,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let reading_note = self.result_tab == 0;
+        let shots = preview.course.slides;
+        let mut row = h_flex()
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
+            .flex_wrap()
+            .gap_3()
+            .items_center()
+            .child(
+                div().flex_shrink_0().child(
+                    SingleChoiceGroup::new("reader-tabs", course2md::tr!("阅读视图"))
+                        .tabs()
+                        .options([
+                            ("note", course2md::tr!("笔记").to_owned()),
+                            (
+                                "images",
+                                if shots > 0 {
+                                    course2md::tr!("截图 · {}", shots)
+                                } else {
+                                    course2md::tr!("截图").to_owned()
+                                },
+                            ),
+                        ])
+                        .icon("note", icons::article())
+                        .icon("images", icons::image())
+                        .focus_handles(self.reader_ui.view_focus.iter().cloned())
+                        .selected(if reading_note { "note" } else { "images" })
+                        .on_change(cx.listener(|this, selected: &SharedString, window, cx| {
+                            this.select_reader_view(
+                                usize::from(selected.as_ref() == "images"),
+                                window,
+                                cx,
+                            );
+                        })),
+                ),
+            )
+            .child(div().flex_1());
+        if reading_note && !outline.is_empty() && !metrics.toc_fits_beside {
+            let toc_on = self.reader_ui.toc_open.unwrap_or(false);
+            row = row.child(
+                quiet("note-contents")
+                    .h(rems(36. / 14.))
+                    .min_h(rems(36. / 14.))
+                    .icon(icons::toc())
+                    .label(course2md::tr!("阅读目录"))
+                    .selected(toc_on)
+                    .accessibility_label(if toc_on {
+                        course2md::tr!("收起目录")
+                    } else {
+                        course2md::tr!("阅读目录")
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.reader_ui.restore.pending = this.capture_reading_position();
+                        this.reader_ui.restore.generation += 1;
+                        this.reader_ui.toc_open = Some(!toc_on);
+                        cx.notify();
+                    })),
+            );
+        }
+        // A single version needs no selector; its revision and date stay in
+        // the note details.
+        if let Some(manifest) = &preview.course.manifest
+            && self.reader_ui.versions.len() > 1
+        {
+            let weak = cx.weak_entity();
+            let versions = self.reader_ui.versions.clone();
+            let current = preview.course.dir.clone();
+            let chip = rems(36. / 14.);
+            row = row.child(
+                quiet("choose-note-version")
+                    .h(chip)
+                    .min_h(chip)
+                    .pl(rems(1.))
+                    .pr(rems(10. / 14.))
+                    .gap(rems(6. / 14.))
+                    .rounded(RADIUS_SMALL)
+                    .border_1()
+                    .border_color(color(CONTROL))
+                    .label_text_size(rems(13. / 14.))
+                    .label(if metrics.compact {
+                        course2md::tr!("第 {} 版", manifest.revision)
+                    } else {
+                        course2md::tr!(
+                            "第 {} 版 · {} 生成",
+                            manifest.revision,
+                            nav::date_local(manifest.created_at_ms)
+                        )
+                    })
+                    .child(
+                        crate::icons::chevron_down()
+                            .size(rems(16. / 14.))
+                            .flex_shrink_0(),
+                    )
+                    .disabled(self.reading)
+                    .dropdown_menu(move |menu, _, _| {
+                        let mut menu = menu;
+                        for version in &versions {
+                            let weak = weak.clone();
+                            let course = version.course.clone();
+                            let label = if course.dir == current {
+                                course2md::tr!("{}（当前）", version.label)
+                            } else {
+                                version.label.clone()
+                            };
+                            menu = menu.item(
+                                PopupMenuItem::new(label)
+                                    .icon(icons::history())
+                                    .checked(course.dir == current)
+                                    .on_click(move |_, _, cx| {
+                                        let _ = weak.update(cx, |this, cx| {
+                                            this.open_reader_version(course.clone(), cx)
+                                        });
+                                    }),
+                            );
+                        }
+                        menu
+                    }),
+            );
+        }
+        row
     }
 
     /// The note tab's article: a variable-height list that builds only the
-    /// visible window of blocks and its overdraw. One text measure, regular
-    /// 1.7-line body copy and spacing between sections, as in the HTML export.
+    /// visible window of blocks and its overdraw. Its items paint one surface
+    /// card together, so the card scrolls with the text.
     fn reader_note_article(
         &mut self,
         preview: &Rc<notes::Preview>,
         metrics: ReaderMetrics,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Side-by-side sections need room for a legible screenshot and measure.
-        let design_px = metrics.reader_width / metrics.rem * 14.;
-        let toc_beside = self.reader_ui.toc_open == Some(true) && metrics.toc_fits_beside;
-        let wide = design_px - if toc_beside { 260. } else { 0. } >= 840.;
+        let article_width = metrics.article_width();
         let flow = NoteFlow {
             items: self.reader_ui.note_items.clone(),
             focus: self.reader_ui.note_focus.clone(),
@@ -3347,7 +3554,12 @@ impl Desktop {
             data_loading: self.reader_ui.data_loading,
             compact: metrics.compact,
             short: metrics.short,
-            wide,
+            // Narrow cards keep more of their width for text.
+            inset: if article_width < metrics.rem * 40. {
+                rems(20. / 14.)
+            } else {
+                rems(48. / 14.)
+            },
             layout: self.reader_ui.note_layout.clone(),
             restore_target: self.reader_ui.restore.target.clone(),
             note_list: self.reader_ui.note_list.clone(),
@@ -3363,14 +3575,13 @@ impl Desktop {
             .min_w_0()
             .w_full()
             .h_full()
-            .max_w(READER_MEASURE)
+            .max_w(ARTICLE_MAX)
             .child(
                 list(self.reader_ui.note_list.clone(), move |index, _, cx| {
                     render_note_item(&flow, index, cx)
                 })
                 .w_full()
-                .h_full()
-                .py_3(),
+                .h_full(),
             )
             .child(crate::backend::vertical_scrollbar_for(
                 &self.reader_ui.note_list,
@@ -3384,8 +3595,8 @@ impl Desktop {
             .into_any_element()
     }
 
-    /// The article with the contents rail beside it, or over it when narrow.
-    /// Reading starts with an uninterrupted article; contents are an explicit choice.
+    /// The contents beside the article on wide windows, or over it on narrow
+    /// ones once asked for.
     fn reader_body(
         &mut self,
         article: AnyElement,
@@ -3393,9 +3604,7 @@ impl Desktop {
         metrics: ReaderMetrics,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let toc_open =
-            self.reader_ui.toc_open.unwrap_or(false) && !outline.is_empty() && self.result_tab == 0;
-        if !toc_open {
+        if outline.is_empty() || self.result_tab != 0 {
             return article;
         }
         let top = self.reader_ui.note_list.logical_scroll_top();
@@ -3408,10 +3617,10 @@ impl Desktop {
                 .w_full()
                 .gap(TOC_GAP)
                 .items_stretch()
+                .child(self.reader_toc_panel(outline, current, Some(metrics.toc_width), cx))
                 .child(article)
-                .child(self.reader_toc_panel(outline, current, true, cx))
                 .into_any_element()
-        } else {
+        } else if self.reader_ui.toc_open == Some(true) {
             div()
                 .relative()
                 .flex_1()
@@ -3423,10 +3632,13 @@ impl Desktop {
                     div()
                         .absolute()
                         .inset_0()
+                        .rounded(RADIUS_HERO)
                         .bg(color(SURFACE))
-                        .child(self.reader_toc_panel(outline, current, false, cx)),
+                        .child(self.reader_toc_panel(outline, current, None, cx)),
                 )
                 .into_any_element()
+        } else {
+            article
         }
     }
 }
@@ -3434,8 +3646,13 @@ impl Desktop {
 /// Reader geometry at the current window size and text scale.
 #[derive(Clone, Copy)]
 struct ReaderMetrics {
+    /// The frame shared by the view tabs and the content below them.
     reader_width: f32,
+    /// The contents column when it sits beside the article.
+    toc_width: f32,
     toc_fits_beside: bool,
+    /// The note tab shows its contents beside the article.
+    toc_beside: bool,
     available_height: f32,
     compact: bool,
     short: bool,
@@ -3443,58 +3660,66 @@ struct ReaderMetrics {
 }
 
 const TOC_GAP: Pixels = px(24.);
-const GALLERY_GAP: f32 = 16.;
-const TOC_ROW_PADDING: Rems = rems(8. / 14.);
+const GALLERY_GAP: f32 = 12.;
+/// The article card's widest measure, and the narrowest it gets beside the contents.
+const ARTICLE_MAX: Rems = rems(820. / 14.);
+const ARTICLE_MIN_BESIDE: Rems = rems(560. / 14.);
+const TOC_MIN: Rems = rems(220. / 14.);
+const TOC_MAX: Rems = rems(280. / 14.);
 /// Space the shell keeps above and below the page, under its title bar.
 const PAGE_VERTICAL_PADDING: Pixels = px(48.);
-const TOC_BESIDE_MIN_WIDTH: Rems = rems(56.);
 const COMPACT_MIN_WIDTH: Rems = rems(60.);
-/// The reader's search field in the title bar, and how narrow it may become
-/// before the window switches to the compact layout.
+/// The note search field in the title bar, and how narrow it may become.
 const READER_SEARCH_WIDTH: Rems = rems(240. / 14.);
 const READER_SEARCH_MIN_WIDTH: Rems = rems(140. / 14.);
 const COMPACT_MIN_HEIGHT: Rems = rems(36.);
 const SHORT_MAX_HEIGHT: Rems = rems(24.);
-/// Inline actions inside text rows are shorter than standalone controls.
-const INLINE_ACTION_HEIGHT: Rems = rems(1.6);
+/// The screenshot grid's narrowest column, and its images' corners.
+const GALLERY_MIN_COLUMN: f32 = 260.;
+const GALLERY_IMAGE_RADIUS: Pixels = px(16.);
 
 impl ReaderMetrics {
-    fn new(window: &Window, toc_open: bool, has_outline: bool) -> Self {
+    fn new(window: &Window, tab: usize, has_outline: bool) -> Self {
         let rem = window.rem_size();
         let pixels = |value: Rems| f32::from(value.to_pixels(rem));
         let gap = f32::from(TOC_GAP);
-        // A single frame aligns navigation, title, tools and document content.
-        // Reserve the same reading axis when the user hides the adjacent contents;
-        // a note without contents keeps the frame at the text measure so the
-        // tools end where the text ends.
-        let measure = pixels(READER_MEASURE);
-        let frame_width = crate::views::shell_content_width(Page::Result, window)
-            .min(measure + pixels(TOC_PANEL) + gap);
+        let shell = crate::views::shell_content_width(Page::Result, window);
+        // The contents and the article together, or the screenshot grid.
+        let full = shell.min(pixels(TOC_MAX) + gap + pixels(ARTICLE_MAX));
+        let toc_fits_beside = full >= pixels(TOC_MIN) + gap + pixels(ARTICLE_MIN_BESIDE);
         let available_height = f32::from(
-            window.bounds().size.height - title_bar_height(window) - PAGE_VERTICAL_PADDING,
+            window.bounds().size.height - reader_title_bar_height(window) - PAGE_VERTICAL_PADDING,
         )
         .max(0.);
+        // A note without contents beside it keeps the frame at the article's
+        // measure, so the tabs end where the text ends.
+        let reader_width = if tab == 0 && !(has_outline && toc_fits_beside) {
+            shell.min(pixels(ARTICLE_MAX))
+        } else {
+            full
+        };
         Self {
-            reader_width: if toc_open && has_outline {
-                frame_width
-            } else {
-                frame_width.min(measure)
-            },
-            toc_fits_beside: frame_width >= pixels(TOC_BESIDE_MIN_WIDTH) + gap,
+            reader_width,
+            toc_width: (full - gap - pixels(ARTICLE_MAX)).clamp(pixels(TOC_MIN), pixels(TOC_MAX)),
+            toc_fits_beside,
+            toc_beside: tab == 0 && has_outline && toc_fits_beside,
             available_height,
-            compact: frame_width < pixels(COMPACT_MIN_WIDTH)
+            compact: full < pixels(COMPACT_MIN_WIDTH)
                 || available_height < pixels(COMPACT_MIN_HEIGHT),
             short: available_height < pixels(SHORT_MAX_HEIGHT),
             rem: f32::from(rem),
         }
     }
-}
 
-/// Where the note header is drawn, so a focused control in it can be revealed.
-enum HeaderContainer {
-    Fixed,
-    Scroll(ScrollHandle),
-    List(ListState),
+    /// The article card's width in the current frame.
+    fn article_width(&self) -> f32 {
+        let beside = if self.toc_beside {
+            self.toc_width + f32::from(TOC_GAP)
+        } else {
+            0.
+        };
+        (self.reader_width - beside).min(820. * self.rem / 14.)
+    }
 }
 
 struct ReaderHeaderParts {
@@ -3533,159 +3758,123 @@ impl Desktop {
             .on_click(cx.listener(|this, _, window, cx| this.relocate_reader_source(window, cx)))
     }
 
-    /// Return row, title and the meta facts line. Compact layouts get the meta
-    /// line back for the information panel instead of an inline row.
+    /// The article's opening: the title, its facts as chips, and the
+    /// obstacles to watching the video with their recovery actions.
     fn reader_metadata_row(
         &mut self,
         preview: &Rc<notes::Preview>,
         compact: bool,
         short_reader: bool,
-        container: HeaderContainer,
+        list: ListState,
         cx: &mut Context<Self>,
     ) -> ReaderHeaderParts {
-        let reveal = |id: &'static str, child: AnyElement| match &container {
-            HeaderContainer::Fixed => child,
-            HeaderContainer::Scroll(scroll) => {
-                crate::focus_scroll::RevealFocus::new(id, child, scroll.clone())
-                    .inline()
-                    .into_any_element()
-            }
-            HeaderContainer::List(list) => {
-                crate::focus_scroll::RevealFocus::in_list(id, child, list.clone())
-                    .inline()
-                    .into_any_element()
-            }
+        // The header is the note list's first item: a focused control in it
+        // scrolls the list to stay visible.
+        let reveal = |id: &'static str, child: AnyElement| {
+            crate::focus_scroll::RevealFocus::in_list(id, child, list.clone())
+                .inline()
+                .into_any_element()
         };
-        // As on the canvas: the source and facts, the title in the reading
-        // serif, then the ways to watch the video.
         let meta = &preview.document.meta;
         let platform = if meta.is_local() {
             Some(course2md::tr!("本地视频"))
         } else {
             crate::views::video_site_name(&meta.webpage_url)
         };
-        let facts = preview.facts.join(" · ");
+        let chip = |id: &'static str, icon: Option<Icon>, text: String| {
+            h_flex()
+                .id(id)
+                .flex_shrink_0()
+                .items_center()
+                .gap(rems(6. / 14.))
+                .h(rems(28. / 14.))
+                .px(rems(10. / 14.))
+                .rounded(RADIUS_SMALL)
+                .bg(color(CANVAS))
+                .text_size(rems(13. / 14.))
+                .text_color(color(GRAY))
+                .children(icon.map(|icon| icon.size(rems(1.)).flex_shrink_0()))
+                .child(theme::accessible_text(
+                    SharedString::from(format!("{id}-text")),
+                    text,
+                ))
+        };
+        let source = match (platform, meta.uploader.trim()) {
+            (Some(platform), "") => Some(platform.to_owned()),
+            (Some(platform), uploader) => Some(format!("{platform} · {uploader}")),
+            (None, "") => None,
+            (None, uploader) => Some(uploader.to_owned()),
+        };
+        let chips = h_flex()
+            .w_full()
+            .flex_wrap()
+            .gap_2()
+            .children(source.map(|text| chip("reader-source-chip", Some(icons::tv()), text)))
+            .when(meta.duration > 0., |row| {
+                row.child(chip(
+                    "reader-duration-chip",
+                    None,
+                    course2md::render::fmt_ts(meta.duration),
+                ))
+            })
+            .when(preview.course.slides > 0, |row| {
+                row.child(chip(
+                    "reader-shots-chip",
+                    None,
+                    preview.course.content_description(),
+                ))
+            });
         let title = v_flex()
             .w_full()
             .min_w_0()
-            .gap(rems(1.))
-            .when(platform.is_some() || !facts.is_empty(), |header| {
-                header.child(
-                    h_flex()
-                        .gap_2()
-                        .flex_wrap()
-                        .items_center()
-                        .children(platform.map(|platform| {
-                            div()
-                                .h(rems(24. / 14.))
-                                .px_2()
-                                .flex()
-                                .items_center()
-                                .rounded(px(6.))
-                                .bg(color(SURFACE_HIGH))
-                                .text_size(TEXT_AUX)
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(platform)
-                        }))
-                        .when(!facts.is_empty(), |row| {
-                            row.child(
-                                theme::accessible_text("reader-facts", facts.clone())
-                                    .text_color(color(GRAY)),
-                            )
-                        }),
-                )
-            })
+            .gap_3()
             .child(
                 theme::accessible_text("reader-title", preview.course.title.clone())
                     .role(Role::Heading)
                     .min_w_0()
                     .whitespace_normal()
-                    .font_family(READER_SERIF)
                     .text_size(if compact {
-                        rems(30. / 14.)
+                        rems(26. / 14.)
                     } else {
-                        rems(40. / 14.)
+                        rems(32. / 14.)
                     })
-                    .line_height(relative(1.3))
-                    .font_weight(FontWeight::SEMIBOLD),
+                    .line_height(if compact {
+                        rems(34. / 14.)
+                    } else {
+                        rems(42. / 14.)
+                    })
+                    .font_weight(FontWeight::MEDIUM),
             )
+            .child(chips)
             .when(short_reader, |title| title.flex_shrink_0())
             .into_any_element();
-        let mut meta_facts = h_flex().gap_2().flex_wrap().items_center();
+        // Playing lives in the title bar; what stays here are the obstacles.
+        let mut obstacles = h_flex().gap_2().flex_wrap().items_center();
+        let mut has_obstacle = false;
         let offline = matches!(self.reader_ui.offline_video, OfflineVideo::Available(_));
-        let play = |id: &'static str| {
-            tonal_pill(id, cx)
-                .icon(icons::play_arrow())
-                .label(course2md::tr!("播放原视频"))
-        };
-        if offline {
-            meta_facts = meta_facts.child(reveal(
-                "reveal-reader-offline-video",
-                play("reader-offline-video")
-                    .loading(self.reader_ui.offline_opening)
-                    .disabled(self.reader_ui.offline_opening)
-                    .on_click(cx.listener(|this, _, _, cx| this.play_reader_offline_video(cx)))
-                    .into_any_element(),
-            ));
-        }
-        if let Some(source) = self.reader_source() {
-            match &source {
-                nav::SourceTarget::Web(url) => {
-                    let open = if offline {
-                        quiet("reader-source")
-                            .text_color(color(ACCENT))
-                            .icon(icons::external_link())
-                            .label(match platform {
-                                Some(platform) => course2md::tr!("在 {} 打开", platform),
-                                None => course2md::tr!("在浏览器中打开").to_owned(),
-                            })
-                    } else {
-                        play("reader-source")
-                    };
-                    meta_facts = meta_facts.child(reveal(
-                        "reveal-reader-source",
-                        open.accessibility_label(course2md::tr!("打开原视频：{}", url))
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.open_reader_source(None, cx)),
-                            )
-                            .into_any_element(),
-                    ));
-                }
-                nav::SourceTarget::Local(path) if !offline => {
-                    let exists = self.reader_ui.source_available;
-                    meta_facts = meta_facts
-                        .when(exists, |row| {
-                            row.child(reveal(
-                                "reveal-reader-source",
-                                play("reader-source")
-                                    .tooltip(path.display().to_string())
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.open_reader_source(None, cx)
-                                    }))
-                                    .into_any_element(),
-                            ))
-                        })
-                        .when(!exists, |row| {
-                            row.child(
-                                theme::accessible_text(
-                                    "missing-original-video",
-                                    course2md::tr!("原视频不可用"),
-                                )
-                                .text_size(TEXT_AUX)
-                                .text_color(color(GRAY)),
-                            )
-                            .child(reveal(
-                                "reveal-relocate-reader-source",
-                                self.relocate_source_button("relocate-reader-source", cx)
-                                    .into_any_element(),
-                            ))
-                        });
-                }
-                nav::SourceTarget::Local(_) => {}
-            }
+        if let Some(nav::SourceTarget::Local(_)) = self.reader_source()
+            && !offline
+            && !self.reader_ui.source_available
+        {
+            has_obstacle = true;
+            obstacles = obstacles
+                .child(
+                    theme::accessible_text(
+                        "missing-original-video",
+                        course2md::tr!("原视频不可用"),
+                    )
+                    .text_size(TEXT_AUX)
+                    .text_color(color(GRAY)),
+                )
+                .child(reveal(
+                    "reveal-relocate-reader-source",
+                    self.relocate_source_button("relocate-reader-source", cx)
+                        .into_any_element(),
+                ));
         }
         if self.reader_ui.offline_video == OfflineVideo::Missing {
-            meta_facts = meta_facts
+            has_obstacle = true;
+            obstacles = obstacles
                 .child(
                     theme::accessible_text(
                         "reader-offline-video-missing",
@@ -3705,165 +3894,113 @@ impl Desktop {
                         .into_any_element(),
                 ));
         }
-        // A single version needs no selector. Keep its revision and date in
-        // generation information; multiple versions retain a visible choice.
-        if let Some(manifest) = &preview.course.manifest {
-            meta_facts = meta_facts.child(div().flex_1());
-            if self.reader_ui.versions.len() > 1 {
-                let weak = cx.weak_entity();
-                let versions = self.reader_ui.versions.clone();
-                let current = preview.course.dir.clone();
-                meta_facts = meta_facts.child(reveal(
-                    "reveal-choose-note-version",
-                    (quiet("choose-note-version")
-                        .icon(icons::history())
-                        .label(course2md::tr!("第 {} 版", manifest.revision))
-                        .child(crate::icons::chevron_down().size_4().flex_shrink_0())
-                        .min_h(INLINE_ACTION_HEIGHT)
-                        .disabled(self.reading)
-                        .dropdown_menu(move |menu, _, _| {
-                            let mut menu = menu;
-                            for version in &versions {
-                                let weak = weak.clone();
-                                let course = version.course.clone();
-                                let label = if course.dir == current {
-                                    course2md::tr!("{}（当前）", version.label)
-                                } else {
-                                    version.label.clone()
-                                };
-                                menu = menu.item(
-                                    PopupMenuItem::new(label)
-                                        .icon(icons::history())
-                                        .checked(course.dir == current)
-                                        .on_click(move |_, _, cx| {
-                                            let _ = weak.update(cx, |this, cx| {
-                                                this.open_reader_version(course.clone(), cx)
-                                            });
-                                        }),
-                                );
-                            }
-                            menu
-                        }))
-                    .into_any_element(),
-                ));
-            }
+        ReaderHeaderParts {
+            title,
+            meta: has_obstacle.then(|| obstacles.into_any_element()),
         }
-        let meta = if !facts.is_empty()
-            || self.reader_source().is_some()
-            || self.reader_ui.offline_video != OfflineVideo::NotRequested
-            || preview.course.manifest.is_some()
-        {
-            Some(meta_facts.into_any_element())
-        } else {
-            None
-        };
-        ReaderHeaderParts { title, meta }
     }
 
-    /// Find field, match navigation, view switcher, contents toggle, export
-    /// menu and the overflow menu.
+    /// The title bar's way to watch the video: the kept offline copy first,
+    /// then the source page or the local file when it is still there.
+    fn reader_play_button(&self, icon_only: bool, cx: &mut Context<Self>) -> Option<Button> {
+        let label = course2md::tr!("播放原视频");
+        let button = outline_pill("reader-play", cx)
+            .h(BUTTON_MEDIUM)
+            .min_h(BUTTON_MEDIUM)
+            .flex_shrink_0()
+            .icon(icons::play())
+            .accessibility_label(label)
+            .when(icon_only, |button| {
+                button
+                    .w(BUTTON_MEDIUM)
+                    .min_w(BUTTON_MEDIUM)
+                    .px_0()
+                    .tooltip(label)
+            })
+            .when(!icon_only, |button| {
+                button
+                    .pl(rems(16. / 14.))
+                    .pr(rems(20. / 14.))
+                    .label_text_size(rems(15. / 14.))
+                    .label(label)
+            });
+        if matches!(self.reader_ui.offline_video, OfflineVideo::Available(_)) {
+            return Some(
+                button
+                    .loading(self.reader_ui.offline_opening)
+                    .disabled(self.reader_ui.offline_opening)
+                    .on_click(cx.listener(|this, _, _, cx| this.play_reader_offline_video(cx))),
+            );
+        }
+        match self.reader_source()? {
+            nav::SourceTarget::Web(url) => Some(
+                button
+                    .accessibility_label(course2md::tr!("打开原视频：{}", url))
+                    .on_click(cx.listener(|this, _, _, cx| this.open_reader_source(None, cx))),
+            ),
+            nav::SourceTarget::Local(path) if self.reader_ui.source_available => Some(
+                button
+                    .when(!icon_only, |button| {
+                        button.tooltip(path.display().to_string())
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| this.open_reader_source(None, cx))),
+            ),
+            nav::SourceTarget::Local(_) => None,
+        }
+    }
+
+    /// The title bar's reading tools: note search, the video, copy and
+    /// export, and the remaining actions. Narrow windows keep only icons.
     fn reader_toolbar(
         &mut self,
         preview: &Rc<notes::Preview>,
-        headings: &[(usize, String, Option<f64>)],
+        _headings: &[(usize, String, Option<f64>)],
         metrics: &ReaderMetrics,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> ReaderToolbarParts {
         let (compact, short_reader) = (metrics.compact, metrics.short);
+        let icon_only = is_compact(window);
         let reading_note = self.result_tab == 0;
-        let (search, short_matches) = self.reader_find_controls(short_reader, window, cx);
-        // The tools share the title bar with the note title: the search field
-        // gives way first, down to its minimum; the other controls keep their size.
-        let mut toolbar = h_flex()
-            .min_w_0()
-            .flex_shrink(1.)
-            .gap_2()
-            .items_center()
-            .when(!short_reader, |row| {
-                row.child(
-                    div().flex_shrink_0().child(
-                        SingleChoiceGroup::new("reader-tabs", course2md::tr!("阅读视图"))
-                            .tabs()
-                            .options([
-                                ("note", course2md::tr!("笔记")),
-                                ("images", course2md::tr!("截图")),
-                            ])
-                            .icon("note", icons::article())
-                            .icon("images", icons::image())
-                            .focus_handles(self.reader_ui.view_focus.iter().cloned())
-                            .selected(if reading_note { "note" } else { "images" })
-                            .on_change(cx.listener(|this, selected: &SharedString, window, cx| {
-                                this.select_reader_view(
-                                    usize::from(selected.as_ref() == "images"),
-                                    window,
-                                    cx,
-                                );
-                            })),
-                    ),
-                )
-            });
-        let search_visible = !reading_note || self.reader_ui.find.open;
-        let mut search_row = h_flex()
-            .min_w_0()
-            .gap_2()
-            .items_center()
-            .when(search_visible, |row| {
-                row.w(READER_SEARCH_WIDTH)
-                    .flex_shrink(1.)
-                    .min_w(READER_SEARCH_MIN_WIDTH)
-                    .child(search)
-            })
-            .when(!search_visible, |row| {
-                row.child(
-                    quiet("reader-open-find")
+        let mut toolbar = h_flex().min_w_0().flex_shrink(1.).gap_2().items_center();
+        let mut compact_search = None;
+        let mut short_matches = None;
+        // The screenshot view carries its own search above the grid.
+        if reading_note {
+            if self.reader_ui.find.open {
+                let (search, matches) = self.reader_find_controls(short_reader, window, cx);
+                short_matches = matches;
+                let search_row = h_flex().min_w_0().gap_2().items_center().child(search);
+                if compact || short_reader {
+                    compact_search = Some(search_row.w_full());
+                } else {
+                    toolbar = toolbar.child(
+                        search_row
+                            .w(READER_SEARCH_WIDTH)
+                            .flex_shrink(1.)
+                            .min_w(READER_SEARCH_MIN_WIDTH),
+                    );
+                }
+            }
+            if !self.reader_ui.find.open || compact || short_reader {
+                let shortcut = if cfg!(target_os = "macos") {
+                    "⌘F"
+                } else {
+                    "Ctrl+F"
+                };
+                toolbar = toolbar.child(
+                    icon_button("reader-open-find", BUTTON_MEDIUM, false, cx)
                         .icon(icons::search())
-                        .w(CONTROL_HEIGHT)
-                        .px_0()
+                        .selected(self.reader_ui.find.open)
                         .accessibility_label(course2md::tr!("查找笔记内容"))
-                        .tooltip(format!(
-                            "{} {}",
-                            course2md::tr!("查找笔记内容"),
-                            if cfg!(target_os = "macos") {
-                                "⌘F"
-                            } else {
-                                "Ctrl+F"
-                            }
-                        ))
+                        .tooltip(format!("{} {shortcut}", course2md::tr!("查找笔记内容")))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.open_reader_find(window, cx);
                         })),
-                )
-            });
-        if !headings.is_empty() && reading_note {
-            let toc_on = self.reader_ui.toc_open.unwrap_or(false);
-            search_row = search_row.child(
-                quiet("note-contents")
-                    .flex_shrink_0()
-                    .icon(icons::toc())
-                    .label(course2md::tr!("目录"))
-                    .selected(toc_on)
-                    .accessibility_label(if toc_on {
-                        course2md::tr!("收起目录")
-                    } else {
-                        course2md::tr!("打开目录")
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.reader_ui.restore.pending = this.capture_reading_position();
-                        this.reader_ui.restore.generation += 1;
-                        this.reader_ui.toc_open = Some(!toc_on);
-                        cx.notify();
-                    })),
-            );
+                );
+            }
         }
-        let (compact_search, short_search) = if short_reader {
-            (None, Some(search_row))
-        } else if compact {
-            (Some(search_row.w_full()), None)
-        } else {
-            toolbar = toolbar.child(search_row);
-            (None, None)
-        };
+        toolbar = toolbar.children(self.reader_play_button(icon_only, cx));
         let output_weak = cx.entity().downgrade();
         let exporting = self.reader_exporting();
         let exporting_current = self
@@ -3876,21 +4013,35 @@ impl Desktop {
         let export_folder = self.reader_ui.export_folder.clone();
         if !short_reader {
             toolbar = toolbar.child(
-                outline_pill("export-note", cx)
+                tonal_pill("export-note", cx)
+                    .h(BUTTON_MEDIUM)
+                    .min_h(BUTTON_MEDIUM)
                     .flex_shrink_0()
-                    .icon(icons::download())
-                    .label(if exporting_current {
-                        course2md::tr!("正在导出…")
-                    } else {
-                        course2md::tr!("导出")
+                    .pl(rems(18. / 14.))
+                    .pr(rems(16. / 14.))
+                    .when(icon_only, |button| button.pl(rems(1.)).pr(rems(12. / 14.)))
+                    .icon(icons::content_copy())
+                    .when(!icon_only, |button| {
+                        button
+                            .label_text_size(rems(15. / 14.))
+                            .label(if exporting_current {
+                                course2md::tr!("正在导出…")
+                            } else {
+                                course2md::tr!("复制与导出")
+                            })
                     })
                     .accessibility_label(course2md::tr!("复制或导出整份笔记"))
-                    .child(crate::icons::chevron_down().size_4().flex_shrink_0())
+                    .tooltip(course2md::tr!("复制与导出"))
+                    .child(
+                        crate::icons::chevron_down()
+                            .size(rems(18. / 14.))
+                            .flex_shrink_0(),
+                    )
                     .loading(exporting_current)
                     .disabled(exporting)
                     .dropdown_menu(move |menu, _, _| {
                         reader_export_items(
-                            menu,
+                            menu.min_w(px(320.)),
                             output_weak.clone(),
                             export_version.clone(),
                             export_folder.clone(),
@@ -3899,13 +4050,11 @@ impl Desktop {
                     }),
             );
         }
-        toolbar = toolbar
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .child(self.reader_more_menu(preview, short_reader, cx)),
-            )
-            .children(short_search);
+        toolbar = toolbar.child(div().flex_shrink_0().child(self.reader_more_menu(
+            preview,
+            short_reader,
+            cx,
+        )));
         ReaderToolbarParts {
             bar: toolbar,
             compact_search,
@@ -3940,7 +4089,11 @@ impl Desktop {
                 } else {
                     course2md::tr!("搜索截图对应文字")
                 },
-                CONTROL_HEIGHT,
+                if reading_note {
+                    BUTTON_MEDIUM
+                } else {
+                    rems(56. / 14.)
+                },
                 window,
                 cx,
             ));
@@ -4022,132 +4175,147 @@ impl Desktop {
         let missing_local = matches!(original, Some(nav::SourceTarget::Local(_)))
             && !self.reader_ui.source_available;
         let exported = self.reader_ui.exports.get(&preview.course.dir).cloned();
+        // A web source opens on its site; the title bar may be playing the
+        // kept offline copy instead.
+        let source_label = match &original {
+            Some(nav::SourceTarget::Web(url)) => match crate::views::video_site_name(url) {
+                Some(site) => course2md::tr!("在 {} 打开", site),
+                None => course2md::tr!("在浏览器中打开").to_owned(),
+            },
+            _ => course2md::tr!("打开原视频").to_owned(),
+        };
         let short_export_version = preview.course.dir.clone();
         let short_export_folder = self.reader_ui.export_folder.clone();
-        quiet("reader-more")
-            .when(short_reader, |button| {
-                button.track_focus(&self.reader_ui.menu_focus)
-            })
-            .icon(if short_reader {
-                if reading_note {
-                    icons::article()
+        let more = if short_reader {
+            quiet("reader-more")
+        } else {
+            icon_button("reader-more", BUTTON_MEDIUM, false, cx)
+        };
+        more.when(short_reader, |button| {
+            button.track_focus(&self.reader_ui.menu_focus)
+        })
+        .icon(if short_reader {
+            if reading_note {
+                icons::article()
+            } else {
+                icons::image()
+            }
+        } else {
+            icons::ellipsis()
+        })
+        .when(short_reader, |button| {
+            button
+                .label(if reading_note {
+                    course2md::tr!("笔记")
                 } else {
-                    icons::image()
-                }
-            } else {
-                icons::ellipsis()
-            })
-            .when(short_reader, |button| {
-                button
-                    .label(if reading_note {
-                        course2md::tr!("笔记")
-                    } else {
-                        course2md::tr!("截图")
-                    })
-                    .child(crate::icons::chevron_down().size_4().flex_shrink_0())
-            })
-            .when(!short_reader, |button| button.w(CONTROL_HEIGHT).px_0())
-            .accessibility_label(if short_reader {
-                course2md::tr!("阅读视图与笔记操作")
-            } else {
-                course2md::tr!("更多笔记操作")
-            })
-            .dropdown_menu(move |menu, window, cx| {
-                let details = more_weak.clone();
-                let source = more_weak.clone();
-                let files = more_weak.clone();
-                let mut menu = menu;
-                if short_reader {
-                    for (index, label, icon) in [
-                        (0, course2md::tr!("笔记"), icons::article()),
-                        (1, course2md::tr!("截图"), icons::image()),
-                    ] {
-                        let weak = more_weak.clone();
-                        menu = menu.item(
-                            PopupMenuItem::new(label)
-                                .icon(icon)
-                                .checked((index == 0) == reading_note)
-                                .on_click(move |_, window, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.select_reader_view(index, window, cx);
-                                        this.reader_ui.menu_focus.focus(window, cx);
-                                    });
-                                }),
-                        );
-                    }
-                    let output = more_weak.clone();
-                    let version = short_export_version.clone();
-                    let folder = short_export_folder.clone();
-                    menu = menu
-                        .separator()
-                        .submenu_with_icon(
-                            Some(icons::download()),
-                            course2md::tr!("复制与导出"),
-                            window,
-                            cx,
-                            move |menu, _, _| {
-                                reader_export_items(
-                                    menu,
-                                    output.clone(),
-                                    version.clone(),
-                                    folder.clone(),
-                                    exporting,
-                                )
-                            },
-                        )
-                        .separator();
-                }
-                menu = menu
-                    .item(
-                        PopupMenuItem::new(course2md::tr!("笔记详情"))
-                            .icon(icons::info())
-                            .on_click(move |_, _, cx| {
-                                let _ = details.update(cx, |this, cx| {
-                                    this.reader_ui.info_open = !this.reader_ui.info_open;
-                                    cx.notify();
-                                });
-                            }),
-                    )
-                    .when(has_source, |menu| {
-                        menu.item(
-                            PopupMenuItem::new(if missing_local {
-                                course2md::tr!("找到原视频…")
-                            } else {
-                                course2md::tr!("打开原视频")
-                            })
-                            .icon(icons::movie())
-                            .on_click(move |_, window, cx| {
-                                let _ = source.update(cx, |this, cx| {
-                                    if missing_local {
-                                        this.relocate_reader_source(window, cx);
-                                    } else {
-                                        this.open_reader_source(None, cx);
-                                    }
-                                });
-                            }),
-                        )
-                    })
-                    .separator()
-                    .item(
-                        PopupMenuItem::new(course2md::tr!("显示笔记保存位置"))
-                            .icon(icons::folder_open())
-                            .on_click(move |_, _, cx| {
-                                let _ = files.update(cx, |this, cx| {
-                                    if let Some(preview) = &this.preview {
-                                        cx.reveal_path(&preview.course.dir);
-                                    }
-                                });
-                            }),
-                    );
-                if let Some(path) = exported.clone() {
+                    course2md::tr!("截图")
+                })
+                .child(crate::icons::chevron_down().size_4().flex_shrink_0())
+        })
+        .when(!short_reader, |button| {
+            button.tooltip(course2md::tr!("更多笔记操作"))
+        })
+        .accessibility_label(if short_reader {
+            course2md::tr!("阅读视图与笔记操作")
+        } else {
+            course2md::tr!("更多笔记操作")
+        })
+        .dropdown_menu(move |menu, window, cx| {
+            let details = more_weak.clone();
+            let source = more_weak.clone();
+            let files = more_weak.clone();
+            let mut menu = menu;
+            if short_reader {
+                for (index, label, icon) in [
+                    (0, course2md::tr!("笔记"), icons::article()),
+                    (1, course2md::tr!("截图"), icons::image()),
+                ] {
+                    let weak = more_weak.clone();
                     menu = menu.item(
-                        PopupMenuItem::new(course2md::tr!("显示上次导出的文件"))
-                            .icon(icons::folder_open())
-                            .on_click(move |_, _, cx| cx.reveal_path(&path)),
+                        PopupMenuItem::new(label)
+                            .icon(icon)
+                            .checked((index == 0) == reading_note)
+                            .on_click(move |_, window, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.select_reader_view(index, window, cx);
+                                    this.reader_ui.menu_focus.focus(window, cx);
+                                });
+                            }),
                     );
                 }
-                menu
-            })
+                let output = more_weak.clone();
+                let version = short_export_version.clone();
+                let folder = short_export_folder.clone();
+                menu = menu
+                    .separator()
+                    .submenu_with_icon(
+                        Some(icons::download()),
+                        course2md::tr!("复制与导出"),
+                        window,
+                        cx,
+                        move |menu, _, _| {
+                            reader_export_items(
+                                menu,
+                                output.clone(),
+                                version.clone(),
+                                folder.clone(),
+                                exporting,
+                            )
+                        },
+                    )
+                    .separator();
+            }
+            menu = menu
+                .item(
+                    PopupMenuItem::new(course2md::tr!("笔记详情"))
+                        .icon(icons::info())
+                        .on_click(move |_, _, cx| {
+                            let _ = details.update(cx, |this, cx| {
+                                this.reader_ui.info_open = !this.reader_ui.info_open;
+                                cx.notify();
+                            });
+                        }),
+                )
+                .when(has_source, |menu| {
+                    menu.item(
+                        PopupMenuItem::new(if missing_local {
+                            course2md::tr!("找到原视频…").to_owned()
+                        } else {
+                            source_label.clone()
+                        })
+                        .icon(icons::movie())
+                        .on_click(move |_, window, cx| {
+                            let _ = source.update(cx, |this, cx| {
+                                if missing_local {
+                                    this.relocate_reader_source(window, cx);
+                                } else {
+                                    this.open_reader_source(None, cx);
+                                }
+                            });
+                        }),
+                    )
+                })
+                .separator()
+                .item(
+                    PopupMenuItem::new(course2md::tr!("显示笔记保存位置"))
+                        .icon(icons::folder_open())
+                        .on_click(move |_, _, cx| {
+                            let _ = files.update(cx, |this, cx| {
+                                if let Some(preview) = &this.preview {
+                                    cx.reveal_path(&preview.course.dir);
+                                }
+                            });
+                        }),
+                );
+            if let Some(path) = exported.clone() {
+                menu = menu.item(
+                    PopupMenuItem::new(course2md::tr!("显示上次导出的文件"))
+                        .icon(icons::folder_open())
+                        .on_click(move |_, _, cx| cx.reveal_path(&path)),
+                );
+            }
+            menu
+        })
     }
 
     /// Collapsible note details: revision, source video, subtitle and model facts.
@@ -4299,12 +4467,11 @@ impl Desktop {
                     .min_w_0()
                     .flex_shrink_0()
                     .gap_2()
-                    .p_3()
-                    .when(compact, |panel| panel.p_2())
-                    .bg(color(INSET))
-                    .border_1()
-                    .border_color(color(HAIRLINE))
-                    .rounded(RADIUS_CARD),
+                    .px(rems(20. / 14.))
+                    .py(rems(16. / 14.))
+                    .when(compact, |panel| panel.p_3())
+                    .bg(color(SURFACE))
+                    .rounded(SETTINGS_CARD_RADIUS),
                 )
                 .into_any_element(),
             )
@@ -4351,11 +4518,10 @@ impl Desktop {
         if let Some(notice) = processing_notice(&preview.processing_issues) {
             let mut problem = v_flex()
                 .gap_3()
-                .p_4()
+                .px(rems(20. / 14.))
+                .py(rems(16. / 14.))
                 .bg(color(WARNING_BG))
-                .border_1()
-                .border_color(color(WARNING_BG))
-                .rounded(RADIUS_CARD)
+                .rounded(rems(20. / 14.))
                 .child(
                     h_flex()
                         .gap_2()
@@ -4555,9 +4721,10 @@ impl Desktop {
                     .items_center()
                     .flex_wrap()
                     .gap_3()
-                    .p_3()
+                    .px(rems(20. / 14.))
+                    .py(rems(12. / 14.))
                     .bg(color(WARNING_BG))
-                    .rounded(RADIUS_CARD)
+                    .rounded(rems(20. / 14.))
                     .child(
                         icons::warning()
                             .size(ICON_SLOT)
@@ -4595,16 +4762,17 @@ impl Desktop {
     ) -> AnyElement {
         // Each screenshot needs enough width for both the slide and a readable
         // text excerpt. The final row keeps the same column widths as the rest.
-        let columns = ((metrics.reader_width + GALLERY_GAP) / (metrics.rem * 20. + GALLERY_GAP))
+        let column = GALLERY_MIN_COLUMN * metrics.rem / 14.;
+        let columns = ((metrics.reader_width + GALLERY_GAP) / (column + GALLERY_GAP))
             .floor()
-            .clamp(1., 3.) as usize;
+            .clamp(1., 6.) as usize;
         if columns != self.reader_ui.gallery.columns {
             self.set_gallery_items(columns, cx);
         }
         // GPUI rounds each rendered line to whole pixels. Reserve that same
         // three-line height so enlarged text cannot run into the action row.
         let excerpt_line_height =
-            px((f32::from(TEXT_BODY.to_pixels(window.rem_size())) * 1.6).round());
+            px((f32::from(TEXT_BODY.to_pixels(window.rem_size())) * 1.5).round());
         let items = self.reader_ui.gallery.items.clone();
         let focus = self.reader_ui.gallery.focus.clone();
         let layout = self.reader_ui.gallery.layout.clone();
@@ -4650,23 +4818,51 @@ impl Desktop {
                 .tab_stop(false)
                 .into_any_element()
         });
-        div()
-            .id("note-reader")
-            .role(Role::Document)
-            .aria_label(preview.course.title.clone())
-            .relative()
+        // The search stays above the grid while the screenshots scroll.
+        let search = (!self.reader_ui.frames.is_empty()).then(|| {
+            let (field, matches) = self.reader_find_controls(true, window, cx);
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_shrink_0()
+                .flex_wrap()
+                .gap_3()
+                .items_center()
+                .child(
+                    div()
+                        .flex_1()
+                        .max_w(rems(560. / 14.))
+                        .min_w(rems(200. / 14.))
+                        .child(field),
+                )
+                .children(matches.map(|matches| matches.w_auto().flex_shrink_0()))
+        });
+        v_flex()
             .flex_1()
             .min_h_0()
             .min_w_0()
             .w_full()
             .h_full()
-            .child(gallery.w_full().h_full().py_3())
-            .child(crate::backend::vertical_scrollbar_for(
-                &self.reader_ui.gallery.list,
-            ))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| this.reading_position_moved(cx)),
+            .gap(rems(16. / 14.))
+            .children(search)
+            .child(
+                div()
+                    .id("note-reader")
+                    .role(Role::Document)
+                    .aria_label(preview.course.title.clone())
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .w_full()
+                    .child(gallery.w_full().h_full().pb(rems(48. / 14.)))
+                    .child(crate::backend::vertical_scrollbar_for(
+                        &self.reader_ui.gallery.list,
+                    ))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| this.reading_position_moved(cx)),
+                    ),
             )
             .into_any_element()
     }
@@ -4679,26 +4875,20 @@ impl Desktop {
         metrics: ReaderMetrics,
         cx: &mut Context<Self>,
     ) -> Div {
+        let _ = metrics;
         let mut header = v_flex().w_full().min_w_0().gap_3();
         let mut empty = true;
-        if metrics.compact {
-            let ReaderHeaderParts { title, .. } = self.reader_metadata_row(
-                preview,
-                true,
-                metrics.short,
-                HeaderContainer::List(self.reader_ui.gallery.list.clone()),
-                cx,
-            );
-            header = header.child(title);
-            empty = false;
-        }
         if self.reader_ui.data_loading && self.reader_ui.frames.is_empty() {
             empty = false;
             header = header.child(
                 h_flex()
-                    .gap_2()
+                    .w_full()
+                    .gap_3()
                     .items_center()
-                    .py_6()
+                    .justify_center()
+                    .py(rems(48. / 14.))
+                    .bg(color(SURFACE))
+                    .rounded(RADIUS_HERO)
                     .child(crate::motion::spinner("reader-images-spinner", cx))
                     .child(theme::accessible_text(
                         "loading-images",
@@ -4711,12 +4901,12 @@ impl Desktop {
                 "reader-images-empty",
                 v_flex()
                     .w_full()
-                    .py_8()
+                    .py(rems(48. / 14.))
                     .px_6()
                     .gap_4()
                     .items_center()
-                    .bg(color(INSET))
-                    .rounded(RADIUS_CARD)
+                    .bg(color(SURFACE))
+                    .rounded(RADIUS_HERO)
                     .child(
                         icons::image()
                             .size(EMPTY_STATE_ICON)
@@ -4758,9 +4948,11 @@ impl Desktop {
             header = header.child(
                 v_flex()
                     .w_full()
-                    .py_8()
+                    .py(rems(48. / 14.))
                     .gap_3()
                     .items_center()
+                    .bg(color(SURFACE))
+                    .rounded(RADIUS_HERO)
                     .child(semantic_label(
                         "gallery-no-matches",
                         course2md::tr!("没有对应的截图"),
@@ -4809,8 +5001,8 @@ impl Desktop {
             }))
     }
 
-    /// One screenshot card: the image, its time with a link to the note, and
-    /// a three-line excerpt of what was said.
+    /// One screenshot card: the 16:9 image with its time, a jump to the
+    /// note, and a three-line excerpt of what was said.
     fn gallery_card(
         &self,
         index: usize,
@@ -4824,180 +5016,199 @@ impl Desktop {
                 self.reader_ui.gallery.list.clone(),
             )
         };
-        {
-            let frame = &self.reader_ui.frames[index];
-            let label = frame_label(frame);
-            let mut card = v_flex()
-                .id(SharedString::from(frame.anchor.clone()))
-                .w_full()
-                .h_full()
-                .min_w_0()
-                .bg(color(SURFACE))
-                .border_1()
-                .border_color(color(CARD_LINE))
-                .rounded(RADIUS_CARD)
-                .overflow_hidden();
-            if let Some(image) = &frame.image {
-                card = card.child(reveal(
-                    ("reveal-screenshot", index).into(),
-                    (control(("screenshot", index))
-                        .ghost()
-                        .p_0()
-                        .w_full()
-                        .h_auto()
-                        .min_h(px(0.))
-                        .rounded_t(RADIUS_CARD)
-                        .rounded_b(px(0.))
-                        .aspect_ratio(frame_aspect(frame))
-                        .accessibility_label(course2md::tr!("放大{}", label))
-                        .child(
-                            img(image.path.clone())
-                                .size_full()
-                                .rounded_t(RADIUS_CARD)
-                                .object_fit(ObjectFit::Contain)
-                                .with_fallback(move || {
-                                    theme::accessible_text(
-                                        ("failed-reader-image", index),
-                                        course2md::tr!("截图无法读取"),
-                                    )
-                                    .into_any_element()
-                                }),
-                        )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.open_reader_image(index, window, cx)
-                        })))
-                    .into_any_element(),
-                ));
-            } else {
-                card = card.child(
-                    v_flex()
-                        .w_full()
-                        .aspect_ratio(MISSING_FRAME_ASPECT)
-                        .justify_center()
-                        .p_4()
-                        .bg(color(INSET))
-                        .child(
-                            theme::accessible_text(
-                                ("missing-frame", index),
+        let frame = &self.reader_ui.frames[index];
+        let label = frame_label(frame);
+        let time = course2md::render::fmt_ts(frame.seconds);
+        let mut image = div()
+            .id(("screenshot-frame", index))
+            .relative()
+            .w_full()
+            .aspect_ratio(16. / 9.)
+            .rounded(GALLERY_IMAGE_RADIUS)
+            .overflow_hidden()
+            .bg(color(SURFACE_HIGH));
+        if let Some(file) = &frame.image {
+            image = image
+                .cursor_pointer()
+                .on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.open_reader_image(index, window, cx)
+                    }),
+                )
+                .child(
+                    img(file.path.clone())
+                        .absolute()
+                        .inset_0()
+                        .size_full()
+                        .rounded(GALLERY_IMAGE_RADIUS)
+                        .object_fit(ObjectFit::Contain)
+                        .with_fallback(move || {
+                            missing_image_notice(
+                                ("failed-gallery-image", index),
                                 course2md::tr!("截图无法读取"),
                             )
-                            .text_size(TEXT_AUX)
-                            .text_color(color(WARNING)),
-                        ),
-                );
-            }
-            let mut card_body = v_flex().flex_1().min_w_0().p_3().gap_2().child(
-                h_flex()
-                    .items_center()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(
-                        theme::accessible_text(
-                            ("frame-title", index),
-                            course2md::render::fmt_ts(frame.seconds),
-                        )
-                        .role(Role::Heading)
-                        .flex_1()
-                        .text_size(TEXT_BODY)
-                        .font_weight(FontWeight::SEMIBOLD),
-                    )
-                    .when_some(frame.body_index, |row, body_index| {
-                        row.child(
-                            reveal(
-                                ("reveal-frame-to-body", index).into(),
-                                quiet(("frame-to-body", index))
-                                    .icon(icons::article())
-                                    .label(course2md::tr!("正文"))
+                            .into_any_element()
+                        }),
+                )
+                .child(
+                    h_flex()
+                        .absolute()
+                        .right(rems(8. / 14.))
+                        .bottom(rems(8. / 14.))
+                        .gap_2()
+                        .when_some(frame.body_index, |row, body_index| {
+                            row.child(
+                                reveal(
+                                    ("reveal-frame-to-body", index).into(),
+                                    image_corner_button(
+                                        ("frame-to-body", index),
+                                        icons::article(),
+                                        cx,
+                                    )
                                     .accessibility_label(course2md::tr!("在笔记中查看"))
+                                    .tooltip(course2md::tr!("在笔记中查看"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.jump_reader_block(body_index, 0., cx)
                                     }))
                                     .into_any_element(),
+                                )
+                                .inline(),
+                            )
+                        })
+                        .child(
+                            reveal(
+                                ("reveal-screenshot", index).into(),
+                                image_corner_button(("screenshot", index), icons::maximize(), cx)
+                                    .accessibility_label(course2md::tr!("放大{}", label))
+                                    .tooltip(course2md::tr!("放大"))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.open_reader_image(index, window, cx)
+                                    }))
+                                    .into_any_element(),
                             )
                             .inline(),
+                        ),
+                );
+        } else {
+            image = image.child(
+                v_flex()
+                    .size_full()
+                    .justify_center()
+                    .p_4()
+                    .bg(color(WARNING_BG))
+                    .child(
+                        theme::accessible_text(
+                            ("missing-frame", index),
+                            course2md::tr!("截图无法读取"),
                         )
-                    }),
+                        .text_size(TEXT_AUX)
+                        .text_color(color(WARNING)),
+                    ),
             );
-            let (excerpt, marks) = match self.reader_ui.gallery.excerpts.get(&index) {
-                Some(found) => (found.text.clone(), found.marks.as_slice()),
-                None => (SharedString::default(), &[][..]),
-            };
-            let excerpt_marks = marks
-                .iter()
-                .cloned()
-                .map(|range| {
-                    (
-                        range,
-                        HighlightStyle {
-                            background_color: Some(color(FIND_HIGHLIGHT).into()),
-                            ..Default::default()
-                        },
-                    )
-                })
-                .collect::<Vec<_>>();
-            // The three-line preview is a defined content slot; the full
-            // transcript remains readable in the image viewer and article.
-            // Without highlights, native ellipsis marks the cut: StyledText
-            // clips silently, which reads like a broken sentence.
-            card_body = card_body.child(
-                div()
-                    .id(("frame-excerpt", index))
-                    .role(Role::Paragraph)
-                    .aria_label(excerpt.clone())
-                    .w_full()
-                    .min_w_0()
-                    .max_h(excerpt_line_height * 3.)
-                    .flex_shrink_0()
-                    .whitespace_normal()
-                    .text_size(TEXT_BODY)
-                    .font_weight(FontWeight::NORMAL)
-                    .line_height(excerpt_line_height)
-                    .text_color(color(GRAY))
-                    .when(excerpt_marks.is_empty(), |view| {
-                        view.text_ellipsis().line_clamp(3).child(excerpt.clone())
-                    })
-                    .when(!excerpt_marks.is_empty(), |view| {
-                        view.child(StyledText::new(excerpt).with_highlights(excerpt_marks))
-                    }),
-            );
-            card.child(card_body).into_any_element()
         }
+        let image = image.child(
+            image_time_chip(time.clone())
+                .left(rems(8. / 14.))
+                .bottom(rems(8. / 14.))
+                .px(rems(8. / 14.))
+                .py(rems(2. / 14.))
+                .rounded(px(6.)),
+        );
+        let (excerpt, marks) = match self.reader_ui.gallery.excerpts.get(&index) {
+            Some(found) => (found.text.clone(), found.marks.as_slice()),
+            None => (SharedString::default(), &[][..]),
+        };
+        let excerpt_marks = marks
+            .iter()
+            .cloned()
+            .map(|range| {
+                (
+                    range,
+                    HighlightStyle {
+                        background_color: Some(color(FIND_HIGHLIGHT).into()),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        // The three-line preview is a defined content slot; the full
+        // transcript remains readable in the image viewer and article.
+        // Without highlights, native ellipsis marks the cut: StyledText
+        // clips silently, which reads like a broken sentence.
+        let excerpt = div()
+            .id(("frame-excerpt", index))
+            .role(Role::Paragraph)
+            .aria_label(format!("{time} {excerpt}"))
+            .w_full()
+            .min_w_0()
+            .px(rems(6. / 14.))
+            .max_h(excerpt_line_height * 3.)
+            .flex_shrink_0()
+            .whitespace_normal()
+            .text_size(TEXT_BODY)
+            .font_weight(FontWeight::NORMAL)
+            .line_height(excerpt_line_height)
+            .text_color(color(GRAY))
+            .when(excerpt_marks.is_empty(), |view| {
+                view.text_ellipsis().line_clamp(3).child(excerpt.clone())
+            })
+            .when(!excerpt_marks.is_empty(), |view| {
+                view.child(StyledText::new(excerpt).with_highlights(excerpt_marks))
+            });
+        v_flex()
+            .id(SharedString::from(frame.anchor.clone()))
+            .w_full()
+            .h_full()
+            .min_w_0()
+            .pt(rems(10. / 14.))
+            .px(rems(10. / 14.))
+            .pb(rems(1.))
+            .gap(rems(10. / 14.))
+            .bg(color(SURFACE))
+            .rounded(SETTINGS_CARD_RADIUS)
+            .child(image)
+            .child(excerpt)
+            .into_any_element()
     }
 
     /// Contents are a reading rail; persistent selection belongs to the row
-    /// surface so pointer feedback cannot erase the current chapter.
+    /// surface so pointer feedback cannot erase the current chapter. Beside
+    /// the article it takes `width`; over it on narrow windows it fills the pane.
     fn reader_toc_panel(
         &self,
         headings: &[(usize, String, Option<f64>)],
         current: Option<usize>,
-        side: bool,
+        width: Option<f32>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        let side = width.is_some();
         let mut panel = v_flex()
             .id("note-toc")
-            .gap_1()
-            .py_3()
+            .role(Role::Navigation)
+            .aria_label(course2md::tr!("阅读目录"))
+            .gap(px(2.))
             .overflow_y_scroll()
             .track_scroll(&self.reader_ui.toc_scroll);
-        panel = if side {
-            panel
-                .w(TOC_PANEL)
-                .flex_shrink_0()
-                .h_full()
-                .min_h_0()
-                .pl_4()
-                .border_l_1()
-                .border_color(color(HAIRLINE))
-        } else {
-            panel.w_full().h_full().min_h_0().px_3()
+        panel = match width {
+            Some(width) => panel.w(px(width)).flex_shrink_0().h_full().min_h_0().pb_4(),
+            None => panel.w_full().h_full().min_h_0().p_3(),
         };
         panel = panel.child(
             h_flex()
                 .items_center()
                 .gap_2()
                 .flex_shrink_0()
-                .mb_2()
-                .child(semantic_label("toc-title", course2md::tr!("目录"), icons::toc()).flex_1())
+                .pt(rems(4. / 14.))
+                .pb(rems(10. / 14.))
+                .px(rems(16. / 14.))
+                .child(
+                    theme::accessible_text("toc-title", course2md::tr!("阅读目录"))
+                        .role(Role::Heading)
+                        .flex_1()
+                        .text_size(TEXT_BODY)
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(color(GRAY)),
+                )
                 .when(!side, |row| {
                     row.child(
                         quiet("close-note-toc")
@@ -5010,16 +5221,19 @@ impl Desktop {
                     )
                 }),
         );
+        let row_height = rems(48. / 14.);
         for (index, label, seconds) in headings {
             let index = *index;
             let on = current == Some(index);
             let trailing_time =
                 seconds.filter(|seconds| *label != course2md::render::fmt_ts(*seconds));
+            let fg = color(if on { ON_SECONDARY_CONTAINER } else { INK });
             panel = panel.child(crate::focus_scroll::RevealFocus::new(
                 ("reveal-toc-item", index),
                 div()
                     .w_full()
                     .min_w_0()
+                    .flex_shrink_0()
                     .rounded(RADIUS_PILL)
                     .when(on, |row| row.bg(color(SECONDARY_CONTAINER)))
                     .child(
@@ -5027,8 +5241,10 @@ impl Desktop {
                             .ghost()
                             .w_full()
                             .h_auto()
-                            .min_h(CONTROL_HEIGHT)
-                            .p(TOC_ROW_PADDING)
+                            .min_h(row_height)
+                            .pl(rems(16. / 14.))
+                            .pr(rems(1.))
+                            .py(rems(8. / 14.))
                             .justify_start()
                             .rounded(RADIUS_PILL)
                             .tooltip(label.clone())
@@ -5041,34 +5257,31 @@ impl Desktop {
                                 h_flex()
                                     .w_full()
                                     .min_w_0()
-                                    .gap_2()
-                                    // The time stays on the first line; only the title column wraps.
-                                    .items_start()
+                                    .gap(rems(10. / 14.))
+                                    .items_center()
                                     .child(
                                         div()
                                             .flex_1()
                                             .min_w_0()
                                             .whitespace_nowrap()
                                             .text_ellipsis()
+                                            .text_size(TEXT_BODY)
                                             .line_height(relative(1.4))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(color(if on {
-                                                ON_SECONDARY_CONTAINER
+                                            .font_weight(if on {
+                                                FontWeight::SEMIBOLD
                                             } else {
-                                                INK
-                                            }))
+                                                FontWeight::NORMAL
+                                            })
+                                            .text_color(fg)
                                             .child(label.clone()),
                                     )
                                     .when_some(trailing_time, |row, seconds| {
                                         row.child(
                                             div()
                                                 .flex_shrink_0()
-                                                .text_size(TEXT_AUX)
-                                                .text_color(color(if on {
-                                                    ON_SECONDARY_CONTAINER
-                                                } else {
-                                                    GRAY
-                                                }))
+                                                .text_size(rems(12. / 14.))
+                                                .font_weight(FontWeight::NORMAL)
+                                                .text_color(if on { fg } else { color(GRAY) })
                                                 .child(course2md::render::fmt_ts(seconds)),
                                         )
                                     }),
@@ -6301,7 +6514,7 @@ mod flow_tests {
                                 .min_w_0()
                                 .flex_shrink(1.)
                                 .gap_2()
-                                .child(fixed("tabs", 260.))
+                                .child(fixed("play", 260.))
                                 .child(
                                     h_flex()
                                         .w(super::READER_SEARCH_WIDTH)
@@ -6742,9 +6955,14 @@ mod flow_tests {
     }
 }
 
+/// The reader's header holds 48px actions with 8px above and below.
+pub(crate) fn reader_title_bar_height(window: &Window) -> Pixels {
+    BUTTON_MEDIUM.to_pixels(window.rem_size()) + px(16.)
+}
+
 impl Desktop {
-    /// A note is read where it was opened: home › origin › title, with the
-    /// reading tools taking the destinations' place.
+    /// A note is read where it was opened: a tonal return to that place, the
+    /// breadcrumb over the note title, then the reading tools.
     pub(crate) fn reader_title_bar(
         &self,
         bar: Div,
@@ -6752,54 +6970,61 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TitleBar {
-        let chevron = || {
-            icons::chevron_right()
-                .size(rems(16. / 14.))
-                .flex_shrink_0()
-                .text_color(color(FAINT))
-        };
         let title = self
             .preview
             .as_ref()
             .map(|preview| preview.course.title.clone())
             .unwrap_or_default();
-        let compact = is_compact(window);
-        crate::views::apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window)))
-            .child(
-                bar.child(
-                    nav_action("nav-home", false, cx)
-                        .w(CONTROL_HEIGHT)
-                        .px_0()
-                        .icon(icons::home())
-                        .accessibility_label(course2md::tr!("主页"))
-                        .tooltip(course2md::tr!("主页"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            if this.prepare_workbench_input(window, cx) {
-                                this.navigate(Page::New, cx);
-                            }
-                        })),
-                )
-                .child(chevron())
-                .when(!compact && self.result_origin != Page::New, |bar| {
-                    bar.child(
-                        quiet("reader-origin")
-                            .text_color(color(GRAY))
-                            .label(self.reader_origin_label())
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.navigate(this.result_origin, cx)),
-                            ),
-                    )
-                    .child(chevron())
-                })
+        let origin = self.reader_origin_label();
+        // The crumb names where the note lives, however it was reached; the
+        // return button names the origin.
+        let library = course2md::tr!("笔记库");
+        let crumb = match &self.preview {
+            Some(preview) => {
+                let folder = self.folder_context(Some(preview.course.dir.clone()));
+                match folder.load_error {
+                    None => format!("{library} · {}", folder.label),
+                    Some(_) => library.to_owned(),
+                }
+            }
+            None => library.to_owned(),
+        };
+        crate::views::apply_shell_title_bar_chrome(
+            TitleBar::new().h(reader_title_bar_height(window)),
+        )
+        .child(
+            bar.gap(px(12.))
                 .child(
-                    accessible_text("reader-crumb-title", title)
+                    icon_button("reader-back", BUTTON_MEDIUM, true, cx)
+                        .icon(icons::arrow_left())
+                        .accessibility_label(course2md::tr!("返回「{}」", origin))
+                        .tooltip(course2md::tr!("返回「{}」", origin))
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.navigate(this.result_origin, cx)),
+                        ),
+                )
+                .child(
+                    v_flex()
                         .flex_1()
                         .min_w_0()
-                        .truncate()
-                        .px_1()
-                        .font_weight(FontWeight::MEDIUM),
+                        .child(
+                            accessible_text("reader-crumb", crumb)
+                                .truncate()
+                                .text_size(rems(13. / 14.))
+                                .line_height(rems(18. / 14.))
+                                .text_color(color(GRAY)),
+                        )
+                        .child(
+                            accessible_text("reader-crumb-title", title)
+                                .role(Role::Heading)
+                                .truncate()
+                                .text_size(rems(22. / 14.))
+                                .line_height(rems(28. / 14.))
+                                .font_weight(FontWeight::NORMAL)
+                                .text_color(color(INK)),
+                        ),
                 )
                 .child(tools),
-            )
+        )
     }
 }

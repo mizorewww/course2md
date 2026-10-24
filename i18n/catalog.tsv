@@ -809,7 +809,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 打开已有笔记	打开已有笔记	Open an existing note	開啟已有筆記	既存のノートを開く
 打开时意外中断，请重试	打开时意外中断，请重试	Unexpected interruption while opening, please try again	開啟時意外中斷，請重試	開いているときに予期しない中断が発生しました。もう一度お試しください。
 打开模型文件夹	打开模型文件夹	Open model folder	開啟模型資料夾	モデルフォルダーを開く
-打开目录	打开目录	Open directory	開啟目錄	ディレクトリを開く
 打开目标副本	打开目标副本	Open target copy	開啟目標副本	ターゲットコピーを開く
 打开笔记保存位置	打开笔记保存位置	Open the location where the note is saved	開啟筆記儲存位置	ノートの保存場所を開く
 执行已保存的任务；从标准输入读取完整 JSON 参数 / Execute a saved task from stdin JSON	执行已保存的任务；从标准输入读取完整 JSON 参数	Execute a saved task from stdin JSON	執行已儲存的任務；從標準輸入讀取完整 JSON 參數	保存したタスクを実行します。標準入力から完全な JSON パラメータを読み取ります
@@ -1773,7 +1772,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 输出格式，逗号分隔 / Output formats, comma-separated: md,html,json	输出格式，逗号分隔	Output formats, comma-separated: md,html,json	輸出格式，逗號分隔	出力形式（カンマ区切り）: md,html,json
 迁移副本中的任务身份已经变化，未覆盖 / Copied task identity changed; not overwritten	迁移副本中的任务身份已经变化，未覆盖	Copied task identity changed; not overwritten	遷移副本中的任務身分已經變化，未覆蓋	移行コピー内のタスク ID が変更されたため、上書きしませんでした
 运行检查	运行检查	Run checks	執行檢查	チェックを実行
-返回	返回	Back	返回	戻る
 返回图片	返回图片	Return to picture	返回圖片	画像に戻る
 返回应用	返回应用	Return to application	返回應用程式	アプリケーションに戻る
 返回格式不符合要求	返回格式不符合要求	The response format does not meet the requirements	傳回格式不符合要求	返された形式が要件を満たしていません
@@ -2147,3 +2145,4 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 {}尚未完成，笔记的其余部分已保存	{}尚未完成，笔记的其余部分已保存	{} not finished; the rest of the note is saved	{}尚未完成，筆記的其餘部分已儲存	{}は完了していません。ノートのほかの部分は保存済みです
 没有未分类的笔记	没有未分类的笔记	No unfiled notes	沒有未分類的筆記	未分類のノートはありません
 只使用视频自带的字幕	只使用视频自带的字幕	Only the video's own subtitles will be used	只使用影片內建的字幕	動画に付属する字幕のみを使用します
+阅读目录	目录	Contents	目錄	目次

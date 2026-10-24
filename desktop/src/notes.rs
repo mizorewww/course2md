@@ -327,8 +327,6 @@ pub struct Preview {
     pub plain_text: String,
     pub markdown_text: String,
     pub document: artifact::Document,
-    /// Author and duration, in display order; the source link is `document.meta`.
-    pub facts: Vec<String>,
     pub issues: Vec<String>,
     /// Incomplete processing is recoverable through its task, never by re-reading files.
     pub processing_issues: Vec<ProcessingIssue>,
@@ -421,13 +419,6 @@ pub fn read_preview(mut course: Course) -> Result<Preview> {
             }
         }
     }
-    let mut facts = Vec::new();
-    if !document.meta.uploader.trim().is_empty() {
-        facts.push(document.meta.uploader.clone());
-    }
-    if document.meta.duration > 0. {
-        facts.push(course2md::render::fmt_ts(document.meta.duration));
-    }
     let processing_issues = processing_issues(&manifest);
     course.title = manifest.title.clone();
     course.slides = manifest.frames.len();
@@ -440,7 +431,6 @@ pub fn read_preview(mut course: Course) -> Result<Preview> {
         plain_text,
         markdown_text: without_image_references(&markdown),
         document,
-        facts,
         issues,
         processing_issues,
     })
