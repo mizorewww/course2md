@@ -1,5 +1,5 @@
 //! Progress samples, independent of rendering. ETA excludes cached work and resets on retries.
-use course2md::progress::{Phase, Stage};
+use course2md::progress::{Phase, Stage, Unit};
 use std::time::{Duration, Instant};
 
 pub struct Activity {
@@ -8,6 +8,8 @@ pub struct Activity {
     pub message: String,
     /// Structured phase from the engine (model transfers).
     pub phase: Option<Phase>,
+    /// What the counter counts, when the stage alone does not say.
+    pub unit: Option<Unit>,
     pub done: bool,
     pub workers: usize,
     /// Tokens the AI service reported for this stage, sent and received.
@@ -30,6 +32,7 @@ impl Activity {
             total: 0,
             message: String::new(),
             phase: None,
+            unit: None,
             done: false,
             workers: 1,
             prompt_tokens: 0,
@@ -107,10 +110,11 @@ impl Activity {
                 ..TransferMetrics::default()
             };
         }
-        let quantity = quantity(stage, self.current, self.total);
-        // Apple reports weighted preparation stages, not byte throughput. Loading,
-        // downloads and compilation do not advance those stages at a constant rate.
-        if *stage == Stage::ModelApple {
+        let byte_download = self.counts_bytes(stage);
+        let quantity = quantity_of(stage, byte_download, self.current, self.total);
+        // Apple loading and compilation report weighted stages, not throughput,
+        // and do not advance at a constant rate. Its downloads report bytes.
+        if *stage == Stage::ModelApple && !byte_download {
             return TransferMetrics {
                 quantity,
                 note: Some(course2md::tr!(
@@ -122,8 +126,10 @@ impl Activity {
         }
         // Model files name their host, and whether the engine is connecting,
         // resuming after a dropped connection or checking the finished file.
-        let host = (matches!(stage, Stage::ModelFile(_)) && !self.message.is_empty())
-            .then_some(self.message.as_str());
+        let host = ((matches!(stage, Stage::ModelFile(_))
+            || (*stage == Stage::ModelApple && byte_download))
+            && !self.message.is_empty())
+        .then_some(self.message.as_str());
         let source = host.map(|host| course2md::tr!("来源 {}", host));
         match (self.phase, host) {
             (Some(Phase::Connect), Some(host)) => {
@@ -148,7 +154,6 @@ impl Activity {
             }
             _ => {}
         }
-        let byte_download = is_byte_download(stage);
         let stalled = self.updated.elapsed() >= Duration::from_secs(30) && self.current > 0;
         if stalled {
             return TransferMetrics {
@@ -166,7 +171,13 @@ impl Activity {
                 ..TransferMetrics::default()
             };
         }
-        let rate = self.rate();
+        // The Apple downloader reports whole 8 MiB ranges with sixteen in
+        // flight, and fetches small configuration files first, so its early
+        // samples miss most of the bytes already received. Until 5% of the
+        // model has landed in this run, the speed is still being measured.
+        let settled = *stage != Stage::ModelApple
+            || self.current.saturating_sub(self.baseline) * 20 >= self.total;
+        let rate = self.rate().filter(|_| settled);
         let speed = rate
             .filter(|_| byte_download)
             .map(|rate| format!("{}/s", throughput(rate)));
@@ -197,6 +208,10 @@ impl Activity {
             eta,
             source,
         }
+    }
+    /// Whether `current` and `total` are bytes moving over the network.
+    pub fn counts_bytes(&self, stage: &Stage) -> bool {
+        is_byte_download(stage) || self.unit == Some(Unit::Bytes)
     }
     pub fn detail(&self, stage: &Stage, running: bool) -> String {
         self.transfer_metrics(stage, running).summary()
@@ -274,11 +289,15 @@ fn is_byte_download(stage: &Stage) -> bool {
 }
 
 pub fn quantity(stage: &Stage, current: u64, total: u64) -> String {
+    quantity_of(stage, is_byte_download(stage), current, total)
+}
+
+fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> String {
     if *stage == Stage::ScenesScan {
         course2md::tr!("已检查 {} 张画面", current)
     } else if *stage == Stage::ScenesExtract && total > 0 {
         course2md::tr!("已保存 {} / {} 张截图", current, total)
-    } else if is_byte_download(stage) {
+    } else if byte_download {
         if total > 0 {
             format!("{} / {}", bytes(current), bytes(total))
         } else {
@@ -498,6 +517,60 @@ mod tests {
             activity.detail(&Stage::parse("model/apple"), true),
             "已完成"
         );
+    }
+
+    #[test]
+    fn apple_downloads_report_bytes_speed_and_remaining_time() {
+        let apple = Stage::parse("model/apple");
+        let mut activity = Activity::new();
+        // Cached files arrive in the first sample and are not throughput.
+        activity.update(
+            300 * 1024 * 1024,
+            1600 * 1024 * 1024,
+            Some("huggingface.co".into()),
+        );
+        activity.phase = Some(Phase::Download);
+        activity.unit = Some(Unit::Bytes);
+        let measuring = activity.transfer_metrics(&apple, true);
+        assert_eq!(measuring.quantity, "300.0 MB / 1.56 GB");
+        assert_eq!(measuring.note.as_deref(), Some("正在测量速度"));
+        assert_eq!(measuring.eta, Some(TransferEta::Remaining("计算中".into())));
+
+        // Configuration files and the first ranges are too little to time.
+        activity.started = Instant::now() - Duration::from_secs(20);
+        activity.update(340 * 1024 * 1024, 1600 * 1024 * 1024, None);
+        let early = activity.transfer_metrics(&apple, true);
+        assert!(early.speed.is_none(), "{early:?}");
+        assert_eq!(early.eta, Some(TransferEta::Remaining("计算中".into())));
+
+        activity.update(500 * 1024 * 1024, 1600 * 1024 * 1024, None);
+        let metrics = activity.transfer_metrics(&apple, true);
+        assert_eq!(metrics.quantity, "500.0 MB / 1.56 GB");
+        assert_eq!(metrics.speed.as_deref(), Some("10.0 MB/s"));
+        // 1100 MB left at 10 MB/s; the test's own runtime may add a second.
+        assert!(
+            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v.starts_with("1 分 5")),
+            "{metrics:?}"
+        );
+        assert_eq!(metrics.source.as_deref(), Some("来源 huggingface.co"));
+        let summary = metrics.summary();
+        assert!(
+            summary.starts_with("500.0 MB / 1.56 GB · 速度 10.0 MB/s · 预计剩余 1 分 5")
+                && summary.ends_with(" · 来源 huggingface.co"),
+            "{summary}"
+        );
+        assert_eq!(model_transfer_phase(&apple, activity.phase), "下载识别模型");
+
+        // Loading after the download reports a weighted fraction again.
+        activity.update(2000, 10000, Some("正在加载本机模型…".into()));
+        activity.phase = Some(Phase::Load);
+        activity.unit = None;
+        let loading = activity.detail(&apple, true);
+        assert!(
+            loading.contains("20%") && loading.contains("已用"),
+            "{loading}"
+        );
+        assert!(!loading.contains("/s") && !loading.contains("预计剩余"));
     }
 
     #[test]
