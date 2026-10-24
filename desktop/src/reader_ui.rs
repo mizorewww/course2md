@@ -1942,6 +1942,27 @@ fn render_note_image(
     .into_any_element()
 }
 
+/// The viewer's media area for a screenshot that cannot be read: the same
+/// warning fill as its card, over the space the image would take.
+fn unreadable_viewer_image() -> Stateful<Div> {
+    v_flex()
+        .id("image-unreadable")
+        .flex_1()
+        .min_h(rems(8.))
+        .w_full()
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .rounded(RADIUS_CARD)
+        .bg(color(WARNING_BG))
+        .text_color(color(WARNING))
+        .child(icons::image().size(EMPTY_STATE_ICON))
+        .child(theme::accessible_text(
+            "image-unreadable-text",
+            course2md::tr!("截图无法读取"),
+        ))
+}
+
 /// Screenshot figures in the article.
 const FIGURE_RADIUS: Pixels = px(20.);
 
@@ -5713,6 +5734,7 @@ impl Desktop {
         let details_open = Self::image_details_open(viewer, &metrics);
         let text_only = metrics.separate_modes && details_open;
         let time = course2md::render::fmt_ts(frame.seconds);
+        let readable = frame.image.is_some();
         let heading = if text_only {
             course2md::tr!("文字 · {}", time)
         } else if compact {
@@ -5766,7 +5788,8 @@ impl Desktop {
                     .disabled(index + 1 >= count)
                     .on_click(cx.listener(|this, _, _, cx| this.move_reader_image(1, cx))),
             )
-            .when(!text_only, |row| {
+            // An unreadable screenshot has nothing to zoom.
+            .when(!text_only && readable, |row| {
                 row.child(self.image_zoom_controls(scale, compact, cx))
             });
         let media = (!text_only).then(|| self.image_viewer_media(scale, label.clone(), cx));
@@ -5841,8 +5864,7 @@ impl Desktop {
             return div().into_any_element();
         };
         let Some(image) = viewer.frames[viewer.index].image.clone() else {
-            return missing_image_notice("image-unreadable", course2md::tr!("截图无法读取"))
-                .into_any_element();
+            return unreadable_viewer_image().into_any_element();
         };
         // The neighbours decode ahead so stepping through shows them at once.
         let neighbours: Vec<PathBuf> = [viewer.index.checked_sub(1), Some(viewer.index + 1)]
@@ -5871,8 +5893,7 @@ impl Desktop {
             // The gallery's thumbnail stands in while the original decodes.
             Loaded::Pending => images.any_ready(&image.path),
             Loaded::Failed => {
-                return missing_image_notice("image-unreadable", course2md::tr!("截图无法读取"))
-                    .into_any_element();
+                return unreadable_viewer_image().into_any_element();
             }
         };
         let picture = match picture {
