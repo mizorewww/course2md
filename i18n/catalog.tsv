@@ -266,7 +266,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 以 NDJSON 输出进度，禁用交互 / Stream NDJSON progress without prompts	以 NDJSON 输出进度，禁用交互	Stream NDJSON progress without prompts	以 NDJSON 輸出進度，禁用互動	進行状況を NDJSON として出力し、インタラクションを無効にする
 以后生成的笔记仍使用修改前的配置 · {}	以后生成的笔记仍使用修改前的配置 · {}	Notes generated later will still use the previous configuration · {}	以後生成的筆記仍使用修改前的配置 · {}	今後生成されるノートでは引き続き変更前の設定が使用されます · {}
 任务	任务	Tasks	任務	タスク
-任务 · {}	任务 · {}	Task · {}	任務 · {}	タスク · {}
+任务 · {}	任务 · {}	Tasks · {}	任務 · {}	タスク · {}
 任务不存在	任务不存在	Task not found	找不到任務	タスクが見つかりません
 任务与笔记位置必须是绝对路径 / Task paths must be absolute	任务与笔记位置必须是绝对路径	Task paths must be absolute	任務與筆記位置必須是絕對路徑	タスクとノートの場所は絶対パスである必要があります
 任务位置与笔记库记录不匹配，请先恢复存储位置	任务位置与笔记库记录不匹配，请先恢复存储位置	The task location does not match the note library record. Please restore the storage location first.	任務位置與筆記庫記錄不匹配，請先恢復儲存位置	タスクの場所がノート ライブラリのレコードと一致しません。まず保存場所を復元してください。
@@ -888,7 +888,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 整理选中的视频	整理选中的视频	Organize selected videos	整理選中的影片	選択した動画を整理する
 文件	文件	File	檔案	ファイル
 文件名含有无法识别的字符，请改名后重试	文件名含有无法识别的字符，请改名后重试	The file name contains unrecognizable characters, please change the name and try again	檔名含有無法辨識的字元，請改名後重試	ファイル名に認識できない文字が含まれています。名前を変更して再試行してください。
-文件夹	文件夹	Folder	資料夾	フォルダー
+文件夹	文件夹	Folders	資料夾	フォルダー
 文件夹信息损坏；原文件已保留，请修复后重试	文件夹信息损坏；原文件已保留，请修复后重试	The folder information is damaged; the original file has been retained, please repair it and try again.	資料夾資訊損壞；原檔案已保留，請修復後重試	フォルダー情報が破損しています。元のファイルは保持されています。修復して再試行してください。
 文件夹信息读取失败	文件夹信息读取失败	Failed to read folder information	資料夾資訊讀取失敗	フォルダー情報の読み込みに失敗しました
 文件夹信息需要恢复	文件夹信息需要恢复	Folder information needs to be restored	資料夾資訊需要恢復	フォルダー情報を復元する必要があります
@@ -1333,7 +1333,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在测试服务…	正在测试服务…	Testing service…	正在測試服務…	サービスをテスト中…
 正在测量速度	正在测量速度	Measuring speed	正在測量速度	速度を測定中
 正在清理备份…	正在清理备份…	Cleaning up backups...	正在清理備份…	バックアップを整理しています...
-正在生成《{}》	正在生成《{}》	Generating "{}"	正在生成《{}》	「{}」を生成しています
+正在生成《{}》	正在生成《{}》	Generating “{}”	正在生成《{}》	「{}」を生成しています
 正在生成笔记	正在生成笔记	Generating notes	正在生成筆記	ノートを生成中
 正在确认来源，请等待读取完成	正在确认来源，请等待读取完成	Confirming the source. Please wait for reading to finish.	正在確認來源，請等待讀取完成	ソースを確認しています。読み込みが完了するまでお待ちください
 正在结束…	正在结束…	Ending…	正在結束…	終了しています…
@@ -1516,7 +1516,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记已保存，部分处理未完成 / Notes saved with unfinished work	笔记已保存，部分处理未完成	Notes saved with unfinished work	筆記已儲存，部分處理未完成	ノートは保存されましたが、一部の処理が完了していません
 笔记已生成	笔记已生成	Note has been generated	筆記已生成	ノートが生成されました
 笔记已生成 / Notes ready	笔记已生成	Notes ready	筆記已生成	ノートが生成されました
-笔记库	笔记库	Note library	筆記庫	ノートライブラリ
+笔记库	笔记库	Library	筆記庫	ノートライブラリ
 笔记库位置	笔记库位置	Note library location	筆記庫位置	ノートライブラリの場所
 笔记库位置尚未添加：{}	笔记库位置尚未添加：{}	Note library location not added yet: {}	筆記庫位置尚未新增：{}	ノートライブラリの場所はまだ追加されていません：{}
 笔记库列表暂时无法读取，请重启应用后重试	笔记库列表暂时无法读取，请重启应用后重试	The note library list can't be read. Restart the app and try again.	暫時無法讀取筆記庫清單，請重新啟動應用程式後再試	ノートライブラリの一覧を読み込めません。アプリを再起動して再試行してください
@@ -1865,7 +1865,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 速度	速度	Speed	速度	速度
 速度 {}	速度 {}	Speed {}	速度 {}	速度 {}
 選項：	選項：	Options:	選項：	オプション:
-部分内容待补全	部分内容待补全	Some content needs to be completed	部分內容待補全	一部の内容は補完が必要です
+部分内容待补全	部分内容待补全	Incomplete	部分內容待補全	一部の内容は補完が必要です
 部分内容暂未读取	部分内容暂未读取	Some content has not been read yet	部分內容暫未讀取	一部の内容はまだ読み込まれていません
 部分处理结果未确认	部分处理结果未确认	Some processing results are not confirmed	部分處理結果未確認	一部の処理結果が未確認
 部分字幕无法读取：{}	部分字幕无法读取：{}	Some subtitles cannot be read: {}	部分字幕無法讀取：{}	一部の字幕が読めません: {}
