@@ -170,10 +170,93 @@ impl Navigation {
         }
     }
 }
-/// Surfaces stay behind the interactive item. Hover/focus cannot erase selection.
+/// The resolved paint of one option for the current motion frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct OptionPaint {
+    background: Rgba,
+    foreground: Rgba,
+    hover: Rgba,
+    press: Rgba,
+    focus: Rgba,
+    left_radius: Pixels,
+    right_radius: Pixels,
+}
+
+/// Inner corners between neighbours; outer group ends are always fully round.
+const INNER_RADIUS: f32 = 8.;
+const GAP: f32 = 2.;
+
+/// M3 connected button group: each option is its own button. `selection` is the
+/// option's animated selection amount (0 unselected, 1 selected), which morphs
+/// both colour and the inner corners toward a full pill.
+fn option_paint(
+    selection: f32,
+    index: usize,
+    count: usize,
+    height: Pixels,
+    disabled: bool,
+) -> OptionPaint {
+    let t = selection.clamp(0., 1.);
+    let full = height / 2.;
+    let inner = px(INNER_RADIUS) + (full - px(INNER_RADIUS)) * t;
+    let left_radius = if index == 0 { full } else { inner };
+    let right_radius = if index + 1 == count { full } else { inner };
+    if disabled {
+        // M3 disabled: on-surface at 12% container and 38% content. The pill
+        // shape still tells which option is current.
+        let ink = super::color(super::INK);
+        return OptionPaint {
+            background: ink.opacity(0.12),
+            foreground: ink.opacity(0.38),
+            hover: ink.opacity(0.12),
+            press: ink.opacity(0.12),
+            focus: gpui::transparent_black().into(),
+            left_radius,
+            right_radius,
+        };
+    }
+    let background = super::blend(
+        super::color(super::SURFACE_HIGH),
+        super::color(super::ACCENT),
+        t,
+    );
+    let foreground = super::blend(super::color(super::INK), super::color(super::ON_PRIMARY), t);
+    OptionPaint {
+        background,
+        foreground,
+        // One state layer in the content colour, resolved over the current
+        // container instead of stacking translucent fills, so the selected
+        // accent stays under hover and press.
+        hover: super::blend(background, foreground, 0.08),
+        press: super::blend(background, foreground, 0.10),
+        // The 2px focus ring is painted inside the option so it is never
+        // clipped. On an unselected option the accent ring reads against the
+        // neutral container; on the accent pill an accent ring would vanish,
+        // so it turns into the on-primary colour, a contrasting inner ring
+        // that stays legible in light and dark palettes.
+        focus: super::blend(
+            super::color(super::ACCENT),
+            super::color(super::ON_PRIMARY),
+            t,
+        ),
+        left_radius,
+        right_radius,
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PAINTED: std::cell::RefCell<BTreeMap<String, OptionPaint>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+/// Containers stay behind the interactive item. Hover/press cannot erase selection.
 fn item_style<T: Styled + StatefulInteractiveElement + gpui::prelude::FluentBuilder>(
     item: T,
+    paint: OptionPaint,
     height: Pixels,
+    fill: bool,
+    disabled: bool,
 ) -> T {
     item.relative()
         .flex()
@@ -182,18 +265,26 @@ fn item_style<T: Styled + StatefulInteractiveElement + gpui::prelude::FluentBuil
         .min_w_0()
         .h(height)
         .min_h(height)
-        .px(rems(12. / 14.))
+        // With the 2px focus border: 16px to the content of a content-sized
+        // option; 8px in equal shares so a 312px panel still fits "语音识别".
+        .px(if fill { rems(6. / 14.) } else { rems(1.) })
         .py_0()
-        .rounded_full()
+        .rounded_l(paint.left_radius)
+        .rounded_r(paint.right_radius)
         .border_2()
         .border_color(gpui::transparent_black())
-        .bg(gpui::transparent_black())
+        .bg(paint.background)
+        .text_color(paint.foreground)
         .text_size(super::TEXT_BODY)
         .font_weight(FontWeight::MEDIUM)
-        .flex_1()
-        .hover(|style| style.bg(super::color(super::INK).opacity(0.035)))
-        .active(|style| style.bg(super::color(super::INK).opacity(0.075)))
-        .focus_visible(|style| style.border_color(super::color(super::ACCENT)))
+        // Content-width options keep the default shrink so a narrow parent
+        // ellipsizes labels instead of overflowing.
+        .when(fill, |item| item.flex_1())
+        .when(!disabled, |item| {
+            item.hover(move |style| style.bg(paint.hover))
+                .active(move |style| style.bg(paint.press))
+                .focus_visible(move |style| style.border_color(paint.focus))
+        })
 }
 impl RenderOnce for SingleChoiceGroup {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -240,120 +331,39 @@ impl RenderOnce for SingleChoiceGroup {
         let last = navigation;
         let count = self.options.len();
         let scale = f32::from(window.rem_size()) / 14.;
-        let segmented = self.segmented;
-        let inset = if segmented { 0. } else { 2. * scale };
-        let item_height = px(if segmented { 40. * scale } else { 36. * scale });
-        let position = crate::motion::selection_value(
-            ElementId::NamedChild(self.id.clone().into(), "selection-position".into()),
-            selected.unwrap_or(0) as f32,
-            window,
-            cx,
-        )
-        .clamp(0., count.saturating_sub(1) as f32);
+        let item_height = px(if self.segmented { 48. } else { 40. } * scale);
+        let fill = self.full_width;
         let icon_size = rems(18. / 14.);
-        // A content-sized group gives every option the slot of its longest
-        // label, so labels stay still while the selected surface moves.
-        // Full-width groups divide the parent instead and need no measurement.
-        let content_width = (!self.full_width).then(|| {
-            let mut font = window.text_style().font();
-            font.weight = FontWeight::MEDIUM;
-            let size = self
-                .label_text_size
-                .unwrap_or(super::TEXT_BODY)
-                .to_pixels(window.rem_size());
-            let label_width = self
-                .options
-                .iter()
-                .map(|option| {
-                    let run = TextRun {
-                        len: option.label.len(),
-                        font: font.clone(),
-                        color: super::color(super::INK).into(),
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    };
-                    let shaped =
-                        window
-                            .text_system()
-                            .shape_line(option.label.clone(), size, &[run], None);
-                    f32::from(shaped.width.ceil())
-                })
-                .fold(0_f32, f32::max);
-            let icon_and_gap = f32::from(rems(26. / 14.).to_pixels(window.rem_size()));
-            let padding = f32::from(
-                rems(if segmented { 8. / 14. } else { 12. / 14. }).to_pixels(window.rem_size()),
-            ) * 2.;
-            // The 2px focus border on each side belongs to the slot.
-            ((label_width + icon_and_gap + padding + 4.).ceil()) * count as f32 + inset * 2. + 2.
-        });
+        let debug_kind = if fill { "full" } else { "content" };
         let mut lane = gpui_base::h_flex()
-            .relative()
             .w_full()
             .min_w_0()
-            .items_stretch()
-            .when(segmented, |lane| lane.rounded_full().overflow_hidden())
+            .gap(px(GAP))
+            .items_center()
             .when(cfg!(test), |lane| {
                 lane.debug_selector(|| "full-choice-lane".into())
             });
-        if selected.is_some() && count > 0 {
-            lane = lane.child(
-                div()
-                    .absolute()
-                    .when(!segmented, |fill| fill.rounded_full())
-                    // GPUI overflow clips the rectangle, not rounded corners. Paint
-                    // the indicator's end caps explicitly; use the animated position
-                    // so leaving/entering an end segment never flashes a square cap.
-                    .when(segmented, |fill| {
-                        let radius = f32::from(item_height) / 2.;
-                        let left = (1. - position).clamp(0., 1.);
-                        let right =
-                            (1. - (count.saturating_sub(1) as f32 - position)).clamp(0., 1.);
-                        fill.rounded_l(px(radius * left))
-                            .rounded_r(px(radius * right))
-                    })
-                    // M3 segmented buttons and navigation share the tonal
-                    // secondary container as the selected surface.
-                    .bg(super::color(super::SECONDARY_CONTAINER))
-                    .top_0()
-                    .bottom_0()
-                    .left(relative(position / count as f32))
-                    .w(relative(1. / count as f32))
-                    .when(cfg!(test), |fill| {
-                        fill.debug_selector(|| "full-choice-indicator".into())
-                    }),
-            );
-        }
-        if segmented && count > 1 {
-            for index in 1..count {
-                lane = lane.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .left(relative(index as f32 / count as f32))
-                        .w(px(1.))
-                        .bg(super::color(super::CONTROL)),
-                );
-            }
-        }
         for (index, option) in self.options.into_iter().enumerate() {
             let checked = selected == Some(index);
             let focus = handles[index].clone().tab_stop(entry == Some(index));
             let callback = self.on_change.clone();
             let value = option.value.clone();
             let label = option.label.clone();
-            let coverage = if selected.is_some() {
-                (1. - (position - index as f32).abs()).clamp(0., 1.)
-            } else {
-                0.
-            };
-            let text_color = super::blend(
-                super::color(super::GRAY),
-                super::color(super::ON_SECONDARY_CONTAINER),
-                coverage,
+            // Each option animates its own selection amount; a rapid click
+            // retargets from the current presentation value.
+            let selection = crate::motion::selection_value(
+                ElementId::NamedChild(self.id.clone().into(), format!("selection-{value}").into()),
+                if checked { 1. } else { 0. },
+                window,
+                cx,
             );
-            let debug_kind = if self.full_width { "full" } else { "content" };
+            let paint = option_paint(selection, index, count, item_height, disabled);
+            #[cfg(test)]
+            PAINTED.with(|painted| {
+                painted
+                    .borrow_mut()
+                    .insert(format!("{debug_kind}-{index}"), paint)
+            });
             let content = gpui_base::h_flex()
                 .max_w_full()
                 .min_w_0()
@@ -391,54 +401,54 @@ impl RenderOnce for SingleChoiceGroup {
                 );
             if self.tabs {
                 let click_focus = focus.clone();
-                let tab = item_style(gpui_base::Tab::new(value.clone()), item_height)
-                    .when_some(self.label_text_size, |item, size| item.text_size(size))
-                    .when(segmented, |item| {
-                        item.px(rems(8. / 14.))
-                            .rounded_none()
-                            .when(index == 0, |item| item.rounded_l_full())
-                            .when(index + 1 == count, |item| item.rounded_r_full())
-                    })
-                    .selected(checked)
-                    .disabled(disabled)
-                    .accessibility_label(label)
-                    .set_position(index + 1, count)
-                    .track_focus(&focus)
-                    .text_color(text_color)
-                    .child(content)
-                    .on_click(move |_, window, cx| {
-                        click_focus.focus(window, cx);
-                        if !checked && let Some(callback) = &callback {
-                            callback(&value, window, cx);
-                        }
-                    });
+                let tab = item_style(
+                    gpui_base::Tab::new(value.clone()),
+                    paint,
+                    item_height,
+                    fill,
+                    disabled,
+                )
+                .when_some(self.label_text_size, |item, size| item.text_size(size))
+                .selected(checked)
+                .disabled(disabled)
+                .accessibility_label(label)
+                .set_position(index + 1, count)
+                .track_focus(&focus)
+                .child(content)
+                .when(cfg!(test), |tab| {
+                    tab.debug_selector(move || format!("{debug_kind}-choice-option-{index}"))
+                })
+                .on_click(move |_, window, cx| {
+                    click_focus.focus(window, cx);
+                    if !checked && let Some(callback) = &callback {
+                        callback(&value, window, cx);
+                    }
+                });
                 lane = lane.child(tab);
             } else {
-                let radio = item_style(gpui_base::Radio::new(value.clone()), item_height)
-                    .when_some(self.label_text_size, |item, size| item.text_size(size))
-                    .when(segmented, |item| {
-                        item.px(rems(8. / 14.))
-                            .rounded_none()
-                            .when(index == 0, |item| item.rounded_l_full())
-                            .when(index + 1 == count, |item| item.rounded_r_full())
-                    })
-                    .checked(checked)
-                    .disabled(disabled)
-                    .accessibility_label(label)
-                    .set_position(index + 1, count)
-                    .track_focus(&focus)
-                    .text_color(text_color)
-                    .when(disabled, |radio| radio.opacity(0.5))
-                    .child(content)
-                    .when(cfg!(test), |radio| {
-                        radio.debug_selector(move || format!("{debug_kind}-choice-option-{index}"))
-                    })
-                    .on_change(move |_, _, window, cx| {
-                        focus.focus(window, cx);
-                        if !checked && let Some(callback) = &callback {
-                            callback(&value, window, cx);
-                        }
-                    });
+                let radio = item_style(
+                    gpui_base::Radio::new(value.clone()),
+                    paint,
+                    item_height,
+                    fill,
+                    disabled,
+                )
+                .when_some(self.label_text_size, |item, size| item.text_size(size))
+                .checked(checked)
+                .disabled(disabled)
+                .accessibility_label(label)
+                .set_position(index + 1, count)
+                .track_focus(&focus)
+                .child(content)
+                .when(cfg!(test), |radio| {
+                    radio.debug_selector(move || format!("{debug_kind}-choice-option-{index}"))
+                })
+                .on_change(move |_, _, window, cx| {
+                    focus.focus(window, cx);
+                    if !checked && let Some(callback) = &callback {
+                        callback(&value, window, cx);
+                    }
+                });
                 lane = lane.child(radio);
             }
         }
@@ -454,18 +464,7 @@ impl RenderOnce for SingleChoiceGroup {
             .flex()
             .min_w_0()
             .max_w_full()
-            .p(px(inset))
-            .rounded_full()
-            .border_1()
-            .border_color(super::color(if segmented {
-                super::CONTROL
-            } else {
-                super::HAIRLINE
-            }))
-            .map(|group| match content_width {
-                Some(width) => group.w(px(width)),
-                None => group.w_full(),
-            })
+            .when(fill, |group| group.w_full())
             .when(cfg!(test), |group| {
                 group.debug_selector(|| "full-choice-track".into())
             })
@@ -481,12 +480,7 @@ impl RenderOnce for SingleChoiceGroup {
         let reveal_id = SharedString::from(format!("choice-reveal-{:?}", self.id));
         if let Some(scroll) = self.reveal_in {
             let reveal = crate::focus_scroll::RevealFocus::new(reveal_id, group, scroll);
-            if self.full_width {
-                reveal
-            } else {
-                reveal.inline()
-            }
-            .into_any_element()
+            if fill { reveal } else { reveal.inline() }.into_any_element()
         } else {
             group.into_any_element()
         }
@@ -495,7 +489,7 @@ impl RenderOnce for SingleChoiceGroup {
 
 #[cfg(test)]
 mod tests {
-    use super::{Direction, SingleChoiceGroup, destination};
+    use super::{Direction, OptionPaint, PAINTED, SingleChoiceGroup, destination};
     use gpui::{
         Bounds, Context, FontWeight, IntoElement, Modifiers, ParentElement as _, Pixels, Render,
         SharedString, Styled as _, TestAppContext, TextRun, VisualTestContext, Window, div, font,
@@ -508,6 +502,7 @@ mod tests {
         selected: usize,
         width: Pixels,
         changes: usize,
+        disabled: bool,
     }
 
     struct ContentWidthHarness {
@@ -567,6 +562,7 @@ mod tests {
                     )
                     .selected(self.selected.to_string())
                     .full_width()
+                    .disabled(self.disabled)
                     .on_change(cx.listener(|this, next: &SharedString, _, cx| {
                         this.selected = next.parse().unwrap();
                         this.changes += 1;
@@ -601,15 +597,77 @@ mod tests {
         }
     }
 
+    fn painted(name: &str) -> OptionPaint {
+        PAINTED.with(|painted| {
+            *painted
+                .borrow()
+                .get(name)
+                .unwrap_or_else(|| panic!("no paint for {name}"))
+        })
+    }
+
+    fn token(token: crate::theme::ColorToken) -> gpui::Rgba {
+        crate::theme::color(token)
+    }
+
+    /// Blended endpoints may differ from a token in the last float bit.
+    fn same(a: gpui::Rgba, b: gpui::Rgba) -> bool {
+        [a.r - b.r, a.g - b.g, a.b - b.b, a.a - b.a]
+            .iter()
+            .all(|d| d.abs() < 1e-4)
+    }
+
+    /// Selected: accent container, on-primary content and a full pill.
+    fn assert_selected(name: &str, height: Pixels) {
+        let paint = painted(name);
+        assert!(
+            same(paint.background, token(crate::theme::ACCENT)),
+            "{name}: {:?}",
+            paint
+        );
+        assert!(
+            same(paint.foreground, token(crate::theme::ON_PRIMARY)),
+            "{name}: {:?}",
+            paint
+        );
+        assert_eq!(paint.left_radius, height / 2., "{name}");
+        assert_eq!(paint.right_radius, height / 2., "{name}");
+        // A state layer resolves over the selected container, never replaces it.
+        assert!(!same(paint.hover, token(crate::theme::SURFACE_HIGH)));
+        assert!(!same(paint.hover, paint.background));
+    }
+
+    /// Unselected: neutral container, ink content; only outer ends are round.
+    fn assert_unselected(name: &str, index: usize, count: usize, height: Pixels) {
+        let paint = painted(name);
+        assert_eq!(
+            paint.background,
+            token(crate::theme::SURFACE_HIGH),
+            "{name}"
+        );
+        assert!(
+            same(paint.foreground, token(crate::theme::INK)),
+            "{name}: {:?}",
+            paint
+        );
+        let left = if index == 0 { height / 2. } else { px(8.) };
+        let right = if index + 1 == count {
+            height / 2.
+        } else {
+            px(8.)
+        };
+        assert_eq!(paint.left_radius, left, "{name}");
+        assert_eq!(paint.right_radius, right, "{name}");
+    }
+
     #[gpui::test]
-    fn connected_segments_fill_track_and_keep_labels_still_on_selection(cx: &mut TestAppContext) {
+    fn connected_segments_share_width_and_keep_labels_still_on_selection(cx: &mut TestAppContext) {
         cx.update(|cx| cx.set_reduce_motion(true));
         let (view, cx) = cx.add_window_view(|_, _| SegmentedHarness {
             selected: 0,
             changes: 0,
         });
         draw_choice(cx);
-        let lane = choice_bounds(cx, "full-choice-lane");
         let labels = [
             "full-choice-label-0",
             "full-choice-label-1",
@@ -622,23 +680,33 @@ mod tests {
             "full-choice-icon-2",
         ];
         let icon_before = icons.map(|selector| choice_bounds(cx, selector));
-        let options = [
-            "full-choice-option-0",
-            "full-choice-option-1",
-            "full-choice-option-2",
-        ]
-        .map(|selector| choice_bounds(cx, selector));
+        let options = OPTION_SELECTORS[..3]
+            .iter()
+            .map(|selector| choice_bounds(cx, selector))
+            .collect::<Vec<_>>();
+        let lane = choice_bounds(cx, "full-choice-lane");
         for index in 0..3 {
-            // Each label follows its icon, and every segment has the same height.
+            // Each label follows its icon; the cluster is centered in a 48px button.
+            assert_eq!(options[index].size.height, px(48.));
+            // Shares snap to the 2x device grid.
+            assert!((options[index].size.width - options[0].size.width).abs() <= px(0.5));
             assert!(icon_before[index].right() <= before[index].left());
-            assert!((options[index].size.height - options[0].size.height).abs() < px(0.5));
             let content_center = (icon_before[index].left() + before[index].right()) / 2.;
             assert!((content_center - options[index].center().x).abs() <= px(0.5));
             assert!((icon_before[index].center().y - options[index].center().y).abs() <= px(0.5));
             assert!((before[index].center().y - options[index].center().y).abs() <= px(0.5));
-            assert!((before[index].top() - before[0].top()).abs() < px(0.5));
         }
-        // Medium reference: a 360px panel minus two 24px insets must show the full label.
+        // Separate buttons with a 2px gap that together fill the parent.
+        for pair in options.windows(2) {
+            assert!((pair[1].left() - pair[0].right() - px(2.)).abs() <= px(0.5));
+        }
+        assert!((options[0].left() - lane.left()).abs() < px(0.5));
+        assert!((options[2].right() - lane.right()).abs() < px(0.5));
+        assert_eq!(lane.size.width, px(312.));
+        assert_selected("full-0", px(48.));
+        assert_unselected("full-1", 1, 3, px(48.));
+        assert_unselected("full-2", 2, 3, px(48.));
+        // A 360px panel minus two 24px insets must show the full label.
         let required = cx.update(|window, _| {
             let mut font = window.text_style().font();
             font.weight = FontWeight::MEDIUM;
@@ -666,26 +734,22 @@ mod tests {
             before[2],
             required
         );
-        let last = choice_bounds(cx, "full-choice-option-2");
-        let first = choice_bounds(cx, "full-choice-option-0");
-        assert!((first.size.width - last.size.width).abs() < px(0.5));
-        cx.simulate_click(last.center(), Modifiers::default());
+        cx.simulate_click(options[2].center(), Modifiers::default());
         draw_choice(cx);
         cx.update(|_, cx| {
             assert_eq!(view.read(cx).selected, 2);
             assert_eq!(view.read(cx).changes, 1);
         });
-        let fill = choice_bounds(cx, "full-choice-indicator");
-        assert!((fill.left() - last.left()).abs() < px(0.5));
-        assert_eq!(fill.top(), lane.top());
-        assert_eq!(fill.bottom(), lane.bottom());
+        // Reduce motion: the new selection is fully drawn on the changed frame.
+        assert_selected("full-2", px(48.));
+        assert_unselected("full-0", 0, 3, px(48.));
         for (selector, bounds) in labels.into_iter().zip(before) {
             assert_eq!(choice_bounds(cx, selector), bounds);
         }
         for (selector, bounds) in icons.into_iter().zip(icon_before) {
             assert_eq!(choice_bounds(cx, selector), bounds);
         }
-        cx.simulate_click(last.center(), Modifiers::default());
+        cx.simulate_click(options[2].center(), Modifiers::default());
         cx.update(|_, cx| assert_eq!(view.read(cx).changes, 1));
     }
 
@@ -746,8 +810,7 @@ mod tests {
         ];
         let before = option_selectors.map(|selector| choice_bounds(cx, selector));
         // The native GPUI test window uses a 2x device scale. Check actual
-        // laid-out labels, including the slightly longer 0.6B option that used
-        // to lose a fraction of a pixel when the track width was rounded.
+        // laid-out labels, including the slightly longer 0.6B option.
         for index in 0..MODEL_LABELS.len() {
             let label = choice_bounds(cx, label_selectors[index]);
             assert!(
@@ -755,12 +818,15 @@ mod tests {
                 "{} was narrowed below its full shaped width",
                 MODEL_LABELS[index]
             );
-            // The label sits inside its segment with equal room on both sides,
-            // whatever the segment padding is.
+            // Content-sized buttons: 16px from each edge to the label.
             let leading = label.left() - before[index].left();
             let trailing = before[index].right() - label.right();
-            assert!(leading > px(0.) && trailing > px(0.));
-            assert!((leading - trailing).abs() <= px(1.));
+            assert!((leading - px(16.)).abs() <= px(1.), "leading {leading:?}");
+            assert!(
+                (trailing - px(16.)).abs() <= px(1.),
+                "trailing {trailing:?}"
+            );
+            assert_eq!(before[index].size.height, px(40.));
         }
         cx.simulate_click(before[1].center(), Modifiers::default());
         draw_choice(cx);
@@ -771,7 +837,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn content_width_choices_move_the_indicator_without_shifting_labels(cx: &mut TestAppContext) {
+    fn content_width_choices_morph_in_place_and_settle(cx: &mut TestAppContext) {
         let (view, cx) = cx.add_window_view(|_, _| ContentWidthHarness {
             selected: "auto".into(),
             changes: 0,
@@ -782,31 +848,46 @@ mod tests {
             "content-choice-option-1",
             "content-choice-option-2",
         ];
+        let labels = [
+            "content-choice-label-0",
+            "content-choice-label-1",
+            "content-choice-label-2",
+        ];
         let before = selectors.map(|selector| choice_bounds(cx, selector));
-        let initial = choice_bounds(cx, "full-choice-indicator");
-        assert!((before[0].size.width - before[2].size.width).abs() < px(0.5));
+        let label_before = labels.map(|selector| choice_bounds(cx, selector));
+        // Each option is sized to its own label and the group hugs the start.
+        assert!(before[2].size.width > before[0].size.width + px(40.));
+        assert!((before[1].left() - before[0].right() - px(2.)).abs() < px(0.5));
+        assert_selected("content-0", px(40.));
         cx.simulate_click(before[2].center(), Modifiers::default());
         draw_choice(cx);
-        assert_eq!(choice_bounds(cx, "full-choice-indicator"), initial);
-        cx.executor().advance_clock(Duration::from_millis(70));
-        draw_choice(cx);
-        let intermediate = choice_bounds(cx, "full-choice-indicator");
-        assert!(intermediate.left() > initial.left());
-        assert!(intermediate.left() < before[2].left());
-        for (selector, bounds) in selectors.into_iter().zip(before) {
-            assert_eq!(choice_bounds(cx, selector), bounds);
-        }
-        cx.executor().advance_clock(Duration::from_millis(230));
-        draw_choice(cx);
-        assert!(
-            (choice_bounds(cx, "full-choice-indicator").left() - before[2].left()).abs() < px(0.5)
+        // The click frame starts from the current presentation, not the endpoint.
+        assert_eq!(
+            painted("content-2").background,
+            token(crate::theme::SURFACE_HIGH)
         );
+        cx.executor().advance_clock(Duration::from_millis(60));
+        draw_choice(cx);
+        let entering = painted("content-2");
+        let leaving = painted("content-0");
+        assert!(entering.right_radius == px(20.) && entering.left_radius > px(8.));
+        assert!(
+            entering.left_radius < px(20.),
+            "an intermediate shape is drawn"
+        );
+        assert!(leaving.right_radius > px(8.) && leaving.right_radius < px(20.));
+        assert!(!same(entering.background, token(crate::theme::ACCENT)));
+        for index in 0..3 {
+            assert_eq!(choice_bounds(cx, selectors[index]), before[index]);
+            assert_eq!(choice_bounds(cx, labels[index]), label_before[index]);
+        }
+        cx.executor().advance_clock(Duration::from_millis(300));
+        draw_choice(cx);
+        assert_selected("content-2", px(40.));
+        assert_unselected("content-0", 0, 3, px(40.));
         cx.simulate_mouse_move(before[2].center(), None, Modifiers::default());
         draw_choice(cx);
-        assert_eq!(
-            choice_bounds(cx, "full-choice-indicator").size,
-            initial.size
-        );
+        assert_eq!(choice_bounds(cx, selectors[2]), before[2]);
         cx.update(|window, cx| {
             assert_eq!(view.read(cx).changes, 1);
             window.simulate_next_frame(cx);
@@ -816,20 +897,16 @@ mod tests {
         });
     }
 
-    fn assert_inside_lane(cx: &mut VisualTestContext, count: usize, width: Pixels) {
+    fn assert_equal_options(cx: &mut VisualTestContext, count: usize, width: Pixels) {
         let track = choice_bounds(cx, "full-choice-track");
         let lane = choice_bounds(cx, "full-choice-lane");
-        let indicator = choice_bounds(cx, "full-choice-indicator");
         assert_eq!(track.size.width, width);
-        assert!(track.contains(&lane.origin) && track.contains(&lane.bottom_right()));
-        assert!(indicator.left() >= lane.left() - px(0.5));
-        assert!(indicator.right() <= lane.right() + px(0.5));
-        assert_eq!(indicator.top(), lane.top());
-        assert_eq!(indicator.bottom(), lane.bottom());
+        assert_eq!(lane.size.width, width);
+        let share = (width - px(2.) * (count - 1) as f32) / count as f32;
         for selector in &OPTION_SELECTORS[..count] {
             let option = choice_bounds(cx, selector);
-            assert!((option.size.width - lane.size.width / count as f32).abs() <= px(0.5));
-            assert!((indicator.size.width - option.size.width).abs() <= px(0.5));
+            assert!((option.size.width - share).abs() <= px(0.5));
+            assert_eq!(option.size.height, px(40.));
         }
     }
 
@@ -839,10 +916,13 @@ mod tests {
             selected: 0,
             width: px(420.),
             changes: 0,
+            disabled: false,
         });
         draw_choice(cx);
-        assert_inside_lane(cx, count, px(420.));
-        let start = choice_bounds(cx, "full-choice-indicator");
+        assert_equal_options(cx, count, px(420.));
+        let last = format!("full-{}", count - 1);
+        assert_selected("full-0", px(40.));
+        assert_unselected(&last, count - 1, count, px(40.));
         let options = (0..count)
             .map(|index| choice_bounds(cx, OPTION_SELECTORS[index]))
             .collect::<Vec<_>>();
@@ -858,42 +938,31 @@ mod tests {
             assert_eq!(view.read(cx).changes, 1);
             window.draw(cx).clear(cx);
         });
-        assert_eq!(
-            choice_bounds(cx, "full-choice-indicator").left(),
-            start.left()
-        );
+        assert_eq!(painted(&last).left_radius, px(8.));
         cx.simulate_click(destination.center(), Modifiers::default());
         cx.update(|_, cx| assert_eq!(view.read(cx).changes, 1, "same choice does not save twice"));
 
-        cx.executor().advance_clock(Duration::from_millis(70));
+        cx.executor().advance_clock(Duration::from_millis(60));
         draw_choice(cx);
-        let middle = choice_bounds(cx, "full-choice-indicator");
-        assert!(
-            middle.left() > start.left(),
-            "selection must leave its starting cell"
-        );
-        assert!(
-            middle.left() < destination.left(),
-            "selection must expose an intermediate frame"
-        );
-        for (index, before) in options.into_iter().enumerate() {
-            assert_eq!(choice_bounds(cx, OPTION_SELECTORS[index]), before);
+        let middle = painted(&last);
+        assert!(middle.left_radius > px(8.) && middle.left_radius < px(20.));
+        assert!(!same(middle.background, token(crate::theme::SURFACE_HIGH)));
+        assert!(!same(middle.background, token(crate::theme::ACCENT)));
+        for (index, before) in options.iter().enumerate() {
+            assert_eq!(choice_bounds(cx, OPTION_SELECTORS[index]), *before);
         }
         draw_choice(cx);
         assert_eq!(
-            choice_bounds(cx, "full-choice-indicator"),
+            painted(&last),
             middle,
             "ordinary redraw must not restart motion"
         );
 
-        // Reverse before settling, then resize without advancing time. Neither
-        // operation may teleport the current selection or use old geometry.
-        cx.simulate_click(start.center(), Modifiers::default());
+        // Reverse before settling, then resize without advancing time. The
+        // shape continues from its current value instead of jumping.
+        cx.simulate_click(options[0].center(), Modifiers::default());
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        assert_eq!(
-            choice_bounds(cx, "full-choice-indicator").left(),
-            middle.left()
-        );
+        assert_eq!(painted(&last).left_radius, middle.left_radius);
         cx.update(|window, cx| {
             view.update(cx, |view, cx| {
                 view.width = px(284.);
@@ -901,14 +970,12 @@ mod tests {
             });
             window.draw(cx).clear(cx);
         });
-        assert_inside_lane(cx, count, px(284.));
-        let resized = choice_bounds(cx, "full-choice-indicator");
-        cx.executor().advance_clock(Duration::from_millis(35));
+        assert_equal_options(cx, count, px(284.));
+        cx.executor().advance_clock(Duration::from_millis(30));
         draw_choice(cx);
-        let returning = choice_bounds(cx, "full-choice-indicator");
-        assert!(returning.left() < resized.left());
-        assert!(returning.left() > choice_bounds(cx, "full-choice-lane").left());
-        assert_inside_lane(cx, count, px(284.));
+        let returning = painted(&last);
+        assert!(returning.left_radius < middle.left_radius);
+        assert!(returning.left_radius >= px(8.));
 
         cx.executor().advance_clock(Duration::from_millis(300));
         cx.update(|window, cx| {
@@ -923,14 +990,12 @@ mod tests {
                 "settled control must stop scheduling frames"
             );
         });
-        assert_eq!(
-            choice_bounds(cx, "full-choice-indicator").left(),
-            choice_bounds(cx, "full-choice-lane").left()
-        );
+        assert_selected("full-0", px(40.));
+        assert_unselected(&last, count - 1, count, px(40.));
     }
 
     #[gpui::test]
-    fn full_width_choices_move_inside_current_geometry_and_settle(cx: &mut TestAppContext) {
+    fn full_width_choices_morph_inside_current_geometry_and_settle(cx: &mut TestAppContext) {
         for count in [3, 4] {
             exercise_full_width_motion(cx, count);
         }
@@ -944,6 +1009,7 @@ mod tests {
             selected: 0,
             width: px(420.),
             changes: 0,
+            disabled: false,
         });
         draw_choice(cx);
         let destination = choice_bounds(cx, "full-choice-option-3");
@@ -953,11 +1019,80 @@ mod tests {
             window.draw(cx).clear(cx);
             assert_eq!(window.simulate_next_frame(cx), 0);
         });
-        assert_eq!(
-            choice_bounds(cx, "full-choice-indicator").left(),
-            destination.left()
-        );
-        assert_inside_lane(cx, 4, px(420.));
+        assert_selected("full-3", px(40.));
+        assert_unselected("full-0", 0, 4, px(40.));
+        assert_equal_options(cx, 4, px(420.));
+    }
+
+    #[gpui::test]
+    fn arrow_keys_move_focus_and_selection_once_per_step(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_reduce_motion(true);
+            super::init(cx);
+        });
+        let (view, cx) = cx.add_window_view(|_, _| FullWidthHarness {
+            count: 3,
+            selected: 0,
+            width: px(420.),
+            changes: 0,
+            disabled: false,
+        });
+        draw_choice(cx);
+        // Clicking the selected option focuses it without a change.
+        let first = choice_bounds(cx, "full-choice-option-0").center();
+        cx.simulate_click(first, Modifiers::default());
+        draw_choice(cx);
+        cx.update(|_, cx| assert_eq!(view.read(cx).changes, 0));
+        cx.simulate_keystrokes("right");
+        draw_choice(cx);
+        cx.update(|_, cx| {
+            assert_eq!(view.read(cx).selected, 1);
+            assert_eq!(view.read(cx).changes, 1);
+        });
+        cx.simulate_keystrokes("left left");
+        draw_choice(cx);
+        cx.update(|_, cx| {
+            assert_eq!(
+                view.read(cx).selected,
+                2,
+                "previous wraps to the last option"
+            );
+            assert_eq!(view.read(cx).changes, 3);
+        });
+        cx.simulate_keystrokes("end");
+        cx.update(|_, cx| assert_eq!(view.read(cx).changes, 3, "already last"));
+        cx.simulate_keystrokes("home");
+        draw_choice(cx);
+        cx.update(|_, cx| {
+            assert_eq!(view.read(cx).selected, 0);
+            assert_eq!(view.read(cx).changes, 4);
+        });
+        assert_selected("full-0", px(40.));
+    }
+
+    #[gpui::test]
+    fn disabled_choices_use_disabled_roles_and_ignore_clicks(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| FullWidthHarness {
+            count: 3,
+            selected: 1,
+            width: px(420.),
+            changes: 0,
+            disabled: true,
+        });
+        draw_choice(cx);
+        let third = choice_bounds(cx, "full-choice-option-2").center();
+        cx.simulate_click(third, Modifiers::default());
+        draw_choice(cx);
+        cx.update(|_, cx| assert_eq!(view.read(cx).changes, 0));
+        let ink = token(crate::theme::INK);
+        for index in 0..3 {
+            let paint = painted(&format!("full-{index}"));
+            assert_eq!(paint.background, ink.opacity(0.12));
+            assert_eq!(paint.foreground, ink.opacity(0.38));
+            assert_eq!(paint.hover, paint.background, "no hover layer");
+        }
+        // The current option keeps its pill shape.
+        assert_eq!(painted("full-1").left_radius, px(20.));
     }
 
     #[test]
