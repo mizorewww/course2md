@@ -1585,6 +1585,60 @@ pub fn badge(kind: BadgeKind) -> gpui::Div {
     view
 }
 
+/// A fact beside a label in the badge's size, outlined rather than filled:
+/// e.g. the local engine on its tile.
+pub fn outlined_badge(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<gpui::SharedString>,
+) -> gpui::Stateful<gpui::Div> {
+    use gpui::prelude::*;
+    accessible_text(id, label)
+        .flex_shrink_0()
+        .px(px(10.))
+        .py(px(4.))
+        .rounded(RADIUS_SMALL)
+        .border_1()
+        .border_color(color(HAIRLINE))
+        .text_size(TEXT_AUX)
+        .line_height(rems(16. / 14.))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(color(GRAY))
+        .whitespace_nowrap()
+}
+
+/// M3 assist chip geometry: 32px tall with 8px corners, 8px before a leading
+/// icon and 12px otherwise. Callers give it their tone and label size.
+pub fn chip(leading_icon: bool) -> gpui::Div {
+    use gpui::prelude::*;
+    gpui_component::h_flex()
+        .flex_shrink_0()
+        .h(rems(32. / 14.))
+        .pl(rems(if leading_icon { 8. } else { 12. } / 14.))
+        .pr(rems(12. / 14.))
+        .gap(px(6.))
+        .items_center()
+        .rounded(RADIUS_SMALL)
+        .whitespace_nowrap()
+}
+
+/// What follows the pointer while a note, folder or queued task is dragged:
+/// its icon and name on a raised surface.
+pub fn drag_chip(icon: gpui_component::Icon, label: gpui::SharedString) -> gpui::Div {
+    use gpui::prelude::*;
+    gpui_component::h_flex()
+        .max_w(rems(24.))
+        .gap_2()
+        .px_3()
+        .py_2()
+        .rounded(RADIUS_SMALL)
+        .bg(color(SURFACE))
+        .shadow(shadow_popover())
+        .text_size(TEXT_BODY)
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .child(icon.size(ICON_SLOT).text_color(color(GRAY)))
+        .child(gpui::div().min_w_0().truncate().child(label))
+}
+
 /// A floating label for an outlined control. The control owns its border;
 /// supporting status stays in normal flow below it and can grow naturally.
 pub fn outlined_field_label(

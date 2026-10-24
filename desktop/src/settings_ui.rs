@@ -244,25 +244,6 @@ pub(super) fn settings_row(
     setting_surface().child(row)
 }
 
-/// A small outlined fact chip beside a tile's label, e.g. the local engine.
-pub(crate) fn outlined_chip(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-) -> Stateful<Div> {
-    accessible_text(id, label)
-        .flex_shrink_0()
-        .px(px(10.))
-        .py(px(4.))
-        .rounded(RADIUS_SMALL)
-        .border_1()
-        .border_color(color(HAIRLINE))
-        .text_size(TEXT_AUX)
-        .line_height(rems(16. / 14.))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(color(GRAY))
-        .whitespace_nowrap()
-}
-
 /// Editing fields use a top label: errors and related actions stay with the
 /// input without forcing long values into the preference label/control grid.
 pub(super) fn settings_field_row(
@@ -318,19 +299,6 @@ pub(super) fn settings_switch_row(label: &'static str, hint: &'static str, contr
                 .flex_shrink_0()
                 .child(preference_switch(control).accessibility_label(label)),
         )
-}
-
-/// Compact outlined chips used for capabilities and license links in settings.
-pub(super) fn settings_chip<T: Styled>(element: T) -> T {
-    element
-        .rounded(RADIUS_SMALL)
-        .h(rems(32. / 14.))
-        .min_h(rems(32. / 14.))
-        .px(rems(8. / 14.))
-        .border_1()
-        .border_color(color(HAIRLINE))
-        .bg(gpui::transparent_black())
-        .font_weight(FontWeight::NORMAL)
 }
 
 /// Status rows inside an existing card: label on the shared axis, value trailing.
@@ -3022,13 +2990,12 @@ impl Desktop {
                             } else {
                                 (icons::warning(), WARNING, course2md::tr!("待修复"))
                             };
-                            settings_chip(h_flex())
+                            chip(true)
+                                .border_1()
+                                .border_color(color(HAIRLINE))
                                 .id(("diagnostic-capability", index))
                                 .role(Role::Label)
                                 .aria_label(course2md::tr!("{}：{}", *label, state))
-                                .pr(rems(12. / 14.))
-                                .gap(rems(6. / 14.))
-                                .items_center()
                                 .text_size(TEXT_SETTINGS_AUX)
                                 .text_color(color(if *ready || *optional { INK } else { WARNING }))
                                 .when(!*ready && !*optional, |chip| {

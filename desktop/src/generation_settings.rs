@@ -343,7 +343,7 @@ impl Desktop {
                     }),
                 )
                 .when(!online, |row| {
-                    row.child(outlined_chip(
+                    row.child(outlined_badge(
                         "asr-method-engine",
                         crate::provider_label(provider),
                     ))

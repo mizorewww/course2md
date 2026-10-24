@@ -41,21 +41,6 @@ pub(crate) struct FolderDrag {
     name: SharedString,
 }
 
-fn drag_chip(icon: gpui_component::Icon, label: SharedString) -> Div {
-    h_flex()
-        .max_w(rems(20.))
-        .gap_2()
-        .px_3()
-        .py_2()
-        .rounded(RADIUS_SMALL)
-        .bg(color(SURFACE))
-        .shadow(shadow_popover())
-        .text_size(TEXT_BODY)
-        .font_weight(FontWeight::SEMIBOLD)
-        .child(icon.size(ICON_SLOT).text_color(color(GRAY)))
-        .child(div().min_w_0().truncate().child(label))
-}
-
 impl Render for NoteDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         drag_chip(icons::article(), self.title.clone())

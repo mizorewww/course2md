@@ -22,17 +22,7 @@ const TRANSCRIPTION_PURPOSE: &str = "transcription";
 /// names its state with color and icon.
 fn step_chip(stage: &TaskStage, cx: &App) -> Stateful<Div> {
     let icon_size = rems(16. / 14.);
-    let chip = h_flex()
-        .id(stage.id.clone())
-        .flex_shrink_0()
-        .h(rems(32. / 14.))
-        .pl_2()
-        .pr_3()
-        .gap(px(6.))
-        .items_center()
-        .rounded(RADIUS_SMALL)
-        .text_size(rems(13. / 14.))
-        .whitespace_nowrap();
+    let chip = chip(true).id(stage.id.clone()).text_size(rems(13. / 14.));
     let label = accessible_text(
         SharedString::from(format!("{}-chip", stage.id)),
         stage.title.clone(),
@@ -177,15 +167,9 @@ fn task_column() -> Div {
 
 /// A count in the page heading: 32px, 8px corners, one color role per kind.
 fn summary_chip(id: &'static str, text: String, kind: BadgeKind) -> Div {
-    let chip = h_flex()
-        .flex_shrink_0()
-        .h(rems(32. / 14.))
-        .px(rems(12. / 14.))
-        .items_center()
-        .rounded(RADIUS_SMALL)
+    let chip = chip(false)
         .text_size(rems(13. / 14.))
-        .font_weight(FontWeight::MEDIUM)
-        .whitespace_nowrap();
+        .font_weight(FontWeight::MEDIUM);
     let chip = match kind {
         BadgeKind::Progress => chip
             .bg(color(SECONDARY_CONTAINER))
@@ -208,22 +192,7 @@ struct QueueDrag {
 
 impl Render for QueueDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .max_w(rems(24.))
-            .gap_2()
-            .px_3()
-            .py_2()
-            .rounded(RADIUS_SMALL)
-            .bg(color(SURFACE))
-            .shadow(shadow_popover())
-            .text_size(TEXT_BODY)
-            .font_weight(FontWeight::SEMIBOLD)
-            .child(
-                icons::grip_vertical()
-                    .size(ICON_SLOT)
-                    .text_color(color(GRAY)),
-            )
-            .child(div().min_w_0().truncate().child(self.title.clone()))
+        drag_chip(icons::grip_vertical(), self.title.clone())
     }
 }
 
