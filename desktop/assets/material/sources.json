@@ -4,23 +4,18 @@
   "style": "Material Icons Rounded, 24px",
   "icons": {
     "task": "communication/list_alt",
-    "eye": "action/visibility",
-    "eye-off": "action/visibility_off",
     "movie": "av/movie",
     "play-arrow": "av/play_arrow",
     "image": "image/image",
     "format-list-bulleted": "editor/format_list_bulleted",
     "pause": "av/pause",
     "history": "action/history",
-    "create-new-folder": "file/create_new_folder",
-    "delete": "action/delete_outline",
     "zoom-in": "action/zoom_in",
     "zoom-out": "action/zoom_out",
     "fit-screen": "action/fit_screen",
     "arrow-up": "navigation/arrow_upward",
     "arrow-down": "navigation/arrow_downward",
     "ellipsis": "navigation/more_horiz",
-    "grid-view": "action/view_module",
     "summarize": "action/subject"
   }
 }

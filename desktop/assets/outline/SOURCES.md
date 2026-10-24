@@ -70,3 +70,9 @@ Downloaded icons and the upstream license are pinned to Lucide commit `d672fc43d
 | `text-align-start.svg` | `text-align-start` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/text-align-start.svg |
 | `loader-circle.svg` | `loader-circle` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/loader-circle.svg |
 | `captions.svg` | `captions` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/captions.svg |
+| `cpu.svg` | `cpu` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/cpu.svg |
+| `gpu.svg` | `gpu` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/gpu.svg |
+| `microchip.svg` | `microchip` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/microchip.svg |
+| `eye.svg` | `eye` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/eye.svg |
+| `eye-off.svg` | `eye-off` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/eye-off.svg |
+| `trash.svg` | `trash` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/trash.svg |

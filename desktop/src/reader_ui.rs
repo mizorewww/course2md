@@ -4202,7 +4202,7 @@ impl Desktop {
                 icons::image()
             }
         } else {
-            icons::ellipsis()
+            icons::more_vertical()
         })
         .when(short_reader, |button| {
             button

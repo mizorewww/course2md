@@ -130,9 +130,9 @@ pub(crate) fn engine_from_id(id: &str) -> Option<AsrProvider> {
 pub(crate) fn engine_icon(provider: Option<AsrProvider>) -> Icon {
     match provider {
         None => icons::auto_fix(),
-        Some(AsrProvider::Coreml) => icons::computer(),
-        Some(AsrProvider::Gpu) => icons::grid_view(),
-        Some(AsrProvider::Cpu) => icons::storage(),
+        Some(AsrProvider::Coreml) => icons::microchip(),
+        Some(AsrProvider::Gpu) => icons::gpu(),
+        Some(AsrProvider::Cpu) => icons::cpu(),
         Some(AsrProvider::Npu) => icons::sparkles(),
         Some(AsrProvider::Api) => icons::cloud(),
     }

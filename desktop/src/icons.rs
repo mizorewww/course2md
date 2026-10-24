@@ -39,10 +39,14 @@ icons! {
     code => "outline" / "code";
     computer => "outline" / "computer";
     content_copy => "outline" / "content-copy";
+    delete => "outline" / "trash";
+    cpu => "outline" / "cpu";
     download => "outline" / "download";
     edit => "outline" / "edit";
     error => "outline" / "circle-x";
     external_link => "outline" / "external-link";
+    eye => "outline" / "eye";
+    eye_off => "outline" / "eye-off";
     file_text => "outline" / "file-text";
     file_upload => "outline" / "file-upload";
     folder => "outline" / "folder";
@@ -50,6 +54,7 @@ icons! {
     folder_open => "outline" / "folder-open";
     folder_plus => "outline" / "folder-plus";
     globe => "outline" / "globe";
+    gpu => "outline" / "gpu";
     grip_vertical => "outline" / "grip-vertical";
     inbox => "outline" / "inbox";
     info => "outline" / "info";
@@ -64,6 +69,7 @@ icons! {
     maximize => "outline" / "maximize-2";
     message_square => "outline" / "message-square";
     mic => "outline" / "mic";
+    microchip => "outline" / "microchip";
     moon => "outline" / "moon";
     more_vertical => "outline" / "ellipsis-vertical";
     notebook => "outline" / "notebook";
@@ -89,13 +95,8 @@ icons! {
 
     arrow_down => "material" / "arrow-down";
     arrow_up => "material" / "arrow-up";
-    create_new_folder => "material" / "create-new-folder";
-    delete => "material" / "delete";
     ellipsis => "material" / "ellipsis";
-    eye => "material" / "eye";
-    eye_off => "material" / "eye-off";
     fit_screen => "material" / "fit-screen";
-    grid_view => "material" / "grid-view";
     history => "material" / "history";
     image => "material" / "image";
     movie => "material" / "movie";
@@ -144,6 +145,11 @@ impl AssetSource for Assets {
         paths.dedup();
         Ok(paths)
     }
+}
+
+/// A new folder: the outline `folder_plus`, under the name some callers use.
+pub fn create_new_folder() -> gpui_component::Icon {
+    folder_plus()
 }
 
 /// Brand colors are intrinsic to the platform mark, independent of UI themes.
