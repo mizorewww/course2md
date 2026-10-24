@@ -1,7 +1,9 @@
 --- a/crates/component/src/switch.rs
 +++ b/crates/component/src/switch.rs
-@@ -2,9 +2,9 @@
-     ActiveTheme, Disableable, Side, Sizable, Size, StyledExt, text::Text, tooltip::ComponentTooltip,
+@@ -1,10 +1,10 @@
+ use crate::{
+-    ActiveTheme, Disableable, Side, Sizable, Size, StyledExt, text::Text, tooltip::ComponentTooltip,
++    ActiveTheme, Disableable, Icon, Side, Sizable, Size, StyledExt, text::Text, tooltip::ComponentTooltip,
  };
  use gpui::{
 -    App, Background, ElementId, Hsla, InteractiveElement, IntoElement, ParentElement as _,
@@ -13,31 +15,30 @@
  };
  use gpui_base::{Switch as BaseSwitch, SwitchThumb, SwitchTrack, spring};
  use std::rc::Rc;
-@@ -22,6 +22,8 @@
+@@ -22,6 +22,9 @@ pub struct Switch {
      label_side: Side,
      on_click: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
      size: Size,
 +    track_height: Option<AbsoluteLength>,
 +    reference_geometry: bool,
++    thumb_icons: Option<(Icon, Icon)>,
      color: Option<Hsla>,
      tooltip: ComponentTooltip,
  }
-@@ -40,6 +42,8 @@
+@@ -40,6 +43,9 @@ impl Switch {
              on_click: None,
              label_side: Side::Right,
              size: Size::Medium,
 +            track_height: None,
 +            reference_geometry: false,
++            thumb_icons: None,
              color: None,
              tooltip: ComponentTooltip::default(),
          }
-@@ -81,6 +85,23 @@
-     /// Defaults to `cx.theme().primary`.
-     pub fn color(mut self, color: impl Into<Hsla>) -> Self {
-         self.color = Some(color.into());
-+        self
-+    }
-+
+@@ -84,6 +90,31 @@ impl Switch {
+         self
+     }
+ 
 +    /// Set a track height while preserving the track and thumb proportions.
 +    ///
 +    /// Rem lengths are resolved against the current window at render time.
@@ -52,16 +53,28 @@
 +    /// Other switches retain the component's original size and proportions.
 +    pub fn reference_geometry(mut self) -> Self {
 +        self.reference_geometry = true;
-         self
-     }
- 
-@@ -141,11 +162,29 @@
++        self
++    }
++
++    /// With `reference_geometry`: show an icon in the thumb for each state.
++    /// Both thumbs are then 24 px and the unchecked thumb takes the outline
++    /// color, as in the Material 3 switch with icons.
++    pub fn thumb_icons(mut self, checked: impl Into<Icon>, unchecked: impl Into<Icon>) -> Self {
++        self.thumb_icons = Some((checked.into(), unchecked.into()));
++        self
++    }
++
+     /// Set tooltip text for the switch.
+     pub fn tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
+         self.tooltip.text = Some((tooltip.into(), None));
+@@ -141,11 +172,30 @@ impl RenderOnce for Switch {
              Size::XSmall | Size::Small => px(12.),
              _ => px(16.),
          };
 -        let inset = px(2.);
++        let with_icons = self.reference_geometry && self.thumb_icons.is_some();
 +        let (bg_width, bg_height, bar_width) = if self.reference_geometry {
-+            (px(52.), px(32.), px(if checked { 24. } else { 16. }))
++            (px(52.), px(32.), px(if checked || with_icons { 24. } else { 16. }))
 +        } else {
 +            (bg_width, bg_height, bar_width)
 +        };
@@ -87,18 +100,24 @@
          };
  
          // The thumb's position is geometry, not a semantic state style: a
-@@ -155,7 +194,9 @@
+@@ -155,7 +205,15 @@ impl RenderOnce for Switch {
          // thumb is when the switch is toggled again mid-travel.
          let thumb_x = spring(
              (self.id.clone(), "thumb"),
 -            if checked {
 +            if self.reference_geometry {
-+                if checked { px(22.) * geometry_scale } else { px(6.) * geometry_scale }
++                if checked {
++                    px(22.) * geometry_scale
++                } else if with_icons {
++                    px(2.) * geometry_scale
++                } else {
++                    px(6.) * geometry_scale
++                }
 +            } else if checked {
                  bg_width - bar_width - inset * 2
              } else {
                  px(0.)
-@@ -198,7 +239,11 @@
+@@ -198,7 +256,11 @@ impl RenderOnce for Switch {
                          .flex()
                          .items_center()
                          .border(inset)
@@ -111,3 +130,31 @@
                          .when(!checked, |this| this.bg(unchecked_bg))
                          .styles(|styles| {
                              styles
+@@ -212,7 +274,26 @@ impl RenderOnce for Switch {
+                                 .rounded(radius)
+                                 .size(bar_width)
+                                 .left(thumb_x)
+-                                .bg(toggle_bg),
++                                .bg(if with_icons && !checked {
++                                    cx.theme().muted_foreground.into()
++                                } else {
++                                    toggle_bg
++                                })
++                                .when_some(
++                                    self.thumb_icons.filter(|_| self.reference_geometry),
++                                    |thumb, (on, off)| {
++                                        thumb.flex().items_center().justify_center().child(
++                                            if checked { on } else { off }
++                                                .size(px(if checked { 16. } else { 14. })
++                                                    * geometry_scale)
++                                                .text_color(if checked {
++                                                    self.color.unwrap_or(cx.theme().primary)
++                                                } else {
++                                                    cx.theme().switch
++                                                }),
++                                        )
++                                    },
++                                ),
+                         ),
+                 )
+                 .when_some(self.label, |this, label| {
