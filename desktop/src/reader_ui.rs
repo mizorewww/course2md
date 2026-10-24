@@ -1923,7 +1923,11 @@ fn render_note_image(
                             image_corner_button(("note-image", index), icons::maximize(), cx)
                                 .accessibility_label(course2md::tr!("放大{}", label))
                                 .tooltip(course2md::tr!("放大"))
-                                .on_click(move |_, window, cx| open(window, cx)),
+                                .on_click(move |_, window, cx| {
+                                    // The figure under the button opens the viewer too.
+                                    cx.stop_propagation();
+                                    open(window, cx)
+                                }),
                         ),
                 )
             })
@@ -5117,6 +5121,8 @@ impl Desktop {
                                     .accessibility_label(course2md::tr!("在笔记中查看"))
                                     .tooltip(course2md::tr!("在笔记中查看"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
+                                        // The image under the button opens the viewer.
+                                        cx.stop_propagation();
                                         this.jump_reader_block(body_index, 0., cx)
                                     }))
                                     .into_any_element(),
@@ -5131,6 +5137,7 @@ impl Desktop {
                                     .accessibility_label(course2md::tr!("放大{}", label))
                                     .tooltip(course2md::tr!("放大"))
                                     .on_click(cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
                                         this.open_reader_image(index, window, cx)
                                     }))
                                     .into_any_element(),
@@ -5356,6 +5363,11 @@ impl Desktop {
         let Some(preview) = &self.preview else {
             return;
         };
+        // One viewer at a time: a second dialog would share the first one's
+        // state and focus, and closing either would strand the other empty.
+        if self.reader_ui.viewer.is_some() && window.has_active_dialog(cx) {
+            return;
+        }
         if self
             .reader_ui
             .frames
