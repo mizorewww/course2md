@@ -50,6 +50,38 @@ fn notice_key(text: &str) -> usize {
     hasher.finish() as usize
 }
 
+/// Whether the app bar holds the brand and every destination with its label,
+/// from the shaped text at the current scale: the mark, wordmark and each
+/// destination's padding, icon, gap and label, plus a little open space.
+fn app_bar_labels_fit(leading: f32, tasks: Option<&str>, window: &Window) -> bool {
+    let rem = f32::from(window.rem_size());
+    let measure = |text: &str, size: f32| {
+        let mut style = window.text_style();
+        style.font_weight = FontWeight::MEDIUM;
+        let text = SharedString::from(text.to_owned());
+        f32::from(
+            window
+                .text_system()
+                .shape_line(text.clone(), px(size), &[style.to_run(text.len())], None)
+                .width,
+        )
+    };
+    let scaled = |value: f32| value * rem / 14.;
+    let brand = scaled(4. + 32. + 10. + 12.) + measure("course2md", scaled(20.));
+    let destination = |label: &str| scaled(12. + 20. + 8. + 16.) + measure(label, scaled(15.));
+    let destinations = [
+        Some(course2md::tr!("笔记库")),
+        tasks,
+        Some(course2md::tr!("设置")),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|label| destination(label) + 4.)
+    .sum::<f32>();
+    let open_space = scaled(24.);
+    leading + brand + destinations + open_space + 16. <= f32::from(window.viewport_size().width)
+}
+
 fn shell_column_at(width: AbsoluteLength) -> Div {
     div()
         .w_full()
@@ -93,7 +125,16 @@ impl Desktop {
         }
         // The brand leads the bar and returns to the workbench, as on the M3
         // canvas; destinations follow on the trailing edge with icon and label.
-        let compact = is_compact(window);
+        let task_label = if task_count > 0 {
+            course2md::tr!("任务 · {}", task_count)
+        } else {
+            course2md::tr!("任务").to_owned()
+        };
+        let show_tasks = task_count > 0 || tasks_need_attention || page == Page::Task;
+        // Destinations keep their labels; they become icons only when the
+        // bar, measured with the current text, can no longer hold them.
+        let compact =
+            !app_bar_labels_fit(leading, show_tasks.then_some(task_label.as_str()), window);
         let home = nav_action("nav-home", false, cx)
             .pl(px(4.))
             .pr(px(12.))
@@ -103,9 +144,10 @@ impl Desktop {
                     .items_center()
                     .gap(px(10.))
                     .child(
+                        // The mark scales with the wordmark beside it.
                         img("images/course2md.png")
-                            .size(px(32.))
-                            .rounded(px(10.))
+                            .size(rems(32. / 14.))
+                            .rounded(rems(10. / 14.))
                             .flex_shrink_0(),
                     )
                     .child(
@@ -134,18 +176,14 @@ impl Desktop {
             this.navigate(Page::Library, cx);
         }));
         // Tasks stay reachable, but only claim space once there is work to show.
-        let tasks = (task_count > 0 || tasks_need_attention || page == Page::Task).then(|| {
+        let tasks = show_tasks.then(|| {
             nav_action("nav-tasks", page == Page::Task, cx)
                 .icon(if tasks_need_attention {
                     icons::warning()
                 } else {
                     icons::list_checks()
                 })
-                .label(if task_count > 0 {
-                    course2md::tr!("任务 · {}", task_count)
-                } else {
-                    course2md::tr!("任务").to_owned()
-                })
+                .label(task_label)
                 .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx)))
         });
         let settings = nav_action("nav-settings", page == Page::Settings, cx)
