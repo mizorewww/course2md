@@ -56,6 +56,7 @@ icons! {
     globe => "outline" / "globe";
     gpu => "outline" / "gpu";
     grip_vertical => "outline" / "grip-vertical";
+    image => "outline" / "image";
     inbox => "outline" / "inbox";
     info => "outline" / "info";
     layout_grid => "outline" / "layout-grid";
@@ -97,7 +98,6 @@ icons! {
     arrow_up => "material" / "arrow-up";
     fit_screen => "material" / "fit-screen";
     history => "material" / "history";
-    image => "material" / "image";
     movie => "material" / "movie";
     pause => "material" / "pause";
     play_arrow => "material" / "play-arrow";

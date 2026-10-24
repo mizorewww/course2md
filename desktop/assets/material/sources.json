@@ -6,7 +6,6 @@
     "task": "communication/list_alt",
     "movie": "av/movie",
     "play-arrow": "av/play_arrow",
-    "image": "image/image",
     "format-list-bulleted": "editor/format_list_bulleted",
     "pause": "av/pause",
     "history": "action/history",

@@ -76,3 +76,4 @@ Downloaded icons and the upstream license are pinned to Lucide commit `d672fc43d
 | `eye.svg` | `eye` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/eye.svg |
 | `eye-off.svg` | `eye-off` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/eye-off.svg |
 | `trash.svg` | `trash` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/trash.svg |
+| `image.svg` | `image` | https://raw.githubusercontent.com/lucide-icons/lucide/d672fc43dbf60962d9d829e35bc3b3e5ed89a178/icons/image.svg |
