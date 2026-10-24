@@ -326,7 +326,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保存位置不可访问，请连接对应磁盘	保存位置不可访问，请连接对应磁盘	The save location is inaccessible, please connect the corresponding disk.	儲存位置無法存取，請連接對應磁碟	保存場所にアクセスできません。対応するディスクを接続してください。
 保存位置不可访问，请连接磁盘或选择其他位置	保存位置不可访问，请连接磁盘或选择其他位置	Save location unavailable. Connect the disk or choose another location.	儲存位置無法存取，請連接磁碟或選擇其他位置	保存先にアクセスできません。ディスクを接続するか、別の場所を選択してください
 保存位置不是文件夹	保存位置不是文件夹	The save location is not a folder	儲存位置不是資料夾	保存場所がフォルダーではありません
-保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	The save location has changed during confirmation and has not yet been re-associated. Please recheck this location.	儲存位置在確認期間已經變化，尚未重新關聯。請重新檢查這個位置。	保存場所は確認中に変更されており、まだ再関連付けされていません。この場所を再確認してください。
+保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	The save location changed during confirmation and has not been reconnected. Check this location again.	儲存位置在確認期間已經變化，尚未重新關聯。請重新檢查這個位置。	保存場所は確認中に変更されたため、まだ再接続されていません。この場所をもう一度確認してください。
 保存位置在读取期间已经变化，请重新检查	保存位置在读取期间已经变化，请重新检查	The save location has changed during reading, please check again	儲存位置在讀取期間已經變化，請重新檢查	読み込み中に保存場所が変更されました。もう一度確認してください。
 保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	The save location corresponds to other note libraries. Please restore the original location or re-register in the storage settings.	儲存位置對應其他筆記庫，請恢復原位置或在儲存設定中重新登記	保存場所は他のノートライブラリに対応します。元の場所に戻すか、ストレージ設定で再登録してください。
 保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	The save location is not ready yet: {}. You can choose a different location in the settings' storage.	儲存位置尚未準備好：{}。可以在設定的儲存中選擇其他位置。	保存場所はまだ準備ができていません: {}。設定のストレージ内の別の場所を選択できます。
@@ -339,7 +339,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保存位置暂时无法访问，未能搜索	保存位置暂时无法访问，未能搜索	The save location is temporarily inaccessible and cannot be searched.	儲存位置暫時無法存取，未能搜尋	保存場所に一時的にアクセスできないため、検索できません。
 保存位置未登记	保存位置未登记	The save location is not registered	儲存位置未登記	保存先が登録されていません
 保存位置由存储设置管理	保存位置由存储设置管理	Save location is managed by storage settings	儲存位置由儲存設定管理	保存場所はストレージ設定によって管理されます
-保存位置需要重新关联	保存位置需要重新关联	Save location needs to be re-associated	儲存位置需要重新關聯	保存場所を再度関連付ける必要があります
+保存位置需要重新关联	保存位置需要重新关联	Save location needs to be reconnected	儲存位置需要重新關聯	保存場所を再接続する必要があります
 保存位置：{}\n\n	保存位置：{}\n\n	Save location: {}\n\n	儲存位置：{}\n\n	保存先：{}\n\n
 保存到	保存到	Save to	儲存到	保存先
 保存名称	保存名称	Saved name	儲存名稱	保存名
@@ -468,7 +468,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 取消读取字幕	取消读取字幕	Cancel reading subtitles	取消讀取字幕	字幕の読み取りをキャンセル
 取消读取视频	取消读取视频	Cancel reading video	取消讀取影片	動画の読み取りをキャンセルします
 取消转换	取消转换	Cancel conversion	取消轉換	変換をキャンセルする
-取消重新关联	取消重新关联	Cancel re-association	取消重新關聯	再関連付けをキャンセルする
+取消重新关联	取消重新关联	Cancel reconnecting	取消重新關聯	再接続をキャンセル
 取消重新定位	取消重新定位	Cancel relocation	取消重新定位	場所の再指定をキャンセル
 另存一份摘要（Markdown）到此目录 / Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目录	Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目錄	各要約を Markdown としてこのディレクトリにも保存
 另有 {} 个位置未纳入搜索	另有 {} 个位置未纳入搜索	{} more locations were not included in the search	另有 {} 個位置未納入搜尋	ほかに {} か所が検索の対象外です
@@ -587,7 +587,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 尚未登录 Codex。/ No Codex login saved.	尚未登录 Codex。/ No Codex login saved.	No Codex login saved.	尚未登入 Codex。/ No Codex login saved.	Codex にまだログインしていません。
 尚未设置	尚未设置	Not set yet	尚未設定	まだ設定されていません
 尚未选择文字来源	尚未选择文字来源	No text source selected yet	尚未選擇文字來源	テキストソースがまだ選択されていません
-尚未重新关联：{}	尚未重新关联：{}	Not reassociated yet: {}	尚未重新關聯：{}	まだ再関連付けされていません: {}
+尚未重新关联：{}	尚未重新关联：{}	Not reconnected yet: {}	尚未重新關聯：{}	まだ再接続されていません: {}
 尚未重新定位：{}	尚未重新定位：{}	Not relocated yet: {}	尚未重新定位：{}	まだ場所を再指定していません: {}
 尚未验证	尚未验证	Not verified yet	尚未驗證	まだ検証されていません
 就绪 / Ready	就绪	Ready	就緒	準備完了
@@ -633,7 +633,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已取消读取	已取消读取	Read cancelled	已取消讀取	読み取りがキャンセルされました
 已取消读取字幕 / Subtitle reading cancelled	已取消读取字幕	Subtitle reading cancelled	已取消讀取字幕	字幕の読み取りがキャンセルされました
 已取消读取文件 / File reading cancelled	已取消读取文件	File reading cancelled	已取消讀取檔案	ファイルの読み込みがキャンセルされました
-已取消重新关联	已取消重新关联	Re-association cancelled	已取消重新關聯	再関連付けをキャンセルしました
+已取消重新关联	已取消重新关联	Reconnecting cancelled	已取消重新關聯	再接続をキャンセルしました
 已取消重新定位	已取消重新定位	Relocation cancelled	已取消重新定位	場所の再指定をキャンセルしました
 已复制 Markdown 文本	已复制 Markdown 文本	Markdown text copied	已複製 Markdown 文字	Markdown テキストをコピーしました
 已复制纯文本	已复制纯文本	Plain text copied	已複製純文字	プレーンテキストがコピーされました
@@ -687,7 +687,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已退出首次使用向导 / Exited the first-run wizard	已退出首次使用向导	Exited the first-run wizard	已退出首次使用嚮導	初回ウィザードを終了しました
 已选的 Apple 识别方式未完成；任务参数和进度已保留 / Selected Apple transcription failed; task settings retained	已选的 Apple 识别方式未完成；任务参数和进度已保留	Selected Apple transcription failed; task settings retained	已選的 Apple 辨識方式未完成；任務參數和進度已保留	選択した Apple の認識方法が完了しませんでした。タスクの設定と進行状況は保持されています
 已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}	已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}	{} task records have been rebuilt and processing has not been started. Original records are kept at {}. {}	已重建 {} 項任務記錄，未啟動處理。原始記錄儲存在 {}。{}	{} 件のタスク記録を再構築しました。処理は開始していません。元の記録は {} に保存されています。{}
-已重新关联「{}」	已重新关联「{}」	"{}" has been re-associated	已重新關聯「{}」	「{}」が再関連付けされました
+已重新关联「{}」	已重新关联「{}」	"{}" has been reconnected	已重新關聯「{}」	「{}」を再接続しました
 已重新定位到 {}	已重新定位到 {}	Relocated to {}	已重新定位到 {}	場所を {} に再指定しました
 已重新开始整理文件夹，原损坏文件已另存	已重新开始整理文件夹，原损坏文件已另存	Folder organization restarted; the original damaged file was saved separately.	已重新開始整理資料夾，原損壞檔案已另存	フォルダーの整理を再開しました。元の破損ファイルは別に保存されています。
 带图时系统提示说明截图用途	带图时系统提示说明截图用途	With images, the system prompt explains what the screenshots are for	帶圖時系統提示說明截圖用途	画像付きの場合、システムプロンプトでスクリーンショットの用途を説明
@@ -708,7 +708,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 开始处理视频… / Processing your video…	开始处理视频…	Processing your video…	開始處理影片…	動画の処理を開始します…
 开始补做	开始补做	Start reprocessing	開始補做	再処理を開始
 开始转换	开始转换	Start conversion	開始轉換	変換を開始
-开源许可	开源许可	Open source license	開放原始碼授權	オープンソースライセンス
+开源许可	开源许可	Open source licenses	開放原始碼授權	オープンソースライセンス
 引数：	引数：	Arguments:	引數：	引数:
 当前 LLM 配置不是 Ollama，未做改动。/ The current LLM configuration is not Ollama; nothing changed.	当前 LLM 配置不是 Ollama，未做改动。/ The current LLM configuration is not Ollama; nothing changed.	The current LLM configuration is not Ollama; nothing changed.	目前 LLM 設定不是 Ollama，未做改動。/ The current LLM configuration is not Ollama; nothing changed.	現在の LLM 設定は Ollama ではないため、変更しませんでした。
 当前 llama.cpp 版本过旧，不支持此显卡设置，请升级后重试 / This llama.cpp is too old for this GPU setting; upgrade and retry	当前 llama.cpp 版本过旧，不支持此显卡设置，请升级后重试	This llama.cpp is too old for this GPU setting; upgrade and retry	目前 llama.cpp 版本過舊，不支援此顯示卡設定，請升級後重試	llama.cpp の現在のバージョンは古すぎるため、このグラフィック カード設定をサポートしていません。アップグレードしてもう一度お試しください。
@@ -960,7 +960,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法确认字幕对应的视频，请重新读取 / Cannot confirm the video for the subtitle; probe again	无法确认字幕对应的视频，请重新读取	Cannot confirm the video for the subtitle; probe again	無法確認字幕對應的影片，請重新讀取	字幕に対応する動画を確認できません。もう一度読み込んでください
 无法确认所选文件夹是这个笔记库，请选择移动后的完整笔记库文件夹	无法确认所选文件夹是这个笔记库，请选择移动后的完整笔记库文件夹	Unable to confirm that the selected folder is this note library, please select the moved complete note library folder	無法確認所選資料夾是這個筆記庫，請選擇移動後的完整筆記庫資料夾	選択したフォルダーがこのノート ライブラリであることを確認できません。移動された完全なノート ライブラリ フォルダーを選択してください
 无法确认这个文件夹是否属于本笔记库：{}	无法确认这个文件夹是否属于本笔记库：{}	Unable to confirm whether this folder belongs to this note library: {}	無法確認這個資料夾是否屬於本筆記庫：{}	このフォルダーがこのノートライブラリに属しているかどうかを確認できません: {}
-无法确认这是原来的笔记库，请检查后重新关联	无法确认这是原来的笔记库，请检查后重新关联	Unable to confirm that this is the original note library, please check and re-associate	無法確認這是原來的筆記庫，請檢查後重新關聯	これが元のノート ライブラリであることを確認できません。確認して再度関連付けてください。
+无法确认这是原来的笔记库，请检查后重新关联	无法确认这是原来的笔记库，请检查后重新关联	Can't confirm this is the original note library. Check it, then reconnect.	無法確認這是原來的筆記庫，請檢查後重新關聯	これが元のノート ライブラリであることを確認できません。確認してから再接続してください。
 无法移动笔记：{}	无法移动笔记：{}	Unable to move note: {}	無法移動筆記：{}	ノートを移動できません: {}
 无法移除此服务的钥匙串凭据（系统代码 {}）	无法移除此服务的钥匙串凭据（系统代码 {}）	Unable to remove keychain credentials for this service (system code {})	無法移除此服務的鑰匙圈憑證（系統代碼 {}）	このサービスのキーチェーン資格情報を削除できません (システム コード {})
 无法移除系统凭据库中此服务的凭据	无法移除系统凭据库中此服务的凭据	Unable to remove credentials for this service from the system credential store	無法移除系統憑證庫中此服務的憑證	このサービスの資格情報をシステム資格情報ストアから削除できません
@@ -1876,10 +1876,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 重命名笔记	重命名笔记	Rename note	重新命名筆記	ノートの名前を変更する
 重命名笔记…	重命名笔记…	Rename note…	重新命名筆記…	ノートの名前を変更…
 重复的识别检查点已忽略 / Ignored duplicate transcription checkpoint	重复的识别检查点已忽略	Ignored duplicate transcription checkpoint	重複的辨識檢查點已忽略	重複した認識チェックポイントを無視しました
-重新关联	重新关联	Reassociate	重新關聯	再関連付け
+重新关联	重新关联	Reconnect	重新關聯	再接続
 重新关联…	重新关联…	Reconnect…	重新關聯…	再接続…
 重新关联此保存位置	重新关联此保存位置	Reconnect this save location	重新關聯此儲存位置	この保存場所を再接続します
-重新关联此保存位置？	重新关联此保存位置？	Reassociate this save location?	重新關聯此儲存位置？	この保存場所を再度関連付けますか?
+重新关联此保存位置？	重新关联此保存位置？	Reconnect this save location?	重新關聯此儲存位置？	この保存場所を再接続しますか?
 重新关联笔记库	重新关联笔记库	Reconnect the note library	重新關聯筆記庫	ノートライブラリを再接続する
 重新发送以上内容	重新发送以上内容	Resend the above	重新傳送以上內容	上記を再送します
 重新发送的选择尚未保存：{}	重新发送的选择尚未保存：{}	Resend selection not saved: {}	重新傳送的選擇尚未儲存：{}	再送信選択が保存されていません: {}
@@ -2141,14 +2141,14 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 只使用视频自带的字幕	只使用视频自带的字幕	Only the video's own subtitles will be used	只使用影片內建的字幕	動画に付属する字幕のみを使用します
 阅读目录	目录	Contents	目錄	目次
 主题、语言、文字大小	主题、语言、文字大小	Theme, language, text size	主題、語言、文字大小	テーマ、言語、文字サイズ
-字幕、语音识别、AI 处理	字幕、语音识别、AI 处理	Subtitles, speech recognition, AI processing	字幕、語音辨識、AI 處理	字幕、音声認識、AI 処理
-来源账号、AI 与语音服务	来源账号、AI 与语音服务	Source accounts, AI and speech services	來源帳號、AI 與語音服務	ソースアカウント、AI と音声サービス
-运行检查、版本、许可	运行检查、版本、许可	Health check, version, licenses	執行檢查、版本、授權	動作チェック、バージョン、ライセンス
+字幕、语音识别、AI 处理	字幕、语音识别、AI 处理	Subtitles, speech, AI	字幕、語音辨識、AI 處理	字幕、音声認識、AI 処理
+来源账号、AI 与语音服务	来源账号、AI 与语音服务	Accounts, AI and speech	來源帳號、AI 與語音服務	ソースアカウント、AI と音声サービス
+运行检查、版本、许可	运行检查、版本、许可	Run checks, version, licenses	執行檢查、版本、授權	チェック、バージョン、ライセンス
 搜索设置	搜索设置	Search settings	搜尋設定	設定を検索
 没有匹配的设置	没有匹配的设置	No matching settings	沒有符合的設定	一致する設定はありません
 设置分类	设置分类	Settings categories	設定分類	設定のカテゴリ
 使用中	使用中	In use	使用中	使用中
 未添加时使用本机识别	未添加时使用本机识别	Without one, speech is recognized on this device	未新增時使用本機辨識	未追加の場合はこのデバイスで認識します
 需要修复	需要修复	Needs repair	需要修復	修正が必要です
-{} 项检查未通过	{} 项检查未通过	{} checks did not pass	{} 項檢查未通過	{} 件のチェックに合格しませんでした
+{} 项检查未通过	{} 项检查未通过	Failed checks: {}	{} 項檢查未通過	{} 件のチェックに合格しませんでした
 应用 / Application	应用	Application	應用程式	アプリ
