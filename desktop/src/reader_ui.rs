@@ -406,6 +406,9 @@ pub(crate) struct State {
     controls_scroll: ScrollHandle,
     information_scroll: ScrollHandle,
     toc_scroll: ScrollHandle,
+    /// The contents entry last scrolled into view, so the rail follows the
+    /// reading position without fighting a reader who scrolls it.
+    toc_revealed: Option<usize>,
     view_focus: [FocusHandle; 2],
     menu_focus: FocusHandle,
     find: FindState,
@@ -588,6 +591,7 @@ impl State {
             controls_scroll: ScrollHandle::new(),
             information_scroll: ScrollHandle::new(),
             toc_scroll: ScrollHandle::new(),
+            toc_revealed: None,
             view_focus: std::array::from_fn(|_| cx.focus_handle()),
             menu_focus: cx.focus_handle(),
             find: FindState {
@@ -2379,6 +2383,8 @@ impl Desktop {
             .set_offset(point(px(0.), px(0.)));
         self.reader_ui.frames = Rc::default();
         self.reader_ui.images.clear(cx);
+        self.reader_ui.toc_revealed = None;
+        self.reader_ui.toc_scroll.set_offset(point(px(0.), px(0.)));
         self.reader_ui.frame_by_path = Rc::default();
         self.reader_ui.missing_by_block = Rc::default();
         self.reader_ui.gallery.matches = Rc::default();
@@ -3763,6 +3769,23 @@ impl Desktop {
         let top = self.reader_ui.note_list.logical_scroll_top();
         let top_block = note_top_block(&self.reader_ui.note_items, top.item_ix).unwrap_or(0);
         let current = outline_current(outline, top_block);
+        if current != self.reader_ui.toc_revealed {
+            let position_of =
+                |block: Option<usize>| outline.iter().position(|(index, ..)| Some(*index) == block);
+            let previous = position_of(self.reader_ui.toc_revealed);
+            self.reader_ui.toc_revealed = current;
+            // The rail's first child is its title, entries follow in order
+            // and its closing space comes last. Reading on reveals the entry
+            // after the current one too (or that closing space), so the
+            // current entry never rests on the rail's edge; reading back
+            // reveals the current entry itself.
+            if let Some(position) = position_of(current) {
+                let ahead = previous.is_none_or(|previous| position > previous);
+                self.reader_ui
+                    .toc_scroll
+                    .scroll_to_item(position + if ahead { 2 } else { 1 });
+            }
+        }
         if metrics.toc_fits_beside {
             h_flex()
                 .flex_1()
@@ -5373,7 +5396,7 @@ impl Desktop {
             .overflow_y_scroll()
             .track_scroll(&self.reader_ui.toc_scroll);
         panel = match width {
-            Some(width) => panel.w(px(width)).flex_shrink_0().h_full().min_h_0().pb_4(),
+            Some(width) => panel.w(px(width)).flex_shrink_0().h_full().min_h_0(),
             None => panel.w_full().h_full().min_h_0().p_3(),
         };
         panel = panel.child(
@@ -5479,7 +5502,9 @@ impl Desktop {
                 self.reader_ui.toc_scroll.clone(),
             ));
         }
-        panel
+        // The rail's closing space is a child, so revealing the last entry
+        // keeps that space below it instead of resting it on the edge.
+        panel.child(div().flex_shrink_0().h(rems(1.)))
     }
     pub(crate) fn open_reader_image(
         &mut self,
