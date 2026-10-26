@@ -87,6 +87,8 @@ CoreML 模型加载失败 / CoreML model loading failed	CoreML 模型加载失�
 Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}; Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}
 HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}; response exceeds 128 KiB, remainder not read	HTTP {}；回應超過 128 KiB，未讀取其餘內容	HTTP {};応答が 128 KiB を超えているため、残りは読み取られていません
 Intel NPU 加速	Intel NPU 加速	Intel NPU acceleration	Intel NPU 加速	Intel NPU アクセラレーション
+{} 万	{} 万	{} × 10,000	{} 萬	{} 万
+{} 亿	{} 亿	{} × 100 million	{} 億	{} 億
 ↓ {} 词元	↓ {} 词元	↓ {} tokens	↓ {} 詞元	↓ {} トークン
 不使用 AI	不使用 AI	No AI processing	不使用 AI	AI 処理なし
 仅对「{}」生效	仅对「{}」生效	Applies only to “{}”	僅對「{}」生效	「{}」にのみ適用されます

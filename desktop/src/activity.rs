@@ -391,13 +391,42 @@ fn duration_words(seconds: u64) -> String {
     }
 }
 
-/// "950", "12.3k", "1.2M".
+/// A large count in the interface language.
 fn compact_count(count: u64) -> String {
-    match count {
-        0..1_000 => count.to_string(),
-        1_000..1_000_000 => format!("{:.1}k", count as f64 / 1e3),
-        _ => format!("{:.1}M", count as f64 / 1e6),
+    compact_count_in(count, course2md::i18n::lang())
+}
+
+/// "950", "12.3k", "1.2M" in English. Chinese and Japanese count in their
+/// own units: "1,234" up to 9,999, then "1.2 万" / "1.2 萬" and "1.2 亿" /
+/// "1.2 億".
+fn compact_count_in(count: u64, lang: course2md::i18n::Lang) -> String {
+    use course2md::i18n::{Lang, t_for};
+    if lang == Lang::En {
+        return match count {
+            0..1_000 => count.to_string(),
+            1_000..1_000_000 => format!("{:.1}k", count as f64 / 1e3),
+            _ => format!("{:.1}M", count as f64 / 1e6),
+        };
     }
+    let (template, value) = match count {
+        0..10_000 => return grouped(count),
+        10_000..100_000_000 => (t_for("{} 万", lang), count as f64 / 1e4),
+        _ => (t_for("{} 亿", lang), count as f64 / 1e8),
+    };
+    template.replacen("{}", &format!("{value:.1}"), 1)
+}
+
+/// "1,234".
+fn grouped(count: u64) -> String {
+    let digits = count.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 fn is_byte_download(stage: &Stage) -> bool {
@@ -577,10 +606,22 @@ fn duration(seconds: f64) -> String {
 mod tests {
     #[test]
     fn counters_are_compact() {
-        use super::{Duration, compact_count, elapsed_label};
-        assert_eq!(compact_count(950), "950");
-        assert_eq!(compact_count(12_345), "12.3k");
-        assert_eq!(compact_count(1_250_000), "1.2M");
+        use super::{Duration, compact_count_in, elapsed_label};
+        use course2md::i18n::Lang;
+        assert_eq!(compact_count_in(950, Lang::En), "950");
+        assert_eq!(compact_count_in(12_345, Lang::En), "12.3k");
+        assert_eq!(compact_count_in(1_250_000, Lang::En), "1.2M");
+        // Chinese and Japanese count in 万 and 亿, with no Latin unit.
+        assert_eq!(compact_count_in(950, Lang::ZhHans), "950");
+        assert_eq!(compact_count_in(1_234, Lang::ZhHans), "1,234");
+        assert_eq!(compact_count_in(9_999, Lang::Ja), "9,999");
+        assert_eq!(compact_count_in(12_345, Lang::ZhHans), "1.2 万");
+        assert_eq!(compact_count_in(12_345, Lang::ZhHant), "1.2 萬");
+        assert_eq!(compact_count_in(12_345, Lang::Ja), "1.2 万");
+        assert_eq!(compact_count_in(1_250_000, Lang::ZhHans), "125.0 万");
+        assert_eq!(compact_count_in(250_000_000, Lang::ZhHans), "2.5 亿");
+        assert_eq!(compact_count_in(250_000_000, Lang::ZhHant), "2.5 億");
+        assert_eq!(compact_count_in(250_000_000, Lang::Ja), "2.5 億");
         assert_eq!(
             elapsed_label(Duration::from_secs(16)),
             "用时\u{a0}16\u{a0}秒"
