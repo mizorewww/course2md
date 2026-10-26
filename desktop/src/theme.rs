@@ -1651,13 +1651,19 @@ pub fn nav_destination(
 }
 
 /// The width, in window pixels, of a `nav_destination` drawing `shown` at the
-/// current text scale.
-pub fn nav_destination_width(shown: Option<&str>, window: &Window) -> f32 {
+/// current text scale; `collapsed` when `shown` is not the full label, which
+/// gives the destination even padding.
+pub fn nav_destination_width(shown: Option<&str>, collapsed: bool, window: &Window) -> f32 {
     let scaled = |value: f32| value * f32::from(window.rem_size()) / 14.;
+    let end = if collapsed {
+        NAV_PAD_START
+    } else {
+        NAV_PAD_END
+    };
     match shown {
-        None => scaled(NAV_PAD_START * 2. + NAV_ICON),
+        None => scaled(NAV_PAD_START + NAV_ICON + end),
         Some(text) => {
-            scaled(NAV_PAD_START + NAV_ICON + NAV_ICON_GAP + NAV_PAD_END)
+            scaled(NAV_PAD_START + NAV_ICON + NAV_ICON_GAP + end)
                 + shaped_width(
                     text,
                     scaled(NAV_LABEL_SIZE),

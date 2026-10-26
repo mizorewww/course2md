@@ -94,7 +94,7 @@ fn app_bar_density(
         ]
         .into_iter()
         .flatten()
-        .map(|shown| nav_destination_width(shown, window) + 4.)
+        .map(|shown| nav_destination_width(shown, !labels, window) + 4.)
         .sum::<f32>();
         brand + destinations + scaled(24.) <= available
     };
