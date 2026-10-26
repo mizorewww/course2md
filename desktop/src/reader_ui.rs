@@ -4165,6 +4165,64 @@ impl Desktop {
         }
     }
 
+    /// Whether the title bar offers the video (see `reader_play_button`).
+    fn reader_can_play(&self) -> bool {
+        matches!(self.reader_ui.offline_video, OfflineVideo::Available(_))
+            || match self.reader_source() {
+                Some(nav::SourceTarget::Web(_)) => true,
+                Some(nav::SourceTarget::Local(_)) => self.reader_ui.source_available,
+                None => false,
+            }
+    }
+
+    /// Whether the title bar is too narrow to hold the note title readably
+    /// beside the reading tools, measured from the tools it will show at the
+    /// current text scale. Then it takes its tight form: the view menu keeps
+    /// only its icon, and the title takes the breadcrumb's line and wraps.
+    fn reader_bar_tight(&self, metrics: &ReaderMetrics, window: &Window) -> bool {
+        if !is_compact(window) {
+            return false;
+        }
+        let rem = metrics.rem;
+        let scaled = |value: f32| value * rem / 14.;
+        let button = f32::from(BUTTON_MEDIUM.to_pixels(window.rem_size()));
+        let reading_note = self.result_tab == 0;
+        let mut tools = Vec::new();
+        if reading_note {
+            tools.push(button);
+        }
+        if self.reader_can_play() {
+            tools.push(button);
+        }
+        if metrics.short {
+            // The view menu: padding, icon, gaps, label and chevron.
+            let label = if reading_note {
+                course2md::tr!("笔记")
+            } else {
+                course2md::tr!("截图")
+            };
+            tools.push(
+                scaled(12. + 16. + 8. + 8. + 16. + 12.)
+                    + shaped_width(label, rem, FontWeight::MEDIUM, window),
+            );
+        } else {
+            // The icon-only export menu and the ⋯ menu.
+            tools.push(scaled(14. + 20. + 8. + 18. + 12.));
+            tools.push(button);
+        }
+        let gaps = 8. * tools.len().saturating_sub(1) as f32;
+        let window_width = f32::from(window.bounds().size.width);
+        let trailing = (window_width - metrics.frame_left - metrics.reader_width).max(16.);
+        let room = window_width
+            - metrics.frame_left
+            - trailing
+            - button
+            - 12. * 2.
+            - tools.iter().sum::<f32>()
+            - gaps;
+        room < scaled(160.)
+    }
+
     /// The title bar's way to watch the video: the kept offline copy first,
     /// then the source page or the local file when it is still there.
     fn reader_play_button(&self, icon_only: bool, cx: &mut Context<Self>) -> Option<Button> {
@@ -4315,9 +4373,11 @@ impl Desktop {
                     }),
             );
         }
+        let tight = self.reader_bar_tight(metrics, window);
         toolbar = toolbar.child(div().flex_shrink_0().child(self.reader_more_menu(
             preview,
             short_reader,
+            tight,
             cx,
         )));
         ReaderToolbarParts {
@@ -4430,9 +4490,15 @@ impl Desktop {
         &mut self,
         preview: &Rc<notes::Preview>,
         short_reader: bool,
+        tight: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let reading_note = self.result_tab == 0;
+        let view_label = if reading_note {
+            course2md::tr!("笔记")
+        } else {
+            course2md::tr!("截图")
+        };
         let exporting = self.reader_exporting();
         let more_weak = cx.weak_entity();
         let original = self.reader_source();
@@ -4468,15 +4534,13 @@ impl Desktop {
         } else {
             icons::more_vertical()
         })
+        // A tight title bar keeps the menu's icon and chevron; the current
+        // view's name moves to its tooltip.
+        .when(short_reader && !tight, |button| button.label(view_label))
         .when(short_reader, |button| {
-            button
-                .label(if reading_note {
-                    course2md::tr!("笔记")
-                } else {
-                    course2md::tr!("截图")
-                })
-                .child(crate::icons::chevron_down().size_4().flex_shrink_0())
+            button.child(crate::icons::chevron_down().size_4().flex_shrink_0())
         })
+        .when(short_reader && tight, |button| button.tooltip(view_label))
         .when(!short_reader, |button| {
             button.tooltip(course2md::tr!("更多笔记操作"))
         })
@@ -7426,6 +7490,7 @@ impl Desktop {
         let frame = ReaderMetrics::new(window, self.result_tab, !self.reader_ui.outline.is_empty());
         let window_width = f32::from(window.bounds().size.width);
         let trailing = (window_width - frame.frame_left - frame.reader_width).max(16.);
+        let tight = self.reader_bar_tight(&frame, window);
         crate::views::apply_shell_title_bar_chrome(
             TitleBar::new().h(reader_title_bar_height(window)),
         )
@@ -7446,19 +7511,32 @@ impl Desktop {
                     v_flex()
                         .flex_1()
                         .min_w_0()
-                        .child(
-                            accessible_text("reader-crumb", crumb)
-                                .truncate()
-                                .text_size(rems(13. / 14.))
-                                .line_height(rems(18. / 14.))
-                                .text_color(color(GRAY)),
-                        )
+                        // In the tight form the breadcrumb (also named by the
+                        // return button) gives its line to the title.
+                        .when(!tight, |column| {
+                            column.child(
+                                accessible_text("reader-crumb", crumb)
+                                    .truncate()
+                                    .text_size(rems(13. / 14.))
+                                    .line_height(rems(18. / 14.))
+                                    .text_color(color(GRAY)),
+                            )
+                        })
                         .child(
                             accessible_text("reader-crumb-title", title)
                                 .role(Role::Heading)
-                                .truncate()
+                                .map(|title| {
+                                    if tight {
+                                        title
+                                            .whitespace_normal()
+                                            .text_ellipsis()
+                                            .line_clamp(2)
+                                            .line_height(rems(24. / 14.))
+                                    } else {
+                                        title.truncate().line_height(rems(28. / 14.))
+                                    }
+                                })
                                 .text_size(rems(22. / 14.))
-                                .line_height(rems(28. / 14.))
                                 .font_weight(FontWeight::NORMAL)
                                 .text_color(color(INK)),
                         ),
