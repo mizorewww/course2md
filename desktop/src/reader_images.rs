@@ -10,7 +10,7 @@
 //! released (bitmap and texture) once the cache exceeds its budget.
 use crate::Desktop;
 use gpui::{App, AppContext as _, Context, RenderImage};
-use image::imageops::FilterType;
+use image::{DynamicImage, imageops::thumbnail};
 use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
@@ -190,10 +190,21 @@ impl ReaderImages {
 
     /// Releases everything, as when another note opens.
     pub(crate) fn clear(&mut self, cx: &mut App) {
-        for (_, entry) in self.entries.drain() {
-            if let Entry::Ready { image, .. } = entry {
-                cx.drop_image(image, None);
-            }
+        let released = self
+            .entries
+            .drain()
+            .filter_map(|(_, entry)| match entry {
+                Entry::Ready { image, .. } => Some(image),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let freed = !released.is_empty();
+        release(released, cx);
+        if freed {
+            // After the images above are dropped: the allocator keeps freed
+            // bitmap pages dirty for reuse, so leaving a note would otherwise
+            // hold its last screenshots' worth of memory indefinitely.
+            cx.defer(|_| return_freed_memory());
         }
         self.queue.clear();
         self.pinned.clear();
@@ -282,7 +293,7 @@ impl ReaderImages {
             };
             if let Some(Entry::Ready { image, bytes, .. }) = self.entries.remove(&key) {
                 self.bytes = self.bytes.saturating_sub(bytes);
-                cx.drop_image(image, None);
+                release(vec![image], cx);
             }
         }
     }
@@ -296,6 +307,37 @@ impl ReaderImages {
     }
 }
 
+/// Frees decoded images and their GPU textures. `App::drop_image` only
+/// reaches windows in the app's window map, and a window being updated
+/// (the reader's own, whenever it navigates or clears inside a window
+/// update) is taken out of that map until the update ends, so the drop
+/// runs once the current effect cycle has returned every window.
+fn release(images: Vec<Arc<RenderImage>>, cx: &mut App) {
+    if images.is_empty() {
+        return;
+    }
+    cx.defer(move |cx| {
+        for image in images {
+            cx.drop_image(image, None);
+        }
+    });
+}
+
+/// Returns the allocator's cached free pages to the system.
+fn return_freed_memory() {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
+        }
+        // SAFETY: a null zone asks every zone to release what it can; goal 0
+        // means as much as possible. It only frees unused pages.
+        unsafe {
+            malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
+        }
+    }
+}
+
 /// Decodes `path` and scales it to `size` with a filter that keeps slide text
 /// legible, as the BGRA frame GPUI uploads.
 fn decode(path: &Path, size: Size) -> Option<RenderImage> {
@@ -305,14 +347,24 @@ fn decode(path: &Path, size: Size) -> Option<RenderImage> {
         .ok()?
         .decode()
         .ok()?;
-    let image = match size {
+    // Area averaging keeps slide text legible and, unlike the filtered
+    // resizers, needs no full-size floating-point intermediate: those
+    // transient buffers (tens of MB per frame) were what the allocator kept
+    // cached after the reader closed.
+    let mut data = match size {
         Size::Thumbnail(width) if width < image.width() => {
             let height = ((image.height() as u64 * width as u64) / image.width() as u64).max(1);
-            image.resize_exact(width, height as u32, FilterType::Triangle)
+            let height = height as u32;
+            match &image {
+                DynamicImage::ImageRgb8(rgb) => {
+                    DynamicImage::ImageRgb8(thumbnail(rgb, width, height)).into_rgba8()
+                }
+                DynamicImage::ImageRgba8(rgba) => thumbnail(rgba, width, height),
+                other => thumbnail(&other.to_rgba8(), width, height),
+            }
         }
-        _ => image,
+        _ => image.into_rgba8(),
     };
-    let mut data = image.into_rgba8();
     for pixel in data.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
@@ -364,6 +416,51 @@ mod tests {
         let scan = bytes.windows(2).position(|w| w == [0xff, 0xda]).unwrap();
         std::fs::write(&jpeg, &bytes[..scan]).unwrap();
         assert!(decode(&jpeg, Size::thumbnail(256.)).is_none());
+    }
+
+    struct Painted(Arc<RenderImage>);
+
+    impl gpui::Render for Painted {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::Styled as _;
+            gpui::img(self.0.clone()).size(gpui::px(64.))
+        }
+    }
+
+    #[gpui::test]
+    fn clearing_inside_a_window_update_releases_that_windows_textures(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut images = ReaderImages::default();
+        let key = (PathBuf::from("frame.jpg"), Size::Original);
+        let image = cx.update(|cx| {
+            images.in_flight += 1;
+            let frame = image::RgbaImage::new(32, 32);
+            images.finish(
+                key.clone(),
+                images.generation,
+                Some(RenderImage::new([image::Frame::new(frame)])),
+                cx,
+            );
+            images.any_ready(&key.0).unwrap()
+        });
+        let window = cx.add_window(|_, _| Painted(image.clone()));
+        cx.run_until_parked();
+        let painted = window
+            .update(cx, |_, window, _| window.has_image_atlas_entry(&image))
+            .unwrap();
+        assert!(painted);
+        // The reader clears its cache while its own window is being updated.
+        window.update(cx, |_, _, cx| images.clear(cx)).unwrap();
+        cx.run_until_parked();
+        let still_painted = window
+            .update(cx, |_, window, _| window.has_image_atlas_entry(&image))
+            .unwrap();
+        assert!(!still_painted);
     }
 
     #[gpui::test]
