@@ -15,12 +15,16 @@ use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 /// Decoded bytes kept for thumbnails and originals together.
 const BUDGET_BYTES: usize = 256 * 1024 * 1024;
-/// Decodes running at once; the rest wait, newest request first.
-const MAX_IN_FLIGHT: usize = 3;
+/// Decodes running at once, at most this many; the rest wait, newest
+/// request first.
+const MAX_IN_FLIGHT: usize = 4;
+/// How long a newly decoded image counts as arriving, for its fade-in.
+const FRESH_FOR: Duration = Duration::from_millis(400);
 /// Thumbnail widths are rounded up to this step so small resizes reuse them.
 const WIDTH_STEP: u32 = 256;
 
@@ -45,7 +49,8 @@ type Key = (PathBuf, Size);
 #[derive(Clone)]
 pub(crate) enum Loaded {
     Pending,
-    Ready(Arc<RenderImage>),
+    /// The image, and whether it has only just arrived.
+    Ready(Arc<RenderImage>, bool),
     Failed,
 }
 
@@ -59,6 +64,7 @@ enum Entry {
         image: Arc<RenderImage>,
         bytes: usize,
         tick: u64,
+        loaded: Instant,
     },
     Failed,
 }
@@ -111,10 +117,13 @@ impl ReaderImages {
         let key = (path.to_path_buf(), size);
         match self.entries.get_mut(&key) {
             Some(Entry::Ready {
-                image, tick: used, ..
+                image,
+                tick: used,
+                loaded,
+                ..
             }) => {
                 *used = tick;
-                return Loaded::Ready(image.clone());
+                return Loaded::Ready(image.clone(), loaded.elapsed() < FRESH_FOR);
             }
             Some(Entry::Failed) => return Loaded::Failed,
             Some(Entry::Decoding) => return Loaded::Pending,
@@ -194,7 +203,10 @@ impl ReaderImages {
     }
 
     fn pump(&mut self, locate: Locate, cx: &mut Context<Desktop>) {
-        while self.in_flight < MAX_IN_FLIGHT {
+        let slots = std::thread::available_parallelism()
+            .map_or(2, |cores| cores.get() / 2)
+            .clamp(2, MAX_IN_FLIGHT);
+        while self.in_flight < slots {
             let Some(key) = self.queue.pop_back() else {
                 return;
             };
@@ -239,6 +251,7 @@ impl ReaderImages {
                     image: Arc::new(image),
                     bytes,
                     tick: self.tick,
+                    loaded: Instant::now(),
                 }
             }
             None => Entry::Failed,
@@ -342,6 +355,15 @@ mod tests {
             1920
         );
         assert!(decode(&dir.path().join("missing.png"), Size::Original).is_none());
+        // A JPEG cut before its image data cannot be decoded.
+        let jpeg = dir.path().join("frame.jpg");
+        image::RgbImage::from_pixel(64, 36, image::Rgb([200, 100, 50]))
+            .save(&jpeg)
+            .unwrap();
+        let bytes = std::fs::read(&jpeg).unwrap();
+        let scan = bytes.windows(2).position(|w| w == [0xff, 0xda]).unwrap();
+        std::fs::write(&jpeg, &bytes[..scan]).unwrap();
+        assert!(decode(&jpeg, Size::thumbnail(256.)).is_none());
     }
 
     #[gpui::test]

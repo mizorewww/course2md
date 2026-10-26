@@ -1323,6 +1323,8 @@ struct NoteFlow {
     short: bool,
     /// The article card's inline padding.
     inset: Rems,
+    /// The decode width of the article's screenshot figures.
+    figure_size: crate::reader_images::Size,
     layout: Rc<RefCell<nav::ReadingLayout>>,
     restore_target: Rc<Cell<Option<usize>>>,
     note_list: ListState,
@@ -1480,6 +1482,26 @@ fn render_note_item(flow: &NoteFlow, item_ix: usize, cx: &mut App) -> AnyElement
         return div().into_any_element();
     };
     let preview = &flow.preview;
+    // The item's screenshots, decoded at the figure's width by the reader's
+    // bounded cache rather than at full size for the rest of the session.
+    let pictures: HashMap<usize, crate::reader_images::Loaded> = item
+        .blocks()
+        .filter_map(|index| match &preview.blocks[index] {
+            PreviewBlock::Image(path) => Some((index, path.clone())),
+            _ => None,
+        })
+        .map(|(index, path)| {
+            let loaded = flow
+                .desktop
+                .update(cx, |this, cx| {
+                    this.reader_ui
+                        .images
+                        .get(&path, flow.figure_size, Desktop::reader_images, cx)
+                })
+                .unwrap_or(crate::reader_images::Loaded::Pending);
+            (index, loaded)
+        })
+        .collect();
     let content = match item {
         NoteItem::Title => flow
             .desktop
@@ -1505,14 +1527,19 @@ fn render_note_item(flow: &NoteFlow, item_ix: usize, cx: &mut App) -> AnyElement
             heading,
             end,
             ordinal,
-        } => render_note_section(flow, heading, end, ordinal, cx),
-        NoteItem::Block(index) => render_note_block(flow, index, cx),
+        } => render_note_section(flow, heading, end, ordinal, &pictures, cx),
+        NoteItem::Block(index) => render_note_block(flow, index, &pictures, cx),
     };
     flow.item_wrapper(item_ix, content).into_any_element()
 }
 
 /// One block on its own: a paragraph, heading or screenshot outside any section.
-fn render_note_block(flow: &NoteFlow, index: usize, cx: &App) -> AnyElement {
+fn render_note_block(
+    flow: &NoteFlow,
+    index: usize,
+    pictures: &HashMap<usize, crate::reader_images::Loaded>,
+    cx: &App,
+) -> AnyElement {
     match &flow.preview.blocks[index] {
         PreviewBlock::Heading {
             text,
@@ -1529,7 +1556,7 @@ fn render_note_block(flow: &NoteFlow, index: usize, cx: &App) -> AnyElement {
         ),
         PreviewBlock::Paragraph { text, anchor } => note_paragraph(flow, index, text, anchor),
         PreviewBlock::Translation { text, anchor } => note_translation(flow, index, text, anchor),
-        PreviewBlock::Image(path) => render_note_image(flow, index, path, cx),
+        PreviewBlock::Image(path) => render_note_image(flow, index, path, pictures.get(&index), cx),
     }
 }
 
@@ -1723,6 +1750,7 @@ fn render_note_section(
     heading: usize,
     end: usize,
     _ordinal: usize,
+    pictures: &HashMap<usize, crate::reader_images::Loaded>,
     cx: &App,
 ) -> AnyElement {
     let preview = &flow.preview;
@@ -1733,7 +1761,13 @@ fn render_note_section(
         _ => (String::new(), None),
     };
     let images = (heading + 1..end).filter_map(|index| match &preview.blocks[index] {
-        PreviewBlock::Image(path) => Some(render_note_image(flow, index, path, cx)),
+        PreviewBlock::Image(path) => Some(render_note_image(
+            flow,
+            index,
+            path,
+            pictures.get(&index),
+            cx,
+        )),
         _ => None,
     });
     let paragraphs = (heading + 1..end).filter_map(|index| match &preview.blocks[index] {
@@ -1862,8 +1896,10 @@ fn render_note_image(
     flow: &NoteFlow,
     index: usize,
     path: &std::path::Path,
+    picture: Option<&crate::reader_images::Loaded>,
     cx: &App,
 ) -> AnyElement {
+    use crate::reader_images::Loaded;
     let frame_index = flow.frame_by_path.get(path).copied();
     let frame = frame_index.map(|i| &flow.frames[i]);
     if frame.is_none() && !flow.data_loading {
@@ -1903,21 +1939,29 @@ fn render_note_image(
                     .cursor_pointer()
                     .on_click(move |_, window, cx| open_click(window, cx))
             })
-            .child(
-                img(path.to_path_buf())
-                    .absolute()
-                    .inset_0()
-                    .size_full()
-                    .rounded(FIGURE_RADIUS)
-                    .object_fit(ObjectFit::Contain)
-                    .with_fallback(move || {
-                        missing_image_notice(
-                            ("failed-reader-image", index),
-                            course2md::tr!("截图无法读取"),
-                        )
-                        .into_any_element()
-                    }),
-            )
+            .map(|figure| match picture {
+                Some(Loaded::Ready(image, fresh)) => {
+                    let picture = img(image.clone())
+                        .absolute()
+                        .inset_0()
+                        .size_full()
+                        .rounded(FIGURE_RADIUS)
+                        .object_fit(ObjectFit::Contain);
+                    figure.child(if *fresh {
+                        crate::motion::enter(("figure-in", index), picture)
+                    } else {
+                        picture.into_any_element()
+                    })
+                }
+                Some(Loaded::Failed) => {
+                    figure.child(div().absolute().inset_0().p_4().child(missing_image_notice(
+                        ("failed-reader-image", index),
+                        course2md::tr!("截图无法读取"),
+                    )))
+                }
+                // The same quiet placeholder as the screenshot cards.
+                _ => figure.child(screenshot_placeholder()),
+            })
             .children(time.map(image_time_chip))
             .when(frame.is_some(), |figure| {
                 figure.child(
@@ -1961,6 +2005,21 @@ fn unreadable_viewer_image() -> Stateful<Div> {
             "image-unreadable-text",
             course2md::tr!("截图无法读取"),
         ))
+}
+
+/// A screenshot still decoding: a quiet image glyph on its tile, one calm
+/// placeholder per figure rather than a spinner on every one.
+fn screenshot_placeholder() -> Div {
+    div()
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(icons::image().size(EMPTY_STATE_ICON).text_color(Rgba {
+            a: 0.45,
+            ..color(GRAY)
+        }))
 }
 
 /// Screenshot figures in the article.
@@ -3630,6 +3689,13 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let article_width = metrics.article_width();
+        // Narrow cards keep more of their width for text.
+        let inset = if article_width < metrics.rem * 40. {
+            20. / 14.
+        } else {
+            48. / 14.
+        };
+        let figure_width = (article_width - inset * metrics.rem * 2.) * metrics.scale_factor;
         let flow = NoteFlow {
             items: self.reader_ui.note_items.clone(),
             focus: self.reader_ui.note_focus.clone(),
@@ -3645,12 +3711,8 @@ impl Desktop {
             data_loading: self.reader_ui.data_loading,
             compact: metrics.compact,
             short: metrics.short,
-            // Narrow cards keep more of their width for text.
-            inset: if article_width < metrics.rem * 40. {
-                rems(20. / 14.)
-            } else {
-                rems(48. / 14.)
-            },
+            inset: rems(inset),
+            figure_size: crate::reader_images::Size::thumbnail(figure_width),
             layout: self.reader_ui.note_layout.clone(),
             restore_target: self.reader_ui.restore.target.clone(),
             note_list: self.reader_ui.note_list.clone(),
@@ -3748,6 +3810,7 @@ struct ReaderMetrics {
     compact: bool,
     short: bool,
     rem: f32,
+    scale_factor: f32,
 }
 
 const TOC_GAP: Pixels = px(24.);
@@ -3799,6 +3862,7 @@ impl ReaderMetrics {
                 || available_height < pixels(COMPACT_MIN_HEIGHT),
             short: available_height < pixels(SHORT_MAX_HEIGHT),
             rem: f32::from(rem),
+            scale_factor: window.scale_factor(),
         }
     }
 
@@ -5134,7 +5198,7 @@ impl Desktop {
                 .images
                 .get(&file.path, thumbnail, Self::reader_images, cx)
         });
-        let openable = matches!(loaded, Some(Loaded::Pending | Loaded::Ready(_)));
+        let openable = matches!(loaded, Some(Loaded::Pending | Loaded::Ready(..)));
         let unreadable = || {
             v_flex()
                 .absolute()
@@ -5160,15 +5224,22 @@ impl Desktop {
             .overflow_hidden()
             .bg(color(SURFACE_HIGH))
             .map(|image| match loaded {
-                Some(Loaded::Ready(thumbnail)) => image.child(
-                    img(thumbnail)
+                Some(Loaded::Ready(thumbnail, fresh)) => {
+                    let picture = img(thumbnail)
                         .absolute()
                         .inset_0()
                         .size_full()
-                        .object_fit(ObjectFit::Contain),
-                ),
-                // A blank tile until the thumbnail arrives, like the article.
-                Some(Loaded::Pending) => image,
+                        .rounded(GALLERY_IMAGE_RADIUS)
+                        .object_fit(ObjectFit::Contain);
+                    // A thumbnail that just arrived fades in over its
+                    // placeholder; one scrolled back into view is already there.
+                    image.child(if fresh {
+                        crate::motion::enter(("thumbnail-in", index), picture)
+                    } else {
+                        picture.into_any_element()
+                    })
+                }
+                Some(Loaded::Pending) => image.child(screenshot_placeholder()),
                 Some(Loaded::Failed) | None => image.child(unreadable()),
             })
             .child(
@@ -5933,7 +6004,7 @@ impl Desktop {
             images.get(path, Size::Original, Self::reader_images, cx);
         }
         let picture = match images.get(&image.path, Size::Original, Self::reader_images, cx) {
-            Loaded::Ready(original) => Some(original),
+            Loaded::Ready(original, _) => Some(original),
             // The gallery's thumbnail stands in while the original decodes.
             Loaded::Pending => images.any_ready(&image.path),
             Loaded::Failed => {
