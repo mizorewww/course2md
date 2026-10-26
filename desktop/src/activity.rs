@@ -439,10 +439,21 @@ fn compact_count_in(count: u64, lang: course2md::i18n::Lang) -> String {
     }
     let (template, value) = match count {
         0..10_000 => return grouped(count),
-        10_000..100_000_000 => (t_for("{} 万", lang), count as f64 / 1e4),
+        // Up to where "9999.5 万" would round to "10000 万".
+        10_000..99_995_000 => (t_for("{} 万", lang), count as f64 / 1e4),
         _ => (t_for("{} 亿", lang), count as f64 / 1e8),
     };
-    template.replacen("{}", &format!("{value:.1}"), 1)
+    // "1.2 万", "12 万" rather than "12.0 万", and whole numbers from 100 up.
+    let number = if value >= 100. {
+        format!("{value:.0}")
+    } else {
+        let number = format!("{value:.1}");
+        number
+            .strip_suffix(".0")
+            .map(str::to_owned)
+            .unwrap_or(number)
+    };
+    template.replacen("{}", &number, 1)
 }
 
 /// "1,234".
@@ -647,7 +658,9 @@ mod tests {
         assert_eq!(compact_count_in(12_345, Lang::ZhHans), "1.2 万");
         assert_eq!(compact_count_in(12_345, Lang::ZhHant), "1.2 萬");
         assert_eq!(compact_count_in(12_345, Lang::Ja), "1.2 万");
-        assert_eq!(compact_count_in(1_250_000, Lang::ZhHans), "125.0 万");
+        assert_eq!(compact_count_in(10_000, Lang::ZhHans), "1 万");
+        assert_eq!(compact_count_in(1_250_000, Lang::ZhHans), "125 万");
+        assert_eq!(compact_count_in(99_999_999, Lang::ZhHans), "1 亿");
         assert_eq!(compact_count_in(250_000_000, Lang::ZhHans), "2.5 亿");
         assert_eq!(compact_count_in(250_000_000, Lang::ZhHant), "2.5 億");
         assert_eq!(compact_count_in(250_000_000, Lang::Ja), "2.5 億");
