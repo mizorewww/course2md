@@ -239,7 +239,8 @@ fn native(t: &Transfer) -> Result<()> {
             fs::remove_file(part)?;
             continue;
         }
-        bar.set_position(have);
+        // The partial file is this run's starting point, not throughput.
+        bar.resume_at(have);
         set_phase(bar, remote, host, phase);
         let result = native_attempt(&agent, t, have);
         let after = fs::metadata(part).map(|m| m.len()).unwrap_or(0);
@@ -493,6 +494,10 @@ fn aria2(program: &Path, t: &Transfer) -> Result<()> {
             last = (completed, Instant::now());
             if !downloading && completed > 0 {
                 downloading = true;
+                // aria2 counts what it resumed from the partial file in its
+                // first report; the download phase starts from there, so
+                // those bytes are not read as speed.
+                bar.resume_at(completed);
                 set_phase(bar, remote, host, Phase::Download);
             }
         }

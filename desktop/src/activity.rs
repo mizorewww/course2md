@@ -91,6 +91,21 @@ impl Activity {
     pub fn has_samples(&self) -> bool {
         self.sampled
     }
+    /// Records the engine's phase. Entering a download starts a new speed
+    /// sample at the current count: a transfer that resumes a partial file
+    /// (or reconnects) may report the bytes already on disk only once it is
+    /// under way, and those bytes did not cross the network in this session.
+    pub fn set_phase(&mut self, phase: Option<Phase>) {
+        if phase != self.phase {
+            let now = Instant::now();
+            if phase == Some(Phase::Download) {
+                self.started = now;
+                self.baseline = self.current;
+            }
+            self.updated = now;
+        }
+        self.phase = phase;
+    }
     fn rate(&self) -> Option<f64> {
         let elapsed = self.started.elapsed().as_secs_f64();
         let processed = self.current.saturating_sub(self.baseline);
@@ -813,6 +828,56 @@ mod tests {
                 .contains("等待响应")
         );
     }
+    const MIB: u64 = 1024 * 1024;
+
+    /// Speed counts only bytes that crossed the network in this session;
+    /// the progress fraction still includes the bytes already on disk.
+    #[test]
+    fn resumed_downloads_time_only_this_sessions_bytes() {
+        let file = Stage::parse("model/model.gguf");
+        // The built-in client reports the partial file before it connects.
+        let mut native = Activity::new();
+        native.update(600 * MIB, 1000 * MIB, None);
+        native.set_phase(Some(Phase::Connect));
+        native.set_phase(Some(Phase::Download));
+        native.started = Instant::now() - Duration::from_secs(10);
+        native.update(700 * MIB, 1000 * MIB, None);
+        let rate = native.rate().unwrap();
+        assert!(
+            (9.9 * MIB as f64..10.1 * MIB as f64).contains(&rate),
+            "{rate}"
+        );
+        assert_eq!(native.fraction(), Some(0.7));
+
+        // aria2 starts from zero and reports the resumed bytes only once it
+        // runs; entering the download phase starts the sample there.
+        let mut aria2 = Activity::new();
+        aria2.update(0, 1000 * MIB, None);
+        aria2.set_phase(Some(Phase::Connect));
+        aria2.update(600 * MIB, 1000 * MIB, None);
+        aria2.set_phase(Some(Phase::Download));
+        assert!(aria2.rate().is_none());
+        aria2.started = Instant::now() - Duration::from_secs(10);
+        aria2.update(700 * MIB, 1000 * MIB, None);
+        let metrics = aria2.transfer_metrics(&file, true);
+        assert_eq!(metrics.speed.as_deref(), Some("10.0 MB/s"), "{metrics:?}");
+        // 300 MB left at 10 MB/s, not at the 70 MB/s the resumed bytes imply.
+        assert!(
+            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "30 秒" || v == "31 秒"),
+            "{metrics:?}"
+        );
+        assert_eq!(aria2.fraction(), Some(0.7));
+
+        // Repeated phase reports within the download keep the sample.
+        aria2.set_phase(Some(Phase::Download));
+        assert!(aria2.rate().is_some());
+        // Reconnecting and resuming starts a new sample at the resumed count.
+        aria2.set_phase(Some(Phase::Retry));
+        aria2.set_phase(Some(Phase::Download));
+        assert!(aria2.rate().is_none());
+        assert_eq!(aria2.fraction(), Some(0.7));
+    }
+
     #[test]
     fn unknown_total_never_invents_a_percentage_or_eta() {
         let mut item = Activity::new();

@@ -1085,7 +1085,7 @@ impl Desktop {
                         .entry(stage)
                         .or_insert_with(activity::Activity::new);
                     activity.update(current, total, message);
-                    activity.phase = phase;
+                    activity.set_phase(phase);
                     activity.unit = unit;
                 }
                 EngineEvent::Tokens {

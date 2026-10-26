@@ -601,11 +601,18 @@ impl Bar {
     /// Starts the counter at `pos` without an event, so the first sample
     /// already includes work done before this run and is not read as speed.
     pub fn with_position(self, pos: u64) -> Self {
+        self.resume_at(pos);
+        self
+    }
+
+    /// Moves the counter to `pos` without an event, as work done before this
+    /// transfer: a resumed partial file. The terminal bar's estimate restarts
+    /// there, and the next event (a phase report) carries it to the desktop,
+    /// which starts its speed sample on entering the download phase.
+    pub fn resume_at(&self, pos: u64) {
         self.bar.set_position(pos);
-        // The terminal bar's own estimate must not count it as speed either.
         self.bar.reset_eta();
         self.current.store(pos, Ordering::Relaxed);
-        self
     }
 
     pub fn inc(&self, n: u64) {
@@ -828,6 +835,25 @@ mod tests {
         // The trailing cached file arrives at once and adds nothing.
         assert_eq!(ledger.advance(1, 1.0), 1000);
         assert_eq!(ledger.total(), 1000);
+    }
+
+    #[test]
+    fn transfer_ledger_counts_a_resumed_file_once_across_retries() {
+        // One 800-byte file with 300 bytes staged by an earlier run.
+        let mut ledger = ledger(&[&[(800, 300)]]);
+        assert_eq!(ledger.present(), 300);
+        // The first attempt reports the staged chunks, then lands 200 bytes.
+        assert_eq!(ledger.advance(0, 300. / 800.), 300);
+        assert_eq!(ledger.advance(0, 500. / 800.), 500);
+        // A retry re-walks the file: the staged and the newly landed chunks
+        // come back at once, and are neither counted again nor as new bytes.
+        assert_eq!(ledger.advance(0, 0.0), 500);
+        assert_eq!(ledger.advance(0, 500. / 800.), 500);
+        // Only bytes past what this run already had advance the count.
+        assert_eq!(ledger.advance(0, 600. / 800.), 600);
+        assert_eq!(ledger.advance(0, 1.0), 800);
+        // Bytes that crossed the network this session: 500 of the 800.
+        assert_eq!(ledger.reported() - ledger.present(), 500);
     }
 
     #[test]
