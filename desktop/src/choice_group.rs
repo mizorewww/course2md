@@ -277,8 +277,10 @@ fn item_style<T: Styled + StatefulInteractiveElement + gpui::prelude::FluentBuil
         .h(height)
         .min_h(height)
         // With the 2px focus border: 16px to the content of a content-sized
-        // option; 8px in equal shares so a 312px panel still fits "语音识别".
-        .px(if fill { rems(6. / 14.) } else { rems(1.) })
+        // option; 14px in equal shares. That is also the floor for a label
+        // wider than its share, so a long label at a large text scale never
+        // meets the pill's edge: the options wrap to another row first.
+        .px(if fill { rems(12. / 14.) } else { rems(1.) })
         .py_0()
         .rounded_l(paint.left_radius)
         .rounded_r(paint.right_radius)
@@ -599,7 +601,7 @@ mod tests {
     impl Render for SegmentedHarness {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             window.set_rem_size(px(14.));
-            div().w(px(312.)).child(
+            div().w(px(360.)).child(
                 SingleChoiceGroup::new("connected-choice", "文字来源")
                     .options([("0", "自动"), ("1", "仅字幕"), ("2", "语音识别")])
                     .icon("0", crate::icons::settings())
@@ -727,11 +729,11 @@ mod tests {
         }
         assert!((options[0].left() - lane.left()).abs() < px(0.5));
         assert!((options[2].right() - lane.right()).abs() < px(0.5));
-        assert_eq!(lane.size.width, px(312.));
+        assert_eq!(lane.size.width, px(360.));
         assert_selected("full-0", px(48.));
         assert_unselected("full-1", 1, 3, px(48.));
         assert_unselected("full-2", 2, 3, px(48.));
-        // A 360px panel minus two 24px insets must show the full label.
+        // The narrowest options lane must show the full label.
         let required = cx.update(|window, _| {
             let mut font = window.text_style().font();
             font.weight = FontWeight::MEDIUM;
