@@ -1,8 +1,8 @@
 diff --git a/crates/gpui/src/text_system/line_layout.rs b/crates/gpui/src/text_system/line_layout.rs
-index e7362f71e5..a6dfc2a82e 100644
+index e7362f71e5..4a9fd97ec1 100644
 --- a/crates/gpui/src/text_system/line_layout.rs
 +++ b/crates/gpui/src/text_system/line_layout.rs
-@@ -203,6 +203,9 @@ impl LineLayout {
+@@ -203,6 +203,9 @@
          };
          let mut last_boundary_x = px(0.);
          let mut prev_ch = '\0';
@@ -12,19 +12,21 @@ index e7362f71e5..a6dfc2a82e 100644
          let mut glyphs = self
              .runs
              .iter()
-@@ -232,7 +235,10 @@ impl LineLayout {
+@@ -232,7 +235,12 @@
                      last_candidate_x = x;
                  }
              } else {
 -                if ch != ' ' && first_non_whitespace_ix.is_some() {
 +                if ch != ' '
 +                    && !LineWrapper::is_cjk_closing_punctuation(ch)
++                    && !LineWrapper::is_glue(ch)
++                    && !LineWrapper::is_glue(prev_ch)
 +                    && first_non_whitespace_ix.is_some()
 +                {
                      last_candidate_ix = Some(boundary);
                      last_candidate_x = x;
                  }
-@@ -244,6 +250,7 @@ impl LineLayout {
+@@ -244,6 +252,7 @@
  
              let next_x = glyphs.peek().map_or(self.width, |(_, _, x)| *x);
              let width = next_x - last_boundary_x;
@@ -32,7 +34,7 @@ index e7362f71e5..a6dfc2a82e 100644
  
              if width > wrap_width && boundary > last_boundary {
                  // When used line_clamp, we should limit the number of lines.
-@@ -256,6 +263,12 @@ impl LineLayout {
+@@ -256,6 +265,12 @@
                  if let Some(last_candidate_ix) = last_candidate_ix.take() {
                      last_boundary = last_candidate_ix;
                      last_boundary_x = last_candidate_x;
@@ -46,10 +48,10 @@ index e7362f71e5..a6dfc2a82e 100644
                      last_boundary = boundary;
                      last_boundary_x = x;
 diff --git a/crates/gpui/src/text_system/line_wrapper.rs b/crates/gpui/src/text_system/line_wrapper.rs
-index 678e9e0f18..1a5861bbc0 100644
+index 678e9e0f18..16aa3f8b48 100644
 --- a/crates/gpui/src/text_system/line_wrapper.rs
 +++ b/crates/gpui/src/text_system/line_wrapper.rs
-@@ -49,6 +49,9 @@ impl LineWrapper {
+@@ -49,6 +49,9 @@
          let mut last_candidate_width = px(0.);
          let mut last_wrap_ix = 0;
          let mut prev_c = '\0';
@@ -59,19 +61,21 @@ index 678e9e0f18..1a5861bbc0 100644
          let mut index = 0;
          let mut candidates = fragments
              .iter()
-@@ -72,7 +75,10 @@ impl LineWrapper {
+@@ -72,7 +75,12 @@
                              }
                          } else {
                              // CJK may not be space separated, e.g.: `Hello world你好世界`
 -                            if c != ' ' && first_non_whitespace_ix.is_some() {
 +                            if c != ' '
 +                                && !Self::is_cjk_closing_punctuation(c)
++                                && !Self::is_glue(c)
++                                && !Self::is_glue(prev_c)
 +                                && first_non_whitespace_ix.is_some()
 +                            {
                                  last_candidate_ix = ix;
                                  last_candidate_width = width;
                              }
-@@ -104,6 +110,7 @@ impl LineWrapper {
+@@ -104,6 +112,7 @@
                  };
  
                  width += item_width;
@@ -79,7 +83,7 @@ index 678e9e0f18..1a5861bbc0 100644
                  if width > wrap_width && ix > last_wrap_ix {
                      if let (None, Some(first_non_whitespace_ix)) = (indent, first_non_whitespace_ix)
                      {
-@@ -112,10 +119,20 @@ impl LineWrapper {
+@@ -112,10 +121,20 @@
                          );
                      }
  
@@ -100,10 +104,12 @@ index 678e9e0f18..1a5861bbc0 100644
                      } else {
                          last_wrap_ix = ix;
                          width = item_width;
-@@ -445,6 +462,13 @@ impl LineWrapper {
-         (text, Cow::Borrowed(runs))
-     }
+@@ -443,6 +462,20 @@
  
+         // Text fits within max_lines without truncation.
+         (text, Cow::Borrowed(runs))
++    }
++
 +    /// Full-width punctuation that never starts a line in Chinese and
 +    /// Japanese (UAX #14 classes CL, CP, EX, IS and NS): `你好，世界` may break
 +    /// before `你` or `世`, never before `，`.
@@ -111,14 +117,18 @@ index 678e9e0f18..1a5861bbc0 100644
 +        "，。、；：！？）］｝〕〉》」』】〗〙〛”’…‥・ー々〜．｡､".contains(c)
 +    }
 +
-     /// Any character in this list should be treated as a word character,
-     /// meaning it can be part of a word that should not be wrapped.
-     pub(crate) fn is_word_char(c: char) -> bool {
-@@ -715,6 +739,26 @@ mod tests {
-             .collect()
++    /// No-break spaces and the word joiner (UAX #14 classes GL and WJ) hold
++    /// the characters on either side together: `11\u{a0}分\u{a0}39\u{a0}秒`
++    /// never breaks inside, while the text around it still may.
++    pub(crate) fn is_glue(c: char) -> bool {
++        matches!(c, '\u{00A0}' | '\u{202F}' | '\u{2060}')
      }
  
-+    #[test]
+     /// Any character in this list should be treated as a word character,
+@@ -716,6 +749,49 @@
+     }
+ 
+     #[test]
 +    fn test_wrap_line_keeps_cjk_closing_punctuation() {
 +        let mut wrapper = build_wrapper();
 +        let text = "缺少识别组件 llama.cpp，安装后重新检查。你好（世界）、再见！好的，谢谢。";
@@ -138,13 +148,38 @@ index 678e9e0f18..1a5861bbc0 100644
 +        }
 +    }
 +
-     #[test]
++    #[test]
++    fn test_wrap_line_keeps_glued_text_together() {
++        let mut wrapper = build_wrapper();
++        let glued = "11\u{a0}分\u{a0}39\u{a0}秒";
++        let text = format!("预计剩余 {glued}，数据分块到达，上一块于 1\u{a0}分\u{a0}26\u{a0}秒前到达");
++        let start = text.find(glued).unwrap();
++        let inside = |ix: usize, from: usize, len: usize| ix > from && ix < from + len;
++        let second = text.find("1\u{a0}分\u{a0}26\u{a0}秒").unwrap();
++        // Wide enough for each glued span: lines break around it, never inside.
++        for width in 160..480 {
++            for ix in wrapper
++                .wrap_line(&[LineFragment::text(&text)], px(width as f32))
++                .map(|boundary| boundary.ix)
++            {
++                assert!(
++                    !inside(ix, start, glued.len())
++                        && !inside(ix, second, "1\u{a0}分\u{a0}26\u{a0}秒".len()),
++                    "break inside a glued span at {ix}, width {width}"
++                );
++            }
++        }
++    }
++
++    #[test]
      fn test_wrap_line() {
          let mut wrapper = build_wrapper();
-@@ -1206,6 +1250,41 @@ mod tests {
+ 
+@@ -1205,6 +1281,41 @@
+     // For compatibility with the test macro
      #[cfg(target_os = "macos")]
      use crate as gpui;
- 
++
 +    #[cfg(target_os = "macos")]
 +    #[crate::test]
 +    fn test_wrap_shaped_line_keeps_cjk_closing_punctuation(cx: &mut TestAppContext) {
@@ -179,7 +214,6 @@ index 678e9e0f18..1a5861bbc0 100644
 +            }
 +        });
 +    }
-+
+ 
      // These seem to vary wildly based on the text system.
      #[cfg(target_os = "macos")]
-     #[crate::test]
