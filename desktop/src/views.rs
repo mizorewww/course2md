@@ -28,6 +28,12 @@ fn shell_column_width(page: Page) -> AbsoluteLength {
     }
 }
 
+/// Where the title bar's content starts: macOS draws the traffic lights
+/// inside its leading edge.
+pub(crate) fn title_bar_leading() -> f32 {
+    if cfg!(target_os = "macos") { 88. } else { 12. }
+}
+
 /// The max width includes both gutters; layout calculations use the same box.
 pub(super) fn shell_content_width(page: Page, window: &Window) -> f32 {
     let width = f32::from(window.bounds().size.width);
@@ -103,8 +109,7 @@ impl Desktop {
             self.workspace.as_ref().map_or((0, false), |workspace| {
                 crate::task_ui::task_navigation_summary(&workspace.state.tasks)
             });
-        // macOS draws the traffic lights inside the title bar's leading edge.
-        let leading = if cfg!(target_os = "macos") { 88. } else { 12. };
+        let leading = title_bar_leading();
         let page = self.page;
         // TitleBar wraps its children in a box that grows to their content, so
         // the bar takes the window's width explicitly; otherwise nothing in it

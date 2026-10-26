@@ -2026,6 +2026,65 @@ fn screenshot_placeholder() -> Div {
         }))
 }
 
+/// A scroll region's bar in the page gutter just past its trailing edge,
+/// clear of the rounded card surfaces it scrolls.
+fn gutter_scrollbar(scrollbar: Scrollbar) -> Div {
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right(-SCROLLBAR_GUTTER)
+        .w(SCROLLBAR_GUTTER)
+        // Its track follows this gutter, not the list's own viewport.
+        .child(scrollbar.viewport_from_layout())
+}
+
+/// The article card keeps a rounded top edge where the scroll region cuts
+/// it, and text scrolling past that edge fades out instead of being cut
+/// through a line. At the top of the note it coincides with the card's own
+/// corners and padding, so nothing shows.
+fn scrolled_card_top() -> Div {
+    let corner = |left: bool| {
+        div()
+            .absolute()
+            .top_0()
+            .when(left, |corner| corner.left_0())
+            .when(!left, |corner| corner.right_0())
+            .size(RADIUS_HERO)
+            .overflow_hidden()
+            .bg(color(CANVAS))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .when(left, |circle| circle.left_0())
+                    .when(!left, |circle| circle.right_0())
+                    .size(RADIUS_HERO * 2.)
+                    .rounded_full()
+                    .bg(color(SURFACE)),
+            )
+    };
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .h(rems(24. / 14.))
+        .bg(linear_gradient(
+            180.,
+            linear_color_stop(color(SURFACE), 0.),
+            linear_color_stop(
+                Rgba {
+                    a: 0.,
+                    ..color(SURFACE)
+                },
+                1.,
+            ),
+        ))
+        .child(corner(true))
+        .child(corner(false))
+}
+
 /// Screenshot figures in the article.
 const FIGURE_RADIUS: Pixels = px(20.);
 
@@ -3459,9 +3518,8 @@ impl Desktop {
             }))
             .h_full()
             .min_h_0()
-            .w_full()
-            .max_w(px(metrics.reader_width))
-            .mx_auto()
+            .w(px(metrics.reader_width))
+            .ml(px(metrics.frame_offset))
             .pt_2()
             .gap(rems(20. / 14.))
             .when(metrics.compact, |view| view.gap_3())
@@ -3742,9 +3800,10 @@ impl Desktop {
                 .w_full()
                 .h_full(),
             )
-            .child(crate::backend::vertical_scrollbar_for(
+            .child(scrolled_card_top())
+            .child(gutter_scrollbar(crate::backend::vertical_scrollbar_for(
                 &self.reader_ui.note_list,
-            ))
+            )))
             // Dragging the scrollbar moves the list without its scroll handler;
             // the release records the settled position (unchanged ones are skipped).
             .on_mouse_up(
@@ -3824,6 +3883,10 @@ impl Desktop {
 struct ReaderMetrics {
     /// The frame shared by the view tabs and the content below them.
     reader_width: f32,
+    /// The frame's leading edge in window coordinates, which the title bar's
+    /// return button shares, and how far that is past the page column's edge.
+    frame_left: f32,
+    frame_offset: f32,
     /// The contents column when it sits beside the article.
     toc_width: f32,
     toc_fits_beside: bool,
@@ -3870,13 +3933,25 @@ impl ReaderMetrics {
         .max(0.);
         // A note without contents beside it keeps the frame at the article's
         // measure, so the tabs end where the text ends.
-        let reader_width = if tab == 0 && !(has_outline && toc_fits_beside) {
+        let wanted = if tab == 0 && !(has_outline && toc_fits_beside) {
             shell.min(pixels(ARTICLE_MAX))
         } else {
             full
         };
+        // One leading ruler for the return button, the view tabs and the
+        // contents rail: the frame stays centred in the page column unless
+        // that would put it left of the title bar's content, which the
+        // traffic lights push in; then it starts where the return button does.
+        let window_width = f32::from(window.bounds().size.width);
+        let column_left = (window_width - shell) / 2.;
+        let frame_left = ((window_width - wanted) / 2.)
+            .max(column_left)
+            .max(crate::views::title_bar_leading());
+        let reader_width = wanted.min(window_width - column_left - frame_left).max(0.);
         Self {
             reader_width,
+            frame_left,
+            frame_offset: frame_left - column_left,
             toc_width: (full - gap - pixels(ARTICLE_MAX)).clamp(pixels(TOC_MIN), pixels(TOC_MAX)),
             toc_fits_beside,
             toc_beside: tab == 0 && has_outline && toc_fits_beside,
@@ -5046,9 +5121,9 @@ impl Desktop {
                     .min_w_0()
                     .w_full()
                     .child(gallery.w_full().h_full().pb(rems(48. / 14.)))
-                    .child(crate::backend::vertical_scrollbar_for(
+                    .child(gutter_scrollbar(crate::backend::vertical_scrollbar_for(
                         &self.reader_ui.gallery.list,
-                    ))
+                    )))
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(|this, _, _, cx| this.reading_position_moved(cx)),
@@ -7344,11 +7419,19 @@ impl Desktop {
             }
             None => library.to_owned(),
         };
+        // The return button starts on the reader frame's leading ruler and
+        // the reading tools end on its trailing edge, so the bar, the view
+        // tabs and the contents line up at every width.
+        let frame = ReaderMetrics::new(window, self.result_tab, !self.reader_ui.outline.is_empty());
+        let window_width = f32::from(window.bounds().size.width);
+        let trailing = (window_width - frame.frame_left - frame.reader_width).max(16.);
         crate::views::apply_shell_title_bar_chrome(
             TitleBar::new().h(reader_title_bar_height(window)),
         )
         .child(
-            bar.gap(px(12.))
+            bar.pl(px(frame.frame_left))
+                .pr(px(trailing))
+                .gap(px(12.))
                 .child(
                     icon_button("reader-back", BUTTON_MEDIUM, true, cx)
                         .icon(icons::arrow_left())
