@@ -3624,7 +3624,7 @@ mod tests {
             activity.finish();
             // The finished stage keeps its clock as the record, still without a fraction.
             let (detail, fraction) = task_stage_progress(name, true, Some(&activity), 1, 1);
-            assert_eq!(detail, "用时 0 秒");
+            assert_eq!(detail, "用时 0\u{a0}秒");
             assert!(fraction.is_none());
         }
         // Quantities that measure completed work keep their determinate progress.

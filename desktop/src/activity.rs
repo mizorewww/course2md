@@ -322,8 +322,14 @@ pub fn elapsed_label(elapsed: Duration) -> String {
 /// The one way the desktop words a span of time, for elapsed clocks and
 /// remaining-time estimates alike: "16 秒", "1 分 05 秒", "1 小时 02 分"
 /// ("16s", "1m 05s", "1h 02m" in English). Within a larger unit the smaller
-/// one keeps two digits, so a ticking clock does not change width.
+/// one keeps two digits, so a ticking clock does not change width. Its
+/// spaces do not break, so a wrapped line never separates a number from its
+/// unit or one unit from the next.
 pub fn duration_label(seconds: u64) -> String {
+    duration_words(seconds).replace(' ', "\u{a0}")
+}
+
+fn duration_words(seconds: u64) -> String {
     if seconds >= 3600 {
         course2md::tr!(
             "{} 小时 {} 分",
@@ -527,11 +533,14 @@ mod tests {
         assert_eq!(compact_count(950), "950");
         assert_eq!(compact_count(12_345), "12.3k");
         assert_eq!(compact_count(1_250_000), "1.2M");
-        assert_eq!(elapsed_label(Duration::from_secs(16)), "用时 16 秒");
-        assert_eq!(elapsed_label(Duration::from_secs(65)), "用时 1 分 05 秒");
+        assert_eq!(elapsed_label(Duration::from_secs(16)), "用时 16\u{a0}秒");
+        assert_eq!(
+            elapsed_label(Duration::from_secs(65)),
+            "用时 1\u{a0}分\u{a0}05\u{a0}秒"
+        );
         assert_eq!(
             elapsed_label(Duration::from_secs(3720)),
-            "用时 1 小时 02 分"
+            "用时 1\u{a0}小时\u{a0}02\u{a0}分"
         );
     }
 
@@ -601,7 +610,7 @@ mod tests {
         activity.update(1700, 10000, None);
         let detail = activity.detail(&Stage::parse("model/apple"), true);
         assert!(
-            detail.contains("17%") && detail.contains("已用 3 分"),
+            detail.contains("17%") && detail.contains("已用 3\u{a0}分"),
             "{detail}"
         );
         assert!(
@@ -656,13 +665,13 @@ mod tests {
         assert_eq!(metrics.speed.as_deref(), Some("10.0 MB/s"));
         // 1100 MB left at 10 MB/s; the test's own runtime may add a second.
         assert!(
-            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v.starts_with("1 分 5")),
+            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v.starts_with("1\u{a0}分\u{a0}5")),
             "{metrics:?}"
         );
         assert_eq!(metrics.source.as_deref(), Some("来源 huggingface.co"));
         let summary = metrics.summary();
         assert!(
-            summary.starts_with("500.0 MB / 1.56 GB · 速度 10.0 MB/s · 预计剩余 1 分 5")
+            summary.starts_with("500.0 MB / 1.56 GB · 速度 10.0 MB/s · 预计剩余 1\u{a0}分\u{a0}5")
                 && summary.ends_with(" · 来源 huggingface.co"),
             "{summary}"
         );
@@ -864,7 +873,7 @@ mod tests {
         let stalled = item.transfer_metrics(&Stage::parse("model/test"), true);
         assert_eq!(stalled.speed.as_deref(), Some("—"));
         assert_eq!(stalled.eta, None);
-        assert_eq!(stalled.note.as_deref(), Some("已 31 秒没有收到新数据"));
+        assert_eq!(stalled.note.as_deref(), Some("已 31\u{a0}秒没有收到新数据"));
         assert_eq!(stalled.quantity, "5 字节 / 100 字节");
         // Work that is not a byte transfer waits for its response.
         let mut proofreading = Activity::new();
@@ -912,7 +921,7 @@ mod tests {
         assert_eq!(metrics.speed.as_deref(), Some("10.0 MB/s"), "{metrics:?}");
         // 300 MB left at 10 MB/s, not at the 70 MB/s the resumed bytes imply.
         assert!(
-            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "30 秒" || v == "31 秒"),
+            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "30\u{a0}秒" || v == "31\u{a0}秒"),
             "{metrics:?}"
         );
         assert_eq!(aria2.fraction(), Some(0.7));
@@ -946,7 +955,7 @@ mod tests {
         assert_eq!(first.eta, Some(TransferEta::Remaining("计算中".into())));
         assert_eq!(
             first.note.as_deref(),
-            Some("数据分块到达，上一块在 1 分 00 秒前")
+            Some("数据分块到达，上一块在 1\u{a0}分\u{a0}00\u{a0}秒前")
         );
 
         // 160 MB landed in 100 s; 40 s later the next block has not.
@@ -958,10 +967,13 @@ mod tests {
         // The average falls between blocks instead of disappearing.
         assert_eq!(slow.speed.as_deref(), Some("1.1 MB/s"), "{slow:?}");
         assert!(
-            matches!(&slow.eta, Some(TransferEta::Remaining(v)) if v.starts_with("18 分")),
+            matches!(&slow.eta, Some(TransferEta::Remaining(v)) if v.starts_with("18\u{a0}分")),
             "{slow:?}"
         );
-        assert_eq!(slow.note.as_deref(), Some("数据分块到达，上一块在 40 秒前"));
+        assert_eq!(
+            slow.note.as_deref(),
+            Some("数据分块到达，上一块在 40\u{a0}秒前")
+        );
         assert_eq!(slow.source.as_deref(), Some("来源 hf-mirror.com"));
         assert!(!slow.summary().contains("等待响应"));
 
@@ -971,7 +983,10 @@ mod tests {
         assert_eq!(stalled.quantity, "360.0 MB / 1.56 GB");
         assert_eq!(stalled.speed.as_deref(), Some("—"));
         assert_eq!(stalled.eta, None);
-        assert_eq!(stalled.note.as_deref(), Some("已 5 分 05 秒没有收到新数据"));
+        assert_eq!(
+            stalled.note.as_deref(),
+            Some("已 5\u{a0}分\u{a0}05\u{a0}秒没有收到新数据")
+        );
     }
     #[test]
     fn unknown_total_never_invents_a_percentage_or_eta() {
