@@ -3658,7 +3658,7 @@ mod tests {
             activity.finish();
             // The finished stage keeps its clock as the record, still without a fraction.
             let (detail, fraction) = task_stage_progress(name, true, Some(&activity), 1, 1);
-            assert_eq!(detail, "用时\u{a0}0\u{a0}秒");
+            assert_eq!(crate::activity::plain(&detail), "用时 0 秒");
             assert!(fraction.is_none());
         }
         // Quantities that measure completed work keep their determinate progress.
@@ -3671,7 +3671,7 @@ mod tests {
             2,
             6,
         );
-        assert!(detail.replace('\u{a0}', " ").contains("2 / 6"));
+        assert!(crate::activity::plain(&detail).contains("2 / 6"));
         assert_eq!(fraction, Some(2. / 6.));
     }
 
