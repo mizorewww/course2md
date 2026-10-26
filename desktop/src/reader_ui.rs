@@ -1906,13 +1906,13 @@ fn render_note_image(
     use crate::reader_images::Loaded;
     let frame_index = flow.frame_by_path.get(path).copied();
     let frame = frame_index.map(|i| &flow.frames[i]);
-    if frame.is_none() && !flow.data_loading {
-        return missing_image_notice(
-            ("unreadable-inline-image", index),
-            course2md::tr!("截图无法读取"),
-        )
-        .into_any_element();
-    }
+    // A file that is missing or whose header cannot be read gets the same
+    // figure and warning as one that fails to decode.
+    let picture = if frame.is_none() && !flow.data_loading {
+        Some(&Loaded::Failed)
+    } else {
+        picture
+    };
     let label = frame
         .map(frame_label)
         .unwrap_or_else(|| course2md::tr!("截图").into());
