@@ -48,7 +48,7 @@ index e7362f71e5..4a9fd97ec1 100644
                      last_boundary = boundary;
                      last_boundary_x = x;
 diff --git a/crates/gpui/src/text_system/line_wrapper.rs b/crates/gpui/src/text_system/line_wrapper.rs
-index 678e9e0f18..16aa3f8b48 100644
+index 678e9e0f18..7a90107011 100644
 --- a/crates/gpui/src/text_system/line_wrapper.rs
 +++ b/crates/gpui/src/text_system/line_wrapper.rs
 @@ -49,6 +49,9 @@
@@ -125,10 +125,13 @@ index 678e9e0f18..16aa3f8b48 100644
      }
  
      /// Any character in this list should be treated as a word character,
-@@ -716,6 +749,49 @@
-     }
- 
-     #[test]
+@@ -713,6 +746,50 @@
+                 ..Default::default()
+             })
+             .collect()
++    }
++
++    #[test]
 +    fn test_wrap_line_keeps_cjk_closing_punctuation() {
 +        let mut wrapper = build_wrapper();
 +        let text = "缺少识别组件 llama.cpp，安装后重新检查。你好（世界）、再见！好的，谢谢。";
@@ -152,7 +155,8 @@ index 678e9e0f18..16aa3f8b48 100644
 +    fn test_wrap_line_keeps_glued_text_together() {
 +        let mut wrapper = build_wrapper();
 +        let glued = "11\u{a0}分\u{a0}39\u{a0}秒";
-+        let text = format!("预计剩余 {glued}，数据分块到达，上一块于 1\u{a0}分\u{a0}26\u{a0}秒前到达");
++        let text =
++            format!("预计剩余 {glued}，数据分块到达，上一块于 1\u{a0}分\u{a0}26\u{a0}秒前到达");
 +        let start = text.find(glued).unwrap();
 +        let inside = |ix: usize, from: usize, len: usize| ix > from && ix < from + len;
 +        let second = text.find("1\u{a0}分\u{a0}26\u{a0}秒").unwrap();
@@ -169,13 +173,10 @@ index 678e9e0f18..16aa3f8b48 100644
 +                );
 +            }
 +        }
-+    }
-+
-+    #[test]
-     fn test_wrap_line() {
-         let mut wrapper = build_wrapper();
+     }
  
-@@ -1205,6 +1281,41 @@
+     #[test]
+@@ -1205,6 +1282,81 @@
      // For compatibility with the test macro
      #[cfg(target_os = "macos")]
      use crate as gpui;
@@ -209,6 +210,46 @@ index 678e9e0f18..16aa3f8b48 100644
 +                    assert!(
 +                        !LineWrapper::is_cjk_closing_punctuation(next),
 +                        "line starts with {next:?} at width {width}"
++                    );
++                }
++            }
++        });
++    }
++
++    #[cfg(target_os = "macos")]
++    #[crate::test]
++    fn test_wrap_shaped_line_keeps_glued_text_together(cx: &mut TestAppContext) {
++        cx.update(|cx| {
++            let text_system = WindowTextSystem::new(cx.text_system().clone());
++            let glued = "11\u{a0}分\u{a0}39\u{a0}秒";
++            let text = format!("360.0 MB / 1.56 GB · 速度 1.8 MB/s · 预计剩余\u{a0}{glued}\u{a0}· 数据分块到达，上一块于 1\u{a0}分\u{a0}26\u{a0}秒前到达");
++            let start = text.find("余").unwrap();
++            let end = text.find(" 数据").unwrap();
++            let run = TextRun {
++                len: text.len(),
++                font: font("PingFang SC"),
++                ..Default::default()
++            };
++            // Wide enough for the glued span: lines break around it, never
++            // inside it (StyledText wraps through LineLayout).
++            for width in 160..480 {
++                let lines = text_system
++                    .shape_text(
++                        text.clone().into(),
++                        px(16.),
++                        &[run.clone()],
++                        Some(px(width as f32)),
++                        None,
++                    )
++                    .unwrap();
++                let layout = &lines[0].layout;
++                for boundary in layout.wrap_boundaries() {
++                    let glyph =
++                        &layout.unwrapped_layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix];
++                    assert!(
++                        glyph.index <= start || glyph.index > end,
++                        "break inside a glued span at {}, width {width}",
++                        glyph.index
 +                    );
 +                }
 +            }
