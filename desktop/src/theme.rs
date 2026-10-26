@@ -1628,7 +1628,8 @@ const NAV_LABEL_SIZE: f32 = 15.;
 /// An app bar destination with its icon and `shown` text: its label, or a
 /// shorter form (a task count) or nothing when the bar cannot hold labels.
 /// The full label always names the button, and shows as its tooltip while it
-/// is not drawn in full; icon-only destinations keep even padding.
+/// is not drawn in full; a collapsed destination (its icon, or the icon and
+/// a count) keeps even padding.
 pub fn nav_destination(
     id: impl Into<gpui::ElementId>,
     selected: bool,
@@ -1641,10 +1642,9 @@ pub fn nav_destination(
     use gpui::prelude::FluentBuilder as _;
     let label = label.into();
     let collapsed = shown.as_ref() != Some(&label);
-    let icon_only = shown.is_none();
     nav_action(id, selected, cx)
         .icon(icon)
-        .when(icon_only, |button| button.pr(rems(NAV_PAD_START / 14.)))
+        .when(collapsed, |button| button.pr(rems(NAV_PAD_START / 14.)))
         .when_some(shown, |button, shown| button.label(shown))
         .accessibility_label(label.clone())
         .when(collapsed, |button| button.tooltip(label))
