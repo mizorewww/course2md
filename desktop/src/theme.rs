@@ -1146,10 +1146,17 @@ pub fn accessible_text(
 ) -> gpui::Stateful<gpui::Div> {
     use gpui::*;
     let value = value.into();
+    // Word joiners only steer line wrapping; a screen reader gets the
+    // plain words so its pacing matches the text's meaning.
+    let label = if value.contains('\u{2060}') {
+        SharedString::from(value.replace('\u{2060}', ""))
+    } else {
+        value.clone()
+    };
     div()
         .id(id)
         .role(Role::Label)
-        .aria_label(value.clone())
+        .aria_label(label)
         .child(value)
 }
 
