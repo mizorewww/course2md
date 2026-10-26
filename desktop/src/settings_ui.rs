@@ -528,6 +528,9 @@ pub(crate) fn add_slot() -> Div {
         .child(icons::plus().size(rems(24. / 14.)))
 }
 
+/// The text keeps a readable measure; when it and the trailing actions no
+/// longer fit side by side (a narrow window, a large text scale), the actions
+/// wrap under the text on its ruler instead of squeezing it.
 pub(crate) fn resource_layout(icon: impl IntoElement, text: Div, trailing: Div) -> Div {
     h_flex()
         .w_full()
@@ -535,9 +538,25 @@ pub(crate) fn resource_layout(icon: impl IntoElement, text: Div, trailing: Div) 
         .gap(RESOURCE_GAP)
         .items_center()
         .child(icon)
-        .child(text.flex_1().min_w_0().gap_1())
-        .child(trailing.flex_shrink_0())
+        .child(
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .flex_wrap()
+                .items_center()
+                .gap(rems(12. / 14.))
+                .child(
+                    text.flex_1()
+                        .flex_basis(RESOURCE_TEXT_MEASURE)
+                        .min_w_0()
+                        .gap_1(),
+                )
+                .child(trailing.flex_shrink_0().max_w_full()),
+        )
 }
+
+/// The narrowest a resource's text column gets before its actions wrap.
+const RESOURCE_TEXT_MEASURE: Rems = rems(180. / 14.);
 
 /// One row of a resource list (an account or a saved service): icon, text,
 /// status and actions, on the same trailing inset as a tile's chevron, so a
