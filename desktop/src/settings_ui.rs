@@ -1597,7 +1597,8 @@ impl Desktop {
             .gap(rems(6. / 14.))
             .child(
                 div()
-                    .h(BUTTON_LARGE)
+                    .min_h(BUTTON_LARGE)
+                    .min_w_0()
                     .flex()
                     .items_center()
                     .child(theme::page_heading(

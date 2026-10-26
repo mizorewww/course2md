@@ -382,6 +382,8 @@ impl SettingsText for SingleChoiceGroup {
 /// Page title shared by library, tasks, settings and a non-hero workbench.
 /// As on the M3 canvas, the title is text alone in the regular-weight
 /// headline role; the app bar already marks the destination with its icon.
+/// A title longer than its column (a narrow window, a large text scale)
+/// wraps rather than running past the edge.
 pub fn page_heading(
     id: impl Into<gpui::ElementId>,
     title: impl Into<gpui::SharedString>,
@@ -389,6 +391,8 @@ pub fn page_heading(
     use gpui::{prelude::*, *};
     div().flex().items_center().min_w_0().child(
         accessible_text(id, title.into())
+            .min_w_0()
+            .whitespace_normal()
             .role(Role::Heading)
             .text_size(TEXT_HEADLINE)
             .line_height(rems(36. / 14.))
