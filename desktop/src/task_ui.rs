@@ -375,6 +375,8 @@ struct TaskStage {
     title: String,
     status: StageStatus,
     detail: String,
+    /// The measurement as one line for a compact card.
+    compact_detail: String,
     fraction: Option<f32>,
 }
 
@@ -388,6 +390,19 @@ fn task_stage_progress(
     current: u64,
     total: u64,
 ) -> (String, Option<f32>) {
+    stage_progress(name, done, live, current, total, false)
+}
+
+/// A stage's measurement: in full for the task details, or `compact` for a
+/// one-line card status, which leaves out supplementary context.
+fn stage_progress(
+    name: &Stage,
+    done: bool,
+    live: Option<&activity::Activity>,
+    current: u64,
+    total: u64,
+    compact: bool,
+) -> (String, Option<f32>) {
     // AI requests have no measurable fraction; their clock and returned
     // tokens show them moving, and stay as the record once they finish.
     if name.is_ai() {
@@ -397,7 +412,11 @@ fn task_stage_progress(
         );
     }
     let detail = if !done && let Some(live) = live {
-        live.detail(name, true)
+        if compact {
+            live.compact_detail(name, true)
+        } else {
+            live.detail(name, true)
+        }
     } else if !done
         || matches!(
             name,
@@ -425,7 +444,11 @@ fn task_stage_progress(
             if matches!(metrics.eta, Some(activity::TransferEta::Note(_))) {
                 metrics.eta = None;
             }
-            let rest = metrics.summary();
+            let rest = if compact {
+                metrics.compact_summary()
+            } else {
+                metrics.summary()
+            };
             if rest.is_empty() {
                 live.live_counter()
             } else {
@@ -2823,11 +2846,13 @@ impl Desktop {
                     .or_else(|| stored.map(|stage| stage.total))
                     .unwrap_or(0);
                 let (detail, fraction) = task_stage_progress(&name, done, live, current, total);
+                let (compact_detail, _) = stage_progress(&name, done, live, current, total, true);
                 TaskStage {
                     id: SharedString::from(format!("task-stage-{}-{name}", task.id)),
                     title: activity::title(&name),
                     status,
                     detail,
+                    compact_detail,
                     fraction,
                 }
             })
@@ -2854,10 +2879,10 @@ impl Desktop {
                 )
             })
             .map(|stage| {
-                let label = if stage.detail.is_empty() {
+                let label = if stage.compact_detail.is_empty() {
                     stage.title
                 } else {
-                    format!("{} · {}", stage.title, stage.detail)
+                    format!("{} · {}", stage.title, stage.compact_detail)
                 };
                 (label, stage.fraction)
             })

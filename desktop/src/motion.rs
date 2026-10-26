@@ -381,7 +381,11 @@ pub fn transfer_status(
             .text_color(color(GRAY)),
         );
     }
-    for (key, text) in [("note", &metrics.note), ("source", &metrics.source)] {
+    for (key, text) in [
+        ("note", &metrics.note),
+        ("aside", &metrics.aside),
+        ("source", &metrics.source),
+    ] {
         if let Some(text) = text {
             view = view.child(
                 accessible_text(SharedString::from(format!("{id:?}-{key}")), text.clone())

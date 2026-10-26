@@ -251,17 +251,23 @@ impl Activity {
         } else {
             None
         };
-        let note = if in_blocks && silent >= QUIET_AFTER {
-            Some(course2md::tr!(
-                "数据分块到达，上一块在 {}前",
-                duration_label(silent.as_secs())
-            ))
+        let note = if in_blocks && landed == 0 {
+            Some(course2md::tr!("正在等待第一块数据").into())
         } else {
             (byte_download && speed.is_none()).then(|| course2md::tr!("正在测量速度").into())
         };
+        // How long ago the last block landed explains a falling speed; it
+        // belongs with the full details, not the one-line status.
+        let aside = (in_blocks && landed > 0 && silent >= QUIET_AFTER).then(|| {
+            course2md::tr!(
+                "数据分块到达，上一块于 {}前到达",
+                duration_label(silent.as_secs())
+            )
+        });
         TransferMetrics {
             quantity,
             note,
+            aside,
             speed,
             eta,
             source,
@@ -273,6 +279,11 @@ impl Activity {
     }
     pub fn detail(&self, stage: &Stage, running: bool) -> String {
         self.transfer_metrics(stage, running).summary()
+    }
+    /// The one-line status for a compact card: what is moving and how fast,
+    /// without the supplementary aside and source.
+    pub fn compact_detail(&self, stage: &Stage, running: bool) -> String {
+        self.transfer_metrics(stage, running).compact_summary()
     }
 }
 
@@ -291,12 +302,20 @@ pub struct TransferMetrics {
     pub speed: Option<String>,
     pub eta: Option<TransferEta>,
     pub note: Option<String>,
+    /// Supplementary context for the full details only.
+    pub aside: Option<String>,
     /// Where the bytes come from, for model files.
     pub source: Option<String>,
 }
 
 impl TransferMetrics {
     pub fn summary(&self) -> String {
+        self.parts(true).join(" · ")
+    }
+    pub fn compact_summary(&self) -> String {
+        self.parts(false).join(" · ")
+    }
+    fn parts(&self, full: bool) -> Vec<String> {
         let mut parts = Vec::new();
         if !self.quantity.is_empty() {
             parts.push(self.quantity.clone());
@@ -313,10 +332,10 @@ impl TransferMetrics {
         if let Some(note) = &self.note {
             parts.push(note.clone());
         }
-        if let Some(source) = &self.source {
-            parts.push(source.clone());
+        if full {
+            parts.extend(self.aside.iter().chain(&self.source).cloned());
         }
-        parts.join(" · ")
+        parts
     }
 }
 
@@ -656,7 +675,7 @@ mod tests {
         activity.unit = Some(Unit::Bytes);
         let measuring = activity.transfer_metrics(&apple, true);
         assert_eq!(measuring.quantity, "300.0 MB / 1.56 GB");
-        assert_eq!(measuring.note.as_deref(), Some("正在测量速度"));
+        assert_eq!(measuring.note.as_deref(), Some("正在等待第一块数据"));
         assert_eq!(measuring.eta, Some(TransferEta::Remaining("计算中".into())));
 
         // Configuration files and the first ranges are too little to time.
@@ -953,17 +972,23 @@ mod tests {
         activity.set_phase(Some(Phase::Download));
         activity.unit = Some(Unit::Bytes);
 
-        // The first sixteen ranges are still in flight after a minute.
+        // The first sixteen ranges are still in flight after a minute; the
+        // 200 MB were on disk, so nothing has landed in this session.
         activity.started = Instant::now() - Duration::from_secs(60);
         activity.updated = Instant::now() - Duration::from_secs(60);
         let first = activity.transfer_metrics(&apple, true);
         assert_eq!(first.quantity, "200.0 MB / 1.56 GB");
         assert_eq!(first.speed, None);
         assert_eq!(first.eta, Some(TransferEta::Remaining("计算中".into())));
-        assert_eq!(
-            first.note.as_deref(),
-            Some("数据分块到达，上一块在 1\u{a0}分\u{a0}00\u{a0}秒前")
-        );
+        assert_eq!(first.note.as_deref(), Some("正在等待第一块数据"));
+        assert_eq!(first.aside, None);
+
+        // One block landed: too little of a wave to time.
+        activity.update(208 * MIB, 1600 * MIB, None);
+        activity.started = Instant::now() - Duration::from_secs(70);
+        let early = activity.transfer_metrics(&apple, true);
+        assert_eq!(early.speed, None);
+        assert_eq!(early.note.as_deref(), Some("正在测量速度"));
 
         // 160 MB landed in 100 s; 40 s later the next block has not.
         activity.update(360 * MIB, 1600 * MIB, None);
@@ -977,12 +1002,23 @@ mod tests {
             matches!(&slow.eta, Some(TransferEta::Remaining(v)) if v.starts_with("18\u{a0}分")),
             "{slow:?}"
         );
+        assert_eq!(slow.note, None);
         assert_eq!(
-            slow.note.as_deref(),
-            Some("数据分块到达，上一块在 40\u{a0}秒前")
+            slow.aside.as_deref(),
+            Some("数据分块到达，上一块于 40\u{a0}秒前到达")
         );
         assert_eq!(slow.source.as_deref(), Some("来源 hf-mirror.com"));
         assert!(!slow.summary().contains("等待响应"));
+        // The full details explain the quiet spell; the one-line status
+        // keeps only what moves.
+        assert!(slow.summary().contains("上一块于"));
+        let compact = activity.compact_detail(&apple, true);
+        assert!(
+            compact.starts_with("360.0 MB / 1.56 GB · 速度 1.1 MB/s · 预计剩余 18\u{a0}分")
+                && !compact.contains("上一块")
+                && !compact.contains("来源"),
+            "{compact}"
+        );
 
         // Five minutes without a block is the downloader's own stall.
         activity.updated = Instant::now() - Duration::from_secs(305);
