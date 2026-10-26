@@ -1957,12 +1957,11 @@ fn render_note_image(
                         picture.into_any_element()
                     })
                 }
-                Some(Loaded::Failed) => {
-                    figure.child(div().absolute().inset_0().p_4().child(missing_image_notice(
-                        ("failed-reader-image", index),
-                        course2md::tr!("截图无法读取"),
-                    )))
-                }
+                Some(Loaded::Failed) => figure.child(
+                    unreadable_screenshot(("failed-reader-image", index))
+                        .absolute()
+                        .inset_0(),
+                ),
                 // The same quiet placeholder as the screenshot cards.
                 _ => figure.child(screenshot_placeholder()),
             })
@@ -1993,22 +1992,35 @@ fn render_note_image(
 /// The viewer's media area for a screenshot that cannot be read: the same
 /// warning fill as its card, over the space the image would take.
 fn unreadable_viewer_image() -> Stateful<Div> {
-    v_flex()
-        .id("image-unreadable")
+    unreadable_screenshot("image-unreadable")
         .flex_1()
         .min_h(rems(8.))
         .w_full()
+        .rounded(RADIUS_CARD)
+}
+
+/// A screenshot whose file cannot be read, in the space its image takes:
+/// the warning fill with the image glyph and message centred, the same in
+/// a card, an article figure and the viewer.
+fn unreadable_screenshot(id: impl Into<ElementId>) -> Stateful<Div> {
+    let id = id.into();
+    v_flex()
+        .id(id.clone())
         .items_center()
         .justify_center()
         .gap_2()
-        .rounded(RADIUS_CARD)
+        .p_4()
         .bg(color(WARNING_BG))
         .text_color(color(WARNING))
         .child(icons::image().size(EMPTY_STATE_ICON))
-        .child(theme::accessible_text(
-            "image-unreadable-text",
-            course2md::tr!("截图无法读取"),
-        ))
+        .child(
+            theme::accessible_text(
+                ElementId::NamedChild(Arc::new(id), "text".into()),
+                course2md::tr!("截图无法读取"),
+            )
+            .text_size(TEXT_AUX)
+            .text_center(),
+        )
 }
 
 /// A screenshot still decoding: a quiet image glyph on its tile, one calm
@@ -5298,20 +5310,9 @@ impl Desktop {
         });
         let openable = matches!(loaded, Some(Loaded::Pending | Loaded::Ready(..)));
         let unreadable = || {
-            v_flex()
+            unreadable_screenshot(("missing-frame", index))
                 .absolute()
                 .inset_0()
-                .justify_center()
-                .p_4()
-                .bg(color(WARNING_BG))
-                .child(
-                    theme::accessible_text(
-                        ("missing-frame", index),
-                        course2md::tr!("截图无法读取"),
-                    )
-                    .text_size(TEXT_AUX)
-                    .text_color(color(WARNING)),
-                )
         };
         let image = div()
             .id(("screenshot-frame", index))
