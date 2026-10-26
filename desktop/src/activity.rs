@@ -2,6 +2,12 @@
 use course2md::progress::{Phase, Stage, Unit};
 use std::time::{Duration, Instant};
 
+/// Silence after which a source that reports continuously has stopped.
+const QUIET_AFTER: Duration = Duration::from_secs(30);
+/// speech-swift abandons an Apple download attempt after five minutes without
+/// a landed range (`HuggingFaceDownloader.downloadStallTimeoutSeconds`).
+const BLOCK_STALL_AFTER: Duration = Duration::from_secs(300);
+
 pub struct Activity {
     pub current: u64,
     pub total: u64,
@@ -106,11 +112,17 @@ impl Activity {
         }
         self.phase = phase;
     }
-    fn rate(&self) -> Option<f64> {
+    /// Units per second since the sample began, counting only work done in
+    /// this sample. Between reports it decays toward zero as time passes.
+    fn average_rate(&self) -> Option<f64> {
         let elapsed = self.started.elapsed().as_secs_f64();
         let processed = self.current.saturating_sub(self.baseline);
-        (elapsed >= 1. && processed > 0 && self.updated.elapsed() < Duration::from_secs(30))
-            .then(|| processed as f64 / elapsed)
+        (elapsed >= 1. && processed > 0).then(|| processed as f64 / elapsed)
+    }
+    /// The average rate while reports still arrive at their usual cadence.
+    fn rate(&self) -> Option<f64> {
+        self.average_rate()
+            .filter(|_| self.updated.elapsed() < QUIET_AFTER)
     }
     pub fn transfer_metrics(&self, stage: &Stage, running: bool) -> TransferMetrics {
         if self.done {
@@ -169,30 +181,46 @@ impl Activity {
             }
             _ => {}
         }
-        let stalled = self.updated.elapsed() >= Duration::from_secs(30) && self.current > 0;
-        if stalled {
+        // The Apple downloader reports a whole 8 MiB range only once it has
+        // landed, sixteen in flight, so on a slow link minutes can pass
+        // between reports while data keeps flowing. Its silence is a stall
+        // only once its own guard would abandon the attempt.
+        let in_blocks = *stage == Stage::ModelApple && byte_download;
+        let silent = self.updated.elapsed();
+        let stall_after = if in_blocks {
+            BLOCK_STALL_AFTER
+        } else {
+            QUIET_AFTER
+        };
+        if silent >= stall_after && self.current > 0 {
             return TransferMetrics {
                 quantity,
                 source,
                 speed: byte_download.then(|| "—".into()),
                 note: Some(
                     if matches!(stage, Stage::ScenesScan | Stage::ScenesExtract) {
-                        course2md::tr!("仍在处理")
+                        course2md::tr!("仍在处理").into()
+                    } else if byte_download {
+                        course2md::tr!("已 {}没有收到新数据", duration_label(silent.as_secs()))
                     } else {
-                        course2md::tr!("等待响应")
-                    }
-                    .into(),
+                        course2md::tr!("等待响应").into()
+                    },
                 ),
                 ..TransferMetrics::default()
             };
         }
-        // The Apple downloader reports whole 8 MiB ranges with sixteen in
-        // flight, and fetches small configuration files first, so its early
+        // It also fetches small configuration files first, so its early
         // samples miss most of the bytes already received. Until 5% of the
         // model has landed in this run, the speed is still being measured.
-        let settled = *stage != Stage::ModelApple
-            || self.current.saturating_sub(self.baseline) * 20 >= self.total;
-        let rate = self.rate().filter(|_| settled);
+        let settled = !in_blocks || self.current.saturating_sub(self.baseline) * 20 >= self.total;
+        // Between its blocks the average keeps falling, which is what a slow
+        // link looks like; the estimate follows it.
+        let rate = if in_blocks {
+            self.average_rate()
+        } else {
+            self.rate()
+        }
+        .filter(|_| settled);
         let speed = rate
             .filter(|_| byte_download)
             .map(|rate| format!("{}/s", throughput(rate)));
@@ -216,9 +244,17 @@ impl Activity {
         } else {
             None
         };
+        let note = if in_blocks && silent >= QUIET_AFTER {
+            Some(course2md::tr!(
+                "数据分块到达，上一块在 {}前",
+                duration_label(silent.as_secs())
+            ))
+        } else {
+            (byte_download && speed.is_none()).then(|| course2md::tr!("正在测量速度").into())
+        };
         TransferMetrics {
             quantity,
-            note: (byte_download && speed.is_none()).then(|| course2md::tr!("正在测量速度").into()),
+            note,
             speed,
             eta,
             source,
@@ -823,11 +859,24 @@ mod tests {
         assert!(item.rate().is_none());
         item.started = Instant::now() - Duration::from_secs(60);
         item.updated = Instant::now() - Duration::from_secs(31);
+        // A byte stream that reports continuously has stopped; it says for
+        // how long instead of keeping a stale speed.
+        let stalled = item.transfer_metrics(&Stage::parse("model/test"), true);
+        assert_eq!(stalled.speed.as_deref(), Some("—"));
+        assert_eq!(stalled.eta, None);
+        assert_eq!(stalled.note.as_deref(), Some("已 31 秒没有收到新数据"));
+        assert_eq!(stalled.quantity, "5 字节 / 100 字节");
+        // Work that is not a byte transfer waits for its response.
+        let mut proofreading = Activity::new();
+        proofreading.update(1, 4, None);
+        proofreading.updated = Instant::now() - Duration::from_secs(31);
         assert!(
-            item.detail(&Stage::parse("model/test"), true)
+            proofreading
+                .detail(&Stage::Transcribe, true)
                 .contains("等待响应")
         );
     }
+
     const MIB: u64 = 1024 * 1024;
 
     /// Speed counts only bytes that crossed the network in this session;
@@ -878,6 +927,52 @@ mod tests {
         assert_eq!(aria2.fraction(), Some(0.7));
     }
 
+    /// The Apple downloader reports whole ranges once they land; a quiet
+    /// spell between them is a slow link, not a stall.
+    #[test]
+    fn apple_downloads_between_blocks_stay_informative() {
+        let apple = Stage::parse("model/apple");
+        let mut activity = Activity::new();
+        activity.update(200 * MIB, 1600 * MIB, Some("hf-mirror.com".into()));
+        activity.set_phase(Some(Phase::Download));
+        activity.unit = Some(Unit::Bytes);
+
+        // The first sixteen ranges are still in flight after a minute.
+        activity.started = Instant::now() - Duration::from_secs(60);
+        activity.updated = Instant::now() - Duration::from_secs(60);
+        let first = activity.transfer_metrics(&apple, true);
+        assert_eq!(first.quantity, "200.0 MB / 1.56 GB");
+        assert_eq!(first.speed, None);
+        assert_eq!(first.eta, Some(TransferEta::Remaining("计算中".into())));
+        assert_eq!(
+            first.note.as_deref(),
+            Some("数据分块到达，上一块在 1 分 00 秒前")
+        );
+
+        // 160 MB landed in 100 s; 40 s later the next block has not.
+        activity.update(360 * MIB, 1600 * MIB, None);
+        activity.started = Instant::now() - Duration::from_secs(140);
+        activity.updated = Instant::now() - Duration::from_secs(40);
+        let slow = activity.transfer_metrics(&apple, true);
+        assert_eq!(slow.quantity, "360.0 MB / 1.56 GB");
+        // The average falls between blocks instead of disappearing.
+        assert_eq!(slow.speed.as_deref(), Some("1.1 MB/s"), "{slow:?}");
+        assert!(
+            matches!(&slow.eta, Some(TransferEta::Remaining(v)) if v.starts_with("18 分")),
+            "{slow:?}"
+        );
+        assert_eq!(slow.note.as_deref(), Some("数据分块到达，上一块在 40 秒前"));
+        assert_eq!(slow.source.as_deref(), Some("来源 hf-mirror.com"));
+        assert!(!slow.summary().contains("等待响应"));
+
+        // Five minutes without a block is the downloader's own stall.
+        activity.updated = Instant::now() - Duration::from_secs(305);
+        let stalled = activity.transfer_metrics(&apple, true);
+        assert_eq!(stalled.quantity, "360.0 MB / 1.56 GB");
+        assert_eq!(stalled.speed.as_deref(), Some("—"));
+        assert_eq!(stalled.eta, None);
+        assert_eq!(stalled.note.as_deref(), Some("已 5 分 05 秒没有收到新数据"));
+    }
     #[test]
     fn unknown_total_never_invents_a_percentage_or_eta() {
         let mut item = Activity::new();

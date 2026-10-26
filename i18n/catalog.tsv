@@ -599,6 +599,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 展开	展开	Expand	展開	展開
 展开处理选项	展开处理选项	Expand processing options	展開處理選項	処理オプションを展開する
 工作目录不能位于已发布版本内 / Work directory overlaps published versions	工作目录不能位于已发布版本内	Work directory overlaps published versions	工作目錄不能位於已發布版本內	作業ディレクトリを公開済みのバージョン内に置くことはできません
+已 {}没有收到新数据	已 {}没有收到新数据	No new data for {}	已 {}沒有收到新資料	{}間、新しいデータが届いていません
 已下载	已下载	Downloaded	已下載	ダウンロード済み
 已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	Inputs and tasks have been restored from backup. Unable to confirm the last operation, the unfinished task has been suspended.	已從備份恢復輸入和任務。無法確認最後一次操作，未完成任務已暫停。	入力とタスクはバックアップから復元されました。最後の操作を確認できず、未完了のタスクは中断されました。
 已使用环境变量中的密钥，点击保存后生效	已使用环境变量中的密钥，点击保存后生效	The key in the environment variable has been used and will take effect after clicking Save.	已使用環境變數中的金鑰，點選儲存後生效	環境変数のキーが使用されており、[保存] をクリックすると有効になります。
@@ -846,6 +847,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 排队中	排队中	Queued	排隊中	待機中
 推荐 · 音频不离开本机	推荐 · 音频不离开本机	Recommended · Audio stays on this device	推薦 · 音訊不離開本機	推奨 · 音声はこのデバイスの外に送信されません
 提交时已确定，不能再更改	提交时已确定，不能再更改	Set when the task was submitted; can't be changed	提交時已確定，不能再更改	タスクの送信時に確定しており、変更できません
+数据分块到达，上一块在 {}前	数据分块到达，上一块在 {}前	Data arrives in blocks; the last one {} ago	資料分塊到達，上一塊在 {}前	データはブロック単位で届きます。前回の受信は {}前
 音频不离开本机	音频不离开本机	Audio stays on this device	音訊不離開本機	音声はこのデバイスの外に送信されません
 提取画面	提取画面	Extract frames	提取畫面	フレームを抽出
 提取音频	提取音频	Extract audio	提取音訊	音声を抽出する
