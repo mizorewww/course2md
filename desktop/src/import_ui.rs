@@ -1095,6 +1095,13 @@ impl Desktop {
     fn fit_source_placeholder(&self, window: &mut Window, cx: &mut Context<Self>) {
         let input = self.inputs[&Field::Source].clone();
         let width = f32::from(input.read(cx).input_bounds().size.width);
+        // The field's bounds come from the last layout. After the window or
+        // text scale changed (perhaps while another page was shown), they
+        // are stale for this frame, so ask for one more.
+        let frame = (window.viewport_size(), window.rem_size());
+        if self.source_placeholder_fit.replace(frame) != frame {
+            window.request_animation_frame();
+        }
         let candidates = [
             course2md::tr!("粘贴 YouTube 或 Bilibili 视频链接"),
             course2md::tr!("粘贴视频链接"),

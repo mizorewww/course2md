@@ -186,6 +186,9 @@ impl ValidationOpen {
 type PreviewPlan = Result<workspace::TaskPlan, (String, bool)>;
 
 struct Desktop {
+    /// The window size and text scale the link placeholder was last fitted
+    /// in; a change asks for one more frame so the fit reads fresh bounds.
+    source_placeholder_fit: std::cell::Cell<(gpui::Size<Pixels>, Pixels)>,
     preferences: preferences::Store,
     settings_ui: settings_ui::State,
     onboarding: onboarding::State,
@@ -589,6 +592,7 @@ impl Desktop {
         let onboarding = onboarding::State::new(window, cx);
         let reader_ui = reader_ui::State::new(window, cx);
         let mut this = Self {
+            source_placeholder_fit: Default::default(),
             preferences,
             settings_ui,
             onboarding,
