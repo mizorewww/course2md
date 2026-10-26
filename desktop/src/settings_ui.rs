@@ -530,29 +530,26 @@ pub(crate) fn add_slot() -> Div {
 
 /// The text keeps a readable measure; when it and the trailing actions no
 /// longer fit side by side (a narrow window, a large text scale), the actions
-/// wrap under the text on its ruler instead of squeezing it.
+/// wrap onto their own line across the item's whole width instead of
+/// squeezing the text or running past the item's edge.
 pub(crate) fn resource_layout(icon: impl IntoElement, text: Div, trailing: Div) -> Div {
     h_flex()
         .w_full()
         .min_w_0()
-        .gap(RESOURCE_GAP)
+        .flex_wrap()
         .items_center()
-        .child(icon)
+        .gap(rems(12. / 14.))
         .child(
             h_flex()
                 .flex_1()
+                .flex_basis(rems(RESOURCE_TEXT_INSET.0 + RESOURCE_TEXT_MEASURE.0))
                 .min_w_0()
-                .flex_wrap()
+                .gap(RESOURCE_GAP)
                 .items_center()
-                .gap(rems(12. / 14.))
-                .child(
-                    text.flex_1()
-                        .flex_basis(RESOURCE_TEXT_MEASURE)
-                        .min_w_0()
-                        .gap_1(),
-                )
-                .child(trailing.flex_shrink_0().max_w_full()),
+                .child(icon)
+                .child(text.flex_1().min_w_0().gap_1()),
         )
+        .child(trailing.flex_shrink_0().max_w_full().ml_auto())
 }
 
 /// The narrowest a resource's text column gets before its actions wrap.
