@@ -56,36 +56,52 @@ fn notice_key(text: &str) -> usize {
     hasher.finish() as usize
 }
 
-/// Whether the app bar holds the brand and every destination with its label,
-/// from the shaped text at the current scale: the mark, wordmark and each
-/// destination's padding, icon, gap and label, plus a little open space.
-fn app_bar_labels_fit(leading: f32, tasks: Option<&str>, window: &Window) -> bool {
-    let rem = f32::from(window.rem_size());
-    let measure = |text: &str, size: f32| {
-        let mut style = window.text_style();
-        style.font_weight = FontWeight::MEDIUM;
-        let text = SharedString::from(text.to_owned());
-        f32::from(
-            window
-                .text_system()
-                .shape_line(text.clone(), px(size), &[style.to_run(text.len())], None)
-                .width,
-        )
+/// How much text the app bar can hold, from most to least.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AppBarDensity {
+    /// The wordmark and every destination's label.
+    Labels,
+    /// Destinations as icons (the task count stays), with the wordmark.
+    Icons,
+    /// The mark alone and icon destinations.
+    Mark,
+}
+
+/// The fullest app bar that fits, measured from the shaped text at the
+/// current scale: the brand (mark, wordmark, padding), each destination as
+/// `nav_destination` draws it, the gaps, and a little open space. `tasks` is
+/// the task destination's label and its count, when it is shown.
+fn app_bar_density(
+    leading: f32,
+    tasks: Option<(&str, Option<&str>)>,
+    window: &Window,
+) -> AppBarDensity {
+    let scaled = |value: f32| value * f32::from(window.rem_size()) / 14.;
+    let available = f32::from(window.viewport_size().width) - leading - 16.;
+    let fits = |density: AppBarDensity| {
+        let brand = match density {
+            AppBarDensity::Mark => scaled(4. + 32. + 4.),
+            _ => {
+                scaled(4. + 32. + 10. + 12.)
+                    + shaped_width("course2md", scaled(20.), FontWeight::MEDIUM, window)
+            }
+        };
+        let labels = density == AppBarDensity::Labels;
+        let destinations = [
+            Some(labels.then_some(course2md::tr!("笔记库"))),
+            tasks.map(|(label, count)| if labels { Some(label) } else { count }),
+            Some(labels.then_some(course2md::tr!("设置"))),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|shown| nav_destination_width(shown, window) + 4.)
+        .sum::<f32>();
+        brand + destinations + scaled(24.) <= available
     };
-    let scaled = |value: f32| value * rem / 14.;
-    let brand = scaled(4. + 32. + 10. + 12.) + measure("course2md", scaled(20.));
-    let destination = |label: &str| scaled(12. + 20. + 8. + 16.) + measure(label, scaled(15.));
-    let destinations = [
-        Some(course2md::tr!("笔记库")),
-        tasks,
-        Some(course2md::tr!("设置")),
-    ]
-    .into_iter()
-    .flatten()
-    .map(|label| destination(label) + 4.)
-    .sum::<f32>();
-    let open_space = scaled(24.);
-    leading + brand + destinations + open_space + 16. <= f32::from(window.viewport_size().width)
+    [AppBarDensity::Labels, AppBarDensity::Icons]
+        .into_iter()
+        .find(|density| fits(*density))
+        .unwrap_or(AppBarDensity::Mark)
 }
 
 fn shell_column_at(width: AbsoluteLength) -> Div {
@@ -135,15 +151,24 @@ impl Desktop {
         } else {
             course2md::tr!("任务").to_owned()
         };
+        let task_count_text = (task_count > 0).then(|| task_count.to_string());
         let show_tasks = task_count > 0 || tasks_need_attention || page == Page::Task;
-        // Destinations keep their labels; they become icons only when the
-        // bar, measured with the current text, can no longer hold them.
-        let compact =
-            !app_bar_labels_fit(leading, show_tasks.then_some(task_label.as_str()), window);
+        // Destinations keep their labels; once the bar, measured with the
+        // current text, cannot hold them, every destination becomes its icon
+        // (the label as its tooltip), and then the wordmark goes.
+        let density = app_bar_density(
+            leading,
+            show_tasks.then_some((task_label.as_str(), task_count_text.as_deref())),
+            window,
+        );
+        let labels = density == AppBarDensity::Labels;
+        let wordmark = density != AppBarDensity::Mark;
+        let shown = |label: &str| labels.then(|| SharedString::from(label.to_owned()));
         let home = nav_action("nav-home", false, cx)
             .pl(px(4.))
-            .pr(px(12.))
+            .pr(px(if wordmark { 12. } else { 4. }))
             .accessibility_label(course2md::tr!("主页"))
+            .when(!wordmark, |home| home.tooltip(course2md::tr!("主页")))
             .child(
                 h_flex()
                     .items_center()
@@ -155,51 +180,68 @@ impl Desktop {
                             .rounded(rems(10. / 14.))
                             .flex_shrink_0(),
                     )
-                    .child(
-                        div()
-                            .text_size(rems(20. / 14.))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(color(INK))
-                            .child("course2md"),
-                    ),
+                    .when(wordmark, |brand| {
+                        brand.child(
+                            div()
+                                .text_size(rems(20. / 14.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(color(INK))
+                                .child("course2md"),
+                        )
+                    }),
             )
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.prepare_workbench_input(window, cx) {
                     this.navigate(Page::New, cx);
                 }
             }));
-        let library = nav_action(
+        let library = nav_destination(
             "nav-library",
             matches!(page, Page::Library | Page::Result),
+            icons::library(),
+            course2md::tr!("笔记库"),
+            shown(course2md::tr!("笔记库")),
             cx,
         )
-        .icon(icons::library())
-        .when(!compact, |button| button.label(course2md::tr!("笔记库")))
-        .accessibility_label(course2md::tr!("笔记库"))
         .on_click(cx.listener(|this, _, _, cx| {
             this.folder_filter = crate::FolderFilter::All;
             this.navigate(Page::Library, cx);
         }));
-        // Tasks stay reachable, but only claim space once there is work to show.
+        // Tasks stay reachable, but only claim space once there is work to
+        // show. Without room for labels the count stays beside the icon.
         let tasks = show_tasks.then(|| {
-            nav_action("nav-tasks", page == Page::Task, cx)
-                .icon(if tasks_need_attention {
+            let shown = if labels {
+                Some(SharedString::from(task_label.clone()))
+            } else {
+                task_count_text.clone().map(SharedString::from)
+            };
+            nav_destination(
+                "nav-tasks",
+                page == Page::Task,
+                if tasks_need_attention {
                     icons::warning()
                 } else {
                     icons::list_checks()
-                })
-                .label(task_label)
-                .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx)))
+                },
+                task_label.clone(),
+                shown,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Task, cx)))
         });
-        let settings = nav_action("nav-settings", page == Page::Settings, cx)
-            .icon(if self.settings_have_problem() {
+        let settings = nav_destination(
+            "nav-settings",
+            page == Page::Settings,
+            if self.settings_have_problem() {
                 icons::warning()
             } else {
                 icons::settings()
-            })
-            .when(!compact, |button| button.label(course2md::tr!("设置")))
-            .accessibility_label(course2md::tr!("设置"))
-            .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)));
+            },
+            course2md::tr!("设置"),
+            shown(course2md::tr!("设置")),
+            cx,
+        )
+        .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)));
         let bar = bar
             .child(home)
             .child(div().flex_1())
