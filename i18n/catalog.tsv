@@ -129,9 +129,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 个与进行中的任务相同，未重复加入	{} 个与进行中的任务相同，未重复加入	{} are identical to tasks in progress and were not added again	{} 個與進行中的任務相同，未重複加入	{} 件は進行中のタスクと同じため、追加しませんでした
 {} 个已有笔记，将生成新版	{} 个已有笔记，将生成新版	{} already have notes; new versions will be generated	{} 個已有筆記，將生成新版	{} 件は既存のノートがあるため、新しいバージョンを生成します
 {} 个无法识别，已跳过	{} 个无法识别，已跳过	{} unrecognized, skipped	{} 個無法辨識，已跳過	{} 件は認識できなかったため、スキップしました
-{} 分 {} 秒	{} 分 {} 秒	{} minutes {} seconds	{} 分 {} 秒	{}分 {}秒
+{} 分 {} 秒	{} 分 {} 秒	{}m {}s	{} 分 {} 秒	{} 分 {} 秒
 {} 字节	{} 字节	{} bytes	{} 位元組	{}バイト
-{} 小时 {} 分	{} 小时 {} 分	{} hours {} minutes	{} 小時 {} 分	{}時間 {}分
+{} 小时 {} 分	{} 小时 {} 分	{}h {}m	{} 小時 {} 分	{} 時間 {} 分
 {} 已准备完成	{} 已准备完成	{} is ready	{} 已準備完成	{} の準備ができました
 {} 张	{} 张	{} matched	{} 張	{} 枚
 {} 张截图 / {} 段文字	{} 张截图 / {} 段文字	Screenshots: {} / text paragraphs: {}	{} 張截圖 / {} 段文字	スクリーンショット {} 枚 / テキスト {} 段落
@@ -144,7 +144,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 的文件夹信息已损坏	{} 的文件夹信息已损坏	The folder information for {} is corrupted	{} 的資料夾資訊已損壞	{} のフォルダー情報が壊れています
 {} 的模型内容 / model content of {}	{} 的模型内容	Model content of {}	{} 的模型內容	{}のモデル内容
 {} 的笔记名称记录无法读取	{} 的笔记名称记录无法读取	The note name record for {} cannot be read.	{} 的筆記名稱記錄無法讀取	{} のノート名の記録を読み取れません。
-{} 秒	{} 秒	{} s	{} 秒	{} 秒
+{} 秒	{} 秒	{}s	{} 秒	{} 秒
 {} 视频 {}	{} 视频 {}	{} video {}	{} 影片 {}	{} 動画 {}
 {} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{}	{} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{}	{} Output a JSON object {{"segments":[{{"id":index,"text":proofread text}}]}}; each id must match the input one-to-one; for entries that contain only filler words, text is an empty string. {}	{} 輸出為 JSON 物件 {{"segments":[{{"id":序號,"text":校對後的文字}}]}}，id 必須與輸入一一對應；純語氣詞條目的 text 為空字串。{}	{} JSON オブジェクト {{"segments":[{{"id":番号,"text":校正後のテキスト}}]}} として出力してください。id は入力と一対一で対応させてください。フィラー（つなぎ言葉）だけの項目は text を空文字列にしてください。{}
 {}。保存位置尚未切换，已复制的内容保留在目标位置。	{}。保存位置尚未切换，已复制的内容保留在目标位置。	{}. The save location has not been switched and the copied content remains at the target location.	{}。儲存位置尚未切換，已複製的內容保留在目標位置。	{}。保存場所はまだ切り替えられていません。コピー済みの内容はコピー先に残っています。

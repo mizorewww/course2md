@@ -119,7 +119,7 @@ impl Activity {
                 quantity,
                 note: Some(course2md::tr!(
                     "已用 {}",
-                    duration(self.started.elapsed().as_secs_f64())
+                    duration_label(self.started.elapsed().as_secs())
                 )),
                 ..TransferMetrics::default()
             };
@@ -196,7 +196,7 @@ impl Activity {
         } else if !byte_download {
             Some(TransferEta::Note(course2md::tr!(
                 "已用 {}",
-                duration(self.started.elapsed().as_secs_f64())
+                duration_label(self.started.elapsed().as_secs())
             )))
         } else {
             None
@@ -262,17 +262,28 @@ impl TransferMetrics {
     }
 }
 
-/// "45s", "1m23s", "1h02m" elapsed.
+/// "用时 45 秒", "用时 1 分 23 秒": how long work has run, in the interface
+/// language.
 pub fn elapsed_label(elapsed: Duration) -> String {
-    let secs = elapsed.as_secs();
-    let compact = if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m{:02}s", secs / 60, secs % 60)
+    course2md::tr!("用时 {}", duration_label(elapsed.as_secs()))
+}
+
+/// The one way the desktop words a span of time, for elapsed clocks and
+/// remaining-time estimates alike: "16 秒", "1 分 05 秒", "1 小时 02 分"
+/// ("16s", "1m 05s", "1h 02m" in English). Within a larger unit the smaller
+/// one keeps two digits, so a ticking clock does not change width.
+pub fn duration_label(seconds: u64) -> String {
+    if seconds >= 3600 {
+        course2md::tr!(
+            "{} 小时 {} 分",
+            seconds / 3600,
+            format!("{:02}", seconds % 3600 / 60)
+        )
+    } else if seconds >= 60 {
+        course2md::tr!("{} 分 {} 秒", seconds / 60, format!("{:02}", seconds % 60))
     } else {
-        format!("{}h{:02}m", secs / 3600, secs % 3600 / 60)
-    };
-    course2md::tr!("用时 {}", compact)
+        course2md::tr!("{} 秒", seconds)
+    }
 }
 
 /// "950", "12.3k", "1.2M".
@@ -452,15 +463,9 @@ fn throughput(bytes_per_sec: f64) -> String {
     }
     bytes(value as u64)
 }
+/// A remaining time rounds up, so an estimate never reaches zero early.
 fn duration(seconds: f64) -> String {
-    let seconds = seconds.ceil() as u64;
-    if seconds >= 3600 {
-        course2md::tr!("{} 小时 {} 分", seconds / 3600, seconds % 3600 / 60)
-    } else if seconds >= 60 {
-        course2md::tr!("{} 分 {} 秒", seconds / 60, seconds % 60)
-    } else {
-        course2md::tr!("{} 秒", seconds)
-    }
+    duration_label(seconds.ceil() as u64)
 }
 
 #[cfg(test)]
@@ -471,9 +476,60 @@ mod tests {
         assert_eq!(compact_count(950), "950");
         assert_eq!(compact_count(12_345), "12.3k");
         assert_eq!(compact_count(1_250_000), "1.2M");
-        assert!(elapsed_label(Duration::from_secs(45)).contains("45s"));
-        assert!(elapsed_label(Duration::from_secs(83)).contains("1m23s"));
-        assert!(elapsed_label(Duration::from_secs(3720)).contains("1h02m"));
+        assert_eq!(elapsed_label(Duration::from_secs(16)), "用时 16 秒");
+        assert_eq!(elapsed_label(Duration::from_secs(65)), "用时 1 分 05 秒");
+        assert_eq!(
+            elapsed_label(Duration::from_secs(3720)),
+            "用时 1 小时 02 分"
+        );
+    }
+
+    /// Every language words a span with its own units; no Latin unit leaks
+    /// into the Chinese or Japanese interface.
+    #[test]
+    fn durations_use_the_interface_language_units() {
+        use course2md::i18n::{Lang, t_for};
+        let words = |lang| {
+            [
+                "用时 {}",
+                "已用 {}",
+                "预计剩余 {}",
+                "{} 秒",
+                "{} 分 {} 秒",
+                "{} 小时 {} 分",
+            ]
+            .map(|key| t_for(key, lang).to_owned())
+        };
+        assert_eq!(
+            words(Lang::En),
+            [
+                "{} elapsed",
+                "Elapsed {}",
+                "{} remaining",
+                "{}s",
+                "{}m {}s",
+                "{}h {}m"
+            ]
+        );
+        assert_eq!(
+            words(Lang::Ja),
+            [
+                "経過 {}",
+                "経過 {}",
+                "推定残り時間 {}",
+                "{} 秒",
+                "{} 分 {} 秒",
+                "{} 時間 {} 分"
+            ]
+        );
+        for lang in [Lang::ZhHans, Lang::ZhHant, Lang::Ja] {
+            for text in words(lang) {
+                assert!(
+                    !text.chars().any(|c| c.is_ascii_alphabetic()),
+                    "{lang:?}: {text}"
+                );
+            }
+        }
     }
 
     use super::*;
