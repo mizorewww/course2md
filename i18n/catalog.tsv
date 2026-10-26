@@ -1569,6 +1569,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 管理模型与下载	管理模型与下载	Manage models and downloads	管理模型與下載	モデルとダウンロードを管理する
 管理配置文件 / Manage the configuration file	管理配置文件 / Manage the configuration file	Manage the configuration file	管理設定檔案	設定ファイルを管理
 粘贴 YouTube 或 Bilibili 视频链接	粘贴 YouTube 或 Bilibili 视频链接	Paste YouTube or Bilibili video link	貼上 YouTube 或 Bilibili 影片連結	YouTube または Bilibili 動画のリンクを貼り付けます
+粘贴视频链接	粘贴视频链接	Paste video link	貼上影片連結	動画リンクを貼り付け
 粘贴链接或拖入视频	粘贴链接或拖入视频	Paste a link or drag in a video	貼上連結或拖入影片	リンクを貼り付けるか動画をドラッグ
 系统凭据库中找不到此服务的凭据，请重新保存 API Key	系统凭据库中找不到此服务的凭据，请重新保存 API Key	Credentials for this service were not found in the system credential store. Save the API key again.	系統憑證庫中找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報がシステム認証情報ストアに見つかりませんでした。API キーを再度保存してください。
 系统提示与 response_format=json_object 同为 segments 对象契约	系统提示与 response_format=json_object 同为 segments 对象契约	The system prompt and response_format=json_object both use the segments object contract.	系統提示與 response_format=json_object 同為 segments 物件契約	システムプロンプトと response_format=json_object はどちらも segments オブジェクトの契約に従います。

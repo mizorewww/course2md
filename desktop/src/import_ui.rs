@@ -9,6 +9,8 @@ const SECTION_GAP: Rems = rems(24. / 14.);
 const HERO_GAP: Rems = rems(16. / 14.);
 /// Square icon buttons beside the hero input.
 const HERO_CONTROL: Rems = rems(48. / 14.);
+/// The link field's text, which its placeholder is measured at.
+const SOURCE_FIELD_TEXT: Rems = rems(17. / 14.);
 /// Option labels and the selected video title.
 const TEXT_LEAD: Rems = rems(16. / 14.);
 use crate::{motion, preferences::ServicePurpose, theme::*};
@@ -1087,6 +1089,32 @@ impl Desktop {
     }
 
     /// Visible field, local file target, and status belonging to this source.
+    /// The link field's placeholder names the supported sites when the field,
+    /// as last laid out at the current text scale, can hold it whole;
+    /// otherwise a shorter one, so it is never cut off mid-word.
+    fn fit_source_placeholder(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.inputs[&Field::Source].clone();
+        let width = f32::from(input.read(cx).input_bounds().size.width);
+        let candidates = [
+            course2md::tr!("粘贴 YouTube 或 Bilibili 视频链接"),
+            course2md::tr!("粘贴视频链接"),
+            course2md::tr!("视频链接"),
+        ];
+        let size = f32::from(SOURCE_FIELD_TEXT.to_pixels(window.rem_size()));
+        let chosen = if width <= 0. {
+            // Not laid out yet: the full text, refined on the next frame.
+            candidates[0]
+        } else {
+            candidates
+                .into_iter()
+                .find(|text| shaped_width(text, size, FontWeight::NORMAL, window) + 2. <= width)
+                .unwrap_or(candidates[2])
+        };
+        if input.read(cx).presentation().placeholder().as_ref() != chosen {
+            input.update(cx, |state, cx| state.set_placeholder(chosen, window, cx));
+        }
+    }
+
     pub fn box_source_input(
         &self,
         preview_extra: Option<Div>,
@@ -1095,6 +1123,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Div {
         let mut view = v_flex().w_full().min_w_0().gap(HERO_GAP);
+        self.fit_source_placeholder(window, cx);
         let focused = self.inputs[&Field::Source]
             .read(cx)
             .focus_handle(cx)
@@ -1149,7 +1178,7 @@ impl Desktop {
                                         .w_full()
                                         .min_w_0()
                                         .px_0()
-                                        .text_size(rems(17. / 14.)),
+                                        .text_size(SOURCE_FIELD_TEXT),
                                 ),
                             )
                             .when(failed, |row| {
