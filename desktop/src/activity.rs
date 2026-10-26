@@ -2,6 +2,8 @@
 use course2md::progress::{Phase, Stage, Unit};
 use std::time::{Duration, Instant};
 
+/// One wave of Apple download ranges: sixteen 8 MiB ranges in flight.
+const BLOCK_WAVE: u64 = 16 * 8 * 1024 * 1024;
 /// Silence after which a source that reports continuously has stopped.
 const QUIET_AFTER: Duration = Duration::from_secs(30);
 /// speech-swift abandons an Apple download attempt after five minutes without
@@ -209,10 +211,15 @@ impl Activity {
                 ..TransferMetrics::default()
             };
         }
-        // It also fetches small configuration files first, so its early
-        // samples miss most of the bytes already received. Until 5% of the
-        // model has landed in this run, the speed is still being measured.
-        let settled = !in_blocks || self.current.saturating_sub(self.baseline) * 20 >= self.total;
+        // Its first blocks land together after a whole wave was in flight,
+        // so the first few undercount what has been received. The speed is
+        // measured once a full wave (sixteen blocks) has landed in this
+        // session, or 5% of what this session has to fetch: a resume with
+        // little left settles on its first blocks.
+        let landed = self.current.saturating_sub(self.baseline);
+        let settled = !in_blocks
+            || landed >= BLOCK_WAVE
+            || landed * 20 >= self.total.saturating_sub(self.baseline);
         // Between its blocks the average keeps falling, which is what a slow
         // link looks like; the estimate follows it.
         let rate = if in_blocks {
@@ -988,6 +995,38 @@ mod tests {
             Some("已 5\u{a0}分\u{a0}05\u{a0}秒没有收到新数据")
         );
     }
+    /// A resumed Apple download with little left is timed on its first
+    /// blocks rather than waiting for 5% of the whole model.
+    #[test]
+    fn apple_resume_with_little_left_still_shows_speed() {
+        let apple = Stage::parse("model/apple");
+        let mut activity = Activity::new();
+        activity.update(1560 * MIB, 1600 * MIB, Some("hf-mirror.com".into()));
+        activity.set_phase(Some(Phase::Download));
+        activity.unit = Some(Unit::Bytes);
+        activity.started = Instant::now() - Duration::from_secs(4);
+        activity.update(1576 * MIB, 1600 * MIB, None);
+        let metrics = activity.transfer_metrics(&apple, true);
+        assert_eq!(metrics.speed.as_deref(), Some("4.0 MB/s"), "{metrics:?}");
+        // 24 MB left at 4 MB/s; the test's own runtime may add a second.
+        assert!(
+            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "6\u{a0}秒" || v == "7\u{a0}秒"),
+            "{metrics:?}"
+        );
+        assert_eq!(metrics.note, None);
+
+        // A fresh download is timed once a full wave of ranges has landed.
+        let mut fresh = Activity::new();
+        fresh.update(0, 16_000 * MIB, Some("hf-mirror.com".into()));
+        fresh.set_phase(Some(Phase::Download));
+        fresh.unit = Some(Unit::Bytes);
+        fresh.started = Instant::now() - Duration::from_secs(60);
+        fresh.update(120 * MIB, 16_000 * MIB, None);
+        assert!(fresh.transfer_metrics(&apple, true).speed.is_none());
+        fresh.update(128 * MIB, 16_000 * MIB, None);
+        assert!(fresh.transfer_metrics(&apple, true).speed.is_some());
+    }
+
     #[test]
     fn unknown_total_never_invents_a_percentage_or_eta() {
         let mut item = Activity::new();
