@@ -460,6 +460,23 @@ impl TileScale {
         }
     }
 
+    /// The label's line box. Tiles that act are Buttons, whose text box is
+    /// exactly the font size; an explicit line height keeps wrapped and
+    /// clamped lines (and their descenders) inside it at every text scale.
+    pub fn label_line_height(self) -> Rems {
+        match self {
+            TileScale::Regular => rems(24. / 14.),
+            TileScale::Compact => rems(22. / 14.),
+        }
+    }
+
+    pub fn support_line_height(self) -> Rems {
+        match self {
+            TileScale::Regular => rems(20. / 14.),
+            TileScale::Compact => rems(18. / 14.),
+        }
+    }
+
     /// A tile's main label, medium weight.
     pub fn label(
         self,
@@ -469,9 +486,7 @@ impl TileScale {
         use gpui::prelude::*;
         accessible_text(id, value)
             .text_size(self.label_size())
-            .when(self == TileScale::Regular, |label| {
-                label.line_height(rems(24. / 14.))
-            })
+            .line_height(self.label_line_height())
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(color(INK))
     }
@@ -487,9 +502,7 @@ impl TileScale {
             .min_w_0()
             .whitespace_normal()
             .text_size(self.support_size())
-            .when(self == TileScale::Regular, |support| {
-                support.line_height(rems(20. / 14.))
-            })
+            .line_height(self.support_line_height())
             .font_weight(gpui::FontWeight::NORMAL)
             .text_color(color(GRAY))
     }

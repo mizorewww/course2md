@@ -3110,6 +3110,7 @@ impl Desktop {
                                 )
                                 .role(Role::Heading)
                                 .text_size(TileScale::Compact.label_size())
+                                .line_height(TileScale::Compact.label_line_height())
                                 .font_weight(FontWeight::MEDIUM),
                             )
                             .child(
