@@ -87,6 +87,7 @@ CoreML 模型加载失败 / CoreML model loading failed	CoreML 模型加载失�
 Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}; Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}
 HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}; response exceeds 128 KiB, remainder not read	HTTP {}；回應超過 128 KiB，未讀取其餘內容	HTTP {};応答が 128 KiB を超えているため、残りは読み取られていません
 Intel NPU 加速	Intel NPU 加速	Intel NPU acceleration	Intel NPU 加速	Intel NPU アクセラレーション
+↓ {} 词元	↓ {} 词元	↓ {} tokens	↓ {} 詞元	↓ {} トークン
 不使用 AI	不使用 AI	No AI processing	不使用 AI	AI 処理なし
 仅对「{}」生效	仅对「{}」生效	Applies only to “{}”	僅對「{}」生效	「{}」にのみ適用されます
 仅对下一个视频生效	仅对下一个视频生效	Applies only to the next video	僅對下一個影片生效	次の動画にのみ適用されます
@@ -2063,7 +2064,6 @@ ChatGPT 账号	ChatGPT 账号	ChatGPT account	ChatGPT 帳號	ChatGPT アカウ�
 在 {} 打开	在 {} 打开	Open on {}	在 {} 開啟	{} で開く
 所选项目不是视频文件，请选择一个视频文件	所选项目不是视频文件，请选择一个视频文件	The selected item is not a video file. Choose a video file.	所選項目不是影片檔案，請選擇一個影片檔案	選択した項目は動画ファイルではありません。動画ファイルを選んでください
 暂时无法获取模型列表，可以直接填写模型名称（{}）	暂时无法获取模型列表，可以直接填写模型名称（{}）	Could not load the model list; you can type a model name ({})	暫時無法取得模型列表，可以直接填寫模型名稱（{}）	モデル一覧を取得できません。モデル名を直接入力できます（{}）
-↓ {} tokens	↓ {} tokens	↓ {} tokens	↓ {} tokens	↓ {} トークン
 用时 {}	用时 {}	{} elapsed	用時 {}	経過 {}
 检测到中国大陆网络，从国内镜像下载模型 / Mainland China network detected; downloading models from a domestic mirror	检测到中国大陆网络，从国内镜像下载模型	Mainland China network detected; downloading models from a domestic mirror	偵測到中國大陸網路，從國內鏡像下載模型	中国本土のネットワークを検出しました。国内ミラーからモデルをダウンロードします
 所有下载地址均失败 / Every download host failed	所有下载地址均失败	Every download host failed	所有下載網址均失敗	すべてのダウンロード元で失敗しました

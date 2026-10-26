@@ -85,7 +85,7 @@ impl Activity {
         let mut parts = vec![elapsed_label(self.elapsed())];
         if self.completion_tokens > 0 {
             parts.push(course2md::tr!(
-                "↓ {} tokens",
+                "↓ {} 词元",
                 compact_count(self.completion_tokens)
             ));
         }
