@@ -8,7 +8,7 @@
 
 粘贴 YouTube 或 Bilibili 链接，或拖入本地视频。course2md 在每次换页时截图，把讲解的话整理在截图下方，并保存在你电脑上的笔记库里。
 
-[![最新版本](https://img.shields.io/github/v/release/mizorewww/course2md?label=download)](https://github.com/mizorewww/course2md/releases/latest)
+[![最新版本](https://img.shields.io/github/v/release/mizorewww/course2md?label=%E4%B8%8B%E8%BD%BD)](https://github.com/mizorewww/course2md/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/mizorewww/course2md)](LICENSE)
 ![macOS · Windows · Linux](https://img.shields.io/badge/desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-blue)
 
@@ -33,7 +33,7 @@
 
 ### 添加视频
 
-在「主页」粘贴链接或拖入文件。course2md 会先读取视频信息，你可以确认标题、时长和处理选项后再开始转换。
+在「主页」（启动后的首页，点左上角的 course2md 标志可返回）粘贴链接或拖入文件。course2md 会先读取视频信息，你可以确认标题、时长和处理选项后再开始转换。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/zh/home-dark.png">
@@ -133,6 +133,8 @@ Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用[命令行工具](#�
 笔记保存在默认笔记库，可在「设置 → 存储」添加其他文件夹。界面语言默认跟随系统，可在「设置 → 外观 → 界面语言」修改。更多见[首次使用指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#首次启动)。
 
 ## 常见问题
+
+**转换时提示缺少 `ffmpeg`。**先安装它（macOS 用 `brew install ffmpeg`，Windows 用 `winget install --id Gyan.FFmpeg -e`，Linux 用系统包管理器），再到「设置 → 应用 → 运行检查」确认（CLI 用 `course2md doctor`）。
 
 **Bilibili 视频失败或清晰度低。**在「设置 → 服务与账号 → Bilibili 账号」扫码登录。
 

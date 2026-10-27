@@ -33,7 +33,7 @@ Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a
 
 ### Add a video
 
-Paste a link or drag a file onto **Home**. course2md reads the video first, so you can check the title, length and processing options before anything is converted.
+Paste a link or drag a file onto **Home**, the start page (click the course2md logo to return to it). course2md reads the video first, so you can check the title, length and processing options before anything is converted.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/home-dark.png">
@@ -133,6 +133,8 @@ Intel Macs and Linux ARM64 have no desktop app yet; use the [command-line tool](
 Notes go to a default library; add other folders in **Settings → Storage**. The interface follows your system language; change it in **Settings → Appearance → Interface language**. More in the [first-launch guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#first-launch).
 
 ## Questions
+
+**Conversion says `ffmpeg` is missing.** Install it (`brew install ffmpeg` on macOS, `winget install --id Gyan.FFmpeg -e` on Windows, your package manager on Linux), then check **Settings → Application → Run checks** (CLI: `course2md doctor`).
 
 **A Bilibili video fails or comes back in low quality.** Log in under **Settings → Services & accounts → Bilibili account** by scanning the QR code.
 
