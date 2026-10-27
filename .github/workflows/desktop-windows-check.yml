@@ -69,11 +69,9 @@ jobs:
           }
           $env:COURSE2MD_BIN = Join-Path $PWD 'target/debug/course2md.exe'
           $env:COURSE2MD_LANG = 'en'
-          # A separate profile whose first-run setup is already done, so the app bar shows.
+          # A fresh, empty profile that no earlier step has touched.
           $env:XDG_CONFIG_HOME = Join-Path $PWD 'profile'
-          $prefs = Join-Path $env:XDG_CONFIG_HOME 'course2md/desktop-preferences'
-          New-Item -ItemType Directory -Force $prefs | Out-Null
-          Set-Content -Path (Join-Path $prefs 'application.json') -Value '{"desktop":{"setup_completed":true}}'
+          New-Item -ItemType Directory -Force $env:XDG_CONFIG_HOME | Out-Null
           $p = Start-Process -FilePath 'desktop/target/debug/course2md-desktop.exe' -PassThru
           Start-Sleep 12
           $p.Refresh(); $h = $p.MainWindowHandle
@@ -104,6 +102,12 @@ jobs:
           [W]::Click($r.R - 69, $r.T + 16); Start-Sleep 2; Shot "$i-maximize"; $i++
           $p.Refresh()
           if (-not $p.HasExited) { $p.Kill() }
+          # Record what the app wrote, for diagnosing save failures.
+          $profileDir = Join-Path $env:XDG_CONFIG_HOME 'course2md'
+          Get-ChildItem -Recurse -Force $profileDir -ErrorAction SilentlyContinue |
+            Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize | Out-String -Width 400 |
+            Set-Content (Join-Path $out 'profile-files.txt')
+          Copy-Item -Recurse -Force $profileDir (Join-Path $out 'profile') -ErrorAction SilentlyContinue
       - uses: actions/upload-artifact@v4
         if: always()
         with:
