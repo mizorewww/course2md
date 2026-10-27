@@ -35,19 +35,21 @@ runs:
     - name: Native packaging tools
       shell: bash
       run: python -m pip install --require-hashes -r desktop/scripts/requirements-packaging.txt
-    # The bundled ffmpeg (built from source on macOS and Linux, downloaded on
-    # Windows) is reused until its recipe in ffmpeg_bundle.py changes.
+    # Bundled tools: ffmpeg built from source and the archives prebuilt.py
+    # downloads, reused until either recipe changes. Every cached download
+    # and build is re-verified against its pinned hash or build manifest.
+    # (The Windows ffmpeg comes from the windows-ffmpeg job instead.)
     - name: Bundled tool cache
       uses: actions/cache@v4
       with:
         path: desktop/.cache/tools
-        key: bundled-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/scripts/ffmpeg_bundle.py') }}
+        key: bundled-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/scripts/ffmpeg_bundle.py', 'desktop/scripts/prebuilt.py') }}
     - name: Linux native dependencies
       if: runner.os == 'Linux'
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential clang cmake pkg-config libasound2-dev libx11-xcb-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig1-dev libssl-dev libclang-dev libgit2-dev libstdc++-14-dev nasm zlib1g-dev
+        sudo apt-get install -y build-essential clang cmake pkg-config libasound2-dev libx11-xcb-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig1-dev libssl-dev libclang-dev libgit2-dev libstdc++-14-dev nasm zlib1g-dev libgnutls28-dev
     - name: Windows LLVM
       if: runner.os == 'Windows'
       shell: pwsh

@@ -122,8 +122,16 @@ jobs:
             security list-keychains -d user -s "${user_keychains[@]}"
           fi
 
-  desktop:
+  # The Windows package's ffmpeg is cross-compiled on Linux.
+  windows-ffmpeg:
     needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/windows-ffmpeg
+
+  desktop:
+    needs: [validate, windows-ffmpeg]
     strategy:
       fail-fast: false
       matrix:
@@ -142,6 +150,11 @@ jobs:
         if: runner.os == 'macOS'
         run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is unavailable on this runner. Point DEVELOPER_DIR (runner .env) or xcode-select at Xcode and run xcodebuild -downloadComponent MetalToolchain."; exit 1; }
       - uses: ./.github/actions/desktop-deps
+      - uses: actions/download-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: ffmpeg-windows
+          path: desktop/.cache/tools
       # Tag builds package the locked inputs; pull-request desktop tests are not implied here.
       - name: Build CLI engine and desktop app
         run: |

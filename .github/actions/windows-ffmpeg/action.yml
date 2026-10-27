@@ -1,0 +1,39 @@
+name: Windows ffmpeg
+description: Cross-compile the Windows ffmpeg bundled with the desktop app and upload it for the Windows packaging job.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Build tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y make nasm pkg-config
+        python -m pip install --require-hashes -r desktop/scripts/requirements-packaging.txt
+    - name: Windows ffmpeg cache
+      uses: actions/cache@v4
+      with:
+        path: desktop/.cache/tools
+        key: windows-ffmpeg-${{ hashFiles('desktop/scripts/ffmpeg_bundle.py') }}
+    # The llvm-mingw toolchain and every source are fetched and verified by
+    # ffmpeg_bundle.py; a cached build is reused only while its manifest matches.
+    - name: Cross-compile
+      shell: bash
+      run: |
+        python -u desktop/scripts/ffmpeg_bundle.py --target Windows | tee build.txt
+        # A file at the cache root keeps the build's directory name in the artifact.
+        tail -n 1 build.txt > desktop/.cache/tools/windows-ffmpeg.txt
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ffmpeg-windows
+        # Relative to desktop/.cache/tools, so the Windows job restores the
+        # build under the same cache key.
+        path: |
+          desktop/.cache/tools/windows-ffmpeg.txt
+          desktop/.cache/tools/ffmpeg-*-windows-*
+          !desktop/.cache/tools/ffmpeg-*-windows-*.build
+          !desktop/.cache/tools/downloads
+        if-no-files-found: error
+        retention-days: 7
