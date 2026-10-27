@@ -83,7 +83,7 @@
   <div class="hero">
     <div class="wrap">
       <div class="hero-text">
-        <a class="chip" href="https://github.com/mizorewww/course2md/releases/latest"><strong>2.0</strong> A new desktop app · release notes</a>
+        <a class="chip" href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0"><strong>2.0</strong> A new desktop app · release notes</a>
         <h1>Turn lecture videos into illustrated notes</h1>
         <p class="lead">Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a screenshot every time the slide changes, transcribes what is said beneath it, and keeps the result in a library on your computer.</p>
         <div class="cta">
@@ -309,7 +309,13 @@
         </div>
         <div class="note">
           <h3>Upgrading from 1.7</h3>
-          <p>Downloaded models, the Bilibili login and the CLI's <code>config.toml</code> keep working. Notes made by 1.x stay where they were as <code>course.md</code> / <code>course.html</code>, but the 2.0 library only lists notes made by 2.0. Set up recognition and AI services again in the setup steps.</p>
+          <p>Downloaded models, the Bilibili login and the CLI's <code>config.toml</code> keep working. Notes made by 1.x stay where they were as <code>course.md</code> / <code>course.html</code>, but the 2.0 library only lists notes made by 2.0. Set up recognition and AI services again in the setup steps; convert old notes again to read them in the library.</p>
+          <p>To upgrade with Homebrew, run:</p>
+          <div class="cmd">
+            <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">brew</span> <span class="w">update</span> <span class="w">&amp;&amp;</span> <span class="w">brew</span> <span class="w">upgrade</span> <span class="w">--cask</span> <span class="w">course2md-gui</span></span></code>
+            <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the upgrade command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
+          </div>
+          <p>Back up <code>config.toml</code> before downgrading to 1.x. Coming from a release candidate? Quit the app and uninstall the <code>course2md-gui@rc</code> cask without <code>--zap</code>, so your data stays, before installing <code>course2md-gui</code>. Details are in the <a href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0">v2.0.0 release notes</a>.</p>
           <p>Intel Macs and Linux ARM64 have no desktop app yet; use the <a href="#cli">command-line tool</a>. More in the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#first-launch">first-launch guide</a> and <a href="https://github.com/mizorewww/course2md/wiki/Troubleshooting">Troubleshooting</a>.</p>
         </div>
       </div>

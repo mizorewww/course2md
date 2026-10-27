@@ -83,7 +83,7 @@
   <div class="hero">
     <div class="wrap">
       <div class="hero-text">
-        <a class="chip" href="https://github.com/mizorewww/course2md/releases/latest"><strong>2.0</strong> 全新桌面应用 · 发布说明</a>
+        <a class="chip" href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0"><strong>2.0</strong> 全新桌面应用 · 发布说明</a>
         <h1><span class="phrase">把课程视频</span><span class="phrase">变成图文笔记</span></h1>
         <p class="lead">粘贴 YouTube 或 Bilibili 链接，或拖入本地视频。course2md 在每次换页时截图，把讲解的话整理在截图下方，并保存在你电脑上的笔记库里。</p>
         <div class="cta">
@@ -309,7 +309,13 @@
         </div>
         <div class="note">
           <h3>从 1.7 升级</h3>
-          <p>已下载的模型、Bilibili 登录和 CLI 的 <code>config.toml</code> 继续可用。1.x 生成的笔记仍以 <code>course.md</code> / <code>course.html</code> 保存在原目录，但 2.0 的笔记库只列出 2.0 生成的笔记。识别方式和 AI 服务需要在首次引导中重新设置。</p>
+          <p>已下载的模型、Bilibili 登录和 CLI 的 <code>config.toml</code> 继续可用。1.x 生成的笔记仍以 <code>course.md</code> / <code>course.html</code> 保存在原目录，但 2.0 的笔记库只列出 2.0 生成的笔记。识别方式和 AI 服务需要在首次引导中重新设置；需要在笔记库中阅读旧笔记时请重新转换。</p>
+          <p>使用 Homebrew 升级：</p>
+          <div class="cmd">
+            <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">brew</span> <span class="w">update</span> <span class="w">&amp;&amp;</span> <span class="w">brew</span> <span class="w">upgrade</span> <span class="w">--cask</span> <span class="w">course2md-gui</span></span></code>
+            <button class="copy" type="button" hidden data-idle="复制" data-done="已复制" aria-label="复制升级命令"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">复制</span></button>
+          </div>
+          <p>降级到 1.x 前请备份 <code>config.toml</code>。用过 RC 版时，先退出应用，卸载 <code>course2md-gui@rc</code>（不要加 <code>--zap</code>，以保留用户数据），再安装 <code>course2md-gui</code>。详见 <a href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0">v2.0.0 发布说明</a>。</p>
           <p>Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用<a href="#cli">命令行工具</a>。更多见<a href="https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#%E9%A6%96%E6%AC%A1%E5%90%AF%E5%8A%A8">首次使用指南</a>和<a href="https://github.com/mizorewww/course2md/wiki/%E6%95%85%E9%9A%9C%E6%8E%92%E6%9F%A5">故障排查</a>。</p>
         </div>
       </div>
