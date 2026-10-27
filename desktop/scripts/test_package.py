@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from package import YTDLP_SHA256, macos_versions, parse_args, verify_tools, ytdlp_asset
+from package import macos_versions, parse_args, verify_tools
 
 
 class MacOSVersionTests(unittest.TestCase):
@@ -28,13 +28,6 @@ class MacOSVersionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 macos_versions(version)
 
-
-
-class YtDlpPinTests(unittest.TestCase):
-    def test_every_bundled_platform_has_a_pinned_checksum(self):
-        for system, machine in [('Darwin', 'arm64'), ('Windows', 'AMD64'), ('Windows', 'ARM64'),
-                                ('Linux', 'x86_64'), ('Linux', 'aarch64')]:
-            self.assertRegex(YTDLP_SHA256[ytdlp_asset(system, machine)], '^[0-9a-f]{64}$')
 
 
 class OptionTests(unittest.TestCase):

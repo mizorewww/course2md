@@ -28,13 +28,9 @@ package() {
     # Keep the tested engine beside the GUI, without owning /usr/bin/course2md.
     install -Dm755 course2md-desktop "${pkgdir}/usr/lib/course2md-desktop/course2md-desktop"
     install -Dm755 course2md "${pkgdir}/usr/lib/course2md-desktop/course2md"
-    # The archive's bundled ffmpeg/ffprobe, uv and llama.cpp/ stay out: the
-    # package uses Arch's (depends/optdepends), which the engine finds on PATH
-    # when none is beside it.
-    # 自带 yt-dlp（包内可选资产）：与可执行文件同目录，PATH 里的 yt-dlp 仍是兜底
-    if [ -f yt-dlp ]; then
-        install -Dm755 yt-dlp "${pkgdir}/usr/lib/course2md-desktop/yt-dlp"
-    fi
+    # The archive's bundled ffmpeg/ffprobe, uv, llama.cpp/ and yt-dlp/ stay
+    # out: the package uses Arch's (depends/optdepends), which the engine
+    # finds on PATH when none is beside it.
     install -dm755 "${pkgdir}/usr/bin"
     ln -s ../lib/course2md-desktop/course2md-desktop "${pkgdir}/usr/bin/course2md-desktop"
     install -Dm644 course2md.desktop "${pkgdir}/usr/share/applications/course2md.desktop"

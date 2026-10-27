@@ -17,6 +17,7 @@ import zipfile
 from dmg import build_install_dmg
 import ffmpeg_bundle
 import prebuilt
+import ytdlp_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT.parent
@@ -69,56 +70,21 @@ def notarize(path, key_path, key_id, issuer):
         "--key-id", key_id, "--issuer", issuer, "--wait")
 
 
-# Bundled yt-dlp is pinned so release archives are reproducible. To update, take
-# the version and hashes from that release's SHA2-256SUMS.
-YTDLP_VERSION = "2026.08.19"
-YTDLP_SHA256 = {
-    "yt-dlp_macos": "0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202",
-    "yt-dlp.exe": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
-    "yt-dlp_arm64.exe": "05b438997bafc3affdfda9d041353c9d73e04dc842207254b655b0887c4445b0",
-    "yt-dlp_linux": "58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a",
-    "yt-dlp_linux_aarch64": "b16e4dab368a816cd05d477d698a605a6ae87ccee1c8ffd38fa21d7254141fcc",
-}
+def bundle_ytdlp(parent, required, local=None, suffix=""):
+    """Place yt-dlp's pinned onedir build in parent/yt-dlp (ytdlp_bundle.py).
 
-
-def ytdlp_asset(system, machine):
-    """Standalone binary asset name in yt-dlp's GitHub releases, or None."""
-    if system == "Darwin":
-        return "yt-dlp_macos"
-    if system == "Windows":
-        return {"AMD64": "yt-dlp.exe", "ARM64": "yt-dlp_arm64.exe"}.get(machine)
-    if system == "Linux":
-        return {"x86_64": "yt-dlp_linux", "aarch64": "yt-dlp_linux_aarch64"}.get(machine)
-    return None
-
-
-def bundle_ytdlp(dest, required, local=None):
-    """Place the pinned standalone yt-dlp beside the app binaries.
-
-    `local` is a yt-dlp build to bundle instead of downloading (--ytdlp).
-    Release builds fail without it; development builds fall back to PATH.
+    `local` is a single yt-dlp executable to bundle instead (--ytdlp); it goes
+    straight into parent. Release builds fail without yt-dlp; development
+    builds fall back to PATH.
     """
     try:
         if local:
+            dest = parent / f"yt-dlp{suffix}"
             shutil.copy2(local, dest)
-        else:
-            asset = ytdlp_asset(platform.system(), platform.machine())
-            if not asset:
-                return None
-            url = f"https://github.com/yt-dlp/yt-dlp/releases/download/{YTDLP_VERSION}/{asset}"
-            tmp = dest.parent / (dest.name + ".download")
-            try:
-                with urllib.request.urlopen(url, timeout=300) as response, tmp.open("wb") as out:
-                    shutil.copyfileobj(response, out)
-                digest = hashlib.sha256(tmp.read_bytes()).hexdigest()
-                if digest != YTDLP_SHA256[asset]:
-                    raise OSError(f"{asset} {YTDLP_VERSION} checksum mismatch: {digest}")
-                tmp.replace(dest)
-            finally:
-                tmp.unlink(missing_ok=True)
-        dest.chmod(0o755)
-        return dest
-    except OSError as error:
+            dest.chmod(0o755)
+            return dest
+        return ytdlp_bundle.stage(parent, TOOL_CACHE / "downloads")
+    except (OSError, zipfile.BadZipFile, subprocess.CalledProcessError) as error:
         if required:
             raise SystemExit(f"Release builds must bundle yt-dlp: {error}") from error
         print(f"warning: yt-dlp not bundled ({error}); the app will use yt-dlp from PATH")
@@ -157,11 +123,13 @@ def bundle_aria2(binaries, licenses, required):
         tmp.unlink(missing_ok=True)
 
 
-def verify_tools(binaries, system, skip=()):
+def verify_tools(binaries, system, skip=(), ytdlp=None):
     """Run each bundled tool once, so a missing library or an ffmpeg without
     TLS fails the package build rather than a user's first conversion."""
     suffix = ".exe" if system == "Windows" else ""
     checks = []
+    if ytdlp:
+        checks.append(([ytdlp, "--version"], ytdlp_bundle.YTDLP_VERSION))
     if "ffmpeg" not in skip and ffmpeg_bundle.supported(system, platform.machine()):
         checks += [(["ffmpeg", "-hide_banner", "-protocols"], "https"),
                    (["ffprobe", "-hide_banner", "-version"], "ffprobe version")]
@@ -317,12 +285,15 @@ def main():
             shutil.copy2(ROOT / "assets/icon.png", base / "course2md.png")
     shutil.copy2(PROJECT / "target" / profile / f"course2md{suffix}", binaries / f"course2md{suffix}")
     shutil.copy2(ROOT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
-    # The runtime searches beside the executable for yt-dlp; --no-ytdlp skips bundling.
+    # yt-dlp's onedir build goes in a yt-dlp directory, which the engine
+    # searches first: beside the binaries, or in the .app's Resources (its
+    # data files may not live in Contents/MacOS). --no-ytdlp skips it.
+    ytdlp = None
     if not args.no_ytdlp:
-        bundled = bundle_ytdlp(binaries / f"yt-dlp{suffix}", required=tools_required,
-                               local=args.ytdlp)
-        if bundled:
-            print(f"bundled {bundled.name}")
+        ytdlp = bundle_ytdlp(resources if system == "Darwin" else binaries,
+                             required=tools_required, local=args.ytdlp, suffix=suffix)
+        if ytdlp:
+            print(f"bundled {ytdlp.relative_to(base)}")
     # ffmpeg and ffprobe sit beside the engine too; it runs those before PATH.
     tool_licenses = []
     if not args.no_ffmpeg:
@@ -340,7 +311,8 @@ def main():
         if bundle_aria2(binaries, base, required=tools_required):
             print("bundled aria2c.exe")
     if tools_required:
-        verify_tools(binaries, system, skip=[*skip, *(["ffmpeg"] if args.no_ffmpeg else [])])
+        verify_tools(binaries, system, skip=[*skip, *(["ffmpeg"] if args.no_ffmpeg else [])],
+                     ytdlp=ytdlp)
     if system == "Windows":
         verify_windows_icon(binaries / "course2md-desktop.exe")
     copy_licenses(base, tool_licenses)
@@ -362,18 +334,18 @@ def main():
         for tool in ("ffmpeg", "ffprobe"):
             if (binaries / tool).is_file():
                 run("codesign", *signing, str(binaries / tool))
-        # Sign the bundled yt-dlp as nested code; --deep verification and notarization require it.
-        # Its PyInstaller payload loads a Python framework with a different Team ID, so
-        # library validation must be disabled for this nested executable.
-        ytdlp = binaries / "yt-dlp"
-        if ytdlp.is_file():
-            run(
-                "codesign",
-                *signing,
-                "--entitlements",
-                str(ROOT / "assets/yt-dlp.entitlements"),
-                str(ytdlp),
-            )
+        # Notarization requires every Mach-O file signed with the hardened
+        # runtime: yt-dlp's extension modules and libraries, then its Python
+        # framework, then the executable. That executable loads the framework
+        # through PyInstaller, so library validation stays disabled for it.
+        if ytdlp and ytdlp.parent.name == ytdlp_bundle.DIRECTORY:
+            for path in ytdlp_bundle.signing_order(ytdlp.parent):
+                extra = (["--entitlements", str(ROOT / "assets/yt-dlp.entitlements")]
+                         if path == ytdlp else [])
+                run("codesign", *signing, *extra, str(path))
+        elif ytdlp:
+            run("codesign", *signing, "--entitlements", str(ROOT / "assets/yt-dlp.entitlements"),
+                str(ytdlp))
         run("codesign", *signing, str(bundle))
         run("codesign", "--verify", "--deep", "--strict", str(bundle))
         if args.app_only:
