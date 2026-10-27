@@ -84,6 +84,10 @@ jobs:
           # Keep the whole window on the 1024x768 screen for the click checks.
           [W]::MoveWindow($h, 0, 0, 1000, 720, $true) | Out-Null
           Start-Sleep 2
+          Shot '01-moved'
+          # First-run setup covers the app bar; its "Skip setup" link sits at the bottom left.
+          [W]::Click(152, 669); Start-Sleep 3
+          Shot '02-after-skip'
           $r = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$r) | Out-Null
           "window: $($r.L),$($r.T) - $($r.R),$($r.B)" | Tee-Object (Join-Path $out 'rect.txt')
           Shot '0-start'
