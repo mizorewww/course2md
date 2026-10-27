@@ -430,7 +430,7 @@ h2 {
   line-height: 1.15;
   text-wrap: balance;
 }
-.section-head p { margin-top: 14px; color: var(--muted); font-size: 18px; text-wrap: pretty; }
+.section-head p:not(.kicker) { margin-top: 14px; color: var(--muted); font-size: 18px; text-wrap: pretty; }
 
 /* Feature tiles: connected M3 tiles, 24px outside corners, 6px where they meet */
 .features {
@@ -581,7 +581,7 @@ h2 {
   align-items: start;
 }
 .cli .section-head { margin-bottom: 0; }
-.cli .section-head p + p { margin-top: 12px; font-size: 16px; }
+.cli .section-head p:not(.kicker) + p { margin-top: 12px; font-size: 16px; }
 .terminal {
   min-width: 0;
   border-radius: 24px;
