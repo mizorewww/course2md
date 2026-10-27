@@ -54,7 +54,7 @@ impl Request {
     pub(crate) fn new(provider: AsrProvider, model: Option<&str>, root: &Path) -> Self {
         let model = model
             .filter(|model| !model.trim().is_empty())
-            .unwrap_or(course2md::config::DEFAULT_ASR_MODEL);
+            .unwrap_or(course2md::config::default_model(provider));
         Self {
             provider,
             model: canonical_model(provider, model).unwrap_or_else(|_| model.to_owned()),
@@ -1367,7 +1367,7 @@ impl Desktop {
                             let mut value = this.generation_edit_base();
                             value.select_provider(Some(provider));
                             value.options.asr_model =
-                                Some(course2md::config::DEFAULT_ASR_MODEL.into());
+                                Some(course2md::config::default_model(provider).into());
                             if this.commit_generation(value, cx) {
                                 this.refresh_model_diagnostics(cx);
                             }

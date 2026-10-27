@@ -2,7 +2,6 @@
 //! 用户报 issue 时附上 `course2md doctor` 输出即可定位大多数环境问题。
 
 use anyhow::Result;
-use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
@@ -122,20 +121,17 @@ pub fn run() -> Result<()> {
             crate::error::install_hint("llama.cpp")
         )),
     }
-    if cfg!(target_os = "linux") {
-        let device = Path::new(crate::npu::NPU_DEVICE_PATH).exists();
+    if cfg!(any(target_os = "linux", windows)) {
+        let device = crate::npu::device_present();
         out.push(if device {
             crate::tr!("✓ npu  检测到 Intel NPU（首次使用会自动安装运行组件）/ Intel NPU detected (runtime components install on first use)")
         } else {
             crate::tr!("- npu  未检测到 Intel NPU 设备 / No Intel NPU device detected")
         }.into());
-        if crate::runtime::which("uv").is_none()
-            && crate::runtime::which("python3").is_none()
-            && crate::runtime::which("python").is_none()
-        {
+        if device && crate::npu::find_launcher(None).is_none() {
             out.push(
                 crate::tr!(
-                    "- npu  缺少 Python/uv / Python or uv is required for NPU transcription"
+                    "- npu  需要 uv，或装好 openvino-genai 的 Python / Intel NPU transcription needs uv, or Python with openvino-genai installed"
                 )
                 .into(),
             );

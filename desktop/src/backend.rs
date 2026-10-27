@@ -633,19 +633,17 @@ impl Environment {
                 .as_deref()
                 .and_then(course2md::config::find_metallib)
                 .is_some();
-        let npu_device = if cfg!(target_os = "linux") {
-            Path::new(course2md::npu::NPU_DEVICE_PATH).exists()
-        } else if cfg!(target_os = "windows") {
-            probe(Path::new("powershell.exe"), &["-NoProfile", "-NonInteractive", "-Command",
-                "Get-CimInstance Win32_PnPEntity | Where-Object { $_.Name -match 'Intel.*(AI Boost|NPU)' -and $_.Status -eq 'OK' } | Select-Object -ExpandProperty Name"], Duration::from_secs(10))
-                .is_some_and(|name| !name.trim().is_empty())
+        // Both checks run commands (PowerShell, a Python import), so they run
+        // side by side; Intel NPUs only exist on Linux and Windows PCs.
+        let (npu_device, npu_runtime) = if cfg!(any(target_os = "linux", windows)) {
+            std::thread::scope(|scope| {
+                let device = scope.spawn(course2md::npu::device_present);
+                let runtime = course2md::npu::find_launcher(Some(&tool_path())).is_some();
+                (device.join().unwrap_or(false), runtime)
+            })
         } else {
-            false
+            (false, false)
         };
-        let npu_runtime = ["uv", "python3", "python"].iter().any(|name| {
-            let executable = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-            std::env::split_paths(&tool_path()).any(|dir| dir.join(&executable).is_file())
-        });
         Self {
             engine: cli.is_some() && checks.contains_key("engine"),
             ffmpeg: checks.contains_key("ffmpeg"),

@@ -170,7 +170,7 @@ fn pick_local_provider() -> Result<LocalPick> {
     if llama {
         cands.push(AsrProvider::Gpu);
     }
-    if std::path::Path::new(crate::npu::NPU_DEVICE_PATH).exists() {
+    if crate::npu::device_present() {
         cands.push(AsrProvider::Npu);
     }
     if llama {

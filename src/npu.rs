@@ -10,17 +10,167 @@ use crate::progress::Stage;
 use crate::timeline::TranscriptEvent;
 use anyhow::Result;
 
-use std::path::Path;
-
-/// Intel NPU 设备节点（Linux accel 子系统）。doctor / wizard / 默认后端提示共用。
-pub const NPU_DEVICE_PATH: &str = "/dev/accel/accel0";
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+// ---------- 设备与启动器 ----------
+
+/// Whether this machine has an Intel NPU. doctor, the setup wizard, the
+/// default backend and the desktop app share this answer; it is computed once.
+pub fn device_present() -> bool {
+    static PRESENT: OnceLock<bool> = OnceLock::new();
+    *PRESENT.get_or_init(detect_device)
+}
+
+/// Linux: an accel subsystem node bound to Intel's `intel_vpu` driver
+/// (other vendors' NPUs, such as AMD XDNA, use the same subsystem).
+#[cfg(target_os = "linux")]
+fn detect_device() -> bool {
+    let Ok(entries) = std::fs::read_dir("/sys/class/accel") else {
+        return Path::new("/dev/accel/accel0").exists();
+    };
+    entries.flatten().any(|entry| {
+        std::fs::read_link(entry.path().join("device/driver"))
+            .ok()
+            .and_then(|driver| driver.file_name().map(|name| name == "intel_vpu"))
+            .unwrap_or(false)
+    })
+}
+
+/// PowerShell query for the Windows NPU device. "Intel(R) AI Boost" sits in
+/// the "Neural processors" (ComputeAccelerator) device class; only a device
+/// whose driver is working counts.
+#[cfg(any(windows, test))]
+const WINDOWS_DEVICE_QUERY: &str = "Get-CimInstance -ClassName Win32_PnPEntity \
+    -Filter \"Name LIKE '%AI Boost%' OR (PNPClass = 'ComputeAccelerator' AND Manufacturer LIKE '%Intel%')\" \
+    | Where-Object { $_.Status -eq 'OK' } | Select-Object -ExpandProperty Name";
+
+/// `powershell -EncodedCommand` takes base64 of UTF-16LE text, which keeps
+/// the query's quotes out of Windows command-line quoting.
+#[cfg(any(windows, test))]
+fn powershell_encoded(script: &str) -> String {
+    use base64::Engine as _;
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+#[cfg(windows)]
+fn query_windows_devices() -> Result<crate::runtime::BoundedOutput> {
+    let shell = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .map(|root| root.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("powershell.exe"));
+    let mut cmd = Command::new(shell);
+    cmd.args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+        .arg(powershell_encoded(WINDOWS_DEVICE_QUERY));
+    crate::runtime::hide_console(&mut cmd);
+    crate::runtime::run_bounded("PowerShell", &mut cmd, Duration::from_secs(20))
+}
+
+#[cfg(windows)]
+fn detect_device() -> bool {
+    match query_windows_devices() {
+        Ok(out) if out.status.success() => !out.stdout.trim().is_empty(),
+        Ok(out) => {
+            tracing::debug!(stderr = %out.stderr.trim(), "npu device query failed");
+            false
+        }
+        Err(e) => {
+            tracing::debug!("npu device query: {e:#}");
+            false
+        }
+    }
+}
+
+/// Intel NPUs only exist on Linux and Windows PCs.
+#[cfg(not(any(target_os = "linux", windows)))]
+fn detect_device() -> bool {
+    false
+}
+
+/// The packages the worker script imports.
+const WORKER_PACKAGES: [&str; 3] = ["openvino-genai", "huggingface_hub", "numpy"];
+/// openvino-genai publishes wheels for these Python versions.
+const WORKER_PYTHON: &str = ">=3.10";
+
+/// What starts the NPU worker script.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Launcher {
+    /// `uv run` installs the worker's packages into a cached environment.
+    Uv(PathBuf),
+    /// A Python that already imports the worker's packages.
+    Python(PathBuf),
+}
+
+impl Launcher {
+    fn command(&self) -> Command {
+        match self {
+            Self::Uv(uv) => {
+                let mut cmd = Command::new(uv);
+                // --no-project: a pyproject.toml in the working directory must
+                // not become the worker's environment.
+                cmd.args(["run", "--no-project", "--python", WORKER_PYTHON]);
+                for package in WORKER_PACKAGES {
+                    cmd.args(["--with", package]);
+                }
+                cmd.arg("python");
+                cmd
+            }
+            Self::Python(python) => Command::new(python),
+        }
+    }
+}
+
+/// Find a launcher on `path` (the process PATH when `None`): uv first, then a
+/// Python that imports the worker's packages. Windows ships `python.exe`
+/// stubs that only open the Microsoft Store, so a Python counts only after it
+/// has run the imports.
+pub fn find_launcher(path: Option<&OsStr>) -> Option<Launcher> {
+    let lookup = |name: &str| match path {
+        Some(path) => which::which_in(name, Some(path), std::env::current_dir().ok()?).ok(),
+        None => crate::runtime::which(name),
+    };
+    if let Some(uv) = lookup("uv") {
+        return Some(Launcher::Uv(uv));
+    }
+    let names = if cfg!(windows) {
+        ["python", "python3"]
+    } else {
+        ["python3", "python"]
+    };
+    names
+        .into_iter()
+        .filter_map(lookup)
+        .find(|python| python_has_worker_packages(python))
+        .map(Launcher::Python)
+}
+
+fn python_has_worker_packages(python: &Path) -> bool {
+    let mut cmd = Command::new(python);
+    cmd.args(["-c", "import openvino_genai, numpy, huggingface_hub"]);
+    worker_env(&mut cmd);
+    crate::runtime::hide_console(&mut cmd);
+    crate::runtime::run_bounded("Python", &mut cmd, Duration::from_secs(60))
+        .is_ok_and(|out| out.status.success())
+}
+
+/// Python writes its pipes in the ANSI code page on Windows (GBK, cp1252):
+/// the worker's messages must arrive as UTF-8 whatever the system locale.
+fn worker_env(cmd: &mut Command) {
+    cmd.env("PYTHONUTF8", "1").env("PYTHONIOENCODING", "utf-8");
+}
 
 // ---------- 超参数 ----------
 
-/// NPU worker /health 就绪等待上限（首次模型编译可能需要 1-2 分钟）
+/// NPU worker 启动期间允许的最长静默（首次模型编译可能需要 1-2 分钟）。
+/// 只要还在输出（uv 安装依赖、模型下载进度）就继续等：首次使用要下载约 1GB。
 const NPU_READY_TIMEOUT: Duration = Duration::from_secs(300);
+/// 启动总时长上限（慢速网络下的首次下载）
+const NPU_READY_LIMIT: Duration = Duration::from_secs(3 * 60 * 60);
 /// NPU 单 chunk 转写请求超时
 const NPU_HTTP_TIMEOUT: Duration = Duration::from_secs(120);
 /// 优雅关闭通知的请求超时（worker 可能正忙，别卡死主流程）
@@ -64,20 +214,43 @@ if not os.path.isdir(model_path):
         sys.stderr.write("错误 / Error: 模型下载失败 / model download failed " + model_arg + ": " + str(e) + "\n（可显式指定 --asr-model whisper 使用 Whisper / pass --asr-model whisper for Whisper）\n")
         sys.exit(1)
 
+# OpenVINO 看不到 NPU 时（驱动缺失或过旧）编译报错晦涩，先给出可操作的说明
+try:
+    import openvino as ov
+    available = ov.Core().available_devices
+except Exception as e:
+    available = None
+    sys.stderr.write("[NPU] 无法列出 OpenVINO 设备 / could not list OpenVINO devices: " + str(e) + "\n")
+if available is not None and device not in available:
+    if sys.platform == "win32":
+        driver = "https://www.intel.com/content/www/us/en/download/794734/intel-npu-driver-windows.html"
+    else:
+        driver = "https://github.com/intel/linux-npu-driver/releases"
+    sys.stderr.write("错误 / Error: OpenVINO 未发现 " + device + "（可用 / available: " + ", ".join(available) + "）。请安装或更新 Intel NPU 驱动 / Install or update the Intel NPU driver: " + driver + "\n")
+    sys.exit(1)
+
 sys.stderr.write("[NPU] 正在将模型加载/编译至 " + device + "（首次编译可能需要 1~2 分钟）...\n")
 sys.stderr.flush()
 t0 = time.time()
 
-if kind == "qwen" and hasattr(ov_genai, "ASRPipeline"):
+if kind != "whisper":
+    # 非 Whisper 仓库只能交给 ASRPipeline；不可用或加载失败直接报错，不回退到 Whisper
+    # （静默换模型会让转写来源不可追溯）
+    if not hasattr(ov_genai, "ASRPipeline"):
+        sys.stderr.write("错误 / Error: 此 openvino-genai 版本只能加载 Whisper 模型 / this openvino-genai only loads Whisper models: " + model_arg + "\n")
+        sys.exit(1)
     try:
         pipe = ov_genai.ASRPipeline(model_path, device)
-        gen_cfg = getattr(ov_genai, "ASRGenerationConfig", lambda: None)()
-    except Exception as e_qwen:
-        # 加载失败直接报错退出，不回退到 Whisper（静默换模型会让转写来源不可追溯）
-        sys.stderr.write("错误 / Error: Qwen3 ASR 加载失败 / load failed: " + str(e_qwen) + "\n（如需 Whisper 请显式指定 --asr-model whisper / pass --asr-model whisper for Whisper）\n")
+        gen_cfg = ov_genai.ASRGenerationConfig()
+    except Exception as e_asr:
+        sys.stderr.write("错误 / Error: 模型加载失败 / model load failed " + model_arg + ": " + str(e_asr) + "\n（Intel NPU 支持 OpenVINO 导出的 Whisper 模型，可指定 --asr-model whisper / Intel NPU runs OpenVINO Whisper exports; pass --asr-model whisper）\n")
         sys.exit(1)
 else:
-    pipe = ov_genai.WhisperPipeline(model_path, device)
+    try:
+        pipe = ov_genai.WhisperPipeline(model_path, device)
+    except Exception as e_whisper:
+        sys.stderr.write("错误 / Error: 模型加载失败 / model load failed " + model_arg + ": " + str(e_whisper) + "\n")
+        sys.exit(1)
     gen_cfg_path = os.path.join(model_path, "generation_config.json")
     if os.path.isfile(gen_cfg_path):
         gen_cfg = ov_genai.WhisperGenerationConfig(gen_cfg_path)
@@ -152,8 +325,6 @@ fn npu_repo(model: &str) -> &str {
         "whisper-tiny" => "OpenVINO/whisper-tiny-fp16-ov",
         "whisper-base" => "OpenVINO/whisper-base-fp16-ov",
         "whisper-small" => "OpenVINO/whisper-small-fp16-ov",
-        "qwen3-0.6b" => "dseditor/Qwen3-ASR-0.6B-INT8_ASYM-OpenVINO",
-        "qwen3-1.7b" => "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO",
         other => other,
     }
 }
@@ -272,13 +443,26 @@ impl NpuWorker {
             .unwrap_or_default();
         let base = format!("http://127.0.0.1:{port}");
 
-        if let Err(e) = crate::runtime::wait_ready(
-            &base,
-            NPU_READY_TIMEOUT,
-            &mut child,
-            Some("ok"),
-            Some(&|| control.check()),
-        ) {
+        let activity = std::cell::Cell::new((stderr.seen(), Instant::now()));
+        let check = || -> Result<()> {
+            control.check()?;
+            let seen = stderr.seen();
+            let (before, since) = activity.get();
+            if seen != before {
+                activity.set((seen, Instant::now()));
+            } else if since.elapsed() > NPU_READY_TIMEOUT {
+                anyhow::bail!(
+                    "Intel NPU 服务 {:.0} 秒没有任何进展 / The Intel NPU service made no progress for {:.0}s",
+                    NPU_READY_TIMEOUT.as_secs_f64(),
+                    NPU_READY_TIMEOUT.as_secs_f64()
+                );
+            }
+            Ok(())
+        };
+        if let Err(e) =
+            crate::runtime::wait_ready(&base, NPU_READY_LIMIT, &mut child, Some("ok"), Some(&check))
+        {
+            crate::runtime::terminate_tree(&mut child);
             return Err(e.context(format!(
                 "Intel NPU 服务启动失败/超时（首次模型编译可能需要更多时间） / Intel NPU service failed to start or timed out (the first model compilation may take longer); stderr tail:\n{}",
                 stderr.tail()
@@ -298,7 +482,7 @@ impl NpuWorker {
         })
     }
 
-    /// 优雅关闭：POST /shutdown → 等待 → SIGTERM 进程组（避免 uv 衍生的孙子进程残留）
+    /// 优雅关闭：POST /shutdown → 等待 → 终止进程树（避免 uv 衍生的孙子进程残留）
     /// → 短等 → 仍未退由 ManagedChild Drop 兜底。
     fn stop(&mut self) {
         let client = ureq::AgentBuilder::new().timeout(SHUTDOWN_TIMEOUT).build();
@@ -307,15 +491,17 @@ impl NpuWorker {
             .set("X-Auth-Token", &self.token)
             .send_json(serde_json::json!({}));
         if self.child.wait_within(SHUTDOWN_WAIT).is_err() {
-            #[cfg(unix)]
-            {
-                let pid = self.child.id() as i32;
-                unsafe {
-                    libc::kill(-pid, libc::SIGTERM);
-                }
-            }
+            crate::runtime::terminate_tree(&mut self.child);
             let _ = self.child.wait_within(SIGTERM_WAIT);
         }
+    }
+}
+
+impl Drop for NpuWorker {
+    /// An error or cancellation between start and stop still ends the
+    /// launcher's Python grandchild, which holds the port and the chunk files.
+    fn drop(&mut self) {
+        crate::runtime::terminate_tree(&mut self.child);
     }
 }
 
@@ -332,30 +518,15 @@ fn spawn_npu_worker(
     kind: &str,
     token: &str,
 ) -> Result<crate::runtime::ManagedChild> {
-    // 优先使用 uv（自动处理隔离环境与依赖），若无则回退系统 python3
-    let mut cmd = if crate::runtime::which("uv").is_some() {
-        let mut c = Command::new("uv");
-        c.args([
-            "run",
-            "--with",
-            "openvino-genai",
-            "--with",
-            "huggingface_hub",
-            "--with",
-            "numpy",
-            "python",
-        ]);
-        c
-    } else if let Some(python) = ["python3", "python"]
-        .into_iter()
-        .find(|python| crate::runtime::which(python).is_some())
-    {
-        Command::new(python)
-    } else {
+    // 优先使用 uv（自动处理隔离环境与依赖），若无则回退已装好依赖的 Python
+    let Some(launcher) = find_launcher(None) else {
         anyhow::bail!(crate::tr!(
-            "未找到 Python/uv，无法启动 NPU 识别 / Install Python or uv to use Intel NPU transcription"
+            "未找到 uv，也没有装好 openvino-genai 的 Python，无法启动 NPU 识别 / Intel NPU transcription needs uv, or Python with openvino-genai, numpy and huggingface_hub installed"
         ));
     };
+    let mut cmd = launcher.command();
+    worker_env(&mut cmd);
+    crate::runtime::hide_console(&mut cmd);
 
     #[cfg(unix)]
     {
@@ -414,6 +585,79 @@ mod tests {
     }
 
     #[test]
+    fn uv_launcher_ignores_projects_and_requests_a_supported_python() {
+        let cmd = Launcher::Uv(PathBuf::from("uv")).command();
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
+        assert_eq!(&args[..4], ["run", "--no-project", "--python", ">=3.10"]);
+        assert_eq!(args.last(), Some(&"python"));
+        for package in WORKER_PACKAGES {
+            assert!(
+                args.windows(2).any(|w| w == ["--with", package]),
+                "{package}"
+            );
+        }
+    }
+
+    #[test]
+    fn device_query_is_encoded_as_utf16_base64() {
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(powershell_encoded(WINDOWS_DEVICE_QUERY))
+            .unwrap();
+        let units: Vec<u16> = bytes
+            .chunks(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), WINDOWS_DEVICE_QUERY);
+        assert!(WINDOWS_DEVICE_QUERY.contains("'%AI Boost%'"));
+    }
+
+    /// The query must run on stock Windows; the runner has no NPU, so only
+    /// the exit status is checked.
+    #[cfg(windows)]
+    #[test]
+    fn windows_device_query_runs() {
+        let out = query_windows_devices().unwrap();
+        assert!(out.status.success(), "{}", out.stderr);
+    }
+
+    fn fake_program(dir: &Path, name: &str, script: &str) {
+        let path = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&path, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[test]
+    fn launcher_prefers_uv_on_the_given_path() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(find_launcher(Some(dir.path().as_os_str())), None);
+        fake_program(dir.path(), "uv", "#!/bin/sh\nexit 0\n");
+        let Some(Launcher::Uv(uv)) = find_launcher(Some(dir.path().as_os_str())) else {
+            panic!("uv not found");
+        };
+        assert_eq!(uv.parent(), Some(dir.path()));
+    }
+
+    /// A Python that cannot import the worker's packages (like the Windows
+    /// Store stub, which exits 9009) is not a launcher.
+    #[cfg(unix)]
+    #[test]
+    fn python_without_worker_packages_is_not_a_launcher() {
+        let dir = tempfile::tempdir().unwrap();
+        fake_program(dir.path(), "python3", "#!/bin/sh\nexit 9009\n");
+        assert_eq!(find_launcher(Some(dir.path().as_os_str())), None);
+        fake_program(dir.path(), "python", "#!/bin/sh\nexit 0\n");
+        let Some(Launcher::Python(python)) = find_launcher(Some(dir.path().as_os_str())) else {
+            panic!("python not found");
+        };
+        assert_eq!(python.file_name().unwrap(), "python");
+    }
+
+    #[test]
     fn npu_model_aliases() {
         assert_eq!(
             resolve_npu_model(Some("whisper")),
@@ -421,7 +665,7 @@ mod tests {
         );
         assert_eq!(
             resolve_npu_model(None),
-            "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO"
+            "OpenVINO/whisper-large-v3-turbo-int8-ov"
         );
         assert_eq!(
             resolve_npu_model(Some("org/custom-model")),

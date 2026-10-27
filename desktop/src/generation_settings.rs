@@ -653,7 +653,7 @@ impl Desktop {
             .options
             .asr_model
             .as_deref()
-            .unwrap_or(course2md::config::DEFAULT_ASR_MODEL);
+            .unwrap_or(course2md::config::default_model(provider));
         let canonical = course2md::config::canonical_model(provider, selected).ok();
         let models = local_models(provider);
         let model_name: SharedString = if canonical.is_some() {
