@@ -11,7 +11,7 @@
 - 语音识别可在本机完成：Apple 芯片开箱即用；其他系统可用显卡、CPU 或 Intel Core Ultra 的 NPU。也可选择云端服务，只有选择云端时音频才会上传。
 - 可选 AI 校对与摘要：支持任意 OpenAI 兼容服务、本地 Ollama 或 ChatGPT 订阅，默认关闭。开启 AI 后还可生成双语笔记（每段下方附译文），口述的公式会写成数学公式并排版显示。
 - 桌面应用提供可暂停、可调整顺序的后台任务，支持嵌套文件夹与搜索的笔记库，带目录、查找和截图视图的阅读器，以及 10 套主题。
-- 语音模型下载支持断点续传和完整性校验；访问 Hugging Face 较慢时（如中国大陆）自动改用镜像。
+- 在中国大陆，语音模型从国内镜像（ModelScope / hf-mirror.com）下载；其他地区以镜像作为备用。GPU/CPU 模型支持断点续传，并按 SHA-256 校验。
 
 
 ## 界面语言
@@ -71,7 +71,7 @@ Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用 [CLI](https://github
 
 ## 安装 CLI
 
-CLI 与桌面应用可以同时安装。两者共用 Bilibili 登录和已下载的识别模型，设置各自独立。
+CLI 与桌面应用可以同时安装。两者共用 Bilibili 和 ChatGPT 登录以及已下载的识别模型，设置各自独立。
 
 **macOS / Linux（预编译二进制）：**
 
@@ -110,7 +110,7 @@ course2md ./lecture.mp4 -o ./notes             # 指定输出根目录
 
 ## 配置
 
-CLI 的设置保存在 `~/.config/course2md/config.toml`（Windows 为 `%APPDATA%\course2md\config.toml`），命令行参数优先于配置文件。桌面应用的设置独立保存，在「设置」中修改。`course2md remove` 清除已保存的 AI 服务设置。
+CLI 的设置保存在 `~/.config/course2md/config.toml`（Windows 为 `%APPDATA%\course2md\config.toml`），命令行参数优先于配置文件。桌面应用的设置独立保存，在「设置」中修改。`course2md remove` 清除 CLI 的 AI 服务设置和 ChatGPT 登录。
 
 ## 常见问题
 

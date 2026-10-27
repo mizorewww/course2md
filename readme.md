@@ -11,7 +11,7 @@ Turn **YouTube, Bilibili, or local videos** into illustrated Markdown / HTML not
 - Speech recognition on your own computer: Apple Silicon works out of the box, and other systems can use a graphics card, the CPU, or an Intel Core Ultra NPU. A cloud service is optional; audio leaves your computer only if you choose it.
 - Optional AI proofreading and summaries using any OpenAI-compatible service, a local Ollama server, or a ChatGPT subscription. Off by default. With AI turned on, notes can also be bilingual (a translation under each paragraph) and spoken formulas are written and rendered as math.
 - The desktop app adds background tasks you can pause and reorder, a library with nested folders and search, a reader with outline, find and a screenshot view, and 10 themes.
-- Speech models download with resume and checksum verification, from mirrors when Hugging Face is slow to reach (for example in mainland China).
+- In mainland China, speech models download from domestic mirrors (ModelScope / hf-mirror.com); elsewhere these are fallbacks. GPU/CPU models resume interrupted downloads and are checked with SHA-256.
 
 
 ## Interface languages
@@ -71,7 +71,7 @@ The first local transcription downloads a speech model (1–2.4 GB). See the [fi
 
 ## Install the CLI
 
-The CLI and the desktop app can be installed side by side. They share the Bilibili login and downloaded speech models; each keeps its own settings.
+The CLI and the desktop app can be installed side by side. They share the Bilibili and ChatGPT logins and the downloaded speech models; each keeps its own settings.
 
 **macOS / Linux (prebuilt binary):**
 
@@ -110,7 +110,7 @@ Use `<command> --help` for each command's options.
 
 ## Configuration
 
-CLI settings live in `~/.config/course2md/config.toml` (`%APPDATA%\course2md\config.toml` on Windows); command-line options override them. The desktop app keeps its own settings, changed in **Settings**. `course2md remove` clears saved AI service settings.
+CLI settings live in `~/.config/course2md/config.toml` (`%APPDATA%\course2md\config.toml` on Windows); command-line options override them. The desktop app keeps its own settings, changed in **Settings**. `course2md remove` clears the CLI's AI service settings and the ChatGPT login.
 
 ## Frequently asked questions
 
