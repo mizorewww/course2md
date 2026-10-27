@@ -3,10 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>course2md · 把课程视频整理成图文笔记</title>
-<script src="../assets/lang.js?v=2.0.3"></script>
-<meta name="description" content="course2md 是免费开源的桌面应用（macOS、Windows、Linux），把 Bilibili、YouTube 或本地的课程视频整理成图文讲义：每页幻灯片配着老师讲它时说的话。">
-<meta name="theme-color" content="#EEF1F8">
+<title>course2md · 把课程视频变成图文笔记</title>
+<script src="../assets/lang.js?v=2.0.4"></script>
+<meta name="description" content="course2md 是免费开源的桌面应用（macOS、Windows、Linux），把 YouTube、Bilibili 和本地的课程视频整理成图文笔记：画面一换就截一张图，下面是讲解的话。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#EEF1F8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)">
 <link rel="canonical" href="https://vibewatching.xyz/zh/">
 <link rel="alternate" hreflang="en" href="https://vibewatching.xyz/">
 <link rel="alternate" hreflang="zh-CN" href="https://vibewatching.xyz/zh/">
@@ -16,8 +18,8 @@
 <link rel="apple-touch-icon" href="../apple-touch-icon.png">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="course2md">
-<meta property="og:title" content="course2md · 把课程视频整理成图文笔记">
-<meta property="og:description" content="看过的课，随时翻得回来。course2md 把一整节课整理成一份图文讲义。">
+<meta property="og:title" content="course2md · 把课程视频变成图文笔记">
+<meta property="og:description" content="免费的桌面应用，把 YouTube、Bilibili 和本地课程视频整理成可以阅读、查找和保存的图文笔记。">
 <meta property="og:url" content="https://vibewatching.xyz/zh/">
 <meta property="og:image" content="https://vibewatching.xyz/images/og-zh.png">
 <meta property="og:image:width" content="1200">
@@ -26,28 +28,28 @@
 <meta property="og:locale" content="zh_CN">
 <meta property="og:locale:alternate" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="course2md · 把课程视频整理成图文笔记">
-<meta name="twitter:description" content="看过的课，随时翻得回来。course2md 把一整节课整理成一份图文讲义。">
+<meta name="twitter:title" content="course2md · 把课程视频变成图文笔记">
+<meta name="twitter:description" content="免费的桌面应用，把 YouTube、Bilibili 和本地课程视频整理成可以阅读、查找和保存的图文笔记。">
 <meta name="twitter:image" content="https://vibewatching.xyz/images/og-zh.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../assets/site.css?v=2.0.3">
-<script src="../assets/site.js?v=2.0.3"></script>
+<link rel="stylesheet" href="../assets/site.css?v=2.0.4">
+<script src="../assets/site.js?v=2.0.4"></script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "course2md", "description": "把课程视频整理成图文并茂的 Markdown 和 HTML 笔记。", "url": "https://vibewatching.xyz/zh/", "applicationCategory": "EducationalApplication", "operatingSystem": "macOS, Windows, Linux", "softwareVersion": "2.0.0", "downloadUrl": "https://github.com/mizorewww/course2md/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "image": "https://vibewatching.xyz/images/og-zh.png", "inLanguage": "zh-CN"}</script>
 </head>
 <body>
 <div class="page">
+
 <header class="site-header">
 <a href="#top" class="brand">
-<span aria-hidden="true" class="mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6v12l8-6Z" fill="currentColor"></path><path d="M17 5v13"></path><path d="m13.500 14.500 3.500 3.500 3.500-3.500"></path></svg></span>
+<img src="../assets/icon-128.png" width="36" height="36" alt="" class="app-icon">
 <span class="brand-name">course2md</span>
 </a>
 <nav aria-label="页面导航" class="site-nav">
 <a href="#story" class="nav-link nav-more">怎么用</a>
 <a href="#download" class="nav-link">下载</a>
+<a href="#faq" class="nav-link nav-more">常见问题</a>
 <a href="https://github.com/mizorewww/course2md/wiki" class="nav-link nav-more">文档</a>
 <a href="../?lang=en" hreflang="en" lang="en" class="nav-link nav-lang"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.500 14.500 0 0 0 0 20 14.500 14.500 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>English</a>
-<a href="https://github.com/mizorewww/course2md" class="nav-link nav-gh"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>GitHub</a>
+<a href="https://github.com/mizorewww/course2md" class="nav-link nav-gh" aria-label="GitHub"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg><span class="label">GitHub</span></a>
 </nav>
 </header>
 
@@ -55,9 +57,13 @@
 
 <section class="hero">
 <div class="hero-copy">
+<div class="badges">
 <span class="badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>免费开源 · MIT 许可</span>
-<h1>看过的课，<br>随时翻得回来</h1>
-<p>网课、公开课、讲座录像，过几天想找某个推导，只能一遍遍拖进度条。course2md 把一整节课整理成一份图文讲义：每页幻灯片配着老师讲它时说的话，按章节排好，点一下就回到视频里的那一秒。</p>
+<a class="badge" href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0"><strong>2.0</strong>新版本</a>
+</div>
+<h1>把课程视频变成图文笔记</h1>
+<p class="subhead">看过的课，随时翻得回来</p>
+<p class="lead">course2md 把一整节课整理成一份图文讲义：画面一换就截一张图，下面是老师讲这一页时说的话。YouTube 和 Bilibili 的视频，每一节都能跳回原视频的那一刻。</p>
 <div class="uses">
 <span class="use">复习网课</span>
 <span class="use">自学公开课</span>
@@ -65,25 +71,29 @@
 </div>
 <div class="ctas">
 <a id="cta-main" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg" class="cta-main"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg><span id="cta-label">下载 macOS 版</span></a>
-<a href="#download" class="cta-alt">其他平台</a>
+<a id="cta-alt" href="#download" class="cta-alt">其他平台</a>
 </div>
-<span id="cta-note" class="cta-note">Apple 芯片 · macOS 15 及以上 · 也可以用 Homebrew 安装</span>
+<div class="cta-notes">
+<span id="cta-note">Apple 芯片 · macOS 15 及以上 · 也可以用 Homebrew 安装</span>
+<a id="cta-intel" href="#cli">Intel Mac 请用命令行版</a>
+</div>
 </div>
 
-<div class="hero-fan" role="group" aria-label="course2md 生成的截图示例">
+<figure class="hero-fan" aria-label="示例课程笔记中的截图">
+<span class="sample-tag">示例课程</span>
 <div class="fan-card fan-a">
-<img src="../images/lecture/frame-04.jpg" width="960" height="720" alt="宝可梦属性图示幻灯片">
-<span class="fan-cap"><span>Example Application</span><span>02:03</span></span>
+<picture><source type="image/avif" srcset="../images/slides/zh/eigen-1-480.avif 480w, ../images/slides/zh/eigen-1-960.avif 960w, ../images/slides/zh/eigen-1-1280.avif 1280w" sizes="(max-width: 900px) 60vw, 340px"><img src="../images/slides/zh/eigen-1-960.jpg" width="1280" height="720" alt="示例课程的标题页：特征值与特征向量" decoding="async"></picture>
+<span class="fan-cap"><span>特征值与特征向量</span><span>00:00</span></span>
 </div>
 <div class="fan-card fan-c">
-<img src="../images/lecture/frame-43.jpg" width="960" height="720" alt="分类结果幻灯片">
-<span class="fan-cap"><span>How’s the results?</span><span>40:01</span></span>
+<picture><source type="image/avif" srcset="../images/slides/zh/eigen-6-480.avif 480w, ../images/slides/zh/eigen-6-960.avif 960w, ../images/slides/zh/eigen-6-1280.avif 1280w" sizes="(max-width: 900px) 56vw, 320px"><img src="../images/slides/zh/eigen-6-960.jpg" width="1280" height="720" alt="幂迭代收敛曲线的幻灯片" decoding="async"></picture>
+<span class="fan-cap"><span>幂迭代</span><span>29:50</span></span>
 </div>
 <div class="fan-card fan-b">
-<img src="../images/lecture/frame-08.jpg" width="960" height="720" alt="皮卡丘数值特征幻灯片">
-<p lang="zh-Hant" class="fan-quote">比如說，皮卡丘整體強的程度是 320，HP 是 35，攻擊力是 55……</p>
+<picture><source type="image/avif" srcset="../images/slides/zh/eigen-2-480.avif 480w, ../images/slides/zh/eigen-2-960.avif 960w, ../images/slides/zh/eigen-2-1280.avif 1280w" sizes="(max-width: 900px) 68vw, 380px"><img src="../images/slides/zh/eigen-2-960.jpg" width="1280" height="720" alt="矩阵变换网格向量的幻灯片" fetchpriority="high" decoding="async"></picture>
+<p class="fan-quote">“但再看沿对角线方向的 v。变换之后，它仍然落在同一条虚线上。”</p>
 </div>
-</div>
+</figure>
 </section>
 
 <a href="#story" class="nudge nudge-link"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"></path><path d="m19 12-7 7-7-7"></path></svg>往下滚，看一节课怎么变成笔记</a>
@@ -93,148 +103,53 @@
 <div class="story-grid">
 
 <div class="story-steps">
-<h2 id="story-title">一节真实的课 · 1 小时 9 分 40 秒</h2>
-<button type="button" class="step story-step-on" aria-current="step"><span class="step-n">1</span><span class="step-text"><span class="step-title">粘贴链接</span><span class="step-body">复制一个 Bilibili 或 YouTube 链接，或者把本地视频拖进窗口。</span></span></button>
-<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">2</span><span class="step-text"><span class="step-title">先预览，再开始</span><span class="step-body">先看到标题、作者和时长，确认是这一节课，再点开始转换。</span></span></button>
-<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">3</span><span class="step-text"><span class="step-title">截图跟着画面走</span><span class="step-body">画面一变就截一张。这节 1 小时 9 分的课，留下了 69 张截图。</span></span></button>
-<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">4</span><span class="step-text"><span class="step-title">文字落到每一页下面</span><span class="step-body">字幕或语音识别的每一句，按时间放到对应的截图下面。</span></span></button>
-<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">5</span><span class="step-text"><span class="step-title">AI 校对与摘要（可选）</span><span class="step-body">补全标点、理顺口语，在开头写好摘要。默认关闭，开了才会发送文字。</span></span></button>
-<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">6</span><span class="step-text"><span class="step-title">像翻幻灯片一样读</span><span class="step-body">目录、时间点、全文查找。点任何一段都能回到原视频的那一秒。</span></span></button>
-<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">7</span><span class="step-text"><span class="step-title">带走你的笔记</span><span class="step-body">Markdown、网页或 JSON，截图一起打包，放进你自己的笔记软件。</span></span></button>
+<h2 id="story-title">示例课程 · 线性代数：特征值与特征向量 · 48:16</h2>
+<button type="button" class="step story-step-on" aria-current="step"><span class="step-n">1</span><span class="step-text"><span class="step-title">粘贴链接</span><span class="step-body">粘贴 YouTube 或 Bilibili 链接，或者把本地视频拖进窗口。先确认标题、时长和处理选项，再开始转换。</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">2</span><span class="step-text"><span class="step-title">截图和讲解</span><span class="step-body">画面一换就截一张图，讲解的话放在下面。视频有字幕就直接用字幕，没有再在本机识别语音。</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">3</span><span class="step-text"><span class="step-title">像翻幻灯片一样读</span><span class="step-body">全文查找；开启 AI 摘要后还有目录。每页截图那一节都能从对应时间打开原视频。</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">4</span><span class="step-text"><span class="step-title">带走你的笔记</span><span class="step-body">笔记以 Markdown 和 HTML 保存在你的电脑上。可以导出含截图的 .zip、单个网页文件或 JSON，也可以直接复制文字。</span></span></button>
 <div aria-hidden="true" class="story-bar"><span></span></div>
+<p class="sample-note">示例课程为本页制作，频道和视频均为虚构。</p>
 </div>
 
-<div class="story-window" role="group" aria-label="course2md 界面演示">
+<div class="story-window" role="group" aria-label="course2md 示例课程演示">
 <div aria-hidden="true" class="traffic"><span class="dot"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
 
-<div aria-hidden="false" class="scene scene-pad sc-link is-on">
-<div class="scene-title">把视频整理成笔记</div>
-<div class="url-field">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#44474F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-<span class="url-text"><span id="typed"></span><span class="caret"></span></span>
-<span class="preview-btn">预览视频</span>
-</div>
-<span class="drop-hint"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m17 8-5-5-5 5"></path><path d="M12 3v12"></path></svg>或把本地视频拖进窗口</span>
-</div>
-
-<div aria-hidden="true" class="scene scene-pad sc-preview">
-<div class="url-plain"><span>https://www.bilibili.com/video/BV1Wv411h7kN?p=16</span></div>
-<article class="video-card">
-<div class="thumb">
-<img src="../images/lecture/frame-01.jpg" width="960" height="720" alt="" loading="lazy" decoding="async">
-<span class="thumb-time">1:09:40</span>
-</div>
-<div class="video-meta">
-<span class="video-title">(选修)To Learn More - 分类神奇宝贝Pokemon</span>
-<span class="video-by">Bilibili · <span>啥都会一点的研究生</span></span>
-<span class="start-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5Z"></path></svg>开始转换</span>
-</div>
-</article>
+<div aria-hidden="false" class="scene sc-app is-on">
+<picture><source media="(prefers-color-scheme: dark)" type="image/avif" srcset="../images/app/zh/home-dark-480.avif 480w, ../images/app/zh/home-dark-960.avif 960w, ../images/app/zh/home-dark-1600.avif 1600w" sizes="(max-width: 900px) 180vw, 800px"><source media="(prefers-color-scheme: dark)" srcset="../images/app/zh/home-dark-960.jpg"><source type="image/avif" srcset="../images/app/zh/home-light-480.avif 480w, ../images/app/zh/home-light-960.avif 960w, ../images/app/zh/home-light-1600.avif 1600w" sizes="(max-width: 900px) 180vw, 800px"><img src="../images/app/zh/home-light-960.jpg" width="1600" height="1095" alt="course2md 主页：已预览的视频及其处理选项" loading="lazy" decoding="async"></picture>
 </div>
 
 <div aria-hidden="true" class="scene sc-shots">
 <div class="shots-head">
-<svg class="spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2B5BB5" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.560"></path></svg>
-<span class="shots-label">提取画面</span>
-<span class="shots-count">截图 <span id="shot-count">0</span> / 69</span>
+<svg class="spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.560"></path></svg>
+<span class="shots-label">生成截图</span>
+<span class="shots-count">截图 <span id="shot-count">0</span> / 7</span>
 </div>
 <div class="shots-bar"><span></span><span></span></div>
 <div class="shot-grid">
-<div class="shot"><img src="../images/lecture/frame-01.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>00:00</span></div>
-<div class="shot"><img src="../images/lecture/frame-02.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>00:15</span></div>
-<div class="shot"><img src="../images/lecture/frame-03.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>01:16</span></div>
-<div class="shot"><img src="../images/lecture/frame-04.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>02:03</span></div>
-<div class="shot"><img src="../images/lecture/frame-05.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>02:56</span></div>
-<div class="shot"><img src="../images/lecture/frame-08.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>04:26</span></div>
-<div class="shot"><img src="../images/lecture/frame-10.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>05:19</span></div>
-<div class="shot"><img src="../images/lecture/frame-15.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>11:24</span></div>
-<div class="shot"><img src="../images/lecture/frame-20.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>16:53</span></div>
-<div class="shot"><img src="../images/lecture/frame-26.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>25:15</span></div>
-<div class="shot"><img src="../images/lecture/frame-27.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>26:53</span></div>
-<div class="shot"><img src="../images/lecture/frame-29.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>27:15</span></div>
-<div class="shot"><img src="../images/lecture/frame-33.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>30:42</span></div>
-<div class="shot"><img src="../images/lecture/frame-43.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>40:01</span></div>
-<div class="shot"><img src="../images/lecture/frame-51.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>43:40</span></div>
-<div class="shot"><img src="../images/lecture/frame-55.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>49:44</span></div>
-<div class="shot"><img src="../images/lecture/frame-62.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>1:01:32</span></div>
-<div class="shot"><img src="../images/lecture/frame-69.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>1:08:45</span></div>
+<div class="shot"><picture><source type="image/avif" srcset="../images/slides/zh/eigen-1-480.avif 480w, ../images/slides/zh/eigen-1-960.avif 960w, ../images/slides/zh/eigen-1-1280.avif 1280w" sizes="(max-width: 900px) 25vw, 190px"><img src="../images/slides/zh/eigen-1-960.jpg" width="1280" height="720" alt="示例课程第 1 页幻灯片" loading="lazy" decoding="async"></picture><span>00:00</span></div>
+<div class="shot"><picture><source type="image/avif" srcset="../images/slides/zh/eigen-2-480.avif 480w, ../images/slides/zh/eigen-2-960.avif 960w, ../images/slides/zh/eigen-2-1280.avif 1280w" sizes="(max-width: 900px) 25vw, 190px"><img src="../images/slides/zh/eigen-2-960.jpg" width="1280" height="720" alt="示例课程第 2 页幻灯片" loading="lazy" decoding="async"></picture><span>03:05</span></div>
+<div class="shot"><picture><source type="image/avif" srcset="../images/slides/zh/eigen-3-480.avif 480w, ../images/slides/zh/eigen-3-960.avif 960w, ../images/slides/zh/eigen-3-1280.avif 1280w" sizes="(max-width: 900px) 25vw, 190px"><img src="../images/slides/zh/eigen-3-960.jpg" width="1280" height="720" alt="示例课程第 3 页幻灯片" loading="lazy" decoding="async"></picture><span>09:00</span></div>
+<div class="shot"><picture><source type="image/avif" srcset="../images/slides/zh/eigen-4-480.avif 480w, ../images/slides/zh/eigen-4-960.avif 960w, ../images/slides/zh/eigen-4-1280.avif 1280w" sizes="(max-width: 900px) 25vw, 190px"><img src="../images/slides/zh/eigen-4-960.jpg" width="1280" height="720" alt="示例课程第 4 页幻灯片" loading="lazy" decoding="async"></picture><span>15:05</span></div>
+<div class="shot"><picture><source type="image/avif" srcset="../images/slides/zh/eigen-5-480.avif 480w, ../images/slides/zh/eigen-5-960.avif 960w, ../images/slides/zh/eigen-5-1280.avif 1280w" sizes="(max-width: 900px) 25vw, 190px"><img src="../images/slides/zh/eigen-5-960.jpg" width="1280" height="720" alt="示例课程第 5 页幻灯片" loading="lazy" decoding="async"></picture><span>22:30</span></div>
+<div class="shot"><picture><source type="image/avif" srcset="../images/slides/zh/eigen-6-480.avif 480w, ../images/slides/zh/eigen-6-960.avif 960w, ../images/slides/zh/eigen-6-1280.avif 1280w" sizes="(max-width: 900px) 25vw, 190px"><img src="../images/slides/zh/eigen-6-960.jpg" width="1280" height="720" alt="示例课程第 6 页幻灯片" loading="lazy" decoding="async"></picture><span>29:50</span></div>
+<div class="shot"><picture><source type="image/avif" srcset="../images/slides/zh/eigen-7-480.avif 480w, ../images/slides/zh/eigen-7-960.avif 960w, ../images/slides/zh/eigen-7-1280.avif 1280w" sizes="(max-width: 900px) 25vw, 190px"><img src="../images/slides/zh/eigen-7-960.jpg" width="1280" height="720" alt="示例课程第 7 页幻灯片" loading="lazy" decoding="async"></picture><span>37:40</span></div>
+</div>
+<div class="transcript">
+<span class="sub-head">讲解文字 · 03:05</span>
+<div class="sub-line"><b>03:05</b><span>把矩阵 A 想象成一台机器：输入一个向量，输出另一个向量。</span></div>
+<div class="sub-line"><b>03:11</b><span>大多数向量经过变换后都会指向新的方向：整个网格被拉伸、错切。</span></div>
+<div class="sub-line"><b>03:18</b><span>但再看沿对角线方向的 v。</span></div>
+<div class="sub-line"><b>03:22</b><span>变换之后，它仍然落在同一条虚线上，</span></div>
+<div class="sub-line"><b>03:26</b><span>只是长度变成了原来的三倍，除此之外什么都没变。</span></div>
 </div>
 </div>
 
-<div aria-hidden="true" class="scene scene-sub">
-<div class="sub-slide">
-<div class="sub-frame"><img src="../images/lecture/frame-08.jpg" width="960" height="720" alt="皮卡丘数值特征幻灯片" loading="lazy" decoding="async"><span class="thumb-time">04:26</span></div>
-<span class="sub-cap">截图 8 / 69 · 04:26 – 05:14</span>
-</div>
-<div class="sub-list">
-<span class="sub-head">视频字幕</span>
-<div lang="zh-Hant" class="sub-line"><b>04:26</b><span>比如說，皮卡丘</span></div>
-<div lang="zh-Hant" class="sub-line"><b>04:28</b><span>它整體強的程度是 320</span></div>
-<div lang="zh-Hant" class="sub-line"><b>04:31</b><span>它 HP 是 35，攻擊力是 55</span></div>
-<div lang="zh-Hant" class="sub-line"><b>04:34</b><span>防禦力是40，特殊攻擊力是 50</span></div>
-<div lang="zh-Hant" class="sub-line"><b>04:37</b><span>然後，它的特殊防禦力是 50，速度是 90</span></div>
-<div lang="zh-Hant" class="sub-line"><b>04:42</b><span>所以一隻皮卡丘，我們就可以用一個 vector 來描述它</span></div>
-<div lang="zh-Hant" class="sub-line"><b>04:46</b><span>這個 vector 裡面總共有 7 個數值</span></div>
-<div lang="zh-Hant" class="sub-line"><b>04:49</b><span>所以，1 隻寶可夢，它就是 7 個數字所組成的一個 vector</span></div>
-<div lang="zh-Hant" class="sub-line"><b>04:56</b><span>所以 1 隻皮卡丘，可以用這 7 個數字來描述它</span></div>
-<div lang="zh-Hant" class="sub-line"><b>04:59</b><span>我們現在要問的問題就是</span></div>
-</div>
+<div aria-hidden="true" class="scene sc-app">
+<picture><source media="(prefers-color-scheme: dark)" type="image/avif" srcset="../images/app/zh/reader-dark-480.avif 480w, ../images/app/zh/reader-dark-960.avif 960w, ../images/app/zh/reader-dark-1600.avif 1600w" sizes="(max-width: 900px) 180vw, 800px"><source media="(prefers-color-scheme: dark)" srcset="../images/app/zh/reader-dark-960.jpg"><source type="image/avif" srcset="../images/app/zh/reader-light-480.avif 480w, ../images/app/zh/reader-light-960.avif 960w, ../images/app/zh/reader-light-1600.avif 1600w" sizes="(max-width: 900px) 180vw, 800px"><img src="../images/app/zh/reader-light-960.jpg" width="1600" height="1095" alt="阅读器：带摘要、目录和排版公式的示例课程笔记" loading="lazy" decoding="async"></picture>
 </div>
 
-<div aria-hidden="true" class="scene scene-pad sc-ai">
-<div class="ai-head">
-<span class="ai-chip">原始字幕</span>
-<span class="ai-note">可选 · 默认关闭</span>
-</div>
-<div class="ai-text">
-<p lang="zh-Hant" class="ai-raw">比如說，皮卡丘它整體強的程度是 320它 HP 是 35，攻擊力是 55防禦力是40，特殊攻擊力是 50然後，它的特殊防禦力是 50，速度是 90所以一隻皮卡丘，我們就可以用一個 vector 來描述它這個 vector 裡面總共有 7 個數值</p>
-<p lang="zh-Hant" class="ai-clean">比如說，皮卡丘整體強的程度是 320，HP 是 35，攻擊力是 55，防禦力是 40，特殊攻擊力是 50，特殊防禦力是 50，速度是 90。所以一隻皮卡丘，我們就可以用一個 vector 來描述它，這個 vector 裡面總共有 7 個數值。</p>
-</div>
-<div class="ai-sum">
-<span class="ai-sum-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg>视频摘要</span>
-<p lang="zh-Hant">以寶可夢屬性分類介紹機率生成模型，從迴歸的限制、貝氏分類與高斯參數估測，推進到共用共變異數的線性邊界及 sigmoid 後驗機率，最後引出直接學習分類參數的構想。</p>
-</div>
-</div>
-
-<div aria-hidden="true" class="scene sc-read">
-<div class="read-bar">
-<span class="read-back"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1A1B20" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></span>
-<span class="read-titles"><span class="read-crumb">笔记库 · <span>李弘毅机器学习</span></span><span class="read-title">(选修)To Learn More - 分类神奇宝贝Pokemon</span></span>
-</div>
-<div class="read-main">
-<div class="demo-toc">
-<span class="toc-head">目录</span>
-<span class="toc-item"><span lang="zh-Hant">摘要</span><span></span></span>
-<span class="toc-item is-active"><span lang="zh-Hant">分類任務與寶可夢資料</span><span>00:00</span></span>
-<span class="toc-item"><span lang="zh-Hant">直接套用迴歸的問題</span><span>07:47</span></span>
-<span class="toc-item"><span lang="zh-Hant">貝氏分類與生成模型</span><span>16:08</span></span>
-<span class="toc-item"><span lang="zh-Hant">高斯假設與最大概似估測</span><span>24:26</span></span>
-<span class="toc-item"><span lang="zh-Hant">分類實作與初步結果</span><span>36:24</span></span>
-<span class="toc-item"><span lang="zh-Hant">共用共變異數與模型簡化</span><span>42:30</span></span>
-<span class="toc-item"><span lang="zh-Hant">模型選擇與 Naive Bayes</span><span>52:07</span></span>
-<span class="toc-item"><span lang="zh-Hant">後驗機率的 sigmoid 表示</span><span>59:13</span></span>
-<span class="toc-item"><span lang="zh-Hant">從共用共變異數推導線性邊界</span><span>1:04:32</span></span>
-<span class="toc-item"><span lang="zh-Hant">引出直接學習分類參數</span><span>1:08:45</span></span>
-</div>
-<div class="read-paper">
-<div class="reader-body">
-<div class="read-shot"><img src="../images/lecture/frame-02.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span class="thumb-time">00:15</span></div>
-<span class="watch-chip"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5Z"></path></svg>01:16 从此处观看</span>
-<p lang="zh-Hant">比如說，你手寫一個字給機器看，看到這張圖，這是「金」。然後，output 就是這個字、這個 image 屬於哪一個 class。如果你是做中文的手寫辨識，中文有至少 8000 個 character，那就是一個 8000 個 class 的 classification。</p>
-<div class="read-shot"><img src="../images/lecture/frame-03.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span class="thumb-time">01:16</span></div>
-<p lang="zh-Hant">其實這個也是寶可夢的例子。我們知道寶可夢有不同的屬性，有 18 種屬性，包括水、火、電，還有草、冰等等。我們現在要做的是一個分類的問題，就是要找一個 function。</p>
-<div class="read-h"><span lang="zh-Hant">直接套用迴歸的問題</span><span>07:47</span></div>
-<div class="read-shot"><img src="../images/lecture/frame-15.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span class="thumb-time">11:24</span></div>
-<p lang="zh-Hant">去做 Regression 的時候，你得到的線不會是綠色這條。雖然你用直覺、用眼睛一看，就會知道綠色這條是一個比較好的 boundary。</p>
-<div class="read-h"><span lang="zh-Hant">貝氏分類與生成模型</span><span>16:08</span></div>
-<div class="read-shot"><img src="../images/lecture/frame-20.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span class="thumb-time">16:53</span></div>
-<p lang="zh-Hant">在盒子 1 裡面，藍球占 4/5，綠球占 1/5……</p>
-</div>
-</div>
-</div>
-</div>
-
-<div aria-hidden="true" class="scene scene-pad sc-export">
+<div aria-hidden="true" class="scene sc-export">
 <div role="menu" aria-label="复制与导出" class="export-menu">
 <span class="menu-item">复制整份笔记 · Markdown 文本</span>
 <span class="menu-item">复制整份笔记 · 纯文本</span>
@@ -243,11 +158,10 @@
 <span class="menu-item">导出 JSON 数据…</span>
 </div>
 <div class="files mono">
-<div class="file"><i></i><span>course.md</span><small></small></div>
-<div class="file"><i class="teal"></i><span>cover.jpg</span><small></small></div>
-<div class="file"><i class="amber"></i><span>frames/</span><small>69 张</small></div>
-<div class="file"><i class="amber"></i><span>exports/</span><small></small></div>
-<div class="file nested"><i></i><span>course.zip</span><small>含截图</small></div>
+<div class="files-head">选择一种导出方式，得到其中之一：</div>
+<div class="file"><i></i><span>course.zip</span><small>Markdown 和截图</small></div>
+<div class="file"><i class="teal"></i><span>course.html</span><small>单个网页</small></div>
+<div class="file"><i class="amber"></i><span>structured.json</span><small>数据</small></div>
 </div>
 </div>
 </div>
@@ -255,60 +169,13 @@
 </div>
 </section>
 
-<section aria-labelledby="gallery-title" class="gallery">
-<div class="reveal container section-intro">
-<h2 id="gallery-title" class="h2">69 张截图，10 个章节</h2>
-<p class="lede">下面这些都是 course2md 从同一节课里截下来的原图，时间点就是它在视频里出现的那一秒。</p>
-</div>
-<div class="marquee-wrap">
-<div class="marquee">
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-01.jpg" width="960" height="720" alt="截图 00:00" loading="lazy"><span class="thumb-time">00:00</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-02.jpg" width="960" height="720" alt="截图 00:15" loading="lazy"><span class="thumb-time">00:15</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-03.jpg" width="960" height="720" alt="截图 01:16" loading="lazy"><span class="thumb-time">01:16</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-04.jpg" width="960" height="720" alt="截图 02:03" loading="lazy"><span class="thumb-time">02:03</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-05.jpg" width="960" height="720" alt="截图 02:56" loading="lazy"><span class="thumb-time">02:56</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-08.jpg" width="960" height="720" alt="截图 04:26" loading="lazy"><span class="thumb-time">04:26</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-10.jpg" width="960" height="720" alt="截图 05:19" loading="lazy"><span class="thumb-time">05:19</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-15.jpg" width="960" height="720" alt="截图 11:24" loading="lazy"><span class="thumb-time">11:24</span></div><figcaption lang="zh-Hant">直接套用迴歸的問題</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-20.jpg" width="960" height="720" alt="截图 16:53" loading="lazy"><span class="thumb-time">16:53</span></div><figcaption lang="zh-Hant">貝氏分類與生成模型</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-26.jpg" width="960" height="720" alt="截图 25:15" loading="lazy"><span class="thumb-time">25:15</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-27.jpg" width="960" height="720" alt="截图 26:53" loading="lazy"><span class="thumb-time">26:53</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-29.jpg" width="960" height="720" alt="截图 27:15" loading="lazy"><span class="thumb-time">27:15</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-33.jpg" width="960" height="720" alt="截图 30:42" loading="lazy"><span class="thumb-time">30:42</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-43.jpg" width="960" height="720" alt="截图 40:01" loading="lazy"><span class="thumb-time">40:01</span></div><figcaption lang="zh-Hant">分類實作與初步結果</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-51.jpg" width="960" height="720" alt="截图 43:40" loading="lazy"><span class="thumb-time">43:40</span></div><figcaption lang="zh-Hant">共用共變異數與模型簡化</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-55.jpg" width="960" height="720" alt="截图 49:44" loading="lazy"><span class="thumb-time">49:44</span></div><figcaption lang="zh-Hant">共用共變異數與模型簡化</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-62.jpg" width="960" height="720" alt="截图 1:01:32" loading="lazy"><span class="thumb-time">1:01:32</span></div><figcaption lang="zh-Hant">後驗機率的 sigmoid 表示</figcaption></figure>
-<figure class="g-card"><div class="g-frame"><img src="../images/lecture/frame-69.jpg" width="960" height="720" alt="截图 1:08:45" loading="lazy"><span class="thumb-time">1:08:45</span></div><figcaption lang="zh-Hant">引出直接學習分類參數</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-01.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">00:00</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-02.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">00:15</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-03.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">01:16</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-04.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">02:03</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-05.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">02:56</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-08.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">04:26</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-10.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">05:19</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-15.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">11:24</span></div><figcaption lang="zh-Hant">直接套用迴歸的問題</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-20.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">16:53</span></div><figcaption lang="zh-Hant">貝氏分類與生成模型</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-26.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">25:15</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-27.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">26:53</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-29.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">27:15</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-33.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">30:42</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-43.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">40:01</span></div><figcaption lang="zh-Hant">分類實作與初步結果</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-51.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">43:40</span></div><figcaption lang="zh-Hant">共用共變異數與模型簡化</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-55.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">49:44</span></div><figcaption lang="zh-Hant">共用共變異數與模型簡化</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-62.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">1:01:32</span></div><figcaption lang="zh-Hant">後驗機率的 sigmoid 表示</figcaption></figure>
-<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="../images/lecture/frame-69.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">1:08:45</span></div><figcaption lang="zh-Hant">引出直接學習分類參數</figcaption></figure>
-</div>
-</div>
-</section>
-
-<section id="features" aria-labelledby="features-title" class="container features">
+<section id="features" aria-labelledby="features-title" class="container section">
 <h2 id="features-title" class="reveal h2">一节课，从「看过」变成「能用」</h2>
 <div class="feature-grid">
 <article class="reveal feature">
-<span aria-hidden="true" class="f-icon f-blue"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></span>
-<h3>复习不用再拖进度条</h3>
-<p>一个多小时的课，几分钟就能从头翻到尾。想找某个概念，全文查找直接停在那一页、那一句。</p>
+<span aria-hidden="true" class="f-icon f-blue"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="14" x="3" y="5" rx="2" ry="2"></rect><path d="M7 15h4M15 15h2M7 11h2M13 11h4"></path></svg></span>
+<h3>有字幕先用字幕</h3>
+<p>视频自带字幕时直接使用，无需语音识别。</p>
 </article>
 <article class="reveal-2 feature">
 <span aria-hidden="true" class="f-icon f-orange"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></span>
@@ -316,15 +183,50 @@
 <p>只看 PPT 看不懂推导，只看字幕又没有图。在这里，每张截图下面就是老师讲这一页时说的话。</p>
 </article>
 <article class="reveal-3 feature">
-<span aria-hidden="true" class="f-icon f-yellow"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></span>
-<h3>笔记是你自己的</h3>
-<p>存成普通的 Markdown 和网页文件，放进 Obsidian 之类的笔记软件，或者直接打印、发给同学。不用注册账号。</p>
+<span aria-hidden="true" class="f-icon f-violet"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 7V4H6l6 8-6 8h12v-3"></path></svg></span>
+<h3>公式排版显示</h3>
+<p>开启 AI 后，公式（包括口述的）会写成 LaTeX 并排版显示；复制时保留原始 LaTeX。</p>
 </article>
 <article class="reveal feature">
-<span aria-hidden="true" class="f-icon f-pink"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1" fill="currentColor"></circle><circle cx="17.5" cy="10.5" r="1" fill="currentColor"></circle><circle cx="8.5" cy="7.5" r="1" fill="currentColor"></circle><circle cx="6.5" cy="12.5" r="1" fill="currentColor"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.640 1.640 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg></span>
-<h3>一次排好一整门课</h3>
-<p>把这学期的课都丢进去，在后台一节节整理，随时暂停。整理好的按文件夹归档，用标题就能搜到。</p>
+<span aria-hidden="true" class="f-icon f-teal"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"></path><path d="m4 14 6-6 2-3"></path><path d="M2 5h12"></path><path d="M7 2h1"></path><path d="m22 22-5-10-5 10"></path><path d="M14 18h6"></path></svg></span>
+<h3>双语笔记</h3>
+<p>AI 可以在每段下方附上译文，支持八种语言。</p>
 </article>
+<article class="reveal-2 feature">
+<span aria-hidden="true" class="f-icon f-gray"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg></span>
+<h3>AI 用你自己的，也可以不用</h3>
+<p>任意 OpenAI 兼容服务、本机 Ollama 或你的 ChatGPT 订阅。默认关闭。</p>
+</article>
+<article class="reveal-3 feature">
+<span aria-hidden="true" class="f-icon f-pink"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6h11"></path><path d="M10 12h11"></path><path d="M10 18h11"></path><path d="m3 6 1 1 2-2"></path><path d="m3 12 1 1 2-2"></path><path d="m3 18 1 1 2-2"></path></svg></span>
+<h3>一次排好一整门课</h3>
+<p>Bilibili 多 P 视频和播放列表可以一次多选加入队列。任务在后台运行，可以暂停、继续和调整顺序。</p>
+</article>
+<article class="reveal feature">
+<span aria-hidden="true" class="f-icon f-yellow"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></span>
+<h3>笔记是你自己的</h3>
+<p>普通的 Markdown 和 HTML 文件，存在你电脑上的笔记库里，支持嵌套文件夹和搜索。不用注册账号。</p>
+</article>
+<article class="reveal-2 feature">
+<span aria-hidden="true" class="f-icon f-green"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1" fill="currentColor"></circle><circle cx="17.5" cy="10.5" r="1" fill="currentColor"></circle><circle cx="8.5" cy="7.5" r="1" fill="currentColor"></circle><circle cx="6.5" cy="12.5" r="1" fill="currentColor"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.640 1.640 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg></span>
+<h3>按你的习惯</h3>
+<p>10 套浅色和深色主题、可调字号，界面支持 English、简体中文、繁體中文和日本語。</p>
+</article>
+</div>
+<h3 class="shots-title">看看应用的其他部分</h3>
+<div class="app-shots">
+<figure class="reveal app-shot">
+<picture><source media="(prefers-color-scheme: dark)" type="image/avif" srcset="../images/app/zh/library-dark-480.avif 480w, ../images/app/zh/library-dark-960.avif 960w, ../images/app/zh/library-dark-1600.avif 1600w" sizes="(max-width: 900px) 100vw, 380px"><source media="(prefers-color-scheme: dark)" srcset="../images/app/zh/library-dark-960.jpg"><source type="image/avif" srcset="../images/app/zh/library-light-480.avif 480w, ../images/app/zh/library-light-960.avif 960w, ../images/app/zh/library-light-1600.avif 1600w" sizes="(max-width: 900px) 100vw, 380px"><img src="../images/app/zh/library-light-960.jpg" width="1600" height="1095" alt="笔记库：文件夹树和笔记卡片" loading="lazy" decoding="async"></picture>
+<figcaption><strong>笔记库</strong>嵌套文件夹、拖放整理，搜索包含所有子文件夹。</figcaption>
+</figure>
+<figure class="reveal-2 app-shot">
+<picture><source media="(prefers-color-scheme: dark)" type="image/avif" srcset="../images/app/zh/tasks-dark-480.avif 480w, ../images/app/zh/tasks-dark-960.avif 960w, ../images/app/zh/tasks-dark-1600.avif 1600w" sizes="(max-width: 900px) 100vw, 380px"><source media="(prefers-color-scheme: dark)" srcset="../images/app/zh/tasks-dark-960.jpg"><source type="image/avif" srcset="../images/app/zh/tasks-light-480.avif 480w, ../images/app/zh/tasks-light-960.avif 960w, ../images/app/zh/tasks-light-1600.avif 1600w" sizes="(max-width: 900px) 100vw, 380px"><img src="../images/app/zh/tasks-light-960.jpg" width="1600" height="1095" alt="任务页：正在进行的转换" loading="lazy" decoding="async"></picture>
+<figcaption><strong>任务</strong>暂停、继续、调整顺序；失败时只补做失败的部分。</figcaption>
+</figure>
+<figure class="reveal-3 app-shot">
+<picture><source media="(prefers-color-scheme: dark)" type="image/avif" srcset="../images/app/zh/settings-dark-480.avif 480w, ../images/app/zh/settings-dark-960.avif 960w, ../images/app/zh/settings-dark-1600.avif 1600w" sizes="(max-width: 900px) 100vw, 380px"><source media="(prefers-color-scheme: dark)" srcset="../images/app/zh/settings-dark-960.jpg"><source type="image/avif" srcset="../images/app/zh/settings-light-480.avif 480w, ../images/app/zh/settings-light-960.avif 960w, ../images/app/zh/settings-light-1600.avif 1600w" sizes="(max-width: 900px) 100vw, 380px"><img src="../images/app/zh/settings-light-960.jpg" width="1600" height="1095" alt="外观设置：主题预览" loading="lazy" decoding="async"></picture>
+<figcaption><strong>主题</strong>10 套浅色和深色主题，可调字号和减少动态效果。</figcaption>
+</figure>
 </div>
 </section>
 
@@ -332,7 +234,7 @@
 <div class="grow">
 <div class="privacy-copy">
 <h2 id="privacy-title" class="h2">音频默认不离开你的电脑</h2>
-<p>语音识别在本机完成。只有你主动选择云端语音服务或 AI 服务时，才会把音频或文字发送出去。</p>
+<p>语音识别默认在本机完成。只有你主动选择云端语音服务或 AI 服务时，才会把音频或文字发送出去。</p>
 </div>
 <div class="privacy-list">
 <div class="privacy-row"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path></svg><span>本机识别</span><span>默认</span></div>
@@ -342,56 +244,67 @@
 </div>
 </section>
 
-<section id="download" aria-labelledby="download-title" class="container download">
+<section id="download" aria-labelledby="download-title" class="container section download">
 <div class="reveal section-intro">
 <h2 id="download-title" class="h2">下载桌面版</h2>
-<p class="lede">桌面版自带转换引擎，另外需要 ffmpeg。第一次在本机识别语音时会下载 1–2.4 GB 的语音模型。</p>
+<p class="lede"><!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->桌面版自带转换引擎，另外需要 ffmpeg。第一次在本机识别语音时会下载 1–2.4 GB 的语音模型。<!-- /tools --></p>
 </div>
+<p class="whats-new"><span class="ver">2.0</span><span><strong>course2md 2.0</strong> 重做了桌面应用：先预览再转换、可暂停和调整顺序的后台任务、带文件夹的笔记库、公式排版的阅读器，以及四种界面语言。<a href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0">发布说明</a></span></p>
 <div class="tab-row">
 <div role="tablist" aria-label="平台" id="platform-tabs" class="seg seg-platform">
-<button type="button" role="tab" aria-selected="true" aria-controls="panel-macos">macOS</button>
-<button type="button" role="tab" aria-selected="false" aria-controls="panel-windows">Windows</button>
-<button type="button" role="tab" aria-selected="false" aria-controls="panel-linux">Linux</button>
+<button type="button" role="tab" aria-selected="true" aria-controls="panel-macos" id="tab-macos">macOS</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="panel-windows" id="tab-windows">Windows</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="panel-linux" id="tab-linux">Linux</button>
 </div>
 <span id="detected" class="detected" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path></svg><span id="detected-text"></span></span>
 </div>
 
-<div id="panel-macos" role="tabpanel" class="panel">
+<div id="panel-macos" role="tabpanel" aria-labelledby="tab-macos" class="panel">
 <div class="tile tile-top">
-<span class="tile-label"><strong>macOS · Apple 芯片</strong><span>macOS 15 及以上</span></span>
+<span class="tile-label"><strong>macOS · Apple 芯片</strong><span><!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->macOS 15 及以上。使用 DMG 时还需自行安装 ffmpeg（见安装指南）。<!-- /tools --></span></span>
 <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>下载 DMG</a>
 </div>
 <div class="tile tile-bottom">
-<span class="tile-hint">或用 Homebrew 安装，会一起装好 ffmpeg 和 yt-dlp</span>
+<span class="tile-hint">或用 Homebrew 安装，之后用 brew upgrade 更新</span>
 <span class="cmd mono"><span class="prompt">$</span><code>brew install --cask mizorewww/tap/course2md-gui</code><button type="button" class="copy" aria-label="复制命令">复制</button></span>
 </div>
 </div>
 
-<div id="panel-windows" role="tabpanel" class="panel" hidden>
+<div id="panel-windows" role="tabpanel" aria-labelledby="tab-windows" class="panel" hidden>
 <div class="tile tile-top">
 <span class="tile-label"><strong>Windows · x64</strong><span>便携版：解压到一个固定的文件夹，运行 course2md-desktop.exe</span></span>
 <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>下载 ZIP</a>
 </div>
+<!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->
 <div class="tile tile-bottom">
-<span class="tile-hint">在 PowerShell 里安装 ffmpeg</span>
+<span class="tile-hint">在 PowerShell 里安装 ffmpeg。在本机识别语音还需要 llama.cpp 的 llama-server，见安装指南。</span>
 <span class="cmd mono"><span class="prompt">&gt;</span><code>winget install --id Gyan.FFmpeg -e</code><button type="button" class="copy" aria-label="复制命令">复制</button></span>
 </div>
+<!-- /tools -->
 </div>
 
-<div id="panel-linux" role="tabpanel" class="panel" hidden>
+<div id="panel-linux" role="tabpanel" aria-labelledby="tab-linux" class="panel" hidden>
 <div class="tile tile-top tight">
 <span class="tile-label narrow"><strong>Arch Linux / CachyOS · x86_64</strong><span>一起装好视频工具和图形库，需要可用的 Vulkan 驱动</span></span>
 <span class="cmd mono"><span class="prompt">$</span><code>yay -S course2md-gui-bin</code><button type="button" class="copy" aria-label="复制命令">复制</button></span>
 </div>
 <div class="tile tile-bottom roomy">
-<span class="tile-label"><strong>Ubuntu 和其他发行版 · x86_64</strong><span>在 Ubuntu 24.04 上构建；另需安装 ffmpeg 和图形库</span></span>
+<span class="tile-label"><strong>Ubuntu 和其他发行版 · x86_64</strong><span><!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->在 Ubuntu 24.04 上构建；另需安装 ffmpeg、llama.cpp 的 llama-server 和图形库<!-- /tools --></span></span>
 <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>下载 tar.gz</a>
 </div>
 </div>
 
-<div class="dl-note">
-<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
-<span>Intel Mac 和 Linux ARM64 暂时没有桌面版，可以使用<a href="#cli">命令行版本</a>。安装细节见<a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation">安装指南</a>。</span>
+<div class="reqs" id="requirements">
+<h3>系统要求</h3>
+<dl>
+<dt>macOS</dt><dd>Apple 芯片，macOS 15 及以上</dd>
+<dt>Windows</dt><dd>x64</dd>
+<dt>Linux</dt><dd>x86_64，需要可用的 Vulkan 驱动；tar.gz 在 Ubuntu 24.04 上构建</dd>
+<!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server --><dt>工具</dt><dd>ffmpeg：Homebrew 和 AUR 包会一并安装；使用 DMG、ZIP 或 tar.gz 时需要自行安装。Windows 和其他 Linux 上在本机识别语音还需要 llama.cpp 的 llama-server。</dd><!-- /tools -->
+<dt>磁盘</dt><dd>语音模型 1–2.4 GB，只需下载一次</dd>
+<dt>Intel Mac、Linux ARM64</dt><dd>暂无桌面版，请使用<a href="#cli">命令行版本</a>。</dd>
+</dl>
+<p class="lede">安装细节见<a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation">安装指南</a>。</p>
 </div>
 </section>
 
@@ -399,47 +312,63 @@
 <div class="reveal cli-copy">
 <span aria-hidden="true" class="f-icon f-gray"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6"></path><path d="M12 19h8"></path></svg></span>
 <h2 id="cli-title" class="h2">也可以在终端里用</h2>
-<p class="lede">命令行版和桌面版共用一份配置，可以同时安装。适合批量处理、写进脚本，也能在 Intel Mac 和 Linux ARM64 上运行。</p>
+<p class="lede">命令行版做同样的转换，可以和桌面版同时安装：两者共用 Bilibili、ChatGPT 登录和已下载的语音模型，设置各自独立。适合批量处理、写脚本，也能在 Intel Mac 和 Linux ARM64 上运行。</p>
 <div role="tablist" aria-label="安装方式" id="cli-tabs" class="seg seg-cli">
-<button type="button" role="tab" aria-selected="true">安装脚本</button>
-<button type="button" role="tab" aria-selected="false">Homebrew</button>
-<button type="button" role="tab" aria-selected="false">Arch</button>
+<button type="button" role="tab" aria-selected="true" aria-controls="cli-panel">安装脚本</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="cli-panel">Homebrew</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="cli-panel">Arch</button>
 </div>
-<span class="cmd cmd-cli mono"><span class="prompt">$</span><code id="cli-cmd">curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash</code><button type="button" class="copy" aria-label="复制命令">复制</button></span>
+<span class="cmd cmd-cli mono" id="cli-panel" role="tabpanel"><span class="prompt">$</span><code id="cli-cmd">curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash</code><button type="button" class="copy" aria-label="复制命令">复制</button></span>
 <a href="https://github.com/mizorewww/course2md/wiki/CLI-Guide" class="guide-link">命令行使用说明<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></a>
 </div>
 
-<div class="reveal-2 term" id="term" role="group" aria-label="命令行演示">
+<div class="reveal-2 term" id="term" role="group" aria-label="示例课程的命令行演示">
 <div class="term-bar">
 <span class="dot"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
 <span class="term-title mono">~/courses — zsh</span>
 <span class="term-spacer"></span>
 </div>
 <div class="term-body mono">
-<div class="term-cmd"><span class="t-dir">~/courses</span> <span class="t-prompt">❯</span> <span class="t-bin">course2md</span> <span class="t-arg" id="cmd-arg"></span><span class="caret" id="cmd-caret"></span></div>
-<div class="t-line t-step" hidden><b>→</b><span>读取视频信息</span></div>
-<div class="t-line t-ok" hidden><b>✓</b><span>(选修)To Learn More - 分类神奇宝贝Pokemon · 1:09:40</span></div>
-<div class="t-line t-ok" hidden><b>✓</b><span>69 张截图 / 99 段文字</span></div>
-<div class="t-line t-ok" hidden><b>✓</b><span>已保存 course.md</span></div>
-<div class="t-line t-dim" hidden><b> </b><span>bilibili/…/BV1Wv411h7kN_p16/</span></div>
-<div id="term-done" hidden><span class="t-dir">~/courses</span> <span class="t-prompt">❯</span> <span class="caret"></span></div>
+<div class="term-cmd"><span class="t-dir">~/courses</span> <span class="t-prompt">❯</span> <span class="t-bin">course2md</span> <span class="t-arg" id="cmd-arg">https://www.youtube.com/watch?v=…</span><span class="caret" id="cmd-caret" hidden></span></div>
+<div class="t-line">读取视频信息…</div>
+<div class="t-line">查找字幕…</div>
+<div class="t-line">扫描画面…</div>
+<div class="t-line">生成截图…</div>
+<div class="t-line">识别语音…</div>
+<div class="t-line">生成笔记…</div>
+<div class="t-line t-done">笔记已生成：./youtube/3f9a…/versions/…/</div>
+<div id="term-done"><span class="t-dir">~/courses</span> <span class="t-prompt">❯</span> <span class="caret"></span></div>
 </div>
+</div>
+</section>
+
+<section id="faq" aria-labelledby="faq-title" class="container section">
+<h2 id="faq-title" class="reveal h2">常见问题</h2>
+<div class="faq">
+<details><summary>course2md 免费吗？</summary><p>免费。course2md 以 MIT 许可证开源，不需要账号，没有订阅和广告。</p></details>
+<details><summary>需要注册账号吗？</summary><p>不需要。只有你选择使用的服务才需要登录：部分 Bilibili 视频需要 Bilibili 账号，开启 AI 时需要相应的 AI 服务。</p></details>
+<details><summary>AI 要花钱吗？</summary><p>AI 是可选的，默认关闭。使用 OpenAI 兼容服务时按用量向该服务付费；本机 Ollama 不花钱；ChatGPT 订阅可以通过导入 Codex 登录使用。course2md 本身不收费。</p></details>
+<details><summary>笔记和数据存在哪里？</summary><p>存在你电脑上的笔记库文件夹里，是带截图的 course.md 和 course.html；可以在「设置 → 存储」添加其他文件夹。服务密钥保存在系统钥匙串。除非你选择云端语音或 AI 服务，否则不会上传任何内容。</p></details>
+<details><summary>语音模型有多大？</summary><p>Apple 芯片约 1–2.3 GB，其他平台约 2.4 GB，只需下载一次。在中国大陆从国内镜像下载，中断后可以续传。</p></details>
+<details><summary>Bilibili 视频失败或清晰度低</summary><p>在「设置 → 服务与账号 → Bilibili 账号」扫码登录。</p></details>
 </div>
 </section>
 </main>
 
 <footer class="site-footer">
 <div class="footer-inner">
-<span class="footer-brand"><span aria-hidden="true" class="mark mark-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6v12l8-6Z" fill="currentColor"></path><path d="M17 5v13"></path><path d="m13.500 14.500 3.500 3.500 3.500-3.500"></path></svg></span>course2md</span>
+<span class="footer-brand"><img src="../assets/icon-128.png" width="24" height="24" alt="" class="app-icon-sm">course2md</span>
 <span class="footer-gap"></span>
 <a href="https://github.com/mizorewww/course2md/wiki">文档</a>
-<a href="https://github.com/mizorewww/course2md/wiki/Troubleshooting">常见问题</a>
+<a href="https://github.com/mizorewww/course2md/wiki/Troubleshooting">故障排查</a>
 <a href="https://github.com/mizorewww/course2md/issues">反馈问题</a>
 <a href="https://github.com/mizorewww/course2md/blob/main/CHANGELOG.md">更新记录</a>
-<span>MIT 许可</span>
+<a href="https://github.com/mizorewww/course2md/blob/main/LICENSE">MIT 许可</a>
+<a href="https://github.com/mizorewww/course2md">GitHub</a>
+<p class="footer-privacy">关于隐私：本网站使用不设置 Cookie 的 Cloudflare Web Analytics。为选择模型下载镜像，应用会查询你的 IP 所在的国家或地区，不会发送音频或文字。</p>
 </div>
 </footer>
 </div>
-<script type="application/json" id="c2m-data">{"url": "https://www.bilibili.com/video/BV1Wv411h7kN?p=16", "ctas": {"macos": {"label": "下载 macOS 版", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg", "note": "Apple 芯片 · macOS 15 及以上 · 也可以用 Homebrew 安装"}, "windows": {"label": "下载 Windows 版", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip", "note": "Windows x64 · 便携版，解压即用 · 另需 ffmpeg"}, "linux": {"label": "下载 Linux 版", "href": "#download", "note": "x86_64 · Arch 用 yay 安装，其他发行版下载 tar.gz"}, "other": {"label": "查看下载方式", "href": "#download", "note": "course2md 是电脑应用，支持 macOS、Windows 和 Linux"}}, "detected": {"macos": "你正在使用 macOS", "windows": "你正在使用 Windows", "linux": "你正在使用 Linux"}, "cliCmds": ["curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash", "brew install mizorewww/tap/course2md", "yay -S course2md-bin"], "copy": "复制", "copied": "已复制", "aiRaw": "原始字幕", "aiClean": "AI 校对后"}</script>
+<script type="application/json" id="c2m-data">{"ctas": {"macos": {"label": "下载 macOS 版", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg", "note": "Apple 芯片 · macOS 15 及以上 · 也可以用 Homebrew 安装"}, "intelmac": {"label": "获取命令行版", "href": "#cli", "note": "桌面版需要 Apple 芯片；Intel Mac 可以使用命令行版。"}, "windows": {"label": "下载 Windows 版", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip", "note": "Windows x64 · 便携版，解压即用 · 另需 ffmpeg"}, "linux": {"label": "获取 Linux 版", "href": "#download", "note": "x86_64 · Arch 用 yay 安装，其他发行版下载 tar.gz"}, "other": {"label": "查看下载方式", "href": "#download", "note": "course2md 是电脑应用，支持 macOS、Windows 和 Linux"}}, "detected": {"macos": "你正在使用 macOS", "windows": "你正在使用 Windows", "linux": "你正在使用 Linux"}, "cliCmds": ["curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash", "brew install mizorewww/tap/course2md", "yay -S course2md-bin"], "cliArg": "https://www.youtube.com/watch?v=…", "copy": "复制", "copied": "已复制"}</script>
 </body>
 </html>
