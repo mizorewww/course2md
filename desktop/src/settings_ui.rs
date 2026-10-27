@@ -3142,8 +3142,18 @@ impl Desktop {
                 course2md::tr!("所需程序"),
             ),
             |group, (index, (name, found))| {
+                // A found tool says where it runs from: shipped with the app or installed.
                 let (icon, tone, state) = if *found {
-                    (icons::check(), SUCCESS, course2md::tr!("已安装"))
+                    let state = match environment.origins.get(name) {
+                        Some(course2md::tools::Origin::Bundled) => {
+                            course2md::tools::Origin::Bundled.label()
+                        }
+                        Some(course2md::tools::Origin::Override) => {
+                            course2md::tools::Origin::Override.label()
+                        }
+                        _ => course2md::tr!("已安装"),
+                    };
+                    (icons::check(), SUCCESS, state)
                 } else {
                     (icons::warning(), WARNING, course2md::tr!("未安装"))
                 };

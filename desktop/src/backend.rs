@@ -542,6 +542,8 @@ pub struct Environment {
     pub apple: bool,
     pub gpu: Option<String>,
     pub npu_parts: NpuParts,
+    /// Where each found media tool runs from, by the names the checks show.
+    pub origins: std::collections::BTreeMap<&'static str, course2md::tools::Origin>,
 }
 
 /// The two independent requirements of Intel NPU recognition.
@@ -580,6 +582,27 @@ impl Environment {
         // 绝对路径再探测；找不到时退回裸名，probe 失败与「未安装」同义。
         let ytdlp = course2md::ytdlp::resolve_in(Some(&tool_path()))
             .unwrap_or_else(|| PathBuf::from("yt-dlp"));
+        // ffmpeg/ffprobe: the engine's search (bundled beside the app, then PATH).
+        let media = |name: &str| course2md::tools::locate_in(name, Some(&tool_path()));
+        let (ffmpeg, ffprobe) = (media("ffmpeg"), media("ffprobe"));
+        let mut origins = std::collections::BTreeMap::new();
+        for (name, tool) in [("ffmpeg", &ffmpeg), ("ffprobe", &ffprobe)] {
+            if let Some(tool) = tool {
+                origins.insert(name, tool.origin);
+            }
+        }
+        if ytdlp.is_absolute() {
+            let origin = course2md::tools::origin_of(
+                &ytdlp,
+                course2md::ytdlp::ENV_OVERRIDE,
+                Some(&tool_path()),
+            );
+            origins.insert("yt-dlp", origin);
+        }
+        let program = |tool: Option<course2md::tools::Tool>, name: &str| {
+            tool.map_or_else(|| PathBuf::from(name), |tool| tool.path)
+        };
+        let (ffmpeg, ffprobe) = (program(ffmpeg, "ffmpeg"), program(ffprobe, "ffprobe"));
         // (字段名, 命令, 参数) 与回填写在一起：数组重排不会造成静默错配
         let checks = std::thread::scope(|scope| {
             let commands: Vec<(&'static str, PathBuf, &'static str)> = vec![
@@ -588,8 +611,8 @@ impl Environment {
                     cli.clone().unwrap_or_else(|| PathBuf::from("course2md")),
                     "--version",
                 ),
-                ("ffmpeg", PathBuf::from("ffmpeg"), "-version"),
-                ("ffprobe", PathBuf::from("ffprobe"), "-version"),
+                ("ffmpeg", ffmpeg, "-version"),
+                ("ffprobe", ffprobe, "-version"),
                 ("ytdlp", ytdlp, "--version"),
                 (
                     "llama-devices",
@@ -656,6 +679,7 @@ impl Environment {
                 device: npu_device,
                 runtime: npu_runtime,
             },
+            origins,
         }
     }
 }
