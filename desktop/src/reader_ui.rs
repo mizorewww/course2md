@@ -42,7 +42,9 @@ actions!(
         ReaderPageUp,
         ReaderPageDown,
         ReaderStart,
-        ReaderEnd
+        ReaderEnd,
+        ImageTextUp,
+        ImageTextDown
     ]
 );
 
@@ -565,6 +567,13 @@ impl State {
             KeyBinding::new("-", ZoomOut, Some("ReaderImage")),
             KeyBinding::new("0", FitImage, Some("ReaderImage")),
             KeyBinding::new("escape", CloseImage, Some("ReaderImage")),
+            // The screenshot's text scrolls from the keyboard as well.
+            KeyBinding::new("up", ImageTextUp, Some("ReaderImage")),
+            KeyBinding::new("down", ImageTextDown, Some("ReaderImage")),
+            KeyBinding::new("pageup", ReaderPageUp, Some("ReaderImage")),
+            KeyBinding::new("pagedown", ReaderPageDown, Some("ReaderImage")),
+            KeyBinding::new("home", ReaderStart, Some("ReaderImage")),
+            KeyBinding::new("end", ReaderEnd, Some("ReaderImage")),
             KeyBinding::new("right", NextReaderView, Some("ReaderViews")),
             KeyBinding::new("left", PreviousReaderView, Some("ReaderViews")),
             KeyBinding::new("pageup", ReaderPageUp, Some("CourseReader && !Input")),
@@ -5926,6 +5935,30 @@ impl Desktop {
         ));
         self.notify_image_viewer(cx);
     }
+    /// Scrolls the screenshot's text, when it is shown, by lines or pages.
+    fn scroll_image_text(
+        &mut self,
+        amount: ImageTextScroll,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(viewer) = &self.reader_ui.viewer else {
+            return;
+        };
+        let line = f32::from(READER_BODY.to_pixels(window.rem_size())) * 1.8;
+        let page = f32::from(viewer.scroll.bounds().size.height) * 0.85;
+        let delta = match amount {
+            ImageTextScroll::Lines(lines) => lines * line,
+            ImageTextScroll::Pages(pages) => pages * page,
+        };
+        let offset = viewer.scroll.offset();
+        let max = f32::from(viewer.scroll.max_offset().y);
+        let moved = image_text_offset(f32::from(offset.y), max, delta);
+        if moved != f32::from(offset.y) {
+            viewer.scroll.set_offset(point(offset.x, px(moved)));
+            self.notify_image_viewer(cx);
+        }
+    }
     /// Keyboard actions shared by the dialog body and its footer.
     fn image_viewer_actions(
         &self,
@@ -5948,6 +5981,24 @@ impl Desktop {
             .on_action(
                 cx.listener(|this, _: &CloseImage, window, cx| this.close_reader_image(window, cx)),
             )
+            .on_action(cx.listener(|this, _: &ImageTextUp, window, cx| {
+                this.scroll_image_text(ImageTextScroll::Lines(-3.), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ImageTextDown, window, cx| {
+                this.scroll_image_text(ImageTextScroll::Lines(3.), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ReaderPageUp, window, cx| {
+                this.scroll_image_text(ImageTextScroll::Pages(-1.), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ReaderPageDown, window, cx| {
+                this.scroll_image_text(ImageTextScroll::Pages(1.), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ReaderStart, window, cx| {
+                this.scroll_image_text(ImageTextScroll::Pages(f32::NEG_INFINITY), window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ReaderEnd, window, cx| {
+                this.scroll_image_text(ImageTextScroll::Pages(f32::INFINITY), window, cx)
+            }))
     }
     fn image_zoom_controls(&self, scale: f32, compact: bool, cx: &mut Context<Self>) -> AnyElement {
         let fit = self
@@ -6139,7 +6190,7 @@ impl Desktop {
                 // Short windows show either the image or its text, giving the
                 // chosen content the whole available viewport.
                 .when(text_only, |view| view.flex_1())
-                .when(!text_only, |view| view.flex_shrink_0().max_h(relative(0.4)))
+                .when(!text_only, |view| view.flex_shrink_0().max_h(relative(0.5)))
                 .min_h_0()
                 .gap_2()
                 .pr_3()
@@ -6605,6 +6656,19 @@ fn files_need_reload(preview: &crate::notes::Preview, issues: &[String], frames:
         || frames.iter().any(|frame| frame.image.is_none())
 }
 
+/// How far a key moves the screenshot's text: lines, or pages of its viewport.
+#[derive(Clone, Copy)]
+enum ImageTextScroll {
+    Lines(f32),
+    Pages(f32),
+}
+
+/// The text's scroll offset (zero or negative) after moving `delta` pixels
+/// further down, kept within its `max` scroll distance.
+fn image_text_offset(offset: f32, max: f32, delta: f32) -> f32 {
+    (offset - delta).clamp(-max.max(0.), 0.)
+}
+
 /// Preserve the image point under the viewport center while either axis grows
 /// from a centered preview into scrollable content, or returns to a fitted image.
 fn image_zoom_offset(viewport: f32, old_extent: f32, new_extent: f32, offset: f32) -> f32 {
@@ -6646,10 +6710,21 @@ mod tests {
     use super::{
         ExportFeedback, ExportState, Frame, GalleryItem, OfflineVideo, OfflineVideoRequest,
         PreviewBlock, block_time, existing_export_folder, files_need_reload, frame_excerpt,
-        gallery_capture_position, gallery_items, gallery_restore_offset, image_zoom_offset,
-        load_reader_data, matching_frames, nav, processing_notice,
+        gallery_capture_position, gallery_items, gallery_restore_offset, image_text_offset,
+        image_zoom_offset, load_reader_data, matching_frames, nav, processing_notice,
     };
     use crate::{notes::Course, source, workspace};
+
+    #[test]
+    fn keys_scroll_the_screenshot_text_within_its_range() {
+        // Down moves the content up (a more negative offset), up returns it.
+        assert_eq!(image_text_offset(0., 500., 90.), -90.);
+        assert_eq!(image_text_offset(-90., 500., -90.), 0.);
+        // Home and End go to either end; nothing scrolls past them.
+        assert_eq!(image_text_offset(-200., 500., f32::INFINITY), -500.);
+        assert_eq!(image_text_offset(-200., 500., f32::NEG_INFINITY), 0.);
+        assert_eq!(image_text_offset(0., 0., 90.), 0.);
+    }
 
     #[test]
     fn saved_export_folder_requires_a_listed_file_inside_the_version() {
