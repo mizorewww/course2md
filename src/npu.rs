@@ -104,6 +104,9 @@ pub enum Launcher {
     Uv(PathBuf),
     /// A Python that already imports the worker's packages.
     Python(PathBuf),
+    /// The Windows `py` launcher, run as `py -3`: python.org installs put it
+    /// on PATH even when python.exe itself is not.
+    PyLauncher(PathBuf),
 }
 
 impl Launcher {
@@ -121,6 +124,11 @@ impl Launcher {
                 cmd
             }
             Self::Python(python) => Command::new(python),
+            Self::PyLauncher(py) => {
+                let mut cmd = Command::new(py);
+                cmd.arg("-3");
+                cmd
+            }
         }
     }
 }
@@ -142,15 +150,19 @@ pub fn find_launcher(path: Option<&OsStr>) -> Option<Launcher> {
     } else {
         ["python3", "python"]
     };
-    names
+    let mut candidates: Vec<_> = names
         .into_iter()
         .filter_map(lookup)
-        .find(|python| python_has_worker_packages(python))
         .map(Launcher::Python)
+        .collect();
+    if cfg!(windows) {
+        candidates.extend(lookup("py").map(Launcher::PyLauncher));
+    }
+    candidates.into_iter().find(python_has_worker_packages)
 }
 
-fn python_has_worker_packages(python: &Path) -> bool {
-    let mut cmd = Command::new(python);
+fn python_has_worker_packages(python: &Launcher) -> bool {
+    let mut cmd = python.command();
     cmd.args(["-c", "import openvino_genai, numpy, huggingface_hub"]);
     worker_env(&mut cmd);
     crate::runtime::hide_console(&mut cmd);
@@ -589,6 +601,8 @@ mod tests {
         let cmd = Launcher::Uv(PathBuf::from("uv")).command();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
         assert_eq!(&args[..4], ["run", "--no-project", "--python", ">=3.10"]);
+        let py = Launcher::PyLauncher(PathBuf::from("py")).command();
+        assert_eq!(py.get_args().collect::<Vec<_>>(), ["-3"]);
         assert_eq!(args.last(), Some(&"python"));
         for package in WORKER_PACKAGES {
             assert!(
