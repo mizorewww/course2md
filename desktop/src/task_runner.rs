@@ -2033,6 +2033,9 @@ pub(crate) fn fill_default_asr_model(
     provider: course2md::config::AsrProvider,
 ) {
     use course2md::config::AsrProvider;
+    // Automatic engine selection keeps the saved model, which may be a
+    // Qwen3 choice from 2.0.0 that the NPU this machine resolved to never ran.
+    course2md::config::migrate_retired_npu_model(Some(provider), &mut config.defaults.asr_model);
     if provider != AsrProvider::Api
         && config
             .defaults
@@ -2060,6 +2063,18 @@ pub(crate) mod tests {
         PlanValidation, apply_draft_options, batch_note_title, edit_current_draft,
         update_draft_source_title, update_input_form, validate_plan_config, validate_plan_storage,
     };
+
+    #[test]
+    fn an_automatic_engine_resolving_to_the_npu_does_not_keep_qwen3() {
+        use course2md::config::AsrProvider;
+        let mut config = course2md::settings::ConfigFile::default();
+        config.defaults.asr_model = Some("qwen3-1.7b".into());
+        super::fill_default_asr_model(&mut config, AsrProvider::Npu);
+        assert_eq!(config.defaults.asr_model.as_deref(), Some("whisper"));
+        config.defaults.asr_model = Some("qwen3-1.7b".into());
+        super::fill_default_asr_model(&mut config, AsrProvider::Cpu);
+        assert_eq!(config.defaults.asr_model.as_deref(), Some("qwen3-1.7b"));
+    }
 
     #[test]
     fn a_changed_option_is_the_draft_without_a_separate_save() {

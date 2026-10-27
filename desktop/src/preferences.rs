@@ -1080,7 +1080,33 @@ impl Store {
         store.services = store.load_group(PreferenceGroup::Services);
         store.load_recovery_intents();
         store.forget_retired_service_records();
+        store.migrate_retired_npu_model();
         store
+    }
+
+    /// Setup in 2.0.0 saved Qwen3 for Intel NPU, whose OpenVINO exports never
+    /// loaded. The saved choice falls back to the NPU default once, with a
+    /// notice; the rewritten file keeps it from repeating.
+    fn migrate_retired_npu_model(&mut self) {
+        if self.blocked.contains(&PreferenceGroup::Generation) {
+            return;
+        }
+        let mut next = self.generation.clone();
+        let engine = match next.options.provider {
+            Some(AsrProvider::Api) => next.last_local_provider,
+            engine => engine,
+        };
+        if !course2md::config::migrate_retired_npu_model(engine, &mut next.options.asr_model) {
+            return;
+        }
+        if self.save_generation(next).is_ok() {
+            self.issues.push(SettingsIssue {
+                group: PreferenceGroup::Generation,
+                kind: SettingsIssueKind::Recovered,
+                message: course2md::config::retired_npu_model_notice().into(),
+                detail: None,
+            });
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -2405,6 +2431,33 @@ mod tests {
                 .outcome,
             TestOutcome::AuthenticationRefused
         );
+    }
+
+    #[test]
+    fn qwen3_saved_for_the_npu_falls_back_to_whisper_once_with_a_notice() {
+        let (directory, mut store) = isolated();
+        let mut generation = store.generation().clone();
+        generation.select_provider(Some(AsrProvider::Npu));
+        generation.options.asr_model = Some("qwen3-1.7b".into());
+        store.save_generation(generation).unwrap();
+        let _ = store.process_writes();
+        let mut reopened = open(directory.path(), store.vault());
+        assert_eq!(
+            reopened.generation().options.provider,
+            Some(AsrProvider::Npu)
+        );
+        assert_eq!(reopened.generation().options.asr_model, None);
+        assert!(reopened.issues().iter().any(|issue| {
+            issue.kind == SettingsIssueKind::Recovered
+                && issue.message == course2md::config::retired_npu_model_notice()
+        }));
+        assert!(!failed(
+            &reopened.process_writes(),
+            PreferenceGroup::Generation
+        ));
+        let again = open(directory.path(), store.vault());
+        assert_eq!(again.generation().options.asr_model, None);
+        assert!(again.issues().is_empty());
     }
 
     #[test]

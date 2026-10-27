@@ -2176,3 +2176,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 找到 1 篇笔记	找到 1 篇笔记	Found 1 note	找到 1 篇筆記	1 件のノートが見つかりました
 1 篇笔记	1 篇笔记	1 note	1 篇筆記	1 件のノート
 {} 篇笔记	{} 篇笔记	{} notes	{} 篇筆記	{} 件のノート
+Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo	Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo	Qwen3 is no longer available on Intel NPU; switched to Whisper large-v3-turbo	Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo	Intel NPU では Qwen3 を利用できなくなったため、Whisper large-v3-turbo に切り替えました
+Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 模型。可用：{}	Qwen3 models are no longer available on Intel NPU. Available: {}	Intel NPU 不再支援 Qwen3 模型。可用：{}	Intel NPU では Qwen3 モデルを利用できなくなりました。利用可能：{}
+识别方式 {} 不支持模型「{}」。可用：{}	识别方式 {} 不支持模型「{}」。可用：{}	The {} backend does not support model {}. Available: {}	辨識方式 {} 不支援模型「{}」。可用：{}	音声認識方式 {} はモデル「{}」に対応していません。利用可能：{}

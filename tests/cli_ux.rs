@@ -364,3 +364,39 @@ fn version_flags_include_the_build_commit() {
         assert_eq!(stdout(&result), expected);
     }
 }
+
+#[test]
+fn a_qwen3_npu_choice_from_2_0_0_falls_back_to_whisper_with_a_notice() {
+    let cli = CliTest::new();
+    cli.config("[defaults]\nprovider = 'npu'\nasr_model = 'qwen3-1.7b'\n");
+    let result = cli.run_with_lang(&["config", "show"], "en");
+    assert!(result.status.success(), "{}", stderr(&result));
+    assert!(
+        stderr(&result).contains("Qwen3 is no longer available on Intel NPU"),
+        "{}",
+        stderr(&result)
+    );
+    assert!(
+        !stdout(&result).contains("qwen3-1.7b"),
+        "{}",
+        stdout(&result)
+    );
+    // Asking for it explicitly is refused in the interface language.
+    let result = cli.run_with_lang(
+        &[
+            "models",
+            "prepare",
+            "--provider",
+            "npu",
+            "--model",
+            "qwen3-1.7b",
+        ],
+        "ja",
+    );
+    assert!(!result.status.success());
+    assert!(
+        stderr(&result).contains("Qwen3 モデル"),
+        "{}",
+        stderr(&result)
+    );
+}
