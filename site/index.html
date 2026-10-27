@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>course2md: turn lecture videos into illustrated notes</title>
+<meta name="description" content="course2md is a free desktop app for macOS, Windows and Linux that turns YouTube, Bilibili and local lecture videos into illustrated Markdown and HTML notes, with one screenshot per slide and the transcript beneath it.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#edf1f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1e26" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://vibewatching.xyz/">
+<link rel="alternate" hreflang="en" href="https://vibewatching.xyz/">
+<link rel="alternate" hreflang="zh-Hans" href="https://vibewatching.xyz/zh/">
+<link rel="alternate" hreflang="x-default" href="https://vibewatching.xyz/">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/icon-32.png">
+<link rel="icon" type="image/png" sizes="128x128" href="assets/icon-128.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="course2md">
+<meta property="og:title" content="course2md: turn lecture videos into illustrated notes">
+<meta property="og:description" content="Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a screenshot every time the slide changes and transcribes what is said beneath it.">
+<meta property="og:url" content="https://vibewatching.xyz/">
+<meta property="og:image" content="https://vibewatching.xyz/images/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The course2md reader showing a lecture note with a summary, an outline and typeset formulas">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="zh_CN">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="course2md: turn lecture videos into illustrated notes">
+<meta name="twitter:description" content="A desktop app that turns lecture videos into illustrated Markdown and HTML notes you can read, search and keep.">
+<meta name="twitter:image" content="https://vibewatching.xyz/images/og.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="assets/site.js"></script>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" hidden>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
+  <symbol id="i-presentation" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-captions" viewBox="0 0 24 24"><rect width="18" height="14" x="3" y="5" rx="2"/><path d="M7 15h4m4 0h2M7 11h2m4 0h4"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96l-6.14 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/><path d="M20 3v4m2-2h-4M4 17v2m1-1H3"/></symbol>
+  <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></symbol>
+  <symbol id="i-tasks" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11"/><path d="m3 6 1 1 2-2m-3 7 1 1 2-2m-3 7 1 1 2-2"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.97 6.01 17.46 2 12 2z"/></symbol>
+</svg>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="appbar">
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="course2md home">
+      <img src="assets/icon-128.png" width="32" height="32" alt="">
+      <span>course2md</span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a class="nav-link section-link" href="#features">Features</a>
+      <a class="nav-link section-link" href="#tour">Tour</a>
+      <a class="nav-link section-link" href="#install">Install</a>
+      <a class="nav-link section-link" href="#cli">CLI</a>
+      <a class="nav-link ext" href="https://github.com/mizorewww/course2md" aria-label="GitHub"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg><span class="label">GitHub</span></a>
+      <a class="nav-link" href="zh/" hreflang="zh-Hans" lang="zh-Hans">中文</a>
+      <button class="icon-btn" id="theme-toggle" type="button" hidden data-label-dark="Switch to dark theme" data-label-light="Switch to light theme" aria-label="Switch theme">
+        <svg class="icon i-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        <svg class="icon i-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="hero">
+    <div class="wrap">
+      <div class="hero-text">
+        <a class="chip" href="https://github.com/mizorewww/course2md/releases/latest"><strong>2.0</strong> A new desktop app · release notes</a>
+        <h1>Turn lecture videos into illustrated notes</h1>
+        <p class="lead">Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a screenshot every time the slide changes, transcribes what is said beneath it, and keeps the result in a library on your computer.</p>
+        <div class="cta">
+          <a class="btn btn-primary stacked" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg">
+            <span class="main"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download for macOS</span>
+            <small>Apple Silicon · macOS 15 or later</small>
+          </a>
+        </div>
+        <p class="platforms" aria-label="Other downloads">
+          <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Windows x64 (ZIP)</a>
+          <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Linux x86_64 (tar.gz)</a>
+          <a href="https://github.com/mizorewww/course2md/releases/latest">All downloads<svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>
+        </p>
+        <div class="cmd">
+          <code><span class="prompt" aria-hidden="true">$</span><span class="line">brew install --cask mizorewww/tap/course2md-gui</span></code>
+          <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the Homebrew command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
+        </div>
+        <p class="hero-note">Homebrew installs the app together with <code>ffmpeg</code>, <code>yt-dlp</code> and <code>aria2</code>. Free and open source under the MIT license.</p>
+      </div>
+      <figure class="shot">
+        <picture>
+          <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/reader-dark.png" width="1600" height="1095">
+          <img src="images/en/reader-light.png" width="1600" height="1095" alt="The course2md reader showing a lecture note with a summary, an outline and typeset formulas" fetchpriority="high">
+        </picture>
+      </figure>
+    </div>
+  </div>
+
+  <section id="features" aria-labelledby="features-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">Why course2md</p>
+        <h2 id="features-title">Notes you can read, search and keep</h2>
+      </div>
+      <div class="features">
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-presentation"/></svg></span>Notes shaped like the lecture</h3>
+          <p>One screenshot per slide, with the matching transcript in paragraphs underneath, saved as ordinary <code>course.md</code> and <code>course.html</code> files you can open anywhere.</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span>Private by default</h3>
+          <p>Speech is recognized on your own computer: Apple Silicon works out of the box, and other systems use a graphics card, the CPU or an Intel Core Ultra NPU. Audio leaves your computer only if you choose a cloud service.</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-captions"/></svg></span>Subtitles first</h3>
+          <p>When a video already has subtitles they are used directly, with no speech recognition needed.</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span>Optional AI</h3>
+          <p>Proofreading, summaries, bilingual notes in eight languages and math formulas, including spoken ones, written as LaTeX and typeset. Works with any OpenAI-compatible service, a local Ollama server or a ChatGPT subscription. Off until you turn it on.</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-export"/></svg></span>Take it anywhere</h3>
+          <p>Export a note as HTML with its images, as Markdown with screenshots in a .zip, or as JSON data.</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-languages"/></svg></span>Four languages</h3>
+          <p>English, 简体中文, 繁體中文 and 日本語, following your system language. Switch any time in Settings → Appearance.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="tour" aria-labelledby="tour-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">A tour of the app</p>
+        <h2 id="tour-title">From a link to a finished note</h2>
+      </div>
+
+      <div class="tour">
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></span>Add a video</h3>
+            <p>Paste a link or drag a file onto Home. course2md reads the video first, so you can check the title, length and processing options before anything is converted. Multi-part Bilibili videos and playlists can be queued in one batch.</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/home-dark.png" width="1600" height="1095">
+              <img src="images/en/home-light.png" width="1600" height="1095" alt="Home page with a previewed video and its processing options" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg></span>Read, find and copy</h3>
+            <p>The reader opens on a summary and key points, keeps an outline of the sections beside the note, and finds text across the whole note.</p>
+          </div>
+          <ul class="reader-points">
+            <li><strong>Typeset formulas.</strong> Copying a passage gives you the original text with each formula's LaTeX.</li>
+            <li><strong>Wide formulas stay whole.</strong> They get their own row that scrolls sideways.</li>
+            <li><strong>Picks up where you left off.</strong> The reader remembers your position in every note.</li>
+            <li><strong>Jump to the source.</strong> Play the original video, or watch from any section.</li>
+          </ul>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg></span>Browse every slide</h3>
+            <p>The Screenshots view shows the whole lecture at a glance. Open any slide to see it large, zoom and pan, and read what was said at that moment.</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/screenshots-dark.png" width="1600" height="1095">
+              <img src="images/en/screenshots-light.png" width="1600" height="1095" alt="Screenshots view with a grid of lecture slides" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/viewer-dark.png" width="1600" height="1095">
+              <img src="images/en/viewer-light.png" width="1600" height="1095" alt="An enlarged slide with the transcript spoken while it was shown" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg></span>Keep a library</h3>
+            <p>Notes live in a library with nested folders, drag and drop, and search that covers subfolders. You can keep several library locations, and deleted notes go to the Trash (Recycle Bin on Windows and Linux).</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/library-dark.png" width="1600" height="1095">
+              <img src="images/en/library-light.png" width="1600" height="1095" alt="Library with a folder tree and note cards" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-tasks"/></svg></span>Let it work in the background</h3>
+            <p>Conversions run as tasks you can pause, resume and reorder, and they carry on after you reopen the app. Each step shows its progress, and model downloads show their size, speed and time left. If one part fails, read what finished and redo only the rest.</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/tasks-dark.png" width="1600" height="1095">
+              <img src="images/en/tasks-light.png" width="1600" height="1095" alt="Tasks page with a running conversion and its progress" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg></span>Make it yours</h3>
+            <p>Choose from 10 themes, adjust the text size and reduce motion in Settings → Appearance. The interface speaks English, 简体中文, 繁體中文 and 日本語.</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/settings-dark.png" width="1600" height="1095">
+              <img src="images/en/settings-light.png" width="1600" height="1095" alt="Appearance settings with theme previews" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" aria-labelledby="install-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">Install</p>
+        <h2 id="install-title">Get course2md</h2>
+        <p>The desktop app includes the conversion engine; you do not need the command-line tool to use it. Videos need <code>ffmpeg</code>, which the package managers below install for you.</p>
+      </div>
+      <div class="install">
+        <article class="platform" id="macos">
+          <h3>macOS<small>Apple Silicon, macOS 15 or later</small></h3>
+          <p>With <a href="https://brew.sh">Homebrew</a>, this installs the app together with <code>ffmpeg</code>, <code>yt-dlp</code> and <code>aria2</code>. Then open course2md from Applications.</p>
+          <div class="cmd">
+            <code><span class="prompt" aria-hidden="true">$</span><span class="line">brew install --cask mizorewww/tap/course2md-gui</span></code>
+            <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the Homebrew command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
+          </div>
+          <p>Without Homebrew, download the DMG, drag course2md to Applications and install <code>ffmpeg</code> as described in the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#macos-apple-silicon">macOS guide</a>. The app already includes <code>yt-dlp</code>.</p>
+          <div class="actions">
+            <a class="btn btn-tonal" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download DMG</a>
+          </div>
+        </article>
+
+        <article class="platform" id="windows">
+          <h3>Windows<small>x64</small></h3>
+          <ol>
+            <li>Download the portable ZIP and extract everything to a permanent folder. It includes <code>yt-dlp</code> and <code>aria2</code>.</li>
+            <li>Install <code>ffmpeg</code> in PowerShell:
+              <div class="cmd">
+                <code><span class="prompt" aria-hidden="true">&gt;</span><span class="line">winget install --id Gyan.FFmpeg -e</span></code>
+                <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the winget command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
+              </div>
+            </li>
+            <li>Open <code>course2md-desktop.exe</code> from the extracted folder and keep the other files next to it.</li>
+          </ol>
+          <div class="actions">
+            <a class="btn btn-tonal" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download ZIP</a>
+          </div>
+        </article>
+
+        <article class="platform" id="arch">
+          <h3>Arch Linux / CachyOS<small>x86_64</small></h3>
+          <div class="cmd">
+            <code><span class="prompt" aria-hidden="true">$</span><span class="line">yay -S course2md-gui-bin</span></code>
+            <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the yay command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
+          </div>
+          <p>Or <code>paru -S course2md-gui-bin</code>. This installs the app, the video tools and the graphics libraries; your GPU needs a working Vulkan driver. See the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#arch-linux--cachyos">Linux guide</a>.</p>
+        </article>
+
+        <article class="platform" id="linux">
+          <h3>Ubuntu and other Linux<small>x86_64</small></h3>
+          <p>Download the tar.gz, install <code>ffmpeg</code> and the graphics libraries from the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#other-linux-x64-distributions">Linux guide</a>, extract it and run <code>./course2md-desktop</code>. Built on Ubuntu 24.04; it includes <code>yt-dlp</code>.</p>
+          <div class="actions">
+            <a class="btn btn-tonal" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download tar.gz</a>
+          </div>
+        </article>
+      </div>
+
+      <div class="notes">
+        <div class="note">
+          <h3>First steps</h3>
+          <ol>
+            <li>Open course2md and follow the setup: choose how speech is recognized, optionally connect an AI service and Bilibili, and download the speech model (1–2.4 GB, once).</li>
+            <li>If anything is missing, Settings → Application → Run checks shows which tool to install.</li>
+            <li>On Home, paste a link or drop a video, review the preview and click Start conversion. Finished notes appear in Library.</li>
+          </ol>
+        </div>
+        <div class="note">
+          <h3>Upgrading from 1.7</h3>
+          <p>Downloaded models, the Bilibili login and the CLI's <code>config.toml</code> keep working. Notes made by 1.x stay where they were as <code>course.md</code> / <code>course.html</code>, but the 2.0 library only lists notes made by 2.0. Set up recognition and AI services again in the setup steps.</p>
+          <p>Intel Macs and Linux ARM64 have no desktop app yet; use the <a href="#cli">command-line tool</a>. More in the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#first-launch">first-launch guide</a> and <a href="https://github.com/mizorewww/course2md/wiki/Troubleshooting">Troubleshooting</a>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="cli" aria-labelledby="cli-title">
+    <div class="wrap cli">
+      <div class="section-head">
+        <p class="kicker">Command-line tool</p>
+        <h2 id="cli-title">Prefer the terminal?</h2>
+        <p>The <code>course2md</code> CLI does the same conversion from the terminal or your scripts. It can be installed beside the desktop app; the two share the Bilibili and ChatGPT logins and the downloaded speech models.</p>
+        <p>It needs <code>ffmpeg</code>; online links also need <code>yt-dlp</code>. Check everything with <code>course2md doctor</code>, and see the <a href="https://github.com/mizorewww/course2md/wiki/CLI-Guide">CLI guide</a> for every command.</p>
+      </div>
+      <div class="terminal">
+        <pre><code><span class="c"># macOS / Linux, into ~/bin</span>
+<span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
+<span class="c"># or Homebrew / Arch</span>
+<span class="p">$ </span>brew install mizorewww/tap/course2md
+<span class="p">$ </span>yay -S course2md-bin</code></pre>
+        <pre><code><span class="p">$ </span>course2md ./lecture.mp4
+<span class="p">$ </span>course2md https://www.youtube.com/watch?v=…
+<span class="p">$ </span>course2md ./lecture.mp4 -o ./notes</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing" aria-labelledby="closing-title">
+    <div class="wrap">
+      <h2 id="closing-title">Your next lecture, as a note</h2>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download for macOS</a>
+        <a class="btn btn-outline" href="#install">Windows and Linux</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="assets/icon-128.png" width="24" height="24" alt=""><span>course2md</span></a>
+    <nav aria-label="Project">
+      <a href="https://github.com/mizorewww/course2md">GitHub</a>
+      <a href="https://github.com/mizorewww/course2md/wiki">Wiki</a>
+      <a href="https://github.com/mizorewww/course2md/releases">Releases</a>
+      <a href="https://github.com/mizorewww/course2md/issues">Report a problem</a>
+      <a href="https://github.com/mizorewww/course2md/blob/main/LICENSE">MIT license</a>
+      <a href="zh/" hreflang="zh-Hans" lang="zh-Hans">中文</a>
+    </nav>
+  </div>
+</footer>
+<p class="visually-hidden" id="copy-status" role="status" aria-live="polite"></p>
+</body>
+</html>
