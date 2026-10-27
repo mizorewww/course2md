@@ -128,8 +128,8 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
 }
 
 /// One simulated input step, `kind~args` with `~`-separated arguments in
-/// window pixels: `move~x~y`, `click~x~y`, `drag~x1~y1~x2~y2`, `wheel~x~y~dy` (positive scrolls
-/// the content up, as a downward wheel turn), `key~<keystroke>` (GPUI
+/// window pixels: `move~x~y`, `click~x~y[~count]`, `drag~x1~y1~x2~y2`, `wheel~x~y~dy[~dx]` (positive scrolls
+/// the content up or left, as a downward or rightward wheel turn), `key~<keystroke>` (GPUI
 /// syntax, e.g. `escape`, `right`, `cmd-f`; `equal` and `plus` name the
 /// keys the spec reserves) and `wait~ms`. Each platform
 /// event is dispatched in its own update, as native input arrives.
@@ -151,22 +151,28 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
     };
     let events = match (kind, position) {
         ("move", Some(position)) => vec![moved(position)],
-        ("click", Some(position)) => vec![
-            moved(position),
-            PlatformInput::MouseDown(MouseDownEvent {
-                button: MouseButton::Left,
-                position,
-                modifiers: Modifiers::default(),
-                click_count: 1,
-                first_mouse: false,
-            }),
-            PlatformInput::MouseUp(MouseUpEvent {
-                button: MouseButton::Left,
-                position,
-                modifiers: Modifiers::default(),
-                click_count: 1,
-            }),
-        ],
+        ("click", Some(position)) => {
+            // An optional third number repeats the click as a double or
+            // triple click, counting up as the platform reports it.
+            let clicks = numbers.get(2).map_or(1, |count| (*count as usize).max(1));
+            let mut events = vec![moved(position)];
+            for click_count in 1..=clicks {
+                events.push(PlatformInput::MouseDown(MouseDownEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count,
+                    first_mouse: false,
+                }));
+                events.push(PlatformInput::MouseUp(MouseUpEvent {
+                    button: MouseButton::Left,
+                    position,
+                    modifiers: Modifiers::default(),
+                    click_count,
+                }));
+            }
+            events
+        }
         ("drag", Some(from)) if numbers.len() >= 4 => {
             let to = point(px(numbers[2]), px(numbers[3]));
             let mut events = vec![
@@ -198,7 +204,10 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
             moved(position),
             PlatformInput::ScrollWheel(ScrollWheelEvent {
                 position,
-                delta: ScrollDelta::Pixels(point(px(0.), px(-numbers[2]))),
+                delta: ScrollDelta::Pixels(point(
+                    px(-numbers.get(3).copied().unwrap_or(0.)),
+                    px(-numbers[2]),
+                )),
                 modifiers: Modifiers::default(),
                 touch_phase: TouchPhase::Moved,
             }),
