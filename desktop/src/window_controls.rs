@@ -6,11 +6,14 @@
 //! client-side decorations neither, so the app draws minimize, maximize or
 //! restore, and close at the trailing edge, once for the whole window.
 //!
-//! They paint and hit-test above everything else, dialogs included: dialogs
-//! are deferred layers (priority 10 and up) whose backdrop is itself a drag
-//! area, so the buttons are a deferred layer of a higher priority and
-//! occlude what lies beneath them, the way the system's own buttons stay
-//! usable over an app's modal content.
+//! They paint and hit-test above the pages and dialogs: dialogs are deferred
+//! layers (priority 10 and up) whose backdrop is itself a drag area, so the
+//! buttons are a deferred layer of a higher priority and occlude what lies
+//! beneath them, the way the system's own buttons stay usable over an app's
+//! modal content. Menus, popovers, dropdowns (priority 100 and up) and
+//! tooltips (200) stay above the buttons, as Windows' own menus are windows
+//! above the caption: where an open menu reaches the top of the window, a
+//! press there chooses its item, never minimizes, maximizes or closes.
 //!
 //! gpui-component's `TitleBar` lays out its own window controls after its
 //! children. Each page's bar content takes the full window width, so those
@@ -78,8 +81,10 @@ pub(crate) fn traffic_lights() -> bool {
 /// does not change them.
 const WINDOWS_BUTTON_WIDTH: f32 = 46.;
 const WINDOWS_BUTTON_HEIGHT: f32 = 32.;
-/// Above every dialog layer (gpui-component paints those at 10 + layer).
-const CAPTION_PRIORITY: usize = 1_000;
+/// Above every dialog layer (gpui-component paints those at 10 + layer),
+/// below its popups (`gpui_base::POPUP_PRIORITY`, 100, and submenus above
+/// that) and tooltips.
+const CAPTION_PRIORITY: usize = 50;
 /// A Linux caption button's target, the round shape inside it, and the gap
 /// between two of them and after the last.
 const LINUX_BUTTON: f32 = 32.;
@@ -356,6 +361,7 @@ mod tests {
     /// priority 10 whose full-window backdrop takes every press.
     struct DialogHarness {
         backdrop_presses: usize,
+        menu_presses: usize,
     }
 
     impl Render for DialogHarness {
@@ -372,6 +378,20 @@ mod tests {
                     MouseButton::Left,
                     cx.listener(|this, _, _, _| this.backdrop_presses += 1),
                 );
+            // A tall menu clamped to the window's top-right corner, over the
+            // close button, as gpui-component's popups place it.
+            let menu = div()
+                .id("menu")
+                .absolute()
+                .top(px(8.))
+                .right(px(8.))
+                .w(px(20.))
+                .h(px(200.))
+                .occlude()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, _| this.menu_presses += 1),
+                );
             let row = gpui_component::h_flex()
                 .h(px(WINDOWS_BUTTON_HEIGHT))
                 .children([Button::Minimize, Button::Maximize, Button::Close].map(windows_button));
@@ -379,6 +399,7 @@ mod tests {
                 .size_full()
                 .child(gpui::deferred(backdrop).with_priority(10))
                 .child(caption_layer(row, window))
+                .child(gpui::deferred(menu).with_priority(gpui_base::POPUP_PRIORITY))
         }
     }
 
@@ -386,11 +407,13 @@ mod tests {
     fn caption_buttons_take_presses_over_a_dialog_backdrop(cx: &mut TestAppContext) {
         let (view, cx) = cx.add_window_view(|_, _| DialogHarness {
             backdrop_presses: 0,
+            menu_presses: 0,
         });
         cx.run_until_parked();
         let width = cx.update(|window, _| f32::from(window.viewport_size().width));
-        // Close, maximize and minimize, from the trailing edge.
-        for offset in [23., 69., 115.] {
+        // Close (where the menu leaves it), maximize and minimize, from the
+        // trailing edge.
+        for offset in [36., 69., 115.] {
             cx.simulate_click(
                 gpui::point(px(width - offset), px(16.)),
                 Modifiers::default(),
@@ -400,8 +423,14 @@ mod tests {
         // Beside them the dialog's backdrop still takes the press.
         cx.simulate_click(gpui::point(px(width - 160.), px(16.)), Modifiers::default());
         // Below the 32px buttons, too.
-        cx.simulate_click(gpui::point(px(width - 23.), px(40.)), Modifiers::default());
+        cx.simulate_click(gpui::point(px(width - 69.), px(40.)), Modifiers::default());
         cx.update(|_, cx| assert_eq!(view.read(cx).backdrop_presses, 2));
+        // An open menu over a caption button takes the press itself.
+        cx.simulate_click(gpui::point(px(width - 18.), px(16.)), Modifiers::default());
+        cx.update(|_, cx| {
+            assert_eq!(view.read(cx).menu_presses, 1);
+            assert_eq!(view.read(cx).backdrop_presses, 2);
+        });
     }
 
     #[test]
