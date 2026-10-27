@@ -854,6 +854,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 推荐 · 音频不离开本机	推荐 · 音频不离开本机	Recommended · Audio stays on this device	推薦 · 音訊不離開本機	推奨 · 音声はこのデバイスの外に送信されません
 提交时已确定，不能再更改	提交时已确定，不能再更改	Set when the task was submitted; can't be changed	提交時已確定，不能再更改	タスクの送信時に確定しており、変更できません
 数据分块到达，上一块于 {}前到达	数据分块到达，上一块于 {}前到达	Data arrives in blocks; the last arrived {} ago	資料分塊到達，上一塊於 {}前到達	データはブロック単位で受信中（前回の受信は {}前）
+未安装；模型改为单连接下载：{}	未安装；模型改为单连接下载：{}	Not installed; models download over a single connection: {}	未安裝；模型改為單一連線下載：{}	未インストール。モデルは単一接続でダウンロードされます：{}
 正在等待第一块数据	正在等待第一块数据	Waiting for the first block	正在等待第一塊資料	最初のブロックを待っています
 由环境变量指定	由环境变量指定	Set by environment variable	由環境變數指定	環境変数で指定
 系统安装	系统安装	Installed on the system	系統安裝	システムにインストール済み

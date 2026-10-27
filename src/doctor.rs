@@ -30,6 +30,11 @@ fn tool_version(cmd: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Option<Strin
     )
 }
 
+/// Where a tool runs from: its path and whether it ships with the app.
+fn location(tool: &crate::tools::Tool) -> String {
+    format!("{} · {}", tool.origin.label(), tool.path.display())
+}
+
 fn check(line: &mut Vec<String>, ok: bool, name: &str, detail: &str) {
     let mark = if ok { "✓" } else { "✗" };
     line.push(format!("{mark} {name}{detail}"));
@@ -45,9 +50,28 @@ pub fn run() -> Result<()> {
     let mut failures = 0;
     out.push(crate::tr!("\n必需工具").into());
     for tool in ["ffmpeg", "ffprobe"] {
-        match tool_version(tool, &["-version", "-hide_banner"]) {
-            Some(version) => check(&mut out, true, tool, &format!("  {version}")),
-            None => {
+        let located = crate::tools::locate(tool);
+        let version = located
+            .as_ref()
+            .and_then(|found| tool_version(&found.path, &["-version", "-hide_banner"]));
+        match (located, version) {
+            (Some(found), Some(version)) => {
+                check(&mut out, true, tool, &format!("  {version}"));
+                out.push(format!("    {}", location(&found)));
+            }
+            (Some(found), None) => {
+                failures += 1;
+                check(
+                    &mut out,
+                    false,
+                    tool,
+                    &format!(
+                        "  {}",
+                        crate::tr!("找到但无法运行：{}", found.path.display())
+                    ),
+                );
+            }
+            (None, _) => {
                 failures += 1;
                 check(
                     &mut out,
@@ -64,12 +88,16 @@ pub fn run() -> Result<()> {
     out.push(crate::tr!("\n按用途选装").into());
     match crate::ytdlp::resolve() {
         Some(path) => match tool_version(&path, &["--version"]) {
-            Some(version) => check(
-                &mut out,
-                true,
-                "yt-dlp",
-                &format!("  {version} · {}", path.display()),
-            ),
+            Some(version) => {
+                check(&mut out, true, "yt-dlp", &format!("  {version}"));
+                out.push(format!(
+                    "    {}",
+                    location(&crate::tools::Tool {
+                        origin: crate::tools::origin_of(&path, crate::ytdlp::ENV_OVERRIDE, None),
+                        path,
+                    })
+                ));
+            }
             None => check(
                 &mut out,
                 false,
@@ -81,6 +109,25 @@ pub fn run() -> Result<()> {
             "- yt-dlp  {}；{}",
             crate::error::install_hint("yt-dlp"),
             crate::tr!("重跑 install.sh 可安装随包版本")
+        )),
+    }
+    match crate::tools::locate("aria2c") {
+        Some(found) => match tool_version(&found.path, &["--version"]) {
+            Some(version) => {
+                check(&mut out, true, "aria2c", &format!("  {version}"));
+                out.push(format!("    {}", location(&found)));
+            }
+            None => out.push(format!(
+                "! aria2c  {}",
+                crate::tr!("找到但无法运行：{}", found.path.display())
+            )),
+        },
+        None => out.push(format!(
+            "- aria2c  {}",
+            crate::tr!(
+                "未安装；模型改为单连接下载：{}",
+                crate::error::install_hint("aria2")
+            )
         )),
     }
     #[cfg(apple_native)]
