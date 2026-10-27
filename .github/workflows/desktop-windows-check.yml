@@ -104,21 +104,31 @@ jobs:
           function Log($m) { $m | Add-Content (Join-Path $out 'log.txt'); Write-Host $m }
           $R = 1000
           Log "after setup: $(Rect)"
-          [W]::Click(800, 28); Start-Sleep 2; Shot '10-click-settings'
-          [W]::Click(680, 28); Start-Sleep 2; Shot '11-click-library'
-          [W]::SetCursorPos($R - 69, 28); Start-Sleep 2; Shot '12-hover-maximize'
-          [W]::Click($R - 69, 28); Start-Sleep 2; Log "after maximize: $(Rect)"; Shot '13-maximized'
+          Shot '09-home'
+          [W]::Click(685, 28); Start-Sleep 2; Shot '10-click-library'
+          [W]::Click(795, 28); Start-Sleep 2; Shot '11-click-settings'
+          [W]::SetCursorPos($R - 69, 16); Start-Sleep 2; Shot '12-hover-maximize'
+          [W]::Click($R - 69, 16); Start-Sleep 2; Log "after maximize: $(Rect)"; Shot '13-maximized'
           $q = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$q) | Out-Null
-          [W]::Click($q.R - 69, $q.T + 28); Start-Sleep 2; Log "after restore: $(Rect)"; Shot '14-restored'
+          [W]::Click($q.R - 69 - 8, $q.T + 16 + 8); Start-Sleep 2; Log "after restore: $(Rect)"; Shot '14-restored'
+          [W]::MoveWindow($h, 0, 0, 1000, 720, $true) | Out-Null; Start-Sleep 1
           [W]::DoubleClick(400, 28); Start-Sleep 2; Log "after double-click: $(Rect)"; Shot '15-double-click'
           $q = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$q) | Out-Null
-          [W]::DoubleClick($q.L + 400, $q.T + 28); Start-Sleep 2; Log "after second double-click: $(Rect)"
+          [W]::DoubleClick($q.L + 8 + 400, $q.T + 8 + 28); Start-Sleep 2; Log "after second double-click: $(Rect)"
           [W]::MoveWindow($h, 0, 0, 1000, 720, $true) | Out-Null; Start-Sleep 1
           [W]::Drag(400, 28, 500, 128); Start-Sleep 2; Log "after drag (expect 100,100): $(Rect)"; Shot '16-dragged'
           [W]::MoveWindow($h, 0, 0, 1000, 720, $true) | Out-Null; Start-Sleep 1
-          [W]::Click($R - 115, 28); Start-Sleep 2; Log "minimized: $([W]::IsIconic($h))"; Shot '17-minimized'
+          # A dialog is open: the palette picker from the light theme card on Appearance.
+          [W]::Click(515, 477); Start-Sleep 2; Shot '20-dialog-open'
+          [W]::Click($R - 69, 16); Start-Sleep 2; Log "dialog open, after maximize click: $(Rect)"; Shot '21-dialog-maximized'
+          [W]::ShowWindow($h, 9) | Out-Null; Start-Sleep 1
+          [W]::MoveWindow($h, 0, 0, 1000, 720, $true) | Out-Null; Start-Sleep 1
+          [W]::Drag(400, 28, 500, 128); Start-Sleep 2; Log "dialog open, after drag (expect 100,100): $(Rect)"; Shot '22-dialog-dragged'
+          [W]::MoveWindow($h, 0, 0, 1000, 720, $true) | Out-Null; Start-Sleep 1
+          [System.Windows.Forms.SendKeys]::SendWait('{ESC}'); Start-Sleep 1; Shot '23-dialog-closed'
+          [W]::Click($R - 115, 16); Start-Sleep 2; Log "minimized: $([W]::IsIconic($h))"; Shot '17-minimized'
           [W]::ShowWindow($h, 9) | Out-Null; Start-Sleep 2
-          [W]::Click($R - 23, 28); Start-Sleep 5; $p.Refresh(); Log "exited after close: $($p.HasExited)"; Shot '18-closed'
+          [W]::Click($R - 23, 16); Start-Sleep 5; $p.Refresh(); Log "exited after close: $($p.HasExited)"; Shot '18-closed'
           $p.Refresh()
           if (-not $p.HasExited) { $p.Kill() }
           # Record what the app wrote, for diagnosing save failures.
