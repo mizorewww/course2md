@@ -536,6 +536,23 @@ pub fn display_ranges(segments: &[Segment], source: &Range<usize>) -> Vec<Range<
         .collect()
 }
 
+/// A selected display range grown to cover every formula (or other whole
+/// segment) it touches, so it is painted as it is copied.
+fn widened(segments: &[Segment], range: Range<usize>) -> Range<usize> {
+    let selected = range.clone();
+    segments
+        .iter()
+        .filter(|segment| {
+            segment.atomic
+                && !segment.source.is_empty()
+                && segment.display.start < selected.end
+                && selected.start < segment.display.end
+        })
+        .fold(range, |range, segment| {
+            range.start.min(segment.display.start)..range.end.max(segment.display.end)
+        })
+}
+
 /// Where a source byte is shown, if this block shows it.
 fn display_index(segments: &[Segment], byte: usize) -> Option<usize> {
     segments
@@ -1105,7 +1122,9 @@ impl Element for NoteText {
                     } else {
                         range.start
                     };
-                    (start < range.end).then_some(start..range.end)
+                    // A formula is selected whole, as it is copied.
+                    (start < range.end)
+                        .then(|| widened(&state.blocks[index].segments, start..range.end))
                 })
                 .collect();
             if let Paragraph::Selected(paragraph) = &shared.paragraph {
@@ -1493,6 +1512,18 @@ mod tests {
         let (whole, second) = (0..6, 3..6);
         assert_eq!(copied_text("要点", &Copy::ListItem, &[whole]), "- 要点\n");
         assert_eq!(copied_text("要点", &Copy::ListItem, &[second]), "点\n");
+    }
+
+    #[test]
+    fn a_selection_touching_a_formula_paints_all_of_it() {
+        let text = "a $x$ b";
+        let blocks = plan(text, None, inline);
+        let segments = &blocks[0].segments;
+        let holder = blocks[0].formulas[0].0.clone();
+        let widened = widened(segments, holder.start + 1..holder.start + 2);
+        assert!(widened.start < holder.start && widened.end > holder.end);
+        // Prose alone is unchanged.
+        assert_eq!(super::widened(segments, 0..1), 0..1);
     }
 
     #[test]
