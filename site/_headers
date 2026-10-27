@@ -7,6 +7,7 @@
   Cross-Origin-Opener-Policy: same-origin
   Strict-Transport-Security: max-age=31536000
 
+# Pages load site.css and site.js with ?v=<release>; bump it whenever they change.
 /assets/*
   Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 
