@@ -9,6 +9,10 @@ on:
       version:
         description: 'Version to publish after every build passes (for example v2.0.0-alpha.1)'
         required: true
+      dry_run:
+        description: 'Build, sign and notarize every asset without publishing a release'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -180,7 +184,7 @@ jobs:
   release:
     needs: [build, desktop]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
