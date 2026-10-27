@@ -63,6 +63,30 @@ fn md_inline(s: &str) -> String {
         .to_string()
 }
 
+/// Link text: a Windows path's backslashes (`C:\a\[1].mp4`) and brackets
+/// would otherwise act as Markdown escapes or end the text early.
+fn md_link_text(s: &str) -> String {
+    let mut out = String::new();
+    for c in md_inline(s).chars() {
+        if matches!(c, '\\' | '[' | ']') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Link destination: a URL as is; anything else (a path that is not a file
+/// URL here, such as a note made on another system) inside `<...>`, so spaces
+/// and parentheses stay part of the destination.
+fn md_link_target(target: &str) -> String {
+    if url::Url::parse(target).is_ok() || !target.contains([' ', '(', ')', '<', '>']) {
+        target.to_string()
+    } else {
+        format!("<{}>", target.replace(['<', '>'], ""))
+    }
+}
+
 pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
     let title = md_inline(&meta.title);
     let uploader = if meta.uploader.is_empty() {
@@ -84,8 +108,8 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
             md,
             "- {} [{}]({})",
             crate::tr!("来源"),
-            md_inline(&meta.webpage_url),
-            source
+            md_link_text(&meta.webpage_url),
+            md_link_target(&source)
         )
         .unwrap();
     }
@@ -223,6 +247,23 @@ pub(crate) fn esc(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_source_link_keeps_windows_paths_literal() {
+        assert_eq!(
+            md_link_text(r"C:\课程\[1] a_b.mp4"),
+            r"C:\\课程\\\[1\] a_b.mp4"
+        );
+        assert_eq!(
+            md_link_target("https://example.com/v?id=1"),
+            "https://example.com/v?id=1"
+        );
+        assert_eq!(
+            md_link_target("file:///C:/%E8%AF%BE/a.mp4"),
+            "file:///C:/%E8%AF%BE/a.mp4"
+        );
+        assert_eq!(md_link_target("lectures/a (1).mp4"), "<lectures/a (1).mp4>");
+    }
     use crate::timeline::TranscriptEvent;
 
     #[test]

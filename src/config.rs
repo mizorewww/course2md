@@ -626,12 +626,88 @@ pub fn expand_tilde(p: PathBuf) -> PathBuf {
         if let Some(h) = home_dir() {
             return h;
         }
-    } else if let Some(rest) = s.strip_prefix("~/")
+    } else if let Some(rest) = s
+        .strip_prefix("~/")
+        .or_else(|| s.strip_prefix(r"~\").filter(|_| cfg!(windows)))
         && let Some(h) = home_dir()
     {
         return h.join(rest);
     }
     p
+}
+
+/// `fs::canonicalize` without Windows' verbatim prefix where it is not needed.
+///
+/// On Windows the canonical form is `\\?\C:\...` (or `\\?\UNC\server\share\...`).
+/// Such a path is stored with the library, shown to people, and handed to
+/// ffmpeg, yt-dlp and the shell, many of which reject it. The prefix is kept
+/// only when the plain spelling would mean something else: a path past the
+/// classic 260-character limit, or a component Win32 would alter (a trailing
+/// dot or space, a reserved device name such as `CON`). Elsewhere this is
+/// `fs::canonicalize`.
+pub fn canonicalize(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(path).map(simplify_verbatim)
+}
+
+/// The non-verbatim spelling of a canonical path, when it names the same file
+/// (see [`canonicalize`]); other paths are returned unchanged.
+pub fn simplify_verbatim(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let mut components = path.components();
+        let plain = match components.next() {
+            Some(Component::Prefix(prefix)) => match prefix.kind() {
+                Prefix::VerbatimDisk(drive) => format!("{}:", drive as char),
+                Prefix::VerbatimUNC(server, share) => format!(
+                    r"\\{}\{}",
+                    server.to_string_lossy(),
+                    share.to_string_lossy()
+                ),
+                _ => return path,
+            },
+            _ => return path,
+        };
+        let mut out = PathBuf::from(format!(r"{plain}\"));
+        for component in components {
+            match component {
+                Component::RootDir => {}
+                Component::Normal(name) => {
+                    let Some(name) = name.to_str() else {
+                        return path;
+                    };
+                    if name.ends_with(['.', ' ']) || windows_reserved_name(name) {
+                        return path;
+                    }
+                    out.push(name);
+                }
+                _ => return path,
+            }
+        }
+        if out.as_os_str().len() >= 260 {
+            return path;
+        }
+        out
+    }
+    #[cfg(not(windows))]
+    path
+}
+
+/// Whether Win32 maps a file name to a device (`CON`, `nul.txt`, `COM1.md`):
+/// the stem before the first dot, ignoring case and trailing spaces, is
+/// reserved. Such a name cannot be created as an ordinary file on Windows.
+pub fn windows_reserved_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end_matches(' ');
+    let upper = stem.to_ascii_uppercase();
+    match upper.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" => true,
+        _ => {
+            let mut chars = upper.chars();
+            let last = chars.next_back();
+            matches!(chars.as_str(), "COM" | "LPT")
+                && matches!(last, Some('1'..='9' | '¹' | '²' | '³'))
+        }
+    }
 }
 
 /// Tri-state flag: an explicit off wins over on; otherwise the file value,
@@ -796,8 +872,13 @@ pub fn sanitize_filename_with_fallback(s: &str, fallback: &str) -> String {
     }
     let out = out.trim_matches(['-', '.', ' ']).to_string();
     let out: String = out.chars().take(MAX_COMPONENT_CHARS).collect();
+    // A cut can end on '.', which Windows drops from the name on disk.
+    let out = out.trim_end_matches('.').to_string();
     if out.is_empty() {
         fallback.to_string()
+    } else if windows_reserved_name(&out) {
+        // `CON.md` opens the console on Windows: keep the title, not the device.
+        format!("{out}_")
     } else {
         out
     }
@@ -811,6 +892,99 @@ pub fn sanitize_component(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_device_names_are_reserved_with_any_extension() {
+        for name in [
+            "CON",
+            "con",
+            "Nul.md",
+            "aux.summary.md",
+            "COM1",
+            "lpt9.txt",
+            "COM¹",
+            "PRN ",
+        ] {
+            assert!(windows_reserved_name(name), "{name}");
+        }
+        for name in ["CONSOLE", "com0", "COM10", "lpt", "nul-notes", "课程"] {
+            assert!(!windows_reserved_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn sanitized_names_are_valid_windows_file_names() {
+        assert_eq!(sanitize_component("CON"), "CON_");
+        assert_eq!(sanitize_component("nul.txt"), "nul.txt_");
+        assert_eq!(
+            sanitize_component(r#"a:b*c?"d<e>f|g\h/i"#),
+            "a-b-c-d-e-f-g-h-i"
+        );
+        // A cut at the length limit must not leave a trailing dot.
+        let long = format!("{}.{}", "a".repeat(MAX_COMPONENT_CHARS - 1), "b".repeat(20));
+        let name = sanitize_component(&long);
+        assert!(!name.ends_with('.'), "{name}");
+        assert!(name.chars().count() <= MAX_COMPONENT_CHARS);
+    }
+
+    #[test]
+    fn canonical_paths_keep_their_plain_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = canonicalize(dir.path()).unwrap();
+        assert!(path.is_absolute());
+        assert!(
+            !path.to_string_lossy().starts_with(r"\\?\"),
+            "{}",
+            path.display()
+        );
+        assert_eq!(
+            std::fs::canonicalize(&path).unwrap(),
+            std::fs::canonicalize(dir.path()).unwrap()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_prefix_is_removed_only_when_the_meaning_is_unchanged() {
+        assert_eq!(
+            simplify_verbatim(PathBuf::from(r"\\?\C:\Users\me\课程\a.mp4")),
+            PathBuf::from(r"C:\Users\me\课程\a.mp4")
+        );
+        assert_eq!(
+            simplify_verbatim(PathBuf::from(r"\\?\UNC\server\share\lib")),
+            PathBuf::from(r"\\server\share\lib")
+        );
+        for kept in [
+            r"\\?\C:\lib\CON",
+            r"\\?\C:\lib\name.",
+            r"\\?\C:\lib\name ",
+            r"\\?\GLOBALROOT\Device\x",
+        ] {
+            assert_eq!(simplify_verbatim(PathBuf::from(kept)), PathBuf::from(kept));
+        }
+        let long = format!(r"\\?\C:\{}", "a".repeat(300));
+        assert_eq!(
+            simplify_verbatim(PathBuf::from(&long)),
+            PathBuf::from(&long)
+        );
+        assert_eq!(
+            simplify_verbatim(PathBuf::from(r"C:\plain")),
+            PathBuf::from(r"C:\plain")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn tilde_expands_with_either_separator_on_windows() {
+        let Some(home) = home_dir() else {
+            return;
+        };
+        assert_eq!(
+            expand_tilde(PathBuf::from(r"~\models")),
+            home.join("models")
+        );
+        assert_eq!(expand_tilde(PathBuf::from("~/models")), home.join("models"));
+    }
 
     #[test]
     fn source_gate() {
