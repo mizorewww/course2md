@@ -132,14 +132,28 @@ pub fn load() -> anyhow::Result<ConfigFile> {
             p.display()
         )
     })?;
-    toml::from_str(&s)
+    let mut cfg: ConfigFile = toml::from_str(&s)
         .with_context(|| {
             format!(
                 "配置格式有误，请修正后重试 / Fix the configuration syntax and retry: {}",
                 p.display()
             )
         })
-        .map_err(crate::error::invalid_configuration)
+        .map_err(crate::error::invalid_configuration)?;
+    // The file is the user's own text and is not rewritten: the notice
+    // repeats (once per run) until its asr_model line is changed.
+    if crate::config::migrate_retired_npu_model(cfg.defaults.provider, &mut cfg.defaults.asr_model)
+    {
+        static NOTICE: std::sync::Once = std::sync::Once::new();
+        NOTICE.call_once(|| {
+            eprintln!(
+                "{} ({})",
+                crate::config::retired_npu_model_notice(),
+                p.display()
+            )
+        });
+    }
+    Ok(cfg)
 }
 
 pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {
@@ -187,7 +201,10 @@ pub fn template() -> String {
         ("{STABLE_SECS}", format!("{:?}", c::DEFAULT_STABLE_SECS)),
         ("{THREADS}", c::DEFAULT_THREADS.to_string()),
         ("{GPU_LAYERS}", c::DEFAULT_GPU_LAYERS.to_string()),
-        ("{ASR_MODEL}", c::DEFAULT_ASR_MODEL.to_string()),
+        (
+            "{ASR_MODEL}",
+            c::default_model(c::default_provider_hint()).to_string(),
+        ),
         ("{MAX_SPEECH}", format!("{:?}", c::DEFAULT_MAX_SPEECH)),
         ("{FORMATS}", formats),
         ("{API_BASE_URL}", api.base_url),

@@ -253,21 +253,66 @@ pub fn canonical_model(provider: AsrProvider, raw: &str) -> AnyhowResult<String>
     }
     match model_alias(&raw.to_ascii_lowercase()) {
         Some(id) if models.iter().any(|m| m.id == id) => Ok(id.to_owned()),
-        _ => {
-            let available = models.iter().map(|m| m.id).collect::<Vec<_>>().join(", ");
-            let (repo_zh, repo_en) = if provider == AsrProvider::Npu {
-                (
-                    crate::tr!("，或 Hugging Face 仓库名（如 org/model）"),
-                    ", or a Hugging Face repository (org/model)",
-                )
-            } else {
-                ("", "")
-            };
-            anyhow::bail!(
-                "所选识别方式不支持模型「{raw}」。可用：{available}{repo_zh} / The {provider} backend does not support model \"{raw}\". Available: {available}{repo_en}"
-            )
-        }
+        _ => Err(unsupported_model_error(provider, raw)),
     }
+}
+
+/// The localized refusal of a model the backend does not offer, listing what it does.
+pub fn unsupported_model_error(provider: AsrProvider, raw: &str) -> anyhow::Error {
+    let mut available = local_models(provider)
+        .iter()
+        .map(|m| m.id)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if provider == AsrProvider::Npu {
+        available.push_str(crate::tr!("，或 Hugging Face 仓库名（如 org/model）"));
+    }
+    if provider == AsrProvider::Npu && retired_npu_model(raw) {
+        anyhow::anyhow!(crate::tr!(
+            "Intel NPU 不再支持 Qwen3 模型。可用：{}",
+            available
+        ))
+    } else {
+        anyhow::anyhow!(crate::tr!(
+            "识别方式 {} 不支持模型「{}」。可用：{}",
+            provider,
+            raw.trim(),
+            available
+        ))
+    }
+}
+
+/// Qwen3 models the NPU backend offered until 2.0.0. Their OpenVINO exports
+/// (the dseditor repositories) never loaded in OpenVINO GenAI, so a saved
+/// choice of one is dropped in favour of the NPU default.
+pub fn retired_npu_model(raw: &str) -> bool {
+    let lower = raw.trim().to_ascii_lowercase();
+    !lower.is_empty()
+        && (matches!(model_alias(&lower), Some(id) if id == QWEN3_1_7B.id || id == QWEN3_0_6B.id)
+            || matches!(
+                lower.as_str(),
+                "dseditor/qwen3-asr-1.7b-int8_openvino"
+                    | "dseditor/qwen3-asr-0.6b-int8_asym-openvino"
+            ))
+}
+
+/// Drops a retired NPU model from saved defaults, so the backend default
+/// (Whisper large-v3-turbo) applies. True when it changed `model`; the caller
+/// shows [`retired_npu_model_notice`].
+pub fn migrate_retired_npu_model(
+    provider: Option<AsrProvider>,
+    model: &mut Option<String>,
+) -> bool {
+    let retired =
+        provider == Some(AsrProvider::Npu) && model.as_deref().is_some_and(retired_npu_model);
+    if retired {
+        *model = None;
+    }
+    retired
+}
+
+pub fn retired_npu_model_notice() -> &'static str {
+    crate::tr!("Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo")
 }
 
 /// 截图发射模式：first（首个不同帧）| stable（等待画面稳定，适合动画课件）。
@@ -1126,6 +1171,41 @@ mod tests {
                 assert_eq!(canonical_model(provider, model.id).unwrap(), model.id);
             }
         }
+    }
+
+    #[test]
+    fn saved_qwen3_choices_on_npu_fall_back_to_the_default() {
+        for saved in [
+            "qwen3-1.7b",
+            "Qwen3-ASR-0.6B",
+            "1.7b",
+            "dseditor/Qwen3-ASR-1.7B-INT8_OpenVINO",
+            "dseditor/Qwen3-ASR-0.6B-INT8_ASYM-OpenVINO",
+        ] {
+            let mut model = Some(saved.to_owned());
+            assert!(
+                migrate_retired_npu_model(Some(AsrProvider::Npu), &mut model),
+                "{saved}"
+            );
+            assert_eq!(model, None);
+            assert_eq!(
+                canonical_model(AsrProvider::Npu, model.as_deref().unwrap_or("")).unwrap(),
+                "whisper"
+            );
+        }
+        for (provider, saved) in [
+            (Some(AsrProvider::Npu), "whisper-tiny"),
+            (Some(AsrProvider::Npu), "org/custom-ov"),
+            (Some(AsrProvider::Npu), ""),
+            (Some(AsrProvider::Coreml), "qwen3-1.7b"),
+            (None, "qwen3-1.7b"),
+        ] {
+            let mut model = Some(saved.to_owned());
+            assert!(!migrate_retired_npu_model(provider, &mut model), "{saved}");
+            assert_eq!(model.as_deref(), Some(saved));
+        }
+        let error = canonical_model(AsrProvider::Npu, "qwen3-1.7b").unwrap_err();
+        assert!(error.to_string().contains("whisper"), "{error}");
     }
 
     #[test]

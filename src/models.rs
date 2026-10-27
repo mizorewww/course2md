@@ -19,17 +19,7 @@ use std::path::{Path, PathBuf};
 pub mod status;
 
 fn unsupported_model(status: &status::LocalModelStatus) -> anyhow::Error {
-    let available = crate::config::local_models(status.provider)
-        .iter()
-        .map(|m| m.id)
-        .collect::<Vec<_>>()
-        .join(", ");
-    anyhow::anyhow!(
-        "所选识别方式不支持模型「{}」。可用：{available} / The {} backend does not support model \"{}\". Available: {available}",
-        status.model,
-        status.provider,
-        status.model
-    )
+    crate::config::unsupported_model_error(status.provider, &status.model)
 }
 
 /// 下载缺失的模型文件（不加载）。`verify` 时额外用正式加载器验证 Apple/NPU 模型可离线加载。
