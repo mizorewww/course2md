@@ -162,7 +162,7 @@ enum LocalPick {
 
 /// 按本机能力动态生成本地后端候选：推荐项（default_provider_hint）置顶并标注。
 fn pick_local_provider() -> Result<LocalPick> {
-    let llama = crate::runtime::which("llama-server").is_some();
+    let llama = crate::tools::locate("llama-server").is_some();
     let mut cands: Vec<AsrProvider> = vec![];
     if cfg!(apple_native) {
         cands.push(AsrProvider::Coreml);

@@ -797,7 +797,7 @@ pub fn resolve_flag(cli_on: bool, cli_off: bool, file: Option<bool>, default: bo
 pub fn default_provider_hint() -> AsrProvider {
     if cfg!(apple_native) {
         AsrProvider::Coreml
-    } else if crate::runtime::which("llama-server").is_none() && crate::npu::device_present() {
+    } else if crate::tools::locate("llama-server").is_none() && crate::npu::device_present() {
         AsrProvider::Npu
     } else {
         AsrProvider::Gpu

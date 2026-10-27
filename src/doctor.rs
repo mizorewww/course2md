@@ -149,10 +149,15 @@ pub fn run() -> Result<()> {
     }
     #[cfg(not(apple_native))]
     out.push(crate::tr!("- coreml  本构建不包含 Apple 原生后端 / Apple native backend is not included in this build").into());
-    match crate::runtime::which("llama-server") {
-        Some(path) => {
-            check(&mut out, true, "gpu/cpu", &format!("  {}", path.display()));
-            match crate::asr::gpu_devices(&path) {
+    match crate::tools::locate("llama-server") {
+        Some(found) => {
+            check(
+                &mut out,
+                true,
+                "gpu/cpu",
+                &format!("  {}", location(&found)),
+            );
+            match crate::asr::gpu_devices(&found.path) {
                 Ok(devices) if !devices.is_empty() => {
                     check(&mut out, true, "GPU", &format!("  {}", devices.join(", ")))
                 }

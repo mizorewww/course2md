@@ -68,6 +68,10 @@ fn is_executable(path: &Path) -> bool {
     }
 }
 
+/// Where Windows and Linux archives keep llama-server with its libraries,
+/// relative to the executable.
+pub const LLAMA_DIR: &str = "llama.cpp";
+
 /// Directories that hold tools shipped with the app.
 pub fn bundled_dirs() -> Vec<PathBuf> {
     let Some(dir) = std::env::current_exe()
@@ -76,7 +80,11 @@ pub fn bundled_dirs() -> Vec<PathBuf> {
     else {
         return Vec::new();
     };
-    vec![dir.clone(), dir.join("../Resources/bin")]
+    vec![
+        dir.clone(),
+        dir.join("../Resources/bin"),
+        dir.join(LLAMA_DIR),
+    ]
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {

@@ -798,9 +798,11 @@ fn parse_gpu_devices(output: &str) -> Result<Vec<String>> {
 }
 
 fn find_llama_server() -> Result<PathBuf> {
-    crate::runtime::which("llama-server").context(crate::tr!(
-        "未找到 llama-server。请安装 llama.cpp 并加入 PATH"
-    ))
+    crate::tools::locate("llama-server")
+        .map(|tool| tool.path)
+        .context(crate::tr!(
+            "未找到 llama-server。请安装 llama.cpp 并加入 PATH"
+        ))
 }
 
 /// llama-server 对 offload 相关新 flag 的支持情况。

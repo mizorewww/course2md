@@ -475,6 +475,8 @@ fn compute_tool_path() -> std::ffi::OsString {
     {
         dirs.push(dir.clone());
         dirs.push(dir.join("../Resources/bin"));
+        // Windows/Linux archives keep llama-server and its libraries here.
+        dirs.push(dir.join(course2md::tools::LLAMA_DIR));
     }
     dirs.extend(
         std::env::var_os("PATH")
@@ -582,11 +584,16 @@ impl Environment {
         // 绝对路径再探测；找不到时退回裸名，probe 失败与「未安装」同义。
         let ytdlp = course2md::ytdlp::resolve_in(Some(&tool_path()))
             .unwrap_or_else(|| PathBuf::from("yt-dlp"));
-        // ffmpeg/ffprobe: the engine's search (bundled beside the app, then PATH).
+        // ffmpeg/ffprobe/llama-server: the engine's search (bundled with the app, then PATH).
         let media = |name: &str| course2md::tools::locate_in(name, Some(&tool_path()));
         let (ffmpeg, ffprobe) = (media("ffmpeg"), media("ffprobe"));
+        let llama_server = media("llama-server");
         let mut origins = std::collections::BTreeMap::new();
-        for (name, tool) in [("ffmpeg", &ffmpeg), ("ffprobe", &ffprobe)] {
+        for (name, tool) in [
+            ("ffmpeg", &ffmpeg),
+            ("ffprobe", &ffprobe),
+            ("llama-server", &llama_server),
+        ] {
             if let Some(tool) = tool {
                 origins.insert(name, tool.origin);
             }
@@ -603,6 +610,7 @@ impl Environment {
             tool.map_or_else(|| PathBuf::from(name), |tool| tool.path)
         };
         let (ffmpeg, ffprobe) = (program(ffmpeg, "ffmpeg"), program(ffprobe, "ffprobe"));
+        let llama_server = program(llama_server, "llama-server");
         // (字段名, 命令, 参数) 与回填写在一起：数组重排不会造成静默错配
         let checks = std::thread::scope(|scope| {
             let commands: Vec<(&'static str, PathBuf, &'static str)> = vec![
@@ -614,11 +622,7 @@ impl Environment {
                 ("ffmpeg", ffmpeg, "-version"),
                 ("ffprobe", ffprobe, "-version"),
                 ("ytdlp", ytdlp, "--version"),
-                (
-                    "llama-devices",
-                    PathBuf::from("llama-server"),
-                    "--list-devices",
-                ),
+                ("llama-devices", llama_server, "--list-devices"),
             ];
             let handles: Vec<_> = commands
                 .into_iter()
