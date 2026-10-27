@@ -69,6 +69,20 @@ class ConfigureTests(unittest.TestCase):
             self.assertIn(" ".join(ffmpeg_bundle.configure_flags(system)), notice)
         self.assertIn("llvm-mingw", ffmpeg_bundle.build_notice("Windows"))
 
+    def test_the_windows_notice_names_the_toolchain_it_was_built_with(self):
+        macos = ffmpeg_bundle.LLVM_MINGW[("Darwin", "arm64")]
+        notice = ffmpeg_bundle.build_notice("Windows", macos)
+        self.assertIn(macos[0], notice)
+        self.assertIn(macos[1], notice)
+        self.assertIn("LICENSE-mingw-w64-runtime", notice)
+
+    def test_linux_links_gnutls_dynamically(self):
+        flags = ffmpeg_bundle.configure_flags("Linux")
+        self.assertNotIn("--pkg-config-flags=--static", flags)
+        self.assertIn("--extra-libs=-lpthread -ldl -lm", flags)
+        for system in ("Darwin", "Windows"):
+            self.assertIn("--pkg-config-flags=--static", ffmpeg_bundle.configure_flags(system))
+
 
 class CacheTests(unittest.TestCase):
     def cached_build(self, cache, system, machine):
@@ -88,8 +102,6 @@ class CacheTests(unittest.TestCase):
                 self.assertEqual(ffmpeg_bundle.missing_build_tools(cache, "Linux", "x86_64"), [])
                 self.assertEqual(ffmpeg_bundle.prepare(cache, "Linux", "x86_64"), out)
                 build.assert_not_called()
-            self.assertIn("built unmodified from https://ffmpeg.org/",
-                          (out / "licenses/ffmpeg-build.txt").read_text())
 
     def test_a_changed_cached_build_is_rebuilt(self):
         with tempfile.TemporaryDirectory() as tmp:

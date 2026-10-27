@@ -129,7 +129,9 @@ def cache_key(system, machine):
     return f"ffmpeg-{FFMPEG_VERSION}-{system.lower()}-{machine}-{digest}"
 
 
-def build_notice(system):
+def build_notice(system, toolchain=None):
+    """The build note shipped with the licenses; `toolchain` is the
+    (url, sha256) of the cross toolchain a Windows build used."""
     notice = (f"ffmpeg {FFMPEG_VERSION} (LGPL-2.1-or-later), built unmodified from "
               f"{FFMPEG_SOURCE[0]}\nsha256: {FFMPEG_SOURCE[1]}\n"
               f"dav1d {DAV1D_VERSION} (BSD-2-Clause), built unmodified from {DAV1D_SOURCE[0]}\n"
@@ -139,10 +141,12 @@ def build_notice(system):
     if system == "Linux":
         notice += "; GnuTLS and zlib are the system's shared libraries"
     elif system == "Windows":
-        url, digest = LLVM_MINGW[("Linux", "x86_64")]
+        url, digest = toolchain or LLVM_MINGW[("Linux", "x86_64")]
         notice += (f".\nCross-compiled with llvm-mingw {LLVM_MINGW_VERSION} ({url}, sha256 "
-                   f"{digest}); its compiler runtime is linked in (LICENSE-llvm-mingw), and "
-                   f"zlib {ZLIB_VERSION} (zlib license, {ZLIB_SOURCE[0]}) is linked statically")
+                   f"{digest}); its compiler runtime (LICENSE-llvm-mingw) and the mingw-w64 "
+                   "C runtime, libmingwex and gdtoa (LICENSE-mingw-w64-runtime) are linked in, "
+                   f"and zlib {ZLIB_VERSION} (zlib license, {ZLIB_SOURCE[0]}) is linked "
+                   "statically")
     return notice + (".\nThe build recipe is desktop/scripts/ffmpeg_bundle.py in "
                      "https://github.com/mizorewww/course2md. Replace these programs with any "
                      "ffmpeg build of your own: the app uses whichever ffmpeg is beside it.\n")
@@ -201,6 +205,7 @@ def _build(system, out, downloads):
     pkg_config = _tool("pkg-config", "pkgconf")
     licenses = {}
     cross = []
+    used_toolchain = None
     if system == "Windows":
         url, digest = LLVM_MINGW[host]
         toolchain = _extract(download(url, digest, downloads / Path(url).name), work / "toolchain")
@@ -208,6 +213,9 @@ def _build(system, out, downloads):
         # The cross pkg-config must only see the libraries built here.
         env["PKG_CONFIG_LIBDIR"] = env.pop("PKG_CONFIG_PATH")
         licenses["LICENSE-llvm-mingw"] = toolchain / "LICENSE.TXT"
+        licenses["LICENSE-mingw-w64-runtime"] = (
+            toolchain / "x86_64-w64-mingw32/share/mingw32/COPYING.MinGW-w64-runtime.txt")
+        used_toolchain = (url, digest)
         licenses["LICENSE-zlib"] = _windows_zlib(work, prefix, env, downloads)
         cross_file = work / "cross.ini"
         cross_file.write_text(
@@ -246,6 +254,7 @@ def _build(system, out, downloads):
     shutil.copy2(dav1d / "COPYING", staged / "licenses/LICENSE-dav1d")
     for name, path in licenses.items():
         shutil.copy2(path, staged / "licenses" / name)
+    (staged / "licenses/ffmpeg-build.txt").write_text(build_notice(system, used_toolchain))
     _write_manifest(staged)
     shutil.rmtree(out, ignore_errors=True)
     staged.replace(out)
@@ -300,7 +309,6 @@ def prepare(cache, system=None, machine=None):
     out = cache / cache_key(system, machine)
     if not _verified(out):
         _build(system, out, cache / "downloads")
-    (out / "licenses/ffmpeg-build.txt").write_text(build_notice(system))
     return out
 
 
