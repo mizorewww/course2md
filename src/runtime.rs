@@ -102,6 +102,9 @@ impl Drop for ManagedChild {
 #[derive(Clone, Default)]
 pub struct StderrTail {
     lines: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    /// Every line read so far, blank ones included: a caller can tell a
+    /// child that is still downloading from one that has gone quiet.
+    seen: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 const STDERR_TAIL_MAX: usize = 100;
@@ -109,6 +112,11 @@ const STDERR_TAIL_MAX: usize = 100;
 const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 impl StderrTail {
+    /// How many lines the child has written so far.
+    pub fn seen(&self) -> usize {
+        self.seen.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub fn tail(&self) -> String {
         self.lines.lock().map(|v| v.join("\n")).unwrap_or_default()
     }
@@ -128,12 +136,13 @@ impl StderrTail {
 /// 为一个已 spawn 的 stderr pipe 启动 drain 线程。
 /// `target` 是 tracing target（如 "llama_server" / "npu_worker"），用于区分日志来源。
 pub fn drain_stderr(stderr: std::process::ChildStderr, target: &'static str) -> StderrTail {
-    use std::io::BufRead;
     let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let shared = lines.clone();
+    let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = seen.clone();
     std::thread::spawn(move || {
-        let reader = std::io::BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
+        for_each_output_line(stderr, |line| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             // tracing 的 target: 只接受常量，来源名放消息前缀
             tracing::debug!("[{target}] {line}");
             if let Ok(mut v) = shared.lock()
@@ -145,9 +154,41 @@ pub fn drain_stderr(stderr: std::process::ChildStderr, target: &'static str) -> 
                     v.drain(..overflow);
                 }
             }
-        }
+        });
     });
-    StderrTail { lines }
+    StderrTail { lines, seen }
+}
+
+/// Reads a child's output to its end, one line at a time. Bytes that are not
+/// UTF-8 (a Windows tool writing in the ANSI code page) are replaced instead of
+/// ending the read: a reader that stops would close the pipe and make the
+/// child's next write fail. Carriage returns end a line too, so a progress bar
+/// that redraws with `\r` does not grow one unbounded line.
+fn for_each_output_line(reader: impl std::io::Read, mut line: impl FnMut(String)) {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(reader);
+    let mut buf = Vec::new();
+    loop {
+        let chunk = match reader.fill_buf() {
+            Ok([]) => break,
+            Ok(chunk) => chunk,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        };
+        let (used, end) = match chunk.iter().position(|b| matches!(b, b'\n' | b'\r')) {
+            Some(i) => (i + 1, true),
+            None => (chunk.len(), false),
+        };
+        buf.extend_from_slice(&chunk[..used - usize::from(end)]);
+        reader.consume(used);
+        if end && !buf.is_empty() {
+            line(String::from_utf8_lossy(&buf).into_owned());
+            buf.clear();
+        }
+    }
+    if !buf.is_empty() {
+        line(String::from_utf8_lossy(&buf).into_owned());
+    }
 }
 
 /// 有界命令输出（stdout/stderr 经临时文件捕获，不受 pipe 缓冲与 GUI stdin 影响）。
@@ -181,8 +222,12 @@ pub fn run_bounded(
     stderr.rewind()?;
     let mut out = String::new();
     let mut err = String::new();
-    stdout.take(64 * 1024 * 1024).read_to_string(&mut out)?;
-    stderr.take(64 * 1024 * 1024).read_to_string(&mut err)?;
+    let mut bytes = Vec::new();
+    stdout.take(64 * 1024 * 1024).read_to_end(&mut bytes)?;
+    out.push_str(&String::from_utf8_lossy(&bytes));
+    bytes.clear();
+    stderr.take(64 * 1024 * 1024).read_to_end(&mut bytes)?;
+    err.push_str(&String::from_utf8_lossy(&bytes));
     Ok(BoundedOutput {
         status,
         stdout: out,
@@ -315,6 +360,55 @@ pub fn http_agent(timeout: Duration) -> ureq::Agent {
         .build()
 }
 
+/// Windows: start a console helper without opening a console window. The
+/// engine runs without a console under the desktop app, and a console child
+/// would otherwise open one of its own. No effect elsewhere.
+pub fn hide_console(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// Ask a still-running child and everything it started to stop. Unix sends
+/// SIGTERM to the process group the child leads (spawned with
+/// `process_group(0)`); Windows has no groups, so `taskkill /T` walks the
+/// process tree. Launchers such as `uv run` start the real worker as a
+/// grandchild, which killing the direct child alone would leave running.
+pub fn terminate_tree(child: &mut ManagedChild) {
+    if child.try_wait().is_some() {
+        // Reaped: its id may already belong to another process.
+        return;
+    }
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGTERM);
+    }
+    #[cfg(windows)]
+    {
+        let mut cmd = Command::new(system32_program("taskkill.exe"));
+        cmd.args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let _ = hide_console(&mut cmd).status();
+    }
+}
+
+/// A Windows system tool by absolute path, so a same-named program earlier on
+/// PATH (or in the working directory) is never run in its place.
+#[cfg(windows)]
+pub fn system32_program(name: &str) -> PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .map(|root| root.join("System32").join(name))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
 /// 在 PATH 上查找可执行文件。
 /// 用 `which` crate 而非手写 PATH 遍历：正确处理 Windows PATHEXT
 /// （PATHEXT 含 `.bat`/`.cmd` 等）。
@@ -440,6 +534,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_lines_survive_bytes_that_are_not_utf8() {
+        // GBK "错误" followed by more output: the reader must keep going.
+        let input: &[u8] = b"\xb4\xed\xce\xf3 one\nprogress 10%\rprogress 20%\r\nlast";
+        let mut lines = Vec::new();
+        for_each_output_line(input, |line| lines.push(line));
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        assert!(lines[0].ends_with(" one"));
+        assert_eq!(lines[1..], ["progress 10%", "progress 20%", "last"]);
+    }
 
     #[test]
     fn workspace_lock_rejects_a_second_writer_and_releases_on_drop() {
