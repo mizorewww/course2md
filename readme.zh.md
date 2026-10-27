@@ -4,15 +4,14 @@
 
 [English](readme.md) · **中文** · [GitHub Wiki](https://github.com/mizorewww/course2md/wiki)
 
-**试用 2.0（RC16）：**[发布说明](https://github.com/mizorewww/course2md/releases/tag/v2.0.0-rc.16)。Homebrew 用户运行 `brew install --cask mizorewww/tap/course2md-gui@rc`。下面的安装方式提供的是稳定版。
-
 ## 功能特性
 
 - 幻灯片式笔记：画面变化时自动截图，文字稿按截图分段，保存为 `course.md` 与 `course.html`。
 - 支持 YouTube、Bilibili 与本地文件。有字幕时直接使用字幕，没有字幕时自动识别语音。
 - 语音识别可在本机完成：Apple 芯片开箱即用；其他系统可用显卡、CPU 或 Intel Core Ultra 的 NPU。也可选择云端服务，只有选择云端时音频才会上传。
-- 可选 AI 校对与摘要：支持任意 OpenAI 兼容服务、本地 Ollama 或 ChatGPT 订阅，默认关闭。
-- 桌面应用提供可暂停的后台任务、支持文件夹与搜索的笔记库、带目录与查找的阅读器，以及 10 套主题。
+- 可选 AI 校对与摘要：支持任意 OpenAI 兼容服务、本地 Ollama 或 ChatGPT 订阅，默认关闭。开启 AI 后还可生成双语笔记（每段下方附译文），口述的公式会写成数学公式并排版显示。
+- 桌面应用提供可暂停、可调整顺序的后台任务，支持嵌套文件夹与搜索的笔记库，带目录、查找和截图视图的阅读器，以及 10 套主题。
+- 语音模型下载支持断点续传和完整性校验；访问 Hugging Face 较慢时（如中国大陆）自动改用镜像。
 
 
 ## 界面语言
@@ -25,7 +24,7 @@
 
 ### macOS：M 系列芯片，macOS 15 及以上
 
-**已安装 Homebrew：**在终端运行以下命令，它会安装应用及视频工具 `ffmpeg`、`yt-dlp`：
+**已安装 Homebrew：**在终端运行以下命令，它会安装应用及工具 `ffmpeg`、`yt-dlp` 和 `aria2`：
 
 ```sh
 brew install --cask mizorewww/tap/course2md-gui
@@ -33,7 +32,7 @@ brew install --cask mizorewww/tap/course2md-gui
 
 装完后，从「访达 → 应用程序」打开 **course2md**。
 
-**不使用 Homebrew：**[下载 DMG](https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg)，打开后把 **course2md** 拖入「应用程序」。另外需要安装 `ffmpeg`，见 [macOS 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#macos-apple-silicon)。
+**不使用 Homebrew：**[下载 DMG](https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg)，打开后把 **course2md** 拖入「应用程序」。应用已内置 `yt-dlp`，另外需要安装 `ffmpeg`，见 [macOS 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#macos-apple-silicon)。
 
 ### Arch Linux / CachyOS：x86_64
 
@@ -48,7 +47,7 @@ yay -S course2md-gui-bin
 ### Windows：x64
 
 1. [下载 Windows 便携包（ZIP）](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip)，**完整解压**到固定文件夹。
-2. 在 PowerShell 中安装 `ffmpeg`：
+2. 便携包已内置 `yt-dlp` 和 `aria2`。在 PowerShell 中安装 `ffmpeg`：
 
    ```powershell
    winget install --id Gyan.FFmpeg -e
@@ -58,21 +57,21 @@ yay -S course2md-gui-bin
 
 ### Ubuntu / 其他 Linux：x86_64
 
-[下载 Linux 包（tar.gz）](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz)，按 [Linux 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#其他-linux-x64)安装 `ffmpeg` 和图形库，解压后运行 `./course2md-desktop`。基于 Ubuntu 24.04 构建。
+[下载 Linux 包（tar.gz）](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz)，按 [Linux 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#其他-linux-x64)安装 `ffmpeg` 和图形库，解压后运行 `./course2md-desktop`。包内已内置 `yt-dlp`。基于 Ubuntu 24.04 构建。
 
 Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用 [CLI](https://github.com/mizorewww/course2md/wiki/CLI-%E6%8C%87%E5%8D%97)。
 
 ## 第一次使用
 
-1. 打开 **course2md**，按提示选择笔记保存位置和语音识别方式。
+1. 打开 **course2md**，按引导选择语音识别方式，可选连接 AI 服务和 Bilibili，再准备识别模型。笔记保存在默认笔记库，可在「设置 → 存储」添加其他位置。
 2. 在「设置 → 应用」的「运行检查」中确认视频工具已被检测到。
-3. 添加视频链接或本地文件，确认预览后点击「开始转换」，完成后在「笔记库」打开笔记。
+3. 在「主页」粘贴视频链接或拖入本地视频，确认预览后点击「开始转换」，完成后在「笔记库」打开笔记。
 
 第一次在本机识别语音时会下载模型（1–2.4 GB），详见[首次使用指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#首次启动)。
 
 ## 安装 CLI
 
-CLI 与桌面应用共享同一份配置文件，可以同时安装。
+CLI 与桌面应用可以同时安装。两者共用 Bilibili 登录和已下载的识别模型，设置各自独立。
 
 **macOS / Linux（预编译二进制）：**
 
@@ -82,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh
 
 脚本把 `course2md` 装进 `~/bin`（可用 `COURSE2MD_BIN_DIR` 修改）。也可以用 `brew install mizorewww/tap/course2md`、`yay -S course2md-bin`，或从源码 `cargo install --path .`。
 
-需要 `ffmpeg`；在线链接还需要 `yt-dlp`（缺少时会自动安装）；非 Apple 系统的本地识别需要 `llama-server`。运行 `course2md doctor` 检查。
+需要 `ffmpeg`；在线链接还需要 `yt-dlp`（缺少时会自动安装）；安装 `aria2` 后模型多线程下载；非 Apple 系统的本地识别需要 `llama-server`。运行 `course2md doctor` 检查。
 
 ## 快速上手
 
@@ -111,7 +110,7 @@ course2md ./lecture.mp4 -o ./notes             # 指定输出根目录
 
 ## 配置
 
-设置保存在 `~/.config/course2md/config.toml`（Windows 为 `%APPDATA%\course2md\config.toml`），与桌面应用共用。命令行参数优先于配置文件。`course2md remove` 清除已保存的 AI 服务设置。
+CLI 的设置保存在 `~/.config/course2md/config.toml`（Windows 为 `%APPDATA%\course2md\config.toml`），命令行参数优先于配置文件。桌面应用的设置独立保存，在「设置」中修改。`course2md remove` 清除已保存的 AI 服务设置。
 
 ## 常见问题
 
@@ -120,6 +119,8 @@ course2md ./lecture.mp4 -o ./notes             # 指定输出根目录
 **Bilibili 视频失败或清晰度低。**运行 `course2md --login bilibili` 扫码登录；`--logout bilibili` 清除保存的登录。
 
 **模型下载有多大？**Apple 芯片约 1–2.3 GB（保存在 `~/Library/Caches/qwen3-speech/`），其他平台约 2.4 GB（`~/.cache/course2md/models/`）。可用 `course2md models prepare` 预先下载。
+
+**从 1.7 升级后，旧笔记在哪里？**1.x 生成的笔记仍以 `course.md` / `course.html` 保存在原目录，可以用任意编辑器或浏览器打开，但 2.0 的笔记库只列出 2.0 生成的笔记。已下载的模型、Bilibili 登录和 CLI 的 `config.toml` 继续可用；桌面应用的识别方式和 AI 服务需要在首次引导中重新设置。
 
 ## 文档与帮助
 
