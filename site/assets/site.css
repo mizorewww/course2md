@@ -36,19 +36,8 @@ img { display: block; }
   .grow { animation: c2m-grow linear both; animation-timeline: view(); animation-range: entry 0% cover 40%; }
 }
 
-/* Fallback without scroll-driven animations: site.js marks elements as they
-   enter the viewport and plays the same keyframes once. */
-@supports not (animation-timeline: view()) {
-  .io .reveal, .io .reveal-2, .io .reveal-3, .io .grow { opacity: 0; }
-  .io .reveal.seen { animation: c2m-rise .7s cubic-bezier(.2, .8, .2, 1) both; }
-  .io .reveal-2.seen { animation: c2m-rise .7s cubic-bezier(.2, .8, .2, 1) .08s both; }
-  .io .reveal-3.seen { animation: c2m-rise .7s cubic-bezier(.2, .8, .2, 1) .16s both; }
-  .io .grow.seen { animation: c2m-grow .8s cubic-bezier(.2, .8, .2, 1) both; }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .caret, .spin, .marquee, .fan-a, .fan-b, .fan-c, .nudge, .reveal, .reveal-2, .reveal-3, .grow { animation: none !important; }
-  .io .reveal, .io .reveal-2, .io .reveal-3, .io .grow { opacity: 1; }
 }
 
 /* Page --------------------------------------------------------------------- */

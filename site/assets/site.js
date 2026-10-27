@@ -6,9 +6,6 @@
   "use strict";
   var root = document.documentElement;
   root.classList.add("js");
-  if (!(window.CSS && CSS.supports && CSS.supports("animation-timeline: view()")) && "IntersectionObserver" in window) {
-    root.classList.add("io");
-  }
 
   function clamp(v) { return Math.max(0, Math.min(1, v)); }
   function $(sel, ctx) { return (ctx || document).querySelector(sel); }
@@ -208,16 +205,6 @@
     renderTerm();
     if (!reduce) {
       setInterval(function () { tt = (tt + 1) % 140; renderTerm(); }, 100);
-    }
-
-    // Reveal fallback for browsers without scroll-driven animations.
-    if (root.classList.contains("io")) {
-      var io = new IntersectionObserver(function (entries) {
-        entries.forEach(function (e) {
-          if (e.isIntersecting) { e.target.classList.add("seen"); io.unobserve(e.target); }
-        });
-      }, { threshold: 0.12 });
-      $$(".reveal, .reveal-2, .reveal-3, .grow").forEach(function (el) { io.observe(el); });
     }
   }
 
