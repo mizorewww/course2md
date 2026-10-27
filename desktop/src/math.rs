@@ -87,6 +87,66 @@ fn typeset(latex: &str, display: bool) -> Option<(String, f32, f32, f32)> {
     Some((formula.svg, formula.width, formula.height, formula.depth))
 }
 
+/// The asset path of slice `index` of `count` equal vertical slices of the
+/// formula at `path`, so a formula too wide for one image can be drawn as
+/// several. `None` once the cache has been reset; the next frame typesets
+/// the formula again.
+pub fn tile(path: &str, index: usize, count: usize) -> Option<SharedString> {
+    if count <= 1 {
+        return Some(SharedString::from(path.to_owned()));
+    }
+    let tile = SharedString::from(format!(
+        "{}-{index}of{count}.svg",
+        path.trim_end_matches(".svg")
+    ));
+    let mut cache = CACHE.lock().ok()?;
+    if !cache.svgs.contains_key(&tile) {
+        let svg = std::str::from_utf8(cache.svgs.get(path)?).ok()?;
+        let sliced = slice_svg(svg, index, count)?;
+        cache.svgs.insert(tile.clone(), sliced.into_bytes().into());
+    }
+    Some(tile)
+}
+
+/// The same drawing seen through slice `index` of `count` of its viewBox,
+/// with its width narrowed to match.
+fn slice_svg(svg: &str, index: usize, count: usize) -> Option<String> {
+    let header_end = svg.find('>')?;
+    let header = &svg[..header_end];
+    let attribute = |name: &str| {
+        let start = header.find(&format!(" {name}=\""))? + name.len() + 3;
+        let end = start + header[start..].find('"')?;
+        Some(start..end)
+    };
+    let view_box = attribute("viewBox")?;
+    let numbers: Vec<f64> = header[view_box.clone()]
+        .split_whitespace()
+        .map(|number| number.parse().ok())
+        .collect::<Option<_>>()?;
+    let [x, y, width, height] = numbers[..] else {
+        return None;
+    };
+    let slice = width / count as f64;
+    let mut header = header.to_owned();
+    // Replace the later attribute first, so the earlier range stays valid.
+    let mut edits = vec![(
+        view_box,
+        format!("{} {y} {slice} {height}", x + slice * index as f64),
+    )];
+    if let Some(width_range) = attribute("width") {
+        let unit: String = header[width_range.clone()]
+            .chars()
+            .skip_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        edits.push((width_range, format!("{slice}{unit}")));
+    }
+    edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+    for (range, value) in edits {
+        header.replace_range(range, &value);
+    }
+    Some(format!("{header}{}", &svg[header_end..]))
+}
+
 /// The SVG behind a formula's asset path.
 pub fn asset(path: &str) -> Option<Cow<'static, [u8]>> {
     if !path.starts_with(ASSET_PREFIX) {
@@ -120,7 +180,20 @@ impl Formula {
 
 #[cfg(test)]
 mod tests {
-    use super::{CACHE, CACHE_LIMIT, asset, formula};
+    use super::{CACHE, CACHE_LIMIT, asset, formula, slice_svg, tile};
+
+    #[test]
+    fn a_wide_formula_is_sliced_into_equal_views_of_one_drawing() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 40" width="300pt" height="40pt"><path d="M0 0"/></svg>"#;
+        assert_eq!(
+            slice_svg(svg, 1, 3).unwrap(),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 0 100 40" width="100pt" height="40pt"><path d="M0 0"/></svg>"#
+        );
+        let typeset = formula("a+b+c", false).unwrap();
+        assert_eq!(tile(&typeset.path(), 0, 1).unwrap(), typeset.path());
+        let second = tile(&typeset.path(), 1, 2).unwrap();
+        assert!(asset(&second).is_some());
+    }
 
     #[test]
     fn the_formula_cache_is_bounded_and_never_reuses_a_path() {

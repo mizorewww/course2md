@@ -30,8 +30,9 @@ use std::{cell::RefCell, ops::Range, rc::Rc};
 const PLACEHOLDER: char = '\u{00A0}';
 /// Allows a line break on either side of an inline formula.
 const BREAK: char = '\u{200B}';
-/// The widest a formula image is drawn, in device pixels. GPUI rasterises an
-/// SVG at twice that size and does not draw one wider than 8192 pixels.
+/// The widest one formula image is drawn, in device pixels: GPUI rasterises an
+/// SVG at twice that size and draws none wider than 8192 pixels, so a wider
+/// formula is drawn as several tiles side by side.
 const MAX_FORMULA_PIXELS: f32 = 4000.;
 
 /// How the paragraph copies.
@@ -574,6 +575,11 @@ pub struct NoteTextLayout {
     margin: Pixels,
 }
 
+/// How many tiles a formula `width` pixels wide is drawn in.
+fn tile_count(width: f32, scale_factor: f32) -> usize {
+    ((width * scale_factor / MAX_FORMULA_PIXELS).ceil() as usize).max(1)
+}
+
 /// Whether an inline formula fits a line `width` wide (unknown: it does).
 fn fits_inline(formula: Pixels, width: Option<Pixels>, margin: Pixels) -> bool {
     width.is_none_or(|width| formula <= width - margin)
@@ -632,7 +638,6 @@ impl Element for NoteText {
             .max(px(1.));
         let margin = space * 2.;
         let em = f32::from(font_size);
-        let scale_factor = window.scale_factor();
         let placeholders = |width: f32| (width / f32::from(space)).ceil() as usize;
         let mut inline_widths = Vec::new();
         let label = match &self.copy {
@@ -641,13 +646,10 @@ impl Element for NoteText {
         };
         let planned = plan(&self.source, label.as_deref(), |latex, display| {
             let formula = crate::math::formula(latex, display)?;
-            // A formula is drawn as one image, which the GPU cannot hold
-            // beyond a texture's size: an extremely wide one is drawn smaller.
-            let fit = (MAX_FORMULA_PIXELS / scale_factor / (formula.width() * em)).min(1.);
             let full = FormulaSize {
-                width: formula.width() * em * fit,
-                height: (formula.height() + formula.depth()) * em * fit,
-                ascent: formula.height() * em * fit,
+                width: formula.width() * em,
+                height: (formula.height() + formula.depth()) * em,
+                ascent: formula.height() * em,
             };
             let row = Placement::Row {
                 placeholders: placeholders(full.width),
@@ -1038,14 +1040,32 @@ impl Element for Line {
                 Some(ascent) => start.y + line_height / 2. + self.font_size * 0.35 - ascent,
                 None => start.y + (line_height - formula.height) / 2.,
             };
-            let _ = window.paint_svg(
-                Bounds::new(Point::new(x, y), gpui::size(formula.width, formula.height)),
-                formula.path.clone(),
-                None,
-                TransformationMatrix::unit(),
-                self.ink,
-                cx,
-            );
+            // A formula wider than one image is drawn as tiles, each the
+            // same drawing seen through its own slice, and only the tiles
+            // in view are drawn.
+            let tiles = tile_count(f32::from(formula.width), window.scale_factor());
+            let tile_width = formula.width / tiles as f32;
+            let visible = window.content_mask().bounds;
+            for tile in 0..tiles {
+                let bounds = Bounds::new(
+                    Point::new(x + tile_width * tile as f32, y),
+                    gpui::size(tile_width, formula.height),
+                );
+                if !bounds.intersects(&visible) {
+                    continue;
+                }
+                let Some(path) = crate::math::tile(&formula.path, tile, tiles) else {
+                    continue;
+                };
+                let _ = window.paint_svg(
+                    bounds,
+                    path,
+                    None,
+                    TransformationMatrix::unit(),
+                    self.ink,
+                    cx,
+                );
+            }
         }
     }
 }
