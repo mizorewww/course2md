@@ -160,7 +160,8 @@ jobs:
           chmod 600 "$p8"
           echo "APPLE_API_KEY_PATH=$p8" >> "$GITHUB_ENV"
       - name: Package native app
-        timeout-minutes: 30
+        # Includes building the bundled ffmpeg when the tool cache is cold.
+        timeout-minutes: 45
         run: python -u desktop/scripts/package.py --no-build
       - uses: actions/upload-artifact@v4
         with:

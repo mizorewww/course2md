@@ -15,9 +15,12 @@ import urllib.request
 import zipfile
 
 from dmg import build_install_dmg
+import ffmpeg_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT.parent
+# Bundled tools that are built or downloaded once and reused by later runs.
+TOOL_CACHE = ROOT / ".cache/tools"
 
 
 def _load_versioning():
@@ -50,7 +53,10 @@ def run(*args, env=None):
     subprocess.run(args, cwd=PROJECT, check=True, env=env)
 
 
-def copy_licenses(dest):
+def copy_licenses(dest, tools=()):
+    """The app's licenses, plus those of bundled tools (`tools`: license files)."""
+    for path in tools:
+        shutil.copy2(path, dest / path.name)
     shutil.copy2(PROJECT / "LICENSE", dest / "LICENSE")
     shutil.copy2(ROOT / "assets/material/LICENSE", dest / "LICENSE-material-icons")
     shutil.copy2(ROOT / "assets/outline/LICENSE", dest / "LICENSE-lucide-icons")
@@ -164,6 +170,8 @@ def parse_args(argv=None, environ=os.environ):
                              "(COURSE2MD_YTDLP)")
     parser.add_argument("--no-ytdlp", action="store_true", default=flag("COURSE2MD_NO_YTDLP"),
                         help="do not bundle yt-dlp (COURSE2MD_NO_YTDLP)")
+    parser.add_argument("--no-ffmpeg", action="store_true", default=flag("COURSE2MD_NO_FFMPEG"),
+                        help="do not bundle ffmpeg and ffprobe (COURSE2MD_NO_FFMPEG)")
     parser.add_argument("--no-aria2", action="store_true", default=flag("COURSE2MD_NO_ARIA2"),
                         help="Windows: do not bundle aria2 (COURSE2MD_NO_ARIA2)")
     parser.add_argument("--no-apple", action="store_true", default=flag("COURSE2MD_NO_APPLE"),
@@ -195,6 +203,11 @@ def main():
     except ImportError as error:
         raise SystemExit("Install packaging tools: python -m pip install -r "
                          "desktop/scripts/requirements-packaging.txt") from error
+    if distribution and not args.no_ffmpeg and ffmpeg_bundle.supported(system, platform.machine()):
+        if missing := ffmpeg_bundle.missing_build_tools(TOOL_CACHE):
+            raise SystemExit(f"Building the bundled ffmpeg needs {', '.join(missing)}: python -m pip "
+                             "install -r desktop/scripts/requirements-packaging.txt (nasm: your "
+                             "system package manager)")
     profile = "debug" if args.debug else "release"
     flags = [] if args.debug else ["--release", *(["--locked"] if distribution else [])]
     revisions = {
@@ -261,18 +274,25 @@ def main():
         bundled = bundle_ytdlp(binaries / f"yt-dlp{suffix}", required=distribution, local=args.ytdlp)
         if bundled:
             print(f"bundled {bundled.name}")
+    # ffmpeg and ffprobe sit beside the engine too; it runs those before PATH.
+    tool_licenses = []
+    if not args.no_ffmpeg:
+        bundled = ffmpeg_bundle.bundle(binaries, TOOL_CACHE, required=distribution)
+        if bundled:
+            placed, tool_licenses = bundled
+            print("bundled " + ", ".join(path.name for path in placed))
     if system == "Windows" and not args.no_aria2:
         if bundle_aria2(binaries, base, required=distribution):
             print("bundled aria2c.exe")
     if system == "Windows":
         verify_windows_icon(binaries / "course2md-desktop.exe")
-    copy_licenses(base)
+    copy_licenses(base, tool_licenses)
     shutil.copy2(PROJECT / "readme.md", base / "README.md")
     # A development archive follows main and must not claim the previous release
     # revisions. Release builds have already checked this snapshot against the lock.
     (base / "sources.lock.json").write_text(json.dumps(revisions, indent=2) + "\n")
     if system == "Darwin":
-        copy_licenses(resources)
+        copy_licenses(resources, tool_licenses)
         shutil.copy2(base / "sources.lock.json", resources / "sources.lock.json")
         identity = "-" if args.app_only else args.signing_identity
         signed = identity != "-"
@@ -281,6 +301,10 @@ def main():
             signing.extend(["--options", "runtime", "--timestamp"])
         run("codesign", *signing, str(binaries / "course2md"))
         run("codesign", *signing, str(binaries / "course2md-desktop"))
+        # Bundled ffmpeg/ffprobe are nested code: hardened runtime, no entitlements.
+        for tool in ("ffmpeg", "ffprobe"):
+            if (binaries / tool).is_file():
+                run("codesign", *signing, str(binaries / tool))
         # Sign the bundled yt-dlp as nested code; --deep verification and notarization require it.
         # Its PyInstaller payload loads a Python framework with a different Team ID, so
         # library validation must be disabled for this nested executable.
