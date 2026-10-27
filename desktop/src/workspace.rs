@@ -2543,7 +2543,9 @@ impl Workspace {
         for existing in existing_roots {
             if existing.canonicalize().ok().as_ref() == Some(&canonical) {
                 return Ok(PreparedLibrary {
-                    root: canonical,
+                    // The root as saved, which may predate canonical roots:
+                    // registering then matches it without touching the disk.
+                    root: existing.clone(),
                     name,
                     id: String::new(),
                     duplicate: true,
@@ -2586,11 +2588,7 @@ impl Workspace {
                 .state
                 .libraries
                 .iter()
-                // A root saved before it was canonical still names this library.
-                .find(|library| {
-                    library.root == prepared.root
-                        || library.root.canonicalize().ok().as_ref() == Some(&prepared.root)
-                })
+                .find(|library| library.root == prepared.root)
             {
                 let id = existing.id.clone();
                 if prepared.make_default {
@@ -3421,6 +3419,35 @@ mod tests {
         assert_eq!(failed.intent, Intent::Quit);
         assert_eq!(failed.error.as_deref(), Some("保留这次失败原因"));
         assert!(failed.unread);
+    }
+
+    #[test]
+    fn re_adding_a_library_saved_under_a_non_canonical_root_finds_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("library")).unwrap();
+        std::fs::create_dir_all(dir.path().join("other")).unwrap();
+        // Saved as typed, with a `..` component: not the canonical spelling.
+        let saved = dir.path().join("other").join("..").join("library");
+        let mut ws = Workspace::open_at_inline(
+            dir.path().join("workspace.json"),
+            saved.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        let id = ws.state.default_library.clone();
+        assert_eq!(ws.state.library(&id).unwrap().root, saved);
+        let roots: Vec<_> = ws.state.libraries.iter().map(|l| l.root.clone()).collect();
+        let ids: Vec<_> = ws.state.libraries.iter().map(|l| l.id.clone()).collect();
+        let prepared = Workspace::prepare_library(
+            dir.path().join("library"),
+            "Again".into(),
+            false,
+            &roots,
+            &ids,
+        )
+        .unwrap();
+        assert!(prepared.duplicate);
+        assert_eq!(ws.register_prepared_library(&prepared).unwrap(), id);
     }
 
     fn test_workspace(dir: &Path) -> Workspace {
