@@ -33,6 +33,24 @@ class PinTests(unittest.TestCase):
             self.assertEqual(tools["uv"].subdir, "")
         self.assertNotIn(("Darwin", "arm64"), prebuilt.PREBUILT)
 
+    def test_only_llama_servers_libraries_are_kept(self):
+        import fnmatch
+        names = {
+            ("Windows", "AMD64"): (["llama-server.exe", "llama-server-impl.dll", "ggml-cpu-zen4.dll",
+                                    "ggml-vulkan.dll", "libomp.dll", "mtmd.dll"],
+                                   ["llama-cli.exe", "llama-cli-impl.dll", "llama-bench-impl.dll",
+                                    "ggml-rpc.dll", "ggml-rpc-server.exe"]),
+            ("Linux", "x86_64"): (["llama-server", "libllama.so.0", "libllama.so.0.7.0",
+                                   "libggml-cpu-haswell.so", "libggml-vulkan.so"],
+                                  ["libllama-cli-impl.so", "libllama-quantize-impl.so",
+                                   "libggml-rpc.so", "ggml-rpc-server"]),
+        }
+        for platform, (kept, dropped) in names.items():
+            (llama,) = [tool for tool in prebuilt.PREBUILT[platform] if tool.name == "llama.cpp"]
+            keeps = lambda name: any(fnmatch.fnmatch(name, p) for p in llama.keep)
+            self.assertTrue(all(map(keeps, kept)), platform)
+            self.assertFalse(any(map(keeps, dropped)), platform)
+
 
 class StageTests(unittest.TestCase):
     def setUp(self):

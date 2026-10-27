@@ -34,6 +34,14 @@ _UV_LICENSES = {
 }
 
 
+def _LLAMA_SERVER_LIBRARIES(pattern):
+    """llama-server's own libraries and the ggml backends it loads (every CPU
+    variant and Vulkan); the archives' other tools and the RPC backend stay out."""
+    return tuple(pattern.format(name) for name in (
+        "llama-server-impl", "llama-common", "llama", "mtmd", "ggml", "ggml-base", "ggml-cpu-*",
+        "ggml-vulkan"))
+
+
 @dataclass(frozen=True)
 class Prebuilt:
     name: str
@@ -54,7 +62,8 @@ PREBUILT = {
                  keep=("uv.exe",), licenses=_UV_LICENSES),
         Prebuilt("llama.cpp", f"{_LLAMA}/llama-{LLAMA_VERSION}-bin-win-vulkan-x64.zip",
                  "cea8a40a2b3e5996df0e0c1e598f65106dd60adc19da9d234f6ef9773b95349b",
-                 keep=("llama-server.exe", "*.dll"), subdir="llama.cpp",
+                 keep=("llama-server.exe", *_LLAMA_SERVER_LIBRARIES("{}.dll"), "libomp.dll"),
+                 subdir="llama.cpp",
                  licenses={"LICENSE-llama.cpp": _LLAMA_LICENSE,
                            "LICENSE-llvm-openmp": "LICENSE-LLVM-OpenMP"}),
     ],
@@ -65,7 +74,9 @@ PREBUILT = {
         # RUNPATH is $ORIGIN, so the libraries load from the same directory.
         Prebuilt("llama.cpp", f"{_LLAMA}/llama-{LLAMA_VERSION}-bin-ubuntu-vulkan-x64.tar.gz",
                  "fd88a932b46ec418e9eff979c35ba3cbbb87f8b6ad308f2d02f095ee141d1b73",
-                 keep=("llama-server", "lib*.so", "lib*.so.*"), subdir="llama.cpp",
+                 keep=("llama-server", *_LLAMA_SERVER_LIBRARIES("lib{}.so"),
+                       *_LLAMA_SERVER_LIBRARIES("lib{}.so.*")),
+                 subdir="llama.cpp",
                  licenses={"LICENSE-llama.cpp": "LICENSE"}),
     ],
 }
