@@ -102,8 +102,9 @@ impl Drop for ManagedChild {
 #[derive(Clone, Default)]
 pub struct StderrTail {
     lines: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-    /// Every line read so far, blank ones included: a caller can tell a
-    /// child that is still downloading from one that has gone quiet.
+    /// How many non-empty lines (progress redraws included) the child has
+    /// written: a caller can tell a child that is still downloading from one
+    /// that has gone quiet.
     seen: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
