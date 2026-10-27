@@ -60,6 +60,7 @@ pub struct NoteText {
     source_position: Option<(usize, SourcePosition)>,
     selection_color: Hsla,
     surface: Hsla,
+    group: Option<SharedString>,
     child: Option<AnyElement>,
 }
 
@@ -74,6 +75,7 @@ impl NoteText {
             source_position: None,
             selection_color: transparent_black(),
             surface: crate::theme::color(crate::theme::SURFACE).into(),
+            group: None,
             child: None,
         }
     }
@@ -114,6 +116,13 @@ impl NoteText {
     /// The surface behind the text, which a wide formula row fades into.
     pub fn surface(mut self, color: Hsla) -> Self {
         self.surface = color;
+        self
+    }
+
+    /// Paragraphs laid out at one width, such as the article column: a new
+    /// one assumes the group's width until it has its own.
+    pub fn width_group(mut self, group: impl Into<SharedString>) -> Self {
+        self.group = Some(group.into());
         self
     }
 }
@@ -590,6 +599,16 @@ fn tile_count(width: f32, scale_factor: f32) -> usize {
     ((width * scale_factor / MAX_FORMULA_PIXELS).ceil() as usize).max(1)
 }
 
+thread_local! {
+    /// The width each group of paragraphs was last laid out at.
+    static GROUP_WIDTHS: RefCell<std::collections::HashMap<SharedString, Pixels>> =
+        RefCell::default();
+}
+
+fn group_width(group: &SharedString) -> Option<Pixels> {
+    GROUP_WIDTHS.with(|widths| widths.borrow().get(group).copied())
+}
+
 /// Whether an inline formula fits a line `width` wide (unknown: it does).
 fn fits_inline(formula: Pixels, width: Option<Pixels>, margin: Pixels) -> bool {
     width.is_none_or(|width| formula <= width - margin)
@@ -614,7 +633,7 @@ impl Element for NoteText {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, NoteTextLayout) {
-        let (handle, shared, width) = window.with_element_state(
+        let (handle, shared, own_width) = window.with_element_state(
             global_id.expect("note text has a stable element id"),
             |retained: Option<Retained>, _| {
                 let retained = retained.unwrap_or_else(|| Retained::new(self.source.clone(), cx));
@@ -628,6 +647,10 @@ impl Element for NoteText {
                 )
             },
         );
+        // Before its first layout, a paragraph assumes the width last found
+        // for its group (the article column, the viewer), so a formula too
+        // wide for the line takes its row from the first frame.
+        let width = own_width.or_else(|| self.group.as_ref().and_then(group_width));
         let rem = window.rem_size();
         let style = window.text_style();
         let font_size = style.font_size.to_pixels(rem);
@@ -872,6 +895,9 @@ impl Element for NoteText {
             cx,
         );
         let width = bounds.size.width;
+        if let Some(group) = &self.group {
+            GROUP_WIDTHS.with(|widths| widths.borrow_mut().insert(group.clone(), width));
+        }
         if state.placed_for != Some(width) {
             if let Some(global_id) = global_id {
                 window.with_element_state(global_id, |retained: Option<Retained>, _| {

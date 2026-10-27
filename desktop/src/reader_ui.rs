@@ -1197,10 +1197,13 @@ fn paragraph(
         .child(
             reader_text(id, text, order as u64, highlights, search_target)
                 .copy(copy)
+                .width_group(place.group())
                 .surface(place.surface().into()),
         )
 }
 
+/// Where a paragraph sits: paragraphs in one place share a width (so a
+/// newly shown one places its formulas right away) and a surface.
 #[derive(Clone, Copy)]
 enum TextPlace {
     Article,
@@ -1210,6 +1213,15 @@ enum TextPlace {
 }
 
 impl TextPlace {
+    fn group(self) -> &'static str {
+        match self {
+            Self::Article => "article",
+            Self::Summary => "summary",
+            Self::KeyPoint => "key-point",
+            Self::Viewer => "viewer",
+        }
+    }
+
     fn surface(self) -> Rgba {
         match self {
             Self::Summary | Self::KeyPoint => summary_tint(),
