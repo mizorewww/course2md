@@ -379,6 +379,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 关于	关于	About	關於	情報
 关于 course2md	关于 course2md	About course2md	關於 course2md	course2mdについて
 关闭	关闭	Close	關閉	閉じる
+最小化	最小化	Minimize	最小化	最小化
+最大化	最大化	Maximize	最大化	最大化
+还原	还原	Restore	還原	元に戻す
 关闭 / disabled	关闭	Disabled	關閉	オフ
 关闭 AI 校对并保留凭据 / Disable AI proofreading and keep credentials	关闭 AI 校对并保留凭据	Disable AI proofreading and keep credentials	關閉 AI 校對並保留憑證	AI 校正をオフにして資格情報を保持する
 关闭完成后的校对提示 / Hide the completion tip	关闭完成后的校对提示	Hide the completion tip	關閉完成後的校對提示	完了後の校正ヒントを非表示

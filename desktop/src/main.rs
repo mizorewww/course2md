@@ -44,6 +44,7 @@ mod task_runner;
 mod task_ui;
 mod theme;
 mod views;
+mod window_controls;
 mod workspace;
 
 use backend::{Done, EngineEvent, Event, Job};

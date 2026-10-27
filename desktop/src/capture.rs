@@ -15,6 +15,9 @@
 //! 1800) is the wait after each navigation; `COURSE2MD_CAPTURE_PALETTE`
 //! (a palette name such as `catppuccin_mocha`) and `COURSE2MD_CAPTURE_SCALE`
 //! (1, 1.25, 1.5 or 2) override the saved appearance without changing it.
+//! `COURSE2MD_CAPTURE_CHROME` (`windows` or `linux`) draws that platform's
+//! caption buttons and leading edge instead of this one's, so the Windows and
+//! Linux title bars can be reviewed from a macOS capture.
 //!
 //! `input:<steps>` dispatches simulated pointer and keyboard input to the
 //! window as it is (see `simulate_input`), steps joined by `+`, then
@@ -40,6 +43,7 @@ use std::{cell::Cell, path::PathBuf, time::Duration};
 thread_local! {
     static PALETTE: Cell<Option<PaletteId>> = const { Cell::new(None) };
     static SCALE: Cell<Option<f32>> = const { Cell::new(None) };
+    static CAPTION: Cell<Option<crate::window_controls::Caption>> = const { Cell::new(None) };
     /// The saved library presentation (cards, grouped), restored before each
     /// library shot so one shot's state does not leak into the next.
     static LIBRARY_PRESENTATION: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
@@ -65,6 +69,11 @@ pub fn override_appearance(appearance: &mut crate::palettes::ThemePreferences) {
     }
 }
 
+/// The caption buttons to draw instead of this platform's.
+pub fn caption_override() -> Option<crate::window_controls::Caption> {
+    CAPTION.with(Cell::get)
+}
+
 pub fn scale_override() -> Option<f32> {
     SCALE.with(Cell::get)
 }
@@ -83,6 +92,15 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
         .and_then(|value| value.parse().ok())
     {
         SCALE.with(|cell| cell.set(Some(scale)));
+    }
+    if let Ok(chrome) = std::env::var("COURSE2MD_CAPTURE_CHROME") {
+        let caption = match chrome.as_str() {
+            "windows" => crate::window_controls::Caption::Windows,
+            "linux" => crate::window_controls::Caption::Linux,
+            _ => panic!("unknown capture chrome {chrome}"),
+        };
+        CAPTION.with(|cell| cell.set(Some(caption)));
+        window.refresh();
     }
     let delay = Duration::from_millis(
         std::env::var("COURSE2MD_CAPTURE_DELAY_MS")
