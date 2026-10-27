@@ -4196,7 +4196,6 @@ impl Desktop {
         }
     }
 
-    /// Whether the title bar offers the video (see `reader_play_button`).
     /// What the title bar's play button does: the kept offline copy first,
     /// then the source.
     fn play_reader_video(&mut self, cx: &mut Context<Self>) {
@@ -4209,6 +4208,7 @@ impl Desktop {
         }
     }
 
+    /// Whether the title bar offers the video (see `reader_play_button`).
     fn reader_can_play(&self) -> bool {
         matches!(self.reader_ui.offline_video, OfflineVideo::Available(_))
             || match self.reader_source() {
