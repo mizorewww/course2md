@@ -52,9 +52,7 @@ pub(crate) struct Request {
 impl Request {
     /// Aliases share the canonical cache entry; an unsupported value is checked as typed.
     pub(crate) fn new(provider: AsrProvider, model: Option<&str>, root: &Path) -> Self {
-        let model = model
-            .filter(|model| !model.trim().is_empty())
-            .unwrap_or(course2md::config::default_model(provider));
+        let model = course2md::config::effective_model(provider, model);
         Self {
             provider,
             model: canonical_model(provider, model).unwrap_or_else(|_| model.to_owned()),

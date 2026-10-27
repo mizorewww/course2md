@@ -315,6 +315,30 @@ pub fn retired_npu_model_notice() -> &'static str {
     crate::tr!("Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo")
 }
 
+/// Prints [`retired_npu_model_notice`] to stderr, once per process however
+/// many times the configuration is read; `source` names the file it came from.
+pub fn announce_retired_npu_model(source: Option<&Path>) {
+    static NOTICE: std::sync::Once = std::sync::Once::new();
+    NOTICE.call_once(|| match source {
+        Some(path) => eprintln!("{} ({})", retired_npu_model_notice(), path.display()),
+        None => eprintln!("{}", retired_npu_model_notice()),
+    });
+}
+
+/// The model a backend runs for a saved choice: the backend default when none
+/// is saved, or when the saved one is a retired Qwen3 choice and the backend
+/// (perhaps picked automatically) is the NPU.
+pub fn effective_model(provider: AsrProvider, saved: Option<&str>) -> &str {
+    let mut model = saved
+        .filter(|model| !model.trim().is_empty())
+        .map(str::to_owned);
+    if model.is_none() || migrate_retired_npu_model(Some(provider), &mut model) {
+        default_model(provider)
+    } else {
+        saved.unwrap_or_default()
+    }
+}
+
 /// 截图发射模式：first（首个不同帧）| stable（等待画面稳定，适合动画课件）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1206,6 +1230,20 @@ mod tests {
         }
         let error = canonical_model(AsrProvider::Npu, "qwen3-1.7b").unwrap_err();
         assert!(error.to_string().contains("whisper"), "{error}");
+        assert_eq!(
+            effective_model(AsrProvider::Npu, Some("qwen3-1.7b")),
+            "whisper"
+        );
+        assert_eq!(effective_model(AsrProvider::Npu, Some(" ")), "whisper");
+        assert_eq!(effective_model(AsrProvider::Npu, None), "whisper");
+        assert_eq!(
+            effective_model(AsrProvider::Npu, Some("whisper-tiny")),
+            "whisper-tiny"
+        );
+        assert_eq!(
+            effective_model(AsrProvider::Cpu, Some("qwen3-1.7b")),
+            "qwen3-1.7b"
+        );
     }
 
     #[test]

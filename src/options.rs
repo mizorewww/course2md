@@ -50,7 +50,7 @@ pub fn resolve(
         .or_else(|| d.out.clone())
         .map(config::expand_tilde)
         .unwrap_or_else(|| config::DEFAULT_OUT_DIR.into());
-    Ok(config::PipelineConfig {
+    let mut cfg = config::PipelineConfig {
         url: source,
         out_root,
         similarity: opts
@@ -122,7 +122,16 @@ pub fn resolve(
             .transcript_source
             .or(d.transcript_source)
             .unwrap_or_default(),
-    })
+    };
+    // Without a configured provider the backend is chosen here, and may be the
+    // NPU: a Qwen3 model saved for another backend is not run on it. A model
+    // given on the command line stays the user's explicit (refused) choice.
+    if opts.asr_model.is_none()
+        && config::migrate_retired_npu_model(Some(cfg.provider), &mut cfg.asr_model)
+    {
+        config::announce_retired_npu_model(None);
+    }
+    Ok(cfg)
 }
 
 /// 云端 STT 配置合并：CLI > 配置文件 > 默认（OpenRouter）。
@@ -165,6 +174,33 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_qwen3_default_is_not_run_on_the_npu() {
+        let mut file = settings::ConfigFile::default();
+        file.defaults.asr_model = Some("qwen3-1.7b".into());
+        let npu = RunOpts {
+            provider: Some(config::AsrProvider::Npu),
+            ..Default::default()
+        };
+        let cfg = resolve("video".into(), &npu, &file).unwrap();
+        assert_eq!(cfg.asr_model, None);
+        cfg.validate_asr_with_auth(true, true).unwrap();
+        // Another backend keeps it, and an explicit --asr-model stays as given.
+        let cpu = RunOpts {
+            provider: Some(config::AsrProvider::Cpu),
+            ..Default::default()
+        };
+        let cfg = resolve("video".into(), &cpu, &file).unwrap();
+        assert_eq!(cfg.asr_model.as_deref(), Some("qwen3-1.7b"));
+        let explicit = RunOpts {
+            asr_model: Some("qwen3-1.7b".into()),
+            ..npu
+        };
+        let cfg = resolve("video".into(), &explicit, &file).unwrap();
+        assert_eq!(cfg.asr_model.as_deref(), Some("qwen3-1.7b"));
+        assert!(cfg.validate_asr_with_auth(true, true).is_err());
+    }
 
     #[test]
     fn explicit_false_overrides_config_and_invalid_values_are_not_clamped() {

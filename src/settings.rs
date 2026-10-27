@@ -144,14 +144,7 @@ pub fn load() -> anyhow::Result<ConfigFile> {
     // repeats (once per run) until its asr_model line is changed.
     if crate::config::migrate_retired_npu_model(cfg.defaults.provider, &mut cfg.defaults.asr_model)
     {
-        static NOTICE: std::sync::Once = std::sync::Once::new();
-        NOTICE.call_once(|| {
-            eprintln!(
-                "{} ({})",
-                crate::config::retired_npu_model_notice(),
-                p.display()
-            )
-        });
+        crate::config::announce_retired_npu_model(Some(&p));
     }
     Ok(cfg)
 }
