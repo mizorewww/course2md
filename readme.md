@@ -81,8 +81,8 @@ Conversions run as tasks you can pause, resume and reorder. Each step shows its 
 Choose from 10 themes, adjust the text size and reduce motion in **Settings → Appearance**.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/appearance-dark.png">
-  <img src="docs/images/en/appearance-light.png" alt="Appearance settings with theme previews">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/settings-dark.png">
+  <img src="docs/images/en/settings-light.png" alt="Appearance settings with theme previews">
 </picture>
 
 ## Install

@@ -81,8 +81,8 @@
 在「设置 → 外观」选择 10 套主题之一，调整界面文字大小，或减少动态效果。
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/zh/appearance-dark.png">
-  <img src="docs/images/zh/appearance-light.png" alt="外观设置：主题预览">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/zh/settings-dark.png">
+  <img src="docs/images/zh/settings-light.png" alt="外观设置：主题预览">
 </picture>
 
 ## 安装
