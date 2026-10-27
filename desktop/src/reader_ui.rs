@@ -1184,7 +1184,13 @@ fn paragraph(
         .font_weight(FontWeight::NORMAL)
         .line_height(relative(1.8));
     if crate::math::has_math(&text) {
-        return view.child(math_paragraph(&text, READER_BODY, color(INK).into()));
+        return view.child(math_paragraph(
+            id,
+            text,
+            order,
+            READER_BODY,
+            color(INK).into(),
+        ));
     }
     view.child(reader_text(
         id,
@@ -1197,8 +1203,17 @@ fn paragraph(
 
 /// Prose with formulas. GPUI text cannot hold inline elements, so the prose is
 /// laid out as wrapping tokens (one per CJK character, one per Latin word)
-/// around the typeset formulas; a display formula takes a centered row.
-fn math_paragraph(text: &str, em: Rems, ink: Hsla) -> Div {
+/// around the typeset formulas; a display formula takes a centered row. The
+/// paragraph takes part in text selection as a whole, and copying a formula
+/// gives its LaTeX source (see `math_selection`).
+fn math_paragraph(
+    id: ElementId,
+    text: SharedString,
+    order: usize,
+    em: Rems,
+    ink: Hsla,
+) -> crate::math_selection::SelectableTokens {
+    let tokens = crate::math_selection::Tokens::default();
     let mut view = v_flex().w_full().min_w_0().gap_2();
     let mut row = Vec::new();
     let flush = |view: Div, row: &mut Vec<AnyElement>| {
@@ -1215,7 +1230,15 @@ fn math_paragraph(text: &str, em: Rems, ink: Hsla) -> Div {
             )
         }
     };
-    for piece in crate::math::pieces(text) {
+    let word = |source: Range<usize>| {
+        tokens.token(
+            source.clone(),
+            div()
+                .whitespace_nowrap()
+                .child(SharedString::from(text[source].to_owned())),
+        )
+    };
+    for (source, piece) in crate::math_selection::piece_sources(&text) {
         match piece {
             crate::math::Piece::Text(prose) => {
                 // Closing punctuation never starts a line: it stays with the
@@ -1224,23 +1247,38 @@ fn math_paragraph(text: &str, em: Rems, ink: Hsla) -> Div {
                     .char_indices()
                     .find(|(_, c)| !closes_line(*c))
                     .map_or(prose.len(), |(index, _)| index);
-                let (lead, rest) = prose.split_at(split);
+                let lead = source.start..source.start + split;
                 match (!lead.is_empty()).then(|| row.pop()).flatten() {
                     Some(previous) => row.push(
                         h_flex()
                             .flex_none()
                             .items_center()
                             .child(previous)
-                            .child(
-                                div()
-                                    .whitespace_nowrap()
-                                    .child(SharedString::from(lead.to_owned())),
-                            )
+                            .child(word(lead))
                             .into_any_element(),
                     ),
-                    None => row.extend(prose_tokens(lead)),
+                    None => row.extend(
+                        prose_tokens(&text[lead.clone()])
+                            .map(|token| word(token.start + lead.start..token.end + lead.start)),
+                    ),
                 }
-                row.extend(prose_tokens(rest));
+                // A line break in the note starts a new row; a blank line
+                // also leaves a paragraph's space, as in plain text.
+                let rest = source.start + split;
+                let mut breaks = 0;
+                for token in prose_tokens(&text[rest..source.end]) {
+                    let token = token.start + rest..token.end + rest;
+                    if &text[token.clone()] == "\n" {
+                        view = flush(view, &mut row);
+                        if breaks == 1 {
+                            view = view.child(div().h(em * 0.6));
+                        }
+                        breaks += 1;
+                    } else {
+                        breaks = 0;
+                        row.push(word(token));
+                    }
+                }
             }
             crate::math::Piece::Math { latex, display } => {
                 let typeset = crate::math::formula(latex, display);
@@ -1253,24 +1291,33 @@ fn math_paragraph(text: &str, em: Rems, ink: Hsla) -> Div {
                                 .justify_center()
                                 .py_2()
                                 .overflow_x_scroll()
-                                .child(formula.element(em, true, ink)),
+                                .child(tokens.token(source, formula.element(em, true, ink))),
                         );
                     }
                     (Some(formula), false) => {
-                        row.push(
-                            div()
-                                .px(em * 0.1)
-                                .child(formula.element(em, false, ink))
-                                .into_any_element(),
-                        );
+                        row.push(tokens.token(
+                            source,
+                            div().px(em * 0.1).child(formula.element(em, false, ink)),
+                        ));
                     }
-                    // Unparseable LaTeX stays readable as its source.
-                    (None, _) => row.extend(prose_tokens(latex)),
+                    // Unparseable LaTeX stays readable as its source, and any
+                    // part of it copies all of it.
+                    (None, _) => row.extend(prose_tokens(latex).map(|token| {
+                        tokens.token(
+                            source.clone(),
+                            div()
+                                .whitespace_nowrap()
+                                .child(SharedString::from(latex[token].to_owned())),
+                        )
+                    })),
                 }
             }
         }
     }
-    flush(view, &mut row)
+    let view = flush(view, &mut row);
+    crate::math_selection::SelectableTokens::new(id, text, tokens, view)
+        .document_order(order as u64)
+        .selection_color(color(SELECTION).into())
 }
 
 /// Punctuation that may not begin a line (CJK and Latin closing marks).
@@ -1278,9 +1325,9 @@ fn closes_line(c: char) -> bool {
     "，。、；：！？）」』”’》〉】,.;:!?)]}".contains(c)
 }
 
-/// Line-break opportunities of prose: Latin words with their trailing space,
-/// and every other character on its own.
-fn prose_tokens(prose: &str) -> impl Iterator<Item = AnyElement> + '_ {
+/// Line-break opportunities of prose, as byte ranges: Latin words with their
+/// trailing space, and every other character on its own.
+fn prose_tokens(prose: &str) -> impl Iterator<Item = Range<usize>> {
     let mut tokens = Vec::new();
     let mut start = 0;
     for (index, c) in prose.char_indices() {
@@ -1292,19 +1339,14 @@ fn prose_tokens(prose: &str) -> impl Iterator<Item = AnyElement> + '_ {
             .is_some_and(|next| next.is_ascii_alphanumeric() || next.is_ascii_punctuation());
         let next_closes = prose[end..].chars().next().is_some_and(closes_line);
         if !(word && next_word) && !next_closes {
-            tokens.push(&prose[start..end]);
+            tokens.push(start..end);
             start = end;
         }
     }
     if start < prose.len() {
-        tokens.push(&prose[start..]);
+        tokens.push(start..prose.len());
     }
-    tokens.into_iter().map(|token| {
-        div()
-            .whitespace_nowrap()
-            .child(SharedString::from(token.to_owned()))
-            .into_any_element()
-    })
+    tokens.into_iter()
 }
 
 /// Everything a virtualized note-flow item needs. The maps are built when the
