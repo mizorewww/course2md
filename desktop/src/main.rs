@@ -1614,6 +1614,27 @@ fn dispatch_desktop_action(
     });
 }
 
+/// The first window fits the display's usable area (without the taskbar or
+/// dock), centered in it with a margin, so its title bar, the only place to
+/// move it from, is never off screen. It still keeps its minimum size, but on
+/// a display smaller than that it starts at the area's top-left corner.
+fn initial_window_bounds(
+    wanted: gpui::Size<Pixels>,
+    min: gpui::Size<Pixels>,
+    area: gpui::Bounds<Pixels>,
+) -> gpui::Bounds<Pixels> {
+    let margin = px(16.);
+    let fit = |wanted: Pixels, min: Pixels, room: Pixels| wanted.min(room - margin * 2.).max(min);
+    let size = size(
+        fit(wanted.width, min.width, area.size.width),
+        fit(wanted.height, min.height, area.size.height),
+    );
+    let mut bounds = gpui::Bounds::centered_at(area.center(), size);
+    bounds.origin.x = bounds.origin.x.max(area.origin.x);
+    bounds.origin.y = bounds.origin.y.max(area.origin.y);
+    bounds
+}
+
 fn main() {
     a11y::init_validation_diagnostics();
     let app = gpui_platform::application().with_assets(icons::Assets);
@@ -1628,7 +1649,9 @@ fn main() {
         theme::init(cx);
         // Debug validation uses the same native window and render path at an exact size.
         // Release builds always use the ordinary initial window size.
-        let initial_size = if cfg!(debug_assertions) {
+        // Debug validation asks for an exact size, which it keeps even where
+        // it does not fit, so captures are comparable across displays.
+        let validation_size = if cfg!(debug_assertions) {
             std::env::var("COURSE2MD_VALIDATION_WINDOW")
                 .ok()
                 .and_then(|value| {
@@ -1638,14 +1661,23 @@ fn main() {
                     (width.is_finite() && height.is_finite() && width >= 720. && height >= 620.)
                         .then_some(size(px(width), px(height)))
                 })
-                .unwrap_or(size(px(1140.), px(820.)))
         } else {
-            size(px(1140.), px(820.))
+            None
+        };
+        let min_size = size(px(720.), px(620.));
+        let window_bounds = match (validation_size, cx.primary_display()) {
+            (Some(exact), _) => WindowBounds::centered(exact, cx),
+            (None, Some(display)) => WindowBounds::Windowed(initial_window_bounds(
+                size(px(1140.), px(820.)),
+                min_size,
+                display.visible_bounds(),
+            )),
+            (None, None) => WindowBounds::centered(size(px(1140.), px(820.)), cx),
         };
         cx.open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::centered(initial_size, cx)),
-                window_min_size: Some(size(px(720.), px(620.))),
+                window_bounds: Some(window_bounds),
+                window_min_size: Some(min_size),
                 titlebar: Some(TitlebarOptions {
                     traffic_light_position: Some(point(px(16.), px(19.))),
                     ..TitleBar::title_bar_options()
@@ -1832,5 +1864,48 @@ mod deadline_tests {
             earliest_deadline(Some(now + Duration::from_secs(2)), Some(now)),
             Some(now)
         );
+    }
+}
+
+#[cfg(test)]
+mod initial_window_tests {
+    use super::initial_window_bounds;
+    use gpui::{Bounds, point, px, size};
+
+    fn area(x: f32, y: f32, width: f32, height: f32) -> Bounds<gpui::Pixels> {
+        Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
+    }
+
+    #[test]
+    fn a_large_display_centers_the_wanted_size_in_its_usable_area() {
+        let bounds = initial_window_bounds(
+            size(px(1140.), px(820.)),
+            size(px(720.), px(620.)),
+            area(0., 25., 1920., 1055.),
+        );
+        assert_eq!(bounds.size, size(px(1140.), px(820.)));
+        assert_eq!(bounds.origin, point(px(390.), px(142.5)));
+    }
+
+    #[test]
+    fn a_small_display_shrinks_the_window_into_its_usable_area() {
+        // 1024×768 with a 48px taskbar: the window used to open at
+        // (-66, -30), its title bar above the screen.
+        let usable = area(0., 0., 1024., 720.);
+        let bounds =
+            initial_window_bounds(size(px(1140.), px(820.)), size(px(720.), px(620.)), usable);
+        assert_eq!(bounds.size, size(px(992.), px(688.)));
+        assert_eq!(bounds.origin, point(px(16.), px(16.)));
+    }
+
+    #[test]
+    fn a_display_below_the_minimum_keeps_the_title_bar_on_screen() {
+        let bounds = initial_window_bounds(
+            size(px(1140.), px(820.)),
+            size(px(720.), px(620.)),
+            area(0., 0., 800., 600.),
+        );
+        assert_eq!(bounds.size, size(px(768.), px(620.)));
+        assert_eq!(bounds.origin, point(px(16.), px(0.)));
     }
 }
