@@ -51,7 +51,7 @@ ZLIB_VERSION = "1.3.2"
 ZLIB_SOURCE = (f"https://zlib.net/fossils/zlib-{ZLIB_VERSION}.tar.gz",
                "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16")
 MACOS_DEPLOYMENT_TARGET = "15.0"
-BUILD_REVISION = 3
+BUILD_REVISION = 4
 BUILD_ENVIRONMENT = {"PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "DEVELOPER_DIR",
                      "SDKROOT", "SYSTEMROOT"}
 # Which platform each build targets, by the packaging host.
@@ -68,17 +68,21 @@ def configure_flags(system):
         "--enable-libdav1d", "--enable-zlib",
         # The engine generates test tones with -f lavfi; no capture devices.
         "--disable-indevs", "--enable-indev=lavfi", "--disable-outdevs",
-        "--pkg-config-flags=--static",
     ]
     if system == "Darwin":
         target = f"-mmacosx-version-min={MACOS_DEPLOYMENT_TARGET}"
-        flags += ["--cc=clang", "--enable-securetransport", f"--extra-cflags={target}",
-                  f"--extra-ldflags={target}"]
+        flags += ["--pkg-config-flags=--static", "--cc=clang", "--enable-securetransport",
+                  f"--extra-cflags={target}", f"--extra-ldflags={target}"]
     elif system == "Linux":
-        # yt-dlp hands some HLS/DASH downloads to ffmpeg over https.
-        flags += ["--enable-gnutls"]
+        # yt-dlp hands some HLS/DASH downloads to ffmpeg over https. GnuTLS is
+        # the system's shared library: a --static pkg-config query would ask
+        # for static copies of its own dependencies (nettle, gmp, p11-kit...),
+        # which the build host does not have. Without it, the static dav1d's
+        # private libraries are named here instead.
+        flags += ["--enable-gnutls", "--extra-libs=-lpthread -ldl -lm"]
     elif system == "Windows":
-        flags += ["--enable-cross-compile", "--target-os=mingw32", "--arch=x86_64",
+        flags += ["--pkg-config-flags=--static", "--enable-cross-compile", "--target-os=mingw32",
+                  "--arch=x86_64",
                   f"--cross-prefix={WINDOWS_PREFIX}", "--enable-schannel", "--enable-w32threads",
                   # The toolchain's own runtime goes into the programs.
                   "--extra-ldflags=-static"]

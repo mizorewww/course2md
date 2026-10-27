@@ -170,8 +170,18 @@ def verify_tools(binaries, system, skip=()):
         checks.append((["uv", "--version"], "uv "))
     if "llama.cpp" in names and "llama.cpp" not in skip:
         checks.append((["llama.cpp/llama-server", "--version"], "version"))
+    if system == "Linux":
+        # Shared libraries the archive expects from the system: printed for the
+        # log, and a missing one fails here.
+        for program in ["ffmpeg", "llama.cpp/llama-server"]:
+            if (binaries / program).is_file():
+                linked = subprocess.run(["ldd", str(binaries / program)], capture_output=True,
+                                        text=True).stdout
+                print(f"{program} links:\n{linked}")
+                if "not found" in linked:
+                    raise SystemExit(f"Bundled {program} misses a shared library:\n{linked}")
     for (program, *arguments), expected in checks:
-        path = binaries / f"{program}{suffix}"
+        path = program if isinstance(program, Path) else binaries / f"{program}{suffix}"
         try:
             result = subprocess.run([str(path), *arguments], capture_output=True, text=True,
                                     timeout=120, stdin=subprocess.DEVNULL)
