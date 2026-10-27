@@ -30,7 +30,7 @@ jobs:
     steps:
       - name: Install tools
         run: |
-          pacman -Syu --noconfirm --needed base-devel git openssh python desktop-file-utils ffmpeg yt-dlp libxcb libxkbcommon libxkbcommon-x11 fontconfig libx11 wayland vulkan-icd-loader
+          pacman -Syu --noconfirm --needed base-devel git openssh python desktop-file-utils ffmpeg yt-dlp aria2 libxcb libxkbcommon libxkbcommon-x11 fontconfig libx11 wayland vulkan-icd-loader
           id builder &>/dev/null || useradd -m builder
 
       - uses: actions/checkout@v4
