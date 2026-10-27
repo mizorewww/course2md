@@ -651,3 +651,8 @@ h2 {
   .hero .shot { margin-top: 36px; }
   .section-head { margin-bottom: 28px; }
 }
+
+.cli-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cmd-label { margin: 4px 0 -6px 18px; color: var(--muted); font-size: 14px; font-weight: 500; }
+.cli-side .terminal { margin-top: 12px; }
+.note .cmd { margin: 12px 0; }

@@ -324,15 +324,27 @@
         <p><code>course2md</code> 命令行工具完成同样的转换，可以和桌面应用同时安装。两者共用 Bilibili 和 ChatGPT 登录以及已下载的语音模型。</p>
         <p>需要 <code>ffmpeg</code>；处理在线链接还需要 <code>yt-dlp</code>。用 <code>course2md doctor</code> 检查，全部命令见 <a href="https://github.com/mizorewww/course2md/wiki/CLI-%E6%8C%87%E5%8D%97">CLI 指南</a>。</p>
       </div>
-      <div class="terminal">
-        <pre><code><span class="c"># macOS / Linux，安装到 ~/bin</span>
-<span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
-<span class="c"># 或 Homebrew / Arch</span>
-<span class="p">$ </span>brew install mizorewww/tap/course2md
-<span class="p">$ </span>yay -S course2md-bin</code></pre>
-        <pre><code><span class="p">$ </span>course2md ./lecture.mp4
+      <div class="cli-side">
+        <p class="cmd-label">macOS / Linux，安装到 ~/bin</p>
+        <div class="cmd">
+          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">curl</span> <span class="w">-fsSL</span> <span class="w">https://</span><wbr><span class="w">raw.githubusercontent.com/</span><wbr><span class="w">mizorewww/</span><wbr><span class="w">course2md/</span><wbr><span class="w">main/</span><wbr><span class="w">install.sh</span> <span class="w">|</span> <span class="w">bash</span></span></code>
+          <button class="copy" type="button" hidden data-idle="复制" data-done="已复制" aria-label="复制安装脚本命令"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">复制</span></button>
+        </div>
+        <p class="cmd-label">或 Homebrew</p>
+        <div class="cmd">
+          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">brew</span> <span class="w">install</span> <span class="w">mizorewww/</span><wbr><span class="w">tap/</span><wbr><span class="w">course2md</span></span></code>
+          <button class="copy" type="button" hidden data-idle="复制" data-done="已复制" aria-label="复制 Homebrew 命令"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">复制</span></button>
+        </div>
+        <p class="cmd-label">或 Arch</p>
+        <div class="cmd">
+          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">yay</span> <span class="w">-S</span> <span class="w">course2md-bin</span></span></code>
+          <button class="copy" type="button" hidden data-idle="复制" data-done="已复制" aria-label="复制 yay 命令"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">复制</span></button>
+        </div>
+        <div class="terminal">
+          <pre><code><span class="p">$ </span>course2md ./lecture.mp4
 <span class="p">$ </span>course2md https://www.youtube.com/watch?v=…
 <span class="p">$ </span>course2md ./lecture.mp4 -o ./notes</code></pre>
+        </div>
       </div>
     </div>
   </section>

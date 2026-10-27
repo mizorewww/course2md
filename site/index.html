@@ -324,15 +324,27 @@
         <p>The <code>course2md</code> CLI does the same conversion from the terminal or your scripts. It can be installed beside the desktop app; the two share the Bilibili and ChatGPT logins and the downloaded speech models.</p>
         <p>It needs <code>ffmpeg</code>; online links also need <code>yt-dlp</code>. Check everything with <code>course2md doctor</code>, and see the <a href="https://github.com/mizorewww/course2md/wiki/CLI-Guide">CLI guide</a> for every command.</p>
       </div>
-      <div class="terminal">
-        <pre><code><span class="c"># macOS / Linux, into ~/bin</span>
-<span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
-<span class="c"># or Homebrew / Arch</span>
-<span class="p">$ </span>brew install mizorewww/tap/course2md
-<span class="p">$ </span>yay -S course2md-bin</code></pre>
-        <pre><code><span class="p">$ </span>course2md ./lecture.mp4
+      <div class="cli-side">
+        <p class="cmd-label">macOS / Linux, into ~/bin</p>
+        <div class="cmd">
+          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">curl</span> <span class="w">-fsSL</span> <span class="w">https://</span><wbr><span class="w">raw.githubusercontent.com/</span><wbr><span class="w">mizorewww/</span><wbr><span class="w">course2md/</span><wbr><span class="w">main/</span><wbr><span class="w">install.sh</span> <span class="w">|</span> <span class="w">bash</span></span></code>
+          <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the install script command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
+        </div>
+        <p class="cmd-label">or Homebrew</p>
+        <div class="cmd">
+          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">brew</span> <span class="w">install</span> <span class="w">mizorewww/</span><wbr><span class="w">tap/</span><wbr><span class="w">course2md</span></span></code>
+          <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the Homebrew command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
+        </div>
+        <p class="cmd-label">or Arch</p>
+        <div class="cmd">
+          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">yay</span> <span class="w">-S</span> <span class="w">course2md-bin</span></span></code>
+          <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the yay command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
+        </div>
+        <div class="terminal">
+          <pre><code><span class="p">$ </span>course2md ./lecture.mp4
 <span class="p">$ </span>course2md https://www.youtube.com/watch?v=…
 <span class="p">$ </span>course2md ./lecture.mp4 -o ./notes</code></pre>
+        </div>
       </div>
     </div>
   </section>
