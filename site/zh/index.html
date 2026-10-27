@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>course2md：把课程视频变成图文笔记</title>
+<meta name="description" content="course2md 是一款免费开源的桌面应用（macOS、Windows、Linux），把 YouTube、Bilibili 和本地课程视频整理成图文并茂的 Markdown 和 HTML 笔记：每页幻灯片一张截图，讲解排在截图下方。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#edf1f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1e26" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://vibewatching.xyz/zh/">
+<link rel="alternate" hreflang="en" href="https://vibewatching.xyz/">
+<link rel="alternate" hreflang="zh-Hans" href="https://vibewatching.xyz/zh/">
+<link rel="alternate" hreflang="x-default" href="https://vibewatching.xyz/">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/icon-32.png">
+<link rel="icon" type="image/png" sizes="128x128" href="../assets/icon-128.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="course2md">
+<meta property="og:title" content="course2md：把课程视频变成图文笔记">
+<meta property="og:description" content="粘贴 YouTube 或 Bilibili 链接，或拖入本地视频。course2md 在每次换页时截图，把讲解的话整理在截图下方。">
+<meta property="og:url" content="https://vibewatching.xyz/zh/">
+<meta property="og:image" content="https://vibewatching.xyz/images/og-zh.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="course2md 阅读器：带摘要、目录和排版公式的课程笔记">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="course2md：把课程视频变成图文笔记">
+<meta name="twitter:description" content="把课程视频变成图文笔记，随时阅读、查找和保存的桌面应用。">
+<meta name="twitter:image" content="https://vibewatching.xyz/images/og-zh.png">
+<link rel="stylesheet" href="../assets/site.css">
+<script src="../assets/site.js"></script>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" hidden>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
+  <symbol id="i-presentation" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-captions" viewBox="0 0 24 24"><rect width="18" height="14" x="3" y="5" rx="2"/><path d="M7 15h4m4 0h2M7 11h2m4 0h4"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96l-6.14 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/><path d="M20 3v4m2-2h-4M4 17v2m1-1H3"/></symbol>
+  <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
+  <symbol id="i-export" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></symbol>
+  <symbol id="i-tasks" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11"/><path d="m3 6 1 1 2-2m-3 7 1 1 2-2m-3 7 1 1 2-2"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.97 6.01 17.46 2 12 2z"/></symbol>
+</svg>
+
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="appbar">
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="course2md 首页">
+      <img src="../assets/icon-128.png" width="32" height="32" alt="">
+      <span>course2md</span>
+    </a>
+    <nav class="nav" aria-label="主导航">
+      <a class="nav-link section-link" href="#features">功能</a>
+      <a class="nav-link section-link" href="#tour">看看应用</a>
+      <a class="nav-link section-link" href="#install">安装</a>
+      <a class="nav-link section-link" href="#cli">命令行</a>
+      <a class="nav-link ext" href="https://github.com/mizorewww/course2md" aria-label="GitHub"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg><span class="label">GitHub</span></a>
+      <a class="nav-link" href="../" hreflang="en" lang="en">English</a>
+      <button class="icon-btn" id="theme-toggle" type="button" hidden data-label-dark="切换到深色主题" data-label-light="切换到浅色主题" aria-label="切换主题">
+        <svg class="icon i-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        <svg class="icon i-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="hero">
+    <div class="wrap">
+      <div class="hero-text">
+        <a class="chip" href="https://github.com/mizorewww/course2md/releases/latest"><strong>2.0</strong> 全新桌面应用 · 发布说明</a>
+        <h1><span class="phrase">把课程视频</span><span class="phrase">变成图文笔记</span></h1>
+        <p class="lead">粘贴 YouTube 或 Bilibili 链接，或拖入本地视频。course2md 在每次换页时截图，把讲解的话整理在截图下方，并保存在你电脑上的笔记库里。</p>
+        <div class="cta">
+          <a class="btn btn-primary stacked" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg">
+            <span class="main"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>下载 macOS 版</span>
+            <small>Apple 芯片 · macOS 15 及以上</small>
+          </a>
+        </div>
+        <p class="platforms" aria-label="其他下载">
+          <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Windows x64（ZIP）</a>
+          <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Linux x86_64（tar.gz）</a>
+          <a href="https://github.com/mizorewww/course2md/releases/latest">全部下载<svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>
+        </p>
+        <div class="cmd">
+          <code><span class="prompt" aria-hidden="true">$</span><span class="line">brew install --cask mizorewww/tap/course2md-gui</span></code>
+          <button class="copy" type="button" hidden data-idle="复制" data-done="已复制" aria-label="复制 Homebrew 命令"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">复制</span></button>
+        </div>
+        <p class="hero-note">Homebrew 会一并安装 <code>ffmpeg</code>、<code>yt-dlp</code> 和 <code>aria2</code>。以 MIT 许可证免费开源。</p>
+      </div>
+      <figure class="shot">
+        <picture>
+          <source data-dark media="(prefers-color-scheme: dark)" srcset="../images/zh/reader-dark.png" width="1600" height="1095">
+          <img src="../images/zh/reader-light.png" width="1600" height="1095" alt="course2md 阅读器：带摘要、目录和排版公式的课程笔记" fetchpriority="high">
+        </picture>
+      </figure>
+    </div>
+  </div>
+
+  <section id="features" aria-labelledby="features-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">为什么用 course2md</p>
+        <h2 id="features-title"><span class="phrase">随时阅读、查找</span><span class="phrase">和保存的笔记</span></h2>
+      </div>
+      <div class="features">
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-presentation"/></svg></span>笔记跟着课件走</h3>
+          <p>每页幻灯片一张截图，对应的讲解按段落排在下方，保存为普通的 <code>course.md</code> 和 <code>course.html</code>，在哪里都能打开。</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span>默认在本机处理</h3>
+          <p>语音识别在你的电脑上完成：Apple 芯片开箱即用，其他系统可用显卡、CPU 或 Intel Core Ultra 的 NPU。只有选择云端服务时音频才会上传。</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-captions"/></svg></span>有字幕先用字幕</h3>
+          <p>视频自带字幕时直接使用，无需语音识别。</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span>AI 可选</h3>
+          <p>校对、摘要、八种语言的双语笔记，以及数学公式（包括口述的公式）写成 LaTeX 并排版显示。支持任意 OpenAI 兼容服务、本地 Ollama 或 ChatGPT 订阅，默认关闭。</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-export"/></svg></span>随处可用</h3>
+          <p>可导出带图片的 HTML、带截图的 Markdown（.zip）和 JSON 数据。</p>
+        </article>
+        <article class="feature">
+          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-languages"/></svg></span>四种界面语言</h3>
+          <p>English、简体中文、繁體中文和日本語，默认跟随系统，可在「设置 → 外观 → 界面语言」随时切换。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="tour" aria-labelledby="tour-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">看看应用</p>
+        <h2 id="tour-title"><span class="phrase">从一条链接</span><span class="phrase">到一篇笔记</span></h2>
+      </div>
+
+      <div class="tour">
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></span>添加视频</h3>
+            <p>在「主页」粘贴链接或拖入文件。course2md 会先读取视频信息，你可以确认标题、时长和处理选项后再开始转换。Bilibili 分集（多 P）和播放列表可以多选，一次加入队列。</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="../images/zh/home-dark.png" width="1600" height="1095">
+              <img src="../images/zh/home-light.png" width="1600" height="1095" alt="主页：已预览的视频及其处理选项" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg></span>阅读、查找和复制</h3>
+            <p>阅读器以摘要和要点开头，旁边是章节目录，可在整篇笔记中查找文字。</p>
+          </div>
+          <ul class="reader-points">
+            <li><strong>公式排版显示。</strong>复制一段文字时得到原文，公式保留原始 LaTeX。</li>
+            <li><strong>长公式完整可读。</strong>超出行宽的公式单独成行，可以横向滚动。</li>
+            <li><strong>接着上次读。</strong>阅读器记住每篇笔记的阅读位置。</li>
+            <li><strong>回到原视频。</strong>播放原视频，或从任意章节开始观看。</li>
+          </ul>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg></span>浏览每一页截图</h3>
+            <p>「截图」视图一眼看完整节课。点开任意一页可放大、缩放和拖动，并阅读这页讲了什么。</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="../images/zh/screenshots-dark.png" width="1600" height="1095">
+              <img src="../images/zh/screenshots-light.png" width="1600" height="1095" alt="截图视图：课程幻灯片网格" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="../images/zh/viewer-dark.png" width="1600" height="1095">
+              <img src="../images/zh/viewer-light.png" width="1600" height="1095" alt="放大的幻灯片和这一页对应的讲解" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg></span>整理笔记库</h3>
+            <p>笔记库支持嵌套文件夹、拖放整理和包含子文件夹的搜索，可以同时使用多个保存位置；删除的笔记移到废纸篓（Windows 和 Linux 为回收站）。</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="../images/zh/library-dark.png" width="1600" height="1095">
+              <img src="../images/zh/library-light.png" width="1600" height="1095" alt="笔记库：文件夹树和笔记卡片" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-tasks"/></svg></span>在后台处理</h3>
+            <p>转换作为任务在后台运行，可以暂停、继续和调整顺序，退出应用后可以接着处理。每一步都显示进度，模型下载显示大小、速度和剩余时间。某一部分失败时，可以先阅读已完成的内容，只补做失败的部分。</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="../images/zh/tasks-dark.png" width="1600" height="1095">
+              <img src="../images/zh/tasks-light.png" width="1600" height="1095" alt="任务页：正在运行的转换及其进度" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+
+        <article class="stop">
+          <div class="stop-head">
+            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg></span>按自己的习惯设置</h3>
+            <p>在「设置 → 外观」选择 10 套主题之一，调整界面文字大小，或减少动态效果。界面提供 English、简体中文、繁體中文和日本語。</p>
+          </div>
+          <figure class="shot">
+            <picture>
+              <source data-dark media="(prefers-color-scheme: dark)" srcset="../images/zh/settings-dark.png" width="1600" height="1095">
+              <img src="../images/zh/settings-light.png" width="1600" height="1095" alt="外观设置：主题预览" loading="lazy" decoding="async">
+            </picture>
+          </figure>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" aria-labelledby="install-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">安装</p>
+        <h2 id="install-title">获取 course2md</h2>
+        <p>桌面应用自带转换引擎，不需要另外安装命令行工具。处理视频需要 <code>ffmpeg</code>，下面的包管理器会一并安装。</p>
+      </div>
+      <div class="install">
+        <article class="platform" id="macos">
+          <h3>macOS<small>Apple 芯片，macOS 15 及以上</small></h3>
+          <p>使用 <a href="https://brew.sh">Homebrew</a> 时，这条命令会安装应用以及 <code>ffmpeg</code>、<code>yt-dlp</code> 和 <code>aria2</code>，然后从「应用程序」打开 course2md。</p>
+          <div class="cmd">
+            <code><span class="prompt" aria-hidden="true">$</span><span class="line">brew install --cask mizorewww/tap/course2md-gui</span></code>
+            <button class="copy" type="button" hidden data-idle="复制" data-done="已复制" aria-label="复制 Homebrew 命令"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">复制</span></button>
+          </div>
+          <p>不使用 Homebrew 时，下载 DMG，把 course2md 拖入「应用程序」，并按 <a href="https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#macos-apple-silicon">macOS 指南</a>安装 <code>ffmpeg</code>。应用已内置 <code>yt-dlp</code>。</p>
+          <div class="actions">
+            <a class="btn btn-tonal" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>下载 DMG</a>
+          </div>
+        </article>
+
+        <article class="platform" id="windows">
+          <h3>Windows<small>x64</small></h3>
+          <ol>
+            <li>下载便携包（ZIP），完整解压到固定文件夹。包内已有 <code>yt-dlp</code> 和 <code>aria2</code>。</li>
+            <li>在 PowerShell 中安装 <code>ffmpeg</code>：
+              <div class="cmd">
+                <code><span class="prompt" aria-hidden="true">&gt;</span><span class="line">winget install --id Gyan.FFmpeg -e</span></code>
+                <button class="copy" type="button" hidden data-idle="复制" data-done="已复制" aria-label="复制 winget 命令"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">复制</span></button>
+              </div>
+            </li>
+            <li>打开解压目录中的 <code>course2md-desktop.exe</code>，其他文件保持在同一目录。</li>
+          </ol>
+          <div class="actions">
+            <a class="btn btn-tonal" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>下载 ZIP</a>
+          </div>
+        </article>
+
+        <article class="platform" id="arch">
+          <h3>Arch Linux / CachyOS<small>x86_64</small></h3>
+          <div class="cmd">
+            <code><span class="prompt" aria-hidden="true">$</span><span class="line">yay -S course2md-gui-bin</span></code>
+            <button class="copy" type="button" hidden data-idle="复制" data-done="已复制" aria-label="复制 yay 命令"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">复制</span></button>
+          </div>
+          <p>或 <code>paru -S course2md-gui-bin</code>。这会安装应用、视频工具和图形库；显卡需要可用的 Vulkan 驱动，详见 <a href="https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#arch-linux--cachyos">Linux 指南</a>。</p>
+        </article>
+
+        <article class="platform" id="linux">
+          <h3>Ubuntu 及其他 Linux<small>x86_64</small></h3>
+          <p>下载 tar.gz，按 <a href="https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#%E5%85%B6%E4%BB%96-linux-x64">Linux 指南</a>安装 <code>ffmpeg</code> 和图形库，解压后运行 <code>./course2md-desktop</code>。基于 Ubuntu 24.04 构建，已内置 <code>yt-dlp</code>。</p>
+          <div class="actions">
+            <a class="btn btn-tonal" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>下载 tar.gz</a>
+          </div>
+        </article>
+      </div>
+
+      <div class="notes">
+        <div class="note">
+          <h3>开始使用</h3>
+          <ol>
+            <li>打开 course2md，按引导选择语音识别方式，可选连接 AI 服务和 Bilibili，再下载识别模型（1–2.4 GB，只需一次）。</li>
+            <li>如有缺失，「设置 → 应用 → 运行检查」会提示需要安装的工具。</li>
+            <li>在「主页」粘贴链接或拖入视频，确认预览后点击「开始转换」，完成的笔记出现在「笔记库」。</li>
+          </ol>
+        </div>
+        <div class="note">
+          <h3>从 1.7 升级</h3>
+          <p>已下载的模型、Bilibili 登录和 CLI 的 <code>config.toml</code> 继续可用。1.x 生成的笔记仍以 <code>course.md</code> / <code>course.html</code> 保存在原目录，但 2.0 的笔记库只列出 2.0 生成的笔记。识别方式和 AI 服务需要在首次引导中重新设置。</p>
+          <p>Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用<a href="#cli">命令行工具</a>。更多见<a href="https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#%E9%A6%96%E6%AC%A1%E5%90%AF%E5%8A%A8">首次使用指南</a>和<a href="https://github.com/mizorewww/course2md/wiki/%E6%95%85%E9%9A%9C%E6%8E%92%E6%9F%A5">故障排查</a>。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="cli" aria-labelledby="cli-title">
+    <div class="wrap cli">
+      <div class="section-head">
+        <p class="kicker">命令行工具</p>
+        <h2 id="cli-title">习惯终端或脚本？</h2>
+        <p><code>course2md</code> 命令行工具完成同样的转换，可以和桌面应用同时安装。两者共用 Bilibili 和 ChatGPT 登录以及已下载的语音模型。</p>
+        <p>需要 <code>ffmpeg</code>；处理在线链接还需要 <code>yt-dlp</code>。用 <code>course2md doctor</code> 检查，全部命令见 <a href="https://github.com/mizorewww/course2md/wiki/CLI-%E6%8C%87%E5%8D%97">CLI 指南</a>。</p>
+      </div>
+      <div class="terminal">
+        <pre><code><span class="c"># macOS / Linux，安装到 ~/bin</span>
+<span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
+<span class="c"># 或 Homebrew / Arch</span>
+<span class="p">$ </span>brew install mizorewww/tap/course2md
+<span class="p">$ </span>yay -S course2md-bin</code></pre>
+        <pre><code><span class="p">$ </span>course2md ./lecture.mp4
+<span class="p">$ </span>course2md https://www.youtube.com/watch?v=…
+<span class="p">$ </span>course2md ./lecture.mp4 -o ./notes</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing" aria-labelledby="closing-title">
+    <div class="wrap">
+      <h2 id="closing-title"><span class="phrase">下一节课，</span><span class="phrase">就是一篇笔记</span></h2>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>下载 macOS 版</a>
+        <a class="btn btn-outline" href="#install">Windows 和 Linux</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="../assets/icon-128.png" width="24" height="24" alt=""><span>course2md</span></a>
+    <nav aria-label="项目">
+      <a href="https://github.com/mizorewww/course2md">GitHub</a>
+      <a href="https://github.com/mizorewww/course2md/wiki">Wiki</a>
+      <a href="https://github.com/mizorewww/course2md/releases">发布版本</a>
+      <a href="https://github.com/mizorewww/course2md/issues">反馈问题</a>
+      <a href="https://github.com/mizorewww/course2md/blob/main/LICENSE">MIT 许可证</a>
+      <a href="../" hreflang="en" lang="en">English</a>
+    </nav>
+  </div>
+</footer>
+<p class="visually-hidden" id="copy-status" role="status" aria-live="polite"></p>
+</body>
+</html>
