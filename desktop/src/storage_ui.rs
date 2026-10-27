@@ -1671,7 +1671,11 @@ impl Desktop {
                             .icon(icons::folder_open())
                             .label(course2md::tr!("打开位置"))
                             .disabled(offline)
-                            .on_click(move |_, _, cx| cx.open_with_system(&root))
+                            .on_click(move |_, _, cx| {
+                                cx.open_with_system(&course2md::config::simplify_verbatim(
+                                    root.clone(),
+                                ))
+                            })
                     }
                 };
                 let trailing = h_flex().gap_2().items_center().when(!repair, |row| {
@@ -1747,7 +1751,11 @@ impl Desktop {
                                 PopupMenuItem::new(course2md::tr!("打开位置"))
                                     .icon(icons::folder_open())
                                     .disabled(offline)
-                                    .on_click(move |_, _, cx| cx.open_with_system(&root)),
+                                    .on_click(move |_, _, cx| {
+                                        cx.open_with_system(&course2md::config::simplify_verbatim(
+                                            root.clone(),
+                                        ))
+                                    }),
                             )
                             .separator()
                             .item(
@@ -1844,7 +1852,9 @@ impl Desktop {
                                         .child(
                                             tile_support(
                                                 ("storage-location-path", index),
-                                                root.display().to_string(),
+                                                course2md::config::simplify_verbatim(root.clone())
+                                                    .display()
+                                                    .to_string(),
                                             )
                                             .font_family(
                                                 gpui_component::Theme::global(cx)
