@@ -16,6 +16,7 @@ import zipfile
 
 from dmg import build_install_dmg
 import ffmpeg_bundle
+import prebuilt
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT.parent
@@ -172,6 +173,10 @@ def parse_args(argv=None, environ=os.environ):
                         help="do not bundle yt-dlp (COURSE2MD_NO_YTDLP)")
     parser.add_argument("--no-ffmpeg", action="store_true", default=flag("COURSE2MD_NO_FFMPEG"),
                         help="do not bundle ffmpeg and ffprobe (COURSE2MD_NO_FFMPEG)")
+    parser.add_argument("--no-uv", action="store_true", default=flag("COURSE2MD_NO_UV"),
+                        help="Windows/Linux: do not bundle uv (COURSE2MD_NO_UV)")
+    parser.add_argument("--no-llama", action="store_true", default=flag("COURSE2MD_NO_LLAMA"),
+                        help="Windows/Linux: do not bundle llama-server (COURSE2MD_NO_LLAMA)")
     parser.add_argument("--no-aria2", action="store_true", default=flag("COURSE2MD_NO_ARIA2"),
                         help="Windows: do not bundle aria2 (COURSE2MD_NO_ARIA2)")
     parser.add_argument("--no-apple", action="store_true", default=flag("COURSE2MD_NO_APPLE"),
@@ -281,6 +286,12 @@ def main():
         if bundled:
             placed, tool_licenses = bundled
             print("bundled " + ", ".join(path.name for path in placed))
+    # Windows/Linux: uv beside the engine (NPU worker) and llama-server in
+    # llama.cpp/ (GPU/CPU transcription); the app searches both before PATH.
+    skip = [name for name, off in (("uv", args.no_uv), ("llama.cpp", args.no_llama)) if off]
+    for name in prebuilt.bundle(system, platform.machine(), binaries, base,
+                                TOOL_CACHE / "downloads", required=distribution, skip=skip):
+        print(f"bundled {name}")
     if system == "Windows" and not args.no_aria2:
         if bundle_aria2(binaries, base, required=distribution):
             print("bundled aria2c.exe")
