@@ -16,7 +16,7 @@
 use gpui::{
     AnyElement, App, Bounds, Corners, Edges, ElementId, GlobalElementId, HighlightStyle, Hitbox,
     HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseDownEvent, PaintQuad, Pixels, Point,
-    SharedString, StyledText, Subscription, TextLayout, TransformationMatrix, Window, div,
+    SharedString, StyledText, Subscription, TextLayout, TextRun, TransformationMatrix, Window, div,
     prelude::*, px, rems, transparent_black,
 };
 use gpui_base::{
@@ -28,6 +28,11 @@ use std::{cell::RefCell, ops::Range, rc::Rc};
 /// Holds an inline formula's place in the text: wraps neither inside nor
 /// next to it, and is measured to the formula's width.
 const PLACEHOLDER: char = '\u{00A0}';
+/// A clamped preview's placeholder, drawn transparent. GPUI's line clamp
+/// counts lines with its own, simpler wrapping, which breaks inside a run of
+/// no-break spaces; it keeps a run of these word characters together as
+/// line wrapping does, and trims them before its ellipsis.
+const PREVIEW_PLACEHOLDER: char = '_';
 /// Allows a line break on either side of an inline formula.
 const BREAK: char = '\u{200B}';
 /// The widest one formula image is drawn, in device pixels: GPUI rasterises an
@@ -321,9 +326,20 @@ pub struct PlannedBlock {
 /// Splits `source` into blocks: prose with inline formulas, and rows for
 /// display formulas and inline ones `place` puts on a row. Unreadable LaTeX
 /// stays in the prose as written. Prose next to a row is trimmed.
-pub fn plan(
+#[cfg(test)]
+fn plan(
     source: &str,
     label: Option<&str>,
+    place: impl FnMut(&str, bool) -> Option<Placement>,
+) -> Vec<PlannedBlock> {
+    plan_with(source, label, PLACEHOLDER, place)
+}
+
+/// `plan`, holding inline formulas' places with `placeholder`.
+fn plan_with(
+    source: &str,
+    label: Option<&str>,
+    placeholder: char,
     mut place: impl FnMut(&str, bool) -> Option<Placement>,
 ) -> Vec<PlannedBlock> {
     let mut blocks: Vec<PlannedBlock> = Vec::new();
@@ -425,7 +441,7 @@ pub fn plan(
                     let holder = current.display.len();
                     current
                         .display
-                        .extend(std::iter::repeat_n(PLACEHOLDER, placeholders.max(1)));
+                        .extend(std::iter::repeat_n(placeholder, placeholders.max(1)));
                     let holder = holder..current.display.len();
                     current.display.push(BREAK);
                     current.segments.push(Segment {
@@ -440,7 +456,7 @@ pub fn plan(
                 Some(Placement::Row { placeholders, size }) => {
                     finish(&mut current, &mut blocks);
                     let display: String =
-                        std::iter::repeat_n(PLACEHOLDER, placeholders.max(1)).collect();
+                        std::iter::repeat_n(placeholder, placeholders.max(1)).collect();
                     let len = display.len();
                     blocks.push(PlannedBlock {
                         display,
@@ -551,6 +567,29 @@ fn widened(segments: &[Segment], range: Range<usize>) -> Range<usize> {
         .fold(range, |range, segment| {
             range.start.min(segment.display.start)..range.end.max(segment.display.end)
         })
+}
+
+/// Whether laid-out (possibly cut) text still holds a formula's whole
+/// place: every placeholder of `holder` and the break after it.
+fn holds_formula(text: &str, holder: &Range<usize>, placeholder: char) -> bool {
+    text.get(holder.clone())
+        .is_some_and(|place| !place.is_empty() && place.chars().all(|c| c == placeholder))
+        && text[holder.end..].starts_with(BREAK)
+}
+
+/// The ellipsis GPUI's line clamp ends cut text with.
+const ELLIPSIS: &str = "…";
+
+/// Where cut text's ellipsis starts, when it took the style of a formula's
+/// placeholders (it follows the run it was appended to).
+fn ellipsis_in_formula<'a>(
+    text: &str,
+    mut holders: impl Iterator<Item = &'a Range<usize>>,
+) -> Option<usize> {
+    let at = text.strip_suffix(ELLIPSIS)?.len();
+    holders
+        .any(|holder| holder.start <= at && at < holder.end)
+        .then_some(at)
 }
 
 /// Where a source byte is shown, if this block shows it.
@@ -786,9 +825,14 @@ impl Element for NoteText {
         let line_height = style.line_height_in_pixels(rem);
         // Formulas are drawn in the text's own color.
         let ink = style.color;
+        let placeholder = if self.preview {
+            PREVIEW_PLACEHOLDER
+        } else {
+            PLACEHOLDER
+        };
         // The placeholder's width as the text will actually be shaped.
         const SAMPLE: usize = 64;
-        let sample: SharedString = std::iter::repeat_n(PLACEHOLDER, SAMPLE)
+        let sample: SharedString = std::iter::repeat_n(placeholder, SAMPLE)
             .collect::<String>()
             .into();
         let runs = [style.to_run(sample.len())];
@@ -806,64 +850,75 @@ impl Element for NoteText {
             Copy::Labeled(label) => Some(label.to_string()),
             _ => None,
         };
-        let planned = plan(&self.source, label.as_deref(), |latex, display| {
-            let formula = crate::math::formula(latex, display)?;
-            let full = FormulaSize {
-                width: formula.width() * em,
-                height: (formula.height() + formula.depth()) * em,
-                ascent: formula.height() * em,
-            };
-            let row = Placement::Row {
-                placeholders: placeholders(full.width),
-                size: full,
-            };
-            if self.preview {
-                // Scaled to the line, and to its width while it stays at
-                // least half as tall; a longer one keeps that size and shows
-                // its beginning, cut at the line's end.
-                let height = (f32::from(line_height) / full.height).min(1.);
-                let line = width.map(|width| f32::from(width - margin).max(0.));
-                let across = line.map_or(1., |line| (line / full.width).min(1.));
-                let scale = height.min(across.max(height * PREVIEW_MIN_SCALE));
-                inline_widths.push((px(full.width), fits_inline(px(full.width), width, margin)));
-                let size = FormulaSize {
+        let planned = plan_with(
+            &self.source,
+            label.as_deref(),
+            placeholder,
+            |latex, display| {
+                let formula = crate::math::formula(latex, display)?;
+                let full = FormulaSize {
+                    width: formula.width() * em,
+                    height: (formula.height() + formula.depth()) * em,
+                    ascent: formula.height() * em,
+                };
+                let row = Placement::Row {
+                    placeholders: placeholders(full.width),
+                    size: full,
+                };
+                if self.preview {
+                    // Scaled to the line, and to its width while it stays at
+                    // least half as tall; a longer one keeps that size and shows
+                    // its beginning, cut at the line's end.
+                    let height = (f32::from(line_height) / full.height).min(1.);
+                    let line = width.map(|width| f32::from(width - margin).max(0.));
+                    let across = line.map_or(1., |line| (line / full.width).min(1.));
+                    let scale = height.min(across.max(height * PREVIEW_MIN_SCALE));
+                    inline_widths
+                        .push((px(full.width), fits_inline(px(full.width), width, margin)));
+                    let size = FormulaSize {
+                        width: full.width * scale,
+                        height: full.height * scale,
+                        ascent: full.ascent * scale,
+                    };
+                    let held = line.map_or(size.width, |line| size.width.min(line));
+                    return Some(Placement::Inline {
+                        placeholders: placeholders(held),
+                        size,
+                    });
+                }
+                if display {
+                    return Some(row);
+                }
+                // A tall inline formula, such as a fraction, may reach into the
+                // space between lines (a line is 1.8 em, its glyphs about 1 em);
+                // only a taller one is scaled down rather than pushing lines apart.
+                let room = f32::from(line_height) * INLINE_ROOM;
+                let scale = (room / full.height).min(1.);
+                let inline = FormulaSize {
                     width: full.width * scale,
                     height: full.height * scale,
                     ascent: full.ascent * scale,
                 };
-                let held = line.map_or(size.width, |line| size.width.min(line));
-                return Some(Placement::Inline {
-                    placeholders: placeholders(held),
-                    size,
-                });
-            }
-            if display {
-                return Some(row);
-            }
-            // A tall inline formula, such as a fraction, may reach into the
-            // space between lines (a line is 1.8 em, its glyphs about 1 em);
-            // only a taller one is scaled down rather than pushing lines apart.
-            let room = f32::from(line_height) * INLINE_ROOM;
-            let scale = (room / full.height).min(1.);
-            let inline = FormulaSize {
-                width: full.width * scale,
-                height: full.height * scale,
-                ascent: full.ascent * scale,
-            };
-            let fits = fits_inline(px(inline.width), width, margin);
-            inline_widths.push((px(inline.width), fits));
-            Some(if fits {
-                Placement::Inline {
-                    placeholders: placeholders(inline.width),
-                    size: inline,
-                }
-            } else {
-                row
-            })
-        });
+                let fits = fits_inline(px(inline.width), width, margin);
+                inline_widths.push((px(inline.width), fits));
+                Some(if fits {
+                    Placement::Inline {
+                        placeholders: placeholders(inline.width),
+                        size: inline,
+                    }
+                } else {
+                    row
+                })
+            },
+        );
         let source_len = self.source.len();
-        let display_highlights = |segments: &[Segment]| {
-            merged(
+        let display_highlights = |segments: &[Segment], holders: &[Range<usize>]| {
+            let overlaps = |range: &Range<usize>| {
+                holders
+                    .iter()
+                    .any(|h| h.start < range.end && range.start < h.end)
+            };
+            let mut highlights = merged(
                 self.highlights
                     .iter()
                     .filter(|(range, _)| range.start < range.end && range.end <= source_len)
@@ -872,8 +927,21 @@ impl Element for NoteText {
                             .into_iter()
                             .map(move |range| (range, *style))
                     })
+                    .filter(|(range, _)| !overlaps(range))
                     .collect(),
-            )
+            );
+            // A preview's placeholders are characters that must not show.
+            highlights.extend(holders.iter().map(|holder| {
+                (
+                    holder.clone(),
+                    HighlightStyle {
+                        fade_out: Some(1.),
+                        ..Default::default()
+                    },
+                )
+            }));
+            highlights.sort_by_key(|(range, _)| range.start);
+            highlights
         };
         let row_count = planned.iter().filter(|block| block.row).count();
         let rows = window.with_element_state(
@@ -891,7 +959,16 @@ impl Element for NoteText {
         let mut children = Vec::with_capacity(planned.len());
         for (index, block) in planned.into_iter().enumerate() {
             let display = SharedString::from(block.display);
-            let highlights = display_highlights(&block.segments);
+            let holders: Vec<Range<usize>> = if self.preview {
+                block
+                    .formulas
+                    .iter()
+                    .map(|(range, ..)| range.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let highlights = display_highlights(&block.segments, &holders);
             let text = if highlights.is_empty() {
                 StyledText::new(display.clone())
             } else {
@@ -925,6 +1002,8 @@ impl Element for NoteText {
                 selection_color: self.selection_color,
                 font_size,
                 fade: block.row.then_some(self.surface),
+                display_len: display.len(),
+                placeholder,
             };
             children.push(
                 if let Some(scroll) = block.row.then(|| rows.next()).flatten() {
@@ -1170,6 +1249,10 @@ struct Line {
     /// On a formula row: the surface the formula fades into where it runs
     /// past the row's edge.
     fade: Option<Hsla>,
+    /// The length of the display text as planned; a clamped preview's laid
+    /// out text is shorter where it was cut.
+    display_len: usize,
+    placeholder: char,
 }
 
 impl IntoElement for Line {
@@ -1273,14 +1356,48 @@ impl Element for Line {
         let visible = window.content_mask().bounds;
         let mut runs_before = false;
         let mut runs_after = false;
+        // A clamped preview cut its text, ending it in an ellipsis: a formula
+        // whose place the cut reached is not drawn, so it is shown whole or
+        // not at all and never covers the ellipsis.
+        let laid_out = (layout.len() != self.display_len).then(|| layout.text());
+        // GPUI gives the clamp's ellipsis the style of the run it follows;
+        // cut right before a formula, that is the formula's hidden
+        // placeholders, so the ellipsis is drawn again in the text's ink.
+        if let Some(text) = &laid_out
+            && let Some(at) = ellipsis_in_formula(text, self.formulas.iter().map(|f| &f.display))
+            && let Some(position) = layout.position_for_index(at)
+        {
+            let style = window.text_style();
+            let runs = [TextRun {
+                color: self.ink,
+                ..style.to_run(ELLIPSIS.len())
+            }];
+            let line =
+                window
+                    .text_system()
+                    .shape_line(ELLIPSIS.into(), self.font_size, &runs, None);
+            let _ = line.paint(
+                position,
+                line_height,
+                gpui::TextAlign::Left,
+                None,
+                window,
+                cx,
+            );
+        }
         for formula in &self.formulas {
+            if let Some(text) = &laid_out
+                && !holds_formula(text, &formula.display, self.placeholder)
+            {
+                continue;
+            }
             let Some(mut start) = layout.position_for_index(formula.display.start) else {
                 continue;
             };
             // A line wrapped just before the formula reports its first
             // placeholder at the end of the previous line; the formula
             // starts the next one.
-            let second = formula.display.start + PLACEHOLDER.len_utf8();
+            let second = formula.display.start + self.placeholder.len_utf8();
             if let Some(next) = layout.position_for_index(second)
                 && next.y > start.y
             {
@@ -1524,6 +1641,47 @@ mod tests {
         assert!(widened.start < holder.start && widened.end > holder.end);
         // Prose alone is unchanged.
         assert_eq!(super::widened(segments, 0..1), 0..1);
+    }
+
+    #[test]
+    fn a_preview_cut_through_a_formula_drops_it() {
+        let p = PREVIEW_PLACEHOLDER;
+        let blocks = plan_with("就得到 $AP = PD$ 之后", None, p, inline);
+        let display = &blocks[0].display;
+        let holder = blocks[0].formulas[0].0.clone();
+        assert!(holds_formula(display, &holder, p));
+        // GPUI's clamp keeps the text up to its cut, trims trailing spaces
+        // and ASCII punctuation (the preview's placeholders) and adds an
+        // ellipsis, which the formula must then not cover.
+        let clamp = |cut: usize| {
+            let kept = display[..cut]
+                .trim_end_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation());
+            format!("{kept}…")
+        };
+        assert!(clamp(holder.start + 1).ends_with("\u{200B}…"));
+        assert!(!holds_formula(&clamp(holder.start + 1), &holder, p));
+        assert!(!holds_formula(&clamp(holder.end), &holder, p));
+        assert!(holds_formula(
+            &clamp(holder.end + BREAK.len_utf8() + 1),
+            &holder,
+            p
+        ));
+        // An ellipsis right where the formula's place began is redrawn.
+        let cut = clamp(holder.start + 1);
+        assert_eq!(
+            ellipsis_in_formula(&cut, std::iter::once(&holder)),
+            Some(cut.len() - ELLIPSIS.len())
+        );
+        assert_eq!(
+            ellipsis_in_formula(
+                &clamp(holder.start - BREAK.len_utf8()),
+                std::iter::once(&holder)
+            ),
+            None
+        );
+        // GPUI's clamp breaks lines at any non-word character, so the
+        // preview's placeholders are word characters, kept together.
+        assert!(p.is_ascii_punctuation());
     }
 
     #[test]
