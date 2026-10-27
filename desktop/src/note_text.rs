@@ -34,6 +34,9 @@ const BREAK: char = '\u{200B}';
 /// SVG at twice that size and draws none wider than 8192 pixels, so a wider
 /// formula is drawn as several tiles side by side.
 const MAX_FORMULA_PIXELS: f32 = 4000.;
+/// The smallest a preview shrinks a formula to fit its line's width, as a
+/// share of its line-height size.
+const PREVIEW_MIN_SCALE: f32 = 0.5;
 /// How tall an inline formula may be, in lines, before it is scaled down.
 const INLINE_ROOM: f32 = 1.4;
 
@@ -61,6 +64,7 @@ pub struct NoteText {
     selection_color: Hsla,
     surface: Hsla,
     group: Option<SharedString>,
+    preview: bool,
     child: Option<AnyElement>,
 }
 
@@ -76,6 +80,7 @@ impl NoteText {
             selection_color: transparent_black(),
             surface: crate::theme::color(crate::theme::SURFACE).into(),
             group: None,
+            preview: false,
             child: None,
         }
     }
@@ -116,6 +121,15 @@ impl NoteText {
     /// The surface behind the text, which a wide formula row fades into.
     pub fn surface(mut self, color: Hsla) -> Self {
         self.surface = color;
+        self
+    }
+
+    /// A clamped preview, such as a screenshot card's excerpt: every formula
+    /// stays in the line, scaled to the line's height (and its width, down to
+    /// half that size, beyond which it is cut), so the text can end in an
+    /// ellipsis; it is not selectable.
+    pub fn preview(mut self) -> Self {
+        self.preview = true;
         self
     }
 
@@ -786,6 +800,26 @@ impl Element for NoteText {
                 placeholders: placeholders(full.width),
                 size: full,
             };
+            if self.preview {
+                // Scaled to the line, and to its width while it stays at
+                // least half as tall; a longer one keeps that size and shows
+                // its beginning, cut at the line's end.
+                let height = (f32::from(line_height) / full.height).min(1.);
+                let line = width.map(|width| f32::from(width - margin).max(0.));
+                let across = line.map_or(1., |line| (line / full.width).min(1.));
+                let scale = height.min(across.max(height * PREVIEW_MIN_SCALE));
+                inline_widths.push((px(full.width), fits_inline(px(full.width), width, margin)));
+                let size = FormulaSize {
+                    width: full.width * scale,
+                    height: full.height * scale,
+                    ascent: full.ascent * scale,
+                };
+                let held = line.map_or(size.width, |line| size.width.min(line));
+                return Some(Placement::Inline {
+                    placeholders: placeholders(held),
+                    size,
+                });
+            }
             if display {
                 return Some(row);
             }
@@ -965,13 +999,15 @@ impl Element for NoteText {
             .map(|block| block.layout.bounds())
             .collect();
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        state.handle.register(
-            TextSelectionRegistration::new(hitbox.clone(), bounds)
-                .with_document_order(self.document_order)
-                .with_text_bounds(text_bounds),
-            window,
-            cx,
-        );
+        if !self.preview {
+            state.handle.register(
+                TextSelectionRegistration::new(hitbox.clone(), bounds)
+                    .with_document_order(self.document_order)
+                    .with_text_bounds(text_bounds),
+                window,
+                cx,
+            );
+        }
         let width = bounds.size.width;
         if let Some(group) = &self.group {
             GROUP_WIDTHS.with(|widths| widths.borrow_mut().insert(group.clone(), width));
@@ -1018,6 +1054,12 @@ impl Element for NoteText {
         window: &mut Window,
         cx: &mut App,
     ) {
+        if self.preview {
+            if let Some(child) = &mut self.child {
+                child.paint(window, cx);
+            }
+            return;
+        }
         let runs: Vec<TextSelectionRun> = state
             .blocks
             .iter()
@@ -1243,26 +1285,41 @@ impl Element for Line {
             runs_after |= x + formula.width > visible.right() + px(0.5);
             let tiles = tile_count(f32::from(formula.width), window.scale_factor());
             let tile_width = formula.width / tiles as f32;
-            for tile in 0..tiles {
-                let bounds = Bounds::new(
-                    Point::new(x + tile_width * tile as f32, y),
-                    gpui::size(tile_width, formula.height),
-                );
-                if !bounds.intersects(&visible) {
-                    continue;
+            // A preview's formula longer than its place is cut at its end.
+            let place = Bounds::new(
+                Point::new(start.x, visible.top()),
+                gpui::size(held.min(formula.width), visible.size.height),
+            );
+            let mask = gpui::ContentMask {
+                bounds: if held < formula.width - px(0.5) {
+                    place
+                } else {
+                    visible
+                },
+            };
+            let visible = mask.bounds.intersect(&visible);
+            window.with_content_mask(Some(mask), |window| {
+                for tile in 0..tiles {
+                    let bounds = Bounds::new(
+                        Point::new(x + tile_width * tile as f32, y),
+                        gpui::size(tile_width, formula.height),
+                    );
+                    if !bounds.intersects(&visible) {
+                        continue;
+                    }
+                    let Some(path) = crate::math::tile(&formula.path, tile, tiles) else {
+                        continue;
+                    };
+                    let _ = window.paint_svg(
+                        bounds,
+                        path,
+                        None,
+                        TransformationMatrix::unit(),
+                        self.ink,
+                        cx,
+                    );
                 }
-                let Some(path) = crate::math::tile(&formula.path, tile, tiles) else {
-                    continue;
-                };
-                let _ = window.paint_svg(
-                    bounds,
-                    path,
-                    None,
-                    TransformationMatrix::unit(),
-                    self.ink,
-                    cx,
-                );
-            }
+            });
         }
         if let Some(surface) = self.fade {
             let width = window.rem_size() * 2.;

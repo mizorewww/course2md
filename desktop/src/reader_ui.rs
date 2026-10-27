@@ -1070,6 +1070,17 @@ fn frame_excerpt(frame: &Frame, query: &str) -> String {
         {
             end += 1;
         }
+        // A formula is shown whole or not at all.
+        for (range, piece) in crate::note_text::piece_sources(text) {
+            if matches!(piece, crate::math::Piece::Math { .. }) {
+                if range.start < start && start < range.end {
+                    start = range.start;
+                }
+                if range.start < end && end < range.end {
+                    end = range.end;
+                }
+            }
+        }
         return format!(
             "{}{}{}",
             if start > 0 { "…" } else { "" },
@@ -5427,9 +5438,8 @@ impl Desktop {
             })
             .collect::<Vec<_>>();
         // The three-line preview is a defined content slot; the full
-        // transcript remains readable in the image viewer and article.
-        // Without highlights, native ellipsis marks the cut: StyledText
-        // clips silently, which reads like a broken sentence.
+        // transcript remains readable in the image viewer and article. An
+        // ellipsis marks the cut, and formulas are typeset in the line.
         let excerpt = div()
             .id(("frame-excerpt", index))
             .role(Role::Paragraph)
@@ -5444,12 +5454,15 @@ impl Desktop {
             .font_weight(FontWeight::NORMAL)
             .line_height(excerpt_line_height)
             .text_color(color(GRAY))
-            .when(excerpt_marks.is_empty(), |view| {
-                view.text_ellipsis().line_clamp(3).child(excerpt.clone())
-            })
-            .when(!excerpt_marks.is_empty(), |view| {
-                view.child(StyledText::new(excerpt).with_highlights(excerpt_marks))
-            });
+            .overflow_hidden()
+            .text_ellipsis()
+            .line_clamp(3)
+            .child(
+                crate::note_text::NoteText::new(("frame-excerpt-text", index), excerpt)
+                    .highlights(excerpt_marks)
+                    .width_group("screenshot-card")
+                    .preview(),
+            );
         v_flex()
             .id(SharedString::from(frame.anchor.clone()))
             .w_full()
@@ -6697,6 +6710,16 @@ mod tests {
             "Some introductory words. OpenAI said that Buckmaster offered terms.",
         );
         assert!(frame_excerpt(&phrase, "Buckmaster").starts_with("…OpenAI said that Buckmaster"));
+        // An excerpt around a match never cuts a formula in half.
+        let formula = frame(
+            4,
+            "前文前文前文前文 $a + b + c + d + e + f + g + h$ 后文 match",
+        );
+        let excerpt = frame_excerpt(&formula, "match");
+        assert!(
+            excerpt.contains("$a + b + c + d + e + f + g + h$"),
+            "{excerpt}"
+        );
     }
 
     #[test]
