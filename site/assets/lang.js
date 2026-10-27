@@ -2,7 +2,8 @@
 // The English home page sends a visitor whose browser prefers Chinese to
 // /zh/ on their first visit. Picking a language from the header link is
 // remembered and wins over the browser; a direct link to /zh/ is never
-// redirected.
+// redirected. The language links also carry ?lang=en / ?lang=zh so the
+// choice holds even where storage is unavailable.
 (function () {
   var KEY = "c2m-lang";
   function saved() {
@@ -25,7 +26,9 @@
 
   var root = document.documentElement;
   var onEnglishHome = root.lang === "en" && /^\/(index\.html)?$/.test(location.pathname);
-  var choice = saved();
+  var asked = /(?:^|[?&])lang=(en|zh)(?:&|$)/.exec(location.search);
+  if (asked) save(asked[1]);
+  var choice = asked ? asked[1] : saved();
   if (onEnglishHome && (choice === "zh" || (!choice && browserPrefersChinese()))) {
     location.replace("/zh/" + location.search + location.hash);
     return;
