@@ -1847,7 +1847,14 @@ fn render_note_section(
                 .text_size(rems(24. / 14.))
                 .line_height(rems(32. / 14.))
                 .font_weight(FontWeight::MEDIUM)
-                .child(chapter.clone())
+                // Selectable with the paragraphs, so a copied section keeps its title.
+                .child(reader_text(
+                    ("reader-chapter", heading),
+                    SharedString::from(chapter.clone()),
+                    heading as u64,
+                    Vec::new(),
+                    None,
+                ))
         }))
         .children(seconds.map(|seconds| watch_from_chip(flow, heading, seconds, marks, cx)));
     v_flex()
@@ -1904,15 +1911,21 @@ fn render_note_heading(
         )
     } else {
         (
-            Some(
-                heading_style(theme::accessible_text(
-                    ("reader-heading", index),
-                    chapter
-                        .cloned()
-                        .map_or_else(|| text.clone(), SharedString::from),
-                ))
-                .into_any_element(),
-            ),
+            Some({
+                let title = chapter
+                    .cloned()
+                    .map_or_else(|| text.clone(), SharedString::from);
+                heading_style(div().id(("reader-heading", index)))
+                    .aria_label(title.clone())
+                    .child(reader_text(
+                        ("reader-heading-text", index),
+                        title,
+                        index as u64,
+                        Vec::new(),
+                        None,
+                    ))
+                    .into_any_element()
+            }),
             Vec::new(),
         )
     };
