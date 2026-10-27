@@ -15,9 +15,9 @@
 //! copied passage reads as Markdown.
 use gpui::{
     AnyElement, App, Bounds, Corners, Edges, ElementId, GlobalElementId, HighlightStyle, Hitbox,
-    HitboxBehavior, Hsla, InspectorElementId, LayoutId, PaintQuad, Pixels, Point, SharedString,
-    StyledText, Subscription, TextLayout, TransformationMatrix, Window, div, prelude::*, px, rems,
-    transparent_black,
+    HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseDownEvent, PaintQuad, Pixels, Point,
+    SharedString, StyledText, Subscription, TextLayout, TransformationMatrix, Window, div,
+    prelude::*, px, rems, transparent_black,
 };
 use gpui_base::{
     TextSelectionEvent, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
@@ -164,11 +164,68 @@ struct Shared {
     runs: Vec<(SharedString, TextLayout, Vec<Segment>)>,
     /// Selected display ranges per block, as projected for painting.
     painted: Vec<Option<Range<usize>>>,
+    /// A triple click's whole paragraph, when it spans formula rows.
+    paragraph: Paragraph,
+}
+
+/// Window text selection selects the line under a triple click within one
+/// run of text; a paragraph split by a formula row spans several, so the
+/// element selects the paragraph itself. Armed by the click, it takes over
+/// the selection that click makes and ends with the next one.
+#[derive(Clone, Debug, Default, PartialEq)]
+enum Paragraph {
+    #[default]
+    None,
+    Armed(Range<usize>),
+    Selected(Range<usize>),
 }
 
 impl Shared {
+    fn selection_event(&mut self, event: &TextSelectionEvent) {
+        match event {
+            TextSelectionEvent::SelectionChanged(snapshot) => {
+                self.snapshot = *snapshot;
+                self.paragraph = match (std::mem::take(&mut self.paragraph), snapshot) {
+                    (Paragraph::Armed(range), Some(_)) => Paragraph::Selected(range),
+                    (Paragraph::Selected(_), None) => Paragraph::None,
+                    (paragraph, _) => paragraph,
+                };
+            }
+            TextSelectionEvent::Cleared => {
+                if let Paragraph::Selected(_) = self.paragraph {
+                    self.paragraph = Paragraph::None;
+                }
+            }
+            TextSelectionEvent::AutoScroll(_) => {}
+        }
+    }
+
+    /// The source paragraph (text between blank lines) under `position`,
+    /// when it spans more than one of the laid-out blocks.
+    fn paragraph_at(&self, position: Point<Pixels>) -> Option<Range<usize>> {
+        let byte = self.runs.iter().find_map(|(_, layout, segments)| {
+            if !layout.bounds().contains(&position) {
+                return None;
+            }
+            let index = match layout.index_for_position(position) {
+                Ok(index) | Err(index) => index,
+            };
+            source_range(segments, index..index + 1).map(|range| range.start)
+        })?;
+        let range = paragraph_range(&self.source, byte);
+        let blocks = self
+            .runs
+            .iter()
+            .filter(|(_, _, segments)| !display_ranges(segments, &range).is_empty())
+            .count();
+        (blocks > 1).then_some(range)
+    }
+
     /// The copied text for the current selection, from the current content.
     fn copied(&self) -> String {
+        if let Paragraph::Selected(range) = &self.paragraph {
+            return copied_text(&self.source, &self.copy, std::slice::from_ref(range));
+        }
         let Some(points) = self.snapshot.and_then(|snapshot| snapshot.window_points()) else {
             return String::new();
         };
@@ -200,9 +257,7 @@ impl Retained {
         let selection = shared.clone();
         let subscription = handle.subscribe(
             move |event, _| {
-                if let TextSelectionEvent::SelectionChanged(snapshot) = event {
-                    selection.borrow_mut().snapshot = *snapshot;
-                }
+                selection.borrow_mut().selection_event(event);
             },
             cx,
         );
@@ -479,6 +534,17 @@ fn display_index(segments: &[Segment], byte: usize) -> Option<usize> {
                 segment.display.start + byte - segment.source.start
             }
         })
+}
+
+/// The paragraph around `byte`: the text between the blank lines before and
+/// after it.
+fn paragraph_range(source: &str, byte: usize) -> Range<usize> {
+    let byte = byte.min(source.len());
+    let start = source[..byte].rfind("\n\n").map_or(0, |found| found + 2);
+    let end = source[byte..]
+        .find("\n\n")
+        .map_or(source.len(), |found| byte + found);
+    start..end
 }
 
 /// The copied text for the selected source spans.
@@ -1000,6 +1066,30 @@ impl Element for NoteText {
                     (start < range.end).then_some(start..range.end)
                 })
                 .collect();
+            if let Paragraph::Selected(paragraph) = &shared.paragraph {
+                shared.painted = state
+                    .blocks
+                    .iter()
+                    .map(|block| {
+                        let ranges = display_ranges(&block.segments, paragraph);
+                        let start = ranges.iter().map(|range| range.start).min()?;
+                        let end = ranges.iter().map(|range| range.end).max()?;
+                        Some(start..end)
+                    })
+                    .collect();
+            }
+        }
+        if state.blocks.len() > 1 {
+            let shared = state.shared.clone();
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _| {
+                if phase.bubble() && event.click_count >= 3 {
+                    let mut shared = shared.borrow_mut();
+                    if let Some(range) = shared.paragraph_at(event.position) {
+                        shared.paragraph = Paragraph::Armed(range);
+                        window.refresh();
+                    }
+                }
+            });
         }
         if let Some(child) = &mut self.child {
             child.paint(window, cx);
@@ -1275,6 +1365,28 @@ mod tests {
         assert_eq!(blocks[2].display, "和后文");
         assert_eq!(&text[blocks[2].segments[0].source.clone()], "和后文");
         assert_eq!(&text[blocks[1].segments[0].source.clone()], "$$E = mc^2$$");
+    }
+
+    #[test]
+    fn a_triple_click_selects_its_paragraph_until_the_next_selection() {
+        assert_eq!(paragraph_range("一\n\n二 $x$ 三\n\n四", 9), 5..16);
+        assert_eq!(paragraph_range("只有一段", 3), 0..12);
+        let mut shared = Shared {
+            paragraph: Paragraph::Armed(0..4),
+            ..Shared::default()
+        };
+        // The click's own clearing comes first and leaves it armed; the
+        // selection the click makes turns it into the selection.
+        shared.selection_event(&TextSelectionEvent::Cleared);
+        shared.selection_event(&TextSelectionEvent::SelectionChanged(None));
+        assert_eq!(shared.paragraph, Paragraph::Armed(0..4));
+        shared.paragraph = match std::mem::take(&mut shared.paragraph) {
+            Paragraph::Armed(range) => Paragraph::Selected(range),
+            other => other,
+        };
+        // The next click clears it.
+        shared.selection_event(&TextSelectionEvent::Cleared);
+        assert_eq!(shared.paragraph, Paragraph::None);
     }
 
     #[test]
