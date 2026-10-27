@@ -6972,7 +6972,7 @@ mod tests {
         let request = OfflineVideoRequest::for_version(&first, &task, &library).unwrap();
         assert_eq!(
             request.inspect(),
-            OfflineVideo::Available(media.canonicalize().unwrap())
+            OfflineVideo::Available(course2md::config::canonicalize(&media).unwrap())
         );
         assert!(OfflineVideoRequest::for_version(&second, &task, &library).is_none());
         let mut changed = task.clone();
