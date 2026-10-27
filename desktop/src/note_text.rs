@@ -257,7 +257,7 @@ pub fn plan(
     label: Option<&str>,
     mut place: impl FnMut(&str, bool) -> Option<Placement>,
 ) -> Vec<PlannedBlock> {
-    let mut blocks = Vec::new();
+    let mut blocks: Vec<PlannedBlock> = Vec::new();
     let mut current = PlannedBlock {
         display: String::new(),
         segments: Vec::new(),
@@ -321,7 +321,34 @@ pub fn plan(
     };
     for (range, piece) in piece_sources(source) {
         match piece {
-            crate::math::Piece::Text(_) => push_prose(&mut current, range),
+            crate::math::Piece::Text(_) => {
+                let mut range = range;
+                // Closing punctuation never starts a line: after a formula
+                // row it stays on the row, following the formula.
+                if current.display.is_empty()
+                    && let Some(row) = blocks.last_mut().filter(|block| block.row)
+                {
+                    let text = &source[range.clone()];
+                    let start = range.start + text.len() - text.trim_start().len();
+                    let end = start
+                        + source[start..range.end]
+                            .chars()
+                            .take_while(|c| closes_line(*c))
+                            .map(char::len_utf8)
+                            .sum::<usize>();
+                    if end > start {
+                        let from = row.display.len();
+                        row.display.push_str(&source[start..end]);
+                        row.segments.push(Segment {
+                            display: from..row.display.len(),
+                            source: start..end,
+                            atomic: false,
+                        });
+                        range.start = end;
+                    }
+                }
+                push_prose(&mut current, range)
+            }
             crate::math::Piece::Math { latex, display } => match place(latex, display) {
                 Some(Placement::Inline { placeholders, size }) => {
                     let start = current.display.len();
@@ -363,6 +390,11 @@ pub fn plan(
     }
     finish(&mut current, &mut blocks);
     blocks
+}
+
+/// Punctuation that may not begin a line (CJK and Latin closing marks).
+fn closes_line(c: char) -> bool {
+    "，。、；：！？）」』”’》〉】,.;:!?)]}".contains(c)
 }
 
 /// The byte ranges `pieces` cover in `text`: prose as written, and a formula
@@ -1218,6 +1250,19 @@ mod tests {
         assert_eq!(blocks[2].display, "和后文");
         assert_eq!(&text[blocks[2].segments[0].source.clone()], "和后文");
         assert_eq!(&text[blocks[1].segments[0].source.clone()], "$$E = mc^2$$");
+    }
+
+    #[test]
+    fn closing_punctuation_after_a_formula_row_stays_on_the_row() {
+        let text = "如下\n$$E$$\n，以及后文";
+        let blocks = plan(text, None, inline);
+        assert_eq!(blocks.len(), 3);
+        assert!(blocks[1].row);
+        assert!(blocks[1].display.ends_with('，'));
+        assert_eq!(blocks[2].display, "以及后文");
+        // The row copies as the formula and its punctuation.
+        let all = source_range(&blocks[1].segments, 0..blocks[1].display.len()).unwrap();
+        assert_eq!(&text[all], "$$E$$\n，");
     }
 
     #[test]
