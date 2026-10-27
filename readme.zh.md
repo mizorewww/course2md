@@ -87,28 +87,22 @@
 
 ## 安装
 
-桌面应用自带转换引擎，不需要另外安装命令行工具。处理视频需要 `ffmpeg`，下面的包管理器会一并安装。
+桌面应用自带转换引擎和它用到的视频工具（`ffmpeg`、`ffprobe` 和 `yt-dlp`），下载下面的安装包即可使用，无需另装其他程序，也不需要命令行工具。
 
 ### macOS（Apple 芯片，macOS 15 及以上）
 
-使用 [Homebrew](https://brew.sh) 时，这条命令会安装应用以及 `ffmpeg`、`yt-dlp` 和 `aria2`：
+使用 [Homebrew](https://brew.sh) 时，这条命令会安装应用以及 `yt-dlp` 和 `aria2`（加快模型下载）：
 
 ```sh
 brew install --cask mizorewww/tap/course2md-gui
 ```
 
-然后从「应用程序」打开 **course2md**。不使用 Homebrew 时，[下载 DMG](https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg)，把 **course2md** 拖入「应用程序」，并按 [macOS 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#macos-apple-silicon)安装 `ffmpeg`。应用已内置 `yt-dlp`。
+然后从「应用程序」打开 **course2md**。不使用 Homebrew 时，[下载 DMG](https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg)，把 **course2md** 拖入「应用程序」即可，详见 [macOS 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#macos-apple-silicon)。
 
 ### Windows（x64）
 
-1. [下载便携包（ZIP）](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip)，**完整解压**到固定文件夹。包内已有 `yt-dlp` 和 `aria2`。
-2. 在 PowerShell 中安装 `ffmpeg`：
-
-   ```powershell
-   winget install --id Gyan.FFmpeg -e
-   ```
-
-3. 打开解压目录中的 **course2md-desktop.exe**，其他文件保持在同一目录。
+1. [下载便携包（ZIP）](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip)，**完整解压**到固定文件夹。包内已有 `ffmpeg`、`yt-dlp`、`aria2`、`uv`（Intel NPU 识别）和用于显卡（Vulkan）与 CPU 识别的 `llama-server`。
+2. 打开解压目录中的 **course2md-desktop.exe**，其他文件保持在同一目录。
 
 ### Arch Linux / CachyOS（x86_64）
 
@@ -116,11 +110,11 @@ brew install --cask mizorewww/tap/course2md-gui
 yay -S course2md-gui-bin
 ```
 
-（或 `paru -S course2md-gui-bin`）。这会安装应用、视频工具和图形库；显卡需要可用的 Vulkan 驱动，详见 [Linux 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#arch-linux--cachyos)。
+（或 `paru -S course2md-gui-bin`）。这会安装应用、系统的视频工具和图形库；显卡需要可用的 Vulkan 驱动，详见 [Linux 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#arch-linux--cachyos)。
 
 ### Ubuntu 及其他 Linux（x86_64）
 
-[下载 tar.gz](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz)，按 [Linux 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#其他-linux-x64)安装 `ffmpeg` 和图形库，解压后运行 `./course2md-desktop`。基于 Ubuntu 24.04 构建，已内置 `yt-dlp`。
+[下载 tar.gz](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz)，按 [Linux 指南](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#其他-linux-x64)安装图形库，解压后运行 `./course2md-desktop`。基于 Ubuntu 24.04 构建，已内置 `ffmpeg`、`yt-dlp`、`uv` 和 `llama-server`（显卡识别使用系统的 Vulkan 驱动）。
 
 Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用[命令行工具](#命令行工具)。
 
@@ -134,7 +128,7 @@ Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用[命令行工具](#�
 
 ## 常见问题
 
-**转换时提示缺少 `ffmpeg`。**先安装它（macOS 用 `brew install ffmpeg`，Windows 用 `winget install --id Gyan.FFmpeg -e`，Linux 用系统包管理器），再到「设置 → 应用 → 运行检查」确认（CLI 用 `course2md doctor`）。
+**转换时提示缺少 `ffmpeg`。**下载的应用把自带的 `ffmpeg` 放在 `course2md-desktop` 旁边，请完整解压或重新安装整个安装包。命令行工具和 Arch 软件包使用系统的 `ffmpeg`，需要先安装（macOS 用 `brew install ffmpeg`，Windows 用 `winget install --id Gyan.FFmpeg -e`，Linux 用系统包管理器）。「设置 → 应用 → 运行检查」（CLI 用 `course2md doctor`）会显示每个工具的来源。
 
 **Bilibili 视频失败或清晰度低。**在「设置 → 服务与账号 → Bilibili 账号」扫码登录。
 

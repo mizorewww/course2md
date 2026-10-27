@@ -87,28 +87,22 @@ Choose from 10 themes, adjust the text size and reduce motion in **Settings → 
 
 ## Install
 
-The desktop app includes the conversion engine; you do not need the command-line tool to use it. Videos need `ffmpeg`, which the package managers below install for you.
+The desktop app includes the conversion engine and the video tools it runs (`ffmpeg`, `ffprobe` and `yt-dlp`), so the downloads below work without installing anything else. You do not need the command-line tool to use it.
 
 ### macOS (Apple Silicon, macOS 15 or later)
 
-With [Homebrew](https://brew.sh), this installs the app together with `ffmpeg`, `yt-dlp` and `aria2`:
+With [Homebrew](https://brew.sh), this installs the app together with `yt-dlp` and `aria2` (faster model downloads):
 
 ```sh
 brew install --cask mizorewww/tap/course2md-gui
 ```
 
-Then open **course2md** from **Applications**. Without Homebrew, [download the DMG](https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg), drag **course2md** to Applications and install `ffmpeg` as described in the [macOS guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#macos-apple-silicon). The app already includes `yt-dlp`.
+Then open **course2md** from **Applications**. Without Homebrew, [download the DMG](https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg) and drag **course2md** to Applications; see the [macOS guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#macos-apple-silicon).
 
 ### Windows (x64)
 
-1. [Download the portable ZIP](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip) and **extract everything** to a permanent folder. It includes `yt-dlp` and `aria2`.
-2. Install `ffmpeg` in PowerShell:
-
-   ```powershell
-   winget install --id Gyan.FFmpeg -e
-   ```
-
-3. Open **course2md-desktop.exe** from the extracted folder and keep the other files next to it.
+1. [Download the portable ZIP](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip) and **extract everything** to a permanent folder. It includes `ffmpeg`, `yt-dlp`, `aria2`, `uv` (Intel NPU recognition) and `llama-server` for GPU (Vulkan) and CPU recognition.
+2. Open **course2md-desktop.exe** from the extracted folder and keep the other files next to it.
 
 ### Arch Linux / CachyOS (x86_64)
 
@@ -116,11 +110,11 @@ Then open **course2md** from **Applications**. Without Homebrew, [download the D
 yay -S course2md-gui-bin
 ```
 
-(or `paru -S course2md-gui-bin`). This installs the app, the video tools and the graphics libraries; your GPU needs a working Vulkan driver. See the [Linux guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#arch-linux--cachyos).
+(or `paru -S course2md-gui-bin`). This installs the app, the system's video tools and the graphics libraries; your GPU needs a working Vulkan driver. See the [Linux guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#arch-linux--cachyos).
 
 ### Ubuntu and other Linux (x86_64)
 
-[Download the tar.gz](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz), install `ffmpeg` and the graphics libraries from the [Linux guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#other-linux-x64-distributions), extract it and run `./course2md-desktop`. Built on Ubuntu 24.04; it includes `yt-dlp`.
+[Download the tar.gz](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz), install the graphics libraries from the [Linux guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#other-linux-x64-distributions), extract it and run `./course2md-desktop`. Built on Ubuntu 24.04; it includes `ffmpeg`, `yt-dlp`, `uv` and `llama-server` (GPU recognition uses your Vulkan driver).
 
 Intel Macs and Linux ARM64 have no desktop app yet; use the [command-line tool](#command-line-tool).
 
@@ -134,7 +128,7 @@ Notes go to a default library; add other folders in **Settings → Storage**. Th
 
 ## Questions
 
-**Conversion says `ffmpeg` is missing.** Install it (`brew install ffmpeg` on macOS, `winget install --id Gyan.FFmpeg -e` on Windows, your package manager on Linux), then check **Settings → Application → Run checks** (CLI: `course2md doctor`).
+**Conversion says `ffmpeg` is missing.** The downloaded app keeps its own `ffmpeg` next to `course2md-desktop`; extract or reinstall the whole package. The CLI and the Arch package use the system's: install it (`brew install ffmpeg` on macOS, `winget install --id Gyan.FFmpeg -e` on Windows, your package manager on Linux). **Settings → Application → Run checks** (CLI: `course2md doctor`) shows where each tool comes from.
 
 **A Bilibili video fails or comes back in low quality.** Log in under **Settings → Services & accounts → Bilibili account** by scanning the QR code.
 
