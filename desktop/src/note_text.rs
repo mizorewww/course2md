@@ -807,37 +807,19 @@ impl Element for NoteText {
                 ink,
                 selection_color: self.selection_color,
                 font_size,
+                fade: block.row.then_some(self.surface),
             };
             children.push(
                 if let Some(scroll) = block.row.then(|| rows.next()).flatten() {
                     // A row scrolls sideways when the formula is wider than the
                     // paragraph, and centers it otherwise. An overflowing row
-                    // keeps its scrollbar shown and fades at each edge it
-                    // continues past, so it never looks complete when it is not.
+                    // keeps its scrollbar shown, and the formula fades at each
+                    // edge it continues past (see `Line`), so it never looks
+                    // complete when it is not.
                     let overflows = matches!(
                         (row_width, width),
                         (Some(formula), Some(width)) if formula > width
                     );
-                    let offset = scroll.offset().x;
-                    let max = scroll.max_offset().x;
-                    let more_before = overflows && offset < px(0.);
-                    let more_after = overflows && (max <= px(0.) || offset > -max);
-                    let fade =
-                        |angle: f32| {
-                            div().absolute().top_0().bottom_0().w(rems(2.)).bg(
-                                gpui::linear_gradient(
-                                    angle,
-                                    gpui::linear_color_stop(
-                                        Hsla {
-                                            a: 0.,
-                                            ..self.surface
-                                        },
-                                        0.,
-                                    ),
-                                    gpui::linear_color_stop(self.surface, 1.),
-                                ),
-                            )
-                        };
                     div()
                         .relative()
                         .w_full()
@@ -864,8 +846,6 @@ impl Element for NoteText {
                                         .child(line),
                                 ),
                         )
-                        .when(more_after, |row| row.child(fade(90.).right_0()))
-                        .when(more_before, |row| row.child(fade(270.).left_0()))
                         .child(crate::scroll::horizontal_scrollbar(&scroll, overflows))
                         .into_any_element()
                 } else {
@@ -1036,6 +1016,9 @@ struct Line {
     ink: Hsla,
     selection_color: Hsla,
     font_size: Pixels,
+    /// On a formula row: the surface the formula fades into where it runs
+    /// past the row's edge.
+    fade: Option<Hsla>,
 }
 
 impl IntoElement for Line {
@@ -1100,22 +1083,32 @@ impl Element for Line {
             .get(self.index)
             .cloned()
             .flatten();
-        if let Some(range) = selected
-            && let (Some(start), Some(end)) = (
-                layout.position_for_index(range.start),
-                layout.position_for_index(range.end),
-            )
-        {
-            for quad in selection_quads(start, end, layout.bounds(), line_height) {
+        let quads = selected
+            .and_then(|range| {
+                Some(selection_quads(
+                    layout.position_for_index(range.start)?,
+                    layout.position_for_index(range.end)?,
+                    layout.bounds(),
+                    line_height,
+                ))
+            })
+            .unwrap_or_default();
+        let selection_color = self.selection_color;
+        let paint_selection = |window: &mut Window| {
+            for quad in &quads {
                 window.paint_quad(PaintQuad {
-                    bounds: quad,
-                    background: self.selection_color.into(),
+                    bounds: *quad,
+                    background: selection_color.into(),
                     corner_radii: Corners::default(),
                     border_widths: Edges::default(),
                     border_color: transparent_black(),
                     border_style: Default::default(),
                 });
             }
+        };
+        // Selection lies under prose, and over a formula row and its fades.
+        if self.fade.is_none() {
+            paint_selection(window);
         }
         self.text.paint(
             global_id,
@@ -1126,6 +1119,9 @@ impl Element for Line {
             window,
             cx,
         );
+        let visible = window.content_mask().bounds;
+        let mut runs_before = false;
+        let mut runs_after = false;
         for formula in &self.formulas {
             let Some(start) = layout.position_for_index(formula.display.start) else {
                 continue;
@@ -1144,9 +1140,10 @@ impl Element for Line {
             // A formula wider than one image is drawn as tiles, each the
             // same drawing seen through its own slice, and only the tiles
             // in view are drawn.
+            runs_before |= x < visible.left() - px(0.5);
+            runs_after |= x + formula.width > visible.right() + px(0.5);
             let tiles = tile_count(f32::from(formula.width), window.scale_factor());
             let tile_width = formula.width / tiles as f32;
-            let visible = window.content_mask().bounds;
             for tile in 0..tiles {
                 let bounds = Bounds::new(
                     Point::new(x + tile_width * tile as f32, y),
@@ -1167,6 +1164,34 @@ impl Element for Line {
                     cx,
                 );
             }
+        }
+        if let Some(surface) = self.fade {
+            let width = window.rem_size() * 2.;
+            let clear = Hsla { a: 0., ..surface };
+            let mut fade = |left: Pixels, angle: f32| {
+                window.paint_quad(PaintQuad {
+                    bounds: Bounds::new(
+                        Point::new(left, visible.top()),
+                        gpui::size(width, visible.size.height),
+                    ),
+                    background: gpui::linear_gradient(
+                        angle,
+                        gpui::linear_color_stop(clear, 0.),
+                        gpui::linear_color_stop(surface, 1.),
+                    ),
+                    corner_radii: Corners::default(),
+                    border_widths: Edges::default(),
+                    border_color: transparent_black(),
+                    border_style: Default::default(),
+                });
+            };
+            if runs_after {
+                fade(visible.right() - width, 90.);
+            }
+            if runs_before {
+                fade(visible.left(), 270.);
+            }
+            paint_selection(window);
         }
     }
 }
