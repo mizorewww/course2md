@@ -2026,7 +2026,7 @@ fn ensure_asr_capability(
     Ok(())
 }
 
-/// Without an explicit model, fill in the default for the recognition engine (NPU resolves its own).
+/// Without an explicit model, fill in the default for the recognition engine.
 /// import_ui's import_model_request and both plan builders share this rule.
 pub(crate) fn fill_default_asr_model(
     config: &mut course2md::settings::ConfigFile,
@@ -2040,11 +2040,7 @@ pub(crate) fn fill_default_asr_model(
             .as_deref()
             .is_none_or(|model| model.trim().is_empty())
     {
-        config.defaults.asr_model = Some(if provider == AsrProvider::Npu {
-            course2md::npu::resolve_npu_model(None)
-        } else {
-            course2md::config::DEFAULT_ASR_MODEL.into()
-        });
+        config.defaults.asr_model = Some(course2md::config::default_model(provider).into());
     }
 }
 

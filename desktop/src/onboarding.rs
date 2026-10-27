@@ -256,7 +256,7 @@ fn apply_provider_choice(
     if model_supported(resolved, model) {
         return None;
     }
-    let previous = std::mem::replace(model, course2md::config::DEFAULT_ASR_MODEL.into());
+    let previous = std::mem::replace(model, course2md::config::default_model(resolved).into());
     Some(course2md::tr!(
         "{} 不支持「{}」，已改用 {}。",
         crate::provider_label(Some(resolved)),
@@ -395,11 +395,15 @@ impl Desktop {
         } else {
             generation.options.provider
         };
+        let engine = self
+            .onboarding
+            .local_provider
+            .unwrap_or_else(|| self.recommended_local_provider());
         self.onboarding.model = generation
             .options
             .asr_model
             .clone()
-            .unwrap_or(course2md::config::DEFAULT_ASR_MODEL.into());
+            .unwrap_or_else(|| course2md::config::default_model(engine).into());
         self.onboarding.ai_proofread = generation.ai.enabled;
         self.onboarding.ai_summary = generation.ai.summarize;
         let refs = self.preferences.default_refs();
@@ -2788,7 +2792,8 @@ mod tests {
             AsrProvider::Coreml,
             AsrProvider::Npu,
         ] {
-            for choice in local_model_choices(provider, "qwen3-1.7b") {
+            let default = course2md::config::default_model(provider);
+            for choice in local_model_choices(provider, default) {
                 assert!(
                     model_supported(provider, &choice.id),
                     "{provider:?}: {}",

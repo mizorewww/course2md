@@ -202,7 +202,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
         Some(Command::Models { cmd }) => match cmd {
             ModelsCmd::Inspect { target, json } => {
                 let root = configured_model_dir(target.dir.as_deref())?;
-                let status = models::status::inspect(target.provider, &target.model, &root)?;
+                let status = models::status::inspect(target.provider, target.model(), &root)?;
                 if json {
                     println!("{}", serde_json::to_string(&status)?);
                 } else {
@@ -214,7 +214,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                 let root = configured_model_dir(target.dir.as_deref())?;
                 let status = course2md::runtime::block_on(models::prepare(
                     target.provider,
-                    &target.model,
+                    target.model(),
                     &root,
                 ))??;
                 progress::emit(&progress::Event::ModelReady {

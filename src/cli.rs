@@ -390,11 +390,18 @@ pub struct ModelTarget {
     #[arg(long, value_enum)]
     pub provider: crate::config::AsrProvider,
     /// 模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)
-    #[arg(long, default_value = crate::config::DEFAULT_ASR_MODEL)]
-    pub model: String,
+    #[arg(long)]
+    pub model: Option<String>,
     /// 模型目录 / Model directory
     #[arg(long)]
     pub dir: Option<PathBuf>,
+}
+
+impl ModelTarget {
+    /// The requested model; empty means the backend's default.
+    pub fn model(&self) -> &str {
+        self.model.as_deref().unwrap_or_default()
+    }
 }
 
 #[derive(Subcommand)]

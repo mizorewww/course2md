@@ -21,7 +21,7 @@ zh	zh_hans	en	zh_hant	ja
 - gpu/cpu  显卡/CPU 识别需要 llama.cpp：{}	- gpu/cpu  显卡/CPU 识别需要 llama.cpp：{}	- gpu/cpu  GPU and CPU transcription require llama.cpp: {}	- gpu/cpu  顯示卡/CPU 辨識需要 llama.cpp：{}	- gpu/cpu  GPU/CPU での音声認識には llama.cpp が必要です：{}
 - gpu/cpu models  未下载或不完整：{}	- gpu/cpu models  未下载或不完整：{}	- gpu/cpu models  Missing or incomplete: {}	- gpu/cpu models  未下載或不完整：{}	- gpu/cpu models  未ダウンロードまたは不完全：{}
 - npu  未检测到 Intel NPU 设备 / No Intel NPU device detected	- npu  未检测到 Intel NPU 设备	- npu  No Intel NPU device detected	- npu  未偵測到 Intel NPU 裝置	- npu  Intel NPU デバイスが検出されません
-- npu  缺少 Python/uv / Python or uv is required for NPU transcription	- npu  缺少 Python/uv	- npu  Python or uv is required for NPU transcription	- npu  缺少 Python/uv	- npu  NPU での音声認識には Python または uv が必要です
+- npu  需要 uv，或装好 openvino-genai 的 Python / Intel NPU transcription needs uv, or Python with openvino-genai installed	- npu  需要 uv，或装好 openvino-genai 的 Python	- npu  Intel NPU transcription needs uv, or Python with openvino-genai installed	- npu  需要 uv，或已安裝 openvino-genai 的 Python	- npu  Intel NPU での音声認識には uv、または openvino-genai をインストールした Python が必要です
 --login 后只能跟视频链接或本地视频路径 / After --login, provide only a video URL or local file path	--login 后只能跟视频链接或本地视频路径	After --login, provide only a video URL or local file path	--login 後只能接影片連結或本機影片路徑	--login の後には動画のリンクまたはローカル動画のパスのみ指定できます
 <img loading="lazy" src="{}" alt="视频 {} 的截图">	<img loading="lazy" src="{}" alt="视频 {} 的截图">	<img loading="lazy" src="{}" alt="Screenshot of video {}">	<img loading="lazy" src="{}" alt="影片 {} 的截圖">	<img loading="lazy" src="{}" alt="動画 {} のスクリーンショット">
 <li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}: {}</li>	<li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}：{}</li>
@@ -1142,7 +1142,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 未完成的移动	未完成的移动	Unfinished move	未完成的移動	未完了の移動
 未完成：{}	未完成：{}	Not completed: {}	未完成：{}	未完了: {}
 未完整收到服务响应 / Did not receive a complete service response	未完整收到服务响应	Did not receive a complete service response	未完整收到服務回應	サービスの応答を完全に受信できませんでした
-未找到 Python/uv，无法启动 NPU 识别 / Install Python or uv to use Intel NPU transcription	未找到 Python/uv，无法启动 NPU 识别	Install Python or uv to use Intel NPU transcription	找不到 Python/uv，無法啟動 NPU 辨識	Python/uv が見つからないため、NPU 認識を開始できません
+未找到 uv，也没有装好 openvino-genai 的 Python，无法启动 NPU 识别 / Intel NPU transcription needs uv, or Python with openvino-genai, numpy and huggingface_hub installed	未找到 uv，也没有装好 openvino-genai 的 Python，无法启动 NPU 识别	Intel NPU transcription needs uv, or Python with openvino-genai, numpy and huggingface_hub installed	找不到 uv，也沒有已安裝 openvino-genai 的 Python，無法啟動 NPU 辨識	uv も、openvino-genai をインストールした Python も見つからないため、NPU 認識を開始できません
 未找到 llama-server。请安装 llama.cpp 并加入 PATH	未找到 llama-server。请安装 llama.cpp 并加入 PATH	llama-server not found. Install llama.cpp and add it to PATH.	找不到 llama-server。請安裝 llama.cpp 並加入 PATH	llama-server が見つかりません。llama.cpp をインストールして PATH に追加してください
 未找到 uv 或 Python	未找到 uv 或 Python	uv or Python not found	找不到 uv 或 Python	uv または Python が見つかりません
 未找到下载的视频（期望 {} 或 {}） / Downloaded video missing (expected {} or {})	未找到下载的视频（期望 {} 或 {}）	Downloaded video missing (expected {} or {})	找不到下載的影片（預期 {} 或 {}）	ダウンロードした動画が見つかりません（{} または {} を想定）

@@ -1008,7 +1008,7 @@ async fn check_tools(
             cfg.provider,
             cfg.asr_model
                 .as_deref()
-                .unwrap_or(config::DEFAULT_ASR_MODEL),
+                .unwrap_or(config::default_model(cfg.provider)),
             &cfg.model_dir,
             &job.control,
         )

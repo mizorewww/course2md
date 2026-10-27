@@ -181,22 +181,32 @@ pub fn local_models(provider: AsrProvider) -> &'static [LocalModel] {
     match provider {
         AsrProvider::Gpu | AsrProvider::Cpu => &[QWEN3_1_7B],
         AsrProvider::Coreml => &[QWEN3_1_7B, QWEN3_0_6B, WHISPER],
-        AsrProvider::Npu => &[
-            QWEN3_1_7B,
-            QWEN3_0_6B,
-            WHISPER,
-            WHISPER_TINY,
-            WHISPER_BASE,
-            WHISPER_SMALL,
-        ],
+        // OpenVINO GenAI loads OpenVINO's Whisper exports on the NPU. The
+        // community Qwen3-ASR OpenVINO exports use their own graph layout,
+        // which neither WhisperPipeline nor ASRPipeline can load.
+        AsrProvider::Npu => &[WHISPER, WHISPER_TINY, WHISPER_BASE, WHISPER_SMALL],
         AsrProvider::Api => &[],
     }
 }
 
+/// The model a local backend uses when none is chosen (first of [`local_models`]).
+/// Cloud backends have no local model and return an empty id.
+pub fn default_model(provider: AsrProvider) -> &'static str {
+    local_models(provider).first().map_or("", |model| model.id)
+}
+
+/// Whether an NPU model value names a model location instead of an alias:
+/// a Hugging Face repository (`org/model`) or a local directory, which on
+/// Windows is written with backslashes (`D:\models\whisper-ov`).
+fn npu_model_location(raw: &str) -> bool {
+    raw.contains('/') || raw.contains('\\') || Path::new(raw).is_absolute()
+}
+
 /// 模型展示名；未知 id（如自定义仓库）原样返回。
 pub fn model_label(id: &str) -> &str {
-    local_models(AsrProvider::Npu)
-        .iter()
+    [AsrProvider::Coreml, AsrProvider::Npu]
+        .into_iter()
+        .flat_map(local_models)
         .find(|model| model.id == id)
         .map_or(id, |model| model.label)
 }
@@ -234,10 +244,13 @@ pub fn canonical_model(provider: AsrProvider, raw: &str) -> AnyhowResult<String>
     if provider == AsrProvider::Api {
         return Ok(raw.to_owned());
     }
-    if provider == AsrProvider::Npu && raw.contains('/') {
+    if provider == AsrProvider::Npu && npu_model_location(raw) {
         return Ok(raw.to_owned());
     }
     let models = local_models(provider);
+    if raw.is_empty() {
+        return Ok(default_model(provider).to_owned());
+    }
     match model_alias(&raw.to_ascii_lowercase()) {
         Some(id) if models.iter().any(|m| m.id == id) => Ok(id.to_owned()),
         _ => {
@@ -639,10 +652,7 @@ pub fn resolve_flag(cli_on: bool, cli_off: bool, file: Option<bool>, default: bo
 pub fn default_provider_hint() -> AsrProvider {
     if cfg!(apple_native) {
         AsrProvider::Coreml
-    } else if cfg!(target_os = "linux")
-        && Path::new(crate::npu::NPU_DEVICE_PATH).exists()
-        && crate::runtime::which("llama-server").is_none()
-    {
+    } else if crate::runtime::which("llama-server").is_none() && crate::npu::device_present() {
         AsrProvider::Npu
     } else {
         AsrProvider::Gpu
@@ -922,6 +932,8 @@ mod tests {
             (AsrProvider::Coreml, " 0.6b ", "qwen3-0.6b"),
             (AsrProvider::Npu, "turbo", "whisper"),
             (AsrProvider::Npu, "MyOrg/Model-INT8", "MyOrg/Model-INT8"),
+            (AsrProvider::Npu, "", "whisper"),
+            (AsrProvider::Coreml, "", "qwen3-1.7b"),
         ] {
             assert_eq!(
                 canonical_model(provider, raw).unwrap(),
@@ -932,11 +944,42 @@ mod tests {
         assert!(canonical_model(AsrProvider::Gpu, "whisper").is_err());
         assert!(canonical_model(AsrProvider::Coreml, "whisper-tiny").is_err());
         assert!(canonical_model(AsrProvider::Coreml, "foo-0.6-bar").is_err());
+        // Qwen3-ASR has no OpenVINO export the NPU pipeline can load.
+        assert!(canonical_model(AsrProvider::Npu, "qwen3-1.7b").is_err());
+        assert!(canonical_model(AsrProvider::Npu, "0.6b").is_err());
         for provider in [AsrProvider::Gpu, AsrProvider::Coreml, AsrProvider::Npu] {
             for model in local_models(provider) {
                 assert_eq!(canonical_model(provider, model.id).unwrap(), model.id);
             }
         }
+    }
+
+    #[test]
+    fn every_local_backend_defaults_to_a_model_it_supports() {
+        for provider in [
+            AsrProvider::Cpu,
+            AsrProvider::Gpu,
+            AsrProvider::Coreml,
+            AsrProvider::Npu,
+        ] {
+            let model = default_model(provider);
+            assert_eq!(canonical_model(provider, model).unwrap(), model);
+        }
+        assert_eq!(default_model(AsrProvider::Npu), "whisper");
+        assert_eq!(default_model(AsrProvider::Api), "");
+        assert_eq!(model_label("qwen3-0.6b"), "Qwen3 0.6B");
+        assert_eq!(model_label("whisper-tiny"), "Whisper Tiny");
+    }
+
+    #[test]
+    fn npu_accepts_local_model_directories_in_platform_spelling() {
+        assert!(npu_model_location("org/model"));
+        assert!(npu_model_location(r"D:\models\whisper-ov"));
+        assert!(npu_model_location(r"models\whisper-ov"));
+        assert!(!npu_model_location("whisper"));
+        let dir = std::env::temp_dir().join("whisper-ov");
+        let raw = dir.to_str().unwrap();
+        assert_eq!(canonical_model(AsrProvider::Npu, raw).unwrap(), raw);
     }
 
     #[test]
