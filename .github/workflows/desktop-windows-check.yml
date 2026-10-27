@@ -54,6 +54,7 @@ jobs:
             [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
             [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
             [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hh, bool repaint);
             [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, IntPtr e);
             public static void Click(int x, int y) { SetCursorPos(x, y); mouse_event(2,0,0,0,IntPtr.Zero); mouse_event(4,0,0,0,IntPtr.Zero); }
           }
@@ -68,10 +69,21 @@ jobs:
           }
           $env:COURSE2MD_BIN = Join-Path $PWD 'target/debug/course2md.exe'
           $env:COURSE2MD_LANG = 'en'
+          # A separate profile whose first-run setup is already done, so the app bar shows.
+          $env:XDG_CONFIG_HOME = Join-Path $PWD 'profile'
+          $prefs = Join-Path $env:XDG_CONFIG_HOME 'course2md/desktop-preferences'
+          New-Item -ItemType Directory -Force $prefs | Out-Null
+          Set-Content -Path (Join-Path $prefs 'application.json') -Value '{"desktop":{"setup_completed":true}}'
           $p = Start-Process -FilePath 'desktop/target/debug/course2md-desktop.exe' -PassThru
           Start-Sleep 12
           $p.Refresh(); $h = $p.MainWindowHandle
           [W]::SetForegroundWindow($h) | Out-Null
+          $r0 = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$r0) | Out-Null
+          "initial window: $($r0.L),$($r0.T) - $($r0.R),$($r0.B)" | Tee-Object (Join-Path $out 'initial-rect.txt')
+          Shot '00-initial'
+          # Keep the whole window on the 1024x768 screen for the click checks.
+          [W]::MoveWindow($h, 0, 0, 1000, 720, $true) | Out-Null
+          Start-Sleep 2
           $r = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$r) | Out-Null
           "window: $($r.L),$($r.T) - $($r.R),$($r.B)" | Tee-Object (Join-Path $out 'rect.txt')
           Shot '0-start'
