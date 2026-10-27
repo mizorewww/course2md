@@ -34,7 +34,7 @@ runs:
         echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
     - name: Native packaging tools
       shell: bash
-      run: python -m pip install -r desktop/scripts/requirements-packaging.txt
+      run: python -m pip install --require-hashes -r desktop/scripts/requirements-packaging.txt
     # The bundled ffmpeg (built from source on macOS and Linux, downloaded on
     # Windows) is reused until its recipe in ffmpeg_bundle.py changes.
     - name: Bundled tool cache

@@ -1,8 +1,64 @@
-dmgbuild==1.6.7; sys_platform == "darwin"
+# Every package, including dependencies, is pinned with its PyPI hashes so
+# pip runs in hash-checking mode. To update one, take the hashes of all its
+# files from https://pypi.org/pypi/<name>/<version>/json.
+dmgbuild==1.6.7; sys_platform == "darwin" \
+    --hash=sha256:37ee5771c377beb3203d9164aae8046ffed8531c06edf9227f5788b3c599b1bf \
+    --hash=sha256:676b17acd448899f6d4a83b2184e0657480444ecb6ac9c4922889efad9e5dbfb
 # dmg.py imports ds_store directly to verify the install window layout.
-ds_store==1.3.3; sys_platform == "darwin"
-pefile==2024.8.26; sys_platform == "win32"
-# ffmpeg_bundle.py builds dav1d and ffmpeg from source on macOS and Linux.
-meson==1.12.1; sys_platform != "win32"
-ninja==1.13.2; sys_platform != "win32"
-pkgconf==3.0.7.post0; sys_platform != "win32"
+ds_store==1.3.3; sys_platform == "darwin" \
+    --hash=sha256:a7380896ea1e880f7ba07c5cdc24bd1530fb86836cad0be531f3e80e2d721ac5 \
+    --hash=sha256:b92a371efbf1b4ccce2a04d1ed13fceacc4736c81ba09cf5aefb74c088160a35
+# Required by dmgbuild and ds_store.
+mac_alias==2.2.3; sys_platform == "darwin" \
+    --hash=sha256:1c7fa367687d66979f2ce4d1a8b2716cf1c9fb811741cab3cf3ca356555c2beb \
+    --hash=sha256:7362b521d2132ef92f606a37abfed5fcd849ceb2f28b6f9743e014b02af92f0d
+pefile==2024.8.26; sys_platform == "win32" \
+    --hash=sha256:3ff6c5d8b43e8c37bb6e6dd5085658d658a7a0bdcd20b6a07b1fcfc1c4e9d632 \
+    --hash=sha256:76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f
+# ffmpeg_bundle.py builds dav1d and ffmpeg from source on macOS and Linux
+# (and cross-builds the Windows one there).
+meson==1.12.1; sys_platform != "win32" \
+    --hash=sha256:930bc7542cbd9f57009e182fd014eba48cf1a0180a7b9006d2d32d8f168d8b02 \
+    --hash=sha256:ab0a6ca09f8ef70c564c8241fb5a23957886a0b53fb58412b5e07eaf07dba743
+ninja==1.13.2; sys_platform != "win32" \
+    --hash=sha256:09de9ab04f7352f51570c73fd4913acb1e6c24be0a72cd8b80243d4d3ed04925 \
+    --hash=sha256:0e083700470c02ca154a855ae6d692d03564f5064cae52e113896f9ccc078418 \
+    --hash=sha256:1293f4078278b70d0ee4b6cc8f3a9e030656c9b2f59909970343c4fe76070118 \
+    --hash=sha256:1684c60d031c54c1d049541b64243c0c567dca5463dbd77682a8901780af293d \
+    --hash=sha256:1db9852e528efa7702f5123969f86678663e46d57ff28ab13f5fd84d64a85fb1 \
+    --hash=sha256:227cbc3ae3e5e429692388103cae8c09451df086cd2d342dae0795af0d162547 \
+    --hash=sha256:525bfa3fc88aa30a4467df270fd5be6f9fcae8061d54d4df74ea1dc5abd5a975 \
+    --hash=sha256:59d71c3e15b6b6f3d903eb0c27285544e0747ca59925ada7037bb1af781ad4b3 \
+    --hash=sha256:65a24341b5ac09fcadcc37082660be40a94174e51a937fabf6e2cae26225fa2c \
+    --hash=sha256:6a87bf42b123abe2f37737300185f0a303a891899da85d73a3613ee80547e578 \
+    --hash=sha256:792cadbb9decfd1f776d4d0a6930feb46d08302eb57c176bcf26b09de5748e9f \
+    --hash=sha256:81d95081c0ad7c95f67bf682220361ed2a32659d7861b4766b03433c58f22516 \
+    --hash=sha256:915bd482c4be41c75120fd67a22e0bb3f0fbb3bbc5f95b89787deadd59e27ef2 \
+    --hash=sha256:919572cbc3f233261ecd41fe1f3efc9d44aa02464a4588867e06a8b4f6f416ea \
+    --hash=sha256:aa3d2ae5706a2c4d1e93edc951d1c6cbb45107413c404f8fde1741239efbc9a0 \
+    --hash=sha256:b2f687437fac460b27b7eadc99039b1163016fb4ba7276e2782a192d9f24ee0e \
+    --hash=sha256:d775a5e43e9088f507a6250d57fcf5678eb31268c545feb5064ffeee33735622 \
+    --hash=sha256:f90f84affc441e219f15fe52532806c1c9dbd22fb66c3addddce88a3deaabab7 \
+    --hash=sha256:fd82e26c0706ad4ab88e5fdd26f3fab0a987a90f810160f6c322e752c6af298b
+# macOS has no pkg-config of its own. Elsewhere the system's is used: this
+# one does not search the system's .pc directories, so on Linux it would hide
+# fontconfig and the other libraries the desktop build links against.
+pkgconf==3.0.7.post0; sys_platform == "darwin" \
+    --hash=sha256:095c4f3dadc59e53600f3b941f05f0da4de6c819ccf1c4f853f4d66612883c96 \
+    --hash=sha256:26db22dbba85a818604ff49260c98748af9ded2d145eb6688dbc6ace055a1668 \
+    --hash=sha256:3716a2a2b2dca3466589b371e5bfa88bb5a4e84e4e7a3771ce14b112a0965f05 \
+    --hash=sha256:3a688f02e12602b4a2be79d9a54ed598d5c44fc2fe042a7501aae53054e4688d \
+    --hash=sha256:47cbf6889d84297b9a4e1741ae016daa4e198f3ec8bab7ce74554cc50b77cce4 \
+    --hash=sha256:4ece8d4e650ee172ddadff762ad31a590a4d91a070806aee09eb92a89e67f559 \
+    --hash=sha256:9235b2bf40fab20580a88154aef5e275f806c0bda3221d6a0cf9afaaaff77a08 \
+    --hash=sha256:9d60ee4d9f942564a214027347a51b12c5ffac1cf84a3b9e6ad707c35fae45c0 \
+    --hash=sha256:a4cffe9897e62e23574700ce875ab8273ae17d7c39f0f19e6c89fa4cb05c0c37 \
+    --hash=sha256:a850487b3beeffdfa3c5e979c24e0528e03a203a0e8695fa6a4c0560d9401d88 \
+    --hash=sha256:bd3ee4b5294a888d58462324cb83b7c0bc7150cc15b64b36aaf983e4b0ab90d5 \
+    --hash=sha256:c2cec076aece3cc5a1ae04ba832498461e85a04ccfbd2bf9b4099b1780b128f5 \
+    --hash=sha256:df29406af15e6e55ac9061c59dd24f296f94e8b091897e036c3933ef6595cf5d \
+    --hash=sha256:e1d46ad90caa1e8558246e68c0469683b7c12c65ca662e3268aa3c4a4fd7636f \
+    --hash=sha256:e7906bb5ec1d0d074e397466075a8545f1c50cb11710768644f222ba8acebc7f \
+    --hash=sha256:ec2e213ae5f922134e3188ed8cbb1e8bcdd0c5b351acfdf9c5833ac32ebfd738 \
+    --hash=sha256:f1496aecdf646fc54d22ba99f80cdc79c8581b40fc07d2b0f6d4b5bbecf01dfb \
+    --hash=sha256:faebb89a180ac7a288f4f7f6c9475ab480bfc2c675812f90801e63c3959d6a04
