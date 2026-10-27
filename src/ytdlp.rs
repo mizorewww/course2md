@@ -40,9 +40,14 @@ fn is_exec(path: &Path) -> bool {
     }
 }
 
-/// 随包自带/同目录候选：exe 旁、`.app` 的 Contents/Resources[/bin]。
+/// 随包自带/同目录候选：桌面安装包的 `yt-dlp/` 目录（onedir 构建，见
+/// [`crate::tools::bundled_dirs`]）、exe 旁、`.app` 的 Contents/Resources[/bin]。
 fn bundled_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
+    let mut candidates: Vec<PathBuf> = crate::tools::bundled_dirs()
+        .into_iter()
+        .filter(|dir| dir.file_name() == Some(OsStr::new(crate::tools::YTDLP_DIR)))
+        .map(|dir| dir.join(binary_name()))
+        .collect();
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
@@ -135,11 +140,26 @@ fn fallback_candidates() -> Vec<PathBuf> {
 /// PyInstaller build can be present and executable yet fail after macOS signing
 /// (the extracted Python has a different Team ID); treat that as unavailable and
 /// continue to the user's PATH/Homebrew installation.
+///
+/// A candidate that ran once is not run again in this process: every preview
+/// and download resolves yt-dlp, and each check is a full Python start. The
+/// limit allows for the first run after an install, which macOS spends
+/// scanning the new code; a broken build fails long before it.
 fn runs(path: &Path) -> bool {
+    static RAN: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    if RAN.lock().is_ok_and(|ran| ran.contains(path)) {
+        return true;
+    }
     let mut command = std::process::Command::new(path);
     command.arg("--version");
-    crate::runtime::run_bounded("yt-dlp", &mut command, std::time::Duration::from_secs(3))
-        .is_ok_and(|output| output.status.success())
+    let ok =
+        crate::runtime::run_bounded("yt-dlp", &mut command, std::time::Duration::from_secs(30))
+            .is_ok_and(|output| output.status.success());
+    if ok && let Ok(mut ran) = RAN.lock() {
+        ran.insert(path.to_path_buf());
+    }
+    ok
 }
 
 fn candidates_in(path: Option<&OsStr>) -> Vec<PathBuf> {

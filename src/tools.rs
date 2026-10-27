@@ -72,6 +72,11 @@ fn is_executable(path: &Path) -> bool {
 /// relative to the executable.
 pub const LLAMA_DIR: &str = "llama.cpp";
 
+/// Where archives keep yt-dlp's onedir build (the `yt-dlp` executable beside
+/// its `_internal` directory): beside the executable, or in a macOS bundle's
+/// `Contents/Resources`.
+pub const YTDLP_DIR: &str = "yt-dlp";
+
 /// The desktop executable: an app package keeps it beside the engine, which
 /// tells a package's own directory apart from one the CLI shares with other
 /// programs (`/usr/local/bin`, Homebrew's `bin`).
@@ -92,6 +97,10 @@ pub fn bundled_dirs_for(exe: &Path) -> Vec<PathBuf> {
         && dir.parent().and_then(Path::file_name) == Some(OsStr::new("Contents"));
     if in_bundle {
         dirs.push(dir.join("../Resources/bin"));
+        // Contents/MacOS may hold only code; the yt-dlp build carries data.
+        dirs.push(dir.join("../Resources").join(YTDLP_DIR));
+    } else {
+        dirs.push(dir.join(YTDLP_DIR));
     }
     dirs.push(dir.join(LLAMA_DIR));
     dirs
@@ -252,7 +261,11 @@ mod tests {
         make_exec(shared.path(), "course2md-desktop");
         assert_eq!(
             bundled_dirs_for(&cli),
-            vec![shared.path().to_path_buf(), shared.path().join(LLAMA_DIR)]
+            vec![
+                shared.path().to_path_buf(),
+                shared.path().join(YTDLP_DIR),
+                shared.path().join(LLAMA_DIR)
+            ]
         );
     }
 
@@ -263,7 +276,10 @@ mod tests {
         std::fs::create_dir_all(&macos).unwrap();
         make_exec(&macos, "course2md-desktop");
         let cli = make_exec(&macos, "course2md");
-        assert!(bundled_dirs_for(&cli).contains(&macos.join("../Resources/bin")));
+        let dirs = bundled_dirs_for(&cli);
+        assert!(dirs.contains(&macos.join("../Resources/bin")));
+        assert!(dirs.contains(&macos.join("../Resources").join(YTDLP_DIR)));
+        assert!(!dirs.contains(&macos.join(YTDLP_DIR)));
         // Elsewhere ../Resources/bin is an arbitrary directory (/tmp/Resources/bin).
         let loose = root.path().join("bin");
         std::fs::create_dir_all(&loose).unwrap();
