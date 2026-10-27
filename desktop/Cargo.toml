@@ -36,6 +36,7 @@ chrono = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 pulldown-cmark = "0.13"
 trash = "5"
+unicode-segmentation = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

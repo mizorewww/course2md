@@ -1048,10 +1048,13 @@ fn matching_frames(frames: &[Frame], query: &str) -> Vec<usize> {
 const EXCERPT_WORD_SLACK: usize = 24;
 
 fn frame_excerpt(frame: &Frame, query: &str) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
     let text = frame.transcript.as_str();
     if let Some(found) = nav::text_matches(text, query).first() {
+        // Step back by whole characters, so an emoji sequence or a letter
+        // with combining marks is never split.
         let mut start = text[..found.start]
-            .char_indices()
+            .grapheme_indices(true)
             .rev()
             .nth(15)
             .map(|(index, _)| index)
@@ -1072,7 +1075,7 @@ fn frame_excerpt(frame: &Frame, query: &str) -> String {
             start += walked;
         }
         let mut end = text[found.end..]
-            .char_indices()
+            .grapheme_indices(true)
             .nth(100)
             .map(|(index, _)| found.end + index)
             .unwrap_or(text.len());
@@ -6794,6 +6797,14 @@ mod tests {
         let excerpt = frame_excerpt(&frame(5, &url), "end");
         let before = excerpt.find("/end").unwrap();
         assert!(excerpt.starts_with('…') && before < 60, "{excerpt}");
+        // The step back counts whole characters, so an emoji sequence stays whole.
+        let family = "👨\u{200d}👩\u{200d}👧\u{200d}👦";
+        let emoji = frame(
+            6,
+            &format!("前文{family}一二三四五六七八九十一二三四 zebra"),
+        );
+        let excerpt = frame_excerpt(&emoji, "zebra");
+        assert!(excerpt.starts_with(&format!("…{family}")), "{excerpt}");
     }
 
     #[test]
