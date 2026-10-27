@@ -1184,6 +1184,7 @@ fn paragraph(
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     search_target: Option<ReaderSearchTarget>,
     copy: crate::note_text::Copy,
+    place: TextPlace,
 ) -> Stateful<Div> {
     let id = id.into();
     div()
@@ -1193,7 +1194,28 @@ fn paragraph(
         .text_size(READER_BODY)
         .font_weight(FontWeight::NORMAL)
         .line_height(relative(1.8))
-        .child(reader_text(id, text, order as u64, highlights, search_target).copy(copy))
+        .child(
+            reader_text(id, text, order as u64, highlights, search_target)
+                .copy(copy)
+                .surface(place.surface().into()),
+        )
+}
+
+#[derive(Clone, Copy)]
+enum TextPlace {
+    Article,
+    Summary,
+    KeyPoint,
+    Viewer,
+}
+
+impl TextPlace {
+    fn surface(self) -> Rgba {
+        match self {
+            Self::Summary | Self::KeyPoint => summary_tint(),
+            Self::Article | Self::Viewer => color(SURFACE),
+        }
+    }
 }
 
 /// Everything a virtualized note-flow item needs. The maps are built when the
@@ -1461,6 +1483,7 @@ fn note_paragraph(flow: &NoteFlow, index: usize, text: &SharedString, anchor: &s
         flow.highlight_runs(index),
         flow.search_target(index),
         crate::note_text::Copy::Plain,
+        TextPlace::Article,
     )
     .into_any_element()
 }
@@ -1479,6 +1502,7 @@ fn note_translation(
         flow.highlight_runs(index),
         flow.search_target(index),
         crate::note_text::Copy::Plain,
+        TextPlace::Article,
     )
     .text_color(color(GRAY))
     .into_any_element()
@@ -1528,6 +1552,7 @@ fn render_note_summary(flow: &NoteFlow, blocks: std::ops::Range<usize>) -> AnyEl
                                     marks,
                                     target,
                                     crate::note_text::Copy::ListItem,
+                                    TextPlace::KeyPoint,
                                 )
                                 .text_size(rems(16. / 14.)),
                             ),
@@ -1543,6 +1568,7 @@ fn render_note_summary(flow: &NoteFlow, blocks: std::ops::Range<usize>) -> AnyEl
                         flow.highlight_runs(index),
                         flow.search_target(index),
                         crate::note_text::Copy::Plain,
+                        TextPlace::Summary,
                     )
                     .text_size(rems(16. / 14.))
                     .into_any_element(),
@@ -6061,6 +6087,7 @@ impl Desktop {
                         Vec::new(),
                         None,
                         crate::note_text::Copy::Labeled(course2md::tr!("这段讲解：{}", "").into()),
+                        TextPlace::Viewer,
                     )
                     .flex_shrink_0()
                     .into_any_element()

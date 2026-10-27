@@ -59,6 +59,7 @@ pub struct NoteText {
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     source_position: Option<(usize, SourcePosition)>,
     selection_color: Hsla,
+    surface: Hsla,
     child: Option<AnyElement>,
 }
 
@@ -72,6 +73,7 @@ impl NoteText {
             highlights: Vec::new(),
             source_position: None,
             selection_color: transparent_black(),
+            surface: crate::theme::color(crate::theme::SURFACE).into(),
             child: None,
         }
     }
@@ -106,6 +108,12 @@ impl NoteText {
 
     pub fn selection_color(mut self, color: Hsla) -> Self {
         self.selection_color = color;
+        self
+    }
+
+    /// The surface behind the text, which a wide formula row fades into.
+    pub fn surface(mut self, color: Hsla) -> Self {
+        self.surface = color;
         self
     }
 }
@@ -735,6 +743,7 @@ impl Element for NoteText {
                 .iter()
                 .map(|formula| formula.height)
                 .fold(line_height, Pixels::max);
+            let row_width = formulas.first().map(|formula| formula.width);
             let line = Line {
                 text,
                 index,
@@ -747,7 +756,33 @@ impl Element for NoteText {
             children.push(
                 if let Some(scroll) = block.row.then(|| rows.next()).flatten() {
                     // A row scrolls sideways when the formula is wider than the
-                    // paragraph, and centers it otherwise.
+                    // paragraph, and centers it otherwise. An overflowing row
+                    // keeps its scrollbar shown and fades at each edge it
+                    // continues past, so it never looks complete when it is not.
+                    let overflows = matches!(
+                        (row_width, width),
+                        (Some(formula), Some(width)) if formula > width
+                    );
+                    let offset = scroll.offset().x;
+                    let max = scroll.max_offset().x;
+                    let more_before = overflows && offset < px(0.);
+                    let more_after = overflows && (max <= px(0.) || offset > -max);
+                    let fade =
+                        |angle: f32| {
+                            div().absolute().top_0().bottom_0().w(rems(2.)).bg(
+                                gpui::linear_gradient(
+                                    angle,
+                                    gpui::linear_color_stop(
+                                        Hsla {
+                                            a: 0.,
+                                            ..self.surface
+                                        },
+                                        0.,
+                                    ),
+                                    gpui::linear_color_stop(self.surface, 1.),
+                                ),
+                            )
+                        };
                     div()
                         .relative()
                         .w_full()
@@ -760,7 +795,9 @@ impl Element for NoteText {
                                 // A vertical wheel keeps scrolling the text around it.
                                 .restrict_scroll_to_axis()
                                 .track_scroll(&scroll)
-                                .py(rems(0.5))
+                                .pt(rems(0.5))
+                                // Room for the scrollbar under an overflowing formula.
+                                .pb(if overflows { rems(1.) } else { rems(0.5) })
                                 .child(
                                     div()
                                         .flex_none()
@@ -772,7 +809,9 @@ impl Element for NoteText {
                                         .child(line),
                                 ),
                         )
-                        .child(crate::scroll::horizontal_scrollbar(&scroll))
+                        .when(more_after, |row| row.child(fade(90.).right_0()))
+                        .when(more_before, |row| row.child(fade(270.).left_0()))
+                        .child(crate::scroll::horizontal_scrollbar(&scroll, overflows))
                         .into_any_element()
                 } else {
                     line.into_any_element()

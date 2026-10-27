@@ -32,12 +32,14 @@ pub(crate) fn vertical_scrollbar(handle: &gpui::ScrollHandle) -> gpui_component:
     vertical_scrollbar_for(handle)
 }
 
-/// 横向滚动条（如过宽的公式行），模式与纵向相同。
+/// 横向滚动条（如过宽的公式行），模式与纵向相同；`overflowing` 的内容常显，
+/// 让人看出这一行还有后续。
 pub(crate) fn horizontal_scrollbar(
     handle: &gpui::ScrollHandle,
+    overflowing: bool,
 ) -> gpui_component::scroll::Scrollbar {
     use gpui_component::scroll::{Scrollbar, ScrollbarMode};
-    Scrollbar::horizontal(handle).mode(if scrollbars_always_visible() {
+    Scrollbar::horizontal(handle).mode(if overflowing || scrollbars_always_visible() {
         ScrollbarMode::Always
     } else {
         ScrollbarMode::Scrolling
