@@ -326,7 +326,12 @@ html:lang(zh) .export-menu { width: 320px; }
 .cmd { flex: 1 1 420px; min-width: 0; display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 6px 0 18px; border-radius: 26px; background: #EEF1F8; font-size: 14px; }
 .cmd .prompt { color: #2B5BB5; font-weight: 600; }
 .cmd code { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: inherit; }
-.copy { height: 40px; flex: none; padding: 0 14px; border: 0; border-radius: 20px; background: #DCE2F9; color: #151B2C; font-size: 13px; font-weight: 600; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; cursor: pointer; }
+.copy { height: 40px; padding: 0 14px; border: 0; border-radius: 20px; background: #DCE2F9; color: #151B2C; font-size: 13px; font-weight: 600; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; cursor: pointer; }
+.cmd-cli .copy { flex: none; }
+/* The Chinese design lets the download rows' buttons inherit the monospace
+   field font and gives the CLI button its own CJK stack. */
+html:lang(zh) .tile .copy { font-family: inherit; }
+html:lang(zh) .cmd-cli .copy { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif; }
 .dl-note { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; color: #44474F; padding: 0 8px; }
 .dl-note svg { flex: none; margin-top: 2px; }
 
