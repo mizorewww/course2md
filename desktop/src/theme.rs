@@ -45,6 +45,7 @@ tokens!(
     FIND_CURRENT,
     FIND_CURRENT_LINE,
     SELECTION,
+    READING_SELECTION,
 );
 const COLOR_COUNT: usize = ALL_TOKENS.len();
 
@@ -116,6 +117,12 @@ fn palette_colors(id: PaletteId) -> [Rgba; COLOR_COUNT] {
         DANGER => rgb(p.danger),
         DANGER_BG => tint(p.danger, 0.12),
         SELECTION => rgb(p.selection),
+        // Selected note text: the accent laid over whatever surface holds the
+        // text, so it stays visible on tinted panels such as the summary.
+        READING_SELECTION => Rgba {
+            a: if id.is_dark() { 0.42 } else { 0.30 },
+            ..rgb(p.accent)
+        },
         FIND_HIGHLIGHT => tint(p.warning, 0.16),
         FIND_CURRENT => tint(p.warning, 0.32),
         FIND_CURRENT_LINE => rgb(p.warning),
