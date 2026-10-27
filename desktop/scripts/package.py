@@ -157,6 +157,33 @@ def bundle_aria2(binaries, licenses, required):
         tmp.unlink(missing_ok=True)
 
 
+def verify_tools(binaries, system, skip=()):
+    """Run each bundled tool once, so a missing library or an ffmpeg without
+    TLS fails the package build rather than a user's first conversion."""
+    suffix = ".exe" if system == "Windows" else ""
+    checks = []
+    if "ffmpeg" not in skip and ffmpeg_bundle.supported(system, platform.machine()):
+        checks += [(["ffmpeg", "-hide_banner", "-protocols"], "https"),
+                   (["ffprobe", "-hide_banner", "-version"], "ffprobe version")]
+    names = {tool.name for tool in prebuilt.PREBUILT.get((system, platform.machine()), [])}
+    if "uv" in names and "uv" not in skip:
+        checks.append((["uv", "--version"], "uv "))
+    if "llama.cpp" in names and "llama.cpp" not in skip:
+        checks.append((["llama.cpp/llama-server", "--version"], "version"))
+    for (program, *arguments), expected in checks:
+        path = binaries / f"{program}{suffix}"
+        try:
+            result = subprocess.run([str(path), *arguments], capture_output=True, text=True,
+                                    timeout=120, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise SystemExit(f"Bundled {program} does not run: {error}") from error
+        output = result.stdout + result.stderr
+        if result.returncode != 0 or expected not in output:
+            raise SystemExit(f"Bundled {program} failed its check (exit {result.returncode}, "
+                             f"expected {expected!r}):\n{output[-2000:]}")
+        print(f"checked {program}")
+
+
 def parse_args(argv=None, environ=os.environ):
     """Command-line options; each environment variable named in its help is the default."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -171,6 +198,10 @@ def parse_args(argv=None, environ=os.environ):
                              "(COURSE2MD_YTDLP)")
     parser.add_argument("--no-ytdlp", action="store_true", default=flag("COURSE2MD_NO_YTDLP"),
                         help="do not bundle yt-dlp (COURSE2MD_NO_YTDLP)")
+    parser.add_argument("--require-tools", action="store_true",
+                        default=flag("COURSE2MD_REQUIRE_TOOLS"),
+                        help="stop if a bundled tool is missing or fails its check, as release "
+                             "builds do; for development packages in CI (COURSE2MD_REQUIRE_TOOLS)")
     parser.add_argument("--no-ffmpeg", action="store_true", default=flag("COURSE2MD_NO_FFMPEG"),
                         help="do not bundle ffmpeg and ffprobe (COURSE2MD_NO_FFMPEG)")
     parser.add_argument("--no-uv", action="store_true", default=flag("COURSE2MD_NO_UV"),
@@ -199,6 +230,8 @@ def main():
     if args.app_only and system != "Darwin":
         raise SystemExit("--app-only builds a macOS .app")
     distribution = not args.debug and not args.app_only
+    # Release builds, and CI's development packages, stop if a tool is missing.
+    tools_required = distribution or args.require_tools
     # Fail before expensive builds if the platform's packaging tools are absent.
     try:
         if system == "Darwin" and not args.app_only:
@@ -208,7 +241,7 @@ def main():
     except ImportError as error:
         raise SystemExit("Install packaging tools: python -m pip install -r "
                          "desktop/scripts/requirements-packaging.txt") from error
-    if distribution and not args.no_ffmpeg and ffmpeg_bundle.supported(system, platform.machine()):
+    if tools_required and not args.no_ffmpeg and ffmpeg_bundle.supported(system, platform.machine()):
         if missing := ffmpeg_bundle.missing_build_tools(TOOL_CACHE):
             raise SystemExit(f"Building the bundled ffmpeg needs {', '.join(missing)}: python -m pip "
                              "install -r desktop/scripts/requirements-packaging.txt (nasm: your "
@@ -276,13 +309,14 @@ def main():
     shutil.copy2(ROOT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
     # The runtime searches beside the executable for yt-dlp; --no-ytdlp skips bundling.
     if not args.no_ytdlp:
-        bundled = bundle_ytdlp(binaries / f"yt-dlp{suffix}", required=distribution, local=args.ytdlp)
+        bundled = bundle_ytdlp(binaries / f"yt-dlp{suffix}", required=tools_required,
+                               local=args.ytdlp)
         if bundled:
             print(f"bundled {bundled.name}")
     # ffmpeg and ffprobe sit beside the engine too; it runs those before PATH.
     tool_licenses = []
     if not args.no_ffmpeg:
-        bundled = ffmpeg_bundle.bundle(binaries, TOOL_CACHE, required=distribution)
+        bundled = ffmpeg_bundle.bundle(binaries, TOOL_CACHE, required=tools_required)
         if bundled:
             placed, tool_licenses = bundled
             print("bundled " + ", ".join(path.name for path in placed))
@@ -290,11 +324,13 @@ def main():
     # llama.cpp/ (GPU/CPU transcription); the app searches both before PATH.
     skip = [name for name, off in (("uv", args.no_uv), ("llama.cpp", args.no_llama)) if off]
     for name in prebuilt.bundle(system, platform.machine(), binaries, base,
-                                TOOL_CACHE / "downloads", required=distribution, skip=skip):
+                                TOOL_CACHE / "downloads", required=tools_required, skip=skip):
         print(f"bundled {name}")
     if system == "Windows" and not args.no_aria2:
-        if bundle_aria2(binaries, base, required=distribution):
+        if bundle_aria2(binaries, base, required=tools_required):
             print("bundled aria2c.exe")
+    if tools_required:
+        verify_tools(binaries, system, skip=[*skip, *(["ffmpeg"] if args.no_ffmpeg else [])])
     if system == "Windows":
         verify_windows_icon(binaries / "course2md-desktop.exe")
     copy_licenses(base, tool_licenses)

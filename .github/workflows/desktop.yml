@@ -86,8 +86,10 @@ jobs:
         run: |
           rm -rf target/debug/deps target/debug/incremental desktop/target/debug/deps desktop/target/debug/incremental
           df -h .
+      # --require-tools: a tool that cannot be bundled, or that fails to run
+      # (an ffmpeg without https, a missing library), fails the job.
       - name: Package development build
-        run: python desktop/scripts/package.py --debug --no-build
+        run: python desktop/scripts/package.py --debug --no-build --require-tools
       - uses: actions/upload-artifact@v4
         with:
           name: course2md-desktop-${{ runner.os }}

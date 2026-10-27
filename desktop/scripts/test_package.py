@@ -1,6 +1,10 @@
+import os
+from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 
-from package import YTDLP_SHA256, macos_versions, parse_args, ytdlp_asset
+from package import YTDLP_SHA256, macos_versions, parse_args, verify_tools, ytdlp_asset
 
 
 class MacOSVersionTests(unittest.TestCase):
@@ -51,6 +55,35 @@ class OptionTests(unittest.TestCase):
         self.assertEqual(args.signing_identity, '-')
         self.assertFalse(args.no_ytdlp or args.no_aria2 or args.no_apple)
         self.assertIsNone(args.ytdlp)
+
+    def test_require_tools_comes_from_the_environment(self):
+        self.assertFalse(parse_args([], {}).require_tools)
+        self.assertTrue(parse_args([], {'COURSE2MD_REQUIRE_TOOLS': '1'}).require_tools)
+
+
+@unittest.skipIf(os.name == 'nt', 'shell scripts stand in for the bundled tools')
+class VerifyToolsTests(unittest.TestCase):
+    def tool(self, directory, name, output):
+        path = Path(directory) / name
+        path.write_text(f'#!/bin/sh\necho "{output}"\n')
+        path.chmod(0o755)
+
+    def test_an_ffmpeg_without_https_fails_the_package(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch('platform.machine', return_value='arm64'):
+            self.tool(tmp, 'ffprobe', 'ffprobe version 9')
+            self.tool(tmp, 'ffmpeg', 'Supported file protocols: file http')
+            with self.assertRaises(SystemExit):
+                verify_tools(Path(tmp), 'Darwin')
+            self.tool(tmp, 'ffmpeg', 'Supported file protocols: file http https tls')
+            verify_tools(Path(tmp), 'Darwin')
+
+    def test_a_missing_tool_fails_the_package(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch('platform.machine', return_value='arm64'):
+            with self.assertRaises(SystemExit):
+                verify_tools(Path(tmp), 'Darwin')
+            verify_tools(Path(tmp), 'Darwin', skip=['ffmpeg'])
 
 
 if __name__ == '__main__':
