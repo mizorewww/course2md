@@ -47,7 +47,7 @@ async fn extract_frame(media: &Path, t: f64, dest: &Path) -> Result<()> {
     let ss = format!("{t:.3}");
     // -q:v 2：JPEG 高质量档（2~31，越小越好），讲义文字可读性优先
     media::run_cmd(
-        Command::new("ffmpeg")
+        Command::new(crate::tools::program("ffmpeg"))
             .args(["-hide_banner", "-loglevel", "error", "-y", "-ss", &ss])
             .arg("-i")
             .arg(media)
@@ -93,7 +93,7 @@ async fn sample_timestamps(
         "slide sample"
     );
 
-    let mut child = Command::new("ffmpeg")
+    let mut child = Command::new(crate::tools::program("ffmpeg"))
         .kill_on_drop(true)
         .args(["-hide_banner", "-loglevel", "error", "-an"])
         .arg("-i")

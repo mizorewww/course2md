@@ -47,7 +47,7 @@ pub async fn extract_audio(media: &Path, dest: &Path) -> Result<()> {
         .suffix(".wav")
         .tempfile_in(dest.parent().unwrap_or(Path::new(".")))?;
     run_cmd(
-        Command::new("ffmpeg")
+        Command::new(crate::tools::program("ffmpeg"))
             .args(["-hide_banner", "-loglevel", "error", "-y"])
             .arg("-i")
             .arg(media)
@@ -90,7 +90,7 @@ struct ProbeFormat {
 /// 视频宽高与时长。用 `-of json` 结构化输出，取代按逗号/空白切分的文本解析。
 pub async fn probe_video(media: &Path) -> Option<VideoInfo> {
     let out = probe_output(
-        Command::new("ffprobe")
+        Command::new(crate::tools::program("ffprobe"))
             .args([
                 "-v",
                 "error",
@@ -146,13 +146,18 @@ fn parse_duration(out: &std::process::Output) -> Option<f64> {
 
 /// 用 ffprobe 拿时长（秒）。失败时返回 None（非致命）。
 pub async fn probe_duration(media: &Path) -> Option<f64> {
-    let out = probe_output(Command::new("ffprobe").args(duration_args()).arg(media)).await?;
+    let out = probe_output(
+        Command::new(crate::tools::program("ffprobe"))
+            .args(duration_args())
+            .arg(media),
+    )
+    .await?;
     parse_duration(&out)
 }
 
 /// [`probe_duration`] 的同步版（供阻塞线程使用）。
 pub fn probe_duration_blocking(media: &Path) -> Option<f64> {
-    let mut cmd = std::process::Command::new("ffprobe");
+    let mut cmd = std::process::Command::new(crate::tools::program("ffprobe"));
     cmd.args(duration_args()).arg(media);
     let out = crate::runtime::run_bounded("ffprobe", &mut cmd, PROBE_TIMEOUT).ok()?;
     out.status

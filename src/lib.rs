@@ -34,6 +34,7 @@ pub mod summarize;
 #[cfg(test)]
 mod test_http;
 pub mod timeline;
+pub mod tools;
 pub mod wizard;
 pub mod ytdlp;
 

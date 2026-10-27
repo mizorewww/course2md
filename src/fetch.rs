@@ -15,7 +15,15 @@ const DOWNLOAD_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs
 /// yt-dlp 公共参数基座：--ignore-config（用户全局配置会让同一命令在不同机器上
 /// 行为漂移）、socket 超时。差异参数由调用方追加，最后以 [`ytdlp_url`] 收尾。
 fn ytdlp_base(cmd: &mut Command) -> &mut Command {
-    cmd.args(["--ignore-config", "--socket-timeout", YTDLP_SOCKET_TIMEOUT])
+    cmd.args(["--ignore-config", "--socket-timeout", YTDLP_SOCKET_TIMEOUT]);
+    // yt-dlp merges video and audio with ffmpeg it finds on PATH; point it at
+    // the copy shipped with the app, which the rest of the pipeline uses too.
+    if let Some(tool) =
+        crate::tools::locate("ffmpeg").filter(|tool| tool.origin != crate::tools::Origin::System)
+    {
+        cmd.arg("--ffmpeg-location").arg(tool.path);
+    }
+    cmd
 }
 
 /// 确定性错误（重试无意义）：4xx 拒绝、不支持的 URL、私有/不可用视频等。

@@ -354,12 +354,7 @@ fn find_aria2() -> Option<PathBuf> {
     if std::env::var_os("COURSE2MD_NO_ARIA2").is_some() {
         return None;
     }
-    let name = format!("aria2c{}", std::env::consts::EXE_SUFFIX);
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join(&name)))
-        .filter(|path| path.is_file())
-        .or_else(|| crate::runtime::which("aria2c"))
+    crate::tools::locate("aria2c").map(|tool| tool.path)
 }
 
 fn aria2_control(part: &Path) -> PathBuf {

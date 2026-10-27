@@ -985,7 +985,7 @@ fn transcribe_file(
 
 pub(crate) fn ffmpeg_vad(wav: &Path, max_speech: f32) -> Result<Vec<Seg>> {
     // run_bounded：stdin 关闭 + 超时强制 kill（ffmpeg 在 GUI/管道 stdin 上可能挂死）
-    let mut cmd = Command::new("ffmpeg");
+    let mut cmd = Command::new(crate::tools::program("ffmpeg"));
     cmd.args(["-hide_banner", "-nostdin", "-i"]).arg(wav).args([
         "-af",
         SILENCEDETECT_AF,
@@ -1290,7 +1290,7 @@ fn invert_silence(dur: f64, sil: &[(f64, f64)]) -> Vec<(f64, f64)> {
 
 pub fn cut_wav(src: &Path, start: f64, end: f64, dest: &Path) -> Result<()> {
     let dur = (end - start).max(0.05);
-    let mut cmd = Command::new("ffmpeg");
+    let mut cmd = Command::new(crate::tools::program("ffmpeg"));
     cmd.args([
         "-hide_banner",
         "-loglevel",

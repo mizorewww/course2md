@@ -20,7 +20,7 @@ pub fn cmd_error(program: &str, code: Option<i32>, stderr: &str) -> anyhow::Erro
 
 /// 校验 PATH 上的外部工具存在（yt-dlp 请用 [`require_ytdlp`]）。
 pub fn require_cmd(cmd: &str) -> Result<()> {
-    if crate::runtime::which(cmd).is_none() {
+    if crate::tools::locate(cmd).is_none() {
         return Err(missing_tool(cmd));
     }
     Ok(())

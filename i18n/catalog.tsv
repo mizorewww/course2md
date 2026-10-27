@@ -855,6 +855,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 提交时已确定，不能再更改	提交时已确定，不能再更改	Set when the task was submitted; can't be changed	提交時已確定，不能再更改	タスクの送信時に確定しており、変更できません
 数据分块到达，上一块于 {}前到达	数据分块到达，上一块于 {}前到达	Data arrives in blocks; the last arrived {} ago	資料分塊到達，上一塊於 {}前到達	データはブロック単位で受信中（前回の受信は {}前）
 正在等待第一块数据	正在等待第一块数据	Waiting for the first block	正在等待第一塊資料	最初のブロックを待っています
+由环境变量指定	由环境变量指定	Set by environment variable	由環境變數指定	環境変数で指定
+系统安装	系统安装	Installed on the system	系統安裝	システムにインストール済み
+随应用附带	随应用附带	Included with the app	隨應用程式附帶	アプリに同梱
 音频不离开本机	音频不离开本机	Audio stays on this device	音訊不離開本機	音声はこのデバイスの外に送信されません
 提取画面	提取画面	Extract frames	提取畫面	フレームを抽出
 提取音频	提取音频	Extract audio	提取音訊	音声を抽出する
