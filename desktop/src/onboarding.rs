@@ -1325,6 +1325,7 @@ impl Desktop {
                     issue,
                     crate::settings_ui::model_diagnostics::DeviceIssue::AppleRuntime
                         | crate::settings_ui::model_diagnostics::DeviceIssue::LlamaMissing
+                        | crate::settings_ui::model_diagnostics::DeviceIssue::VcRuntime
                         | crate::settings_ui::model_diagnostics::DeviceIssue::NpuRuntime
                 )
                 && !repairable.contains(&issue)

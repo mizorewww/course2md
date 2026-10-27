@@ -169,6 +169,10 @@ pub(crate) fn model_action_label(
         _ => course2md::tr!("继续准备模型"),
     }
 }
+/// Microsoft's permanent link to the latest supported Visual C++ runtime
+/// installer for x64 (2015-2022), which llama.cpp's Windows build needs.
+const VC_RUNTIME_URL: &str = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
+
 /// The one classification of why a local engine cannot run here. Messages,
 /// repair actions and engine choices all derive from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +181,9 @@ pub(crate) enum DeviceIssue {
     AppleHardware,
     AppleRuntime,
     LlamaMissing,
+    /// Windows: llama-server is there but the Microsoft Visual C++ runtime it
+    /// links against is not.
+    VcRuntime,
     GpuAbsent,
     NpuDevice,
     NpuRuntime,
@@ -189,7 +196,7 @@ impl DeviceIssue {
             Self::AppleHardware => course2md::tr!("需要 Apple 芯片的 Mac"),
             Self::GpuAbsent => course2md::tr!("未检测到可用显卡"),
             Self::NpuDevice => course2md::tr!("未检测到 Intel NPU"),
-            Self::AppleRuntime | Self::LlamaMissing | Self::NpuRuntime => {
+            Self::AppleRuntime | Self::LlamaMissing | Self::VcRuntime | Self::NpuRuntime => {
                 course2md::tr!("需要安装识别组件")
             }
         }
@@ -203,6 +210,9 @@ impl DeviceIssue {
                 course2md::tr!("缺少 Apple 识别组件，请重新安装应用或改用其他方式")
             }
             Self::LlamaMissing => course2md::tr!("安装 llama.cpp 后才能用 GPU 或 CPU 识别"),
+            Self::VcRuntime => {
+                course2md::tr!("GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查")
+            }
             Self::GpuAbsent => course2md::tr!("未检测到可用显卡，可改用 CPU"),
             Self::NpuDevice => course2md::tr!("未检测到 Intel NPU，请改用其他方式"),
             Self::NpuRuntime => course2md::tr!("安装 uv 后才能用 Intel NPU 识别"),
@@ -222,6 +232,9 @@ pub(crate) fn device_issue(
         }
         AsrProvider::Coreml if !environment.apple => Some(DeviceIssue::AppleRuntime),
         AsrProvider::Gpu if !environment.llama => Some(DeviceIssue::LlamaMissing),
+        AsrProvider::Gpu | AsrProvider::Cpu if !environment.vc_runtime => {
+            Some(DeviceIssue::VcRuntime)
+        }
         AsrProvider::Gpu if environment.gpu.is_none() => Some(DeviceIssue::GpuAbsent),
         AsrProvider::Cpu if !environment.llama => Some(DeviceIssue::LlamaMissing),
         AsrProvider::Npu if !environment.npu_device() => Some(DeviceIssue::NpuDevice),
@@ -522,6 +535,16 @@ impl Desktop {
                 );
             }
         }
+        if issue == Some(DeviceIssue::VcRuntime) {
+            view = view.child(
+                control(SharedString::from(format!("model-vc-runtime-{key}")))
+                    .settings_text()
+                    .icon(icons::download())
+                    .label(course2md::tr!("下载 Microsoft Visual C++ 运行库"))
+                    .self_start()
+                    .on_click(|_, _, cx| cx.open_url(VC_RUNTIME_URL)),
+            );
+        }
         if issue == Some(DeviceIssue::NpuRuntime) {
             view = view.child(
                 control(SharedString::from(format!(
@@ -591,6 +614,14 @@ impl Desktop {
                     );
                 }
             }
+            DeviceIssue::VcRuntime => {
+                actions = actions.child(
+                    text_button(SharedString::from(format!("{id}-vc-runtime")), cx)
+                        .icon(icons::download())
+                        .label(course2md::tr!("下载 Microsoft Visual C++ 运行库"))
+                        .on_click(|_, _, cx| cx.open_url(VC_RUNTIME_URL)),
+                );
+            }
             DeviceIssue::NpuRuntime => {
                 actions = actions.child(
                     text_button(SharedString::from(format!("{id}-uv-help")), cx)
@@ -603,7 +634,12 @@ impl Desktop {
             }
             DeviceIssue::AppleHardware | DeviceIssue::GpuAbsent | DeviceIssue::NpuDevice => {}
         }
-        if recheck && matches!(issue, DeviceIssue::LlamaMissing | DeviceIssue::NpuRuntime) {
+        if recheck
+            && matches!(
+                issue,
+                DeviceIssue::LlamaMissing | DeviceIssue::VcRuntime | DeviceIssue::NpuRuntime
+            )
+        {
             actions = actions.child(
                 text_button(SharedString::from(format!("{id}-recheck")), cx)
                     .icon(icons::refresh())

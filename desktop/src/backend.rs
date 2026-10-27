@@ -535,6 +535,9 @@ pub struct Environment {
     pub apple: bool,
     pub gpu: Option<String>,
     pub npu_parts: NpuParts,
+    /// Windows: the Microsoft Visual C++ runtime llama-server links against
+    /// is installed (always true elsewhere).
+    pub vc_runtime: bool,
     /// Where each found media tool runs from, by the names the checks show.
     pub origins: std::collections::BTreeMap<&'static str, course2md::tools::Origin>,
 }
@@ -562,8 +565,8 @@ impl Environment {
         use course2md::config::AsrProvider;
         match provider {
             AsrProvider::Coreml => self.apple,
-            AsrProvider::Gpu => self.llama && self.gpu.is_some(),
-            AsrProvider::Cpu => self.llama,
+            AsrProvider::Gpu => self.llama && self.vc_runtime && self.gpu.is_some(),
+            AsrProvider::Cpu => self.llama && self.vc_runtime,
             AsrProvider::Npu => self.npu(),
             AsrProvider::Api => true,
         }
@@ -670,9 +673,29 @@ impl Environment {
                 device: npu_device,
                 runtime: npu_runtime,
             },
+            vc_runtime: vc_runtime_present(),
             origins,
         }
     }
+}
+
+/// The Visual C++ runtime DLLs that llama.cpp's Windows build imports beyond
+/// what the app itself needs, in System32 (where Microsoft's installer puts
+/// them) or app-local beside llama-server.
+fn vc_runtime_present() -> bool {
+    if !cfg!(windows) {
+        return true;
+    }
+    let system = std::env::var_os("SystemRoot")
+        .map(|root| PathBuf::from(root).join("System32"))
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows\System32"));
+    let local = course2md::tools::bundled_dirs()
+        .into_iter()
+        .filter(|dir| dir.ends_with(course2md::tools::LLAMA_DIR));
+    let dirs: Vec<PathBuf> = std::iter::once(system).chain(local).collect();
+    ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"]
+        .iter()
+        .all(|dll| dirs.iter().any(|dir| dir.join(dll).is_file()))
 }
 
 /// Bounded, executable checks. Redirect output to a file so a verbose tool cannot

@@ -2913,6 +2913,12 @@ impl Desktop {
             course2md::config::AsrProvider::Cpu | course2md::config::AsrProvider::Gpu
         ) {
             tools.push(("llama-server", environment.llama));
+            if cfg!(windows) {
+                tools.push((
+                    course2md::tr!("Microsoft Visual C++ 运行库"),
+                    environment.vc_runtime,
+                ));
+            }
         }
         tools
     }
@@ -2947,8 +2953,8 @@ impl Desktop {
         let local_ready = e.engine
             && match provider {
                 course2md::config::AsrProvider::Coreml => e.apple,
-                course2md::config::AsrProvider::Gpu => e.llama && e.gpu.is_some(),
-                course2md::config::AsrProvider::Cpu => e.llama,
+                course2md::config::AsrProvider::Gpu => e.llama && e.vc_runtime && e.gpu.is_some(),
+                course2md::config::AsrProvider::Cpu => e.llama && e.vc_runtime,
                 course2md::config::AsrProvider::Npu => e.npu(),
                 course2md::config::AsrProvider::Api => false,
             };
