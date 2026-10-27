@@ -2780,6 +2780,12 @@ mod tests {
                 engine_preferences(&GenerationPreferences::default(), Some(provider), current);
             assert_eq!(saved.options.asr_model.as_deref(), Some(current));
         }
+        // An automatic engine that resolves to the NPU runs its default, not
+        // the Qwen3 choice saved for another engine.
+        assert_eq!(
+            super::ModelRequest::new(AsrProvider::Npu, Some("qwen3-1.7b"), root).model,
+            "whisper"
+        );
         // An NPU-only model must not be silently substituted on Apple silicon.
         assert!(!model_supported(AsrProvider::Coreml, "whisper-tiny"));
         assert_eq!(

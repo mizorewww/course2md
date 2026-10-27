@@ -653,11 +653,10 @@ impl Desktop {
         let preferences = self.preferences.generation();
         let selected_provider = preferences.options.provider;
         let provider = selected_provider.unwrap_or_else(|| self.recommended_local_provider());
-        let selected = preferences
-            .options
-            .asr_model
-            .as_deref()
-            .unwrap_or(course2md::config::default_model(provider));
+        // Automatic selection may resolve to the NPU, which runs its default
+        // in place of a Qwen3 choice saved for another engine.
+        let selected =
+            course2md::config::effective_model(provider, preferences.options.asr_model.as_deref());
         let canonical = course2md::config::canonical_model(provider, selected).ok();
         let models = local_models(provider);
         let model_name: SharedString = if canonical.is_some() {
