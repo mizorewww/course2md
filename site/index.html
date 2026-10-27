@@ -3,22 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>course2md: turn lecture videos into illustrated notes</title>
-<meta name="description" content="course2md is a free desktop app for macOS, Windows and Linux that turns YouTube, Bilibili and local lecture videos into illustrated Markdown and HTML notes, with one screenshot per slide and the transcript beneath it.">
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#edf1f7" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1a1e26" media="(prefers-color-scheme: dark)">
+<title>course2md · Turn lecture videos into illustrated notes</title>
+<meta name="description" content="course2md is a free, open-source desktop app for macOS, Windows and Linux that turns lecture videos from Bilibili, YouTube or your computer into illustrated notes: every slide above what the lecturer said about it.">
+<meta name="theme-color" content="#EEF1F8">
 <link rel="canonical" href="https://vibewatching.xyz/">
 <link rel="alternate" hreflang="en" href="https://vibewatching.xyz/">
-<link rel="alternate" hreflang="zh-Hans" href="https://vibewatching.xyz/zh/">
+<link rel="alternate" hreflang="zh-CN" href="https://vibewatching.xyz/zh/">
 <link rel="alternate" hreflang="x-default" href="https://vibewatching.xyz/">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/icon-32.png">
 <link rel="icon" type="image/png" sizes="128x128" href="assets/icon-128.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="course2md">
-<meta property="og:title" content="course2md: turn lecture videos into illustrated notes">
-<meta property="og:description" content="Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a screenshot every time the slide changes and transcribes what is said beneath it.">
+<meta property="og:title" content="course2md · Turn lecture videos into illustrated notes">
+<meta property="og:description" content="Every lecture you&#x27;ve watched, ready to flip through again. course2md turns a whole lecture into an illustrated handout.">
 <meta property="og:url" content="https://vibewatching.xyz/">
 <meta property="og:image" content="https://vibewatching.xyz/images/og.png">
 <meta property="og:image:width" content="1200">
@@ -27,358 +25,420 @@
 <meta property="og:locale" content="en_US">
 <meta property="og:locale:alternate" content="zh_CN">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="course2md: turn lecture videos into illustrated notes">
-<meta name="twitter:description" content="A desktop app that turns lecture videos into illustrated Markdown and HTML notes you can read, search and keep.">
+<meta name="twitter:title" content="course2md · Turn lecture videos into illustrated notes">
+<meta name="twitter:description" content="Every lecture you&#x27;ve watched, ready to flip through again. course2md turns a whole lecture into an illustrated handout.">
 <meta name="twitter:image" content="https://vibewatching.xyz/images/og.png">
-<link rel="stylesheet" href="assets/site.css?v=2.0.0">
-<script src="assets/site.js?v=2.0.0"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css?v=2.0.1">
+<script src="assets/site.js?v=2.0.1"></script>
 </head>
 <body>
-<svg xmlns="http://www.w3.org/2000/svg" hidden>
-  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
-  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
-  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
-  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2m-7.07-17.07 1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
-  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
-  <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
-  <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
-  <symbol id="i-presentation" viewBox="0 0 24 24"><path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/></symbol>
-  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
-  <symbol id="i-captions" viewBox="0 0 24 24"><rect width="18" height="14" x="3" y="5" rx="2"/><path d="M7 15h4m4 0h2M7 11h2m4 0h4"/></symbol>
-  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96l-6.14 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"/><path d="M20 3v4m2-2h-4M4 17v2m1-1H3"/></symbol>
-  <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
-  <symbol id="i-export" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></symbol>
-  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
-  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
-  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></symbol>
-  <symbol id="i-library" viewBox="0 0 24 24"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></symbol>
-  <symbol id="i-tasks" viewBox="0 0 24 24"><path d="M10 6h11M10 12h11M10 18h11"/><path d="m3 6 1 1 2-2m-3 7 1 1 2-2m-3 7 1 1 2-2"/></symbol>
-  <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.97 6.01 17.46 2 12 2z"/></symbol>
-</svg>
-
-<a class="skip" href="#main">Skip to content</a>
-
-<header class="appbar">
-  <div class="wrap">
-    <a class="brand" href="./" aria-label="course2md home">
-      <img src="assets/icon-128.png" width="32" height="32" alt="">
-      <span>course2md</span>
-    </a>
-    <nav class="nav" aria-label="Main">
-      <a class="nav-link section-link" href="#features">Features</a>
-      <a class="nav-link section-link" href="#tour">Tour</a>
-      <a class="nav-link section-link" href="#install">Install</a>
-      <a class="nav-link section-link" href="#cli">CLI</a>
-      <a class="nav-link ext" href="https://github.com/mizorewww/course2md" aria-label="GitHub"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg><span class="label">GitHub</span></a>
-      <a class="nav-link" href="zh/" hreflang="zh-Hans" lang="zh-Hans">中文</a>
-      <button class="icon-btn" id="theme-toggle" type="button" hidden data-label-dark="Switch to dark theme" data-label-light="Switch to light theme" aria-label="Switch theme">
-        <svg class="icon i-moon" aria-hidden="true"><use href="#i-moon"/></svg>
-        <svg class="icon i-sun" aria-hidden="true"><use href="#i-sun"/></svg>
-      </button>
-    </nav>
-  </div>
+<div class="page">
+<header class="site-header">
+<a href="#top" class="brand">
+<span aria-hidden="true" class="mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6v12l8-6Z" fill="currentColor"></path><path d="M17 5v13"></path><path d="m13.500 14.500 3.500 3.500 3.500-3.500"></path></svg></span>
+<span class="brand-name">course2md</span>
+</a>
+<nav aria-label="Page" class="site-nav">
+<a href="#story" class="nav-link nav-more">How it works</a>
+<a href="#download" class="nav-link">Download</a>
+<a href="https://github.com/mizorewww/course2md/wiki" class="nav-link nav-more">Docs</a>
+<a href="zh/" hreflang="zh-CN" lang="zh-CN" class="nav-link nav-lang"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.500 14.500 0 0 0 0 20 14.500 14.500 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>中文</a>
+<a href="https://github.com/mizorewww/course2md" class="nav-link nav-gh"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>GitHub</a>
+</nav>
 </header>
 
-<main id="main">
-  <div class="hero">
-    <div class="wrap">
-      <div class="hero-text">
-        <a class="chip" href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0"><strong>2.0</strong> A new desktop app · release notes</a>
-        <h1>Turn lecture videos into illustrated notes</h1>
-        <p class="lead">Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a screenshot every time the slide changes, transcribes what is said beneath it, and keeps the result in a library on your computer.</p>
-        <div class="cta">
-          <a class="btn btn-primary stacked" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg">
-            <span class="main"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download for macOS</span>
-            <small>Apple Silicon · macOS 15 or later</small>
-          </a>
-        </div>
-        <p class="platforms" aria-label="Other downloads">
-          <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Windows x64 (ZIP)</a>
-          <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Linux x86_64 (tar.gz)</a>
-          <a href="https://github.com/mizorewww/course2md/releases/latest">All downloads<svg class="icon" aria-hidden="true"><use href="#i-external"/></svg></a>
-        </p>
-        <div class="cmd">
-          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">brew</span> <span class="w">install</span> <span class="w">--cask</span> <span class="w">mizorewww/</span><wbr><span class="w">tap/</span><wbr><span class="w">course2md-gui</span></span></code>
-          <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the Homebrew command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
-        </div>
-        <p class="hero-note">Homebrew installs the app together with <code>ffmpeg</code>, <code>yt-dlp</code> and <code>aria2</code>. Free and open source under the MIT license.</p>
-      </div>
-      <figure class="shot">
-        <picture>
-          <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/reader-dark.png" width="1600" height="1095">
-          <img src="images/en/reader-light.png" width="1600" height="1095" alt="The course2md reader showing a lecture note with a summary, an outline and typeset formulas" fetchpriority="high">
-        </picture>
-      </figure>
-    </div>
-  </div>
+<main id="top">
 
-  <section id="features" aria-labelledby="features-title">
-    <div class="wrap">
-      <div class="section-head">
-        <p class="kicker">Why course2md</p>
-        <h2 id="features-title">Notes you can read, search and keep</h2>
-      </div>
-      <div class="features">
-        <article class="feature">
-          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-presentation"/></svg></span>Notes shaped like the lecture</h3>
-          <p>One screenshot per slide, with the matching transcript in paragraphs underneath, saved as ordinary <code>course.md</code> and <code>course.html</code> files you can open anywhere.</p>
-        </article>
-        <article class="feature">
-          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span>Private by default</h3>
-          <p>Speech is recognized on your own computer: Apple Silicon works out of the box, and other systems use a graphics card, the CPU or an Intel Core Ultra NPU. Audio leaves your computer only if you choose a cloud service.</p>
-        </article>
-        <article class="feature">
-          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-captions"/></svg></span>Subtitles first</h3>
-          <p>When a video already has subtitles they are used directly, with no speech recognition needed.</p>
-        </article>
-        <article class="feature">
-          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-sparkles"/></svg></span>Optional AI</h3>
-          <p>Proofreading, summaries, bilingual notes in eight languages and math formulas, including spoken ones, written as LaTeX and typeset. Works with any OpenAI-compatible service, a local Ollama server or a ChatGPT subscription. Off until you turn it on.</p>
-        </article>
-        <article class="feature">
-          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-export"/></svg></span>Take it anywhere</h3>
-          <p>Export a note as HTML with its images, as Markdown with screenshots in a .zip, or as JSON data.</p>
-        </article>
-        <article class="feature">
-          <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-languages"/></svg></span>Four languages</h3>
-          <p>English, 简体中文, 繁體中文 and 日本語, following your system language. Switch any time in Settings → Appearance.</p>
-        </article>
-      </div>
-    </div>
-  </section>
+<section class="hero">
+<div class="hero-copy">
+<span class="badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>Free and open source · MIT</span>
+<h1>Every lecture you've watched, ready to flip through again</h1>
+<p>Online courses, open lectures, recorded talks: a few days later you need one derivation and you're scrubbing the timeline all over again. course2md turns a whole lecture into an illustrated handout. Every slide sits above what the lecturer said about it, organized by chapter, one click away from that exact second of the video.</p>
+<div class="uses">
+<span class="use">Reviewing online courses</span>
+<span class="use">Self-study with open courseware</span>
+<span class="use">Talks and lab-meeting recordings</span>
+</div>
+<div class="ctas">
+<a id="cta-main" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg" class="cta-main"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg><span id="cta-label">Download for macOS</span></a>
+<a href="#download" class="cta-alt">Other platforms</a>
+</div>
+<span id="cta-note" class="cta-note">Apple Silicon · macOS 15 or later · also available via Homebrew</span>
+</div>
 
-  <section id="tour" aria-labelledby="tour-title">
-    <div class="wrap">
-      <div class="section-head">
-        <p class="kicker">A tour of the app</p>
-        <h2 id="tour-title">From a link to a finished note</h2>
-      </div>
+<div class="hero-fan" role="group" aria-label="Screenshots produced by course2md">
+<div class="fan-card fan-a">
+<img src="images/lecture/frame-04.jpg" width="960" height="720" alt="Slide showing Pokémon type symbols">
+<span class="fan-cap"><span>Example Application</span><span>02:03</span></span>
+</div>
+<div class="fan-card fan-c">
+<img src="images/lecture/frame-43.jpg" width="960" height="720" alt="Slide showing classification results">
+<span class="fan-cap"><span>How’s the results?</span><span>40:01</span></span>
+</div>
+<div class="fan-card fan-b">
+<img src="images/lecture/frame-08.jpg" width="960" height="720" alt="Slide listing Pikachu's stats as features">
+<p lang="zh-Hant" class="fan-quote">比如說，皮卡丘整體強的程度是 320，HP 是 35，攻擊力是 55……</p>
+</div>
+</div>
+</section>
 
-      <div class="tour">
-        <article class="stop">
-          <div class="stop-head">
-            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></span>Add a video</h3>
-            <p>Paste a link or drag a file onto Home. course2md reads the video first, so you can check the title, length and processing options before anything is converted. Multi-part Bilibili videos and playlists can be queued in one batch.</p>
-          </div>
-          <figure class="shot">
-            <picture>
-              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/home-dark.png" width="1600" height="1095">
-              <img src="images/en/home-light.png" width="1600" height="1095" alt="Home page with a previewed video and its processing options" loading="lazy" decoding="async">
-            </picture>
-          </figure>
-        </article>
+<a href="#story" class="nudge nudge-link"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"></path><path d="m19 12-7 7-7-7"></path></svg>Scroll to watch one lecture become notes</a>
 
-        <article class="stop">
-          <div class="stop-head">
-            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg></span>Read, find and copy</h3>
-            <p>The reader opens on a summary and key points, keeps an outline of the sections beside the note, and finds text across the whole note.</p>
-          </div>
-          <ul class="reader-points">
-            <li><strong>Typeset formulas.</strong> Copying a passage gives you the original text with each formula's LaTeX.</li>
-            <li><strong>Wide formulas stay whole.</strong> They get their own row that scrolls sideways.</li>
-            <li><strong>Picks up where you left off.</strong> The reader remembers your position in every note.</li>
-            <li><strong>Jump to the source.</strong> Play the original video, or watch from any section.</li>
-          </ul>
-        </article>
+<section id="story" aria-labelledby="story-title" class="story">
+<div class="story-pin">
+<div class="story-grid">
 
-        <article class="stop">
-          <div class="stop-head">
-            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg></span>Browse every slide</h3>
-            <p>The Screenshots view shows the whole lecture at a glance. Open any slide to see it large, zoom and pan, and read what was said at that moment.</p>
-          </div>
-          <figure class="shot">
-            <picture>
-              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/screenshots-dark.png" width="1600" height="1095">
-              <img src="images/en/screenshots-light.png" width="1600" height="1095" alt="Screenshots view with a grid of lecture slides" loading="lazy" decoding="async">
-            </picture>
-          </figure>
-          <figure class="shot">
-            <picture>
-              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/viewer-dark.png" width="1600" height="1095">
-              <img src="images/en/viewer-light.png" width="1600" height="1095" alt="An enlarged slide with the transcript spoken while it was shown" loading="lazy" decoding="async">
-            </picture>
-          </figure>
-        </article>
+<div class="story-steps">
+<h2 id="story-title">A real lecture · 1 h 9 min 40 s</h2>
+<button type="button" class="step story-step-on" aria-current="step"><span class="step-n">1</span><span class="step-text"><span class="step-title">Paste a link</span><span class="step-body">Copy a Bilibili or YouTube link, or drag a local video into the window.</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">2</span><span class="step-text"><span class="step-title">Preview, then start</span><span class="step-body">See the title, uploader and length first. Start only once you know it’s the right lecture.</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">3</span><span class="step-text"><span class="step-title">Screenshots follow the slides</span><span class="step-body">Whenever the picture changes, a screenshot. This lecture of just over an hour left 69 of them.</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">4</span><span class="step-text"><span class="step-title">Words under every slide</span><span class="step-body">Each subtitle or transcribed sentence lands under the screenshot it belongs to.</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">5</span><span class="step-text"><span class="step-title">AI proofreading and summary (optional)</span><span class="step-body">Fixes punctuation, smooths spoken language and writes a summary at the top. Off by default; text is sent only when you turn it on.</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">6</span><span class="step-text"><span class="step-title">Read it like a slide deck</span><span class="step-body">Contents, timestamps and find. Any paragraph takes you back to that second of the video.</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">7</span><span class="step-text"><span class="step-title">Take your notes with you</span><span class="step-body">Markdown, a web page or JSON, screenshots included, ready for the notes app you already use.</span></span></button>
+<div aria-hidden="true" class="story-bar"><span></span></div>
+</div>
 
-        <article class="stop">
-          <div class="stop-head">
-            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg></span>Keep a library</h3>
-            <p>Notes live in a library with nested folders, drag and drop, and search that covers subfolders. You can keep several library locations, and deleted notes go to the Trash (Recycle Bin on Windows and Linux).</p>
-          </div>
-          <figure class="shot">
-            <picture>
-              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/library-dark.png" width="1600" height="1095">
-              <img src="images/en/library-light.png" width="1600" height="1095" alt="Library with a folder tree and note cards" loading="lazy" decoding="async">
-            </picture>
-          </figure>
-        </article>
+<div class="story-window" role="group" aria-label="course2md interface demo">
+<div aria-hidden="true" class="traffic"><span class="dot"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
 
-        <article class="stop">
-          <div class="stop-head">
-            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-tasks"/></svg></span>Let it work in the background</h3>
-            <p>Conversions run as tasks you can pause, resume and reorder, and they carry on after you reopen the app. Each step shows its progress, and model downloads show their size, speed and time left. If one part fails, read what finished and redo only the rest.</p>
-          </div>
-          <figure class="shot">
-            <picture>
-              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/tasks-dark.png" width="1600" height="1095">
-              <img src="images/en/tasks-light.png" width="1600" height="1095" alt="Tasks page with a running conversion and its progress" loading="lazy" decoding="async">
-            </picture>
-          </figure>
-        </article>
+<div aria-hidden="false" class="scene scene-pad sc-link is-on">
+<div class="scene-title">Turn videos into notes</div>
+<div class="url-field">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#44474F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+<span class="url-text"><span id="typed"></span><span class="caret"></span></span>
+<span class="preview-btn">Preview video</span>
+</div>
+<span class="drop-hint"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m17 8-5-5-5 5"></path><path d="M12 3v12"></path></svg>Or drag a local video into the window</span>
+</div>
 
-        <article class="stop">
-          <div class="stop-head">
-            <h3><span class="tint"><svg class="icon" aria-hidden="true"><use href="#i-palette"/></svg></span>Make it yours</h3>
-            <p>Choose from 10 themes, adjust the text size and reduce motion in Settings → Appearance. The interface speaks English, 简体中文, 繁體中文 and 日本語.</p>
-          </div>
-          <figure class="shot">
-            <picture>
-              <source data-dark media="(prefers-color-scheme: dark)" srcset="images/en/settings-dark.png" width="1600" height="1095">
-              <img src="images/en/settings-light.png" width="1600" height="1095" alt="Appearance settings with theme previews" loading="lazy" decoding="async">
-            </picture>
-          </figure>
-        </article>
-      </div>
-    </div>
-  </section>
+<div aria-hidden="true" class="scene scene-pad sc-preview">
+<div class="url-plain"><span>https://www.bilibili.com/video/BV1Wv411h7kN?p=16</span></div>
+<article class="video-card">
+<div class="thumb">
+<img src="images/lecture/frame-01.jpg" width="960" height="720" alt="" loading="lazy" decoding="async">
+<span class="thumb-time">1:09:40</span>
+</div>
+<div class="video-meta">
+<span lang="zh-CN" class="video-title">(选修)To Learn More - 分类神奇宝贝Pokemon</span>
+<span class="video-by">Bilibili · <span lang="zh-CN">啥都会一点的研究生</span></span>
+<span class="start-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5Z"></path></svg>Start conversion</span>
+</div>
+</article>
+</div>
 
-  <section id="install" aria-labelledby="install-title">
-    <div class="wrap">
-      <div class="section-head">
-        <p class="kicker">Install</p>
-        <h2 id="install-title">Get course2md</h2>
-        <p>The desktop app includes the conversion engine; you do not need the command-line tool to use it. Videos need <code>ffmpeg</code>, which the package managers below install for you.</p>
-      </div>
-      <div class="install">
-        <article class="platform" id="macos">
-          <h3>macOS<small>Apple Silicon, macOS 15 or later</small></h3>
-          <p>With <a href="https://brew.sh">Homebrew</a>, this installs the app together with <code>ffmpeg</code>, <code>yt-dlp</code> and <code>aria2</code>. Then open course2md from Applications.</p>
-          <div class="cmd">
-            <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">brew</span> <span class="w">install</span> <span class="w">--cask</span> <span class="w">mizorewww/</span><wbr><span class="w">tap/</span><wbr><span class="w">course2md-gui</span></span></code>
-            <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the Homebrew command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
-          </div>
-          <p>Without Homebrew, download the DMG, drag course2md to Applications and install <code>ffmpeg</code> as described in the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#macos-apple-silicon">macOS guide</a>. The app already includes <code>yt-dlp</code>.</p>
-          <div class="actions">
-            <a class="btn btn-tonal" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download DMG</a>
-          </div>
-        </article>
+<div aria-hidden="true" class="scene sc-shots">
+<div class="shots-head">
+<svg class="spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2B5BB5" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.560"></path></svg>
+<span class="shots-label">Extract frames</span>
+<span class="shots-count">Screenshots <span id="shot-count">0</span> / 69</span>
+</div>
+<div class="shots-bar"><span></span><span></span></div>
+<div class="shot-grid">
+<div class="shot"><img src="images/lecture/frame-01.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>00:00</span></div>
+<div class="shot"><img src="images/lecture/frame-02.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>00:15</span></div>
+<div class="shot"><img src="images/lecture/frame-03.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>01:16</span></div>
+<div class="shot"><img src="images/lecture/frame-04.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>02:03</span></div>
+<div class="shot"><img src="images/lecture/frame-05.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>02:56</span></div>
+<div class="shot"><img src="images/lecture/frame-08.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>04:26</span></div>
+<div class="shot"><img src="images/lecture/frame-10.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>05:19</span></div>
+<div class="shot"><img src="images/lecture/frame-15.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>11:24</span></div>
+<div class="shot"><img src="images/lecture/frame-20.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>16:53</span></div>
+<div class="shot"><img src="images/lecture/frame-26.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>25:15</span></div>
+<div class="shot"><img src="images/lecture/frame-27.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>26:53</span></div>
+<div class="shot"><img src="images/lecture/frame-29.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>27:15</span></div>
+<div class="shot"><img src="images/lecture/frame-33.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>30:42</span></div>
+<div class="shot"><img src="images/lecture/frame-43.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>40:01</span></div>
+<div class="shot"><img src="images/lecture/frame-51.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>43:40</span></div>
+<div class="shot"><img src="images/lecture/frame-55.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>49:44</span></div>
+<div class="shot"><img src="images/lecture/frame-62.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>1:01:32</span></div>
+<div class="shot"><img src="images/lecture/frame-69.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span>1:08:45</span></div>
+</div>
+</div>
 
-        <article class="platform" id="windows">
-          <h3>Windows<small>x64</small></h3>
-          <ol>
-            <li>Download the portable ZIP and extract everything to a permanent folder. It includes <code>yt-dlp</code> and <code>aria2</code>.</li>
-            <li>Install <code>ffmpeg</code> in PowerShell:
-              <div class="cmd">
-                <code><span class="prompt" aria-hidden="true">&gt;</span><span class="line"><span class="w">winget</span> <span class="w">install</span> <span class="w">--id</span> <span class="w">Gyan.FFmpeg</span> <span class="w">-e</span></span></code>
-                <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the winget command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
-              </div>
-            </li>
-            <li>Open <code>course2md-desktop.exe</code> from the extracted folder and keep the other files next to it.</li>
-          </ol>
-          <div class="actions">
-            <a class="btn btn-tonal" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download ZIP</a>
-          </div>
-        </article>
+<div aria-hidden="true" class="scene scene-sub">
+<div class="sub-slide">
+<div class="sub-frame"><img src="images/lecture/frame-08.jpg" width="960" height="720" alt="Slide listing Pikachu's stats as features" loading="lazy" decoding="async"><span class="thumb-time">04:26</span></div>
+<span class="sub-cap">Screenshot 8 of 69 · 04:26 – 05:14</span>
+</div>
+<div class="sub-list">
+<span class="sub-head">Video subtitles</span>
+<div lang="zh-Hant" class="sub-line"><b>04:26</b><span>比如說，皮卡丘</span></div>
+<div lang="zh-Hant" class="sub-line"><b>04:28</b><span>它整體強的程度是 320</span></div>
+<div lang="zh-Hant" class="sub-line"><b>04:31</b><span>它 HP 是 35，攻擊力是 55</span></div>
+<div lang="zh-Hant" class="sub-line"><b>04:34</b><span>防禦力是40，特殊攻擊力是 50</span></div>
+<div lang="zh-Hant" class="sub-line"><b>04:37</b><span>然後，它的特殊防禦力是 50，速度是 90</span></div>
+<div lang="zh-Hant" class="sub-line"><b>04:42</b><span>所以一隻皮卡丘，我們就可以用一個 vector 來描述它</span></div>
+<div lang="zh-Hant" class="sub-line"><b>04:46</b><span>這個 vector 裡面總共有 7 個數值</span></div>
+<div lang="zh-Hant" class="sub-line"><b>04:49</b><span>所以，1 隻寶可夢，它就是 7 個數字所組成的一個 vector</span></div>
+<div lang="zh-Hant" class="sub-line"><b>04:56</b><span>所以 1 隻皮卡丘，可以用這 7 個數字來描述它</span></div>
+<div lang="zh-Hant" class="sub-line"><b>04:59</b><span>我們現在要問的問題就是</span></div>
+</div>
+</div>
 
-        <article class="platform" id="arch">
-          <h3>Arch Linux / CachyOS<small>x86_64</small></h3>
-          <div class="cmd">
-            <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">yay</span> <span class="w">-S</span> <span class="w">course2md-gui-bin</span></span></code>
-            <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the yay command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
-          </div>
-          <p>Or <code>paru -S course2md-gui-bin</code>. This installs the app, the video tools and the graphics libraries; your GPU needs a working Vulkan driver. See the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#arch-linux--cachyos">Linux guide</a>.</p>
-        </article>
+<div aria-hidden="true" class="scene scene-pad sc-ai">
+<div class="ai-head">
+<span class="ai-chip">Original subtitles</span>
+<span class="ai-note">Optional · off by default</span>
+</div>
+<div class="ai-text">
+<p lang="zh-Hant" class="ai-raw">比如說，皮卡丘它整體強的程度是 320它 HP 是 35，攻擊力是 55防禦力是40，特殊攻擊力是 50然後，它的特殊防禦力是 50，速度是 90所以一隻皮卡丘，我們就可以用一個 vector 來描述它這個 vector 裡面總共有 7 個數值</p>
+<p lang="zh-Hant" class="ai-clean">比如說，皮卡丘整體強的程度是 320，HP 是 35，攻擊力是 55，防禦力是 40，特殊攻擊力是 50，特殊防禦力是 50，速度是 90。所以一隻皮卡丘，我們就可以用一個 vector 來描述它，這個 vector 裡面總共有 7 個數值。</p>
+</div>
+<div class="ai-sum">
+<span class="ai-sum-title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg>Video summary</span>
+<p lang="zh-Hant">以寶可夢屬性分類介紹機率生成模型，從迴歸的限制、貝氏分類與高斯參數估測，推進到共用共變異數的線性邊界及 sigmoid 後驗機率，最後引出直接學習分類參數的構想。</p>
+</div>
+</div>
 
-        <article class="platform" id="linux">
-          <h3>Ubuntu and other Linux<small>x86_64</small></h3>
-          <p>Download the tar.gz, install <code>ffmpeg</code> and the graphics libraries from the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#other-linux-x64-distributions">Linux guide</a>, extract it and run <code>./course2md-desktop</code>. Built on Ubuntu 24.04; it includes <code>yt-dlp</code>.</p>
-          <div class="actions">
-            <a class="btn btn-tonal" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download tar.gz</a>
-          </div>
-        </article>
-      </div>
+<div aria-hidden="true" class="scene sc-read">
+<div class="read-bar">
+<span class="read-back"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1A1B20" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></span>
+<span class="read-titles"><span class="read-crumb">Library · <span lang="zh-CN">李弘毅机器学习</span></span><span lang="zh-CN" class="read-title">(选修)To Learn More - 分类神奇宝贝Pokemon</span></span>
+</div>
+<div class="read-main">
+<div class="demo-toc">
+<span class="toc-head">Contents</span>
+<span class="toc-item"><span lang="en">Summary</span><span></span></span>
+<span class="toc-item is-active"><span lang="zh-Hant">分類任務與寶可夢資料</span><span>00:00</span></span>
+<span class="toc-item"><span lang="zh-Hant">直接套用迴歸的問題</span><span>07:47</span></span>
+<span class="toc-item"><span lang="zh-Hant">貝氏分類與生成模型</span><span>16:08</span></span>
+<span class="toc-item"><span lang="zh-Hant">高斯假設與最大概似估測</span><span>24:26</span></span>
+<span class="toc-item"><span lang="zh-Hant">分類實作與初步結果</span><span>36:24</span></span>
+<span class="toc-item"><span lang="zh-Hant">共用共變異數與模型簡化</span><span>42:30</span></span>
+<span class="toc-item"><span lang="zh-Hant">模型選擇與 Naive Bayes</span><span>52:07</span></span>
+<span class="toc-item"><span lang="zh-Hant">後驗機率的 sigmoid 表示</span><span>59:13</span></span>
+<span class="toc-item"><span lang="zh-Hant">從共用共變異數推導線性邊界</span><span>1:04:32</span></span>
+<span class="toc-item"><span lang="zh-Hant">引出直接學習分類參數</span><span>1:08:45</span></span>
+</div>
+<div class="read-paper">
+<div class="reader-body">
+<div class="read-shot"><img src="images/lecture/frame-02.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span class="thumb-time">00:15</span></div>
+<span class="watch-chip"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5Z"></path></svg>01:16 Watch from here</span>
+<p lang="zh-Hant">比如說，你手寫一個字給機器看，看到這張圖，這是「金」。然後，output 就是這個字、這個 image 屬於哪一個 class。如果你是做中文的手寫辨識，中文有至少 8000 個 character，那就是一個 8000 個 class 的 classification。</p>
+<div class="read-shot"><img src="images/lecture/frame-03.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span class="thumb-time">01:16</span></div>
+<p lang="zh-Hant">其實這個也是寶可夢的例子。我們知道寶可夢有不同的屬性，有 18 種屬性，包括水、火、電，還有草、冰等等。我們現在要做的是一個分類的問題，就是要找一個 function。</p>
+<div class="read-h"><span lang="zh-Hant">直接套用迴歸的問題</span><span>07:47</span></div>
+<div class="read-shot"><img src="images/lecture/frame-15.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span class="thumb-time">11:24</span></div>
+<p lang="zh-Hant">去做 Regression 的時候，你得到的線不會是綠色這條。雖然你用直覺、用眼睛一看，就會知道綠色這條是一個比較好的 boundary。</p>
+<div class="read-h"><span lang="zh-Hant">貝氏分類與生成模型</span><span>16:08</span></div>
+<div class="read-shot"><img src="images/lecture/frame-20.jpg" width="960" height="720" alt="" loading="lazy" decoding="async"><span class="thumb-time">16:53</span></div>
+<p lang="zh-Hant">在盒子 1 裡面，藍球占 4/5，綠球占 1/5……</p>
+</div>
+</div>
+</div>
+</div>
 
-      <div class="notes">
-        <div class="note">
-          <h3>First steps</h3>
-          <ol>
-            <li>Open course2md and follow the setup: choose how speech is recognized, optionally connect an AI service and Bilibili, and download the speech model (1–2.4 GB, once).</li>
-            <li>If anything is missing, Settings → Application → Run checks shows which tool to install.</li>
-            <li>On Home, paste a link or drop a video, review the preview and click Start conversion. Finished notes appear in Library.</li>
-          </ol>
-        </div>
-        <div class="note">
-          <h3>Upgrading from 1.7</h3>
-          <p>Downloaded models, the Bilibili login and the CLI's <code>config.toml</code> keep working. Notes made by 1.x stay where they were as <code>course.md</code> / <code>course.html</code>, but the 2.0 library only lists notes made by 2.0. Set up recognition and AI services again in the setup steps; convert old notes again to read them in the library.</p>
-          <p>To upgrade with Homebrew, run:</p>
-          <div class="cmd">
-            <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">brew</span> <span class="w">update</span> <span class="w">&amp;&amp;</span> <span class="w">brew</span> <span class="w">upgrade</span> <span class="w">--cask</span> <span class="w">course2md-gui</span></span></code>
-            <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the upgrade command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
-          </div>
-          <p>Back up <code>config.toml</code> before downgrading to 1.x. Coming from a release candidate? Quit the app and uninstall the <code>course2md-gui@rc</code> cask without <code>--zap</code>, so your data stays, before installing <code>course2md-gui</code>. Details are in the <a href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0">v2.0.0 release notes</a>.</p>
-          <p>Intel Macs and Linux ARM64 have no desktop app yet; use the <a href="#cli">command-line tool</a>. More in the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#first-launch">first-launch guide</a> and <a href="https://github.com/mizorewww/course2md/wiki/Troubleshooting">Troubleshooting</a>.</p>
-        </div>
-      </div>
-    </div>
-  </section>
+<div aria-hidden="true" class="scene scene-pad sc-export">
+<div role="menu" aria-label="Copy and export" class="export-menu">
+<span class="menu-item">Copy entire note · Markdown text</span>
+<span class="menu-item">Copy entire note · Plain text</span>
+<span class="menu-item">Export Markdown (with screenshots, .zip)…</span>
+<span class="menu-item">Export web page file…</span>
+<span class="menu-item">Export JSON data…</span>
+</div>
+<div class="files mono">
+<div class="file"><i></i><span>course.md</span><small></small></div>
+<div class="file"><i class="teal"></i><span>cover.jpg</span><small></small></div>
+<div class="file"><i class="amber"></i><span>frames/</span><small>69 files</small></div>
+<div class="file"><i class="amber"></i><span>exports/</span><small></small></div>
+<div class="file nested"><i></i><span>course.zip</span><small>with screenshots</small></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
 
-  <section id="cli" aria-labelledby="cli-title">
-    <div class="wrap cli">
-      <div class="section-head">
-        <p class="kicker">Command-line tool</p>
-        <h2 id="cli-title">Prefer the terminal?</h2>
-        <p>The <code>course2md</code> CLI does the same conversion from the terminal or your scripts. It can be installed beside the desktop app; the two share the Bilibili and ChatGPT logins and the downloaded speech models.</p>
-        <p>It needs <code>ffmpeg</code>; online links also need <code>yt-dlp</code>. Check everything with <code>course2md doctor</code>, and see the <a href="https://github.com/mizorewww/course2md/wiki/CLI-Guide">CLI guide</a> for every command.</p>
-      </div>
-      <div class="cli-side">
-        <p class="cmd-label">macOS / Linux, into ~/bin</p>
-        <div class="cmd">
-          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">curl</span> <span class="w">-fsSL</span> <span class="w">https://</span><wbr><span class="w">raw.githubusercontent.com/</span><wbr><span class="w">mizorewww/</span><wbr><span class="w">course2md/</span><wbr><span class="w">main/</span><wbr><span class="w">install.sh</span> <span class="w">|</span> <span class="w">bash</span></span></code>
-          <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the install script command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
-        </div>
-        <p class="cmd-label">or Homebrew</p>
-        <div class="cmd">
-          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">brew</span> <span class="w">install</span> <span class="w">mizorewww/</span><wbr><span class="w">tap/</span><wbr><span class="w">course2md</span></span></code>
-          <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the Homebrew command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
-        </div>
-        <p class="cmd-label">or Arch</p>
-        <div class="cmd">
-          <code><span class="prompt" aria-hidden="true">$</span><span class="line"><span class="w">yay</span> <span class="w">-S</span> <span class="w">course2md-bin</span></span></code>
-          <button class="copy" type="button" hidden data-idle="Copy" data-done="Copied" aria-label="Copy the yay command"><svg class="icon i-copy" aria-hidden="true"><use href="#i-copy"/></svg><svg class="icon i-check" aria-hidden="true"><use href="#i-check"/></svg><span class="label">Copy</span></button>
-        </div>
-        <div class="terminal">
-          <pre><code><span class="p">$ </span>course2md ./lecture.mp4
-<span class="p">$ </span>course2md https://www.youtube.com/watch?v=…
-<span class="p">$ </span>course2md ./lecture.mp4 -o ./notes</code></pre>
-        </div>
-      </div>
-    </div>
-  </section>
+<section aria-labelledby="gallery-title" class="gallery">
+<div class="reveal container section-intro">
+<h2 id="gallery-title" class="h2">69 screenshots, 10 chapters</h2>
+<p class="lede">Every image below is an original screenshot course2md took from that one lecture, labeled with the second it appears in the video.</p>
+</div>
+<div class="marquee-wrap">
+<div class="marquee">
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-01.jpg" width="960" height="720" alt="Screenshot at 00:00" loading="lazy"><span class="thumb-time">00:00</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-02.jpg" width="960" height="720" alt="Screenshot at 00:15" loading="lazy"><span class="thumb-time">00:15</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-03.jpg" width="960" height="720" alt="Screenshot at 01:16" loading="lazy"><span class="thumb-time">01:16</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-04.jpg" width="960" height="720" alt="Screenshot at 02:03" loading="lazy"><span class="thumb-time">02:03</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-05.jpg" width="960" height="720" alt="Screenshot at 02:56" loading="lazy"><span class="thumb-time">02:56</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-08.jpg" width="960" height="720" alt="Screenshot at 04:26" loading="lazy"><span class="thumb-time">04:26</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-10.jpg" width="960" height="720" alt="Screenshot at 05:19" loading="lazy"><span class="thumb-time">05:19</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-15.jpg" width="960" height="720" alt="Screenshot at 11:24" loading="lazy"><span class="thumb-time">11:24</span></div><figcaption lang="zh-Hant">直接套用迴歸的問題</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-20.jpg" width="960" height="720" alt="Screenshot at 16:53" loading="lazy"><span class="thumb-time">16:53</span></div><figcaption lang="zh-Hant">貝氏分類與生成模型</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-26.jpg" width="960" height="720" alt="Screenshot at 25:15" loading="lazy"><span class="thumb-time">25:15</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-27.jpg" width="960" height="720" alt="Screenshot at 26:53" loading="lazy"><span class="thumb-time">26:53</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-29.jpg" width="960" height="720" alt="Screenshot at 27:15" loading="lazy"><span class="thumb-time">27:15</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-33.jpg" width="960" height="720" alt="Screenshot at 30:42" loading="lazy"><span class="thumb-time">30:42</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-43.jpg" width="960" height="720" alt="Screenshot at 40:01" loading="lazy"><span class="thumb-time">40:01</span></div><figcaption lang="zh-Hant">分類實作與初步結果</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-51.jpg" width="960" height="720" alt="Screenshot at 43:40" loading="lazy"><span class="thumb-time">43:40</span></div><figcaption lang="zh-Hant">共用共變異數與模型簡化</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-55.jpg" width="960" height="720" alt="Screenshot at 49:44" loading="lazy"><span class="thumb-time">49:44</span></div><figcaption lang="zh-Hant">共用共變異數與模型簡化</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-62.jpg" width="960" height="720" alt="Screenshot at 1:01:32" loading="lazy"><span class="thumb-time">1:01:32</span></div><figcaption lang="zh-Hant">後驗機率的 sigmoid 表示</figcaption></figure>
+<figure class="g-card"><div class="g-frame"><img src="images/lecture/frame-69.jpg" width="960" height="720" alt="Screenshot at 1:08:45" loading="lazy"><span class="thumb-time">1:08:45</span></div><figcaption lang="zh-Hant">引出直接學習分類參數</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-01.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">00:00</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-02.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">00:15</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-03.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">01:16</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-04.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">02:03</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-05.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">02:56</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-08.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">04:26</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-10.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">05:19</span></div><figcaption lang="zh-Hant">分類任務與寶可夢資料</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-15.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">11:24</span></div><figcaption lang="zh-Hant">直接套用迴歸的問題</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-20.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">16:53</span></div><figcaption lang="zh-Hant">貝氏分類與生成模型</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-26.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">25:15</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-27.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">26:53</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-29.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">27:15</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-33.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">30:42</span></div><figcaption lang="zh-Hant">高斯假設與最大概似估測</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-43.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">40:01</span></div><figcaption lang="zh-Hant">分類實作與初步結果</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-51.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">43:40</span></div><figcaption lang="zh-Hant">共用共變異數與模型簡化</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-55.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">49:44</span></div><figcaption lang="zh-Hant">共用共變異數與模型簡化</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-62.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">1:01:32</span></div><figcaption lang="zh-Hant">後驗機率的 sigmoid 表示</figcaption></figure>
+<figure class="g-card" aria-hidden="true"><div class="g-frame"><img src="images/lecture/frame-69.jpg" width="960" height="720" alt="" loading="lazy"><span class="thumb-time">1:08:45</span></div><figcaption lang="zh-Hant">引出直接學習分類參數</figcaption></figure>
+</div>
+</div>
+</section>
 
-  <section class="closing" aria-labelledby="closing-title">
-    <div class="wrap">
-      <h2 id="closing-title">Your next lecture, as a note</h2>
-      <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download for macOS</a>
-        <a class="btn btn-outline" href="#install">Windows and Linux</a>
-      </div>
-    </div>
-  </section>
+<section id="features" aria-labelledby="features-title" class="container features">
+<h2 id="features-title" class="reveal h2">From “I watched it” to “I can use it”</h2>
+<div class="feature-grid">
+<article class="reveal feature">
+<span aria-hidden="true" class="f-icon f-blue"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></span>
+<h3>No more scrubbing the timeline</h3>
+<p>Flip through an hour-long lecture in minutes. Looking for one concept? Find takes you straight to the slide and the sentence.</p>
+</article>
+<article class="reveal-2 feature">
+<span aria-hidden="true" class="f-icon f-orange"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></span>
+<h3>Slides and explanation, together</h3>
+<p>Slides alone don't explain the derivation, and subtitles alone have no pictures. Here, every screenshot sits right above what the lecturer said about it.</p>
+</article>
+<article class="reveal-3 feature">
+<span aria-hidden="true" class="f-icon f-yellow"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></span>
+<h3>Your notes, your files</h3>
+<p>Saved as plain Markdown and web pages. Drop them into Obsidian or another notes app, print them, or send them to a classmate. No account needed.</p>
+</article>
+<article class="reveal feature">
+<span aria-hidden="true" class="f-icon f-pink"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 6 4 14"></path><path d="M12 6v14"></path><path d="M8 8v12"></path><path d="M4 4v16"></path></svg></span>
+<h3>Queue up a whole course</h3>
+<p>Add the semester's lectures and they're processed one by one in the background; pause any time. Finished notes are filed in folders and searchable by title.</p>
+</article>
+</div>
+</section>
+
+<section aria-labelledby="privacy-title" class="container">
+<div class="grow">
+<div class="privacy-copy">
+<h2 id="privacy-title" class="h2">Your audio stays on your computer</h2>
+<p>Speech is recognized locally. Audio or text leaves your computer only if you choose a cloud speech service or an AI service.</p>
+</div>
+<div class="privacy-list">
+<div class="privacy-row"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path></svg><span>Local recognition</span><span>Default</span></div>
+<div class="privacy-row"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path></svg><span>Cloud speech service</span><span>Optional</span></div>
+<div class="privacy-row"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path></svg><span>AI proofreading and summaries</span><span>Off by default</span></div>
+</div>
+</div>
+</section>
+
+<section id="download" aria-labelledby="download-title" class="container download">
+<div class="reveal section-intro">
+<h2 id="download-title" class="h2">Download the desktop app</h2>
+<p class="lede">The desktop app includes the conversion engine and also needs ffmpeg. The first local transcription downloads a speech model (1–2.4 GB).</p>
+</div>
+<div class="tab-row">
+<div role="tablist" aria-label="Platform" id="platform-tabs" class="seg seg-platform">
+<button type="button" role="tab" aria-selected="true" aria-controls="panel-macos">macOS</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="panel-windows">Windows</button>
+<button type="button" role="tab" aria-selected="false" aria-controls="panel-linux">Linux</button>
+</div>
+<span id="detected" class="detected" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path></svg><span id="detected-text"></span></span>
+</div>
+
+<div id="panel-macos" role="tabpanel" class="panel">
+<div class="tile tile-top">
+<span class="tile-label"><strong>macOS · Apple Silicon</strong><span>macOS 15 or later</span></span>
+<a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Download DMG</a>
+</div>
+<div class="tile tile-bottom">
+<span class="tile-hint">Or install with Homebrew, which also installs ffmpeg and yt-dlp</span>
+<span class="cmd mono"><span class="prompt">$</span><code>brew install --cask mizorewww/tap/course2md-gui</code><button type="button" class="copy" aria-label="Copy command">Copy</button></span>
+</div>
+</div>
+
+<div id="panel-windows" role="tabpanel" class="panel" hidden>
+<div class="tile tile-top">
+<span class="tile-label"><strong>Windows · x64</strong><span>Portable package: extract everything to a permanent folder, then open course2md-desktop.exe</span></span>
+<a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Download ZIP</a>
+</div>
+<div class="tile tile-bottom">
+<span class="tile-hint">Install ffmpeg in PowerShell</span>
+<span class="cmd mono"><span class="prompt">&gt;</span><code>winget install --id Gyan.FFmpeg -e</code><button type="button" class="copy" aria-label="Copy command">Copy</button></span>
+</div>
+</div>
+
+<div id="panel-linux" role="tabpanel" class="panel" hidden>
+<div class="tile tile-top tight">
+<span class="tile-label narrow"><strong>Arch Linux / CachyOS · x86_64</strong><span>Installs the video tools and graphics libraries too. Needs a working Vulkan driver.</span></span>
+<span class="cmd mono"><span class="prompt">$</span><code>yay -S course2md-gui-bin</code><button type="button" class="copy" aria-label="Copy command">Copy</button></span>
+</div>
+<div class="tile tile-bottom roomy">
+<span class="tile-label"><strong>Ubuntu and other distributions · x86_64</strong><span>Built on Ubuntu 24.04. Install ffmpeg and the graphics libraries separately.</span></span>
+<a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Download tar.gz</a>
+</div>
+</div>
+
+<div class="dl-note">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+<span>Intel Macs and Linux ARM64 have no desktop app yet; use the <a href="#cli">command-line version</a>. See the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation">installation guide</a> for details.</span>
+</div>
+</section>
+
+<section id="cli" aria-labelledby="cli-title" class="container cli">
+<div class="reveal cli-copy">
+<span aria-hidden="true" class="f-icon f-gray"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 17 6-6-6-6"></path><path d="M12 19h8"></path></svg></span>
+<h2 id="cli-title" class="h2">Prefer the terminal?</h2>
+<p class="lede">The CLI shares one configuration file with the desktop app, and both can be installed side by side. Handy for batches and scripts, and it also runs on Intel Macs and Linux ARM64.</p>
+<div role="tablist" aria-label="Install method" id="cli-tabs" class="seg seg-cli">
+<button type="button" role="tab" aria-selected="true">Install script</button>
+<button type="button" role="tab" aria-selected="false">Homebrew</button>
+<button type="button" role="tab" aria-selected="false">Arch</button>
+</div>
+<span class="cmd cmd-cli mono"><span class="prompt">$</span><code id="cli-cmd">curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash</code><button type="button" class="copy" aria-label="Copy command">Copy</button></span>
+<a href="https://github.com/mizorewww/course2md/wiki/CLI-Guide" class="guide-link">CLI guide<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></a>
+</div>
+
+<div class="reveal-2 term" id="term" role="group" aria-label="Command-line demo">
+<div class="term-bar">
+<span class="dot"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+<span class="term-title mono">~/courses — zsh</span>
+<span class="term-spacer"></span>
+</div>
+<div class="term-body mono">
+<div class="term-cmd"><span class="t-dir">~/courses</span> <span class="t-prompt">❯</span> <span class="t-bin">course2md</span> <span class="t-arg" id="cmd-arg"></span><span class="caret" id="cmd-caret"></span></div>
+<div class="t-line t-step" hidden><b>→</b><span>Reading video info</span></div>
+<div class="t-line t-ok" hidden><b>✓</b><span>(选修)To Learn More - 分类神奇宝贝Pokemon · 1:09:40</span></div>
+<div class="t-line t-ok" hidden><b>✓</b><span>69 screenshots / 99 paragraphs</span></div>
+<div class="t-line t-ok" hidden><b>✓</b><span>Saved course.md</span></div>
+<div class="t-line t-dim" hidden><b> </b><span>bilibili/…/BV1Wv411h7kN_p16/</span></div>
+<div id="term-done" hidden><span class="t-dir">~/courses</span> <span class="t-prompt">❯</span> <span class="caret"></span></div>
+</div>
+</div>
+</section>
 </main>
 
-<footer class="footer">
-  <div class="wrap">
-    <a class="brand" href="./"><img src="assets/icon-128.png" width="24" height="24" alt=""><span>course2md</span></a>
-    <nav aria-label="Project">
-      <a href="https://github.com/mizorewww/course2md">GitHub</a>
-      <a href="https://github.com/mizorewww/course2md/wiki">Wiki</a>
-      <a href="https://github.com/mizorewww/course2md/releases">Releases</a>
-      <a href="https://github.com/mizorewww/course2md/issues">Report a problem</a>
-      <a href="https://github.com/mizorewww/course2md/blob/main/LICENSE">MIT license</a>
-      <a href="zh/" hreflang="zh-Hans" lang="zh-Hans">中文</a>
-    </nav>
-  </div>
+<footer class="site-footer">
+<div class="footer-inner">
+<span class="footer-brand"><span aria-hidden="true" class="mark mark-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6v12l8-6Z" fill="currentColor"></path><path d="M17 5v13"></path><path d="m13.500 14.500 3.500 3.500 3.500-3.500"></path></svg></span>course2md</span>
+<span class="footer-gap"></span>
+<a href="https://github.com/mizorewww/course2md/wiki">Docs</a>
+<a href="https://github.com/mizorewww/course2md/wiki/Troubleshooting">Troubleshooting</a>
+<a href="https://github.com/mizorewww/course2md/issues">Report a problem</a>
+<a href="https://github.com/mizorewww/course2md/blob/main/CHANGELOG.md">Changelog</a>
+<span>MIT license</span>
+</div>
 </footer>
-<p class="visually-hidden" id="copy-status" role="status" aria-live="polite"></p>
+</div>
+<script type="application/json" id="c2m-data">{"url": "https://www.bilibili.com/video/BV1Wv411h7kN?p=16", "ctas": {"macos": {"label": "Download for macOS", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg", "note": "Apple Silicon · macOS 15 or later · also available via Homebrew"}, "windows": {"label": "Download for Windows", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip", "note": "Windows x64 · portable, just extract and run · needs ffmpeg"}, "linux": {"label": "Download for Linux", "href": "#download", "note": "x86_64 · install with yay on Arch, or download the tar.gz"}, "other": {"label": "See download options", "href": "#download", "note": "course2md is a desktop app for macOS, Windows and Linux"}}, "detected": {"macos": "You’re on macOS", "windows": "You’re on Windows", "linux": "You’re on Linux"}, "cliCmds": ["curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash", "brew install mizorewww/tap/course2md", "yay -S course2md-bin"], "copy": "Copy", "copied": "Copied", "aiRaw": "Original subtitles", "aiClean": "After AI proofreading"}</script>
 </body>
 </html>
