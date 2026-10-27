@@ -4243,7 +4243,8 @@ impl Desktop {
         }
         let gaps = 8. * tools.len().saturating_sub(1) as f32;
         let window_width = f32::from(window.bounds().size.width);
-        let trailing = (window_width - metrics.frame_left - metrics.reader_width).max(16.);
+        let trailing = (window_width - metrics.frame_left - metrics.reader_width)
+            .max(crate::window_controls::title_bar_trailing(window));
         let room = window_width
             - metrics.frame_left
             - trailing
@@ -4316,7 +4317,11 @@ impl Desktop {
         let (compact, short_reader) = (metrics.compact, metrics.short);
         let icon_only = is_compact(window);
         let reading_note = self.result_tab == 0;
-        let mut toolbar = h_flex().min_w_0().flex_shrink(1.).gap_2().items_center();
+        // The reading tools sit in the title bar: presses on them are theirs,
+        // not the start of a window move.
+        let mut toolbar = crate::window_controls::title_bar_control(
+            h_flex().min_w_0().flex_shrink(1.).gap_2().items_center(),
+        );
         let mut compact_search = None;
         let mut short_matches = None;
         // The screenshot view carries its own search above the grid.
@@ -7624,7 +7629,8 @@ impl Desktop {
         // tabs and the contents line up at every width.
         let frame = ReaderMetrics::new(window, self.result_tab, !self.reader_ui.outline.is_empty());
         let window_width = f32::from(window.bounds().size.width);
-        let trailing = (window_width - frame.frame_left - frame.reader_width).max(16.);
+        let trailing = (window_width - frame.frame_left - frame.reader_width)
+            .max(crate::window_controls::title_bar_trailing(window));
         let tight = self.reader_bar_tight(&frame, window);
         crate::views::apply_shell_title_bar_chrome(
             TitleBar::new().h(reader_title_bar_height(window)),
@@ -7633,7 +7639,7 @@ impl Desktop {
             bar.pl(px(frame.frame_left))
                 .pr(px(trailing))
                 .gap(px(12.))
-                .child(
+                .child(crate::window_controls::title_bar_control(
                     icon_button("reader-back", BUTTON_MEDIUM, true, cx)
                         .icon(icons::arrow_left())
                         .accessibility_label(course2md::tr!("返回「{}」", origin))
@@ -7641,7 +7647,7 @@ impl Desktop {
                         .on_click(
                             cx.listener(|this, _, _, cx| this.navigate(this.result_origin, cx)),
                         ),
-                )
+                ))
                 .child(
                     v_flex()
                         .flex_1()

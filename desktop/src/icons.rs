@@ -1,7 +1,8 @@
 //! The application's icon set. Each name has exactly one asset: Lucide outline
-//! icons for shared chrome, Material icons where Lucide has no match, and the
-//! platform brand marks. GPUI Component looks icons up by `icons/<file>.svg`,
-//! so a registered file also replaces the component's own icon of that name.
+//! icons for shared chrome, Material icons where Lucide has no match, the
+//! platform brand marks, and the glyphs of the window caption buttons the app
+//! draws. GPUI Component looks icons up by `icons/<file>.svg`, so a
+//! registered file also replaces the component's own icon of that name.
 use gpui::{AssetSource, SharedString, Styled};
 use std::borrow::Cow;
 
@@ -108,6 +109,11 @@ icons! {
     zoom_out => "material" / "zoom-out";
 
     bilibili_mark => "brands" / "bilibili";
+
+    caption_close => "window" / "caption-close";
+    caption_maximize => "window" / "caption-maximize";
+    caption_minimize => "window" / "caption-minimize";
+    caption_restore => "window" / "caption-restore";
 }
 
 const APP_ICON: (&str, &[u8]) = (

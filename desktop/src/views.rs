@@ -31,7 +31,11 @@ fn shell_column_width(page: Page) -> AbsoluteLength {
 /// Where the title bar's content starts: macOS draws the traffic lights
 /// inside its leading edge.
 pub(crate) fn title_bar_leading() -> f32 {
-    if cfg!(target_os = "macos") { 88. } else { 12. }
+    if crate::window_controls::traffic_lights() {
+        88.
+    } else {
+        12.
+    }
 }
 
 /// The max width includes both gutters; layout calculations use the same box.
@@ -77,7 +81,9 @@ fn app_bar_density(
     window: &Window,
 ) -> AppBarDensity {
     let scaled = |value: f32| value * f32::from(window.rem_size()) / 14.;
-    let available = f32::from(window.viewport_size().width) - leading - 16.;
+    let available = f32::from(window.viewport_size().width)
+        - leading
+        - crate::window_controls::title_bar_trailing(window);
     let fits = |density: AppBarDensity| {
         let brand = match density {
             AppBarDensity::Mark => scaled(4. + 32. + 4.),
@@ -135,7 +141,7 @@ impl Desktop {
             .min_w_0()
             .h_full()
             .pl(px(leading))
-            .pr(px(16.))
+            .pr(px(crate::window_controls::title_bar_trailing(window)))
             .gap(px(4.))
             .items_center();
         if page == Page::Settings {
@@ -242,12 +248,14 @@ impl Desktop {
             cx,
         )
         .on_click(cx.listener(|this, _, window, cx| this.open_settings(window, cx)));
+        // The bar between them stays a place to move the window from.
+        use crate::window_controls::title_bar_control;
         let bar = bar
-            .child(home)
+            .child(title_bar_control(home))
             .child(div().flex_1())
-            .child(library)
-            .children(tasks)
-            .child(settings);
+            .child(title_bar_control(library))
+            .children(tasks.map(title_bar_control))
+            .child(title_bar_control(settings));
         apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window))).child(bar)
     }
 
@@ -407,7 +415,11 @@ impl Render for Desktop {
                                     .w(window.viewport_size().width)
                                     .h_full()
                                     // The traffic lights, then the home action's inset.
-                                    .pl(px(if cfg!(target_os = "macos") { 92. } else { 16. }))
+                                    .pl(px(if crate::window_controls::traffic_lights() {
+                                        92.
+                                    } else {
+                                        16.
+                                    }))
                                     .gap(px(10.))
                                     .items_center()
                                     .child(
@@ -429,6 +441,7 @@ impl Render for Desktop {
                     window.has_active_dialog(cx),
                 ))
                 .children(Root::render_dialog_layer(window, cx))
+                .children(self.caption_buttons(title_bar_height(window), window, cx))
                 .into_any_element();
         }
         let mut reader_tools = None;
@@ -479,6 +492,11 @@ impl Render for Desktop {
             content.into_any_element()
         } else {
             crate::motion::page_enter(("page-content", self.page as usize), content)
+        };
+        let title_bar_height = if self.page == Page::Result && reader_tools.is_some() {
+            crate::reader_ui::reader_title_bar_height(window)
+        } else {
+            title_bar_height(window)
         };
         let topbar = self.shell_topbar(reader_tools, window, cx);
         let task_notice = self.task_result_notice(cx);
@@ -640,6 +658,8 @@ impl Render for Desktop {
                 view.child(self.workbench_drop_overlay(cx))
             })
             .children(Root::render_dialog_layer(window, cx))
+            // Last, so the caption buttons stay usable over a dialog.
+            .children(self.caption_buttons(title_bar_height, window, cx))
             .into_any_element()
     }
 }

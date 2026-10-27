@@ -351,6 +351,39 @@ pub fn on_image_scrim() -> Rgba {
     rgb(0xffffff)
 }
 
+/// Window caption buttons (see `window_controls`). Minimize and maximize take
+/// the M3 hover and press state layers of the title bar's ink, translucent so
+/// they also read over a dialog's scrim. Close turns the platform's red with
+/// white glyphs, as Windows draws it, whatever the palette.
+pub fn caption_hover() -> Rgba {
+    Rgba {
+        a: 0.08,
+        ..color(INK)
+    }
+}
+
+pub fn caption_pressed() -> Rgba {
+    Rgba {
+        a: 0.10,
+        ..color(INK)
+    }
+}
+
+pub fn caption_close_hover() -> Rgba {
+    rgb(0xc42b1c)
+}
+
+pub fn caption_close_pressed() -> Rgba {
+    Rgba {
+        a: 0.9,
+        ..rgb(0xc42b1c)
+    }
+}
+
+pub fn on_caption_close() -> Rgba {
+    rgb(0xffffff)
+}
+
 /* ---------- Column widths (rems; structure that scales with text) ---------- */
 pub const COLUMN: Rems = rems(65.714);
 
