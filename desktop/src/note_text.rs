@@ -34,6 +34,8 @@ const BREAK: char = '\u{200B}';
 /// SVG at twice that size and draws none wider than 8192 pixels, so a wider
 /// formula is drawn as several tiles side by side.
 const MAX_FORMULA_PIXELS: f32 = 4000.;
+/// How tall an inline formula may be, in lines, before it is scaled down.
+const INLINE_ROOM: f32 = 1.4;
 
 /// How the paragraph copies.
 #[derive(Clone, Default)]
@@ -658,9 +660,11 @@ impl Element for NoteText {
             if display {
                 return Some(row);
             }
-            // A tall inline formula is scaled to its line rather than
-            // pushing the lines apart.
-            let scale = (f32::from(line_height) / full.height).min(1.);
+            // A tall inline formula, such as a fraction, may reach into the
+            // space between lines (a line is 1.8 em, its glyphs about 1 em);
+            // only a taller one is scaled down rather than pushing lines apart.
+            let room = f32::from(line_height) * INLINE_ROOM;
+            let scale = (room / full.height).min(1.);
             let inline = FormulaSize {
                 width: full.width * scale,
                 height: full.height * scale,
