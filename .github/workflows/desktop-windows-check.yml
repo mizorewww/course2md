@@ -1,0 +1,92 @@
+name: desktop windows check
+
+# Manual check of the desktop window on a real Windows machine: renders pages
+# through the capture build, then launches the normal build, clicks the app
+# bar with real mouse input and screenshots the desktop before and after.
+on:
+  workflow_dispatch:
+    inputs:
+      pages:
+        description: 'Capture pages (space separated)'
+        default: 'home tasks library settings:appearance onboarding'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/desktop-deps
+        with:
+          locked: true
+      - name: Build engine and desktop (normal and capture)
+        shell: pwsh
+        run: |
+          cargo build
+          cargo build --manifest-path desktop/Cargo.toml
+          cargo build --manifest-path desktop/Cargo.toml --features capture --target-dir desktop/target/capture
+      - name: Capture pages
+        shell: pwsh
+        env:
+          PAGES: ${{ inputs.pages }}
+        run: |
+          $out = Join-Path $PWD 'shots/capture'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $spec = ($env:PAGES -split ' ' | Where-Object { $_ } | ForEach-Object { "$_=$out\$($_ -replace '[:~]','-').png" }) -join ';'
+          $env:COURSE2MD_CAPTURE = $spec
+          $env:COURSE2MD_BIN = Join-Path $PWD 'target/debug/course2md.exe'
+          $env:COURSE2MD_LANG = 'en'
+          $p = Start-Process -FilePath 'desktop/target/capture/debug/course2md-desktop.exe' -PassThru
+          if (-not $p.WaitForExit(240000)) { $p.Kill(); Write-Warning 'capture timed out' }
+          Get-ChildItem $out
+      - name: Click the app bar with real input
+        shell: pwsh
+        run: |
+          $out = Join-Path $PWD 'shots/input'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+          Add-Type @'
+          using System; using System.Runtime.InteropServices;
+          public static class W {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, IntPtr e);
+            public static void Click(int x, int y) { SetCursorPos(x, y); mouse_event(2,0,0,0,IntPtr.Zero); mouse_event(4,0,0,0,IntPtr.Zero); }
+          }
+          '@
+          function Shot($name) {
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save((Join-Path $out "$name.png"))
+            $g.Dispose(); $bmp.Dispose()
+          }
+          $env:COURSE2MD_BIN = Join-Path $PWD 'target/debug/course2md.exe'
+          $env:COURSE2MD_LANG = 'en'
+          $p = Start-Process -FilePath 'desktop/target/debug/course2md-desktop.exe' -PassThru
+          Start-Sleep 12
+          $p.Refresh(); $h = $p.MainWindowHandle
+          [W]::SetForegroundWindow($h) | Out-Null
+          $r = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$r) | Out-Null
+          "window: $($r.L),$($r.T) - $($r.R),$($r.B)" | Tee-Object (Join-Path $out 'rect.txt')
+          Shot '0-start'
+          # App bar row: about 32 px below the top edge; destinations sit left of the caption buttons.
+          $y = $r.T + 32
+          $i = 1
+          foreach ($dx in 200, 300, 400, 520) {
+            [W]::Click($r.R - $dx, $y); Start-Sleep 2; Shot ("$i-click-right-minus-$dx"); $i++
+          }
+          # Maximize via the caption button area (right edge - 69), then restore.
+          [W]::Click($r.R - 69, $r.T + 16); Start-Sleep 2; Shot "$i-maximize"; $i++
+          $p.Refresh()
+          if (-not $p.HasExited) { $p.Kill() }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-desktop-shots
+          path: shots
