@@ -530,7 +530,11 @@ impl Desktop {
                     .iter()
                     .find(|library| library.id == workspace.state.default_library)
             })
-            .map(|library| library.root.display().to_string());
+            .map(|library| {
+                course2md::config::simplify_verbatim(library.root.clone())
+                    .display()
+                    .to_string()
+            });
         let manage_storage = tile_button("settings-manage-storage", [true, true, false, false], cx)
             .min_h(rems(76. / 14.))
             .accessibility_label(course2md::tr!("保存位置"))

@@ -2586,7 +2586,11 @@ impl Workspace {
                 .state
                 .libraries
                 .iter()
-                .find(|library| library.root == prepared.root)
+                // A root saved before it was canonical still names this library.
+                .find(|library| {
+                    library.root == prepared.root
+                        || library.root.canonicalize().ok().as_ref() == Some(&prepared.root)
+                })
             {
                 let id = existing.id.clone();
                 if prepared.make_default {

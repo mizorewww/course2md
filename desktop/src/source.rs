@@ -628,7 +628,9 @@ fn inspect_local(input: String, cancel: &AtomicBool) -> Result<Source> {
         course2md::tr!("所选项目不是视频文件，请选择一个视频文件")
     );
     ensure!(path.is_file(), course2md::tr!("视频文件不存在，请重新选择"));
-    let path = std::fs::canonicalize(path)
+    // The path goes to ffprobe/ffmpeg and into the note's source line, so it
+    // keeps the plain `C:\...` spelling rather than `\\?\C:\...`.
+    let path = course2md::config::canonicalize(path)
         .context(course2md::tr!("无法读取所选视频的位置，请重新选择"))?;
     let before_probe = std::fs::metadata(&path).context(course2md::tr!("无法读取所选视频"))?;
     let input = path

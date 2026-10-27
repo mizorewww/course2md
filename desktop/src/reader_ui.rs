@@ -182,8 +182,9 @@ impl OfflineVideoRequest {
         }
         let media = work.join("media.mp4").canonicalize().ok()?;
         let metadata = media.metadata().ok()?;
+        // The system player is started through the shell, which rejects `\\?\` paths.
         (media.parent() == Some(work.as_path()) && metadata.is_file() && metadata.len() > 0)
-            .then_some(media)
+            .then(|| course2md::config::simplify_verbatim(media))
     }
 }
 
@@ -3175,10 +3176,9 @@ impl Desktop {
             return;
         };
         let title = self.course_display_title(&course);
-        let stem = title
-            .chars()
-            .map(|c| if "/\\:*?\"<>|".contains(c) { '_' } else { c })
-            .collect::<String>();
+        // The engine's file-name rules: also control characters, trailing dots,
+        // device names such as `CON` and over-long titles.
+        let stem = course2md::config::sanitize_filename_with_fallback(&title, "course");
         let extension = match format {
             course2md::config::OutputFormat::Md => "zip",
             course2md::config::OutputFormat::Html => "html",

@@ -213,7 +213,8 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
 pub fn default_output() -> PathBuf {
     course2md::config::home_dir()
         .unwrap_or_else(|| ".".into())
-        .join("Documents/course2md")
+        .join("Documents")
+        .join("course2md")
 }
 
 #[derive(Clone)]

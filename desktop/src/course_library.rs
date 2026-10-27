@@ -1063,7 +1063,11 @@ impl Desktop {
                             control(("retry-library-location", index))
                                 .icon(icons::refresh())
                                 .label(course2md::tr!("重新检查保存位置"))
-                                .tooltip(root.display().to_string())
+                                .tooltip(
+                                    course2md::config::simplify_verbatim(root.clone())
+                                        .display()
+                                        .to_string(),
+                                )
                                 .self_start()
                                 .loading(self.loading)
                                 .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
