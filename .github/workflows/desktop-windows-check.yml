@@ -56,7 +56,15 @@ jobs:
             [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
             [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hh, bool repaint);
             [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, IntPtr e);
-            public static void Click(int x, int y) { SetCursorPos(x, y); mouse_event(2,0,0,0,IntPtr.Zero); mouse_event(4,0,0,0,IntPtr.Zero); }
+            [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+            public static void Click(int x, int y) { SetCursorPos(x, y); System.Threading.Thread.Sleep(150); mouse_event(2,0,0,0,IntPtr.Zero); mouse_event(4,0,0,0,IntPtr.Zero); }
+            public static void DoubleClick(int x, int y) { Click(x, y); System.Threading.Thread.Sleep(80); mouse_event(2,0,0,0,IntPtr.Zero); mouse_event(4,0,0,0,IntPtr.Zero); }
+            public static void Drag(int x, int y, int x2, int y2) {
+              SetCursorPos(x, y); System.Threading.Thread.Sleep(150); mouse_event(2,0,0,0,IntPtr.Zero);
+              for (int i = 1; i <= 20; i++) { SetCursorPos(x + (x2 - x) * i / 20, y + (y2 - y) * i / 20); System.Threading.Thread.Sleep(25); }
+              mouse_event(4,0,0,0,IntPtr.Zero);
+            }
           }
           '@
           function Shot($name) {
@@ -92,14 +100,25 @@ jobs:
           $r = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$r) | Out-Null
           "window: $($r.L),$($r.T) - $($r.R),$($r.B)" | Tee-Object (Join-Path $out 'rect.txt')
           Shot '0-start'
-          # App bar row: about 32 px below the top edge; destinations sit left of the caption buttons.
-          $y = $r.T + 32
-          $i = 1
-          foreach ($dx in 200, 300, 400, 520) {
-            [W]::Click($r.R - $dx, $y); Start-Sleep 2; Shot ("$i-click-right-minus-$dx"); $i++
-          }
-          # Maximize via the caption button area (right edge - 69), then restore.
-          [W]::Click($r.R - 69, $r.T + 16); Start-Sleep 2; Shot "$i-maximize"; $i++
+          function Rect() { $q = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$q) | Out-Null; "$($q.L),$($q.T) - $($q.R),$($q.B)" }
+          function Log($m) { $m | Add-Content (Join-Path $out 'log.txt'); Write-Host $m }
+          $R = 1000
+          Log "after setup: $(Rect)"
+          [W]::Click(800, 28); Start-Sleep 2; Shot '10-click-settings'
+          [W]::Click(680, 28); Start-Sleep 2; Shot '11-click-library'
+          [W]::SetCursorPos($R - 69, 28); Start-Sleep 2; Shot '12-hover-maximize'
+          [W]::Click($R - 69, 28); Start-Sleep 2; Log "after maximize: $(Rect)"; Shot '13-maximized'
+          $q = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$q) | Out-Null
+          [W]::Click($q.R - 69, $q.T + 28); Start-Sleep 2; Log "after restore: $(Rect)"; Shot '14-restored'
+          [W]::DoubleClick(400, 28); Start-Sleep 2; Log "after double-click: $(Rect)"; Shot '15-double-click'
+          $q = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$q) | Out-Null
+          [W]::DoubleClick($q.L + 400, $q.T + 28); Start-Sleep 2; Log "after second double-click: $(Rect)"
+          [W]::MoveWindow($h, 0, 0, 1000, 720, $true) | Out-Null; Start-Sleep 1
+          [W]::Drag(400, 28, 500, 128); Start-Sleep 2; Log "after drag (expect 100,100): $(Rect)"; Shot '16-dragged'
+          [W]::MoveWindow($h, 0, 0, 1000, 720, $true) | Out-Null; Start-Sleep 1
+          [W]::Click($R - 115, 28); Start-Sleep 2; Log "minimized: $([W]::IsIconic($h))"; Shot '17-minimized'
+          [W]::ShowWindow($h, 9) | Out-Null; Start-Sleep 2
+          [W]::Click($R - 23, 28); Start-Sleep 5; $p.Refresh(); Log "exited after close: $($p.HasExited)"; Shot '18-closed'
           $p.Refresh()
           if (-not $p.HasExited) { $p.Kill() }
           # Record what the app wrote, for diagnosing save failures.
