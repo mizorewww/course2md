@@ -2,14 +2,14 @@
 //! its own, typeset by RaTeX into monochrome SVG. The SVG is served through the
 //! app's asset source and drawn as a tinted mask, so formulas follow the theme
 //! and stay sharp at every text scale.
-use gpui::{prelude::*, *};
+use gpui::*;
 use std::{
     borrow::Cow,
     collections::HashMap,
     sync::{Arc, LazyLock, Mutex},
 };
 
-pub use course2md::math::{Piece, has_math, pieces};
+pub use course2md::math::{Piece, pieces};
 
 /// A typeset formula: its asset path and its box in em, with the baseline
 /// `height` below the top.
@@ -97,25 +97,24 @@ pub fn asset(path: &str) -> Option<Cow<'static, [u8]>> {
 }
 
 impl Formula {
-    /// The formula at `em` text size in `ink`. GPUI paints an SVG only in its
-    /// own text color, which it does not inherit from the paragraph.
-    /// Inline formulas sit on the text baseline: a line's content box centers
-    /// near 0.35 em above the baseline, the formula's own center at
-    /// (height − depth) / 2.
-    pub fn element(&self, em: Rems, display: bool, ink: Hsla) -> AnyElement {
-        let svg = svg()
-            .path(self.path.clone())
-            .text_color(ink)
-            .flex_shrink_0()
-            .w(em * self.width)
-            .h(em * (self.height + self.depth));
-        if display {
-            svg.into_any_element()
-        } else {
-            svg.relative()
-                .top(em * (0.35 - (self.height - self.depth) / 2.))
-                .into_any_element()
-        }
+    /// The asset path its SVG is served under (see `note_text`, which paints it).
+    pub fn path(&self) -> SharedString {
+        self.path.clone()
+    }
+
+    /// Its width in em.
+    pub fn width(&self) -> f32 {
+        self.width
+    }
+
+    /// From its top to its baseline, in em.
+    pub fn height(&self) -> f32 {
+        self.height
+    }
+
+    /// Below its baseline, in em.
+    pub fn depth(&self) -> f32 {
+        self.depth
     }
 }
 

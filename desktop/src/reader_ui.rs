@@ -1143,30 +1143,29 @@ fn reader_outline(preview: &notes::Preview) -> Vec<(usize, String, Option<f64>)>
         .collect::<Vec<_>>();
     nav::content_outline(&headings, &summary_outline(preview))
 }
-/// Selectable note text with find highlights. A search target also records
-/// the current match's line while the run is laid out, so find can scroll to it.
+/// Selectable note text with find highlights (see `note_text`). A search
+/// target also records the current match's line once it is laid out, so
+/// find can scroll to it.
 fn reader_text(
     id: impl Into<ElementId>,
     text: impl Into<SharedString>,
     document_order: u64,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     search_target: Option<ReaderSearchTarget>,
-) -> gpui_base::SelectableText {
-    let text = gpui_base::SelectableText::new(id, text)
+) -> crate::note_text::NoteText {
+    let text = crate::note_text::NoteText::new(id, text)
         .document_order(document_order)
-        .selection_color(color(SELECTION).into())
+        .selection_color(color(READING_SELECTION).into())
         .highlights(highlights);
     match search_target {
-        Some(target) => text.on_layout(move |layout| {
-            if let Some(position) = layout.position_for_index(target.byte) {
-                // Window coordinates: see `ReadingLayout`.
-                target.positions.borrow_mut().record_search_line(
-                    target.block,
-                    target.byte,
-                    f32::from(position.y),
-                    f32::from(layout.line_height()),
-                );
-            }
+        Some(target) => text.on_source_position(target.byte, move |position, line_height| {
+            // Window coordinates: see `ReadingLayout`.
+            target.positions.borrow_mut().record_search_line(
+                target.block,
+                target.byte,
+                f32::from(position.y),
+                f32::from(line_height),
+            );
         }),
         None => text,
     }
@@ -1177,185 +1176,24 @@ struct ReaderSearchTarget {
     byte: usize,
     positions: Rc<RefCell<nav::ReadingLayout>>,
 }
+/// A paragraph of note text in the reading type; `copy` says how it copies.
 fn paragraph(
     id: impl Into<ElementId>,
     text: SharedString,
     order: usize,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     search_target: Option<ReaderSearchTarget>,
+    copy: crate::note_text::Copy,
 ) -> Stateful<Div> {
     let id = id.into();
-    let view = div()
+    div()
         .id(id.clone())
         .role(Role::Paragraph)
         .aria_label(text.clone())
         .text_size(READER_BODY)
         .font_weight(FontWeight::NORMAL)
-        .line_height(relative(1.8));
-    if crate::math::has_math(&text) {
-        return view.child(math_paragraph(
-            id,
-            text,
-            order,
-            READER_BODY,
-            color(INK).into(),
-        ));
-    }
-    view.child(reader_text(
-        id,
-        text,
-        order as u64,
-        highlights,
-        search_target,
-    ))
-}
-
-/// Prose with formulas. GPUI text cannot hold inline elements, so the prose is
-/// laid out as wrapping tokens (one per CJK character, one per Latin word)
-/// around the typeset formulas; a display formula takes a centered row. The
-/// paragraph takes part in text selection as a whole, and copying a formula
-/// gives its LaTeX source (see `math_selection`).
-fn math_paragraph(
-    id: ElementId,
-    text: SharedString,
-    order: usize,
-    em: Rems,
-    ink: Hsla,
-) -> crate::math_selection::SelectableTokens {
-    let tokens = crate::math_selection::Tokens::default();
-    let mut view = v_flex().w_full().min_w_0().gap_2();
-    let mut row = Vec::new();
-    let flush = |view: Div, row: &mut Vec<AnyElement>| {
-        if row.is_empty() {
-            view
-        } else {
-            view.child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .flex_wrap()
-                    .items_center()
-                    .children(row.drain(..)),
-            )
-        }
-    };
-    let word = |source: Range<usize>| {
-        tokens.token(
-            source.clone(),
-            div()
-                .whitespace_nowrap()
-                .child(SharedString::from(text[source].to_owned())),
-        )
-    };
-    for (source, piece) in crate::math_selection::piece_sources(&text) {
-        match piece {
-            crate::math::Piece::Text(prose) => {
-                // Closing punctuation never starts a line: it stays with the
-                // formula or word before it.
-                let split = prose
-                    .char_indices()
-                    .find(|(_, c)| !closes_line(*c))
-                    .map_or(prose.len(), |(index, _)| index);
-                let lead = source.start..source.start + split;
-                match (!lead.is_empty()).then(|| row.pop()).flatten() {
-                    Some(previous) => row.push(
-                        h_flex()
-                            .flex_none()
-                            .items_center()
-                            .child(previous)
-                            .child(word(lead))
-                            .into_any_element(),
-                    ),
-                    None => row.extend(
-                        prose_tokens(&text[lead.clone()])
-                            .map(|token| word(token.start + lead.start..token.end + lead.start)),
-                    ),
-                }
-                // A line break in the note starts a new row; a blank line
-                // also leaves a paragraph's space, as in plain text.
-                let rest = source.start + split;
-                let mut breaks = 0;
-                for token in prose_tokens(&text[rest..source.end]) {
-                    let token = token.start + rest..token.end + rest;
-                    if &text[token.clone()] == "\n" {
-                        view = flush(view, &mut row);
-                        if breaks == 1 {
-                            view = view.child(div().h(em * 0.6));
-                        }
-                        breaks += 1;
-                    } else {
-                        breaks = 0;
-                        row.push(word(token));
-                    }
-                }
-            }
-            crate::math::Piece::Math { latex, display } => {
-                let typeset = crate::math::formula(latex, display);
-                match (typeset, display) {
-                    (Some(formula), true) => {
-                        view = flush(view, &mut row).child(
-                            h_flex()
-                                .id(SharedString::from(format!("display-math-{latex}")))
-                                .w_full()
-                                .justify_center()
-                                .py_2()
-                                .overflow_x_scroll()
-                                .child(tokens.token(source, formula.element(em, true, ink))),
-                        );
-                    }
-                    (Some(formula), false) => {
-                        row.push(tokens.token(
-                            source,
-                            div().px(em * 0.1).child(formula.element(em, false, ink)),
-                        ));
-                    }
-                    // Unparseable LaTeX stays readable as its source, and any
-                    // part of it copies all of it.
-                    (None, _) => row.extend(prose_tokens(latex).map(|token| {
-                        tokens.token(
-                            source.clone(),
-                            div()
-                                .whitespace_nowrap()
-                                .child(SharedString::from(latex[token].to_owned())),
-                        )
-                    })),
-                }
-            }
-        }
-    }
-    let view = flush(view, &mut row);
-    crate::math_selection::SelectableTokens::new(id, text, tokens, view)
-        .document_order(order as u64)
-        .selection_color(color(SELECTION).into())
-}
-
-/// Punctuation that may not begin a line (CJK and Latin closing marks).
-fn closes_line(c: char) -> bool {
-    "，。、；：！？）」』”’》〉】,.;:!?)]}".contains(c)
-}
-
-/// Line-break opportunities of prose, as byte ranges: Latin words with their
-/// trailing space, and every other character on its own.
-fn prose_tokens(prose: &str) -> impl Iterator<Item = Range<usize>> {
-    let mut tokens = Vec::new();
-    let mut start = 0;
-    for (index, c) in prose.char_indices() {
-        let end = index + c.len_utf8();
-        let word = c.is_ascii_alphanumeric() || c.is_ascii_punctuation();
-        let next_word = prose[end..]
-            .chars()
-            .next()
-            .is_some_and(|next| next.is_ascii_alphanumeric() || next.is_ascii_punctuation());
-        let next_closes = prose[end..].chars().next().is_some_and(closes_line);
-        if !(word && next_word) && !next_closes {
-            tokens.push(start..end);
-            start = end;
-        }
-    }
-    if start < prose.len() {
-        tokens.push(start..prose.len());
-    }
-    tokens.into_iter()
+        .line_height(relative(1.8))
+        .child(reader_text(id, text, order as u64, highlights, search_target).copy(copy))
 }
 
 /// Everything a virtualized note-flow item needs. The maps are built when the
@@ -1622,6 +1460,7 @@ fn note_paragraph(flow: &NoteFlow, index: usize, text: &SharedString, anchor: &s
         index,
         flow.highlight_runs(index),
         flow.search_target(index),
+        crate::note_text::Copy::Plain,
     )
     .into_any_element()
 }
@@ -1639,6 +1478,7 @@ fn note_translation(
         index,
         flow.highlight_runs(index),
         flow.search_target(index),
+        crate::note_text::Copy::Plain,
     )
     .text_color(color(GRAY))
     .into_any_element()
@@ -1654,6 +1494,18 @@ fn render_note_summary(flow: &NoteFlow, blocks: std::ops::Range<usize>) -> AnyEl
         if let PreviewBlock::Paragraph { text, anchor } = &preview.blocks[index] {
             if anchor.starts_with("key-point-") {
                 let point = text.trim_start_matches("• ").to_owned();
+                // Find measures the block text, bullet included.
+                let bullet = text.len() - point.len();
+                let marks = flow
+                    .highlight_runs(index)
+                    .into_iter()
+                    .filter(|(range, _)| range.start >= bullet)
+                    .map(|(range, style)| (range.start - bullet..range.end - bullet, style))
+                    .collect();
+                let target = flow.search_target(index).map(|mut target| {
+                    target.byte = target.byte.saturating_sub(bullet);
+                    target
+                });
                 points.push(
                     h_flex()
                         .min_w_0()
@@ -1673,8 +1525,9 @@ fn render_note_summary(flow: &NoteFlow, blocks: std::ops::Range<usize>) -> AnyEl
                                     SharedString::from(anchor.clone()),
                                     point.into(),
                                     index,
-                                    flow.highlight_runs(index),
-                                    flow.search_target(index),
+                                    marks,
+                                    target,
+                                    crate::note_text::Copy::ListItem,
                                 )
                                 .text_size(rems(16. / 14.)),
                             ),
@@ -1689,6 +1542,7 @@ fn render_note_summary(flow: &NoteFlow, blocks: std::ops::Range<usize>) -> AnyEl
                         index,
                         flow.highlight_runs(index),
                         flow.search_target(index),
+                        crate::note_text::Copy::Plain,
                     )
                     .text_size(rems(16. / 14.))
                     .into_any_element(),
@@ -6195,14 +6049,18 @@ impl Desktop {
                 .gap_2()
                 .pr_3()
                 .overflow_y_scroll()
+                // A sideways swipe scrolls a wide formula, not the text.
+                .restrict_scroll_to_axis()
                 .track_scroll(&viewer.scroll)
                 .child(if has_text {
+                    // The caption leads the text but is not copied with it.
                     paragraph(
                         "image-transcript",
-                        course2md::tr!("这段讲解：{}", frame.transcript).into(),
+                        frame.transcript.clone().into(),
                         0,
                         Vec::new(),
                         None,
+                        crate::note_text::Copy::Labeled(course2md::tr!("这段讲解：{}", "").into()),
                     )
                     .flex_shrink_0()
                     .into_any_element()

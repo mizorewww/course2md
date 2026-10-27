@@ -32,6 +32,18 @@ pub(crate) fn vertical_scrollbar(handle: &gpui::ScrollHandle) -> gpui_component:
     vertical_scrollbar_for(handle)
 }
 
+/// 横向滚动条（如过宽的公式行），模式与纵向相同。
+pub(crate) fn horizontal_scrollbar(
+    handle: &gpui::ScrollHandle,
+) -> gpui_component::scroll::Scrollbar {
+    use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+    Scrollbar::horizontal(handle).mode(if scrollbars_always_visible() {
+        ScrollbarMode::Always
+    } else {
+        ScrollbarMode::Scrolling
+    })
+}
+
 /// 任意 ScrollbarHandle（含 gpui::ListState 虚拟列表）都走同一模式决策：
 /// 系统「始终显示滚动条」偏好开启时常驻，否则滚动时显示。
 pub(crate) fn vertical_scrollbar_for<H: gpui_component::scroll::ScrollbarHandle + Clone>(
