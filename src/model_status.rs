@@ -70,7 +70,7 @@ pub fn inspect(provider: AsrProvider, model: &str, root: &Path) -> Result<LocalM
         .unwrap_or_else(|| {
             std::env::var_os("HF_HOME")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".cache/huggingface"))
+                .unwrap_or_else(|| home.join(".cache").join("huggingface"))
                 .join("hub")
         });
     Ok(with_receipt(inspect_at(

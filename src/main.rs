@@ -498,7 +498,7 @@ fn summarize_note(
     out: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     use course2md::{artifact, execution};
-    let dir = std::fs::canonicalize(dir)?;
+    let dir = course2md::config::canonicalize(dir)?;
     let base = artifact::read_manifest(&dir.join("manifest.json"))?;
     let document: artifact::Document =
         serde_json::from_slice(&std::fs::read(dir.join(&base.document))?)?;

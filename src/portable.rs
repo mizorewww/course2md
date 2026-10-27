@@ -150,9 +150,7 @@ pub(crate) fn write_document(
     let images = images(root, document)?;
     let mut portable = document.clone();
     let local_file = if portable.meta.extractor == "local" {
-        let name = Path::new(&portable.meta.webpage_url)
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned());
+        let name = local_file_name(&portable.meta.webpage_url);
         portable.meta.webpage_url.clear();
         name
     } else {
@@ -251,9 +249,29 @@ pub(crate) fn write_document(
     Ok(destination.to_path_buf())
 }
 
+/// The file name of a local source path. The note may have been made on
+/// another system, so both separators split it, whatever this platform's
+/// path rules are.
+fn local_file_name(path: &str) -> Option<String> {
+    path.rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty() && *name != "." && *name != "..")
+        .map(str::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_file_names_come_from_either_platform() {
+        assert_eq!(
+            local_file_name(r"C:\课程\a b.mp4").as_deref(),
+            Some("a b.mp4")
+        );
+        assert_eq!(local_file_name("/Users/me/a.mp4").as_deref(), Some("a.mp4"));
+        assert_eq!(local_file_name("dir/"), None);
+    }
     #[test]
     fn all_exports_survive_without_the_original_library_and_never_overwrite() {
         use crate::{

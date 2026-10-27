@@ -294,6 +294,10 @@ pub fn valid_id(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
         && value != "."
         && value != ".."
+        // IDs name directories: Windows drops a trailing dot and maps device
+        // names (`con`, `nul.json`) to devices.
+        && !value.ends_with('.')
+        && !crate::config::windows_reserved_name(value)
 }
 
 pub fn validate_events(events: &[TranscriptEvent]) -> Result<()> {
@@ -530,6 +534,15 @@ mod identity_snapshot;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ids_are_valid_windows_directory_names() {
+        for id in ["con", "NUL", "aux.json", "abc.", "lpt1"] {
+            assert!(!valid_id(id), "{id}");
+        }
+        assert!(valid_id("task-0123456789abcdef"));
+        assert!(valid_id("a.b"));
+    }
 
     #[test]
     fn immutable_work_rejects_changed_inputs_without_destroying_progress() {
