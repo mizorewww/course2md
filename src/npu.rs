@@ -133,17 +133,18 @@ impl Launcher {
     }
 }
 
-/// Find a launcher on `path` (the process PATH when `None`): uv first, then a
-/// Python that imports the worker's packages. Windows ships `python.exe`
-/// stubs that only open the Microsoft Store, so a Python counts only after it
-/// has run the imports.
+/// Find a launcher on `path` (the process PATH when `None`): uv, the copy
+/// bundled beside the app first, then a Python that imports the worker's
+/// packages. Windows ships `python.exe` stubs that only open the Microsoft
+/// Store, so a Python counts only after it has run the imports.
 pub fn find_launcher(path: Option<&OsStr>) -> Option<Launcher> {
     let lookup = |name: &str| match path {
         Some(path) => which::which_in(name, Some(path), std::env::current_dir().ok()?).ok(),
         None => crate::runtime::which(name),
     };
-    if let Some(uv) = lookup("uv") {
-        return Some(Launcher::Uv(uv));
+    // The uv that Windows and Linux archives carry beside the engine comes first.
+    if let Some(uv) = crate::tools::locate_in("uv", path) {
+        return Some(Launcher::Uv(uv.path));
     }
     let names = if cfg!(windows) {
         ["python", "python3"]
