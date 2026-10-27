@@ -2,10 +2,10 @@
 //!
 //! Desktop archives carry their own ffmpeg and ffprobe beside the engine, so
 //! a downloaded app works without a separate install. The search is:
-//! `COURSE2MD_<NAME>` (an explicit binary) → beside the executable (the
-//! archive's copy; `.app` bundles also look in `../Resources/bin`) → PATH.
-//! Package managers that supply system tools (Homebrew formula, AUR) simply
-//! leave the bundled copies out, and PATH is used.
+//! `COURSE2MD_<NAME>` (an explicit binary) → the app package's own
+//! directories ([`bundled_dirs_for`]) → PATH. Package managers that supply
+//! system tools (Homebrew formula, AUR) simply leave the bundled copies out,
+//! and PATH is used.
 //!
 //! yt-dlp has its own, wider search ([`crate::ytdlp`]) and reports its
 //! origin through [`origin_of`].
@@ -72,19 +72,36 @@ fn is_executable(path: &Path) -> bool {
 /// relative to the executable.
 pub const LLAMA_DIR: &str = "llama.cpp";
 
-/// Directories that hold tools shipped with the app.
-pub fn bundled_dirs() -> Vec<PathBuf> {
-    let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    else {
+/// The desktop executable: an app package keeps it beside the engine, which
+/// tells a package's own directory apart from one the CLI shares with other
+/// programs (`/usr/local/bin`, Homebrew's `bin`).
+const DESKTOP: &str = "course2md-desktop";
+
+/// Directories that hold tools shipped with the app whose executable is
+/// `exe`: none outside an app package. A macOS bundle also has
+/// `Contents/Resources/bin`, looked at only from inside `Contents/MacOS`.
+pub fn bundled_dirs_for(exe: &Path) -> Vec<PathBuf> {
+    let Some(dir) = exe.parent() else {
         return Vec::new();
     };
-    vec![
-        dir.clone(),
-        dir.join("../Resources/bin"),
-        dir.join(LLAMA_DIR),
-    ]
+    if !dir.join(file_name(DESKTOP)).is_file() {
+        return Vec::new();
+    }
+    let mut dirs = vec![dir.to_path_buf()];
+    let in_bundle = dir.file_name() == Some(OsStr::new("MacOS"))
+        && dir.parent().and_then(Path::file_name) == Some(OsStr::new("Contents"));
+    if in_bundle {
+        dirs.push(dir.join("../Resources/bin"));
+    }
+    dirs.push(dir.join(LLAMA_DIR));
+    dirs
+}
+
+/// [`bundled_dirs_for`] the running executable.
+pub fn bundled_dirs() -> Vec<PathBuf> {
+    std::env::current_exe()
+        .map(|exe| bundled_dirs_for(&exe))
+        .unwrap_or_default()
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -94,31 +111,22 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-fn on_path(dir: &Path, path: &OsStr) -> bool {
-    std::env::split_paths(path).any(|entry| same_dir(&entry, dir))
-}
-
 fn search_path(path: Option<&OsStr>) -> OsString {
     path.map(OsStr::to_os_string)
         .or_else(|| std::env::var_os("PATH"))
         .unwrap_or_default()
 }
 
-/// How a tool at `path` was found. A directory beside the executable that is
-/// itself on PATH (`/usr/local/bin`, Homebrew's `bin`) is a system install:
-/// the CLI shares it with every other program there.
-pub fn origin_of(path: &Path, override_var: &str, search: Option<&OsStr>) -> Origin {
+/// How a tool at `path` was found: named by `override_var`, shipped in the
+/// app package, or installed on the system. The app's search path lists the
+/// package's directories first, so whether a directory is on PATH says
+/// nothing about where a tool came from.
+pub fn origin_of(path: &Path, override_var: &str) -> Origin {
     if std::env::var_os(override_var).is_some_and(|value| Path::new(&value) == path) {
         return Origin::Override;
     }
-    let search = search_path(search);
     match path.parent() {
-        Some(dir)
-            if bundled_dirs().iter().any(|bundled| same_dir(bundled, dir))
-                && !on_path(dir, &search) =>
-        {
-            Origin::Bundled
-        }
+        Some(dir) if bundled_dirs().iter().any(|bundled| same_dir(bundled, dir)) => Origin::Bundled,
         _ => Origin::System,
     }
 }
@@ -140,11 +148,10 @@ fn locate_with(name: &str, bundled: &[PathBuf], search: &OsStr) -> Option<Tool> 
         .map(|dir| dir.join(&file))
         .find(|path| is_executable(path))
     {
-        let origin = match path.parent() {
-            Some(dir) if on_path(dir, search) => Origin::System,
-            _ => Origin::Bundled,
-        };
-        return Some(Tool { path, origin });
+        return Some(Tool {
+            path,
+            origin: Origin::Bundled,
+        });
     }
     let cwd = std::env::current_dir().unwrap_or_default();
     which::which_in(name, Some(search), cwd)
@@ -223,17 +230,46 @@ mod tests {
     }
 
     #[test]
-    fn a_directory_on_path_is_a_system_install() {
-        // The CLI in /usr/local/bin finds the ffmpeg there: same file, but not ours.
-        let shared = tempfile::tempdir().unwrap();
-        make_exec(shared.path(), "c2md-test-tool");
+    fn a_bundled_copy_stays_bundled_when_the_search_path_lists_its_directory() {
+        // The desktop puts the package directory first on the engine's PATH.
+        let package = tempfile::tempdir().unwrap();
+        make_exec(package.path(), "c2md-test-tool");
         let tool = locate_with(
             "c2md-test-tool",
-            &[shared.path().to_path_buf()],
-            shared.path().as_os_str(),
+            &[package.path().to_path_buf()],
+            package.path().as_os_str(),
         )
         .unwrap();
-        assert_eq!(tool.origin, Origin::System);
+        assert_eq!(tool.origin, Origin::Bundled);
+    }
+
+    #[test]
+    fn only_an_app_package_has_bundled_directories() {
+        // The CLI in /usr/local/bin shares that directory with other programs.
+        let shared = tempfile::tempdir().unwrap();
+        let cli = make_exec(shared.path(), "course2md");
+        assert!(bundled_dirs_for(&cli).is_empty());
+        make_exec(shared.path(), "course2md-desktop");
+        assert_eq!(
+            bundled_dirs_for(&cli),
+            vec![shared.path().to_path_buf(), shared.path().join(LLAMA_DIR)]
+        );
+    }
+
+    #[test]
+    fn resources_bin_counts_only_inside_a_macos_bundle() {
+        let root = tempfile::tempdir().unwrap();
+        let macos = root.path().join("course2md.app/Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        make_exec(&macos, "course2md-desktop");
+        let cli = make_exec(&macos, "course2md");
+        assert!(bundled_dirs_for(&cli).contains(&macos.join("../Resources/bin")));
+        // Elsewhere ../Resources/bin is an arbitrary directory (/tmp/Resources/bin).
+        let loose = root.path().join("bin");
+        std::fs::create_dir_all(&loose).unwrap();
+        make_exec(&loose, "course2md-desktop");
+        let cli = make_exec(&loose, "course2md");
+        assert!(!bundled_dirs_for(&cli).contains(&loose.join("../Resources/bin")));
     }
 
     #[test]

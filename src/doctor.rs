@@ -93,7 +93,7 @@ pub fn run() -> Result<()> {
                 out.push(format!(
                     "    {}",
                     location(&crate::tools::Tool {
-                        origin: crate::tools::origin_of(&path, crate::ytdlp::ENV_OVERRIDE, None),
+                        origin: crate::tools::origin_of(&path, crate::ytdlp::ENV_OVERRIDE),
                         path,
                     })
                 ));

@@ -466,18 +466,9 @@ fn compute_tool_path() -> std::ffi::OsString {
     if let Some(path) = std::env::var_os("COURSE2MD_TOOL_PATH").filter(|path| !path.is_empty()) {
         return path;
     }
-    // 随包自带的工具（yt-dlp 等）与可执行文件同目录，排在最前：安装包行为
-    // 不随用户 PATH 漂移。`.app` 布局额外看 ../Resources/bin。
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    {
-        dirs.push(dir.clone());
-        dirs.push(dir.join("../Resources/bin"));
-        // Windows/Linux archives keep llama-server and its libraries here.
-        dirs.push(dir.join(course2md::tools::LLAMA_DIR));
-    }
+    // 随包自带的工具（yt-dlp、ffmpeg、llama.cpp/ 等）所在的应用目录排在最前：
+    // 安装包行为不随用户 PATH 漂移。目录清单与引擎的 tools::bundled_dirs 同一份。
+    let mut dirs: Vec<PathBuf> = course2md::tools::bundled_dirs();
     dirs.extend(
         std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
@@ -599,11 +590,7 @@ impl Environment {
             }
         }
         if ytdlp.is_absolute() {
-            let origin = course2md::tools::origin_of(
-                &ytdlp,
-                course2md::ytdlp::ENV_OVERRIDE,
-                Some(&tool_path()),
-            );
+            let origin = course2md::tools::origin_of(&ytdlp, course2md::ytdlp::ENV_OVERRIDE);
             origins.insert("yt-dlp", origin);
         }
         let program = |tool: Option<course2md::tools::Tool>, name: &str| {
