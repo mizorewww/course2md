@@ -134,6 +134,7 @@ h1, h2, h3 { margin: 0; font-weight: 400; letter-spacing: -0.01em; }
 p { margin: 0; }
 
 code {
+  white-space: nowrap;
   font-family: var(--mono);
   font-size: 0.9em;
   padding: 0.1em 0.35em;
@@ -301,9 +302,12 @@ code {
   padding: 0;
   background: none;
   font-size: 14px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: normal;
+  overflow-x: auto;
 }
+/* Each word of a command stays whole; lines break only at spaces and at the
+   <wbr> placed after a slash. */
+.cmd .w { white-space: nowrap; }
 .cmd .prompt { color: var(--faint); user-select: none; margin-right: 0.6em; }
 .copy {
   flex: none;
@@ -604,7 +608,7 @@ h2 {
   line-height: 1.75;
 }
 .terminal pre + pre { border-top: 1px solid rgb(255 255 255 / 0.08); }
-.terminal code { padding: 0; background: none; font-size: inherit; }
+.terminal code { padding: 0; background: none; font-size: inherit; white-space: pre; }
 .terminal .c { color: #8590a2; }
 .terminal .p { color: #8baffb; user-select: none; }
 @media (max-width: 860px) {
