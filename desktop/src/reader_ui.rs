@@ -4197,6 +4197,18 @@ impl Desktop {
     }
 
     /// Whether the title bar offers the video (see `reader_play_button`).
+    /// What the title bar's play button does: the kept offline copy first,
+    /// then the source.
+    fn play_reader_video(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.reader_ui.offline_video, OfflineVideo::Available(_)) {
+            if !self.reader_ui.offline_opening {
+                self.play_reader_offline_video(cx);
+            }
+        } else {
+            self.open_reader_source(None, cx);
+        }
+    }
+
     fn reader_can_play(&self) -> bool {
         matches!(self.reader_ui.offline_video, OfflineVideo::Available(_))
             || match self.reader_source() {
@@ -4359,7 +4371,14 @@ impl Desktop {
                 );
             }
         }
-        toolbar = toolbar.children(self.reader_play_button(icon_only, cx));
+        // Where the app draws the window's caption buttons, a tight bar also
+        // gives them the play button's room, so the note title keeps as much
+        // as it has where the system draws them; playing moves to the menu.
+        let tight = self.reader_bar_tight(metrics, window);
+        let play_in_menu = tight && crate::window_controls::caption_width(window) > 0.;
+        if !play_in_menu {
+            toolbar = toolbar.children(self.reader_play_button(icon_only, cx));
+        }
         let output_weak = cx.entity().downgrade();
         let exporting = self.reader_exporting();
         let exporting_current = self
@@ -4409,11 +4428,11 @@ impl Desktop {
                     }),
             );
         }
-        let tight = self.reader_bar_tight(metrics, window);
         toolbar = toolbar.child(div().flex_shrink_0().child(self.reader_more_menu(
             preview,
             short_reader,
             tight,
+            play_in_menu && self.reader_can_play(),
             cx,
         )));
         ReaderToolbarParts {
@@ -4527,6 +4546,7 @@ impl Desktop {
         preview: &Rc<notes::Preview>,
         short_reader: bool,
         tight: bool,
+        play: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let reading_note = self.result_tab == 0;
@@ -4587,6 +4607,7 @@ impl Desktop {
         })
         .dropdown_menu(move |menu, window, cx| {
             let details = more_weak.clone();
+            let player = more_weak.clone();
             let source = more_weak.clone();
             let files = more_weak.clone();
             let mut menu = menu;
@@ -4627,6 +4648,17 @@ impl Desktop {
                                 exporting,
                             )
                         },
+                    )
+                    .separator();
+            }
+            if play {
+                menu = menu
+                    .item(
+                        PopupMenuItem::new(course2md::tr!("播放原视频"))
+                            .icon(icons::play())
+                            .on_click(move |_, _, cx| {
+                                let _ = player.update(cx, |this, cx| this.play_reader_video(cx));
+                            }),
                     )
                     .separator();
             }
