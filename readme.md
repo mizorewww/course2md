@@ -1,129 +1,183 @@
+<div align="center">
+
+<img src="desktop/assets/128x128@2x.png" width="96" alt="course2md app icon">
+
 # course2md
 
-Turn **YouTube, Bilibili, or local videos** into illustrated Markdown / HTML notes. Add a video in the desktop app, generate notes, then organize and read them in your notes library.
+**Turn lecture videos into illustrated notes you can read, search and keep.**
 
-**English** · [中文](readme.zh.md) · [GitHub Wiki](https://github.com/mizorewww/course2md/wiki)
+Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a screenshot every time the slide changes, transcribes what is said beneath it, and keeps the result in a library on your computer.
 
-## Features
+[![Latest release](https://img.shields.io/github/v/release/mizorewww/course2md?label=download)](https://github.com/mizorewww/course2md/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/mizorewww/course2md)](LICENSE)
+![macOS · Windows · Linux](https://img.shields.io/badge/desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-blue)
 
-- Slide-style notes: a screenshot whenever the picture changes, with the transcript in paragraphs beneath it, saved as `course.md` and `course.html`.
-- YouTube, Bilibili and local files. Existing subtitles are used when available; otherwise speech is transcribed.
-- Speech recognition on your own computer: Apple Silicon works out of the box, and other systems can use a graphics card, the CPU, or an Intel Core Ultra NPU. A cloud service is optional; audio leaves your computer only if you choose it.
-- Optional AI proofreading and summaries using any OpenAI-compatible service, a local Ollama server, or a ChatGPT subscription. Off by default. With AI turned on, notes can also be bilingual (a translation under each paragraph) and spoken formulas are written and rendered as math.
-- The desktop app adds background tasks you can pause and reorder, a library with nested folders and search, a reader with outline, find and a screenshot view, and 10 themes.
-- In mainland China, speech models download from domestic mirrors (ModelScope / hf-mirror.com); elsewhere these are fallbacks. Every model download resumes after interruptions; GPU/CPU models are also checked with SHA-256.
+**English** · [中文](readme.zh.md) · [Download](#install) · [Wiki](https://github.com/mizorewww/course2md/wiki)
 
+</div>
 
-## Interface languages
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/reader-dark.png">
+  <img src="docs/images/en/reader-light.png" alt="The course2md reader showing a lecture note with a summary, an outline and typeset formulas">
+</picture>
 
-The desktop app and CLI are available in **English, 简体中文, 繁體中文 and 日本語**. The desktop follows the system language by default; change it in **Settings → Appearance → Interface language**. The CLI follows the system locale, and `--lang en|zh-Hans|zh-Hant|ja` (or `COURSE2MD_LANG`) overrides it. Machine-readable `--json` output stays in Simplified Chinese so scripts keep stable message text.
+## Why course2md
 
-## Install the desktop app (GUI)
+- **Notes shaped like the lecture.** One screenshot per slide, with the matching transcript in paragraphs underneath, saved as ordinary `course.md` and `course.html` files you can open anywhere.
+- **Private by default.** Speech is recognized on your own computer: Apple Silicon works out of the box, and other systems use a graphics card, the CPU or an Intel Core Ultra NPU. Audio leaves your computer only if you choose a cloud service.
+- **Subtitles first.** When a video already has subtitles they are used directly, with no speech recognition needed.
+- **Optional AI.** Proofreading, summaries, bilingual notes and typeset math formulas with any OpenAI-compatible service, a local Ollama server or a ChatGPT subscription. Off until you turn it on.
+- **Four languages.** English, 简体中文, 繁體中文 and 日本語, following your system language.
 
-The desktop app includes the conversion engine, so you do not need to install the CLI. It does need `ffmpeg`, which the steps below install.
+## A tour of the app
 
-### macOS: Apple Silicon, macOS 15 or later
+### Add a video
 
-**If you have Homebrew:** run this in Terminal to install the app and the tools `ffmpeg`, `yt-dlp` and `aria2`:
+Paste a link or drag a file onto **Home**. course2md reads the video first, so you can check the title, length and processing options before anything is converted.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/home-dark.png">
+  <img src="docs/images/en/home-light.png" alt="Home page with a previewed video and its processing options">
+</picture>
+
+### Read, find and copy
+
+The reader opens on a summary and key points, keeps an outline of the sections beside the note, and finds text across the whole note. Formulas are typeset, and copying a passage gives you the original text with each formula's LaTeX.
+
+### Browse every slide
+
+The **Screenshots** view shows the whole lecture at a glance. Open any slide to see it large, zoom and pan, and read what was said at that moment.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/screenshots-dark.png">
+  <img src="docs/images/en/screenshots-light.png" alt="Screenshots view with a grid of lecture slides">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/viewer-dark.png">
+  <img src="docs/images/en/viewer-light.png" alt="An enlarged slide with the transcript spoken while it was shown">
+</picture>
+
+### Keep a library
+
+Notes live in a library with nested folders, drag and drop, and search that covers subfolders. You can keep several library locations, and deleted notes go to the Trash (Recycle Bin on Windows and Linux).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/library-dark.png">
+  <img src="docs/images/en/library-light.png" alt="Library with a folder tree and note cards">
+</picture>
+
+### Let it work in the background
+
+Conversions run as tasks you can pause, resume and reorder. Each step shows its progress, and model downloads show their size, speed and time left. If one part fails, read what finished and redo only the rest.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/tasks-dark.png">
+  <img src="docs/images/en/tasks-light.png" alt="Tasks page with a running conversion and its progress">
+</picture>
+
+### Make it yours
+
+Choose from 10 themes, adjust the text size and reduce motion in **Settings → Appearance**.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/en/appearance-dark.png">
+  <img src="docs/images/en/appearance-light.png" alt="Appearance settings with theme previews">
+</picture>
+
+## Install
+
+The desktop app includes the conversion engine; you do not need the command-line tool to use it. Videos need `ffmpeg`, which the package managers below install for you.
+
+### macOS (Apple Silicon, macOS 15 or later)
+
+With [Homebrew](https://brew.sh), this installs the app together with `ffmpeg`, `yt-dlp` and `aria2`:
 
 ```sh
 brew install --cask mizorewww/tap/course2md-gui
 ```
 
-After installation, open **course2md** from **Finder → Applications**.
+Then open **course2md** from **Applications**. Without Homebrew, [download the DMG](https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg), drag **course2md** to Applications and install `ffmpeg` as described in the [macOS guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#macos-apple-silicon). The app already includes `yt-dlp`.
 
-**Without Homebrew:** [download the DMG](https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg), open it, and drag **course2md** to Applications. The app includes `yt-dlp`; you also need `ffmpeg`, see the [macOS guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#macos-apple-silicon).
+### Windows (x64)
 
-### Arch Linux / CachyOS: x86_64
-
-If you have `yay`, run this to install the desktop app, video tools and required graphics libraries:
-
-```sh
-yay -S course2md-gui-bin
-```
-
-With `paru`, run `paru -S course2md-gui-bin`. Open **course2md** from your applications menu. Your graphics hardware needs a working Vulkan driver; see the [Linux installation guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#arch-linux--cachyos).
-
-### Windows: x64
-
-1. [Download the Windows portable package (ZIP)](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip) and **extract everything** to a permanent folder.
-2. The package includes `yt-dlp` and `aria2`. Install `ffmpeg` in PowerShell:
+1. [Download the portable ZIP](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip) and **extract everything** to a permanent folder. It includes `yt-dlp` and `aria2`.
+2. Install `ffmpeg` in PowerShell:
 
    ```powershell
    winget install --id Gyan.FFmpeg -e
    ```
 
-3. Open **course2md-desktop.exe** from the extracted folder. Keep the other files next to it.
+3. Open **course2md-desktop.exe** from the extracted folder and keep the other files next to it.
 
-### Ubuntu / other Linux distributions: x86_64
-
-[Download the Linux package (tar.gz)](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz), install `ffmpeg` and the graphics libraries from the [Linux guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#other-linux-x64-distributions), extract it, and run `./course2md-desktop`. The package includes `yt-dlp`. Built on Ubuntu 24.04.
-
-Intel Macs and Linux ARM64 have no desktop app yet; use the [CLI](https://github.com/mizorewww/course2md/wiki/CLI-Guide).
-
-## First use
-
-1. Open **course2md** and follow the setup steps: choose how speech is recognized, optionally connect an AI service and Bilibili, and prepare the speech model. Notes go to a default library; add other locations in **Settings → Storage**.
-2. Open **Settings → Application** and look at **Run checks** to confirm the video tools are detected.
-3. On **Home**, paste a video link or drag in a local video, review the preview, and click **Start conversion**. Open the finished notes from **Library**.
-
-The first local transcription downloads a speech model (1–2.4 GB). See the [first-launch guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#first-launch).
-
-## Install the CLI
-
-The CLI and the desktop app can be installed side by side. They share the Bilibili and ChatGPT logins and the downloaded speech models; each keeps its own settings.
-
-**macOS / Linux (prebuilt binary):**
+### Arch Linux / CachyOS (x86_64)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash
+yay -S course2md-gui-bin
 ```
 
-This installs `course2md` into `~/bin` (change with `COURSE2MD_BIN_DIR`). Alternatives: `brew install mizorewww/tap/course2md`, `yay -S course2md-bin`, or `cargo install --path .` from source.
+(or `paru -S course2md-gui-bin`). This installs the app, the video tools and the graphics libraries; your GPU needs a working Vulkan driver. See the [Linux guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#arch-linux--cachyos).
 
-Requires `ffmpeg`. Online links also need `yt-dlp` (installed automatically if missing); with `aria2` installed, models download over several connections. Local recognition on non-Apple systems needs `llama-server`. Run `course2md doctor` to check.
+### Ubuntu and other Linux (x86_64)
 
-## Quick start
+[Download the tar.gz](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz), install `ffmpeg` and the graphics libraries from the [Linux guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#other-linux-x64-distributions), extract it and run `./course2md-desktop`. Built on Ubuntu 24.04; it includes `yt-dlp`.
+
+Intel Macs and Linux ARM64 have no desktop app yet; use the [command-line tool](#command-line-tool).
+
+## First steps
+
+1. Open **course2md** and follow the setup: choose how speech is recognized, optionally connect an AI service and Bilibili, and download the speech model (1–2.4 GB, once).
+2. If anything is missing, **Settings → Application → Run checks** shows which tool to install.
+3. On **Home**, paste a link or drop a video, review the preview and click **Start conversion**. Finished notes appear in **Library**.
+
+Notes go to a default library; add other folders in **Settings → Storage**. The interface follows your system language; change it in **Settings → Appearance → Interface language**. More in the [first-launch guide](https://github.com/mizorewww/course2md/wiki/GUI-Installation#first-launch).
+
+## Questions
+
+**A Bilibili video fails or comes back in low quality.** Log in under **Settings → Services & accounts → Bilibili account** by scanning the QR code.
+
+**How large are the model downloads, and where do they go?** About 1–2.3 GB on Apple Silicon (`~/Library/Caches/qwen3-speech/`) and 2.4 GB elsewhere (`~/.cache/course2md/models/`). In mainland China they download from domestic mirrors (ModelScope / hf-mirror.com); elsewhere these are fallbacks. Downloads resume after interruptions, and GPU/CPU models are checked with SHA-256.
+
+**I upgraded from 1.7. Where are my notes?** Notes made by 1.x stay where they were as `course.md` / `course.html` and still open in any editor or browser, but the 2.0 library only lists notes made by 2.0. Downloaded models, the Bilibili login and the CLI's `config.toml` keep working; set up recognition and AI services again in the setup steps.
+
+More answers in [Troubleshooting](https://github.com/mizorewww/course2md/wiki/Troubleshooting).
+
+## Command-line tool
+
+Prefer the terminal or scripts? The `course2md` CLI does the same conversion. It can be installed beside the desktop app; the two share the Bilibili and ChatGPT logins and the downloaded speech models, and each keeps its own settings.
 
 ```sh
-course2md ./lecture.mp4                        # local file
-course2md https://www.youtube.com/watch?v=…    # or a Bilibili link
-course2md ./lecture.mp4 -o ./notes             # choose the output root
+curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash   # macOS / Linux, into ~/bin
+brew install mizorewww/tap/course2md                                                      # or Homebrew
+yay -S course2md-bin                                                                      # or Arch
 ```
 
-The first run asks a few setup questions. Notes are saved under the output folder as `platform/title/ID/`.
+It needs `ffmpeg`; online links also need `yt-dlp` (installed by the script if missing), and with `aria2` models download over several connections. Local recognition on non-Apple systems needs `llama-server`. Check everything with `course2md doctor`.
 
-## Common commands
+```sh
+course2md ./lecture.mp4                        # a local file
+course2md https://www.youtube.com/watch?v=…    # or a YouTube / Bilibili link
+course2md ./lecture.mp4 -o ./notes             # choose where notes go
+```
+
+The first run asks a few setup questions; notes are saved as `platform/title/ID/` under the output folder.
 
 | Command | Purpose |
 | --- | --- |
-| `course2md <URL or file>` | Convert a video into notes |
-| `course2md --login bilibili` / `--logout bilibili` | Scan a QR code to log in to Bilibili / remove the saved login |
-| `course2md --login ollama` / `--login codex` | Use a local Ollama server / import the Codex CLI's ChatGPT login (browser authorization offered when absent) |
+| `course2md --login bilibili` / `--logout bilibili` | Log in to Bilibili with a QR code / remove the saved login |
+| `course2md --login ollama` / `--login codex` | Use a local Ollama server / a ChatGPT subscription via the Codex login |
 | `course2md doctor` | Check tools, speech backends and settings |
-| `course2md config init` / `config show` | Create a configuration template / show the config path and settings |
-| `course2md models list` / `models prepare` | Check downloaded models / pre-download a model |
+| `course2md models list` / `models prepare` | Check downloaded models / download one ahead of time |
 | `course2md llm setup` / `llm status` / `llm disable` | Configure, inspect or turn off AI proofreading |
 | `course2md summarize ./notes` | Add AI summaries to existing notes |
+| `course2md config init` / `config show` | Create a configuration template / show the settings |
 
-Use `<command> --help` for each command's options.
+CLI settings live in `~/.config/course2md/config.toml` (`%APPDATA%\course2md\config.toml` on Windows), and options override them. `course2md remove` clears the CLI's AI service settings and the ChatGPT login. `--lang en|zh-Hans|zh-Hant|ja` (or `COURSE2MD_LANG`) sets the language; `--json` output stays in Simplified Chinese for scripts. See `<command> --help` and the [CLI guide](https://github.com/mizorewww/course2md/wiki/CLI-Guide).
 
-## Configuration
+## Help and contributing
 
-CLI settings live in `~/.config/course2md/config.toml` (`%APPDATA%\course2md\config.toml` on Windows); command-line options override them. The desktop app keeps its own settings, changed in **Settings**. `course2md remove` clears the CLI's AI service settings and the ChatGPT login.
+[Documentation (Wiki)](https://github.com/mizorewww/course2md/wiki) · [Upgrade and uninstall](https://github.com/mizorewww/course2md/wiki/GUI-Installation#upgrade-and-uninstall) · [Troubleshooting](https://github.com/mizorewww/course2md/wiki/Troubleshooting) · [Report a problem](https://github.com/mizorewww/course2md/issues) · [Release notes](https://github.com/mizorewww/course2md/releases)
 
-## Frequently asked questions
+For developers: [contributing](AGENTS.md) · [desktop development](desktop/README.md) · [engine architecture](docs/DESIGN.md) · [benchmarks](docs/BENCHMARKS.md) · [releases](docs/PACKAGING.md) · [Changelog](CHANGELOG.md)
 
-**Conversion fails with a missing `ffmpeg`.** Install `ffmpeg` (it includes `ffprobe`) and `yt-dlp` for online links — for example `brew install ffmpeg yt-dlp` on macOS — then run `course2md doctor` to confirm.
-
-**A Bilibili video fails or comes back in low quality.** Run `course2md --login bilibili` and scan the QR code; `--logout bilibili` removes the saved login.
-
-**How large are the model downloads?** About 1–2.3 GB on Apple Silicon (stored in `~/Library/Caches/qwen3-speech/`) and 2.4 GB elsewhere (`~/.cache/course2md/models/`). Download ahead of time with `course2md models prepare`.
-
-**I upgraded from 1.7. Where are my notes?** Notes made by 1.x stay where they were as `course.md` / `course.html` and still open in any editor or browser, but the 2.0 library only lists notes made by 2.0. Downloaded models, the Bilibili login and the CLI's `config.toml` keep working; set up the desktop app's recognition and AI services again in the setup steps.
-
-## Documentation and help
-
-[All documentation (GitHub Wiki)](https://github.com/mizorewww/course2md/wiki) · [CLI installation and usage](https://github.com/mizorewww/course2md/wiki/CLI-Guide) · [Upgrade and uninstall](https://github.com/mizorewww/course2md/wiki/GUI-Installation#upgrade-and-uninstall) · [Troubleshooting](https://github.com/mizorewww/course2md/wiki/Troubleshooting) · [Report a problem](https://github.com/mizorewww/course2md/issues)
-
-For developers: [contributing](AGENTS.md) · [desktop development](desktop/README.md) · [engine architecture](docs/DESIGN.md) · [benchmarks](docs/BENCHMARKS.md) · [releases](docs/PACKAGING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE)
+course2md is released under the [MIT license](LICENSE).
