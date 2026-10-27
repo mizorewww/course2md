@@ -1044,6 +1044,9 @@ fn matching_frames(frames: &[Frame], query: &str) -> Vec<usize> {
         .collect()
 }
 
+/// How far a card excerpt moves its cut to reach a word boundary.
+const EXCERPT_WORD_SLACK: usize = 24;
+
 fn frame_excerpt(frame: &Frame, query: &str) -> String {
     let text = frame.transcript.as_str();
     if let Some(found) = nav::text_matches(text, query).first() {
@@ -1053,22 +1056,34 @@ fn frame_excerpt(frame: &Frame, query: &str) -> String {
             .nth(15)
             .map(|(index, _)| index)
             .unwrap_or(0);
+        // Start at a word boundary, but within a few characters, so a match
+        // after a very long token (a URL) still falls within the excerpt's
+        // three lines; such a token is cut, after the leading ellipsis.
+        let mut walked = 0;
         while start > 0
+            && walked < EXCERPT_WORD_SLACK
             && text.as_bytes()[start].is_ascii_alphanumeric()
             && text.as_bytes()[start - 1].is_ascii_alphanumeric()
         {
             start -= 1;
+            walked += 1;
+        }
+        if walked == EXCERPT_WORD_SLACK {
+            start += walked;
         }
         let mut end = text[found.end..]
             .char_indices()
             .nth(100)
             .map(|(index, _)| found.end + index)
             .unwrap_or(text.len());
+        let mut walked = 0;
         while end < text.len()
+            && walked < EXCERPT_WORD_SLACK
             && text.as_bytes()[end - 1].is_ascii_alphanumeric()
             && text.as_bytes()[end].is_ascii_alphanumeric()
         {
             end += 1;
+            walked += 1;
         }
         // A formula is shown whole or not at all.
         for (range, piece) in crate::note_text::piece_sources(text) {
@@ -6774,6 +6789,11 @@ mod tests {
             excerpt.contains("$a + b + c + d + e + f + g + h$"),
             "{excerpt}"
         );
+        // A match after a very long token starts close to the match.
+        let url = format!("链接 https://example.com/{}/end?q=x 结尾", "a".repeat(300));
+        let excerpt = frame_excerpt(&frame(5, &url), "end");
+        let before = excerpt.find("/end").unwrap();
+        assert!(excerpt.starts_with('…') && before < 60, "{excerpt}");
     }
 
     #[test]
