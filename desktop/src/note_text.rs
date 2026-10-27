@@ -1213,9 +1213,18 @@ impl Element for Line {
         let mut runs_before = false;
         let mut runs_after = false;
         for formula in &self.formulas {
-            let Some(start) = layout.position_for_index(formula.display.start) else {
+            let Some(mut start) = layout.position_for_index(formula.display.start) else {
                 continue;
             };
+            // A line wrapped just before the formula reports its first
+            // placeholder at the end of the previous line; the formula
+            // starts the next one.
+            let second = formula.display.start + PLACEHOLDER.len_utf8();
+            if let Some(next) = layout.position_for_index(second)
+                && next.y > start.y
+            {
+                start = Point::new(layout.bounds().left(), next.y);
+            }
             let held = layout
                 .position_for_index(formula.display.end)
                 .filter(|end| end.y == start.y)
