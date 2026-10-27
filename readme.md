@@ -11,7 +11,7 @@ Turn **YouTube, Bilibili, or local videos** into illustrated Markdown / HTML not
 - Speech recognition on your own computer: Apple Silicon works out of the box, and other systems can use a graphics card, the CPU, or an Intel Core Ultra NPU. A cloud service is optional; audio leaves your computer only if you choose it.
 - Optional AI proofreading and summaries using any OpenAI-compatible service, a local Ollama server, or a ChatGPT subscription. Off by default. With AI turned on, notes can also be bilingual (a translation under each paragraph) and spoken formulas are written and rendered as math.
 - The desktop app adds background tasks you can pause and reorder, a library with nested folders and search, a reader with outline, find and a screenshot view, and 10 themes.
-- In mainland China, speech models download from domestic mirrors (ModelScope / hf-mirror.com); elsewhere these are fallbacks. GPU/CPU models resume interrupted downloads and are checked with SHA-256.
+- In mainland China, speech models download from domestic mirrors (ModelScope / hf-mirror.com); elsewhere these are fallbacks. Every model download resumes after interruptions; GPU/CPU models are also checked with SHA-256.
 
 
 ## Interface languages
