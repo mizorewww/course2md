@@ -323,7 +323,7 @@ html:lang(zh) .export-menu { width: 320px; }
 .tile-hint { flex: 1 1 260px; font-size: 15px; color: #44474F; }
 .dl-btn { height: 56px; padding: 0 26px 0 20px; border-radius: 28px; background: #2B5BB5; color: #FFFFFF; display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-size: 16px; font-weight: 600; }
 .dl-btn:hover { color: #FFFFFF; }
-.cmd { flex: 1 1 420px; min-width: 0; display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 6px 0 18px; border-radius: 26px; background: #EEF1F8; font-size: 14px; box-sizing: border-box; }
+.cmd { flex: 1 1 420px; min-width: 0; display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 6px 0 18px; border-radius: 26px; background: #EEF1F8; font-size: 14px; }
 .cmd .prompt { color: #2B5BB5; font-weight: 600; }
 .cmd code { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: inherit; }
 .copy { height: 40px; flex: none; padding: 0 14px; border: 0; border-radius: 20px; background: #DCE2F9; color: #151B2C; font-size: 13px; font-weight: 600; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; cursor: pointer; }
@@ -333,7 +333,7 @@ html:lang(zh) .export-menu { width: 320px; }
 /* CLI */
 .cli { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
 .cli-copy { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
-.cmd-cli { flex: none; height: auto; min-height: 52px; padding: 6px 6px 6px 18px; background: #FBFCFF; font-size: 13px; }
+.cmd-cli { flex: none; height: auto; min-height: 52px; padding: 6px 6px 6px 18px; box-sizing: border-box; background: #FBFCFF; font-size: 13px; }
 .cmd-cli code { overflow-x: auto; text-overflow: clip; }
 .guide-link { align-self: flex-start; height: 44px; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; font-size: 15px; font-weight: 600; }
 .term { flex: 1 1 520px; min-width: 0; border-radius: 28px; background: #1B1D22; box-shadow: 0 24px 60px rgba(14, 18, 30, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.06); overflow: hidden; }
