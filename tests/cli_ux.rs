@@ -400,3 +400,32 @@ fn a_qwen3_npu_choice_from_2_0_0_falls_back_to_whisper_with_a_notice() {
         stderr(&result)
     );
 }
+
+#[test]
+fn an_unsupported_model_is_quoted_in_every_language() {
+    let cli = CliTest::new();
+    for (lang, quoted) in [
+        ("en", "\"whisper-x\""),
+        ("zh-Hans", "「whisper-x」"),
+        ("zh-Hant", "「whisper-x」"),
+        ("ja", "「whisper-x」"),
+    ] {
+        let result = cli.run_with_lang(
+            &[
+                "models",
+                "prepare",
+                "--provider",
+                "cpu",
+                "--model",
+                "whisper-x",
+            ],
+            lang,
+        );
+        assert!(!result.status.success());
+        assert!(
+            stderr(&result).contains(quoted),
+            "{lang}: {}",
+            stderr(&result)
+        );
+    }
+}
