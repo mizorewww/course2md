@@ -10,7 +10,9 @@ cask "@CASK_TOKEN@" do
 @CONFLICTS@
   depends_on arch: :arm64
   depends_on macos: :sequoia
-  depends_on formula: "ffmpeg"
+  # The app bundles a signed ffmpeg and runs it before any on PATH, so a
+  # Homebrew ffmpeg would go unused. yt-dlp stays: it updates more often than
+  # the app, and the engine falls back to it.
   depends_on formula: "yt-dlp"
   depends_on formula: "aria2"
 
