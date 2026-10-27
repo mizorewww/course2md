@@ -1,7 +1,7 @@
-// Behaviour of the course2md landing page, ported from the design's component
-// logic (LandingEn.dc.html / Landing.dc.html): platform detection, the
-// scroll-driven story, the terminal demo, tabs and copy buttons. Strings come
-// from the page's JSON data block so one script serves every language.
+// Behaviour of the course2md landing page: the download button for the
+// visitor's platform, the scroll-driven "how it works" window, the terminal
+// demo, tabs and copy buttons. Strings come from the page's JSON data block
+// so one script serves every language.
 (function () {
   "use strict";
   var root = document.documentElement;
@@ -22,8 +22,8 @@
 
     // Platform ------------------------------------------------------------
     var detected = "other";
+    var nav = window.navigator || {};
     try {
-      var nav = window.navigator || {};
       var ua = nav.userAgent || "";
       var plat = (nav.userAgentData && nav.userAgentData.platform) || nav.platform || "";
       var mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (nav.userAgentData && nav.userAgentData.mobile);
@@ -34,12 +34,26 @@
       }
     } catch (e) {}
 
-    var cta = (data.ctas || {})[detected] || (data.ctas || {}).other;
-    if (cta) {
-      var ctaLink = $("#cta-main");
+    var ctaLink = $("#cta-main");
+    var ctaAlt = $("#cta-alt");
+    var intelNote = $("#cta-intel");
+    function showCta(key) {
+      var cta = (data.ctas || {})[key] || (data.ctas || {}).other;
+      if (!cta) return;
       ctaLink.setAttribute("href", cta.href);
       $("#cta-label").textContent = cta.label;
       $("#cta-note").textContent = cta.note;
+      // When the main button already leads to the download section, a second
+      // "Other platforms" button would point to the same place.
+      ctaAlt.hidden = cta.href.charAt(0) === "#";
+      intelNote.hidden = key !== "macos";
+    }
+    showCta(detected);
+    // Chromium reports the CPU architecture; Intel Macs get the command line.
+    if (detected === "macos" && nav.userAgentData && nav.userAgentData.getHighEntropyValues) {
+      nav.userAgentData.getHighEntropyValues(["architecture"]).then(function (v) {
+        if (v && v.architecture === "x86") { showCta("intelmac"); intelNote.hidden = true; }
+      }, function () {});
     }
 
     // Segmented tabs (platform downloads, CLI install method)
@@ -85,32 +99,23 @@
     // Story ---------------------------------------------------------------
     var story = $("#story");
     var pin = $(".story-pin", story);
-    var N = 7, SN = 115, SG = 40;
     var steps = $$(".step", story);
     var scenes = $$(".scene", story);
+    var N = scenes.length;
     var bar = $(".story-bar span", story);
-    var url = data.url || "";
-    var typedEl = $("#typed");
-    var previewBtn = $(".preview-btn", story);
-    var startBtn = $(".start-btn", story);
     var shots = $$(".shot", story);
     var shotCount = $("#shot-count");
     var shotBar = $(".shots-bar span", story);
     var subs = $$(".sub-line", story);
-    var ai = $(".sc-ai", story);
-    var aiChip = $(".ai-chip", story);
-    var aiSum = $(".ai-sum", story);
-    var readBody = $(".reader-body", story);
-    var toc = $$(".toc-item", story);
     var menu = $$(".menu-item", story);
     var files = $$(".file", story);
     var last = {};
 
     function progress() {
-      var total = SN * SG;
+      var total = story.offsetHeight;
       var pinH = pin.offsetHeight;
       var top = story.getBoundingClientRect().top;
-      return { p: clamp(-top / (total - pinH)), total: total, pinH: pinH };
+      return { p: clamp(-top / Math.max(1, total - pinH)), total: total, pinH: pinH };
     }
 
     function renderStory() {
@@ -136,35 +141,19 @@
       }
       bar.style.width = Math.round(p * 100) + "%";
 
-      var typed = scene === 0 ? url.slice(0, Math.floor(clamp(q * 1.35) * url.length)) : url;
-      if (typedEl.textContent !== typed) typedEl.textContent = typed;
-      toggle(previewBtn, "is-done", scene === 0 && q > 0.78);
-      toggle(startBtn, "is-hot", scene === 1 && q > 0.6);
-
-      var shotQ = scene > 2 ? 1 : (scene === 2 ? clamp(q * 1.15) : 0);
+      // Scene 2: screenshots fill in, then the transcript lines arrive.
+      var shotQ = scene > 1 ? 1 : (scene === 1 ? clamp(q * 1.8) : 0);
       shots.forEach(function (s, i) { toggle(s, "is-on", shotQ * shots.length > i); });
-      shotCount.textContent = String(Math.round(69 * shotQ));
+      shotCount.textContent = String(Math.round(shots.length * shotQ));
       shotBar.style.width = Math.round(shotQ * 100) + "%";
-
-      var subQ = scene > 3 ? 1 : (scene === 3 ? clamp(q * 1.2) : 0);
+      var subQ = scene > 1 ? 1 : (scene === 1 ? clamp((q - 0.45) * 2.2) : 0);
       subs.forEach(function (s, i) { toggle(s, "is-on", subQ * subs.length > i); });
 
-      var aiQ = scene > 4 ? 1 : (scene === 4 ? q : 0);
-      var cleaned = aiQ > 0.4;
-      toggle(ai, "is-clean", cleaned);
-      var chip = cleaned ? data.aiClean : data.aiRaw;
-      if (aiChip.textContent !== chip) aiChip.textContent = chip;
-      toggle(aiSum, "is-on", aiQ > 0.68);
-
-      var readQ = scene > 5 ? 1 : (scene === 5 ? clamp(q * 1.1) : 0);
-      readBody.style.transform = "translateY(" + Math.round(-readQ * 1500) + "px)";
-      var tocActive = readQ < 0.42 ? 1 : (readQ < 0.78 ? 2 : 3);
-      toc.forEach(function (t, i) { toggle(t, "is-active", i === tocActive); });
-
-      var exQ = scene === 6 ? q : 0;
-      var menuHi = exQ < 0.3 ? -1 : 2;
+      // Scene 4: the export menu item is chosen, then the exported files appear.
+      var exQ = scene === 3 ? q : (scene > 3 ? 1 : 0);
+      var menuHi = exQ < 0.25 ? -1 : 2;
       menu.forEach(function (m, i) { toggle(m, "is-hi", i === menuHi); });
-      files.forEach(function (f, i) { toggle(f, "is-on", exQ > 0.35 + i * 0.1); });
+      files.forEach(function (f, i) { toggle(f, "is-on", exQ > 0.35 + i * 0.12); });
     }
 
     var queued = false;
@@ -177,34 +166,46 @@
     window.addEventListener("resize", onScroll);
     renderStory();
 
-    // Steps jump to the middle of their scene, snapped to the design's 40 px sentinels.
+    // A step jumps to the middle of its scene.
     steps.forEach(function (st, i) {
       st.addEventListener("click", function () {
         var m = progress();
         var y = ((i + 0.5) / N) * (m.total - m.pinH);
-        var idx = Math.max(0, Math.min(SN - 1, Math.round(y / SG)));
-        var top = story.getBoundingClientRect().top + window.scrollY + idx * SG;
+        var top = story.getBoundingClientRect().top + window.scrollY + y;
         window.scrollTo({ top: top, behavior: reduce ? "auto" : "smooth" });
       });
     });
 
-    // Terminal demo: a 14 s loop ticking every 100 ms (static and complete with reduced motion).
+    // Terminal demo: a 14 s loop ticking every 100 ms while the terminal is
+    // on screen (static and complete with reduced motion).
     var term = $("#term");
     var cmdArg = $("#cmd-arg", term);
     var cmdCaret = $("#cmd-caret", term);
     var lines = $$(".t-line", term);
     var done = $("#term-done", term);
-    var thresholds = [30, 40, 54, 70, 80];
-    var tt = reduce ? 129 : 0;
+    var start = 30, step = 9;
+    var tt = reduce ? 139 : 0;
+    var arg = data.cliArg || "";
     function renderTerm() {
-      cmdArg.textContent = url.slice(0, Math.floor(clamp((tt - 4) / 20) * url.length));
+      cmdArg.textContent = arg.slice(0, Math.floor(clamp((tt - 4) / 20) * arg.length));
       cmdCaret.hidden = !(tt < 28);
-      lines.forEach(function (l, i) { l.hidden = !(tt >= thresholds[i]); });
-      done.hidden = !(tt >= 90);
+      lines.forEach(function (l, i) { l.hidden = !(tt >= start + i * step); });
+      done.hidden = !(tt >= start + lines.length * step + 6);
     }
     renderTerm();
     if (!reduce) {
-      setInterval(function () { tt = (tt + 1) % 140; renderTerm(); }, 100);
+      var timer = null;
+      var run = function (on) {
+        if (on && !timer) timer = setInterval(function () { tt = (tt + 1) % 140; renderTerm(); }, 100);
+        if (!on && timer) { clearInterval(timer); timer = null; }
+      };
+      if ("IntersectionObserver" in window) {
+        new IntersectionObserver(function (entries) {
+          run(entries[entries.length - 1].isIntersecting);
+        }).observe(term);
+      } else {
+        run(true);
+      }
     }
   }
 
