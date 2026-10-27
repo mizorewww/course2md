@@ -33,7 +33,7 @@ fn source_url(meta: &VideoMeta) -> String {
 /// `source` is resolved by the caller (canonicalize runs once per render,
 /// not once per section).
 fn ts_url_from(source: &str, sec: f64) -> String {
-    let Ok(mut url) = url::Url::parse(source) else {
+    let Some(mut url) = parse_url(source) else {
         return source.to_string();
     };
     let seconds = (sec.max(0.0).floor() as u64).to_string();
@@ -76,11 +76,18 @@ fn md_link_text(s: &str) -> String {
     out
 }
 
+/// A URL, but not a Windows path: `C:\a.mp4` parses as a URL with scheme `c`.
+fn parse_url(value: &str) -> Option<url::Url> {
+    url::Url::parse(value)
+        .ok()
+        .filter(|url| url.scheme().len() > 1)
+}
+
 /// Link destination: a URL as is; anything else (a path that is not a file
 /// URL here, such as a note made on another system) inside `<...>`, so spaces
 /// and parentheses stay part of the destination.
 fn md_link_target(target: &str) -> String {
-    if url::Url::parse(target).is_ok() || !target.contains([' ', '(', ')', '<', '>']) {
+    if parse_url(target).is_some() || !target.contains([' ', '(', ')', '<', '>']) {
         target.to_string()
     } else {
         format!("<{}>", target.replace(['<', '>'], ""))
@@ -133,7 +140,7 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
                 md,
                 "## [{}]({})\n\n",
                 fmt_ts(s.t),
-                ts_url_from(&source, s.t)
+                md_link_target(&ts_url_from(&source, s.t))
             )
             .unwrap();
         }
@@ -263,6 +270,9 @@ mod tests {
             "file:///C:/%E8%AF%BE/a.mp4"
         );
         assert_eq!(md_link_target("lectures/a (1).mp4"), "<lectures/a (1).mp4>");
+        // A Windows path read on another system parses as a URL with scheme "c".
+        assert_eq!(md_link_target(r"C:\a b\(1).mp4"), r"<C:\a b\(1).mp4>");
+        assert_eq!(ts_url_from(r"C:\a b.mp4", 65.), r"C:\a b.mp4");
     }
     use crate::timeline::TranscriptEvent;
 
