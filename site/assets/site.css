@@ -15,7 +15,8 @@
   --card-line: #e6eaf0;
   --control: #a2aaba;
   --accent: #3968d7;
-  --accent-hover: #3660c6;
+  --link: #3661c6;
+  --link-hover: #345bb6;
   --on-accent: #ffffff;
   --tonal: #cfdbf5;
   --on-tonal: #2a4074;
@@ -46,7 +47,8 @@
     --card-line: #2f3540;
     --control: #647187;
     --accent: #8baffb;
-    --accent-hover: #9fbdfb;
+    --link: #8baffb;
+    --link-hover: #a9c4fc;
     --on-accent: #16213a;
     --tonal: #3c4863;
     --on-tonal: #cbd8f3;
@@ -70,7 +72,8 @@
   --card-line: #2f3540;
   --control: #647187;
   --accent: #8baffb;
-  --accent-hover: #9fbdfb;
+  --link: #8baffb;
+  --link-hover: #a9c4fc;
   --on-accent: #16213a;
   --tonal: #3c4863;
   --on-tonal: #cbd8f3;
@@ -119,8 +122,10 @@ body {
 
 img { display: block; max-width: 100%; height: auto; }
 
-a { color: var(--accent); text-underline-offset: 2px; }
-a:hover { color: var(--accent-hover); }
+/* Text links use the app's hovered-primary tone (accent blended 10% toward ink)
+   so they keep 4.5:1 contrast on the canvas; filled controls keep the accent. */
+a { color: var(--link); text-underline-offset: 2px; }
+a:hover { color: var(--link-hover); }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -272,10 +277,10 @@ code {
 .btn-tonal:hover { color: var(--on-tonal); background: color-mix(in srgb, var(--tonal) 90%, var(--ink)); }
 .btn-outline {
   background: transparent;
-  color: var(--accent);
+  color: var(--link);
   box-shadow: inset 0 0 0 1px var(--control);
 }
-.btn-outline:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.btn-outline:hover { color: var(--link); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 
 /* Command line with copy button ----------------------------------------- */
 
@@ -347,7 +352,7 @@ code {
   text-decoration: none;
 }
 a.chip:hover { color: var(--ink); }
-.chip strong { color: var(--accent); font-weight: 600; }
+.chip strong { color: var(--link); font-weight: 600; }
 .hero h1 {
   margin: 20px 0 16px;
   font-size: clamp(36px, 6vw, 60px);
@@ -420,7 +425,7 @@ section { padding: 96px 0 0; }
 .section-head.center { margin-left: auto; margin-right: auto; text-align: center; }
 .kicker {
   margin-bottom: 10px;
-  color: var(--accent);
+  color: var(--link);
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
