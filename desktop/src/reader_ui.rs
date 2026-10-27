@@ -1451,10 +1451,16 @@ fn render_note_item(flow: &NoteFlow, item_ix: usize, cx: &mut App) -> AnyElement
                     flow.note_list.clone(),
                     cx,
                 );
+                let notices = if flow.short {
+                    this.reader_notices(preview, NoticeScroll::List(flow.note_list.clone()), cx)
+                } else {
+                    Vec::new()
+                };
                 v_flex()
                     .w_full()
                     .min_w_0()
                     .gap_3()
+                    .children(notices)
                     .child(title)
                     .children(meta)
                     .into_any_element()
@@ -2007,6 +2013,17 @@ fn screenshot_placeholder() -> Div {
 
 /// A scroll region's bar in the page gutter just past its trailing edge,
 /// clear of the rounded card surfaces it scrolls.
+/// What a notice's focused control scrolls into view: the bounded notice
+/// region above the views, or the note or screenshot list it heads.
+enum NoticeScroll {
+    Region(ScrollHandle),
+    List(ListState),
+}
+
+/// The share of a compact reader's height that its notices may take before
+/// they scroll.
+const NOTICES_SHARE: f32 = 0.4;
+
 fn gutter_scrollbar(scrollbar: Scrollbar) -> Div {
     div()
         .absolute()
@@ -3554,7 +3571,16 @@ impl Desktop {
                     ),
             ));
         }
-        items.extend(self.reader_notices(preview, &controls_scroll, cx));
+        // A short reader shows its notices at the top of the note or the
+        // screenshots, scrolling away with them, so a notice is never cut
+        // to fit the space above the views.
+        if !metrics.short {
+            items.extend(self.reader_notices(
+                preview,
+                NoticeScroll::Region(controls_scroll.clone()),
+                cx,
+            ));
+        }
         let information_panel = if self.reader_ui.info_open {
             self.reader_info_panel(preview, compact, None, available_height, window, cx)
         } else {
@@ -3564,19 +3590,39 @@ impl Desktop {
             return (None, toolbar.bar);
         }
         // Notices scroll in a bounded region on small windows so the views
-        // and the text below them keep most of the height.
+        // and the text below them keep most of the height. The region holds
+        // a typical notice whole; when they need more, its scrollbar stays
+        // shown so a notice never looks cut off.
         let notices = (!items.is_empty()).then(|| {
-            v_flex()
-                .id("reader-controls")
+            let bound = compact.then(|| px(available_height * NOTICES_SHARE));
+            let overflows = bound.is_some_and(|bound| {
+                controls_scroll.max_offset().y > px(0.)
+                    && controls_scroll.bounds().size.height <= bound
+            });
+            div()
+                .relative()
                 .w_full()
                 .min_w_0()
-                .min_h_0()
                 .flex_shrink_0()
-                .gap_3()
-                .when(compact, |view| view.max_h(px(available_height * 0.28)))
-                .overflow_y_scroll()
-                .track_scroll(&controls_scroll)
-                .children(items)
+                .child(
+                    v_flex()
+                        .id("reader-controls")
+                        .w_full()
+                        .min_w_0()
+                        .min_h_0()
+                        .gap_3()
+                        .when_some(bound, |view, bound| view.max_h(bound))
+                        .when(overflows, |view| view.pr(SCROLLBAR_GUTTER))
+                        .overflow_y_scroll()
+                        .track_scroll(&controls_scroll)
+                        .children(items),
+                )
+                .when(overflows, |region| {
+                    region.child(
+                        gpui_component::scroll::Scrollbar::vertical(&controls_scroll)
+                            .mode(ScrollbarMode::Always),
+                    )
+                })
         });
         let controls = v_flex()
             .w_full()
@@ -4780,11 +4826,16 @@ impl Desktop {
     fn reader_notices(
         &mut self,
         preview: &Rc<notes::Preview>,
-        controls_scroll: &ScrollHandle,
+        scroll: NoticeScroll,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let reveal = |id: &'static str, child: AnyElement| {
-            crate::focus_scroll::RevealFocus::new(id, child, controls_scroll.clone()).inline()
+        let reveal = |id: &'static str, child: AnyElement| match &scroll {
+            NoticeScroll::Region(handle) => {
+                crate::focus_scroll::RevealFocus::new(id, child, handle.clone()).inline()
+            }
+            NoticeScroll::List(list) => {
+                crate::focus_scroll::RevealFocus::in_list(id, child, list.clone()).inline()
+            }
         };
         let mut notices = Vec::new();
         if let Some(current) = &preview.course.manifest
@@ -5183,8 +5234,11 @@ impl Desktop {
         metrics: ReaderMetrics,
         cx: &mut Context<Self>,
     ) -> Div {
-        let _ = metrics;
         let mut header = v_flex().w_full().min_w_0().gap_3();
+        if metrics.short {
+            let list = self.reader_ui.gallery.list.clone();
+            header = header.children(self.reader_notices(preview, NoticeScroll::List(list), cx));
+        }
         let mut empty = true;
         if self.reader_ui.data_loading && self.reader_ui.frames.is_empty() {
             empty = false;
