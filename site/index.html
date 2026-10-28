@@ -33,7 +33,7 @@
 <meta name="twitter:image" content="https://vibewatching.xyz/images/og.png">
 <link rel="stylesheet" href="assets/site.css?v=2.0.4">
 <script src="assets/site.js?v=2.0.4"></script>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "course2md", "description": "Turns lecture videos into illustrated Markdown and HTML notes.", "url": "https://vibewatching.xyz/", "applicationCategory": "EducationalApplication", "operatingSystem": "macOS, Windows, Linux", "softwareVersion": "2.0.0", "downloadUrl": "https://github.com/mizorewww/course2md/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "image": "https://vibewatching.xyz/images/og.png", "inLanguage": "en"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "course2md", "description": "Turns lecture videos into illustrated Markdown notes.", "url": "https://vibewatching.xyz/", "applicationCategory": "EducationalApplication", "operatingSystem": "macOS, Windows, Linux", "softwareVersion": "2.0.0", "downloadUrl": "https://github.com/mizorewww/course2md/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "image": "https://vibewatching.xyz/images/og.png", "inLanguage": "en"}</script>
 </head>
 <body>
 <div class="page">
@@ -107,7 +107,7 @@
 <button type="button" class="step story-step-on" aria-current="step"><span class="step-n">1</span><span class="step-text"><span class="step-title">Paste a link</span><span class="step-body">Paste a YouTube or Bilibili link, or drag in a local video. Check the title, length and options before you start.</span></span></button>
 <button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">2</span><span class="step-text"><span class="step-title">Screenshots and transcript</span><span class="step-body">A screenshot each time the slide changes, with what was said underneath. Existing subtitles are used first; otherwise speech is recognized on your computer.</span></span></button>
 <button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">3</span><span class="step-text"><span class="step-title">Read it like a slide deck</span><span class="step-body">Find across the whole note, plus an outline when AI summaries are on. Each slide's section can open the video at that moment.</span></span></button>
-<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">4</span><span class="step-text"><span class="step-title">Take your notes with you</span><span class="step-body">Notes are Markdown and HTML on your computer. Export a .zip with screenshots, a single web page or JSON, or copy the text.</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">4</span><span class="step-text"><span class="step-title">Take your notes with you</span><span class="step-body">Notes are saved as Markdown with their screenshots. Export a .zip, a single web page or JSON, or copy the text.</span></span></button>
 <div aria-hidden="true" class="story-bar"><span></span></div>
 <p class="sample-note">The sample lecture was made for this page; its channel and video are fictional.</p>
 </div>
@@ -205,7 +205,7 @@
 <article class="reveal feature">
 <span aria-hidden="true" class="f-icon f-yellow"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></span>
 <h3>Your notes, your files</h3>
-<p>Plain Markdown and HTML in a library on your computer, with nested folders and search. No account needed.</p>
+<p>Plain Markdown with screenshots, in a library on your computer with nested folders and title search. Export a web page any time. No account needed.</p>
 </article>
 <article class="reveal-2 feature">
 <span aria-hidden="true" class="f-icon f-green"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1" fill="currentColor"></circle><circle cx="17.5" cy="10.5" r="1" fill="currentColor"></circle><circle cx="8.5" cy="7.5" r="1" fill="currentColor"></circle><circle cx="6.5" cy="12.5" r="1" fill="currentColor"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.640 1.640 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg></span>
@@ -348,7 +348,7 @@
 <details><summary>Is course2md free?</summary><p>Yes. It's open source under the MIT license, with no account, subscription or ads.</p></details>
 <details><summary>Do I need an account?</summary><p>No. You only sign in to services you choose to use: a Bilibili account for some videos, or an AI service if you turn AI on.</p></details>
 <details><summary>Does the AI cost money?</summary><p>AI is optional and off by default. With an OpenAI-compatible service you pay that provider for what you use; a local Ollama server costs nothing; a ChatGPT subscription works through the Codex login. course2md itself charges nothing.</p></details>
-<details><summary>Where are my notes and data?</summary><p>In a library folder on your computer, as course.md and course.html with their screenshots; add more library folders in Settings → Storage. Service keys are kept in the system keychain. Nothing is uploaded unless you choose a cloud speech or AI service.</p></details>
+<details><summary>Where are my notes and data?</summary><p>In a library folder on your computer: each note is a course.md file with its screenshots, and you can export a web page, a .zip or JSON at any time. Add more library folders in Settings → Storage. Service keys are kept in the system keychain. Nothing is uploaded unless you choose a cloud speech or AI service.</p></details>
 <details><summary>How large are the speech models?</summary><p>About 1–2.3 GB on Apple Silicon and 2.4 GB on other systems, downloaded once. In mainland China they come from domestic mirrors, and downloads resume after interruptions.</p></details>
 <details><summary>A Bilibili video fails or comes back in low quality</summary><p>Log in under Settings → Services & accounts → Bilibili account by scanning the QR code.</p></details>
 </div>

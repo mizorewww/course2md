@@ -33,7 +33,7 @@
 <meta name="twitter:image" content="https://vibewatching.xyz/images/og-zh.png">
 <link rel="stylesheet" href="../assets/site.css?v=2.0.4">
 <script src="../assets/site.js?v=2.0.4"></script>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "course2md", "description": "把课程视频整理成图文并茂的 Markdown 和 HTML 笔记。", "url": "https://vibewatching.xyz/zh/", "applicationCategory": "EducationalApplication", "operatingSystem": "macOS, Windows, Linux", "softwareVersion": "2.0.0", "downloadUrl": "https://github.com/mizorewww/course2md/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "image": "https://vibewatching.xyz/images/og-zh.png", "inLanguage": "zh-CN"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "course2md", "description": "把课程视频整理成图文并茂的 Markdown 笔记。", "url": "https://vibewatching.xyz/zh/", "applicationCategory": "EducationalApplication", "operatingSystem": "macOS, Windows, Linux", "softwareVersion": "2.0.0", "downloadUrl": "https://github.com/mizorewww/course2md/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "image": "https://vibewatching.xyz/images/og-zh.png", "inLanguage": "zh-CN"}</script>
 </head>
 <body>
 <div class="page">
@@ -107,7 +107,7 @@
 <button type="button" class="step story-step-on" aria-current="step"><span class="step-n">1</span><span class="step-text"><span class="step-title">粘贴链接</span><span class="step-body">粘贴 YouTube 或 Bilibili 链接，或者把本地视频拖进窗口。先确认标题、时长和处理选项，再开始转换。</span></span></button>
 <button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">2</span><span class="step-text"><span class="step-title">截图和讲解</span><span class="step-body">画面一换就截一张图，讲解的话放在下面。视频有字幕就直接用字幕，没有再在本机识别语音。</span></span></button>
 <button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">3</span><span class="step-text"><span class="step-title">像翻幻灯片一样读</span><span class="step-body">全文查找；开启 AI 摘要后还有目录。每页截图那一节都能从对应时间打开原视频。</span></span></button>
-<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">4</span><span class="step-text"><span class="step-title">带走你的笔记</span><span class="step-body">笔记以 Markdown 和 HTML 保存在你的电脑上。可以导出含截图的 .zip、单个网页文件或 JSON，也可以直接复制文字。</span></span></button>
+<button type="button" class="step story-step-idle" aria-current="false"><span class="step-n">4</span><span class="step-text"><span class="step-title">带走你的笔记</span><span class="step-body">笔记以 Markdown 加截图保存在你的电脑上。可以导出含截图的 .zip、单个网页文件或 JSON，也可以直接复制文字。</span></span></button>
 <div aria-hidden="true" class="story-bar"><span></span></div>
 <p class="sample-note">示例课程为本页制作，频道和视频均为虚构。</p>
 </div>
@@ -205,7 +205,7 @@
 <article class="reveal feature">
 <span aria-hidden="true" class="f-icon f-yellow"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg></span>
 <h3>笔记是你自己的</h3>
-<p>普通的 Markdown 和 HTML 文件，存在你电脑上的笔记库里，支持嵌套文件夹和搜索。不用注册账号。</p>
+<p>普通的 Markdown 文件加截图，存在你电脑上的笔记库里，支持嵌套文件夹和按标题搜索，随时可以导出网页。不用注册账号。</p>
 </article>
 <article class="reveal-2 feature">
 <span aria-hidden="true" class="f-icon f-green"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1" fill="currentColor"></circle><circle cx="17.5" cy="10.5" r="1" fill="currentColor"></circle><circle cx="8.5" cy="7.5" r="1" fill="currentColor"></circle><circle cx="6.5" cy="12.5" r="1" fill="currentColor"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.640 1.640 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path></svg></span>
@@ -348,7 +348,7 @@
 <details><summary>course2md 免费吗？</summary><p>免费。course2md 以 MIT 许可证开源，不需要账号，没有订阅和广告。</p></details>
 <details><summary>需要注册账号吗？</summary><p>不需要。只有你选择使用的服务才需要登录：部分 Bilibili 视频需要 Bilibili 账号，开启 AI 时需要相应的 AI 服务。</p></details>
 <details><summary>AI 要花钱吗？</summary><p>AI 是可选的，默认关闭。使用 OpenAI 兼容服务时按用量向该服务付费；本机 Ollama 不花钱；ChatGPT 订阅可以通过导入 Codex 登录使用。course2md 本身不收费。</p></details>
-<details><summary>笔记和数据存在哪里？</summary><p>存在你电脑上的笔记库文件夹里，是带截图的 course.md 和 course.html；可以在「设置 → 存储」添加其他文件夹。服务密钥保存在系统钥匙串。除非你选择云端语音或 AI 服务，否则不会上传任何内容。</p></details>
+<details><summary>笔记和数据存在哪里？</summary><p>存在你电脑上的笔记库文件夹里：每篇笔记是一个 course.md 文件加上它的截图，随时可以导出网页、.zip 或 JSON。可以在「设置 → 存储」添加其他文件夹。服务密钥保存在系统钥匙串。除非你选择云端语音或 AI 服务，否则不会上传任何内容。</p></details>
 <details><summary>语音模型有多大？</summary><p>Apple 芯片约 1–2.3 GB，其他平台约 2.4 GB，只需下载一次。在中国大陆从国内镜像下载，中断后可以续传。</p></details>
 <details><summary>Bilibili 视频失败或清晰度低</summary><p>在「设置 → 服务与账号 → Bilibili 账号」扫码登录。</p></details>
 </div>
