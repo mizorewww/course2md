@@ -159,6 +159,7 @@ a.badge:hover { color: var(--on-tonal); background: color-mix(in srgb, var(--ton
 .hero h1 { margin: 0; font-size: 56px; font-weight: 700; line-height: 1.08; letter-spacing: -1px; text-wrap: balance; }
 html:lang(zh) .hero h1 { font-size: 58px; line-height: 1.12; letter-spacing: -0.5px; }
 .subhead { margin: -6px 0 0; font-size: 24px; font-weight: 600; line-height: 1.35; color: var(--ink); text-wrap: balance; }
+.lead-short { display: none; margin: 0; font-size: 17px; line-height: 1.6; color: var(--muted); }
 .lead { margin: 0; font-size: 18px; line-height: 1.65; color: var(--muted); max-width: 560px; }
 html:lang(zh) .lead { line-height: 1.75; }
 .uses { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -419,6 +420,9 @@ html:lang(zh) .step-body { line-height: 1.65; }
   .hero h1, html:lang(zh) .hero h1 { font-size: 36px; letter-spacing: 0; }
   .subhead { font-size: 19px; margin-top: -4px; }
   .lead, .uses { display: none; }
+  .lead-short { display: block; }
+  .fan-cap { display: none; }
+  .fan-quote { font-size: 12px; }
   .cta-main, .cta-alt { height: 52px; font-size: 16px; }
   .h2 { font-size: 28px; }
   main { gap: 72px; }
