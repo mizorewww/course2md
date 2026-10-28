@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>course2md · Turn lecture videos into illustrated notes</title>
-<script src="assets/lang.js?v=2.0.5"></script>
+<script src="assets/lang.js?v=2.0.6"></script>
 <meta name="description" content="course2md is a free, open-source desktop app for macOS, Windows and Linux that turns YouTube, Bilibili and local lecture videos into illustrated notes: a screenshot each time the slide changes, with what was said underneath.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#EEF1F8" media="(prefers-color-scheme: light)">
@@ -31,9 +31,9 @@
 <meta name="twitter:title" content="course2md · Turn lecture videos into illustrated notes">
 <meta name="twitter:description" content="A free desktop app that turns YouTube, Bilibili and local lecture videos into illustrated notes you can read, search and keep.">
 <meta name="twitter:image" content="https://vibewatching.xyz/images/og.png">
-<link rel="stylesheet" href="assets/site.css?v=2.0.5">
-<script src="assets/site.js?v=2.0.5"></script>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "course2md", "description": "Turns lecture videos into illustrated Markdown notes.", "url": "https://vibewatching.xyz/", "applicationCategory": "EducationalApplication", "operatingSystem": "macOS, Windows, Linux", "softwareVersion": "2.0.0", "downloadUrl": "https://github.com/mizorewww/course2md/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "image": "https://vibewatching.xyz/images/og.png", "inLanguage": "en"}</script>
+<link rel="stylesheet" href="assets/site.css?v=2.0.6">
+<script src="assets/site.js?v=2.0.6"></script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "course2md", "description": "Turns lecture videos into illustrated Markdown notes.", "url": "https://vibewatching.xyz/", "applicationCategory": "EducationalApplication", "operatingSystem": "macOS, Windows, Linux", "softwareVersion": "2.0.1", "downloadUrl": "https://github.com/mizorewww/course2md/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "image": "https://vibewatching.xyz/images/og.png", "inLanguage": "en"}</script>
 </head>
 <body>
 <div class="page">
@@ -59,7 +59,7 @@
 <div class="hero-copy">
 <div class="badges">
 <span class="badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>Free and open source · MIT</span>
-<a class="badge" href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0"><strong>2.0</strong>What's new</a>
+<a class="badge" href="https://github.com/mizorewww/course2md/releases/tag/v2.0.1"><strong>2.0.1</strong>What's new</a>
 </div>
 <h1>Turn lecture videos into illustrated notes</h1>
 <p class="subhead">Every lecture you've watched, ready to flip through again</p>
@@ -248,9 +248,9 @@
 <section id="download" aria-labelledby="download-title" class="container section download">
 <div class="reveal section-intro">
 <h2 id="download-title" class="h2">Download the desktop app</h2>
-<p class="lede"><!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->The desktop app includes the conversion engine and also needs ffmpeg. The first local transcription downloads a speech model (1–2.4 GB).<!-- /tools --></p>
+<p class="lede">Everything needed to convert videos is included. The first local transcription downloads a speech model (1–2.4 GB).</p>
 </div>
-<p class="whats-new"><span class="ver">2.0</span><span><strong>course2md 2.0</strong> is a rebuilt desktop app: preview before converting, background tasks you can pause and reorder, a library with folders, a reader with typeset formulas, and four interface languages. <a href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0">Release notes</a></span></p>
+<p class="whats-new"><span class="ver">2.0</span><span><strong>course2md 2.0</strong> is a rebuilt desktop app: preview before converting, background tasks you can pause and reorder, a library with folders, a reader with typeset formulas, and four interface languages. <a href="https://github.com/mizorewww/course2md/releases/tag/v2.0.1">Release notes</a></span></p>
 <div class="tab-row">
 <div role="tablist" aria-label="Platform" id="platform-tabs" class="seg seg-platform">
 <button type="button" role="tab" aria-selected="true" aria-controls="panel-macos" id="tab-macos">macOS</button>
@@ -262,7 +262,7 @@
 
 <div id="panel-macos" role="tabpanel" aria-labelledby="tab-macos" class="panel">
 <div class="tile tile-top">
-<span class="tile-label"><strong>macOS · Apple Silicon</strong><span><!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->macOS 15 or later. With the DMG, also install ffmpeg (see the guide).<!-- /tools --></span></span>
+<span class="tile-label"><strong>macOS · Apple Silicon</strong><span>macOS 15 or later</span></span>
 <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Download DMG</a>
 </div>
 <div class="tile tile-bottom">
@@ -276,12 +276,9 @@
 <span class="tile-label"><strong>Windows · x64</strong><span>Portable package: extract everything to a permanent folder, then open course2md-desktop.exe</span></span>
 <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Download ZIP</a>
 </div>
-<!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->
-<div class="tile tile-bottom">
-<span class="tile-hint">Install ffmpeg in PowerShell. Local speech recognition also needs llama.cpp's llama-server; see the installation guide.</span>
-<span class="cmd mono"><span class="prompt">&gt;</span><code>winget install --id Gyan.FFmpeg -e</code><button type="button" class="copy" aria-label="Copy command">Copy</button></span>
+<div class="tile tile-bottom roomy">
+<span class="tile-hint">GPU and CPU speech recognition need the Microsoft Visual C++ runtime; if it's missing, Run checks links Microsoft's installer.</span>
 </div>
-<!-- /tools -->
 </div>
 
 <div id="panel-linux" role="tabpanel" aria-labelledby="tab-linux" class="panel" hidden>
@@ -290,7 +287,7 @@
 <span class="cmd mono"><span class="prompt">$</span><code>yay -S course2md-gui-bin</code><button type="button" class="copy" aria-label="Copy command">Copy</button></span>
 </div>
 <div class="tile tile-bottom roomy">
-<span class="tile-label"><strong>Ubuntu and other distributions · x86_64</strong><span><!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->Built on Ubuntu 24.04. Install ffmpeg, llama.cpp's llama-server and the graphics libraries separately.<!-- /tools --></span></span>
+<span class="tile-label"><strong>Ubuntu and other distributions · x86_64</strong><span>Built on Ubuntu 24.04. Install the graphics libraries separately (see the <a href="https://github.com/mizorewww/course2md/wiki/GUI-Installation#other-linux-x64-distributions">Linux guide</a>).</span></span>
 <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Download tar.gz</a>
 </div>
 </div>
@@ -301,7 +298,7 @@
 <dt>macOS</dt><dd>Apple Silicon, macOS 15 or later</dd>
 <dt>Windows</dt><dd>x64</dd>
 <dt>Linux</dt><dd>x86_64 with a working Vulkan driver; the tar.gz is built on Ubuntu 24.04</dd>
-<!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server --><dt>Tools</dt><dd>ffmpeg: Homebrew and the AUR package install it; with the DMG, ZIP or tar.gz, install it yourself. Local speech recognition on Windows and Linux (on Arch, the optional llama-cpp package) also needs llama.cpp's llama-server.</dd><!-- /tools -->
+<dt>Tools</dt><dd>Everything needed to convert videos is included. The AUR package uses Arch's ffmpeg, and local speech recognition there needs the optional llama-cpp package. On Windows, GPU and CPU recognition also need the Microsoft Visual C++ 2015–2022 runtime.</dd>
 <dt>Disk</dt><dd>1–2.4 GB for the speech model, downloaded once</dd>
 <dt>Intel Mac, Linux ARM64</dt><dd>No desktop app yet; use the <a href="#cli">command-line version</a>.</dd>
 </dl>
@@ -373,6 +370,6 @@
 </div>
 </footer>
 </div>
-<script type="application/json" id="c2m-data">{"ctas": {"macos": {"label": "Download for macOS", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg", "note": "Apple Silicon · macOS 15 or later · also available via Homebrew"}, "intelmac": {"label": "Get the command-line version", "href": "#cli", "note": "The desktop app needs Apple Silicon; Intel Macs can use the command-line version."}, "windows": {"label": "Download for Windows", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip", "note": "Windows x64 · portable, just extract and run · needs ffmpeg"}, "linux": {"label": "Get it for Linux", "href": "#download", "note": "x86_64 · install with yay on Arch, or download the tar.gz"}, "other": {"label": "See download options", "href": "#download", "note": "course2md is a desktop app for macOS, Windows and Linux"}}, "detected": {"macos": "You’re on macOS", "windows": "You’re on Windows", "linux": "You’re on Linux"}, "cliCmds": ["curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash", "brew install mizorewww/tap/course2md", "yay -S course2md-bin"], "cliArg": "https://www.youtube.com/watch?v=…", "copy": "Copy", "copied": "Copied"}</script>
+<script type="application/json" id="c2m-data">{"ctas": {"macos": {"label": "Download for macOS", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg", "note": "Apple Silicon · macOS 15 or later · also available via Homebrew"}, "intelmac": {"label": "Get the command-line version", "href": "#cli", "note": "The desktop app needs Apple Silicon; Intel Macs can use the command-line version."}, "windows": {"label": "Download for Windows", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip", "note": "Windows x64 · portable, just extract and run"}, "linux": {"label": "Get it for Linux", "href": "#download", "note": "x86_64 · install with yay on Arch, or download the tar.gz"}, "other": {"label": "See download options", "href": "#download", "note": "course2md is a desktop app for macOS, Windows and Linux"}}, "detected": {"macos": "You’re on macOS", "windows": "You’re on Windows", "linux": "You’re on Linux"}, "cliCmds": ["curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash", "brew install mizorewww/tap/course2md", "yay -S course2md-bin"], "cliArg": "https://www.youtube.com/watch?v=…", "copy": "Copy", "copied": "Copied"}</script>
 </body>
 </html>

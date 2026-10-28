@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>course2md · 把课程视频变成图文笔记</title>
-<script src="../assets/lang.js?v=2.0.5"></script>
+<script src="../assets/lang.js?v=2.0.6"></script>
 <meta name="description" content="course2md 是免费开源的桌面应用（macOS、Windows、Linux），把 YouTube、Bilibili 和本地的课程视频整理成图文笔记：画面一换就截一张图，下面是讲解的话。">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#EEF1F8" media="(prefers-color-scheme: light)">
@@ -31,9 +31,9 @@
 <meta name="twitter:title" content="course2md · 把课程视频变成图文笔记">
 <meta name="twitter:description" content="免费的桌面应用，把 YouTube、Bilibili 和本地课程视频整理成可以阅读、查找和保存的图文笔记。">
 <meta name="twitter:image" content="https://vibewatching.xyz/images/og-zh.png">
-<link rel="stylesheet" href="../assets/site.css?v=2.0.5">
-<script src="../assets/site.js?v=2.0.5"></script>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "course2md", "description": "把课程视频整理成图文并茂的 Markdown 笔记。", "url": "https://vibewatching.xyz/zh/", "applicationCategory": "EducationalApplication", "operatingSystem": "macOS, Windows, Linux", "softwareVersion": "2.0.0", "downloadUrl": "https://github.com/mizorewww/course2md/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "image": "https://vibewatching.xyz/images/og-zh.png", "inLanguage": "zh-CN"}</script>
+<link rel="stylesheet" href="../assets/site.css?v=2.0.6">
+<script src="../assets/site.js?v=2.0.6"></script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "course2md", "description": "把课程视频整理成图文并茂的 Markdown 笔记。", "url": "https://vibewatching.xyz/zh/", "applicationCategory": "EducationalApplication", "operatingSystem": "macOS, Windows, Linux", "softwareVersion": "2.0.1", "downloadUrl": "https://github.com/mizorewww/course2md/releases/latest", "license": "https://opensource.org/licenses/MIT", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}, "image": "https://vibewatching.xyz/images/og-zh.png", "inLanguage": "zh-CN"}</script>
 </head>
 <body>
 <div class="page">
@@ -59,7 +59,7 @@
 <div class="hero-copy">
 <div class="badges">
 <span class="badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>免费开源 · MIT 许可</span>
-<a class="badge" href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0"><strong>2.0</strong>更新内容</a>
+<a class="badge" href="https://github.com/mizorewww/course2md/releases/tag/v2.0.1"><strong>2.0.1</strong>更新内容</a>
 </div>
 <h1>把课程视频变成图文笔记</h1>
 <p class="subhead">看过的课，随时翻得回来</p>
@@ -248,9 +248,9 @@
 <section id="download" aria-labelledby="download-title" class="container section download">
 <div class="reveal section-intro">
 <h2 id="download-title" class="h2">下载桌面版</h2>
-<p class="lede"><!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->桌面版自带转换引擎，另外需要 ffmpeg。第一次在本机识别语音时会下载 1–2.4 GB 的语音模型。<!-- /tools --></p>
+<p class="lede">转换视频所需的工具都已内置。第一次在本机识别语音时会下载 1–2.4 GB 的语音模型。</p>
 </div>
-<p class="whats-new"><span class="ver">2.0</span><span><strong>course2md 2.0</strong> 重做了桌面应用：先预览再转换、可暂停和调整顺序的后台任务、带文件夹的笔记库、公式排版的阅读器，以及四种界面语言。<a href="https://github.com/mizorewww/course2md/releases/tag/v2.0.0">发布说明</a></span></p>
+<p class="whats-new"><span class="ver">2.0</span><span><strong>course2md 2.0</strong> 重做了桌面应用：先预览再转换、可暂停和调整顺序的后台任务、带文件夹的笔记库、公式排版的阅读器，以及四种界面语言。<a href="https://github.com/mizorewww/course2md/releases/tag/v2.0.1">发布说明</a></span></p>
 <div class="tab-row">
 <div role="tablist" aria-label="平台" id="platform-tabs" class="seg seg-platform">
 <button type="button" role="tab" aria-selected="true" aria-controls="panel-macos" id="tab-macos">macOS</button>
@@ -262,7 +262,7 @@
 
 <div id="panel-macos" role="tabpanel" aria-labelledby="tab-macos" class="panel">
 <div class="tile tile-top">
-<span class="tile-label"><strong>macOS · Apple 芯片</strong><span><!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->macOS 15 及以上。使用 DMG 时还需自行安装 ffmpeg（见安装指南）。<!-- /tools --></span></span>
+<span class="tile-label"><strong>macOS · Apple 芯片</strong><span>macOS 15 及以上</span></span>
 <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>下载 DMG</a>
 </div>
 <div class="tile tile-bottom">
@@ -276,12 +276,9 @@
 <span class="tile-label"><strong>Windows · x64</strong><span>便携版：解压到一个固定的文件夹，运行 course2md-desktop.exe</span></span>
 <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>下载 ZIP</a>
 </div>
-<!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->
-<div class="tile tile-bottom">
-<span class="tile-hint">在 PowerShell 里安装 ffmpeg。在本机识别语音还需要 llama.cpp 的 llama-server，见安装指南。</span>
-<span class="cmd mono"><span class="prompt">&gt;</span><code>winget install --id Gyan.FFmpeg -e</code><button type="button" class="copy" aria-label="复制命令">复制</button></span>
+<div class="tile tile-bottom roomy">
+<span class="tile-hint">显卡和 CPU 语音识别需要 Microsoft Visual C++ 运行库；缺少时，「运行检查」会给出微软安装程序的链接。</span>
 </div>
-<!-- /tools -->
 </div>
 
 <div id="panel-linux" role="tabpanel" aria-labelledby="tab-linux" class="panel" hidden>
@@ -290,7 +287,7 @@
 <span class="cmd mono"><span class="prompt">$</span><code>yay -S course2md-gui-bin</code><button type="button" class="copy" aria-label="复制命令">复制</button></span>
 </div>
 <div class="tile tile-bottom roomy">
-<span class="tile-label"><strong>Ubuntu 和其他发行版 · x86_64</strong><span><!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server -->在 Ubuntu 24.04 上构建；另需安装 ffmpeg、llama.cpp 的 llama-server 和图形库<!-- /tools --></span></span>
+<span class="tile-label"><strong>Ubuntu 和其他发行版 · x86_64</strong><span>在 Ubuntu 24.04 上构建；另需安装图形库（见<a href="https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#%E5%85%B6%E4%BB%96-linux-x64">Linux 指南</a>）</span></span>
 <a href="https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-linux-x86_64.tar.gz" class="dl-btn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>下载 tar.gz</a>
 </div>
 </div>
@@ -301,7 +298,7 @@
 <dt>macOS</dt><dd>Apple 芯片，macOS 15 及以上</dd>
 <dt>Windows</dt><dd>x64</dd>
 <dt>Linux</dt><dd>x86_64，需要可用的 Vulkan 驱动；tar.gz 在 Ubuntu 24.04 上构建</dd>
-<!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server --><dt>工具</dt><dd>ffmpeg：Homebrew 和 AUR 包会一并安装；使用 DMG、ZIP 或 tar.gz 时需要自行安装。Windows 和 Linux（Arch 上为可选依赖 llama-cpp）上在本机识别语音还需要 llama.cpp 的 llama-server。</dd><!-- /tools -->
+<dt>工具</dt><dd>转换视频所需的工具都已内置；AUR 包使用 Arch 自带的 ffmpeg，在本机识别语音需另装可选依赖 llama-cpp。Windows 上用显卡或 CPU 识别语音还需要 Microsoft Visual C++ 2015–2022 运行库。</dd>
 <dt>磁盘</dt><dd>语音模型 1–2.4 GB，只需下载一次</dd>
 <dt>Intel Mac、Linux ARM64</dt><dd>暂无桌面版，请使用<a href="#cli">命令行版本</a>。</dd>
 </dl>
@@ -373,6 +370,6 @@
 </div>
 </footer>
 </div>
-<script type="application/json" id="c2m-data">{"ctas": {"macos": {"label": "下载 macOS 版", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg", "note": "Apple 芯片 · macOS 15 及以上 · 也可以用 Homebrew 安装"}, "intelmac": {"label": "获取命令行版", "href": "#cli", "note": "桌面版需要 Apple 芯片；Intel Mac 可以使用命令行版。"}, "windows": {"label": "下载 Windows 版", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip", "note": "Windows x64 · 便携版，解压即用 · 另需 ffmpeg"}, "linux": {"label": "获取 Linux 版", "href": "#download", "note": "x86_64 · Arch 用 yay 安装，其他发行版下载 tar.gz"}, "other": {"label": "查看下载方式", "href": "#download", "note": "course2md 是电脑应用，支持 macOS、Windows 和 Linux"}}, "detected": {"macos": "你正在使用 macOS", "windows": "你正在使用 Windows", "linux": "你正在使用 Linux"}, "cliCmds": ["curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash", "brew install mizorewww/tap/course2md", "yay -S course2md-bin"], "cliArg": "https://www.youtube.com/watch?v=…", "copy": "复制", "copied": "已复制"}</script>
+<script type="application/json" id="c2m-data">{"ctas": {"macos": {"label": "下载 macOS 版", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-gui-macos-arm64.dmg", "note": "Apple 芯片 · macOS 15 及以上 · 也可以用 Homebrew 安装"}, "intelmac": {"label": "获取命令行版", "href": "#cli", "note": "桌面版需要 Apple 芯片；Intel Mac 可以使用命令行版。"}, "windows": {"label": "下载 Windows 版", "href": "https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip", "note": "Windows x64 · 便携版，解压即用"}, "linux": {"label": "获取 Linux 版", "href": "#download", "note": "x86_64 · Arch 用 yay 安装，其他发行版下载 tar.gz"}, "other": {"label": "查看下载方式", "href": "#download", "note": "course2md 是电脑应用，支持 macOS、Windows 和 Linux"}}, "detected": {"macos": "你正在使用 macOS", "windows": "你正在使用 Windows", "linux": "你正在使用 Linux"}, "cliCmds": ["curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash", "brew install mizorewww/tap/course2md", "yay -S course2md-bin"], "cliArg": "https://www.youtube.com/watch?v=…", "copy": "复制", "copied": "已复制"}</script>
 </body>
 </html>
