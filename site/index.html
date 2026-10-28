@@ -285,7 +285,7 @@
 
 <div id="panel-linux" role="tabpanel" aria-labelledby="tab-linux" class="panel" hidden>
 <div class="tile tile-top tight">
-<span class="tile-label narrow"><strong>Arch Linux / CachyOS · x86_64</strong><span>Installs the video tools and graphics libraries too. Needs a working Vulkan driver.</span></span>
+<span class="tile-label narrow"><strong>Arch Linux / CachyOS · x86_64</strong><span>Installs ffmpeg, yt-dlp and the graphics libraries. Needs a working Vulkan driver; local speech recognition also needs the llama-cpp package.</span></span>
 <span class="cmd mono"><span class="prompt">$</span><code>yay -S course2md-gui-bin</code><button type="button" class="copy" aria-label="Copy command">Copy</button></span>
 </div>
 <div class="tile tile-bottom roomy">
@@ -300,7 +300,7 @@
 <dt>macOS</dt><dd>Apple Silicon, macOS 15 or later</dd>
 <dt>Windows</dt><dd>x64</dd>
 <dt>Linux</dt><dd>x86_64 with a working Vulkan driver; the tar.gz is built on Ubuntu 24.04</dd>
-<!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server --><dt>Tools</dt><dd>ffmpeg: Homebrew and the AUR package install it; with the DMG, ZIP or tar.gz, install it yourself. Local speech recognition on Windows and other Linux also needs llama.cpp's llama-server.</dd><!-- /tools -->
+<!-- tools: changes when 2.0.1 bundles ffmpeg, uv and llama-server --><dt>Tools</dt><dd>ffmpeg: Homebrew and the AUR package install it; with the DMG, ZIP or tar.gz, install it yourself. Local speech recognition on Windows and Linux (on Arch, the optional llama-cpp package) also needs llama.cpp's llama-server.</dd><!-- /tools -->
 <dt>Disk</dt><dd>1–2.4 GB for the speech model, downloaded once</dd>
 <dt>Intel Mac, Linux ARM64</dt><dd>No desktop app yet; use the <a href="#cli">command-line version</a>.</dd>
 </dl>
