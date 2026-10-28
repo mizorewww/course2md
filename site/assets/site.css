@@ -227,6 +227,8 @@ html:lang(zh) .step-body { line-height: 1.65; }
 .sc-shots { padding: 16px 28px 24px; flex-direction: column; gap: 14px; }
 .shots-head { display: flex; align-items: center; gap: 12px; padding-left: 64px; }
 .shots-label { flex: 1; font-size: 15px; font-weight: 600; }
+.sc-shots .spin { color: var(--primary); }
+.shots-done { color: var(--ok-fg); }
 .shots-count { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .shots-bar { display: flex; align-items: center; gap: 4px; height: 6px; }
 .shots-bar span { height: 6px; border-radius: 3px; background: var(--primary); width: 0; transition: width .2s linear; }

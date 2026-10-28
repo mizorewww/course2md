@@ -107,6 +107,8 @@
     var shotCount = $("#shot-count");
     var shotBar = $(".shots-bar span", story);
     var subs = $$(".sub-line", story);
+    var spinner = $(".sc-shots .spin", story);
+    var doneMark = $(".shots-done", story);
     var menu = $$(".menu-item", story);
     var files = $$(".file", story);
     var last = {};
@@ -146,6 +148,9 @@
       shots.forEach(function (s, i) { toggle(s, "is-on", shotQ * shots.length > i); });
       shotCount.textContent = String(Math.round(shots.length * shotQ));
       shotBar.style.width = Math.round(shotQ * 100) + "%";
+      // The spinner stops once every screenshot is in.
+      spinner.toggleAttribute("hidden", shotQ >= 1);
+      doneMark.toggleAttribute("hidden", shotQ < 1);
       var subQ = scene > 1 ? 1 : (scene === 1 ? clamp((q - 0.45) * 2.2) : 0);
       subs.forEach(function (s, i) { toggle(s, "is-on", subQ * subs.length > i); });
 
