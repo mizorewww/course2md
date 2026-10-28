@@ -356,6 +356,7 @@ html:lang(zh) .step-body { line-height: 1.65; }
 .term-body .caret { color: #ADC6FF; }
 .t-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #C4C6D0; }
 .t-line.t-done { color: #8FD9A0; }
+.t-line.t-tip { color: #8E9099; }
 
 /* FAQ */
 .faq { display: flex; flex-direction: column; gap: 2px; }
