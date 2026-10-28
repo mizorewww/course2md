@@ -394,6 +394,8 @@ html:lang(zh) .step-body { line-height: 1.65; }
   .story-step-on { padding: 10px 12px; }
   .sample-note { display: none; }
   .story-window { width: 100%; height: min(480px, calc(100svh - 210px)); border-radius: 24px; }
+  .sc-home img { object-position: 50% 0; }
+  .sc-reader img { object-position: 100% 0; }
   .hero-fan { height: 320px; }
   .sc-shots { padding: 12px 16px 16px; gap: 10px; }
   .shots-head { padding-left: 0; gap: 8px; }
