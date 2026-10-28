@@ -201,9 +201,17 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
     steps:
       - uses: actions/checkout@v4
+      # Only the release assets: the CLI binaries and the native packages,
+      # not the ffmpeg-windows build that only the desktop job consumes.
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: course2md-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: native-*
           merge-multiple: true
       - name: Checksums
         working-directory: dist
