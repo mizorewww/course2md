@@ -23,7 +23,7 @@ Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a
 
 ## Why course2md
 
-- **Notes shaped like the lecture.** One screenshot per slide, with the matching transcript in paragraphs underneath, saved as ordinary `course.md` and `course.html` files you can open anywhere.
+- **Notes shaped like the lecture.** One screenshot per slide, with the matching transcript in paragraphs underneath, saved as an ordinary `course.md` with its screenshots that opens anywhere; export a web page, a .zip or JSON whenever you need one.
 - **Private by default.** Speech is recognized on your own computer: Apple Silicon works out of the box, and other systems use a graphics card, the CPU or an Intel Core Ultra NPU. Audio leaves your computer only if you choose a cloud service.
 - **Subtitles first.** When a video already has subtitles they are used directly, with no speech recognition needed.
 - **Optional AI.** Proofreading, summaries, bilingual notes and typeset math formulas with any OpenAI-compatible service, a local Ollama server or a ChatGPT subscription. Off until you turn it on.
