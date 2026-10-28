@@ -101,7 +101,7 @@ Then open **course2md** from **Applications**. Without Homebrew, [download the D
 
 ### Windows (x64)
 
-1. [Download the portable ZIP](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip) and **extract everything** to a permanent folder. It includes `ffmpeg`, `yt-dlp`, `aria2`, `uv` (Intel NPU recognition) and `llama-server` for GPU (Vulkan) and CPU recognition.
+1. [Download the portable ZIP](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip) and **extract everything** to a permanent folder. It includes `ffmpeg`, `yt-dlp`, `aria2`, `uv` (Intel NPU recognition) and `llama-server` for GPU (Vulkan) and CPU recognition. GPU and CPU recognition also need the [Microsoft Visual C++ runtime](https://aka.ms/vs/17/release/vc_redist.x64.exe); if it is missing, **Run checks** says so and links the installer.
 2. Open **course2md-desktop.exe** from the extracted folder and keep the other files next to it.
 
 ### Arch Linux / CachyOS (x86_64)

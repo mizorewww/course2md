@@ -101,7 +101,7 @@ brew install --cask mizorewww/tap/course2md-gui
 
 ### Windows（x64）
 
-1. [下载便携包（ZIP）](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip)，**完整解压**到固定文件夹。包内已有 `ffmpeg`、`yt-dlp`、`aria2`、`uv`（Intel NPU 识别）和用于显卡（Vulkan）与 CPU 识别的 `llama-server`。
+1. [下载便携包（ZIP）](https://github.com/mizorewww/course2md/releases/latest/download/course2md-desktop-windows-AMD64.zip)，**完整解压**到固定文件夹。包内已有 `ffmpeg`、`yt-dlp`、`aria2`、`uv`（Intel NPU 识别）和用于显卡（Vulkan）与 CPU 识别的 `llama-server`。显卡和 CPU 识别还需要 [Microsoft Visual C++ 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)；缺少时，「运行检查」会提示并给出安装程序链接。
 2. 打开解压目录中的 **course2md-desktop.exe**，其他文件保持在同一目录。
 
 ### Arch Linux / CachyOS（x86_64）
