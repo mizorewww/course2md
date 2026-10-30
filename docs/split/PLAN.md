@@ -23,6 +23,13 @@ directory when the project is accepted.
 7. `gh` may create **public** repositories for the split-out crates.
 8. Acceptance: independent subagent reviews find no problems in UI, app and CLI,
    and find the result conforms to this plan.
+9. The app should end up as a thin wrapper over many crates with low coupling and
+   high cohesion. A crate boundary that needs many cross-crate reaches is wrong; move
+   the boundary rather than widening the API.
+10. Disk is tight. Do not keep several full `target` directories: share one
+    `CARGO_TARGET_DIR` where possible, delete build output and worktrees once merged,
+    and check `df -h` during long builds. Never delete anything in the owner's
+    `gpui-kit-material` checkout or other sibling repositories.
 
 ## Locations
 
