@@ -7,7 +7,8 @@
   Cross-Origin-Opener-Policy: same-origin
   Strict-Transport-Security: max-age=31536000
 
-# Pages load site.css and site.js with ?v=<release>; bump it whenever they change.
+# Pages load lang.js, site.css and site.js with a ?v= cache token. It is not the
+# release version: bump it in every page whenever one of them changes.
 /assets/*
   Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 

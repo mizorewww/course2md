@@ -170,8 +170,6 @@ fn main() {
     }
 }
 
-/// Extra `swift build` arguments this toolchain supports, probed from its help
-/// text once and cached in OUT_DIR under the `swift --version` it came from.
 /// Builds the Swift package with the newest option set the toolchain accepts:
 /// the Swift Build engine (which compiles MLX's Metal shaders into
 /// default.metallib) and no prebuilt swift-syntax download. The set that
