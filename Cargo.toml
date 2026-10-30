@@ -27,7 +27,7 @@ getrandom = "0.2"
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-indicatif = "0.17"
+indicatif = "0.18"
 image-compare = "0.5.0"
 libc = "0.2"
 dialoguer = "0.12.0"
