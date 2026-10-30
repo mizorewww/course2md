@@ -440,35 +440,58 @@ pub fn read_preview(mut course: Course) -> Result<Preview> {
     })
 }
 
-/// Copy-friendly markdown: strips image spans and their reference definitions while
-/// leaving authored prose, inline code, lists, tables and links untouched.
+/// Copy-friendly markdown: strips image spans and the reference definitions only
+/// they use, leaving authored prose, inline code, lists, tables and links untouched.
 pub fn without_image_references(markdown: &str) -> String {
     use pulldown_cmark::{Event, Tag};
-    let mut ranges = Vec::new();
-    let mut definitions = Vec::new();
-    for (event, range) in
-        pulldown_cmark::Parser::new_ext(markdown, pulldown_cmark::Options::all()).into_offset_iter()
-    {
-        if let Event::Start(Tag::Image { id, .. }) = event {
-            ranges.push(range);
-            if !id.is_empty() {
-                definitions.push(id.into_string());
+    let mut removed = Vec::new();
+    let mut image_ids = Vec::new();
+    let mut link_ids = Vec::new();
+    let mut events = pulldown_cmark::Parser::new_ext(markdown, pulldown_cmark::Options::all())
+        .into_offset_iter();
+    for (event, range) in events.by_ref() {
+        match event {
+            Event::Start(Tag::Image { id, .. }) => {
+                removed.push(range);
+                image_ids.push(id);
             }
+            Event::Start(Tag::Link { id, .. }) => link_ids.push(id),
+            _ => {}
         }
     }
-    let mut result = markdown.to_owned();
-    for range in ranges.into_iter().rev() {
-        result.replace_range(range, "");
+    // Labels match case-insensitively, so the parser's own table decides. A
+    // definition may have a link using it as well; that link must keep working.
+    let definitions = events.reference_definitions();
+    let span_of = |id: &pulldown_cmark::CowStr| Some(definitions.get(id)?.span.clone());
+    let linked: Vec<_> = link_ids.iter().filter_map(span_of).collect();
+    for span in image_ids.iter().filter_map(span_of) {
+        if !linked.contains(&span) {
+            removed.push(whole_line(markdown, span));
+        }
     }
+    // An image's description can hold another image; only the outermost is cut.
+    removed.sort_by_key(|range| (range.start, std::cmp::Reverse(range.end)));
+    let mut result = String::with_capacity(markdown.len());
+    let mut copied = 0;
+    for range in removed {
+        if range.start >= copied {
+            result.push_str(&markdown[copied..range.start]);
+        }
+        copied = copied.max(range.end);
+    }
+    result.push_str(&markdown[copied..]);
     result
-        .lines()
-        .filter(|line| {
-            !definitions
-                .iter()
-                .any(|id| line.trim_start().starts_with(&format!("[{id}]:")))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+}
+
+/// `span` with the rest of its last line, when only blank space follows it.
+fn whole_line(text: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize> {
+    let rest = &text[span.end..];
+    let line = rest.find('\n').map_or(rest.len(), |newline| newline + 1);
+    if !text[span.clone()].ends_with('\n') && rest[..line].trim().is_empty() {
+        span.start..span.end + line
+    } else {
+        span
+    }
 }
 
 /// Published notes for tests: one frame and one paragraph per time.
@@ -679,5 +702,37 @@ mod tests {
         assert!(copied.contains("before  after"));
         assert!(!copied.contains("frames/a.png"));
         assert!(copied.contains("`![example](literal)`"));
+    }
+
+    #[test]
+    fn copy_markdown_handles_nested_images() {
+        assert_eq!(without_image_references("a ![![b](c)](e) f"), "a  f");
+        assert_eq!(
+            without_image_references("![![b][c]](e) ![g](h)\n\n[c]: d\n"),
+            " \n\n"
+        );
+    }
+
+    #[test]
+    fn copy_markdown_matches_definitions_as_the_parser_does() {
+        assert_eq!(
+            without_image_references("![x][PIC]\n\n[pic]: frames/a.png\nnext\n"),
+            "\n\nnext\n"
+        );
+        // Text that only looks like a definition, and one a link still uses, stay.
+        let code = "![x][pic]\n\n[pic]: a.png\n\n```\n[pic]: kept\n```\n";
+        assert!(without_image_references(code).contains("[pic]: kept"));
+        let shared = "![x][a] and [y][a]\n\n[a]: https://example.com\n";
+        assert_eq!(
+            without_image_references(shared),
+            " and [y][a]\n\n[a]: https://example.com\n"
+        );
+    }
+
+    #[test]
+    fn copy_markdown_keeps_line_endings() {
+        assert_eq!(without_image_references("text\n"), "text\n");
+        assert_eq!(without_image_references("a\r\n\r\nb\r\n"), "a\r\n\r\nb\r\n");
+        assert_eq!(without_image_references("no newline"), "no newline");
     }
 }
