@@ -1048,14 +1048,7 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
     }
     let resp = request.send_json(body).context(fail_hint)?;
     let v: serde_json::Value = if crate::provider::is_sse(s) {
-        let mut bytes = Vec::new();
-        use std::io::Read as _;
-        resp.into_reader()
-            .take(SSE_BODY_LIMIT + 1)
-            .read_to_end(&mut bytes)
-            .context(crate::tr!(
-                "服务响应接收中断 / Service response was interrupted"
-            ))?;
+        let bytes = read_sse_body(resp.into_reader())?;
         crate::provider::sse_to_chat_json(&bytes)?
     } else {
         resp.into_json()
@@ -1072,6 +1065,24 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
         )
     );
     Ok(())
+}
+
+/// The whole streamed body, or an error: a test of a truncated stream would judge
+/// a response nobody has read to its end.
+fn read_sse_body(reader: impl std::io::Read) -> Result<Vec<u8>> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    reader
+        .take(SSE_BODY_LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .context(crate::tr!(
+            "服务响应接收中断 / Service response was interrupted"
+        ))?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= SSE_BODY_LIMIT,
+        crate::tr!("服务响应超过接收上限 / Service response exceeds the receiving limit")
+    );
+    Ok(bytes)
 }
 
 /// `llm setup`：交互式补齐缺失项并写盘。
@@ -1234,6 +1245,17 @@ mod tests {
         // A complete formula followed by another stays two formulas.
         assert_eq!(events[2].text, "这是 $x$");
         assert_eq!(events[3].text, "$y$ 不变");
+    }
+
+    #[test]
+    fn an_oversized_stream_is_an_error_not_a_shorter_stream() {
+        use std::io::Read as _;
+        let at_limit = std::io::repeat(b'x').take(SSE_BODY_LIMIT);
+        assert_eq!(
+            read_sse_body(at_limit).unwrap().len() as u64,
+            SSE_BODY_LIMIT
+        );
+        assert!(read_sse_body(std::io::repeat(b'x')).is_err());
     }
 
     #[test]
