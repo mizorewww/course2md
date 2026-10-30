@@ -253,12 +253,14 @@ fn codex_failure(error: &anyhow::Error) -> CodexFailure {
             .is_some()
     });
     let http_status = error.chain().find_map(|cause| match cause.downcast_ref() {
-        Some(ureq::Error::Status(status, _)) => Some(*status),
+        Some(course2md::llm::RequestError::Status(status)) => Some(*status),
         _ => None,
     });
     let transport = error.chain().any(|cause| {
-        matches!(cause.downcast_ref(), Some(ureq::Error::Transport(_)))
-            || cause.downcast_ref::<std::io::Error>().is_some()
+        matches!(
+            cause.downcast_ref(),
+            Some(course2md::llm::RequestError::Transport(_))
+        ) || cause.downcast_ref::<std::io::Error>().is_some()
     });
     let outcome = if login {
         TestOutcome::AuthenticationRefused

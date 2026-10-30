@@ -1,3 +1,4 @@
+.deps/
 # Bundled tools built or downloaded by scripts/package.py, kept between runs.
 .cache/
 target/

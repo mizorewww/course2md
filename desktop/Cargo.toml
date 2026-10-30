@@ -78,6 +78,13 @@ gpui-base = { path = "../../gpui-kit-material-course2md/vendor/gpui-base" }
 gpui-pre = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre" }
 gpui-pre-web = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-web" }
 gpui-pre-apple = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-apple" }
+gpui-fast-linux = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-linux" }
+gpui-fast-wgpu = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-wgpu" }
+gpui-fast-windows = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-windows" }
+gpui-pre-linux = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-linux" }
+gpui-pre-wgpu = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-wgpu" }
+gpui-pre-windows = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-windows" }
+wgpu = { path = "../../gpui-kit-material-course2md/vendor/wgpu" }
 
 [patch."https://github.com/longbridge/gpui-kit"]
 gpui-kit = { path = "../../gpui-kit-material-course2md/vendor/gpui-kit" }
