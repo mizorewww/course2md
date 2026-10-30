@@ -23,7 +23,7 @@ zip = { version = "9", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 ureq = { version = "2", features = ["json"] }
 base64 = "0.22"
-getrandom = "0.2"
+getrandom = "0.4"
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

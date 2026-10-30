@@ -365,7 +365,7 @@ fn aria2_control(part: &Path) -> PathBuf {
 
 fn random_hex(bytes: usize) -> Result<String> {
     let mut buffer = vec![0u8; bytes];
-    getrandom::getrandom(&mut buffer).map_err(|_| anyhow::anyhow!("getrandom"))?;
+    getrandom::fill(&mut buffer).map_err(|_| anyhow::anyhow!("getrandom"))?;
     Ok(buffer.iter().map(|b| format!("{b:02x}")).collect())
 }
 
