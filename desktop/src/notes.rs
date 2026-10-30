@@ -16,6 +16,19 @@ fn body_unreadable() -> &'static str {
     course2md::tr!("笔记正文无法读取，原文件已保留")
 }
 
+/// The note was written by a newer app. Unlike damage, an older intact version is
+/// no answer: this app must not show or republish over what it cannot read.
+#[derive(Debug)]
+struct NewerSchema;
+
+impl std::fmt::Display for NewerSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(course2md::tr!("这份笔记由更新版本的应用生成，请更新应用"))
+    }
+}
+
+impl std::error::Error for NewerSchema {}
+
 #[derive(Clone)]
 pub struct Course {
     pub dir: PathBuf,
@@ -113,10 +126,10 @@ fn current_course(dir: &Path) -> Result<Course> {
     let current = || -> Result<Course> {
         let pointer: artifact::CurrentVersion =
             serde_json::from_slice(&std::fs::read(dir.join("current.json"))?)?;
-        anyhow::ensure!(
-            pointer.schema == 1,
-            course2md::tr!("这份笔记由更新版本的应用生成，请更新应用")
-        );
+        if pointer.schema > 1 {
+            return Err(NewerSchema.into());
+        }
+        anyhow::ensure!(pointer.schema == 1, version_damaged());
         let manifest_path = artifact::safe_asset_path(dir, &pointer.manifest)?;
         let course = version_course(manifest_path.parent().context(version_damaged())?)?;
         anyhow::ensure!(
@@ -128,6 +141,9 @@ fn current_course(dir: &Path) -> Result<Course> {
         Ok(course)
     };
     current().or_else(|error| {
+        if error.is::<NewerSchema>() {
+            return Err(error);
+        }
         let mut intact = std::fs::read_dir(dir.join("versions"))
             .into_iter()
             .flatten()
@@ -669,6 +685,24 @@ mod tests {
                 ..Default::default()
             }))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn a_note_from_a_newer_app_asks_for_an_update_instead_of_falling_back() {
+        let root = tempfile::tempdir().unwrap();
+        published_note(root.path(), 1, &[10.], Default::default());
+        let pointer = root.path().join("course/current.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&pointer).unwrap()).unwrap();
+        value["schema"] = 2.into();
+        std::fs::write(&pointer, serde_json::to_vec(&value).unwrap()).unwrap();
+        let scan = scan_library(root.path()).unwrap();
+        assert!(scan.courses.is_empty());
+        assert!(
+            scan.issues[0].contains("更新版本的应用"),
+            "{:?}",
+            scan.issues
         );
     }
 
