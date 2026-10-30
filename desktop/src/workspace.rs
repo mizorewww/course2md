@@ -1914,9 +1914,7 @@ impl Workspace {
             course2md::tr!("保存位置暂时不可访问，请先连接对应磁盘")
         );
         create_library_marker(&library)?;
-        self.mirror_snapshots
-            .lock()
-            .expect("mirror snapshot lock")
+        course2md::runtime::lock_recover(&self.mirror_snapshots)
             .retain(|_, (_, location)| location.id != id);
         Ok(())
     }
@@ -2461,9 +2459,7 @@ impl Workspace {
             let Some(library) = state.library(&task.plan.library_id) else {
                 continue;
             };
-            if mirror_snapshots
-                .lock()
-                .expect("mirror snapshot lock")
+            if course2md::runtime::lock_recover(mirror_snapshots)
                 .get(&task.id)
                 .is_some_and(|(previous, location)| previous == task && location == library)
             {
@@ -2472,9 +2468,7 @@ impl Workspace {
             if check_library(library).is_err() {
                 // Retry an unavailable location when the task/location changes,
                 // it is explicitly reassociated, or the application restarts.
-                mirror_snapshots
-                    .lock()
-                    .expect("mirror snapshot lock")
+                course2md::runtime::lock_recover(mirror_snapshots)
                     .insert(task.id.clone(), (task.clone(), library.clone()));
                 continue;
             }
@@ -2489,9 +2483,7 @@ impl Workspace {
                 course2md::checkpoint::atomic_write(&mirror, &bytes)
                     .context(course2md::tr!("任务恢复副本未能保存，原任务记录仍保留"))?;
             }
-            mirror_snapshots
-                .lock()
-                .expect("mirror snapshot lock")
+            course2md::runtime::lock_recover(mirror_snapshots)
                 .insert(task.id.clone(), (task.clone(), library.clone()));
         }
         // The record refers to the draft subtitle by identity, so its events
