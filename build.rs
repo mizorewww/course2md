@@ -144,18 +144,18 @@ fn main() {
             // desktop/scripts/package.py and desktop/scripts/ux_fixture.py.
             let exe_dir = PathBuf::from(out_dir).join("../../../");
             let dest = exe_dir.join("mlx.metallib");
-            if std::fs::copy(&bundle, &dest).is_err() {
-                println!(
-                    "cargo:warning=无法复制 mlx.metallib 到 {}",
+            if let Err(error) = std::fs::copy(&bundle, &dest) {
+                without_metallib(&format!(
+                    "无法复制 mlx.metallib 到 {}：{error}",
                     exe_dir.display()
-                );
+                ));
             }
         }
     } else {
-        println!(
-            "cargo:warning=未找到 mlx.metallib（{} 下递归搜索无果），CoreML 推理可能失败",
+        without_metallib(&format!(
+            "未找到 mlx.metallib（{} 下递归搜索无果），CoreML 推理可能失败",
             pkg.join(".build").display()
-        );
+        ));
     }
     // Swift 5 语言模式包的兼容钩子 + clang 运行时（___isPlatformVersionAtLeast 等）
     let devdir = xcode_devdir();
@@ -186,6 +186,20 @@ fn without_apple_module(reason: &str, reports: &[String]) {
     }
     for report in reports {
         println!("cargo:warning={report}");
+    }
+    println!("cargo:warning={reason}");
+}
+
+/// The Swift build succeeded but left no Metal library, as the native build system
+/// does, for one. Apple recognition would fail at run time, so a release stops here
+/// as it does for a failed build; a development build only warns.
+fn without_metallib(reason: &str) {
+    if std::env::var("PROFILE").as_deref() == Ok("release") {
+        eprintln!("{reason}");
+        eprintln!(
+            "release builds must include mlx.metallib; set COURSE2MD_NO_APPLE=1 to build without the Apple module"
+        );
+        std::process::exit(1);
     }
     println!("cargo:warning={reason}");
 }
