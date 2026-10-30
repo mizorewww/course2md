@@ -235,7 +235,14 @@ impl Checkpoint {
                 needs_newline: false,
             });
         }
-        let content = std::fs::read_to_string(path).with_context(|| {
+        let bytes = std::fs::read(path).with_context(|| {
+            crate::tr!(
+                "读取 {} / Failed to read {}",
+                path.display(),
+                path.display()
+            )
+        })?;
+        let content = complete_text(bytes).with_context(|| {
             crate::tr!(
                 "读取 {} / Failed to read {}",
                 path.display(),
@@ -371,6 +378,22 @@ impl Checkpoint {
     }
 }
 
+/// The file's text. A crash can stop a write inside a multi-byte character, so
+/// bytes that are not UTF-8 are a torn tail when they lie after the last newline,
+/// and that line is dropped here; anywhere earlier they are damage.
+fn complete_text(bytes: Vec<u8>) -> Result<String> {
+    let error = match String::from_utf8(bytes) {
+        Ok(text) => return Ok(text),
+        Err(error) => error,
+    };
+    let bytes = error.as_bytes();
+    let complete = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |newline| newline + 1);
+    Ok(std::str::from_utf8(&bytes[..complete])?.to_owned())
+}
+
 /// 小文件原子写：tmp → fsync → rename，避免崩溃留下半截文件。
 /// 保证级别：崩溃安全（文件本体已 fsync 后才 rename）；
 /// 不含掉电场景下父目录的 fsync（极端掉电时目录项本身可能未落盘）。
@@ -453,6 +476,40 @@ mod tests {
         assert_eq!(events[1].text, "second");
         assert_eq!(std::fs::read(path).unwrap(), bytes);
         assert!(!dir.path().join(".asr_done").exists());
+    }
+
+    #[test]
+    fn a_tail_torn_inside_a_character_is_only_a_torn_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        Checkpoint::open(dir.path(), true, &identity("qwen3")).unwrap();
+        let path = dir.path().join("asr.jsonl");
+        let whole = "{\"start\":0.0,\"end\":1.0,\"text\":\"第一句\"}\n";
+        // The crash stopped two bytes into the three bytes of `二`.
+        let mut torn = whole.as_bytes().to_vec();
+        let unfinished = "{\"start\":1.0,\"end\":2.0,\"text\":\"第二句";
+        torn.extend_from_slice(&unfinished.as_bytes()[..unfinished.len() - 4]);
+        assert!(std::str::from_utf8(&torn).is_err());
+        std::fs::write(&path, &torn).unwrap();
+
+        // Reading a failed task's progress leaves the file alone.
+        assert_eq!(Checkpoint::saved_events(dir.path()).unwrap().len(), 1);
+        assert_eq!(std::fs::read(&path).unwrap(), torn);
+
+        let mut checkpoint = Checkpoint::open(dir.path(), true, &identity("qwen3")).unwrap();
+        assert!(checkpoint.is_done(0.0, 1.0));
+        assert!(!checkpoint.is_done(1.0, 2.0));
+        checkpoint.record(1.0, 2.0, "第二句").unwrap();
+        drop(checkpoint);
+        assert_eq!(
+            Checkpoint::saved_events(dir.path()).unwrap()[1].text,
+            "第二句"
+        );
+
+        // Invalid bytes before the last line are damage, not a crash at the end.
+        let mut damaged = b"{\"start\":0.0,\"text\":\"\xff\"}\n".to_vec();
+        damaged.extend_from_slice(whole.as_bytes());
+        std::fs::write(&path, damaged).unwrap();
+        assert!(Checkpoint::open(dir.path(), true, &identity("qwen3")).is_err());
     }
 
     #[test]
