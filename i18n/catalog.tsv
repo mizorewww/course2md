@@ -1503,7 +1503,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 设置下一个视频	设置下一个视频	Set up the next video	設定下一個影片	次の動画を設定する
 跳过设置	跳过设置	Skip setup	略過設定	セットアップをスキップ
 短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息	The short text says photosynthesis uses sunlight and releases oxygen; the summary did not keep this key information.	短文講述光合作用使用陽光並釋放氧氣，摘要未保留這些關鍵資訊	短い文章では光合成が太陽光を使い酸素を放出すると述べていますが、要約にはこの重要な情報が残っていません
-移动临时文件位置发生变化，未修改内容	移动临时文件位置发生变化，未修改内容	The location of the move's temporary file has changed; nothing was modified.	移動暫存檔案位置發生變化，未修改內容	移動用の一時ファイルの場所が変わったため、内容は変更されていません。
 移动位置已经变化，原数据和副本已保留	移动位置已经变化，原数据和副本已保留	The move location has changed; the original data and the copy were retained.	移動位置已經變化，原資料和副本已保留	移動先が変わりました。元のデータとコピーは保持されています。
 移动笔记库	移动笔记库	Move note library	移動筆記庫	ノートライブラリを移動
 移动笔记库…	移动笔记库…	Move note library…	移動筆記庫…	ノートライブラリを移動…

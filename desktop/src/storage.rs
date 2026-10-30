@@ -1306,7 +1306,7 @@ mod tests {
         let records = read_records(journal_dir, &libraries, &[]);
         assert!(records.pending.is_empty());
         assert_eq!(records.unsettled[0].1.phase, Phase::Committed);
-        assert_eq!(records.stale_markers, [marker.clone()]);
+        assert_eq!(records.stale_markers, std::slice::from_ref(&marker));
         assert_eq!(std::fs::read(&prepared.path).unwrap(), before);
         assert!(marker.is_file());
 
