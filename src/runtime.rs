@@ -431,19 +431,47 @@ impl Drop for FileLock {
     }
 }
 
-/// Hold an OS file lock until the returned guard is dropped. The lock file
-/// remains in place so another process cannot open a different inode at its path.
-pub fn lock_file(path: &Path) -> Result<FileLock> {
-    let file = std::fs::OpenOptions::new()
+fn open_lock_file(path: &Path) -> Result<std::fs::File> {
+    Ok(std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
-        .open(path)?;
+        .open(path)?)
+}
+
+/// Hold an OS file lock until the returned guard is dropped. The lock file
+/// remains in place so another process cannot open a different inode at its path.
+pub fn lock_file(path: &Path) -> Result<FileLock> {
+    let file = open_lock_file(path)?;
     file.try_lock().with_context(|| {
         crate::tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
     })?;
     Ok(FileLock { file })
+}
+
+/// [`lock_file`] for a short critical section: waits up to `timeout` for the holder,
+/// in this process or another, instead of failing at once.
+pub fn lock_file_within(path: &Path, timeout: Duration) -> Result<FileLock> {
+    let file = open_lock_file(path)?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(FileLock { file }),
+            Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    crate::tr!(
+                        "等待文件锁 {} 超时 / Timed out waiting for the file lock {}",
+                        path.display(),
+                        path.display()
+                    )
+                });
+            }
+        }
+    }
 }
 
 /// 让 OS 分配一个空闲端口。
@@ -545,6 +573,21 @@ mod tests {
         assert_eq!(lines.len(), 4, "{lines:?}");
         assert!(lines[0].ends_with(" one"));
         assert_eq!(lines[1..], ["progress 10%", "progress 20%", "last"]);
+    }
+
+    #[test]
+    fn a_short_lock_waits_for_its_holder_and_gives_up_on_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".lock");
+        let holder = lock_file(&path).unwrap();
+        assert!(lock_file_within(&path, Duration::from_millis(100)).is_err());
+        let waiter = {
+            let path = path.clone();
+            std::thread::spawn(move || lock_file_within(&path, Duration::from_secs(20)).is_ok())
+        };
+        std::thread::sleep(Duration::from_millis(150));
+        drop(holder);
+        assert!(waiter.join().unwrap());
     }
 
     #[test]

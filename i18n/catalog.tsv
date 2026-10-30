@@ -2185,4 +2185,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 {} 篇笔记	{} 篇笔记	{} notes	{} 篇筆記	{} 件のノート
 Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo	Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo	Qwen3 is no longer available on Intel NPU; switched to Whisper large-v3-turbo	Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo	Intel NPU では Qwen3 を利用できなくなったため、Whisper large-v3-turbo に切り替えました
 Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 模型。可用：{}	Qwen3 models are no longer available on Intel NPU. Available: {}	Intel NPU 不再支援 Qwen3 模型。可用：{}	Intel NPU では Qwen3 モデルを利用できなくなりました。利用可能：{}
+等待文件锁 {} 超时 / Timed out waiting for the file lock {}	等待文件锁 {} 超时	Timed out waiting for the file lock {}	等待檔案鎖 {} 逾時	ファイルロック {} の待機がタイムアウトしました
+授权被拒绝：{} / Authorization denied: {}	授权被拒绝：{}	Authorization denied: {}	授權被拒絕：{}	認可が拒否されました: {}
 识别方式 {} 不支持模型「{}」。可用：{}	识别方式 {} 不支持模型「{}」。可用：{}	The {} backend does not support model "{}". Available: {}	辨識方式 {} 不支援模型「{}」。可用：{}	音声認識方式 {} はモデル「{}」に対応していません。利用可能：{}

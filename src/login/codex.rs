@@ -238,11 +238,13 @@ fn refresh(tokens: &CodexTokens) -> Result<CodexTokens> {
     Ok(refreshed)
 }
 
-/// 刷新互斥：校对 worker 并发取认证头，避免 thundering refresh（refresh token
-/// 单次使用，并发刷新必然只有一个成功）。
-static REFRESH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Longer than one refresh request, so a waiter normally finds the holder's result.
+const REFRESH_LOCK_WAIT: Duration = Duration::from_secs(45);
 
 /// 获取可用凭据：临期/过期则在锁内复查后刷新并写回。
+///
+/// The refresh token is single-use, and proofreading workers, task processes and the
+/// desktop app all ask for tokens: the lock is a file, so only one of them refreshes.
 fn fresh_tokens() -> Result<CodexTokens> {
     let Some(tokens) = load_tokens()? else {
         return Err(CodexLoginRequired.into());
@@ -250,8 +252,12 @@ fn fresh_tokens() -> Result<CodexTokens> {
     if !needs_refresh(&tokens) {
         return Ok(tokens);
     }
-    let _guard = crate::runtime::lock_recover(&REFRESH_LOCK);
-    // 锁内复查：另一线程可能刚刷新完
+    let path = credential_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let _guard = crate::runtime::lock_file_within(&path.with_extension("lock"), REFRESH_LOCK_WAIT)?;
+    // 锁内复查：另一线程或进程可能刚刷新完
     let Some(current) = load_tokens()? else {
         return Err(CodexLoginRequired.into());
     };
@@ -334,6 +340,31 @@ fn pkce_challenge(verifier: &str) -> String {
         .encode(sha2::Sha256::digest(verifier.as_bytes()))
 }
 
+/// The authorization server answered this login with a refusal; waiting longer
+/// cannot change that. Holds what the server said, which may name the cause.
+#[derive(Debug)]
+struct AuthorizationDenied(String);
+
+impl std::fmt::Display for AuthorizationDenied {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Text from a URL reaches a terminal: no control characters, bounded length.
+        let cause: String = self
+            .0
+            .trim()
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(200)
+            .collect();
+        f.write_str(&crate::tr!(
+            "授权被拒绝：{} / Authorization denied: {}",
+            cause,
+            cause
+        ))
+    }
+}
+
+impl std::error::Error for AuthorizationDenied {}
+
 /// 从回调请求行解析授权码并校验 state（防 CSRF/错会话）。
 fn parse_callback_request(request_line: &str, expected_state: &str) -> Result<String> {
     let path = request_line.split_whitespace().nth(1).context(crate::tr!(
@@ -351,14 +382,15 @@ fn parse_callback_request(request_line: &str, expected_state: &str) -> Result<St
             .find(|(k, _)| k == name)
             .map(|(_, v)| v.into_owned())
     };
-    if let Some(error) = param("error") {
-        let description = param("error_description").unwrap_or_default();
-        bail!("授权被拒绝 / Authorization denied: {error} {description}");
-    }
+    // State first: anything without it is not an answer to this login, whatever it says.
     ensure!(
         param("state").as_deref() == Some(expected_state),
         crate::tr!("授权回调状态不匹配，请重试 / Authorization state mismatch; retry")
     );
+    if let Some(error) = param("error") {
+        let description = param("error_description").unwrap_or_default();
+        return Err(AuthorizationDenied(format!("{error} {description}")).into());
+    }
     param("code")
         .filter(|code| !code.is_empty())
         .context(crate::tr!(
@@ -396,10 +428,7 @@ fn exchange_code(code: &str, verifier: &str, port: u16) -> Result<CodexTokens> {
             ("grant_type", "authorization_code"),
             ("client_id", CLIENT_ID),
             ("code", code),
-            (
-                "redirect_uri",
-                &format!("http://localhost:{port}/auth/callback"),
-            ),
+            ("redirect_uri", &callback_url(port)),
             ("code_verifier", verifier),
         ])
         .map_err(|e| {
@@ -438,6 +467,31 @@ fn exchange_code(code: &str, verifier: &str, port: u16) -> Result<CodexTokens> {
     })
 }
 
+fn callback_url(port: u16) -> String {
+    format!("http://localhost:{port}/auth/callback")
+}
+
+/// The authorization page's address, with every value percent-encoded. Spaces are
+/// `%20`, not the form encoding's `+`, as in the codex CLI's own request.
+fn authorize_url(port: u16, challenge: &str, state: &str) -> String {
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs([
+            ("response_type", "code"),
+            ("client_id", CLIENT_ID),
+            ("redirect_uri", &callback_url(port)),
+            ("code_challenge", challenge),
+            ("code_challenge_method", "S256"),
+            ("state", state),
+            ("scope", OAUTH_SCOPE),
+            ("id_token_add_organizations", "true"),
+            ("codex_cli_simplified_flow", "true"),
+            ("originator", "codex_cli_rs"),
+        ])
+        .finish()
+        .replace('+', "%20");
+    format!("{AUTHORIZE_URL}?{query}")
+}
+
 /// 浏览器授权全流程：本地回调服务器 + PKCE + 令牌交换。
 fn browser_authorization(cancel: Option<&std::sync::atomic::AtomicBool>) -> Result<CodexTokens> {
     use std::io::{Read as _, Write as _};
@@ -452,11 +506,7 @@ fn browser_authorization(cancel: Option<&std::sync::atomic::AtomicBool>) -> Resu
 
     let verifier = crate::random_b64url(64)?;
     let state = crate::random_b64url(32)?;
-    let url = format!(
-        "{AUTHORIZE_URL}?response_type=code&client_id={CLIENT_ID}&redirect_uri=http://localhost:{port}/auth/callback&code_challenge={}&code_challenge_method=S256&state={state}&scope={}&id_token_add_organizations=true&codex_cli_simplified_flow=true&originator=codex_cli_rs",
-        pkce_challenge(&verifier),
-        OAUTH_SCOPE.replace(' ', "%20"),
-    );
+    let url = authorize_url(port, &pkce_challenge(&verifier), &state);
     crate::println_tr!(
         "正在打开浏览器完成 ChatGPT 授权（{} 分钟内有效，Ctrl+C 取消）…",
         CALLBACK_TIMEOUT.as_secs() / 60
@@ -478,19 +528,15 @@ fn browser_authorization(cancel: Option<&std::sync::atomic::AtomicBool>) -> Resu
                 let size = stream.read(&mut buf).unwrap_or(0);
                 let request = String::from_utf8_lossy(&buf[..size]);
                 let line = request.lines().next().unwrap_or_default();
-                let (body, result) = match parse_callback_request(line, &state) {
-                    Ok(code) => (
-                        crate::tr!(
-                            "Codex 登录成功，可以关闭此页。/ Login successful; you may close this page."
-                        ),
-                        Some(code),
-                    ),
-                    Err(_) => (
-                        crate::tr!(
-                            "登录失败，请回终端重试。/ Login failed; return to the terminal and retry."
-                        ),
-                        None,
-                    ),
+                let parsed = parse_callback_request(line, &state);
+                let body = if parsed.is_ok() {
+                    crate::tr!(
+                        "Codex 登录成功，可以关闭此页。/ Login successful; you may close this page."
+                    )
+                } else {
+                    crate::tr!(
+                        "登录失败，请回终端重试。/ Login failed; return to the terminal and retry."
+                    )
                 };
                 let body = format!(
                     "<html><body style=\"font-family:sans-serif;text-align:center;padding:4em\">{body}</body></html>"
@@ -502,8 +548,12 @@ fn browser_authorization(cancel: Option<&std::sync::atomic::AtomicBool>) -> Resu
                     )
                     .as_bytes(),
                 );
-                if let Some(code) = result {
-                    break code;
+                match parsed {
+                    Ok(code) => break code,
+                    // The refusal ends the wait; any other request (a stray tab, a
+                    // favicon) was not an answer, so the real one can still arrive.
+                    Err(error) if error.is::<AuthorizationDenied>() => return Err(error),
+                    Err(_) => {}
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -756,14 +806,56 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_cannot_write_control_characters_to_the_terminal() {
+        let shown = AuthorizationDenied("bad\u{1b}[2Jnews\n".repeat(100)).to_string();
+        assert!(!shown.chars().any(char::is_control), "{shown:?}");
+        assert!(shown.chars().count() < 450);
+    }
+
+    #[test]
+    fn authorize_url_encodes_every_value() {
+        let raw = authorize_url(1455, "chal-lenge_", "st&ate=1");
+        assert!(
+            raw.contains("redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"),
+            "{raw}"
+        );
+        assert!(raw.contains("scope=openid%20profile%20email"), "{raw}");
+        assert!(!raw.contains('+'), "{raw}");
+        let url = url::Url::parse(&raw).unwrap();
+        let param = |name: &str| {
+            url.query_pairs()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.into_owned())
+                .unwrap()
+        };
+        assert_eq!(param("redirect_uri"), "http://localhost:1455/auth/callback");
+        assert_eq!(param("scope"), OAUTH_SCOPE);
+        assert_eq!(param("state"), "st&ate=1");
+        assert_eq!(param("client_id"), CLIENT_ID);
+    }
+
+    #[test]
     fn callback_parsing_validates_state_path_and_errors() {
         let good = "GET /auth/callback?code=abc123&state=st HTTP/1.1";
         assert_eq!(parse_callback_request(good, "st").unwrap(), "abc123");
         // state 不匹配（CSRF/错会话）
         assert!(parse_callback_request(good, "other").is_err());
-        // 授权被拒绝
-        let denied = "GET /auth/callback?error=access_denied&state=st HTTP/1.1";
-        assert!(parse_callback_request(denied, "st").is_err());
+        // 授权被拒绝：原因保留，且可与无关请求区分
+        let denied =
+            "GET /auth/callback?error=access_denied&error_description=no%20plan&state=st HTTP/1.1";
+        let error = parse_callback_request(denied, "st").unwrap_err();
+        assert!(error.is::<AuthorizationDenied>());
+        assert!(
+            error.to_string().contains("access_denied no plan"),
+            "{error}"
+        );
+        // 没有正确 state 的拒绝不是对本次登录的回答
+        let forged = "GET /auth/callback?error=access_denied&state=other HTTP/1.1";
+        assert!(
+            !parse_callback_request(forged, "st")
+                .unwrap_err()
+                .is::<AuthorizationDenied>()
+        );
         // 路径不受支持
         let wrong_path = "GET /other?code=x&state=st HTTP/1.1";
         assert!(parse_callback_request(wrong_path, "st").is_err());
