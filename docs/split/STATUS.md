@@ -28,6 +28,25 @@ Update this file in the same commit as the work it records.
 | `component-menu-style` | Dropped, debt | `MaterialMenu` in P5 |
 | `component-switch-geometry` | Dropped, debt | `MaterialSwitch` in P5 |
 
+## P1 verification
+
+On kit merge `03b38ec` (which includes `origin/main` at `c6a1476`), Rust 1.99.1, Xcode 27.2 beta for Metal.
+
+- `desktop`: `cargo fmt --check`; `cargo test` 303 passed, 3 ignored (they need yt-dlp, ffmpeg or network);
+  `cargo clippy --all-targets --no-deps -- -D warnings`; `cargo check --features capture,performance --all-targets`.
+- Kit, affected packages only, on the earlier merge `f836c92` (`03b38ec` does not touch the text system):
+  `cargo test -p gpui-pre --lib text_system` 56, `-p gpui-fast --lib line_break` 15, `--lib text_system` 41.
+  `gpui-base` is not a workspace member, so `a_disabled_input_leaves_the_tab_order` passed with it added as
+  a member temporarily. `cargo clippy -p gpui-pre -p gpui-fast --lib` ran before the merges, with no findings.
+  The kit's full `cargo test --workspace` was not run, to save disk.
+- Native run, fixture library and isolated `HOME`/`XDG_*`: the normal build stayed alive with no panic until
+  stopped; the capture build exited 0. Looked at PNGs of home, library, reader, settings, rename dialog, image viewer and overflow
+  menu; tasks was captured but not opened. Driven with simulated input: reader
+  find (1/2, 2/2, highlights, scroll to match, close), inline formulas, text selection, wheel scroll, Escape
+  closing the viewer. A real reader line shows `11 分 39 秒` moving down whole and no line opening with punctuation.
+- Not exercised: a real conversion (no engine binary beside the app, so home shows its "cannot run" notice,
+  as it should), Windows and Linux builds, and the old stack for comparison.
+
 ## Next action
 
 Finish P2, then P3. Before P5, read the debts below.
@@ -43,7 +62,7 @@ Finish P2, then P3. Before P5, read the debts below.
   the kit's rule. Port it only if a frozen window is ever observed.
 - **`gpui-kit-material` is on with `default-features = false`** (`serde`, `gpui-fast`) until P5 uses it.
 - **Kit changes go upstream as one PR per concern** (plan decision 11): `05632a9` wrapping, `e016136`
-  disabled inputs.
+  disabled inputs. Both are separate, non-merge commits on `course2md-integration`.
 
 ## Debts for P5
 
