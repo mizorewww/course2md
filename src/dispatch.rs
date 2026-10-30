@@ -762,6 +762,15 @@ impl Ledger {
         if !(200..300).contains(&response.status) {
             receipt.state = State::Uncertain;
             self.save(&receipt)?;
+            // As for a lost response above: without per-request billing, a server
+            // error costs nothing to send again, so no one needs to be asked.
+            if resend == Resend::Free {
+                return Err(Failure::with_status(
+                    Some(response.status),
+                    true,
+                    rejection_message(response.status),
+                ));
+            }
             return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain")));
         }
         let value = match value {
@@ -1034,6 +1043,40 @@ mod tests {
     }
 
     #[test]
+    fn free_service_server_errors_resend_without_blocking_later_requests() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let payload = serde_json::json!({"text":"one"});
+        let spec = RequestSpec {
+            service: "llm",
+            purpose: "proofreading",
+            description: "segment",
+            endpoint: "https://example.test",
+            identity: &payload,
+            resend: Resend::Free,
+        };
+        let failed = || {
+            Ok(HttpResponse {
+                status: 502,
+                body: b"bad gateway".to_vec(),
+            })
+        };
+        let first = ledger
+            .send_described(&spec, failed, |_| Ok(()))
+            .unwrap_err();
+        assert!(first.retryable && !first.uncertain());
+        // The body of a failed response is never kept; the attempt stays unresolved
+        // so a later billed request still sees it.
+        let receipt = &receipts(dir.path()).unwrap()[0];
+        assert_eq!(receipt.state, State::Uncertain);
+        assert_eq!(receipt.http_status, Some(502));
+        assert!(receipt.response.is_none());
+        let resent = ledger.send_described(&spec, success, |_| Ok(())).unwrap();
+        assert!(!resent.replayed);
+        assert_eq!(receipts(dir.path()).unwrap()[0].attempt, 2);
+    }
+
+    #[test]
     fn uncertain_attempt_requires_exact_single_use_authorization() {
         let dir = tempfile::tempdir().unwrap();
         let control = dir.path().join("control.json");
@@ -1273,6 +1316,12 @@ mod ephemeral_tests {
         assert!(request(429, b"{}", Resend::AskUser).unwrap_err().retryable);
         let unknown = request(503, b"", Resend::AskUser).unwrap_err();
         assert!(unknown.uncertain() && !unknown.retryable);
+        // A free service's server error is an ordinary retryable failure, not a
+        // question about charges: the transport branch already treats it so.
+        let free = request(503, b"", Resend::Free).unwrap_err();
+        assert!(free.retryable && !free.uncertain());
+        assert_eq!(free.status, Some(503));
+        assert_eq!(free.kind, crate::artifact::FailureKind::Service);
         // Nothing persists between calls: the same payload sends again.
         assert!(request(200, br#"{"ok":true}"#, Resend::AskUser).is_ok());
         let lost = TaskControl::default()
