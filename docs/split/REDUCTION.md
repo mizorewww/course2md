@@ -3,8 +3,8 @@
 From the audit of 2026-10-31 at `699adba` (78,281 production Rust lines then; baseline
 78,518). Estimates, not prototyped; about ±15% on lines removed. **Top with all features
 kept: about 44,500 lines, true deletion 43%; 42,100 in this repo (46%) after moving 2,400 to
-owned repos.** 60% is not reachable by deletion under the no-drop rule. Lever 9 is a
-placeholder until the kit audit reports.
+owned repos.** 60% is not reachable by deletion under the no-drop rule. See "Working target"
+for the figure after the decisions and the kit audit.
 
 Do levers 1 and 3 before P3: they change crate boundaries.
 
@@ -18,7 +18,7 @@ Do levers 1 and 3 before P3: they change crate boundaries.
 | 6 | Settings, setup, library (22,728 → 12,306): form -2,312, onboarding on shared parts -1,944, async surface -1,886, shell -1,662, note row -1,102, service test -645, menus -505, service list -431, Tree -335 | -10,422 | gpui-kit Tree |
 | 7 | Import and task pages (12,024 → 7,155): recovery surface, options form, subtitles, card, follow state | -4,799 | |
 | 8 | Reader (8,045 → 3,950): viewer, render, position, menus, gallery, export, shell | -4,095 | walkdir |
-| 9 | Theme, widgets, `note_text` (6,235 → ?) | -4,235 placeholder | gpui-kit |
+| 9 | Theme, widgets, `note_text` (6,235 → about 0): `theme` -2,070, `note_text` -1,371, `choice_group` -511, `folder_tree` -400, `motion` -390, `window_controls` -330, `select_field` -240, `focus_scroll` -221, `palettes` -196, `reader_images` -150, `a11y`+`scroll` -134, `icons` -129, `math` -100 | -6,242 | gpui-kit |
 | 10 | Move to owned repos: `subtitle` 560, `scene` 300, `download`+`hub` 635, viewer and image cache 510, form primitives 400 | -2,405 moved | |
 
 ## Decisions applied to the audit
@@ -37,7 +37,45 @@ owner's no-drop rule:
   Windows no worse than today, Whisper on NPU, and existing users' model caches handled.
   Without it the target becomes 46,700 total, 44,300 in repo.
 
-Working target after these: **about 45,000 lines (-43%)**, adjusted when lever 9 is known.
+## Working target
+
+**About 43,200 lines (-45%)**, about 40,800 in this repo (-48%) after lever 10. Componentization
+alone is about -11,450 (14.6%, range 13.3-16.5%): lever 9 plus 4,200-6,700 of page view code
+already counted in levers 6-8. So the 20% first target needs the logic levers as well.
+
+## Kit audit (2026-10-31)
+
+Almost every "candidate for the kit" was false. **No kit PR is required.**
+
+- CJK wrap and disabled-input Tab stop reverted from the kit. Plain `gpui-fast` already keeps
+  `，` off line starts; NBSP is already a word character (`line_wrapper.rs:552`). `glued()`
+  (`activity.rs:369`), `SEPARATOR` (`:362`), `theme.rs:1209` go; status lines render parts as
+  `flex_wrap` children with `max_w_full`, one helper. Disabled inputs stay Tab stops.
+- `[patch]` table: 6 entries suffice on macOS (`gpui-fast`, `-apple`, `-macos`, `gpui-base`
+  under crates.io; `gpui-kit`, `gpui-base` under the git source). Windows and Linux are
+  unverified and need CI. Vendored crates depending on each other by path was tried and
+  rejected: 9 packages resolve twice.
+- Debts: `button_size` replaces `label_text_size`; `MaterialMenu::style`/`density` replaces
+  `MenuStyle`; `MaterialSwitch::icons`; danger rows use a red `.leading` icon with existing
+  confirmation; drop dismiss-tooltip-on-any-key; macOS redraw fallback stays dropped.
+- Candidates: scrollbar policy → `Theme::sync_scrollbar_appearance` (`component/theme/mod.rs:373`,
+  also fixes D12); `scrolled_card_top` → `RoundedFrameCover`, `ScrollableMask`; disclosure →
+  `motion::disclosure`, `disclosure_chevron`; `ModalBackground`, `bounded_scroll_panel`,
+  `gutter_scrollbar` → delete or inline; `transfer_status`, image viewer, `reader_images`
+  stay in the app, smaller.
+- `note_text` → `TextView` + about 120-line math plugin, proven in a native spike
+  (`MarkdownPlugin` on `Node::InlineMath`, `InlineElement::with_baseline`; drag across
+  `TextView`s; `SelectionFormat::Source`). Must handle: formula in a Markdown list item fell back
+  to plain text; `.markdown()` for `$$` on copy; `$5 and $10` must return `None` per
+  `math::pieces`; escape plain text; find highlight is background only and skips formulas;
+  wide formulas keep their size; selection and `reveal_range` inside a virtualized `list` untested
+  (largest risk).
+- Awkward call sites to accept: controlled `MenuPopup`/`ExposedDropdown` (one `use_keyed_state`
+  helper, about 11 sites); 12 `context_menu(` sites stay on Kit's `PopupMenu`; `ExposedDropdown`
+  takes strings only, so options with icons use `MenuPopup`; `ListTrailing` has no custom element,
+  so select rows use `list_tile` and `TileScale`; `use ColorRole::*` at about 460 sites.
+- Optional kit PRs only: delete `spoken()` U+2060 handling from `components/text.rs` once glue is
+  gone; `ListTrailing::Custom`.
 
 ## Libraries rejected after checking coverage
 
