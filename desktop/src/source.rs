@@ -568,15 +568,32 @@ fn online_metadata(
 /// The cache file for `key`: the same cover or track reuses one file instead
 /// of leaving a new one behind on every read.
 fn cache_file(kind: &str, key: &str, extension: &str) -> Result<PathBuf> {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::hash::DefaultHasher::new();
-    key.hash(&mut hasher);
     let dir = course2md::config::cache_dir().join(kind);
     std::fs::create_dir_all(&dir)?;
-    Ok(dir.join(format!("{:016x}.{extension}", hasher.finish())))
+    Ok(dir.join(cache_name(key, extension)))
 }
 
-/// Removes cached covers and subtitles that have not been written for
+/// A digest rather than `DefaultHasher`, whose output may change with the
+/// toolchain and would strand every cached file.
+fn cache_name(key: &str, extension: &str) -> String {
+    let digest = course2md::execution::digest(key.as_bytes());
+    format!("{}.{extension}", &digest[..16])
+}
+
+/// Whether `file` is already cached. A hit counts as use, so a file still being
+/// reused does not age out of the cache.
+fn cache_hit(file: &Path) -> bool {
+    if !file.is_file() {
+        return false;
+    }
+    let _ = std::fs::File::options()
+        .write(true)
+        .open(file)
+        .and_then(|file| file.set_modified(SystemTime::now()));
+    true
+}
+
+/// Removes cached covers and subtitles that have not been used for
 /// CACHE_MAX_AGE. Notes keep their own copies, and drafts keep subtitle text.
 pub fn prune_cache() {
     let Some(cutoff) = SystemTime::now().checked_sub(CACHE_MAX_AGE) else {
@@ -604,7 +621,7 @@ pub fn prune_cache() {
 pub(crate) fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
     check_cancel(cancel)?;
     let target = cache_file("covers", url, "jpg")?;
-    if target.is_file() {
+    if cache_hit(&target) {
         return Ok(target);
     }
     let response = ureq::AgentBuilder::new()
@@ -723,7 +740,7 @@ fn inspect_local(input: String, cancel: &AtomicBool) -> Result<Source> {
     );
     source.subtitles = local_subtitle_evidence(&path, &meta, &source.identity);
     let target = cache_file("covers", &source.identity, "jpg")?;
-    if target.is_file() {
+    if cache_hit(&target) {
         source.cover = Some(target);
         check_cancel(cancel)?;
         return Ok(source);
@@ -1368,4 +1385,26 @@ mod tests {
         assert_eq!(tracks[0].language.as_deref(), Some("zh-Hans"));
     }
 
+    #[test]
+    fn cache_names_do_not_depend_on_the_toolchain() {
+        assert_eq!(cache_name("key", "jpg"), "2c70e12b7a0646f9.jpg");
+    }
+
+    #[test]
+    fn a_cache_hit_keeps_the_file_from_aging_out() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("cover.jpg");
+        assert!(!cache_hit(&file));
+        std::fs::write(&file, b"cover").unwrap();
+        let old = SystemTime::now() - CACHE_MAX_AGE * 2;
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert!(cache_hit(&file));
+        let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+        assert!(modified > SystemTime::now() - CACHE_MAX_AGE);
+    }
 }
