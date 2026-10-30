@@ -150,13 +150,13 @@ fn error_kind(error: &anyhow::Error) -> FailureKind {
     FailureKind::Other
 }
 
-/// Repair actions follow the actual response, never a platform-wide login tip.
-/// Stored messages keep the tool's own lines, which are what this matches.
 /// Local sources use a content digest identity; online sources use platform ids.
 pub fn is_local_identity(identity: &str) -> bool {
     identity.starts_with("local:sha256:")
 }
 
+/// Repair actions follow the actual response, never a platform-wide login tip.
+/// Stored messages keep the tool's own lines, which are what this matches.
 /// Legacy stored subtitle text predates typed causes. New code must carry
 /// [`FailureKind`] from the probe; this helper is only for old workspace strings.
 pub(crate) fn legacy_login_failure_from_text(message: &str) -> bool {

@@ -232,8 +232,6 @@ pub fn content_outline(
         .collect()
 }
 
-/// Display an immutable UTC instant using the system timezone's rules for that
-/// date, rather than applying today's offset to every historical timestamp.
 /// Calendar date in local time, without slicing a formatted timestamp.
 pub fn date_local(milliseconds: u64) -> String {
     use chrono::Datelike;
@@ -249,6 +247,8 @@ pub fn date_local(milliseconds: u64) -> String {
         .to_string()
 }
 
+/// Display an immutable UTC instant using the system timezone's rules for that
+/// date, rather than applying today's offset to every historical timestamp.
 pub fn timestamp_local(milliseconds: u64) -> String {
     timestamp_in_timezone(milliseconds, &chrono::Local)
 }
