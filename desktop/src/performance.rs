@@ -170,6 +170,12 @@ pub fn start(window: &mut Window, cx: &App) {
                             })).collect::<Vec<_>>(),
                             "motion_events_dropped": motion_dropped,
                             "frame_events": events.into_iter().map(|event| match event {
+                                gpui::profiler::FrameEvent::Complete(frame) => json!({
+                                    "kind": "complete",
+                                    "age_ms": frame.start.elapsed().as_secs_f64() * 1000.,
+                                    "duration_ms": frame.duration().as_secs_f64() * 1000.,
+                                    "presentation_wait_ms": frame.presentation_wait.as_secs_f64() * 1000.,
+                                }),
                                 gpui::profiler::FrameEvent::Draw(frame) => json!({
                                     "kind": "draw",
                                     "age_ms": frame.draw_start.elapsed().as_secs_f64() * 1000.,
@@ -180,21 +186,7 @@ pub fn start(window: &mut Window, cx: &App) {
                                     "kind": "present",
                                     "age_ms": frame.present_start.elapsed().as_secs_f64() * 1000.,
                                     "present_ms": frame.present_duration().as_secs_f64() * 1000.,
-                                    "platform_stages": {
-                                        "transaction": frame.platform_stages.presents_with_transaction,
-                                        "drawable_available": frame.platform_stages.drawable_available,
-                                        "window_lock_ms": frame.platform_stages.window_lock.as_secs_f64() * 1000.,
-                                        "next_drawable_ms": frame.platform_stages.next_drawable.as_secs_f64() * 1000.,
-                                        "encode_ms": frame.platform_stages.encode.as_secs_f64() * 1000.,
-                                        "commit_ms": frame.platform_stages.commit.as_secs_f64() * 1000.,
-                                        "wait_until_scheduled_ms": frame.platform_stages.wait_until_scheduled.as_secs_f64() * 1000.,
-                                        "drawable_present_ms": frame.platform_stages.drawable_present.as_secs_f64() * 1000.,
-                                        "schedule_present_ms": frame.platform_stages.schedule_present.as_secs_f64() * 1000.,
-                                        "autorelease_drain_ms": frame.platform_stages.autorelease_drain.as_secs_f64() * 1000.,
-                                        "other_ms": frame.present_duration()
-                                            .saturating_sub(frame.platform_stages.measured_duration())
-                                            .as_secs_f64() * 1000.,
-                                    },
+                                    "successful_new_frame": frame.successful_new_frame,
                                 }),
                             }).collect::<Vec<_>>(),
                             "draw": histogram!(frames.draw_duration_histogram),

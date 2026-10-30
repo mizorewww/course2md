@@ -15,8 +15,8 @@ macro_rules! icons {
             ),)+
         ];
         $(
-            pub fn $name() -> gpui_component::Icon {
-                gpui_component::Icon::default().path(concat!("icons/", $file, ".svg"))
+            pub fn $name() -> gpui_kit::component::Icon {
+                gpui_kit::component::Icon::default().path(concat!("icons/", $file, ".svg"))
             }
         )+
     };
@@ -135,10 +135,10 @@ impl AssetSource for Assets {
         {
             return Ok(Some(Cow::Borrowed(bytes)));
         }
-        gpui_kit_assets::Assets.load(path)
+        gpui_kit::assets::Assets.load(path)
     }
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        let mut paths = gpui_kit_assets::Assets.list(path)?;
+        let mut paths = gpui_kit::assets::Assets.list(path)?;
         paths.extend(
             ICONS
                 .iter()
@@ -153,6 +153,6 @@ impl AssetSource for Assets {
 }
 
 /// Brand colors are intrinsic to the platform mark, independent of UI themes.
-pub fn bilibili() -> gpui_component::Icon {
+pub fn bilibili() -> gpui_kit::component::Icon {
     bilibili_mark().text_color(gpui::rgb(0x00a1d6))
 }

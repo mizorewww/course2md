@@ -1,7 +1,7 @@
 //! Reading navigation is bound to one immutable note version, independently of exports.
 use super::*;
 use crate::{notes::PreviewBlock, reader_navigation as nav, theme::*};
-use gpui_component::{
+use gpui_kit::component::{
     button::*,
     menu::{DropdownMenu, PopupMenu, PopupMenuItem},
     scroll::{Scrollbar, ScrollbarMode},
@@ -586,9 +586,10 @@ impl State {
             this.reader_layout_changed(window, cx)
         });
         // Text scale changes reach the window's rem size through the theme.
-        let scale = cx.observe_global_in::<gpui_component::Theme>(window, |this, window, cx| {
-            this.reader_layout_changed(window, cx)
-        });
+        let scale = cx
+            .observe_global_in::<gpui_kit::component::Theme>(window, |this, window, cx| {
+                this.reader_layout_changed(window, cx)
+            });
         let gallery_list = ListState::new(1, ListAlignment::Top, px(1000.));
         let desktop = cx.weak_entity();
         gallery_list.set_scroll_handler(move |_, _, cx| {
@@ -3637,7 +3638,7 @@ impl Desktop {
                 )
                 .when(overflows, |region| {
                     region.child(
-                        gpui_component::scroll::Scrollbar::vertical(&controls_scroll)
+                        gpui_kit::component::scroll::Scrollbar::vertical(&controls_scroll)
                             .mode(ScrollbarMode::Always),
                     )
                 })
@@ -6356,7 +6357,9 @@ impl Desktop {
                             // The press pans the image; it must not also start
                             // selecting the transcript below it.
                             window.prevent_default();
-                            gpui_component::global_state::GlobalState::suppress_text_selection(cx);
+                            gpui_kit::component::global_state::GlobalState::suppress_text_selection(
+                                cx,
+                            );
                             this.notify_image_viewer(cx);
                         }
                     }
@@ -7158,7 +7161,7 @@ mod flow_tests {
 
     impl Render for TitleBarHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            use gpui_component::h_flex;
+            use gpui_kit::component::h_flex;
             let fixed = |name: &'static str, width: f32| {
                 div()
                     .flex_shrink_0()

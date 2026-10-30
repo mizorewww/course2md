@@ -4,10 +4,9 @@ use crate::theme::{
     ACCENT, CONTROL, GRAY, INK, SECONDARY_CONTAINER, TEXT_AUX, TEXT_BODY, accessible_text, color,
 };
 use gpui::{prelude::*, *};
-use gpui_component::{Sizable, h_flex, v_flex};
+use gpui_kit::component::{Sizable, h_flex, v_flex};
 use std::time::Duration;
 
-pub const ENTER_MS: u64 = 160;
 const SPINNER_TURN_MS: u64 = 1000;
 const INDETERMINATE_SWEEP_MS: u64 = 1400;
 
@@ -156,7 +155,7 @@ pub fn icon_spinner(id: impl Into<ElementId>, size: Rems, cx: &App) -> AnyElemen
     spin(crate::icons::loader_circle().size(size), id, cx)
 }
 
-fn spin(icon: gpui_component::Icon, id: impl Into<ElementId>, cx: &App) -> AnyElement {
+fn spin(icon: gpui_kit::component::Icon, id: impl Into<ElementId>, cx: &App) -> AnyElement {
     let icon = icon.text_color(color(ACCENT));
     if cx.reduce_motion() {
         return icon.into_any_element();
@@ -446,7 +445,7 @@ mod tests {
     };
     use std::{cell::Cell, rc::Rc, time::Duration};
 
-    #[derive(IntoElement)]
+    #[derive(gpui::IntoElement)]
     struct StatefulChild {
         target: f32,
         mounts: Rc<Cell<usize>>,

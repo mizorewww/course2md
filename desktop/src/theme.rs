@@ -1,7 +1,7 @@
 //! Semantic design tokens and animated appearance for all desktop pages.
 use crate::palettes::{PaletteId, ThemePreferences};
 use gpui::{App, Pixels, Rems, Rgba, Window, px, rems, rgb};
-use gpui_component::{Theme, ThemeMode};
+use gpui_kit::component::{Theme, ThemeMode};
 use std::{cell::RefCell, time::Instant};
 #[path = "choice_group.rs"]
 mod choice_group;
@@ -205,7 +205,7 @@ fn sync_component_theme(dark: bool, cx: &mut App) {
     macro_rules! set {
         ($value:expr => $($field:ident),+ $(,)?) => {{ let value = $value; $(colors.$field = value.into();)+ }};
     }
-    set!(color(CANVAS) => background, title_bar, tab_bar, status_bar, tiles);
+    set!(color(CANVAS) => background, title_bar, tab_bar, status_bar);
     set!(color(SURFACE) => button, popover, list, table, accordion, group_box, tab_active, switch_thumb, slider_thumb);
     set!(color(INSET) => sidebar, table_head, table_foot, description_list_label, list_head, list_even, table_even, tab, secondary, button_secondary);
     set!(color(INK) => foreground, button_foreground, popover_foreground, secondary_foreground, button_secondary_foreground, sidebar_foreground, group_box_foreground, table_head_foreground, table_foot_foreground, tab_active_foreground);
@@ -231,42 +231,6 @@ fn sync_component_theme(dark: bool, cx: &mut App) {
     colors.scrollbar = gpui::hsla(0., 0., 0., 0.);
     theme.tokens = theme.colors.into();
     Theme::sync_base(cx);
-    cx.set_global(menu_style(dark));
-}
-
-/// Every dropdown, context menu and submenu: one elevated container, 40px rows
-/// with a single 8% state layer, tonal checked rows and a short entrance.
-fn menu_style(dark: bool) -> gpui_component::menu::MenuStyle {
-    let ink = color(INK);
-    let layer = |alpha: f32| Rgba { a: alpha, ..ink };
-    gpui_component::menu::MenuStyle {
-        // M3 menus sit on surface-container; dark elevation reads as a lighter tone.
-        surface: if dark {
-            blend(color(SURFACE), ink, 0.06)
-        } else {
-            color(SURFACE)
-        }
-        .into(),
-        radius: MENU_RADIUS,
-        padding: px(6.),
-        // M3 menu items are 48px tall.
-        item_height: rems(48. / 14.).into(),
-        item_radius: px(10.),
-        item_padding: rems(12. / 14.).into(),
-        gap: rems(12. / 14.).into(),
-        text_size: TEXT_BODY.into(),
-        icon_size: rems(18. / 14.).into(),
-        icon_color: color(GRAY).into(),
-        highlight: layer(0.08).into(),
-        checked: color(SECONDARY_CONTAINER).into(),
-        checked_highlight: blend(color(SECONDARY_CONTAINER), ink, 0.08).into(),
-        checked_foreground: color(ON_SECONDARY_CONTAINER).into(),
-        danger: color(DANGER).into(),
-        disabled: layer(0.38).into(),
-        separator: color(HAIRLINE).into(),
-        min_width: px(220.),
-        enter: std::time::Duration::from_millis(crate::motion::ENTER_MS),
-    }
 }
 
 /* ---------- Geometry (px; does not scale with text) ---------- */
@@ -284,8 +248,6 @@ pub const BUTTON_LARGE: Rems = rems(56. / 14.);
 pub const BUTTON_MEDIUM: Rems = rems(48. / 14.);
 pub const RADIUS_HERO: Pixels = px(28.);
 pub const RADIUS_SMALL: Pixels = px(8.);
-/// Menus and the select fields that open them.
-pub const MENU_RADIUS: Pixels = px(16.);
 pub const FIELD_RADIUS: Pixels = px(12.);
 /// A select at the trailing end of a settings row keeps a readable width
 /// instead of spanning the row.
@@ -398,17 +360,51 @@ pub const TEXT_HEADLINE: Rems = rems(30. / 14.);
 pub const TEXT_SETTINGS_BODY: Rems = rems(16. / 14.);
 pub const TEXT_SETTINGS_AUX: Rems = TEXT_BODY;
 
+/// Kit's `Button` fixes its label to one of its sizes' text roles and offers no
+/// override, so a label asking for body size or above takes the largest role
+/// (1rem). Exact sizes return with `MaterialButton` in the Material phase.
+pub trait ButtonLabelSize {
+    fn label_text_size(self, size: Rems) -> Self;
+}
+impl ButtonLabelSize for gpui_kit::component::button::Button {
+    fn label_text_size(self, size: Rems) -> Self {
+        use gpui_kit::component::Sizable as _;
+        if size.0 >= TEXT_BODY.0 {
+            self.with_size(gpui_kit::component::Size::Large)
+        } else {
+            self
+        }
+    }
+}
+
+/// A destructive menu row. Kit's menu items have no danger role, so the row
+/// carries its own color.
+pub fn danger_menu_item(
+    label: impl Into<gpui::SharedString>,
+    icon: gpui_kit::component::Icon,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    use gpui::{ParentElement as _, Styled as _};
+    let label = label.into();
+    gpui_kit::component::menu::PopupMenuItem::element(move |_, _| {
+        gpui_kit::component::h_flex()
+            .gap_x_1()
+            .text_color(color(DANGER))
+            .child(icon.clone())
+            .child(label.clone())
+    })
+}
+
 /// Gives a shared control the settings reading size. Controls size their own
 /// labels, so the role cannot be inherited from the enclosing settings card.
 pub trait SettingsText {
     fn settings_text(self) -> Self;
 }
-impl SettingsText for gpui_component::button::Button {
+impl SettingsText for gpui_kit::component::button::Button {
     fn settings_text(self) -> Self {
         self.label_text_size(TEXT_SETTINGS_BODY)
     }
 }
-impl SettingsText for gpui_component::input::Input {
+impl SettingsText for gpui_kit::component::input::Input {
     fn settings_text(self) -> Self {
         gpui::Styled::text_size(self, TEXT_SETTINGS_BODY)
     }
@@ -572,10 +568,10 @@ impl TileScale {
         id: impl Into<gpui::ElementId>,
         outer: [bool; 4],
         cx: &App,
-    ) -> gpui_component::button::Button {
+    ) -> gpui_kit::component::button::Button {
         use gpui::Styled;
         let button = custom_fill(
-            gpui_component::button::Button::new(id),
+            gpui_kit::component::button::Button::new(id),
             color(SURFACE),
             color(INK),
             true,
@@ -616,7 +612,7 @@ impl TileScale {
     /// labels wrap.
     pub fn row(self) -> gpui::Div {
         use gpui::prelude::*;
-        gpui_component::h_flex()
+        gpui_kit::component::h_flex()
             .flex_1()
             .w_full()
             .min_w_0()
@@ -635,7 +631,7 @@ impl TileScale {
     ) -> gpui::Div {
         use gpui::prelude::*;
         let id = id.into();
-        gpui_component::v_flex()
+        gpui_kit::component::v_flex()
             .flex_1()
             .min_w_0()
             .gap(rems(2. / 14.))
@@ -655,7 +651,7 @@ pub use tile_group::TileGroup;
 mod tile_group {
     use super::{SECTION_TITLE_GAP, SETTING_ITEM_INSET, TILE_GAP, TileScale, list_corners};
     use gpui::{AnyElement, App, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
-    use gpui_component::v_flex;
+    use gpui_kit::component::v_flex;
 
     /// Builds a tile's content once the group knows which corners are outside.
     type TileBuilder = Box<dyn FnOnce([bool; 4]) -> AnyElement>;
@@ -678,7 +674,7 @@ mod tile_group {
     /// of tiles, each item on its own surface with 24px outer and 6px inner
     /// corners and 2px between tiles. Settings pages and the workbench's
     /// processing options share it at their own `TileScale`.
-    #[derive(IntoElement)]
+    #[derive(gpui::IntoElement)]
     pub struct TileGroup {
         id: &'static str,
         title: &'static str,
@@ -840,7 +836,7 @@ pub fn tile_button(
     id: impl Into<gpui::ElementId>,
     outer: [bool; 4],
     cx: &App,
-) -> gpui_component::button::Button {
+) -> gpui_kit::component::button::Button {
     TileScale::Regular.button(id, outer, cx)
 }
 
@@ -850,15 +846,15 @@ pub fn tile_disclosure(
     outer: [bool; 4],
     open: bool,
     cx: &App,
-) -> gpui_component::button::Button {
-    use gpui_component::Selectable;
+) -> gpui_kit::component::button::Button {
+    use gpui_kit::component::Selectable;
     tile_button(id, outer, cx).selected(open)
 }
 
 /// An explanation inside a tile: the information icon and supporting text.
 pub fn tile_info(id: impl Into<gpui::ElementId>, text: impl Into<gpui::SharedString>) -> gpui::Div {
     use gpui::prelude::*;
-    gpui_component::h_flex()
+    gpui_kit::component::h_flex()
         .w_full()
         .min_w_0()
         .items_start()
@@ -879,7 +875,7 @@ pub fn tile_info(id: impl Into<gpui::ElementId>, text: impl Into<gpui::SharedStr
 }
 
 /// The trailing chevron of a tile that opens something.
-pub fn tile_chevron() -> gpui_component::Icon {
+pub fn tile_chevron() -> gpui_kit::component::Icon {
     use gpui::Styled;
     crate::icons::chevron_right()
         .size(rems(20. / 14.))
@@ -888,7 +884,7 @@ pub fn tile_chevron() -> gpui_component::Icon {
 }
 
 /// The chevron of an in-place disclosure; it turns over when open.
-pub fn disclosure_chevron(open: bool) -> gpui_component::Icon {
+pub fn disclosure_chevron(open: bool) -> gpui_kit::component::Icon {
     use gpui::Styled;
     if open {
         crate::icons::chevron_up()
@@ -935,7 +931,7 @@ mod choice_tile {
         AnyElement, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement,
         SharedString, StatefulInteractiveElement, Styled, div, prelude::FluentBuilder,
     };
-    use gpui_component::v_flex;
+    use gpui_kit::component::v_flex;
 
     /// One choice in a connected group of tiles, as on the canvas: tonal
     /// selection on the secondary container, a leading icon, the label with
@@ -945,7 +941,7 @@ mod choice_tile {
         id: ElementId,
         outer: [bool; 4],
         icon: Option<AnyElement>,
-        tinted: Option<(gpui_component::Icon, Tint, Pixels)>,
+        tinted: Option<(gpui_kit::component::Icon, Tint, Pixels)>,
         title: SharedString,
         description: Option<SharedString>,
         status: Option<AnyElement>,
@@ -990,7 +986,12 @@ mod choice_tile {
         /// A category icon in its tinted circle. While the tile is selected
         /// the circle turns to the surface, so it stays distinct from the
         /// secondary container behind it.
-        pub fn tinted_icon(mut self, icon: gpui_component::Icon, tint: Tint, size: Pixels) -> Self {
+        pub fn tinted_icon(
+            mut self,
+            icon: gpui_kit::component::Icon,
+            tint: Tint,
+            size: Pixels,
+        ) -> Self {
             self.tinted = Some((icon, tint, size));
             self
         }
@@ -1160,7 +1161,7 @@ pub fn is_dark_paint() -> bool {
 /// rems where the circle shares a ruler with text, so both follow the text
 /// scale.
 pub fn tinted_icon(
-    icon: gpui_component::Icon,
+    icon: gpui_kit::component::Icon,
     tint: Tint,
     size: impl Into<gpui::AbsoluteLength>,
 ) -> gpui::Div {
@@ -1408,9 +1409,9 @@ pub fn init(cx: &mut App) {
 }
 
 /// One baseline for ordinary actions; content buttons explicitly opt into auto height.
-pub fn control(id: impl Into<gpui::ElementId>) -> gpui_component::button::Button {
+pub fn control(id: impl Into<gpui::ElementId>) -> gpui_kit::component::button::Button {
     use gpui::Styled;
-    gpui_component::button::Button::new(id)
+    gpui_kit::component::button::Button::new(id)
         .h(CONTROL_HEIGHT)
         .min_h(CONTROL_HEIGHT)
         .min_w(CONTROL_HEIGHT)
@@ -1425,10 +1426,10 @@ pub fn control(id: impl Into<gpui::ElementId>) -> gpui_component::button::Button
 /// The outlined field shared with selects: transparent, a control-strength
 /// outline and 12px corners; focus draws the accent ring.
 pub fn text_input(
-    state: &gpui::Entity<gpui_component::input::InputState>,
-) -> gpui_component::input::Input {
+    state: &gpui::Entity<gpui_kit::component::input::InputState>,
+) -> gpui_kit::component::input::Input {
     use gpui::Styled;
-    gpui_component::input::Input::new(state)
+    gpui_kit::component::input::Input::new(state)
         .h(rems(48. / 14.))
         .min_h(rems(48. / 14.))
         .rounded(FIELD_RADIUS)
@@ -1443,8 +1444,8 @@ pub fn text_input(
 pub fn labeled_input(
     id: impl Into<gpui::ElementId>,
     label: impl Into<gpui::SharedString>,
-    state: &gpui::Entity<gpui_component::input::InputState>,
-    input: gpui_component::input::Input,
+    state: &gpui::Entity<gpui_kit::component::input::InputState>,
+    input: gpui_kit::component::input::Input,
     window: &gpui::Window,
     cx: &App,
 ) -> gpui::Div {
@@ -1464,7 +1465,7 @@ pub fn labeled_input(
 /// A section title led by its category icon, as on diagnostic groups.
 pub fn section_heading(
     id: impl Into<gpui::ElementId>,
-    icon: gpui_component::Icon,
+    icon: gpui_kit::component::Icon,
     title: impl Into<gpui::SharedString>,
 ) -> gpui::Div {
     use gpui::{prelude::*, *};
@@ -1497,7 +1498,7 @@ pub fn section_title(
 /// M3 search bar: a filled, borderless pill with a leading search icon. The
 /// field's own frame is off, so the bar draws the focus outline itself.
 pub fn search_field(
-    state: &gpui::Entity<gpui_component::input::InputState>,
+    state: &gpui::Entity<gpui_kit::component::input::InputState>,
     label: impl Into<gpui::SharedString>,
     height: Rems,
     window: &Window,
@@ -1532,7 +1533,7 @@ pub fn search_field(
         )
         .child(
             gpui::div().flex_1().min_w_0().child(
-                gpui_component::input::Input::new(state)
+                gpui_kit::component::input::Input::new(state)
                     .appearance(false)
                     .aria_label(label.into())
                     .w_full()
@@ -1547,7 +1548,7 @@ pub fn search_field(
 /// Callers chain their own gap and contents on top of the shared frame.
 pub fn card_surface() -> gpui::Div {
     use gpui::Styled;
-    gpui_component::v_flex()
+    gpui_kit::component::v_flex()
         .w_full()
         .p_4()
         .bg(color(SURFACE))
@@ -1592,9 +1593,9 @@ pub fn selection_card(
 }
 
 /// The single forward action of a page or region, in the active theme's accent.
-pub fn primary_pill(id: impl Into<gpui::ElementId>) -> gpui_component::button::Button {
+pub fn primary_pill(id: impl Into<gpui::ElementId>) -> gpui_kit::component::button::Button {
     use gpui::Styled;
-    use gpui_component::button::ButtonVariants;
+    use gpui_kit::component::button::ButtonVariants;
     control(id).primary().px(rems(16. / 14.)).gap(ICON_GAP)
 }
 
@@ -1602,14 +1603,14 @@ pub fn primary_pill(id: impl Into<gpui::ElementId>) -> gpui_component::button::B
 /// to 20%, so the token is also set as the background. With state layers,
 /// hover and press add 8% and 10% of the content color, as in M3.
 fn custom_fill(
-    button: gpui_component::button::Button,
+    button: gpui_kit::component::button::Button,
     bg: gpui::Rgba,
     fg: gpui::Rgba,
     state_layers: bool,
     cx: &App,
-) -> gpui_component::button::Button {
+) -> gpui_kit::component::button::Button {
     use gpui::Styled;
-    use gpui_component::button::{ButtonCustomVariant, ButtonVariants};
+    use gpui_kit::component::button::{ButtonCustomVariant, ButtonVariants};
     let layer = |amount| {
         if state_layers {
             blend(bg, gpui::Rgba { a: 1., ..fg }, amount)
@@ -1635,9 +1636,9 @@ pub fn nav_action(
     id: impl Into<gpui::ElementId>,
     selected: bool,
     cx: &App,
-) -> gpui_component::button::Button {
+) -> gpui_kit::component::button::Button {
     use gpui::Styled;
-    use gpui_component::Sizable;
+    use gpui_kit::component::Sizable;
     let (bg, fg) = if selected {
         (color(SECONDARY_CONTAINER), color(ON_SECONDARY_CONTAINER))
     } else {
@@ -1673,11 +1674,11 @@ const NAV_LABEL_SIZE: f32 = 15.;
 pub fn nav_destination(
     id: impl Into<gpui::ElementId>,
     selected: bool,
-    icon: gpui_component::Icon,
+    icon: gpui_kit::component::Icon,
     label: impl Into<gpui::SharedString>,
     shown: Option<gpui::SharedString>,
     cx: &App,
-) -> gpui_component::button::Button {
+) -> gpui_kit::component::button::Button {
     use gpui::Styled;
     use gpui::prelude::FluentBuilder as _;
     let label = label.into();
@@ -1732,14 +1733,14 @@ pub fn shaped_width(text: &str, size: f32, weight: gpui::FontWeight, window: &Wi
 /// its icon to 75% of a custom size and overrides the icon's own size; every
 /// other dimension a custom size would set is replaced by our explicit
 /// height, padding and label size.
-fn component_icon_size(design: f32, cx: &App) -> gpui_component::Size {
+fn component_icon_size(design: f32, cx: &App) -> gpui_kit::component::Size {
     let font = Theme::global(cx).font_size;
-    gpui_component::Size::Size(font * (design / 14. / 0.75))
+    gpui_kit::component::Size::Size(font * (design / 14. / 0.75))
 }
 
 /// M3 filled tonal button: a secondary action that still carries weight,
 /// e.g. opening a finished note from a list row.
-pub fn tonal_pill(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_component::button::Button {
+pub fn tonal_pill(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_kit::component::button::Button {
     use gpui::Styled;
     custom_fill(
         control(id),
@@ -1755,10 +1756,10 @@ pub fn tonal_pill(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_component::b
 /// M3 disabled filled button: on-surface at 12% with 38% content, so an
 /// unavailable action never reads as a selected tonal surface.
 pub fn disabled_when(
-    button: gpui_component::button::Button,
+    button: gpui_kit::component::button::Button,
     disabled: bool,
     cx: &App,
-) -> gpui_component::button::Button {
+) -> gpui_kit::component::button::Button {
     if !disabled {
         return button;
     }
@@ -1778,7 +1779,7 @@ pub fn filter_chip(
     id: impl Into<gpui::ElementId>,
     selected: bool,
     cx: &App,
-) -> gpui_component::button::Button {
+) -> gpui_kit::component::button::Button {
     use gpui::Styled;
     let size = rems(32. / 14.);
     let (bg, fg) = if selected {
@@ -1792,20 +1793,26 @@ pub fn filter_chip(
             color(INK),
         )
     };
-    let chip = custom_fill(gpui_component::button::Button::new(id), bg, fg, true, cx)
-        .h(size)
-        .min_h(size)
-        .px(rems(12. / 14.))
-        .gap(rems(6. / 14.))
-        .rounded(RADIUS_SMALL)
-        .flex_shrink_0()
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .border_1()
-        .border_color(if selected {
-            color(SECONDARY_CONTAINER)
-        } else {
-            color(CONTROL)
-        });
+    let chip = custom_fill(
+        gpui_kit::component::button::Button::new(id),
+        bg,
+        fg,
+        true,
+        cx,
+    )
+    .h(size)
+    .min_h(size)
+    .px(rems(12. / 14.))
+    .gap(rems(6. / 14.))
+    .rounded(RADIUS_SMALL)
+    .flex_shrink_0()
+    .font_weight(gpui::FontWeight::MEDIUM)
+    .border_1()
+    .border_color(if selected {
+        color(SECONDARY_CONTAINER)
+    } else {
+        color(CONTROL)
+    });
     if selected {
         chip.icon(crate::icons::check())
     } else {
@@ -1815,7 +1822,10 @@ pub fn filter_chip(
 
 /// M3 outlined button: accent label inside an outline-colored border, with
 /// accent state layers.
-pub fn outline_pill(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_component::button::Button {
+pub fn outline_pill(
+    id: impl Into<gpui::ElementId>,
+    cx: &App,
+) -> gpui_kit::component::button::Button {
     use gpui::Styled;
     custom_fill(
         control(id),
@@ -1834,7 +1844,10 @@ pub fn outline_pill(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_component:
 }
 
 /// M3 text button: an accent label with accent state layers and no container.
-pub fn text_button(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_component::button::Button {
+pub fn text_button(
+    id: impl Into<gpui::ElementId>,
+    cx: &App,
+) -> gpui_kit::component::button::Button {
     use gpui::Styled;
     custom_fill(
         control(id),
@@ -1857,9 +1870,9 @@ pub fn icon_button(
     size: Rems,
     tonal: bool,
     cx: &App,
-) -> gpui_component::button::Button {
+) -> gpui_kit::component::button::Button {
     use gpui::Styled;
-    use gpui_component::Sizable;
+    use gpui_kit::component::Sizable;
     let (bg, fg) = if tonal {
         (color(SURFACE_HIGH), color(INK))
     } else {
@@ -1875,10 +1888,10 @@ pub fn icon_button(
     // ignores the icon's own; an icon-only button sizes it at three quarters
     // of an explicit size. Give it the glyph the canvas uses (22px in a 48px
     // button, 20px in 40px), in the current text scale.
-    let rem = gpui_component::Theme::global(cx).font_size;
+    let rem = gpui_kit::component::Theme::global(cx).font_size;
     let glyph = rem * (size.0 / 4. + 10. / 14.);
     custom_fill(control(id), bg, fg, true, cx)
-        .with_size(gpui_component::Size::Size(glyph / 0.75))
+        .with_size(gpui_kit::component::Size::Size(glyph / 0.75))
         .h(size)
         .min_h(size)
         .w(size)
@@ -1896,15 +1909,15 @@ pub const QUIET_INSET: gpui::Rems = gpui::rems(0.625);
 /// Do not add a hover text color here: gpui-component's Button applies its own
 /// variant hover during render, and a user-set hover style trips the base
 /// button's `hover style already set` debug assertion (debug builds panic).
-pub fn quiet(id: impl Into<gpui::ElementId>) -> gpui_component::button::Button {
+pub fn quiet(id: impl Into<gpui::ElementId>) -> gpui_kit::component::button::Button {
     use gpui::Styled;
-    use gpui_component::button::ButtonVariants;
+    use gpui_kit::component::button::ButtonVariants;
     control(id).ghost().text_color(color(GRAY))
 }
 
 /// An icon action inside a field shares that field's boundary. Its compact
 /// target leaves room for the input's text and focus ring at every text scale.
-pub fn input_action(id: impl Into<gpui::ElementId>) -> gpui_component::button::Button {
+pub fn input_action(id: impl Into<gpui::ElementId>) -> gpui_kit::component::button::Button {
     use gpui::Styled;
     let size = rems(28. / 14.);
     quiet(id).h(size).min_h(size).w(size).min_w(size).px_0()
@@ -1947,7 +1960,7 @@ pub fn dialog_title(
 /// action, then the filled (or error) confirming action.
 pub fn dialog_actions() -> gpui::Div {
     use gpui::prelude::*;
-    gpui_component::h_flex()
+    gpui_kit::component::h_flex()
         .w_full()
         .pt(px(8.))
         .gap_2()
@@ -1956,7 +1969,10 @@ pub fn dialog_actions() -> gpui::Div {
 }
 
 /// M3 error button: the destructive confirming action of a dialog.
-pub fn danger_pill(id: impl Into<gpui::ElementId>, cx: &App) -> gpui_component::button::Button {
+pub fn danger_pill(
+    id: impl Into<gpui::ElementId>,
+    cx: &App,
+) -> gpui_kit::component::button::Button {
     use gpui::Styled;
     custom_fill(control(id), color(DANGER), color(ON_PRIMARY), true, cx)
         .px(rems(16. / 14.))
@@ -1991,13 +2007,13 @@ pub trait MaterialDialog: gpui::Styled + Sized {
     }
 }
 
-impl MaterialDialog for gpui_component::dialog::Dialog {
+impl MaterialDialog for gpui_kit::component::dialog::Dialog {
     fn headline(self, title: gpui::Stateful<gpui::Div>) -> Self {
         self.title(title)
     }
 }
 
-impl MaterialDialog for gpui_component::dialog::AlertDialog {
+impl MaterialDialog for gpui_kit::component::dialog::AlertDialog {
     fn headline(self, title: gpui::Stateful<gpui::Div>) -> Self {
         self.title(title)
     }
@@ -2012,15 +2028,15 @@ impl MaterialDialog for gpui_component::dialog::AlertDialog {
 /// its verb: the trash for a destructive one, the check otherwise. Dialogs
 /// that build their own actions follow the same rule.
 pub fn confirm_dialog(
-    dialog: gpui_component::dialog::AlertDialog,
+    dialog: gpui_kit::component::dialog::AlertDialog,
     title: impl Into<gpui::SharedString>,
     cancel: impl Into<gpui::SharedString>,
     confirm: impl Into<gpui::SharedString>,
     danger: bool,
     cx: &App,
-) -> gpui_component::dialog::AlertDialog {
+) -> gpui_kit::component::dialog::AlertDialog {
     use gpui::{ParentElement, Styled};
-    use gpui_component::dialog::{Cancel, Confirm};
+    use gpui_kit::component::dialog::{Cancel, Confirm};
     let confirm_button = if danger {
         danger_pill("material-alert-confirm", cx).icon(crate::icons::delete())
     } else {
@@ -2106,7 +2122,7 @@ pub enum BadgeKind {
 /// Icon, padding and label belong to one container; callers append the label.
 pub fn badge(kind: BadgeKind) -> gpui::Div {
     use gpui::{Styled, div, prelude::*};
-    use gpui_component::Sizable;
+    use gpui_kit::component::Sizable;
     let (text, bg, icon) = match kind {
         BadgeKind::Success => (SUCCESS, SUCCESS_BG, Some(crate::icons::check_circle())),
         BadgeKind::Warning => (WARNING, WARNING_BG, Some(crate::icons::warning())),
@@ -2164,7 +2180,7 @@ pub fn outlined_badge(
 /// icon and 12px otherwise. Callers give it their tone and label size.
 pub fn chip(leading_icon: bool) -> gpui::Div {
     use gpui::prelude::*;
-    gpui_component::h_flex()
+    gpui_kit::component::h_flex()
         .flex_shrink_0()
         .h(rems(32. / 14.))
         .pl(rems(if leading_icon { 8. } else { 12. } / 14.))
@@ -2177,9 +2193,9 @@ pub fn chip(leading_icon: bool) -> gpui::Div {
 
 /// What follows the pointer while a note, folder or queued task is dragged:
 /// its icon and name on a raised surface.
-pub fn drag_chip(icon: gpui_component::Icon, label: gpui::SharedString) -> gpui::Div {
+pub fn drag_chip(icon: gpui_kit::component::Icon, label: gpui::SharedString) -> gpui::Div {
     use gpui::prelude::*;
-    gpui_component::h_flex()
+    gpui_kit::component::h_flex()
         .max_w(rems(24.))
         .gap_2()
         .px_3()
@@ -2223,19 +2239,18 @@ pub fn outlined_field_label(
         )
 }
 
-/// Every preference switch is the M3 switch with icons: a 52×32 track that
-/// scales with UI text, a check on the selected thumb and a cross on the
-/// unselected one.
-pub fn preference_switch(switch: gpui_component::switch::Switch) -> gpui_component::switch::Switch {
-    switch
-        .color(color(ACCENT))
-        .reference_geometry()
-        .thumb_icons(crate::icons::check(), crate::icons::close())
-        .track_height(rems(32. / 14.))
+/// Every preference switch. Becomes `MaterialSwitch` in the Material phase; Kit's
+/// switch has no 52x32 track or thumb icons.
+pub fn preference_switch(
+    switch: gpui_kit::component::switch::Switch,
+) -> gpui_kit::component::switch::Switch {
+    switch.color(color(ACCENT))
 }
 
 /// Switches in the processing panel's preference rows.
-pub fn processing_switch(switch: gpui_component::switch::Switch) -> gpui_component::switch::Switch {
+pub fn processing_switch(
+    switch: gpui_kit::component::switch::Switch,
+) -> gpui_kit::component::switch::Switch {
     preference_switch(switch)
 }
 

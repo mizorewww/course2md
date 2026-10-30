@@ -215,7 +215,7 @@ impl Shared {
                     self.paragraph = Paragraph::None;
                 }
             }
-            TextSelectionEvent::AutoScroll(_) => {}
+            TextSelectionEvent::AutoScroll(_) | TextSelectionEvent::TouchSelectionChanged => {}
         }
     }
 

@@ -17,7 +17,7 @@ use crate::{motion, preferences::ServicePurpose, theme::*};
 use anyhow::Context as _;
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
-use gpui_component::{
+use gpui_kit::component::{
     checkbox::Checkbox,
     menu::{DropdownMenu, PopupMenuItem},
     switch::Switch,
@@ -85,7 +85,7 @@ fn task_runs_in_card(task: &workspace::TaskRecord) -> bool {
 
 /// The mark on a cover slot whose video has no cover image, shared by the
 /// home page's video card, running task and task rows.
-pub(crate) fn cover_placeholder(size: Rems) -> gpui_component::Icon {
+pub(crate) fn cover_placeholder(size: Rems) -> gpui_kit::component::Icon {
     icons::movie()
         .size(size)
         .text_color(color(ON_SECONDARY_CONTAINER))

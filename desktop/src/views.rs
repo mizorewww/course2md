@@ -1,7 +1,7 @@
 //! Native pages: stable navigation and actions surround independently scrolling content.
 use super::*;
 use crate::theme::*;
-use gpui_component::button::*;
+use gpui_kit::component::button::*;
 
 const SHELL_GUTTER: f32 = 24.;
 const SETTINGS_SHELL_WIDTH: f32 = 1108.;
@@ -440,7 +440,6 @@ impl Render for Desktop {
                         .child(content),
                     window.has_active_dialog(cx),
                 ))
-                .children(Root::render_dialog_layer(window, cx))
                 .children(self.caption_buttons(title_bar_height(window), window, cx))
                 .into_any_element();
         }
@@ -657,7 +656,6 @@ impl Render for Desktop {
             .when(self.page == Page::New, |view| {
                 view.child(self.workbench_drop_overlay(cx))
             })
-            .children(Root::render_dialog_layer(window, cx))
             // Last, so the caption buttons stay usable over a dialog.
             .children(self.caption_buttons(title_bar_height, window, cx))
             .into_any_element()

@@ -8,7 +8,7 @@ use crate::{
 use course2md::config::TranscriptSource;
 use course2md::execution::Component;
 use course2md::progress::{Stage, StageStatus as EngineStageStatus};
-use gpui_component::{
+use gpui_kit::component::{
     button::*,
     menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
 };
@@ -598,7 +598,7 @@ pub(crate) fn retry_components_label(components: &[String]) -> &'static str {
     }
 }
 
-#[derive(IntoElement)]
+#[derive(gpui::IntoElement)]
 struct TaskStages {
     rows: Vec<TaskStage>,
 }
@@ -760,7 +760,7 @@ impl TaskPanel {
     }
 }
 
-#[derive(IntoElement)]
+#[derive(gpui::IntoElement)]
 struct TaskDisclosure {
     panel: TaskPanel,
     task_id: String,
@@ -1733,13 +1733,14 @@ impl Desktop {
             if !state.finished() {
                 let cancelling = state == TaskState::Pausing && task.intent == Intent::Cancel;
                 menu = menu.separator().item(
-                    PopupMenuItem::new(if cancelling {
-                        course2md::tr!("正在取消…")
-                    } else {
-                        course2md::tr!("取消任务")
-                    })
-                    .icon(icons::close())
-                    .danger(true)
+                    crate::theme::danger_menu_item(
+                        if cancelling {
+                            course2md::tr!("正在取消…")
+                        } else {
+                            course2md::tr!("取消任务")
+                        },
+                        icons::close(),
+                    )
                     .disabled(cancelling)
                     .on_click(intent(Intent::Cancel)),
                 );

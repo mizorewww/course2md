@@ -10,7 +10,7 @@ use course2md::i18n::{self, Lang};
 pub(crate) fn apply(language: InterfaceLanguage) {
     let lang = language.resolve();
     i18n::set_lang(lang);
-    gpui_component::set_locale(component_locale(lang));
+    gpui_kit::component::set_locale(component_locale(lang));
 }
 
 /// Short calendar date in the interface language: "Sep 27" or "9月27日".

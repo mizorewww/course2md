@@ -3,7 +3,7 @@ use gpui::{prelude::*, *};
 
 /// Draw a visible outline around a component whose focus handle is internal.
 /// The wrapper observes descendants without adding a keyboard stop of its own.
-#[derive(IntoElement)]
+#[derive(gpui::IntoElement)]
 pub struct FocusRing {
     id: ElementId,
     child: AnyElement,
@@ -90,7 +90,7 @@ impl RevealScroll {
     }
 }
 
-#[derive(IntoElement)]
+#[derive(gpui::IntoElement)]
 pub struct RevealFocus {
     id: ElementId,
     child: AnyElement,
@@ -201,7 +201,7 @@ impl RenderOnce for RevealFocus {
 /// first, then this one stops the event before it reaches the page.
 pub fn contain_scroll(view: Stateful<Div>, handle: &ScrollHandle) -> Stateful<Div> {
     let observed = handle.clone();
-    view.track_scroll(handle).on_scroll_wheel(move |_, _, cx| {
+    view.track_scroll(handle).on_scroll(move |_, _, cx| {
         if observed.max_offset().y > px(0.) {
             cx.stop_propagation();
         }

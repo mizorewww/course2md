@@ -6,22 +6,21 @@ license = "MIT"
 description = "Native course2md desktop application"
 
 [workspace]
-exclude = [".deps/zed", ".deps/component"]
 
 [features]
 # Explicitly opt in when investigating native frame pacing. Ordinary builds
 # neither collect nor write performance data.
-performance = ["gpui/profiler"]
+performance = ["gpui-kit/profiler"]
 # Render named pages to PNG files for layout review (src/capture.rs).
-capture = ["gpui/test-support", "gpui_platform/test-support"]
+capture = ["gpui-kit/test-support"]
 
 [dependencies]
 course2md = { path = ".." }
-gpui = { path = ".deps/zed/crates/gpui" }
-gpui_platform = { path = ".deps/zed/crates/gpui_platform", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui-component = { path = ".deps/component/crates/component" }
-gpui-base = { path = ".deps/component/crates/base" }
-gpui-kit-assets = { path = ".deps/component/crates/assets" }
+# The same stack as gpui-kit-material. The [patch] tables below must stay equal
+# to that repository's. Paths flip to a pinned Git revision before acceptance.
+gpui-kit = { path = "../../gpui-kit-material-course2md/vendor/gpui-kit", features = ["gpui-fast"] }
+gpui-base = { path = "../../gpui-kit-material-course2md/vendor/gpui-base" }
+gpui-kit-material = { path = "../../gpui-kit-material-course2md/crates/material", default-features = false, features = ["serde", "gpui-fast"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -54,12 +53,32 @@ security-framework = "3.7"
 embed-resource = "3.0"
 
 [dev-dependencies]
-gpui = { path = ".deps/zed/crates/gpui", features = ["test-support"] }
-
+gpui-kit = { path = "../../gpui-kit-material-course2md/vendor/gpui-kit", features = ["gpui-fast", "test-support"] }
 
 [profile.dev]
 debug = "line-tables-only"
 
+[profile.dev.package.gpui-pre]
+opt-level = 3
+
+[profile.dev.package.gpui-fast]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 strip = true
+
+[patch.crates-io]
+gpui-fast-macos = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-macos" }
+gpui-pre-macos = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-macos" }
+gpui-fast = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast" }
+gpui-fast-web = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-web" }
+gpui-fast-apple = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-apple" }
+gpui-base = { path = "../../gpui-kit-material-course2md/vendor/gpui-base" }
+gpui-pre = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre" }
+gpui-pre-web = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-web" }
+gpui-pre-apple = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-apple" }
+
+[patch."https://github.com/longbridge/gpui-kit"]
+gpui-kit = { path = "../../gpui-kit-material-course2md/vendor/gpui-kit" }
+gpui-base = { path = "../../gpui-kit-material-course2md/vendor/gpui-base" }

@@ -556,7 +556,9 @@ impl Desktop {
                                 )
                                 .text_size(rems(13. / 14.))
                                 .font_family(
-                                    gpui_component::Theme::global(cx).mono_font_family.clone(),
+                                    gpui_kit::component::Theme::global(cx)
+                                        .mono_font_family
+                                        .clone(),
                                 ),
                             ),
                     )

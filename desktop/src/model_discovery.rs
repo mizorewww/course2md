@@ -405,7 +405,7 @@ fn parse_models(body: &[u8], authorization: Option<&Secret>) -> Result<Vec<Strin
 /// discovery state; choosing a candidate emits its ordinary input-change event.
 pub fn model_field(
     id: &'static str,
-    input: &gpui::Entity<gpui_component::input::InputState>,
+    input: &gpui::Entity<gpui_kit::component::input::InputState>,
     state: &State,
     disabled: bool,
     error: Option<&str>,
@@ -414,7 +414,7 @@ pub fn model_field(
 ) -> gpui::Div {
     use crate::{icons, theme::*};
     use gpui::{SharedString, prelude::*};
-    use gpui_component::{
+    use gpui_kit::component::{
         Disableable as _, h_flex,
         menu::{DropdownMenu, PopupMenuItem},
         v_flex,

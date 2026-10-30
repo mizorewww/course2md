@@ -121,7 +121,7 @@ impl Button {
         }
     }
 
-    fn glyph(self) -> gpui_component::Icon {
+    fn glyph(self) -> gpui_kit::component::Icon {
         match self {
             Self::Minimize => crate::icons::caption_minimize(),
             Self::Maximize => crate::icons::caption_maximize(),
@@ -226,7 +226,7 @@ impl Desktop {
         }
         let active = window.is_window_active();
         let glyph_color = color(if active { INK } else { GRAY });
-        let row = gpui_component::h_flex()
+        let row = gpui_kit::component::h_flex()
             .id("window-caption")
             .text_color(glyph_color);
         let row = match caption {
@@ -392,7 +392,7 @@ mod tests {
                     MouseButton::Left,
                     cx.listener(|this, _, _, _| this.menu_presses += 1),
                 );
-            let row = gpui_component::h_flex()
+            let row = gpui_kit::component::h_flex()
                 .h(px(WINDOWS_BUTTON_HEIGHT))
                 .children([Button::Minimize, Button::Maximize, Button::Close].map(windows_button));
             div()

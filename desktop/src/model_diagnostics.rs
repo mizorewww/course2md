@@ -8,7 +8,7 @@ use course2md::{
     config::{AsrProvider, canonical_model, model_dir_from, model_label},
     models::status::{CacheState, LocalModelStatus},
 };
-use gpui_component::button::*;
+use gpui_kit::component::button::*;
 use std::path::Path;
 
 /// One vocabulary for cache states across settings, setup and diagnostics.

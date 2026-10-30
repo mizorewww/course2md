@@ -1,7 +1,7 @@
 //! Product identity and build provenance, kept separate from operational settings.
 use super::*;
 use crate::theme::*;
-use gpui_component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 
 /// The licenses the app ships under and where each text lives.
 const LICENSES: [(&str, &str); 3] = [

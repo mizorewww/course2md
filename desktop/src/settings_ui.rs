@@ -17,7 +17,7 @@ use crate::service_test::{self, TestKind};
 use crate::theme::*;
 use anyhow::{Context as _, anyhow};
 use course2md::execution::Component;
-use gpui_component::{
+use gpui_kit::component::{
     button::*,
     input::{InputContentType, Textarea, TextareaState},
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
@@ -338,7 +338,7 @@ pub(super) fn setting_surface() -> Div {
 /// Diagnostic facts as on the canvas: an accent heading over one inset block of
 /// label/value rows separated by hairlines. `after` holds actions that follow
 /// the block rather than belong to a row.
-#[derive(IntoElement)]
+#[derive(gpui::IntoElement)]
 pub(crate) struct DetailGroup {
     id: ElementId,
     icon: Icon,
@@ -576,7 +576,10 @@ const RESOURCE_MENU_OUTSET: f32 = (20. - 12.) / 14.;
 
 /// The ⋯ button at the end of a resource row (an account, a saved service,
 /// a library location). Callers attach its label, tooltip and menu.
-pub(crate) fn resource_menu(id: impl Into<ElementId>, cx: &App) -> gpui_component::button::Button {
+pub(crate) fn resource_menu(
+    id: impl Into<ElementId>,
+    cx: &App,
+) -> gpui_kit::component::button::Button {
     icon_button(id, CONTROL_HEIGHT, false, cx)
         .mr(rems(-RESOURCE_MENU_OUTSET))
         .icon(icons::more_vertical())
@@ -952,7 +955,7 @@ impl Desktop {
         &self,
         index: usize,
         label: &'static str,
-        input: gpui_component::input::Input,
+        input: gpui_kit::component::input::Input,
         error: Option<String>,
         action: Option<AnyElement>,
     ) -> Div {
@@ -1232,7 +1235,7 @@ impl Desktop {
             )
             .child(
                 div().flex_1().min_w_0().child(
-                    gpui_component::input::Input::new(&self.settings_ui.search)
+                    gpui_kit::component::input::Input::new(&self.settings_ui.search)
                         .appearance(false)
                         .aria_label(course2md::tr!("搜索设置"))
                         .w_full()
@@ -2040,9 +2043,7 @@ impl Desktop {
                 )
             })
             .item(
-                PopupMenuItem::new(course2md::tr!("删除服务…"))
-                    .icon(icons::delete())
-                    .danger(true)
+                crate::theme::danger_menu_item(course2md::tr!("删除服务…"), icons::delete())
                     .on_click(delete),
             )
         })

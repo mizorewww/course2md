@@ -18,7 +18,7 @@ use course2md::{
     config::{AsrProvider, local_models, model_dir_from, model_label},
     models::status::CacheState,
 };
-use gpui_component::switch::Switch;
+use gpui_kit::component::switch::Switch;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},

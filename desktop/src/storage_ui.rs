@@ -5,7 +5,7 @@ use crate::{
     theme::*,
 };
 use anyhow::{Context as _, Result, ensure};
-use gpui_component::{
+use gpui_kit::component::{
     button::*,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
 };
@@ -1664,7 +1664,7 @@ impl Desktop {
                 let repair = needs_reassociation || needs_relocation;
                 let open_location = {
                     let root = root.clone();
-                    move |button: gpui_component::button::Button| {
+                    move |button: gpui_kit::component::button::Button| {
                         let root = root.clone();
                         button
                             .settings_text()
@@ -1857,7 +1857,7 @@ impl Desktop {
                                                     .to_string(),
                                             )
                                             .font_family(
-                                                gpui_component::Theme::global(cx)
+                                                gpui_kit::component::Theme::global(cx)
                                                     .mono_font_family
                                                     .clone(),
                                             )

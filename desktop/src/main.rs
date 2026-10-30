@@ -1,4 +1,8 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+// GPUI's macro output and this crate name its types through `gpui`; the Kit selects
+// the engine behind that name, as gpui-kit-material does.
+extern crate gpui_kit as gpui;
+
 mod a11y;
 mod about;
 mod account_ui;
@@ -51,7 +55,7 @@ use backend::{Done, EngineEvent, Event, Job};
 use conversion::ConversionOptions;
 use course2md::progress::{ModelOperation, Stage, StageStatus};
 use gpui::{prelude::*, *};
-use gpui_component::{
+use gpui_kit::component::{
     input::{InputEvent, InputState},
     *,
 };
@@ -1638,7 +1642,7 @@ fn initial_window_bounds(
 
 fn main() {
     a11y::init_validation_diagnostics();
-    let app = gpui_platform::application().with_assets(icons::Assets);
+    let app = gpui_kit::application().with_assets(icons::Assets);
     app.on_reopen(|cx| {
         cx.activate(true);
         for handle in cx.windows() {
@@ -1646,7 +1650,7 @@ fn main() {
         }
     });
     app.run(|cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
         theme::init(cx);
         // Debug validation uses the same native window and render path at an exact size.
         // Release builds always use the ordinary initial window size.
@@ -1675,7 +1679,7 @@ fn main() {
             )),
             (None, None) => WindowBounds::centered(size(px(1140.), px(820.)), cx),
         };
-        cx.open_window(
+        gpui_kit::open_window(
             WindowOptions {
                 window_bounds: Some(window_bounds),
                 window_min_size: Some(min_size),
@@ -1685,6 +1689,7 @@ fn main() {
                 }),
                 ..TitleBar::window_options()
             },
+            cx,
             |window, cx| {
                 window.set_window_title("course2md");
                 #[cfg(feature = "performance")]
@@ -1744,7 +1749,7 @@ fn main() {
                     }
                     false
                 });
-                cx.new(|cx| Root::new(view, window, cx))
+                view
             },
         )
         .expect(course2md::tr!("无法创建 course2md 窗口"));

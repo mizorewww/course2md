@@ -1,7 +1,7 @@
 //! Course organization and presentation are independent, persistent choices.
 use super::*;
 use crate::theme::*;
-use gpui_component::{
+use gpui_kit::component::{
     button::*,
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
 };
@@ -193,7 +193,7 @@ struct LibraryRowContext<'a> {
 }
 
 /// A collapsed list of technical details under a short message.
-#[derive(IntoElement)]
+#[derive(gpui::IntoElement)]
 pub(crate) struct IssueDetails {
     id: SharedString,
     messages: Vec<String>,
@@ -953,9 +953,7 @@ impl Desktop {
                         }),
                 )
                 .item(
-                    PopupMenuItem::new(course2md::tr!("删除笔记…"))
-                        .icon(icons::delete())
-                        .danger(true)
+                    crate::theme::danger_menu_item(course2md::tr!("删除笔记…"), icons::delete())
                         .on_click(move |_, window, cx| {
                             let _ = delete.update(cx, |this, cx| {
                                 this.confirm_course_delete(Course::clone(&doomed), window, cx)

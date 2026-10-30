@@ -1,7 +1,7 @@
 //! A single controlled selection with native radio semantics and roving keyboard focus.
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_component::Icon;
+use gpui_kit::component::Icon;
 use std::{collections::BTreeMap, rc::Rc};
 
 actions!(
@@ -27,7 +27,7 @@ struct OptionItem {
     label: SharedString,
 }
 
-#[derive(IntoElement)]
+#[derive(gpui::IntoElement)]
 pub struct SingleChoiceGroup {
     id: ElementId,
     label: SharedString,

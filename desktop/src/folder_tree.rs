@@ -3,8 +3,8 @@
 //! by dragging onto a folder or through the same commands on right-click.
 use super::*;
 use crate::theme::*;
-use gpui_component::button::ButtonVariants;
-use gpui_component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::button::ButtonVariants;
+use gpui_kit::component::menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem};
 use std::{collections::HashMap, path::Path};
 
 /// Width of the folder navigation beside the notes.
@@ -60,7 +60,7 @@ fn drop_highlight(style: StyleRefinement) -> StyleRefinement {
 
 /// A truncated name shows in full on hover.
 fn name_tooltip(name: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyView {
-    move |window, cx| gpui_component::tooltip::Tooltip::new(name.clone()).build(window, cx)
+    move |window, cx| gpui_kit::component::tooltip::Tooltip::new(name.clone()).build(window, cx)
 }
 
 /// Note counts shown beside the navigation's places.
@@ -343,9 +343,7 @@ impl Desktop {
             )
             .separator()
             .item(
-                PopupMenuItem::new(course2md::tr!("删除文件夹…"))
-                    .icon(icons::delete())
-                    .danger(true)
+                crate::theme::danger_menu_item(course2md::tr!("删除文件夹…"), icons::delete())
                     .on_click(act(|this, root, id, window, cx| {
                         this.begin_delete_folder_at(root, id, window, cx)
                     })),
@@ -452,7 +450,7 @@ impl Desktop {
         &mut self,
         target: TreeTarget,
         depth: usize,
-        icon: gpui_component::Icon,
+        icon: gpui_kit::component::Icon,
         label: SharedString,
         count: Option<usize>,
         disclosure: Option<bool>,

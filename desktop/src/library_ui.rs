@@ -1,6 +1,6 @@
 use super::*;
 use crate::theme::*;
-use gpui_component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},

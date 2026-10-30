@@ -2,7 +2,7 @@
 use super::*;
 use crate::theme::*;
 use course2md::auth::{AccountProfile, AccountStatus, QrPoll, QrSession};
-use gpui_component::{
+use gpui_kit::component::{
     button::*,
     menu::{DropdownMenu, PopupMenuItem},
 };

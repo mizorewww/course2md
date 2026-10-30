@@ -3,7 +3,7 @@
 //! and a second line. While open the outline turns accent and the chevron flips.
 use super::*;
 use gpui::{prelude::*, *};
-use gpui_component::{
+use gpui_kit::component::{
     Disableable as _, ElementExt as _, Icon, StyledExt as _,
     button::{Button, ButtonCustomVariant, ButtonVariants},
     h_flex,
@@ -18,7 +18,7 @@ pub type MenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>
 /// A menu is never narrower than this, even under a narrow trigger.
 const MENU_MIN_WIDTH: Pixels = px(200.);
 
-#[derive(IntoElement)]
+#[derive(gpui::IntoElement)]
 pub struct SelectField {
     id: ElementId,
     value: SharedString,

@@ -37,7 +37,7 @@
 //! (from Settings › 存储 against a fixture library); the harness does not fake them.
 use crate::{Desktop, Page, palettes::PaletteId, settings_ui::SettingsTab};
 use gpui::{App, AsyncWindowContext, WeakEntity, Window};
-use gpui_component::WindowExt as _;
+use gpui_kit::component::WindowExt as _;
 use std::{cell::Cell, path::PathBuf, time::Duration};
 
 thread_local! {
@@ -154,7 +154,7 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
 async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
     use gpui::{
         Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-        PlatformInput, ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
+        PlatformInput, ScrollDelta, ScrollEvent, TouchPhase, point, px,
     };
     let mut parts = step.split('~');
     let kind = parts.next().unwrap_or_default();
@@ -220,7 +220,7 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
         }
         ("wheel", Some(position)) if numbers.len() >= 3 => vec![
             moved(position),
-            PlatformInput::ScrollWheel(ScrollWheelEvent {
+            PlatformInput::Scroll(ScrollEvent {
                 position,
                 delta: ScrollDelta::Pixels(point(
                     px(-numbers.get(3).copied().unwrap_or(0.)),
@@ -228,6 +228,7 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
                 )),
                 modifiers: Modifiers::default(),
                 touch_phase: TouchPhase::Moved,
+                source: Default::default(),
             }),
         ],
         ("key", _) => {
@@ -237,12 +238,14 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
                 "plus" => "+",
                 key => key,
             };
-            match Keystroke::parse(key) {
-                Ok(keystroke) => {
-                    let _ = cx.update(|window, cx| window.dispatch_keystroke(keystroke, cx));
+            let _ = cx.update(|window, cx| {
+                match Keystroke::parse_with_os(key, cx.platform_info().os) {
+                    Ok(keystroke) => {
+                        window.dispatch_keystroke(keystroke, cx);
+                    }
+                    Err(error) => eprintln!("capture input {step}: {error}"),
                 }
-                Err(error) => eprintln!("capture input {step}: {error}"),
-            }
+            });
             Vec::new()
         }
         ("wait", _) if !numbers.is_empty() => {
