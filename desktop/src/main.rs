@@ -1640,6 +1640,23 @@ fn initial_window_bounds(
     bounds
 }
 
+/// A binding on the platform's primary modifier. GPUI resolves `secondary-` only
+/// through `load`, which knows the host OS; `KeyBinding::new` panics on it.
+pub(crate) fn secondary_binding<A: gpui::Action>(
+    keystrokes: &str,
+    action: A,
+    context: Option<&str>,
+    cx: &App,
+) -> KeyBinding {
+    let context = context.map(|context| {
+        gpui::KeyBindingContextPredicate::parse(context)
+            .expect("a valid key context")
+            .into()
+    });
+    KeyBinding::load(keystrokes, Box::new(action), context, false, None, cx)
+        .expect("a valid keystroke")
+}
+
 fn main() {
     a11y::init_validation_diagnostics();
     let app = gpui_kit::application().with_assets(icons::Assets);
@@ -1764,10 +1781,10 @@ fn main() {
             // confirmation otherwise closes it on key-down before that action
             // can run (including validation, cancellation, and image controls).
             KeyBinding::new("enter", NoAction, Some("Dialog")),
-            KeyBinding::new("secondary-q", Quit, None),
-            KeyBinding::new("secondary-,", OpenSettings, None),
-            KeyBinding::new("secondary-n", ImportVideo, None),
-            KeyBinding::new("secondary-f", SearchContent, None),
+            secondary_binding("secondary-q", Quit, None, cx),
+            secondary_binding("secondary-,", OpenSettings, None, cx),
+            secondary_binding("secondary-n", ImportVideo, None, cx),
+            secondary_binding("secondary-f", SearchContent, None, cx),
         ]);
         cx.set_menus([
             gpui::Menu::new("course2md").items([
@@ -1913,5 +1930,20 @@ mod initial_window_tests {
         );
         assert_eq!(bounds.size, size(px(768.), px(620.)));
         assert_eq!(bounds.origin, point(px(16.), px(0.)));
+    }
+}
+
+#[cfg(test)]
+mod key_binding_tests {
+    use super::{Quit, secondary_binding};
+
+    #[gpui::test]
+    fn secondary_bindings_resolve_on_the_host(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            for keystrokes in ["secondary-f", "secondary-,", "secondary-shift-g"] {
+                let binding = secondary_binding(keystrokes, Quit, Some("CourseReader"), cx);
+                assert_eq!(binding.keystrokes().len(), 1);
+            }
+        });
     }
 }

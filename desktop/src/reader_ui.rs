@@ -556,10 +556,13 @@ impl State {
                 cx.notify();
             }
         });
+        let find_keys = [
+            crate::secondary_binding("secondary-f", FindInNote, Some("CourseReader"), cx),
+            crate::secondary_binding("secondary-g", NextMatch, Some("CourseReader"), cx),
+            crate::secondary_binding("secondary-shift-g", PreviousMatch, Some("CourseReader"), cx),
+        ];
+        cx.bind_keys(find_keys);
         cx.bind_keys([
-            KeyBinding::new("secondary-f", FindInNote, Some("CourseReader")),
-            KeyBinding::new("secondary-g", NextMatch, Some("CourseReader")),
-            KeyBinding::new("secondary-shift-g", PreviousMatch, Some("CourseReader")),
             KeyBinding::new("escape", CloseFind, Some("CourseReader")),
             KeyBinding::new("left", PreviousImage, Some("ReaderImage")),
             KeyBinding::new("right", NextImage, Some("ReaderImage")),
