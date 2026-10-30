@@ -888,6 +888,7 @@ impl Desktop {
     fn apply_storage_records(&mut self, records: storage::Records, cx: &mut Context<Self>) {
         self.storage_ui.pending = records.pending;
         self.storage_ui.corrupt_records = records.corrupt;
+        let (unsettled, stale_markers) = (records.unsettled, records.stale_markers);
         let mut relocated = Vec::new();
         for (path, mut journal) in records.settings_pending {
             match self.relocate_settings_paths(&journal.source, &journal.destination, cx) {
@@ -903,10 +904,11 @@ impl Desktop {
                 }
             }
         }
-        if !relocated.is_empty() {
+        if !(relocated.is_empty() && unsettled.is_empty() && stale_markers.is_empty()) {
             // Updating model paths again is harmless, so a lost flag only
             // repeats it at the next start.
             crate::spawn_blocking_io(move || {
+                storage::settle_records(&unsettled, &stale_markers);
                 for (path, journal) in relocated {
                     let _ = storage::save_journal(&path, &journal);
                 }

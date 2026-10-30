@@ -493,7 +493,17 @@ pub fn read_journal(path: &Path) -> Result<Journal> {
 pub fn abandon_move(path: &Path) -> Result<()> {
     let mut journal = read_journal(path)?;
     journal.phase = Phase::Abandoned;
-    save_journal(path, &journal)
+    save_journal(path, &journal)?;
+    // Without a resumable move the copy is an ordinary folder.
+    let marker = journal.destination.join(MOVE_MARKER_FILE);
+    if read_marker(&marker).is_some_and(|owner| owner.id == journal.id) {
+        let _ = std::fs::remove_file(marker);
+    }
+    Ok(())
+}
+
+fn read_marker(path: &Path) -> Option<Journal> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
 /// What the move records on disk say, read once at startup and after each
@@ -507,6 +517,10 @@ pub struct Records {
     pub settings_pending: Vec<(PathBuf, Journal)>,
     /// Backups whose cleanup already finished.
     pub cleaned: Vec<String>,
+    /// Published moves whose records have not caught up; see `settle_records`.
+    pub unsettled: Vec<(PathBuf, Journal)>,
+    /// Ownership markers of moves that have been published.
+    pub stale_markers: Vec<PathBuf>,
 }
 
 /// `libraries` are the registered (id, root) pairs.
@@ -515,23 +529,30 @@ pub fn read_records(
     libraries: &[(String, PathBuf)],
     backups: &[BackupRecord],
 ) -> Records {
-    let (mut pending, corrupt) = scan_journals(directory);
+    let (pending, corrupt) = scan_journals(directory);
     // A registry update that committed before the app closed leaves its record
     // merely behind; never offer to replay or undo that copy.
-    pending.retain(|(path, journal)| {
-        let committed = libraries
+    let published = |journal: &Journal| {
+        libraries
             .iter()
-            .any(|(id, root)| *id == journal.library_id && *root == journal.destination);
-        if committed {
-            let mut journal = journal.clone();
-            journal.phase = Phase::Committed;
-            let _ = save_journal(path, &journal);
-        }
-        !committed
-    });
+            .any(|(id, root)| *id == journal.library_id && *root == journal.destination)
+    };
+    let (mut unsettled, pending): (Vec<_>, Vec<_>) = pending
+        .into_iter()
+        .partition(|(_, journal)| published(journal));
+    for (_, journal) in &mut unsettled {
+        journal.phase = Phase::Committed;
+    }
+    // The marker identifies a partial copy for a resume; a published move has none.
+    let stale_markers = libraries
+        .iter()
+        .map(|(_, root)| root.join(MOVE_MARKER_FILE))
+        .filter(|marker| read_marker(marker).is_some_and(|owner| published(&owner)))
+        .collect();
     let mut records = Records {
         pending,
         corrupt,
+        stale_markers,
         ..Records::default()
     };
     for backup in backups {
@@ -542,12 +563,31 @@ pub fn read_records(
             records.cleaned.push(backup.id.clone());
         }
         if !journal.settings_relocated {
+            let mut journal = journal;
+            // Saved later with its new flag; it must not undo the settled phase.
+            if unsettled
+                .iter()
+                .any(|(path, _)| *path == backup.journal_path)
+            {
+                journal.phase = Phase::Committed;
+            }
             records
                 .settings_pending
                 .push((backup.journal_path.clone(), journal));
         }
     }
+    records.unsettled = unsettled;
     records
+}
+
+/// Writes what `read_records` found behind. Failures only repeat this at the next read.
+pub fn settle_records(unsettled: &[(PathBuf, Journal)], stale_markers: &[PathBuf]) {
+    for (path, journal) in unsettled {
+        let _ = save_journal(path, journal);
+    }
+    for marker in stale_markers {
+        let _ = std::fs::remove_file(marker);
+    }
 }
 
 pub fn resume_move(
@@ -1245,5 +1285,64 @@ mod tests {
         .err()
         .unwrap();
         assert!(format!("{error:#}").contains("目标副本未通过校验"));
+    }
+    #[test]
+    fn reading_records_writes_nothing_and_settling_clears_the_published_move() {
+        let (_dir, prepared) = fixture();
+        let journal_dir = prepared.path.parent().unwrap();
+        let marker = prepared.journal.destination.join(MOVE_MARKER_FILE);
+        let before = std::fs::read(&prepared.path).unwrap();
+        let libraries = [("library".to_owned(), prepared.journal.destination.clone())];
+
+        // Not registered there yet: still a move in progress, marker and all.
+        let waiting = read_records(
+            journal_dir,
+            &[("library".to_owned(), prepared.journal.source.clone())],
+            &[],
+        );
+        assert_eq!(waiting.pending.len(), 1);
+        assert!(waiting.unsettled.is_empty() && waiting.stale_markers.is_empty());
+
+        let records = read_records(journal_dir, &libraries, &[]);
+        assert!(records.pending.is_empty());
+        assert_eq!(records.unsettled[0].1.phase, Phase::Committed);
+        assert_eq!(records.stale_markers, [marker.clone()]);
+        assert_eq!(std::fs::read(&prepared.path).unwrap(), before);
+        assert!(marker.is_file());
+
+        settle_records(&records.unsettled, &records.stale_markers);
+        assert_eq!(
+            read_journal(&prepared.path).unwrap().phase,
+            Phase::Committed
+        );
+        assert!(!marker.exists());
+        let settled = read_records(journal_dir, &libraries, &[]);
+        assert!(settled.unsettled.is_empty() && settled.stale_markers.is_empty());
+    }
+
+    #[test]
+    fn another_librarys_marker_is_not_stale() {
+        let (_dir, prepared) = fixture();
+        let marker = prepared.journal.destination.join(MOVE_MARKER_FILE);
+        let records = read_records(
+            prepared.path.parent().unwrap(),
+            &[("other".to_owned(), prepared.journal.destination.clone())],
+            &[],
+        );
+        assert!(records.stale_markers.is_empty());
+        assert!(marker.is_file());
+    }
+
+    #[test]
+    fn abandoning_a_move_removes_its_marker() {
+        let (_dir, prepared) = fixture();
+        let marker = prepared.journal.destination.join(MOVE_MARKER_FILE);
+        abandon_move(&prepared.path).unwrap();
+        assert!(!marker.exists());
+        assert_eq!(
+            read_journal(&prepared.path).unwrap().phase,
+            Phase::Abandoned
+        );
+        assert!(resume_move(&prepared.path, &AtomicBool::new(false), &|_| {}).is_err());
     }
 }
