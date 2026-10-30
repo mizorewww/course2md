@@ -22,8 +22,9 @@ fn main() {
         return;
     }
     if !swiftc_available() {
-        println!(
-            "cargo:warning=未找到 swiftc（需要 Xcode Command Line Tools），跳过 Apple 原生模块；coreml 后端不可用"
+        without_apple_module(
+            "未找到 swiftc（需要 Xcode Command Line Tools），跳过 Apple 原生模块；coreml 后端不可用",
+            &[],
         );
         return;
     }
@@ -49,11 +50,9 @@ fn main() {
     // 判断（旧 Xcode 的帮助不列出 swiftbuild，却支持它），所以按实际构建结果
     // 选择；成功的参数组合按工具链版本缓存在 OUT_DIR，之后只跑一次 swift build。
     if let Err(reports) = build_swift_package(&pkg) {
-        for report in reports {
-            println!("cargo:warning={report}");
-        }
-        println!(
-            "cargo:warning=swift build 失败（见上方输出），跳过 Apple 原生模块；coreml 后端不可用"
+        without_apple_module(
+            "swift build 失败（见上方输出），跳过 Apple 原生模块；coreml 后端不可用",
+            &reports,
         );
         return;
     }
@@ -168,6 +167,27 @@ fn main() {
         println!("cargo:rustc-link-search=native={}", rt.display());
         println!("cargo:rustc-link-lib=static=clang_rt.osx");
     }
+}
+
+/// The Apple module cannot be built. A development build carries on without it, so
+/// a machine lacking Xcode can still work on everything else; a release build stops,
+/// because it would otherwise ship without local speech recognition and say nothing.
+/// `COURSE2MD_NO_APPLE=1` is how a release leaves the module out on purpose.
+fn without_apple_module(reason: &str, reports: &[String]) {
+    if std::env::var("PROFILE").as_deref() == Ok("release") {
+        for report in reports {
+            eprintln!("{report}");
+        }
+        eprintln!("{reason}");
+        eprintln!(
+            "release builds must include the Apple module; set COURSE2MD_NO_APPLE=1 to build without it"
+        );
+        std::process::exit(1);
+    }
+    for report in reports {
+        println!("cargo:warning={report}");
+    }
+    println!("cargo:warning={reason}");
 }
 
 /// Builds the Swift package with the newest option set the toolchain accepts:
