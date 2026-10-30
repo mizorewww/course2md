@@ -57,13 +57,31 @@ public func c2mLastError() -> UnsafePointer<CChar> {
 
 // MARK: - Silero VAD
 
-@_cdecl("c2m_vad_load")
-public func c2mVadLoad() -> Int32 {
-    do {
-        _ = try runSync {
+/// The one loaded VAD model. The model keeps per-stream state between chunks, so
+/// the lock also serializes its use; detectSpeech resets that state for each file.
+private final class VadCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var model: SileroVADModel?
+
+    func withModel<T>(_ body: (SileroVADModel) throws -> T) throws -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        if let model { return try body(model) }
+        let loaded = try runSync {
             try await SileroVADModel.fromPretrained(
                 engine: .coreml, offlineMode: true, progressHandler: cachedLoadProgress)
         }
+        model = loaded
+        return try body(loaded)
+    }
+}
+
+private let vadCache = VadCache()
+
+@_cdecl("c2m_vad_load")
+public func c2mVadLoad() -> Int32 {
+    do {
+        try vadCache.withModel { _ in }
         return 0
     } catch {
         setErr("语音检测模型加载失败 / VAD model failed to load: \(error)")
@@ -85,13 +103,12 @@ public func c2mVadDetect(
     outN.pointee = 0
     do {
         let samples = try loadWav(String(cString: wavPath))
-        let vad = try runSync {
-            try await SileroVADModel.fromPretrained(engine: .coreml, offlineMode: true, progressHandler: cachedLoadProgress)
-        }
         var config = VADConfig.sileroDefault
         config.minSpeechDuration = Float(minSpeech)
         config.minSilenceDuration = Float(minSilence)
-        let segments = vad.detectSpeech(audio: samples, sampleRate: 16000, config: config)
+        let segments = try vadCache.withModel {
+            $0.detectSpeech(audio: samples, sampleRate: 16000, config: config)
+        }
         let n = segments.count
         guard n > 0 else { return 0 }
         let starts = malloc(MemoryLayout<Double>.stride * n)!.assumingMemoryBound(to: Double.self)
@@ -405,15 +422,14 @@ public func c2mAsrTranscribe(
             outText.pointee = 0
             return 1 // 1 = 无文本（非错误）
         }
-        let fits = trimmed.utf8CString.count <= outLen // utf8CString 含结尾 NUL
-        trimmed.withCString { cStr in
-            _ = strncpy(outText, cStr, outLen - 1)
+        let bytes = Array(trimmed.utf8)
+        let count = utf8PrefixLength(bytes, capacity: outLen - 1)
+        bytes.withUnsafeBytes { source in
+            UnsafeMutableRawPointer(outText).copyMemory(
+                from: source.baseAddress!, byteCount: count)
         }
-        // strncpy leaves the last byte alone when the text fills the buffer
-        // exactly or is truncated; terminate here so the caller need not
-        // pre-zero its buffer.
-        outText[outLen - 1] = 0
-        if !fits {
+        outText[count] = 0
+        if count < bytes.count {
             return 2 // 2 = 成功但被截断（Rust 侧据此 warn，不再静默截断）
         }
         return 0
@@ -421,6 +437,15 @@ public func c2mAsrTranscribe(
         setErr("转写失败 / Transcription failed: \(error)")
         return -1
     }
+}
+
+/// How many leading bytes fit in `capacity` without splitting a UTF-8 sequence.
+private func utf8PrefixLength(_ bytes: [UInt8], capacity: Int) -> Int {
+    if bytes.count <= capacity { return bytes.count }
+    var end = capacity
+    // A continuation byte at the cut means the character before it does not fit.
+    while end > 0 && bytes[end] & 0xC0 == 0x80 { end -= 1 }
+    return end
 }
 
 @_cdecl("c2m_asr_destroy")
