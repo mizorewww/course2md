@@ -264,6 +264,33 @@ fn explicit_subtitles_zero_exports_and_confirmed_title_survive_real_conversion_a
     assert!(!persisted.contains("environment-key-must-not-be-used"));
 }
 
+/// A sidecar saved by a Windows subtitle editor: UTF-16 with a BOM.
+#[test]
+fn a_selected_subtitle_file_is_decoded_like_any_other_sidecar() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let video = root.path().join("lesson.mp4");
+    common::fixture_video(&video, 1);
+    let mut request = request(root.path(), &video);
+    let subtitle = root.path().join("selected.srt");
+    let mut bytes = vec![0xff, 0xfe];
+    "1\n00:00:00,000 --> 00:00:01,000\n来自 UTF-16 字幕的正文\n"
+        .encode_utf16()
+        .for_each(|unit| bytes.extend_from_slice(&unit.to_le_bytes()));
+    std::fs::write(&subtitle, bytes).unwrap();
+    request.subtitle_events = None;
+    request.subtitle = Some(subtitle);
+    let output = run(root.path(), &request);
+    assert!(output.status.success(), "{:#?}", events(&output));
+    let document = request
+        .course_dir
+        .join("versions/version-one/document.json");
+    let text = std::fs::read_to_string(document).unwrap();
+    assert!(text.contains("来自 UTF-16 字幕的正文"), "{text}");
+}
+
 #[test]
 fn broken_video_preserves_readable_subtitles_as_partial_note_without_phantom_images() {
     if !common::ffmpeg_available() {

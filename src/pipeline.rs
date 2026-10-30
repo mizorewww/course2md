@@ -233,7 +233,7 @@ async fn run_task_inner(
     let subtitle = if let Some(events) = &request.subtitle_events {
         Some(events.clone())
     } else if let Some(path) = &request.subtitle {
-        let content = std::fs::read_to_string(path).context(crate::tr!(
+        let content = crate::subtitle::read_subtitle_text(path).context(crate::tr!(
             "无法读取已选字幕 / Cannot read selected subtitles"
         ))?;
         Some(crate::subtitle::parse_subtitle(&content))
@@ -693,7 +693,7 @@ async fn subtitles(
     };
     match found {
         Some(file) => {
-            let content = std::fs::read_to_string(&file.path)
+            let content = crate::subtitle::read_subtitle_text(&file.path)
                 .context(crate::tr!("无法读取字幕文件 / Cannot read subtitle file"))?;
             let events = crate::subtitle::parse_subtitle(&content);
             execution::validate_events(&events)?;
