@@ -2,9 +2,11 @@
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{BTreeMap, HashSet},
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
+    time::SystemTime,
 };
 
 /// Identity marker written at the root of every registered library.
@@ -12,9 +14,18 @@ pub const LIBRARY_ID_FILE: &str = ".course2md-library-id";
 /// Task bindings rewrite this file when a verified copy is relocated.
 const TASK_IDENTITY_FILE: &str = "task-identity.json";
 const MOVE_MARKER_FILE: &str = ".course2md-move.json";
+/// Every temporary copy starts with this. A move adds its own id, so a partial
+/// copy left by a crash is recognizable without a journal write per file.
+const TEMPORARY_PREFIX: &str = ".course2md-copy-";
 const MAX_DEPTH: usize = 64;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg(test)]
+thread_local! {
+    static FILES_HASHED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static JOURNAL_SAVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct FileRecord {
     pub path: PathBuf,
     pub bytes: u64,
@@ -238,8 +249,46 @@ fn walk(
 }
 
 fn digest(path: &Path, cancel: &AtomicBool) -> Result<String> {
+    #[cfg(test)]
+    FILES_HASHED.with(|count| count.set(count.get() + 1));
     course2md::fetch::local_content_identity(path, cancel)
         .with_context(|| course2md::tr!("无法校验 {}", path.display()))
+}
+
+/// Files and directories under `root`, sorted, relative to it.
+fn sorted_tree(root: &Path, cancel: &AtomicBool) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let mut paths = Vec::new();
+    let mut directories = Vec::new();
+    walk(root, root, &mut paths, &mut directories, cancel)?;
+    paths.sort();
+    directories.sort();
+    Ok((paths, directories))
+}
+
+/// Size and modification time: what shows a hashed file has since been written to,
+/// without reading it again.
+#[derive(Debug, PartialEq, Eq)]
+struct FileStamp {
+    bytes: u64,
+    modified: Option<SystemTime>,
+}
+
+impl FileStamp {
+    fn of(path: &Path) -> Result<Self> {
+        let metadata = std::fs::metadata(path)?;
+        Ok(Self {
+            bytes: metadata.len(),
+            modified: metadata.modified().ok(),
+        })
+    }
+}
+
+type Stamps = BTreeMap<PathBuf, FileStamp>;
+
+struct Inventory {
+    files: Vec<FileRecord>,
+    directories: Vec<PathBuf>,
+    stamps: Stamps,
 }
 
 fn inventory(
@@ -247,34 +296,39 @@ fn inventory(
     message: &str,
     cancel: &AtomicBool,
     progress: &impl Fn(Progress),
-) -> Result<(Vec<FileRecord>, Vec<PathBuf>)> {
-    let mut paths = Vec::new();
-    let mut directories = Vec::new();
-    walk(root, root, &mut paths, &mut directories, cancel)?;
-    paths.sort();
-    directories.sort();
+) -> Result<Inventory> {
+    let (paths, directories) = sorted_tree(root, cancel)?;
     let total = paths.len() as u64;
     let mut files = Vec::new();
+    let mut stamps = Stamps::new();
     for path in paths {
         check_cancel(cancel)?;
         let absolute = root.join(&path);
-        let bytes = std::fs::metadata(&absolute)?.len();
+        // Taken before hashing: a write during the hash must not look unchanged later.
+        let stamp = FileStamp::of(&absolute)?;
         let hash = digest(&absolute, cancel)?;
         files.push(FileRecord {
-            path,
-            bytes,
+            path: path.clone(),
+            bytes: stamp.bytes,
             digest: hash,
         });
+        stamps.insert(path, stamp);
         progress(Progress {
             message: message.into(),
             completed: files.len() as u64,
             total,
         });
     }
-    Ok((files, directories))
+    Ok(Inventory {
+        files,
+        directories,
+        stamps,
+    })
 }
 
 pub fn save_journal(path: &Path, journal: &Journal) -> Result<()> {
+    #[cfg(test)]
+    JOURNAL_SAVES.with(|count| count.set(count.get() + 1));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -302,12 +356,25 @@ fn valid_relative(path: &Path) -> bool {
             .all(|part| matches!(part, std::path::Component::Normal(_)))
 }
 
+/// A file this move's temporary copies are named as. Journals from before these
+/// names existed list their temporary files in `temporary_files` instead.
+fn is_own_temporary(path: &Path, move_id: &str) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix(TEMPORARY_PREFIX))
+        .and_then(|name| name.strip_prefix(move_id))
+        .is_some_and(|rest| rest.starts_with('-'))
+}
+
 fn validate_journal_paths(journal: &Journal) -> Result<()> {
     let mut paths = std::collections::BTreeSet::new();
     ensure!(
-        journal.files.iter().all(|file| valid_relative(&file.path)
-            && !ignored(&file.path)
-            && paths.insert(file.path.clone()))
+        // The id becomes part of a file name.
+        valid_relative(Path::new(&journal.id))
+            && Path::new(&journal.id).components().count() == 1
+            && journal.files.iter().all(|file| valid_relative(&file.path)
+                && !ignored(&file.path)
+                && paths.insert(file.path.clone()))
             && journal
                 .directories
                 .iter()
@@ -317,9 +384,9 @@ fn validate_journal_paths(journal: &Journal) -> Result<()> {
                 .iter()
                 .all(|path| valid_relative(path)
                     && paths.insert(path.clone())
-                    && path.file_name().is_some_and(|name| name
-                        .to_string_lossy()
-                        .starts_with(".course2md-copy-"))),
+                    && path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with(TEMPORARY_PREFIX))),
         course2md::tr!("移动记录包含无效文件位置，未修改任何内容")
     );
     Ok(())
@@ -368,7 +435,11 @@ pub fn prepare_move(
     progress: &impl Fn(Progress),
 ) -> Result<PreparedMove> {
     let (source, destination) = validate_destination(source, destination)?;
-    let (files, directories) = inventory(
+    let Inventory {
+        files,
+        directories,
+        stamps,
+    } = inventory(
         &source,
         course2md::tr!("正在检查原笔记库…"),
         cancel,
@@ -411,7 +482,7 @@ pub fn prepare_move(
     sync_directory(&journal.destination)?;
     // The inventory above is the one just recorded; only a resumed copy has to
     // check that the source still matches it.
-    copy_journal(path, journal, false, cancel, progress)
+    copy_journal(path, journal, Some(stamps), cancel, progress)
 }
 
 pub fn read_journal(path: &Path) -> Result<Journal> {
@@ -505,75 +576,88 @@ pub fn resume_move(
             && marker.files == journal.files,
         course2md::tr!("目标不属于这次移动，未修改目标内容")
     );
-    copy_journal(path.to_owned(), journal, true, cancel, progress)
+    copy_journal(path.to_owned(), journal, None, cancel, progress)
 }
 
+/// Copies the recorded files, verifying each one as it lands.
+///
+/// Each file is hashed when recorded and once more when its copy is read back; a
+/// file already at the destination after a crash is hashed once. The checks that
+/// close the copy compare sizes and modification times rather than hash everything
+/// again: the copied bytes are already known good, and `cleanup_backup` hashes the
+/// source again before anything is deleted.
+///
+/// The journal is only written when the phase changes. Everything a resumed copy
+/// needs is on disk under names it can recognize: a finished file sits at its final
+/// path, fsynced before its rename, and a partial one has this move's temporary name.
+///
+/// `source_stamps` come from the inventory that produced the journal; `None` resumes
+/// an earlier copy, which first has to check that the source still matches.
 fn copy_journal(
     path: PathBuf,
     mut journal: Journal,
-    resumed: bool,
+    mut source_stamps: Option<Stamps>,
     cancel: &AtomicBool,
     progress: &impl Fn(Progress),
 ) -> Result<PreparedMove> {
     validate_journal_paths(&journal)?;
     let mut copy = || -> Result<()> {
-        // Validate the whole target before following any parent of a recorded
-        // temporary file; a replaced parent must never lead outside the copy.
-        let mut existing_files = Vec::new();
-        let mut existing_dirs = Vec::new();
-        walk(
-            &journal.destination,
-            &journal.destination,
-            &mut existing_files,
-            &mut existing_dirs,
-            cancel,
-        )?;
+        // Validate the whole target before removing anything; a replaced parent
+        // must never lead outside the copy.
+        let (existing_files, existing_dirs) = sorted_tree(&journal.destination, cancel)?;
+        let expected_files: HashSet<&Path> = journal
+            .files
+            .iter()
+            .map(|record| record.path.as_path())
+            .collect();
+        let expected_dirs: HashSet<&Path> =
+            journal.directories.iter().map(PathBuf::as_path).collect();
+        let recorded: HashSet<&Path> = journal
+            .temporary_files
+            .iter()
+            .map(PathBuf::as_path)
+            .collect();
+        let temporary =
+            |path: &Path| recorded.contains(path) || is_own_temporary(path, &journal.id);
         ensure!(
             existing_files
                 .iter()
-                .all(|path| journal.temporary_files.contains(path)
-                    || journal.files.iter().any(|record| &record.path == path))
+                .all(|path| expected_files.contains(path.as_path()) || temporary(path))
                 && existing_dirs
                     .iter()
-                    .all(|path| journal.directories.contains(path)),
+                    .all(|path| expected_dirs.contains(path.as_path())),
             course2md::tr!("目标副本出现了非预期内容，未覆盖任何文件")
         );
-        for temporary in &journal.temporary_files {
-            let owned = journal.destination.join(temporary);
-            if owned.exists() {
-                ensure!(
-                    std::fs::symlink_metadata(&owned)?.is_file()
-                        && owned.file_name().is_some_and(|name| name
-                            .to_string_lossy()
-                            .starts_with(".course2md-copy-")),
-                    course2md::tr!("移动临时文件位置发生变化，未修改内容")
-                );
-                std::fs::remove_file(owned)?;
-            }
+        for path in existing_files.iter().filter(|path| temporary(path)) {
+            std::fs::remove_file(journal.destination.join(path))?;
         }
         journal.temporary_files.clear();
-        if resumed {
-            let (current, directories) = inventory(
-                &journal.source,
-                course2md::tr!("正在检查原笔记库…"),
-                cancel,
-                progress,
-            )?;
-            ensure!(
-                current == journal.files && directories == journal.directories,
-                course2md::tr!(
-                    "原笔记库在上次移动后发生变化，尚未切换位置。请保留这份副本，并重新选择空文件夹移动。"
-                )
-            );
-        }
+        let source_stamps = match source_stamps.take() {
+            Some(stamps) => stamps,
+            None => {
+                let current = inventory(
+                    &journal.source,
+                    course2md::tr!("正在检查原笔记库…"),
+                    cancel,
+                    progress,
+                )?;
+                ensure!(
+                    current.files == journal.files && current.directories == journal.directories,
+                    course2md::tr!(
+                        "原笔记库在上次移动后发生变化，尚未切换位置。请保留这份副本，并重新选择空文件夹移动。"
+                    )
+                );
+                current.stamps
+            }
+        };
         for directory in &journal.directories {
             std::fs::create_dir_all(journal.destination.join(directory))?;
         }
         let total = journal.files.iter().map(|file| file.bytes).sum();
         let mut completed = 0;
         let mut buffer = vec![0; 1024 * 1024];
-        for index in 0..journal.files.len() {
-            let record = &journal.files[index];
+        let temporary_prefix = format!("{TEMPORARY_PREFIX}{}-", journal.id);
+        for record in &journal.files {
             check_cancel(cancel)?;
             let source = journal.source.join(&record.path);
             let destination = journal.destination.join(&record.path);
@@ -604,15 +688,8 @@ fn copy_journal(
                 std::fs::create_dir_all(parent)?;
                 let mut input = std::fs::File::open(&source)?;
                 let mut output = tempfile::Builder::new()
-                    .prefix(".course2md-copy-")
+                    .prefix(&temporary_prefix)
                     .tempfile_in(parent)?;
-                journal.temporary_files.push(
-                    output
-                        .path()
-                        .strip_prefix(&journal.destination)?
-                        .to_path_buf(),
-                );
-                save_journal(&path, &journal)?;
                 let message = course2md::tr!("正在复制 {}", record.path.display());
                 let mut copied = 0;
                 loop {
@@ -653,31 +730,38 @@ fn copy_journal(
             });
         }
         check_cancel(cancel)?;
-        let (source_files, source_dirs) = inventory(
-            &journal.source,
-            course2md::tr!("正在检查原笔记库…"),
-            cancel,
-            progress,
-        )?;
+        progress(Progress {
+            message: course2md::tr!("正在检查原笔记库…").into(),
+            completed: 0,
+            total: 1,
+        });
+        let (source_files, source_dirs) = sorted_tree(&journal.source, cancel)?;
+        let mut unchanged =
+            source_dirs == journal.directories && source_files.len() == source_stamps.len();
+        for path in &source_files {
+            unchanged = unchanged
+                && source_stamps.get(path) == Some(&FileStamp::of(&journal.source.join(path))?);
+        }
         ensure!(
-            source_files == journal.files && source_dirs == journal.directories,
+            unchanged,
             course2md::tr!("原笔记库在复制期间发生变化，尚未切换保存位置")
         );
         course2md::execution::relocate_work_bindings(&journal.source, &journal.destination)?;
-        let (target_files, target_dirs) = inventory(
-            &journal.destination,
-            course2md::tr!("正在核验副本…"),
-            cancel,
-            progress,
-        )?;
+        progress(Progress {
+            message: course2md::tr!("正在核验副本…").into(),
+            completed: 1,
+            total: 1,
+        });
+        let (target_files, target_dirs) = sorted_tree(&journal.destination, cancel)?;
         ensure!(
             target_dirs == journal.directories && target_files.len() == journal.files.len(),
             course2md::tr!("目标副本包含非预期内容，尚未切换保存位置")
         );
         for (original, target) in journal.files.iter().zip(&target_files) {
             ensure!(
-                original.path == target.path
-                    && (original.digest == target.digest
+                original.path == *target
+                    && (std::fs::metadata(journal.destination.join(target))?.len()
+                        == original.bytes
                         || original
                             .path
                             .file_name()
@@ -750,12 +834,14 @@ pub fn cleanup_backup(
             course2md::tr!("这个位置仍被笔记库使用，不能作为备份清理")
         );
     }
-    let (files, directories) = inventory(&path, course2md::tr!("正在检查备份…"), cancel, &|_| {})?;
+    let Inventory {
+        files, directories, ..
+    } = inventory(&path, course2md::tr!("正在检查备份…"), cancel, &|_| {})?;
     let unchanged = if journal.cleanup_started {
-        files.iter().all(|file| journal.files.contains(file))
-            && directories
-                .iter()
-                .all(|path| journal.directories.contains(path))
+        let recorded_files: HashSet<&FileRecord> = journal.files.iter().collect();
+        let recorded_dirs: HashSet<&PathBuf> = journal.directories.iter().collect();
+        files.iter().all(|file| recorded_files.contains(file))
+            && directories.iter().all(|path| recorded_dirs.contains(path))
     } else {
         files == journal.files && directories == journal.directories
     };
@@ -1028,5 +1114,136 @@ mod tests {
             std::fs::read(source.join("large.bin")).unwrap(),
             std::fs::read(destination.join("large.bin")).unwrap()
         );
+    }
+    fn moved_library(files: usize) -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("old");
+        let destination = dir.path().join("new");
+        std::fs::create_dir_all(source.join("notes")).unwrap();
+        std::fs::create_dir_all(&destination).unwrap();
+        for index in 0..files {
+            std::fs::write(source.join(format!("notes/{index}.md")), "notes").unwrap();
+        }
+        let journals = dir.path().join("journals");
+        (dir, source, destination, journals)
+    }
+
+    #[test]
+    fn a_move_hashes_each_file_twice_and_writes_its_journal_at_phase_changes() {
+        let (_dir, source, destination, journals) = moved_library(40);
+        FILES_HASHED.with(|count| count.set(0));
+        JOURNAL_SAVES.with(|count| count.set(0));
+        prepare_move(
+            "library".into(),
+            &source,
+            &destination,
+            &journals,
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .unwrap();
+        assert_eq!(FILES_HASHED.with(|count| count.get()), 80);
+        assert_eq!(JOURNAL_SAVES.with(|count| count.get()), 2);
+    }
+
+    #[test]
+    fn a_crash_while_a_file_is_copying_needs_no_journal_entry_to_recover() {
+        let (_dir, prepared) = fixture();
+        let id = &prepared.journal.id;
+        let partial = PathBuf::from(format!("notes/{TEMPORARY_PREFIX}{id}-a1b2c3"));
+        std::fs::remove_file(prepared.journal.destination.join("notes/course.md")).unwrap();
+        std::fs::write(prepared.journal.destination.join(&partial), "partial").unwrap();
+        let mut journal = prepared.journal.clone();
+        journal.phase = Phase::Copying;
+        assert!(journal.temporary_files.is_empty());
+        save_journal(&prepared.path, &journal).unwrap();
+        let resumed = resume_move(&prepared.path, &AtomicBool::new(false), &|_| {}).unwrap();
+        assert_eq!(resumed.journal.phase, Phase::Verified);
+        assert!(!resumed.journal.destination.join(partial).exists());
+        assert_eq!(
+            std::fs::read(resumed.journal.destination.join("notes/course.md")).unwrap(),
+            std::fs::read(resumed.journal.source.join("notes/course.md")).unwrap()
+        );
+    }
+
+    #[test]
+    fn another_moves_temporary_file_is_not_this_moves_to_remove() {
+        let (_dir, prepared) = fixture();
+        let foreign = prepared
+            .journal
+            .destination
+            .join(format!("notes/{TEMPORARY_PREFIX}move-other-a1b2c3"));
+        std::fs::write(&foreign, "someone else's").unwrap();
+        assert!(resume_move(&prepared.path, &AtomicBool::new(false), &|_| {}).is_err());
+        assert!(foreign.is_file());
+    }
+
+    /// Runs a move and calls `after_copy` once the first file has been copied.
+    fn move_with(
+        source: &Path,
+        destination: &Path,
+        journals: &Path,
+        after_copy: impl Fn(),
+    ) -> Result<PreparedMove> {
+        let done = std::cell::Cell::new(false);
+        prepare_move(
+            "library".into(),
+            source,
+            destination,
+            journals,
+            &AtomicBool::new(false),
+            &|progress| {
+                if progress.message == "正在复制笔记库…" && !done.replace(true) {
+                    after_copy();
+                }
+            },
+        )
+    }
+
+    #[test]
+    fn a_source_file_written_after_its_copy_stops_the_move() {
+        let (_dir, source, destination, journals) = moved_library(3);
+        let first = source.join("notes/0.md");
+        let error = move_with(&source, &destination, &journals, || {
+            // The same size, so only the modification time gives it away.
+            std::fs::write(&first, "edits").unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&first)
+                .unwrap()
+                .set_modified(SystemTime::now() + std::time::Duration::from_secs(5))
+                .unwrap();
+        })
+        .err()
+        .unwrap();
+        assert!(format!("{error:#}").contains("原笔记库在复制期间发生变化"));
+        assert_eq!(std::fs::read_to_string(first).unwrap(), "edits");
+        let (pending, _) = scan_journals(&journals);
+        assert_eq!(pending[0].1.phase, Phase::Failed);
+    }
+
+    #[test]
+    fn a_source_file_added_after_its_copy_stops_the_move() {
+        let (_dir, source, destination, journals) = moved_library(3);
+        let added = source.join("notes/added.md");
+        assert!(
+            move_with(&source, &destination, &journals, || {
+                std::fs::write(&added, "new").unwrap();
+            })
+            .is_err()
+        );
+        assert!(added.is_file());
+    }
+
+    #[test]
+    fn a_copy_that_changed_size_after_landing_is_not_published() {
+        let (_dir, source, destination, journals) = moved_library(3);
+        let copy = destination.join("notes/0.md");
+        let error = move_with(&source, &destination, &journals, || {
+            std::fs::write(&copy, "truncated by something else").unwrap();
+        })
+        .err()
+        .unwrap();
+        assert!(format!("{error:#}").contains("目标副本未通过校验"));
     }
 }
