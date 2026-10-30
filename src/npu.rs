@@ -92,10 +92,18 @@ fn detect_device() -> bool {
     false
 }
 
-/// The packages the worker script imports.
-const WORKER_PACKAGES: [&str; 3] = ["openvino-genai", "huggingface_hub", "numpy"];
-/// openvino-genai publishes wheels for these Python versions.
-const WORKER_PYTHON: &str = ">=3.10";
+/// The packages the worker script imports, pinned so that a new upstream release
+/// cannot change what runs on a machine that resolved the environment later.
+/// Checked together with `uv pip compile` on Linux, Windows and macOS at Python
+/// 3.10 and 3.13, and by importing them. openvino-genai pins openvino and
+/// openvino-tokenizers itself. Bump them together, and re-check that way.
+const WORKER_PACKAGES: [&str; 3] = [
+    "openvino-genai==2026.4.1.0",
+    "huggingface_hub==2.4.0",
+    "numpy==2.2.6",
+];
+/// Python versions with wheels for every pinned package: numpy 2.2 stops at 3.13.
+const WORKER_PYTHON: &str = ">=3.10,<3.14";
 
 /// What starts the NPU worker script.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -601,11 +609,18 @@ mod tests {
     fn uv_launcher_ignores_projects_and_requests_a_supported_python() {
         let cmd = Launcher::Uv(PathBuf::from("uv")).command();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert_eq!(&args[..4], ["run", "--no-project", "--python", ">=3.10"]);
+        assert_eq!(
+            &args[..4],
+            ["run", "--no-project", "--python", WORKER_PYTHON]
+        );
         let py = Launcher::PyLauncher(PathBuf::from("py")).command();
         assert_eq!(py.get_args().collect::<Vec<_>>(), ["-3"]);
         assert_eq!(args.last(), Some(&"python"));
         for package in WORKER_PACKAGES {
+            assert!(
+                package.contains("=="),
+                "an unpinned package changes under users: {package}"
+            );
             assert!(
                 args.windows(2).any(|w| w == ["--with", package]),
                 "{package}"
