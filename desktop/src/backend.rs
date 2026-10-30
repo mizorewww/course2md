@@ -407,28 +407,27 @@ fn reader(
             }
         }
         let _finished = Finished(finished);
-        for line in BufReader::new(stream).lines() {
-            let event = match line {
-                Ok(line) if line.trim().is_empty() => continue,
-                Ok(line) => {
-                    let line = redactions.line(&line);
-                    if json {
-                        match serde_json::from_str(&line) {
-                            Ok(event) => Event::Engine(event),
-                            // A JSON object this build does not recognize is a
-                            // protocol drift, not a log line; keep it visible.
-                            Err(error) if line.starts_with('{') => Event::log(course2md::tr!(
-                                "无法识别的任务事件（{}）：{}",
-                                error,
-                                line
-                            )),
-                            Err(_) => Event::log(line),
-                        }
-                    } else {
-                        Event::log(line)
+        let mut stream = BufReader::new(stream);
+        let mut bytes = Vec::new();
+        loop {
+            bytes.clear();
+            let event = match stream.read_until(b'\n', &mut bytes) {
+                Ok(0) => break,
+                // One undecodable byte must not cost the rest of its line.
+                Ok(_) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    let line = line.trim_end_matches(['\n', '\r']);
+                    if line.trim().is_empty() {
+                        continue;
                     }
+                    line_event(line, json, &redactions)
                 }
-                Err(error) => Event::error(course2md::tr!("读取任务输出失败：{}", error)),
+                // A failed stream stays failed; reading it again would only repeat this.
+                Err(error) => {
+                    let _ = tx.send(Event::error(course2md::tr!("读取任务输出失败：{}", error)));
+                    let _ = wake.try_send(());
+                    break;
+                }
             };
             if tx.send(event).is_err() {
                 break;
@@ -1096,5 +1095,52 @@ mod tests {
             std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         assert!(llama_binary_on_path(dir.path().as_os_str()));
+    }
+    fn read_all(stream: impl std::io::Read + Send + 'static, json: bool) -> Vec<Event> {
+        let (tx, rx) = mpsc::sync_channel(8);
+        let (wake, _) = smol::channel::bounded(1);
+        let reading = reader(
+            stream,
+            tx,
+            json,
+            std::sync::Arc::new(Redactions(vec![])),
+            wake,
+            mpsc::channel().0,
+        );
+        let events = rx.iter().collect();
+        reading.join().unwrap();
+        events
+    }
+
+    #[test]
+    fn a_line_with_invalid_utf8_keeps_its_text_and_the_lines_after_it() {
+        let events = read_all(
+            std::io::Cursor::new(b"before\nbad \xff byte\r\nafter".to_vec()),
+            false,
+        );
+        let lines: Vec<_> = events
+            .iter()
+            .map(|event| match event {
+                Event::Engine(EngineEvent::Log { message, .. }) => message.as_str(),
+                other => panic!("expected a log line, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(lines, ["before", "bad \u{fffd} byte", "after"]);
+    }
+
+    #[test]
+    fn a_stream_that_keeps_failing_reports_once_and_ends() {
+        struct Broken;
+        impl std::io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("gone"))
+            }
+        }
+        let events = read_all(Broken, true);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            Event::Engine(EngineEvent::Error { message, .. }) if message.contains("gone")
+        ));
     }
 }
