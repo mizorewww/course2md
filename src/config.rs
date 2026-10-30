@@ -412,6 +412,19 @@ impl std::str::FromStr for OutputFormat {
     }
 }
 
+/// A credential in `Debug` output: shows whether it is set, never its value.
+pub(crate) struct Redacted<'a>(pub &'a str);
+
+impl std::fmt::Debug for Redacted<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_empty() {
+            "<empty>"
+        } else {
+            "<set>"
+        })
+    }
+}
+
 /// 运行期管线配置（由 CLI 参数归一而来）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {

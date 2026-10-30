@@ -72,7 +72,7 @@ impl std::fmt::Display for LlmProvider {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct LlmSettings {
     pub enabled: bool,
@@ -95,6 +95,25 @@ pub struct LlmSettings {
     pub translate: Option<String>,
     /// 校对并发数（chunk 间相互独立；自建网关/代理可调高）
     pub concurrency: usize,
+}
+
+/// Credentials never reach logs or error text: the key shows only as set or not.
+impl std::fmt::Debug for LlmSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmSettings")
+            .field("enabled", &self.enabled)
+            .field("provider", &self.provider)
+            .field("base_url", &self.base_url)
+            .field("api_key", &crate::config::Redacted(&self.api_key))
+            .field("model", &self.model)
+            .field("prompt", &self.prompt)
+            .field("disable_hint", &self.disable_hint)
+            .field("vision", &self.vision)
+            .field("summarize", &self.summarize)
+            .field("translate", &self.translate)
+            .field("concurrency", &self.concurrency)
+            .finish()
+    }
 }
 
 impl Default for LlmSettings {
@@ -1215,6 +1234,17 @@ mod tests {
         // A complete formula followed by another stays two formulas.
         assert_eq!(events[2].text, "这是 $x$");
         assert_eq!(events[3].text, "$y$ 不变");
+    }
+
+    #[test]
+    fn debug_never_contains_the_api_key() {
+        let settings = LlmSettings {
+            api_key: "secret-key".into(),
+            ..Default::default()
+        };
+        let debug = format!("{settings:?}");
+        assert!(!debug.contains("secret-key"), "{debug}");
+        assert!(debug.contains("<set>"), "{debug}");
     }
 
     #[test]
