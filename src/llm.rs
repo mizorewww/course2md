@@ -714,7 +714,7 @@ pub fn parse_segments(content: &str) -> Option<Vec<(usize, String)>> {
 }
 
 /// 截取首个 { 到末个 } 解析为 JSON 对象；容忍尾逗号。
-pub(crate) fn extract_json_object(content: &str) -> Option<serde_json::Value> {
+pub fn extract_json_object(content: &str) -> Option<serde_json::Value> {
     let start = content.find('{')?;
     let end = content.rfind('}')?;
     if end <= start {

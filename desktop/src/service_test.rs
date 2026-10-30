@@ -602,14 +602,15 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
             }
         }
         TestKind::Summary => {
-            let start = content
-                .find('{')
-                .ok_or_else(|| contract(course2md::tr!("需要摘要 JSON 对象")))?;
-            let end = content
-                .rfind('}')
-                .ok_or_else(|| contract(course2md::tr!("需要摘要 JSON 对象")))?;
-            let value: Value = serde_json::from_str(&content[start..=end])
-                .map_err(|_| contract(course2md::tr!("摘要 JSON 无法解析")))?;
+            // The same reading production gives a summary: code fences, surrounding
+            // prose and trailing commas do not make a working service fail its test.
+            let value = course2md::llm::extract_json_object(content).ok_or_else(|| {
+                contract(if content.contains('{') {
+                    course2md::tr!("摘要 JSON 无法解析")
+                } else {
+                    course2md::tr!("需要摘要 JSON 对象")
+                })
+            })?;
             let tldr = value
                 .get("tldr")
                 .and_then(Value::as_str)
@@ -719,6 +720,22 @@ mod tests {
             &AtomicBool::new(false),
             fake,
         )
+    }
+
+    #[test]
+    fn a_summary_passes_with_whatever_production_tolerates() {
+        let body = r#"{"tldr":"Photosynthesis uses sunlight and releases oxygen.",
+            "key_points":["Plants use sunlight","They release oxygen"],
+            "outline":[{"t":0,"title":"Photosynthesis","detail":"Sunlight in, oxygen out",},],}"#;
+        for content in [
+            body.to_owned(),
+            format!("Here it is:\n```json\n{body}\n```\nDone."),
+        ] {
+            assert!(course2md::llm::extract_json_object(&content).is_some());
+            assert_eq!(verify_sample(TestKind::Summary, &content), Ok(()));
+        }
+        assert!(verify_sample(TestKind::Summary, "no object here").is_err());
+        assert!(verify_sample(TestKind::Summary, "{not json}").is_err());
     }
 
     #[test]
