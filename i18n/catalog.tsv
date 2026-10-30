@@ -1577,6 +1577,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 粘贴 YouTube 或 Bilibili 视频链接	粘贴 YouTube 或 Bilibili 视频链接	Paste YouTube or Bilibili video link	貼上 YouTube 或 Bilibili 影片連結	YouTube または Bilibili 動画のリンクを貼り付けます
 粘贴视频链接	粘贴视频链接	Paste video link	貼上影片連結	動画リンクを貼り付け
 粘贴链接或拖入视频	粘贴链接或拖入视频	Paste a link or drag in a video	貼上連結或拖入影片	リンクを貼り付けるか動画をドラッグ
+系统凭据库当前不可用，此服务的凭据可能保存在其中。请确认系统凭据服务已启动，或重新保存 API Key	系统凭据库当前不可用，此服务的凭据可能保存在其中。请确认系统凭据服务已启动，或重新保存 API Key	The system credential store is unavailable, and this service's credential may be saved there. Make sure the credential service is running, or save the API key again.	系統憑據庫目前無法使用，此服務的憑據可能儲存在其中。請確認系統憑據服務已啟動，或重新儲存 API Key	システムの資格情報ストアを利用できません。このサービスの資格情報はそこに保存されている可能性があります。資格情報サービスが起動していることを確認するか、API キーを保存し直してください。
 系统凭据库中找不到此服务的凭据，请重新保存 API Key	系统凭据库中找不到此服务的凭据，请重新保存 API Key	Credentials for this service were not found in the system credential store. Save the API key again.	系統憑證庫中找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報がシステム認証情報ストアに見つかりませんでした。API キーを再度保存してください。
 系统提示与 response_format=json_object 同为 segments 对象契约	系统提示与 response_format=json_object 同为 segments 对象契约	The system prompt and response_format=json_object both use the segments object contract.	系統提示與 response_format=json_object 同為 segments 物件契約	システムプロンプトと response_format=json_object はどちらも segments オブジェクトの契約に従います。
 繁体中文	繁体中文	Traditional Chinese	繁體中文	繁体字中国語
