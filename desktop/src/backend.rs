@@ -129,7 +129,7 @@ fn kill_pid(pid: u32, group: bool) {
         if group {
             args.push("/T");
         }
-        let _ = Command::new("taskkill")
+        let _ = Command::new(course2md::runtime::system32_program("taskkill.exe"))
             .creation_flags(CREATE_NO_WINDOW)
             .args(args)
             .stdout(Stdio::null())
@@ -445,7 +445,7 @@ pub(crate) fn terminate(child: &mut std::process::Child) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        let _ = Command::new("taskkill")
+        let _ = Command::new(course2md::runtime::system32_program("taskkill.exe"))
             .creation_flags(CREATE_NO_WINDOW)
             .args(["/PID", &child.id().to_string(), "/T", "/F"])
             .stdout(Stdio::null())
