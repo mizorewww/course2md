@@ -24,7 +24,6 @@ Microsoft Visual C++ 运行库	Microsoft Visual C++ 运行库	Microsoft Visual C
 - npu  未检测到 Intel NPU 设备 / No Intel NPU device detected	- npu  未检测到 Intel NPU 设备	- npu  No Intel NPU device detected	- npu  未偵測到 Intel NPU 裝置	- npu  Intel NPU デバイスが検出されません
 - npu  需要 uv，或装好 openvino-genai 的 Python / Intel NPU transcription needs uv, or Python with openvino-genai installed	- npu  需要 uv，或装好 openvino-genai 的 Python	- npu  Intel NPU transcription needs uv, or Python with openvino-genai installed	- npu  需要 uv，或已安裝 openvino-genai 的 Python	- npu  Intel NPU での音声認識には uv、または openvino-genai をインストールした Python が必要です
 --login 后只能跟视频链接或本地视频路径 / After --login, provide only a video URL or local file path	--login 后只能跟视频链接或本地视频路径	After --login, provide only a video URL or local file path	--login 後只能接影片連結或本機影片路徑	--login の後には動画のリンクまたはローカル動画のパスのみ指定できます
-<img loading="lazy" src="{}" alt="视频 {} 的截图">	<img loading="lazy" src="{}" alt="视频 {} 的截图">	<img loading="lazy" src="{}" alt="Screenshot of video {}">	<img loading="lazy" src="{}" alt="影片 {} 的截圖">	<img loading="lazy" src="{}" alt="動画 {} のスクリーンショット">
 <li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}: {}</li>	<li><b>{}</b> {}：{}</li>	<li><b>{}</b> {}：{}</li>
 == 第 {} 段摘要 ==\n	== 第 {} 段摘要 ==\n	== Summary of segment {} ==\n	== 第 {} 段摘要 ==\n	== セグメント {} の要約 ==\n
 AI 处理	AI 处理	AI processing	AI 處理	AI 処理

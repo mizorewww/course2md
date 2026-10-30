@@ -211,9 +211,9 @@ pub fn render_html(meta: &VideoMeta, sections: &[Section]) -> String {
         if !s.image.is_empty() {
             writeln!(
                 body,
-                "<img loading=\"lazy\" src=\"{}\" alt=\"视频 {} 的截图\">",
+                "<img loading=\"lazy\" src=\"{}\" alt=\"{}\">",
                 esc(&s.image),
-                esc(&fmt_ts(s.t))
+                esc(&crate::tr!("视频 {} 的截图", fmt_ts(s.t)))
             )
             .unwrap();
         }
@@ -226,9 +226,23 @@ pub fn render_html(meta: &VideoMeta, sections: &[Section]) -> String {
         body.push_str("</section>\n");
     }
     format!(
-        "<!DOCTYPE html>\n<html lang=\"zh\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{title}</title>\n<style>\n:root {{ color-scheme: light dark; }}\nbody {{ max-width: 920px; margin: 0 auto; padding: 1rem; font-family: system-ui, -apple-system, sans-serif; line-height: 1.7; }}\nheader h1 {{ font-size: 1.5rem; }}\nheader p {{ color: #888; }}\nsection {{ margin: 2rem 0; }}\nsection h2 {{ font-size: 1rem; font-weight: 600; }}\nsection h2 a {{ color: #0969da; text-decoration: none; }}\nimg {{ max-width: 100%; border: 1px solid #8884; border-radius: 6px; }}\np {{ margin: .4rem 0; }}\np.translation {{ color: #777; margin-top: 0; }}\n.math {{ display: inline-block; }}\n.math svg {{ display: block; }}\n.math.display {{ display: block; margin: .6rem auto; max-width: 100%; }}\n</style>\n</head>\n<body>\n{body}</body>\n</html>\n",
+        "<!DOCTYPE html>\n<html lang=\"{lang}\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>{title}</title>\n<style>\n:root {{ color-scheme: light dark; }}\nbody {{ max-width: 920px; margin: 0 auto; padding: 1rem; font-family: system-ui, -apple-system, sans-serif; line-height: 1.7; }}\nheader h1 {{ font-size: 1.5rem; }}\nheader p {{ color: #888; }}\nsection {{ margin: 2rem 0; }}\nsection h2 {{ font-size: 1rem; font-weight: 600; }}\nsection h2 a {{ color: #0969da; text-decoration: none; }}\nimg {{ max-width: 100%; border: 1px solid #8884; border-radius: 6px; }}\np {{ margin: .4rem 0; }}\np.translation {{ color: #777; margin-top: 0; }}\n.math {{ display: inline-block; }}\n.math svg {{ display: block; }}\n.math.display {{ display: block; margin: .6rem auto; max-width: 100%; }}\n</style>\n</head>\n<body>\n{body}</body>\n</html>\n",
         title = esc(&meta.title),
+        lang = document_language(sections),
     )
+}
+
+/// The language most of the page is in: the transcript's when it can be judged,
+/// otherwise the interface language its headings and captions use.
+fn document_language(sections: &[Section]) -> &'static str {
+    let sample: String = sections
+        .iter()
+        .flat_map(|section| &section.speech)
+        .map(|event| event.text.as_str())
+        .take(200)
+        .collect::<Vec<_>>()
+        .join(" ");
+    crate::language::detect(&sample).unwrap_or_else(|| crate::i18n::lang().code())
 }
 
 /// Note text with its formulas typeset; everything else escaped.
@@ -337,5 +351,44 @@ mod tests {
             "正文直接成段，不再用「」对话包裹"
         );
         assert!(!html.contains("「你好」"));
+    }
+
+    #[test]
+    fn html_names_the_language_it_is_in() {
+        let m = VideoMeta {
+            id: "1".into(),
+            title: "t".into(),
+            uploader: "u".into(),
+            webpage_url: "https://example.test".into(),
+            duration: 1.0,
+            extractor: "generic".into(),
+        };
+        let page = |text: &str| {
+            render_html(
+                &m,
+                &[Section {
+                    t: 0.0,
+                    end: 1.0,
+                    image: "a.jpg".into(),
+                    speech: vec![TranscriptEvent {
+                        start: 0.0,
+                        end: 1.0,
+                        text: text.into(),
+                        raw: None,
+                        translation: None,
+                    }],
+                }],
+            )
+        };
+        let english = page(&"the lecture explains how compilers work and why ".repeat(4));
+        assert!(english.contains("<html lang=\"en\">"), "{english}");
+        let chinese = page(&"今天我们来讲一讲编译器是如何工作的以及它为什么重要".repeat(4));
+        assert!(chinese.contains("<html lang=\"zh\">"), "{chinese}");
+        // The caption is translated like its Markdown counterpart, not fixed text.
+        let caption = crate::tr!("视频 {} 的截图", fmt_ts(0.0));
+        assert!(
+            english.contains(&format!("alt=\"{}\"", esc(&caption))),
+            "{english}"
+        );
     }
 }
