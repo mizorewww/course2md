@@ -3441,7 +3441,10 @@ impl Desktop {
                     .children(tabs)
                     .child(v_flex().flex_1().min_h_0().w_full().child(body)),
             ),
-            Some(tools.into_any_element()),
+            Some(
+                self.reader_find_keys(tools, metrics.toc_fits_beside, cx)
+                    .into_any_element(),
+            ),
         )
     }
 
@@ -3484,43 +3487,23 @@ impl Desktop {
         )
     }
 
-    /// The page frame and its keyboard actions.
-    fn reader_root(&mut self, metrics: ReaderMetrics, cx: &mut Context<Self>) -> Stateful<Div> {
-        let toc_fits_beside = metrics.toc_fits_beside;
-        v_flex()
-            .id("reader-page")
-            .track_focus(&self.reader_ui.focus)
+    /// The find keys and the key context they are bound in. The note's search field
+    /// sits in the title bar, outside the page, so the toolbar holding it carries
+    /// these as well: focus in the field dispatches through the toolbar, focus in
+    /// the note through the page.
+    fn reader_find_keys<E: InteractiveElement>(
+        &self,
+        element: E,
+        toc_fits_beside: bool,
+        cx: &mut Context<Self>,
+    ) -> E {
+        element
             .key_context("CourseReader")
             .on_action(
                 cx.listener(|this, _: &FindInNote, window, cx| this.open_reader_find(window, cx)),
             )
             .on_action(cx.listener(|this, _: &NextMatch, _, cx| this.move_reader_match(1, cx)))
             .on_action(cx.listener(|this, _: &PreviousMatch, _, cx| this.move_reader_match(-1, cx)))
-            .on_action(cx.listener(|this, _: &ReaderPageUp, _, cx| this.scroll_reader_page(1., cx)))
-            .on_action(
-                cx.listener(|this, _: &ReaderPageDown, _, cx| this.scroll_reader_page(-1., cx)),
-            )
-            .on_action(cx.listener(|this, _: &ReaderStart, _, cx| {
-                if this.result_tab == 0 {
-                    this.reader_ui.note_list.scroll_to(ListOffset {
-                        item_ix: 0,
-                        offset_in_item: px(0.),
-                    });
-                } else {
-                    this.reader_ui.gallery.list.scroll_to(ListOffset::default());
-                }
-                this.reading_position_moved(cx);
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &ReaderEnd, _, cx| {
-                if this.result_tab == 0 {
-                    this.reader_ui.note_list.scroll_to_end();
-                } else {
-                    this.reader_ui.gallery.list.scroll_to_end();
-                }
-                this.reading_position_moved(cx);
-                cx.notify();
-            }))
             .on_action(cx.listener(move |this, _: &CloseFind, window, cx| {
                 if !toc_fits_beside && this.reader_ui.toc_open == Some(true) {
                     this.reader_ui.toc_open = Some(false);
@@ -3534,13 +3517,47 @@ impl Desktop {
                     cx.propagate();
                 }
             }))
-            .h_full()
-            .min_h_0()
-            .w(px(metrics.reader_width))
-            .ml(px(metrics.frame_offset))
-            .pt_2()
-            .gap(rems(20. / 14.))
-            .when(metrics.compact, |view| view.gap_3())
+    }
+
+    /// The page frame and its keyboard actions.
+    fn reader_root(&mut self, metrics: ReaderMetrics, cx: &mut Context<Self>) -> Stateful<Div> {
+        self.reader_find_keys(
+            v_flex()
+                .id("reader-page")
+                .track_focus(&self.reader_ui.focus),
+            metrics.toc_fits_beside,
+            cx,
+        )
+        .on_action(cx.listener(|this, _: &ReaderPageUp, _, cx| this.scroll_reader_page(1., cx)))
+        .on_action(cx.listener(|this, _: &ReaderPageDown, _, cx| this.scroll_reader_page(-1., cx)))
+        .on_action(cx.listener(|this, _: &ReaderStart, _, cx| {
+            if this.result_tab == 0 {
+                this.reader_ui.note_list.scroll_to(ListOffset {
+                    item_ix: 0,
+                    offset_in_item: px(0.),
+                });
+            } else {
+                this.reader_ui.gallery.list.scroll_to(ListOffset::default());
+            }
+            this.reading_position_moved(cx);
+            cx.notify();
+        }))
+        .on_action(cx.listener(|this, _: &ReaderEnd, _, cx| {
+            if this.result_tab == 0 {
+                this.reader_ui.note_list.scroll_to_end();
+            } else {
+                this.reader_ui.gallery.list.scroll_to_end();
+            }
+            this.reading_position_moved(cx);
+            cx.notify();
+        }))
+        .h_full()
+        .min_h_0()
+        .w(px(metrics.reader_width))
+        .ml(px(metrics.frame_offset))
+        .pt_2()
+        .gap(rems(20. / 14.))
+        .when(metrics.compact, |view| view.gap_3())
     }
 
     /// Export feedback, version loading, notices and the details panel above
