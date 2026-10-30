@@ -40,14 +40,20 @@ sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else sh
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# Verify against the release's SHA256SUMS when it publishes one; older releases do not.
+# Nothing is installed without a matching entry in the release's SHA256SUMS. Every
+# release since v2.0.0 publishes one, and this script installs only the latest.
 sums="$tmp/SHA256SUMS"
-curl -fsSL "$RELEASE/SHA256SUMS" -o "$sums" 2>/dev/null || rm -f "$sums"
+if ! curl -fsSL "$RELEASE/SHA256SUMS" -o "$sums"; then
+  warn "无法下载校验和文件，已停止安装 / Could not download SHA256SUMS; nothing was installed."
+  exit 1
+fi
 verify() {
   local file="$1" name="$2" expected
-  [ -f "$sums" ] || return 0
   expected="$(awk -v n="$name" '$2 == n || $2 == "*" n {print $1}' "$sums")"
-  [ -n "$expected" ] || return 0
+  if [ -z "$expected" ]; then
+    warn "校验和文件中没有 ${name}，已停止安装 / $name is not listed in SHA256SUMS; nothing was installed."
+    exit 1
+  fi
   if [ "$(sha256 "$file")" != "$expected" ]; then
     warn "校验和不匹配：$name / Checksum mismatch: $name"
     exit 1

@@ -11,10 +11,12 @@ spec.loader.exec_module(module)
 
 
 class ReleaseVersionTests(unittest.TestCase):
-    def resolve(self, env, releases=None, draft=False, prerelease=False):
+    def resolve(self, env, releases=None, draft=False, prerelease=False, jobs=None):
         calls = []
         def api(path):
             calls.append(path)
+            if path.startswith('actions/runs/'):
+                return {'jobs': jobs or []}
             if path.startswith('releases?'):
                 return releases or []
             return {'draft': draft, 'prerelease': prerelease}
@@ -37,6 +39,29 @@ class ReleaseVersionTests(unittest.TestCase):
         ]
         output, _ = self.resolve({'RELEASE_BRANCH': 'main', 'RELEASE_SHA': 'tested'}, releases)
         self.assertEqual(output, 'version=1.7.0\nchannel=stable\npublish=true\n')
+
+    def test_a_dry_run_publishes_nothing_even_if_the_commit_has_a_release(self):
+        release = {'target_commitish': 'tested', 'tag_name': 'v1.7.0', 'draft': False, 'prerelease': False}
+        skipped = [{'name': 'build', 'conclusion': 'success'}, {'name': 'release', 'conclusion': 'skipped'}]
+        env = {'RELEASE_BRANCH': 'main', 'RELEASE_SHA': 'tested', 'RELEASE_RUN_ID': '42'}
+        output, calls = self.resolve(env, [release], jobs=skipped)
+        self.assertEqual(output, 'publish=false\n')
+        self.assertEqual(calls, ['actions/runs/42/jobs?per_page=100'])
+        # A dry run of a commit with no release is not a failure either.
+        output, _ = self.resolve({**env, 'RELEASE_SHA': 'untagged'}, [], jobs=skipped)
+        self.assertEqual(output, 'publish=false\n')
+
+    def test_a_real_release_run_still_publishes(self):
+        release = {'target_commitish': 'tested', 'tag_name': 'v1.7.0', 'draft': False, 'prerelease': False}
+        done = [{'name': 'release', 'conclusion': 'success'}]
+        env = {'RELEASE_BRANCH': 'main', 'RELEASE_SHA': 'tested', 'RELEASE_RUN_ID': '42'}
+        output, _ = self.resolve(env, [release], jobs=done)
+        self.assertEqual(output, 'version=1.7.0\nchannel=stable\npublish=true\n')
+
+    def test_a_manual_channel_run_is_not_gated_on_a_run(self):
+        output, calls = self.resolve({'REQUESTED_VERSION': '1.7.0', 'RELEASE_RUN_ID': ''})
+        self.assertIn('publish=true', output)
+        self.assertEqual(calls, ['releases/tags/v1.7.0'])
 
     def test_prerelease_only_updates_explicitly_enabled_channels(self):
         for source in ['REQUESTED_VERSION', 'RELEASE_BRANCH']:

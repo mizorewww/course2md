@@ -21,27 +21,21 @@ const COOKIE_NAMES: &[&str] = &[
     "b_nut",
 ];
 type Cookies = BTreeMap<String, String>;
+type Response = ureq::http::Response<ureq::Body>;
 
 pub const BILIBILI_SETUP_TIP: &str = "使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。 / For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.";
 
 #[derive(Debug)]
-struct LoginTip {
-    error: anyhow::Error,
-    hint: &'static str,
-}
+struct LoginTip(&'static str);
 
 impl std::fmt::Display for LoginTip {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.hint)
-    }
-}
-impl std::error::Error for LoginTip {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.error.as_ref())
+        f.write_str(self.0)
     }
 }
 
-/// Keep the original failure visible; login is a suggested next step, not a diagnosis.
+/// Keep the original failure visible and recognisable: login is a suggested next
+/// step, not a diagnosis, so markers in `error` still answer to `downcast_ref`.
 pub fn with_bilibili_login_tip(url: &str, error: anyhow::Error) -> anyhow::Error {
     if !is_bilibili_url(url) || error.downcast_ref::<LoginTip>().is_some() {
         return error;
@@ -51,7 +45,7 @@ pub fn with_bilibili_login_tip(url: &str, error: anyhow::Error) -> anyhow::Error
     } else {
         "提示：可运行 course2md --login bilibili 扫码登录后重试；已登录时可重新登录。 / Hint: run course2md --login bilibili and scan the QR code to retry; if already logged in, log in again."
     };
-    anyhow::Error::new(LoginTip { error, hint })
+    error.context(LoginTip(hint))
 }
 
 pub fn cookie_path() -> PathBuf {
@@ -124,8 +118,11 @@ fn insert_cookie(cookies: &mut Cookies, name: &str, value: &str) {
     }
 }
 
-fn read_cookies(response: &ureq::Response, cookies: &mut Cookies) {
-    for header in response.all("set-cookie") {
+fn read_cookies(response: &Response, cookies: &mut Cookies) {
+    for header in response.headers().get_all("set-cookie") {
+        let Ok(header) = header.to_str() else {
+            continue;
+        };
         if let Some((name, value)) = header
             .split(';')
             .next()
@@ -177,19 +174,19 @@ fn save_cookies(path: &Path, cookies: &Cookies) -> Result<()> {
     ))
 }
 
-fn request(agent: &ureq::Agent, url: &str, cookies: &Cookies) -> Result<ureq::Response> {
+fn request(agent: &ureq::Agent, url: &str, cookies: &Cookies) -> Result<Response> {
     // Transport errors may contain the URL, including a one-use QR ticket.
     agent
         .get(url)
-        .set("User-Agent", USER_AGENT)
-        .set("Referer", "https://passport.bilibili.com/")
-        .set("Cookie", &cookie_header(cookies))
+        .header("User-Agent", USER_AGENT)
+        .header("Referer", "https://passport.bilibili.com/")
+        .header("Cookie", &cookie_header(cookies))
         .call()
         .map_err(|_| anyhow::anyhow!(crate::tr!("Bilibili 登录请求失败，请检查网络后重试 / Bilibili login request failed; check the network and retry")))
 }
 
-fn data(response: ureq::Response) -> Result<Value> {
-    let value: Value = response.into_json().context(crate::tr!(
+fn data(mut response: Response) -> Result<Value> {
+    let value: Value = response.body_mut().read_json().context(crate::tr!(
         "无法解析 Bilibili 登录响应 / Cannot parse Bilibili login response"
     ))?;
     ensure!(
@@ -233,7 +230,7 @@ fn finish_login(
 fn finish_with(
     login: &Value,
     cookies: &mut Cookies,
-    mut fetch: impl FnMut(&str, &Cookies) -> Result<ureq::Response>,
+    mut fetch: impl FnMut(&str, &Cookies) -> Result<Response>,
 ) -> Result<AccountProfile> {
     if let Some(raw) = login["url"].as_str().filter(|s| !s.is_empty()) {
         // Older responses embed cookies in the callback query; newer responses
@@ -256,12 +253,16 @@ fn finish_with(
                 if complete(cookies) {
                     break;
                 }
-                if !(300..400).contains(&response.status()) {
+                if !response.status().is_redirection() {
                     break;
                 }
-                let location = response.header("location").context(crate::tr!(
-                    "登录跳转缺少地址 / Login redirect is missing an address"
-                ))?;
+                let location = response
+                    .headers()
+                    .get("location")
+                    .and_then(|location| location.to_str().ok())
+                    .context(crate::tr!(
+                        "登录跳转缺少地址 / Login redirect is missing an address"
+                    ))?;
                 let joined = next.join(location).map_err(|_| {
                     anyhow::anyhow!(crate::tr!("登录跳转地址无效 / Invalid login redirect URL"))
                 })?;
@@ -275,9 +276,12 @@ fn finish_with(
             "登录响应缺少凭据，请重新运行 course2md --login bilibili / Login response is missing credentials; run course2md --login bilibili again"
         )
     );
-    let value: Value = fetch(NAV, cookies)?.into_json().context(crate::tr!(
-        "无法解析 Bilibili 登录响应 / Cannot parse Bilibili login response"
-    ))?;
+    let value: Value = fetch(NAV, cookies)?
+        .body_mut()
+        .read_json()
+        .context(crate::tr!(
+            "无法解析 Bilibili 登录响应 / Cannot parse Bilibili login response"
+        ))?;
     match nav_status(&value)? {
         AccountStatus::Connected(profile) => Ok(profile),
         _ => bail!(crate::tr!(
@@ -368,7 +372,8 @@ pub fn bilibili_account_status() -> Result<AccountStatus> {
         return Ok(AccountStatus::Expired);
     }
     let value: Value = request(&login_agent(), NAV, &cookies)?
-        .into_json()
+        .body_mut()
+        .read_json()
         .map_err(|_| {
             anyhow::anyhow!(crate::tr!("无法解析账号状态 / Cannot parse account status"))
         })?;
@@ -511,6 +516,18 @@ pub fn login_bilibili() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn answer(status: u16, cookies: &[&str], body: &str) -> Response {
+        let mut response = ureq::http::Response::builder().status(status);
+        for cookie in cookies {
+            response = response.header("Set-Cookie", *cookie);
+        }
+        if (300..400).contains(&status) {
+            response = response.header("Location", "https://www.bilibili.com/");
+        }
+        response.body(ureq::Body::builder().data(body)).unwrap()
+    }
+
     #[test]
     fn login_tip_preserves_failure_and_only_applies_to_bilibili_once() {
         let error = anyhow::anyhow!("HTTP Error 403").context("无法读取视频");
@@ -524,6 +541,20 @@ mod tests {
             anyhow::anyhow!("HTTP Error 403"),
         );
         assert_eq!(error.to_string(), "HTTP Error 403");
+    }
+
+    #[test]
+    fn login_tip_leaves_typed_causes_reachable() {
+        #[derive(Debug)]
+        struct Marker;
+        impl std::fmt::Display for Marker {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("marker")
+            }
+        }
+        impl std::error::Error for Marker {}
+        let error = with_bilibili_login_tip("https://b23.tv/example", Marker.into());
+        assert!(error.downcast_ref::<Marker>().is_some());
     }
 
     #[test]
@@ -560,7 +591,15 @@ mod tests {
     #[test]
     fn cookies_are_private_complete_and_in_netscape_format() {
         let mut cookies = Cookies::new();
-        let response: ureq::Response = "HTTP/1.1 200 OK\r\nSet-Cookie: SESSDATA=abc%2C123; Domain=.bilibili.com; HttpOnly; Secure\r\nSet-Cookie: bili_jct=csrf; Path=/\r\nSet-Cookie: DedeUserID=123; Path=/\r\n\r\n".parse().unwrap();
+        let response = answer(
+            200,
+            &[
+                "SESSDATA=abc%2C123; Domain=.bilibili.com; HttpOnly; Secure",
+                "bili_jct=csrf; Path=/",
+                "DedeUserID=123; Path=/",
+            ],
+            "",
+        );
         read_cookies(&response, &mut cookies);
         insert_cookie(&mut cookies, "evil", "ignored");
         insert_cookie(&mut cookies, "buvid3", "bad\ninjection");
@@ -590,16 +629,29 @@ mod tests {
         ] {
             let mut cookies = Cookies::new();
             let mut calls = Vec::new();
-            finish_with(&serde_json::json!({"url":callback}), &mut cookies, |url, jar| {
-                calls.push(url.to_owned());
-                if url.contains("/nav") {
-                    assert!(complete(jar));
-                    assert_eq!(jar["SESSDATA"], "abc%2C123");
-                    Ok(ureq::Response::new(200, "OK", r#"{"code":0,"data":{"isLogin":true}}"#).unwrap())
-                } else {
-                    Ok("HTTP/1.1 302 Found\r\nSet-Cookie: SESSDATA=abc%2C123; Secure\r\nSet-Cookie: bili_jct=csrf\r\nSet-Cookie: DedeUserID=123\r\nLocation: https://www.bilibili.com/\r\n\r\n".parse().unwrap())
-                }
-            }).unwrap();
+            finish_with(
+                &serde_json::json!({"url":callback}),
+                &mut cookies,
+                |url, jar| {
+                    calls.push(url.to_owned());
+                    if url.contains("/nav") {
+                        assert!(complete(jar));
+                        assert_eq!(jar["SESSDATA"], "abc%2C123");
+                        Ok(answer(200, &[], r#"{"code":0,"data":{"isLogin":true}}"#))
+                    } else {
+                        Ok(answer(
+                            302,
+                            &[
+                                "SESSDATA=abc%2C123; Secure",
+                                "bili_jct=csrf",
+                                "DedeUserID=123",
+                            ],
+                            "",
+                        ))
+                    }
+                },
+            )
+            .unwrap();
             assert_eq!(calls.last().unwrap(), NAV);
             assert_eq!(
                 calls.len(),
@@ -607,10 +659,7 @@ mod tests {
             );
             assert!(
                 finish_with(&serde_json::json!({}), &mut cookies, |_, _| {
-                    Ok(
-                        ureq::Response::new(200, "OK", r#"{"code":0,"data":{"isLogin":false}}"#)
-                            .unwrap(),
-                    )
+                    Ok(answer(200, &[], r#"{"code":0,"data":{"isLogin":false}}"#))
                 })
                 .is_err()
             );

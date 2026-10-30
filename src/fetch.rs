@@ -368,18 +368,18 @@ pub fn candidate_identity(candidate: &SourceCandidate) -> Option<String> {
 }
 
 fn bilibili_view(agent: &ureq::Agent, bvid: &str) -> Result<BilibiliViewData> {
-    let response = agent
+    let mut response = agent
         .get(&format!(
             "https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
         ))
-        .set(
+        .header(
             "User-Agent",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
         )
-        .set("Referer", "https://www.bilibili.com")
+        .header("Referer", "https://www.bilibili.com")
         .call()
         .context(crate::tr!("读取 Bilibili 分集信息失败"))?;
-    let view: BilibiliView = serde_json::from_str(&response.into_string()?)?;
+    let view: BilibiliView = serde_json::from_str(&response.body_mut().read_to_string()?)?;
     view.data.context(crate::tr!("Bilibili 没有返回分集信息"))
 }
 
@@ -444,11 +444,12 @@ pub fn enrich_bilibili_candidates(candidates: &mut [SourceCandidate]) {
             break;
         }
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(3))
-        .timeout_read(std::time::Duration::from_secs(3))
-        .timeout(std::time::Duration::from_secs(8))
-        .build();
+    let agent = crate::runtime::agent_builder()
+        .timeout_connect(Some(std::time::Duration::from_secs(3)))
+        .timeout_per_read(Some(std::time::Duration::from_secs(3)))
+        .timeout_global(Some(std::time::Duration::from_secs(8)))
+        .build()
+        .new_agent();
     // 每个请求最长 8s：并发补全，避免几十个分集串行等待。单个失败只记日志。
     let views = crate::runtime::map_pool(
         bvids.iter().collect(),
@@ -640,7 +641,7 @@ pub async fn probe_online(
     ]);
     let out = run_output(ytdlp_url(&mut cmd, url), control)
         .await
-        .map_err(|e| crate::auth::with_bilibili_login_tip(url, e))?;
+        .map_err(|e| login_tip(url, e))?;
     parse_online_probe(&out.stdout, url, &String::from_utf8_lossy(&out.stderr))
 }
 
@@ -770,7 +771,7 @@ pub async fn fetch_selected_subtitle(
         });
         let out = run_output(ytdlp_url(&mut cmd, url), control)
             .await
-            .map_err(|error| crate::auth::with_bilibili_login_tip(url, error))?;
+            .map_err(|error| login_tip(url, error))?;
         match parse_online_probe(&out.stdout, url, &String::from_utf8_lossy(&out.stderr))? {
             OnlineProbe::Video { video } => ensure!(
                 video.identity == source_identity,
@@ -865,7 +866,7 @@ pub async fn download(
         }
         let outcome = tokio::select! {
             status = run_download(ytdlp_url(&mut cmd, url)) => {
-                status.map_err(|e| crate::auth::with_bilibili_login_tip(url, e))
+                status.map_err(|e| login_tip(url, e))
             }
             // 取消/暂停：drop run_download 分支即 kill_on_drop 终止当前 yt-dlp
             e = control.watch() => return Err(e),
@@ -906,8 +907,8 @@ pub async fn download(
                             bilibili_412_retries += 1;
                             next_delay = Some(delay);
                         }
-                        // 412 重试耗尽，不再进下一轮
-                        None => return Err(bilibili_hint(e)),
+                        // 412 重试耗尽，不再进下一轮（提示已由 run_download 附上）
+                        None => return Err(e),
                     }
                 } else if is_deterministic_download_error(&format!("{e:#}")) {
                     return Err(e);
@@ -920,6 +921,17 @@ pub async fn download(
     }
     Err(last_err
         .unwrap_or_else(|| anyhow::anyhow!(crate::tr!("视频下载失败 / Video download failed"))))
+}
+
+/// What a failed yt-dlp run suggests. A stopped task did not fail, and a 412
+/// already carries its own advice, so neither is told to log in.
+fn login_tip(url: &str, error: anyhow::Error) -> anyhow::Error {
+    if error.downcast_ref::<crate::dispatch::Failure>().is_some()
+        || error.downcast_ref::<Bilibili412>().is_some()
+    {
+        return error;
+    }
+    crate::auth::with_bilibili_login_tip(url, error)
 }
 
 /// Bilibili can reject a request transiently at either the webpage or API stage.
@@ -977,11 +989,13 @@ async fn run_output(
 ) -> Result<std::process::Output> {
     let mut retries = 0;
     loop {
-        let out = cmd
-            .kill_on_drop(true)
-            .output()
-            .await
-            .context(crate::tr!("启动 yt-dlp 失败 / Failed to start yt-dlp"))?;
+        // 取消/暂停：drop output() 分支即 kill_on_drop 终止当前 yt-dlp
+        let out = tokio::select! {
+            out = cmd.kill_on_drop(true).output() => {
+                out.context(crate::tr!("启动 yt-dlp 失败 / Failed to start yt-dlp"))?
+            }
+            e = control.watch() => return Err(e),
+        };
         if out.status.success() {
             return Ok(out);
         }
@@ -1031,34 +1045,42 @@ fn parse_ytdlp_progress(line: &str) {
     }
 }
 
+/// Reads a child's output to its end, one line at a time. Bytes that are not
+/// UTF-8 (a title in a legacy code page) are replaced instead of ending the read:
+/// a reader that stops leaves the pipe full and the child blocked on its next write.
+async fn for_each_line(reader: impl tokio::io::AsyncRead + Unpin, mut line: impl FnMut(String)) {
+    use tokio::io::AsyncBufReadExt;
+    let mut reader = tokio::io::BufReader::new(reader);
+    let mut buf = Vec::new();
+    while matches!(reader.read_until(b'\n', &mut buf).await, Ok(1..)) {
+        let text = buf.strip_suffix(b"\n").unwrap_or(&buf);
+        let text = text.strip_suffix(b"\r").unwrap_or(text);
+        line(String::from_utf8_lossy(text).into_owned());
+        buf.clear();
+    }
+}
+
 /// 运行 yt-dlp 下载：流式读取 stdout/stderr 并实时转发字节进度。
 /// 错误语义与 media::run_cmd 一致（stderr 尾部进错误，412 附登录提示）；
 /// 三个读取分支同属一个 future，drop 即整体取消（kill_on_drop 杀子进程）。
 async fn run_download(cmd: &mut Command) -> Result<()> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
     let mut child = cmd
         .kill_on_drop(true)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .context(crate::tr!("启动 yt-dlp 失败 / Failed to start yt-dlp"))?;
-    let mut stdout =
-        BufReader::new(child.stdout.take().expect(crate::tr!("stdout 管道已配置"))).lines();
-    let mut stderr_pipe =
-        BufReader::new(child.stderr.take().expect(crate::tr!("stderr 管道已配置"))).lines();
+    let stdout = child.stdout.take().expect(crate::tr!("stdout 管道已配置"));
+    let stderr_pipe = child.stderr.take().expect(crate::tr!("stderr 管道已配置"));
     let wait = child.wait();
-    let out = async {
-        while let Ok(Some(line)) = stdout.next_line().await {
-            parse_ytdlp_progress(&line);
-        }
-    };
+    let out = for_each_line(stdout, |line| parse_ytdlp_progress(&line));
     let err = async {
         use std::collections::VecDeque;
         // Keep the tail, not the head: yt-dlp ends with the actionable error.
         const STDERR_TAIL_BYTES: usize = 64 * 1024;
         let mut tail: VecDeque<String> = VecDeque::new();
         let mut bytes = 0usize;
-        while let Ok(Some(line)) = stderr_pipe.next_line().await {
+        for_each_line(stderr_pipe, |line| {
             parse_ytdlp_progress(&line);
             bytes += line.len() + 1;
             tail.push_back(line);
@@ -1066,7 +1088,8 @@ async fn run_download(cmd: &mut Command) -> Result<()> {
                 let Some(old) = tail.pop_front() else { break };
                 bytes = bytes.saturating_sub(old.len() + 1);
             }
-        }
+        })
+        .await;
         tail.into_iter().collect::<Vec<_>>().join("\n")
     };
     let (status, (), stderr) = tokio::join!(wait, out, err);
@@ -1096,6 +1119,79 @@ mod tests {
     }
 
     use super::*;
+
+    /// Bytes that are not UTF-8 must not stop the reader: a child that fills
+    /// the now-unread pipe blocks forever. The test's deadline is that hang.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn output_that_is_not_utf8_cannot_hang_the_download() {
+        let mut cmd = Command::new("sh");
+        cmd.args([
+            "-c",
+            r#"
+            printf '\377\376 gbk\n' >&2
+            printf '\377\376 gbk\n'
+            i=0; while [ $i -lt 4000 ]; do
+              echo 'padding padding padding padding padding padding padding' >&2
+              echo 'padding padding padding padding padding padding padding'
+              i=$((i+1))
+            done
+            echo 'ERROR: the actionable last line' >&2
+            exit 1
+        "#,
+        ]);
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(20), run_download(&mut cmd))
+                .await
+                .expect("the reader stopped draining the pipe");
+        let message = format!("{:#}", result.unwrap_err());
+        assert!(message.contains("the actionable last line"), "{message}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_stopped_task_does_not_wait_for_a_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("control.json");
+        let control = crate::dispatch::TaskControl::open(
+            dir.path(),
+            crate::dispatch::ControlSource {
+                control_path: Some(path.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::checkpoint::atomic_write(
+            &path,
+            &serde_json::to_vec(&crate::dispatch::Control {
+                intent: crate::dispatch::Intent::Cancel,
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut cmd = Command::new("sleep");
+        cmd.arg("30");
+        let started = std::time::Instant::now();
+        let error = run_output(&mut cmd, &control).await.unwrap_err();
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        // The stop stays recognisable through the wrapping every probe applies,
+        // and nothing suggests logging in to a task the person cancelled.
+        let error = login_tip("https://www.bilibili.com/video/BV1", error);
+        assert!(error.downcast_ref::<crate::dispatch::Failure>().is_some());
+        assert!(!format!("{error:#}").contains("--login"), "{error:#}");
+    }
+
+    #[test]
+    fn a_login_tip_keeps_the_markers_retries_look_for() {
+        let url = "https://www.bilibili.com/video/BV1";
+        let error = login_tip(url, anyhow::anyhow!("yt-dlp failed").context(Bilibili412));
+        assert!(error.downcast_ref::<Bilibili412>().is_some());
+        let error = login_tip(url, anyhow::anyhow!("HTTP Error 403"));
+        let message = format!("{error:#}");
+        assert!(message.contains("--login bilibili"), "{message}");
+        assert!(message.contains("HTTP Error 403"), "{message}");
+    }
 
     #[test]
     fn deterministic_download_errors_skip_the_retry_loop() {

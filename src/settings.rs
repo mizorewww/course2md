@@ -57,13 +57,25 @@ impl std::fmt::Display for AsrApiMode {
 }
 
 /// 云端 STT（provider = "api"，OpenAI 兼容端点，如 OpenRouter）。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct AsrApi {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
     pub mode: AsrApiMode,
+}
+
+/// Credentials never reach logs or error text: the key shows only as set or not.
+impl std::fmt::Debug for AsrApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsrApi")
+            .field("base_url", &self.base_url)
+            .field("api_key", &crate::config::Redacted(&self.api_key))
+            .field("model", &self.model)
+            .field("mode", &self.mode)
+            .finish()
+    }
 }
 
 impl Default for AsrApi {
@@ -150,6 +162,16 @@ pub fn load() -> anyhow::Result<ConfigFile> {
 }
 
 pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {
+    write_config(toml::to_string_pretty(cfg)?.as_bytes())
+}
+
+/// Replaces the configuration with the commented template (`config init`).
+pub fn write_template() -> Result<PathBuf> {
+    write_config(template().as_bytes())
+}
+
+/// Writes the configuration atomically, keeping the previous file beside it.
+fn write_config(bytes: &[u8]) -> Result<PathBuf> {
     let p = config_path();
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir)?;
@@ -167,8 +189,7 @@ pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {
             );
         }
     }
-    let bytes = toml::to_string_pretty(cfg)?;
-    crate::checkpoint::atomic_write(&p, bytes.as_bytes())?;
+    crate::checkpoint::atomic_write(&p, bytes)?;
     Ok(p)
 }
 
@@ -398,6 +419,22 @@ pub fn print_effective(cfg: &ConfigFile) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn debug_never_contains_the_api_key() {
+        let api = super::AsrApi {
+            api_key: "secret-key".into(),
+            ..Default::default()
+        };
+        let debug = format!(
+            "{:?}",
+            super::ConfigFile {
+                asr_api: api,
+                ..Default::default()
+            }
+        );
+        assert!(!debug.contains("secret-key"), "{debug}");
+    }
+
     #[test]
     fn template_paths_are_escaped_toml_strings() {
         let quoted = toml::Value::String(r"C:\Users\me\models".into()).to_string();

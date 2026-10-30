@@ -292,7 +292,7 @@ pub fn inspect_at(
         can_prepare: true,
         last_error: None,
         loaded_at: None,
-        fingerprint: format!("{:x}", hash.finalize()),
+        fingerprint: hex(&hash.finalize()),
     })
 }
 fn cache_part(name: &str, path: PathBuf, missing: Vec<String>) -> Result<CachePart> {
@@ -516,8 +516,12 @@ fn receipt_path(status: &LocalModelStatus) -> PathBuf {
     );
     crate::config::cache_dir()
         .join("model-checks")
-        .join(format!("{:x}.json", Sha256::digest(key)))
+        .join(format!("{}.json", hex(&Sha256::digest(key))))
 }
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 pub fn record_result(status: &LocalModelStatus, loaded: bool, error: Option<String>) -> Result<()> {
     let receipt = Receipt {
         fingerprint: status.fingerprint.clone(),

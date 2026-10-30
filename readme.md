@@ -132,7 +132,7 @@ Notes go to a default library; add other folders in **Settings → Storage**. Th
 
 **A Bilibili video fails or comes back in low quality.** Log in under **Settings → Services & accounts → Bilibili account** by scanning the QR code.
 
-**How large are the model downloads, and where do they go?** About 1–2.3 GB on Apple Silicon (`~/Library/Caches/qwen3-speech/`) and 2.4 GB elsewhere (`~/.cache/course2md/models/`). In mainland China they download from domestic mirrors (ModelScope / hf-mirror.com); elsewhere these are fallbacks. Downloads resume after interruptions, and GPU/CPU models are checked with SHA-256.
+**How large are the model downloads, and where do they go?** About 1–2.3 GB on Apple Silicon (`~/Library/Caches/qwen3-speech/`) and 2.4 GB elsewhere (`~/.cache/course2md/models/`). On a system set up for mainland China (its locale or time zone) they download from domestic mirrors (ModelScope / hf-mirror.com); elsewhere these are fallbacks. `HF_ENDPOINT` names a host outright, and `COURSE2MD_IP_LOOKUP=1` lets course2md ask public services for your country instead, which sends them your IP address. Downloads resume after interruptions, and GPU/CPU models are checked with SHA-256.
 
 **I upgraded from 1.7. Where are my notes?** Notes made by 1.x stay where they were as `course.md` / `course.html` and still open in any editor or browser, but the 2.0 library only lists notes made by 2.0. Downloaded models, the Bilibili login and the CLI's `config.toml` keep working; set up recognition and AI services again in the setup steps.
 

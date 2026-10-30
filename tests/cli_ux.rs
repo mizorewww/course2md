@@ -225,6 +225,14 @@ fn generated_template_parses_and_does_not_overwrite_existing_config() {
     let file =
         std::fs::read_to_string(cli.dir.path().join("config/course2md/config.toml")).unwrap();
     assert!(file.contains("threads = 7"));
+
+    // --force replaces it, and the hand-edited file stays beside the new one.
+    assert!(cli.run(&["config", "init", "--force"]).status.success());
+    let dir = cli.dir.path().join("config/course2md");
+    let file = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+    assert!(!file.contains("threads = 7"));
+    let backup = std::fs::read_to_string(dir.join("config.toml.bak")).unwrap();
+    assert!(backup.contains("threads = 7"));
 }
 
 #[test]

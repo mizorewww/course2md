@@ -762,6 +762,15 @@ impl Ledger {
         if !(200..300).contains(&response.status) {
             receipt.state = State::Uncertain;
             self.save(&receipt)?;
+            // As for a lost response above: without per-request billing, a server
+            // error costs nothing to send again, so no one needs to be asked.
+            if resend == Resend::Free {
+                return Err(Failure::with_status(
+                    Some(response.status),
+                    true,
+                    rejection_message(response.status),
+                ));
+            }
             return Err(self.block(BlockReason::Uncertain, Some(&receipt), crate::tr!("服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain")));
         }
         let value = match value {
@@ -792,20 +801,42 @@ impl Ledger {
     }
 }
 
+/// Whether this failure proves that no request bytes left: only then may a paid
+/// request go out again without asking. ureq reports refused connections as plain I/O
+/// errors. The two unreachable kinds are not here although connecting can fail with
+/// them, because an established connection can fail with them too, after sending.
+fn never_sent(error: &ureq::Error) -> bool {
+    use std::io::ErrorKind;
+    match error {
+        ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => true,
+        ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect) => true,
+        ureq::Error::Io(error) => matches!(
+            error.kind(),
+            ErrorKind::ConnectionRefused | ErrorKind::AddrNotAvailable
+        ),
+        _ => false,
+    }
+}
+
 /// Drain the HTTP body before recording completion; a body read error is still uncertain.
 /// Cloud callers must disable redirects: a failed connection after a redirect would not
 /// prove that the initial request was never handled.
-pub fn receive(
-    result: std::result::Result<ureq::Response, ureq::Error>,
+pub(crate) fn receive(
+    result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
 ) -> std::result::Result<HttpResponse, NetworkFailure> {
     use std::io::Read;
     let response = match result {
-        Ok(response) | Err(ureq::Error::Status(_, response)) => response,
-        Err(ureq::Error::Transport(error)) => {
-            let definitely_unsent = matches!(
-                error.kind(),
-                ureq::ErrorKind::Dns | ureq::ErrorKind::ConnectionFailed
-            );
+        Ok(response) => response,
+        // An agent that reports statuses as errors has dropped the body; the status
+        // still classifies the answer.
+        Err(ureq::Error::StatusCode(status)) => {
+            return Ok(HttpResponse {
+                status,
+                body: Vec::new(),
+            });
+        }
+        Err(error) => {
+            let definitely_unsent = never_sent(&error);
             return Err(NetworkFailure {
                 message: if definitely_unsent {
                     crate::tr!("无法连接服务，尚未提交内容 / Could not connect; request content was not submitted")
@@ -817,10 +848,11 @@ pub fn receive(
             });
         }
     };
-    let status = response.status();
+    let status = response.status().as_u16();
     let mut body = Vec::new();
     const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
     response
+        .into_body()
         .into_reader()
         .take(MAX_RESPONSE_BYTES + 1)
         .read_to_end(&mut body)
@@ -953,6 +985,129 @@ mod tests {
             body: br#"{"text":"saved"}"#.to_vec(),
         })
     }
+    /// Reads one request, then runs `answer` on its connection. Counts requests.
+    fn answering_server(
+        answer: impl Fn(&mut std::net::TcpStream) + Send + 'static,
+    ) -> (String, Arc<AtomicUsize>) {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let count = Arc::new(AtomicUsize::new(0));
+        let seen = count.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while !request.windows(1).any(|b| b == b"}") {
+                    match stream.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => request.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                seen.fetch_add(1, Ordering::SeqCst);
+                answer(&mut stream);
+            }
+        });
+        (url, count)
+    }
+
+    fn body() -> Value {
+        serde_json::json!({"text":"paid"})
+    }
+
+    #[test]
+    fn a_lost_connection_after_sending_is_never_resent_silently() {
+        // The server takes the request and goes away before answering.
+        let (url, requests) = answering_server(|_| {});
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let client = crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5));
+        let send = || receive(client.post(&url).send_json(body()));
+        let failure = ledger
+            .send("asr", "transcription", &url, &body(), send, |_| Ok(()))
+            .unwrap_err();
+        assert!(failure.uncertain(), "{}", failure.message);
+        assert!(
+            ledger
+                .send("asr", "transcription", &url, &body(), send, |_| Ok(()))
+                .unwrap_err()
+                .uncertain()
+        );
+        // Neither the client library nor the ledger sent it a second time.
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(receipts(dir.path()).unwrap()[0].state, State::Uncertain);
+    }
+
+    #[test]
+    fn redirects_are_answers_not_followed() {
+        use std::io::Write;
+        let (target, target_requests) = answering_server(|_| {});
+        let location = target.clone();
+        let (url, requests) = answering_server(move |stream| {
+            let _ = write!(
+                stream,
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}/moved\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+        });
+        for client in [
+            crate::runtime::http_agent(std::time::Duration::from_secs(5)),
+            crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5)),
+        ] {
+            let response = receive(client.post(&url).send_json(body())).ok().unwrap();
+            assert_eq!(response.status, 307);
+        }
+        assert_eq!(requests.load(Ordering::SeqCst), 2);
+        assert_eq!(target_requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn error_bodies_are_kept_for_classification() {
+        use std::io::Write;
+        let (url, _) = answering_server(|stream| {
+            let body = r#"{"error":{"param":"response_format","code":"unsupported_parameter"}}"#;
+            let _ = write!(
+                stream,
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        });
+        let client = crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5));
+        let response = receive(client.post(&url).send_json(body())).ok().unwrap();
+        assert_eq!(response.status, 400);
+        let value = serde_json::from_slice(&response.body).unwrap();
+        assert!(rejects_response_format(400, Some(&value)));
+        // An agent reporting statuses as errors still gives the status.
+        let client = crate::runtime::http_agent(std::time::Duration::from_secs(5));
+        let response = receive(client.post(&url).send_json(body())).ok().unwrap();
+        assert_eq!(response.status, 400);
+    }
+
+    #[test]
+    fn only_failures_before_sending_count_as_unsent() {
+        use std::io::{Error, ErrorKind};
+        for error in [
+            ureq::Error::HostNotFound,
+            ureq::Error::ConnectionFailed,
+            ureq::Error::Timeout(ureq::Timeout::Connect),
+            ureq::Error::Timeout(ureq::Timeout::Resolve),
+            ureq::Error::Io(Error::from(ErrorKind::ConnectionRefused)),
+        ] {
+            assert!(never_sent(&error), "{error}");
+        }
+        for error in [
+            ureq::Error::Timeout(ureq::Timeout::Global),
+            ureq::Error::Timeout(ureq::Timeout::SendBody),
+            ureq::Error::Timeout(ureq::Timeout::RecvResponse),
+            ureq::Error::Timeout(ureq::Timeout::PerRead),
+            ureq::Error::Io(Error::from(ErrorKind::ConnectionReset)),
+            ureq::Error::Io(Error::from(ErrorKind::BrokenPipe)),
+            ureq::Error::Io(Error::from(ErrorKind::HostUnreachable)),
+        ] {
+            assert!(!never_sent(&error), "{error}");
+        }
+    }
+
     #[test]
     fn confirmed_connection_failure_can_resume_without_resend_authorization() {
         // Nothing can listen on port 0, so the connection always fails before
@@ -1031,6 +1186,40 @@ mod tests {
                 .iter()
                 .all(|r| !is_unresolved(r))
         );
+    }
+
+    #[test]
+    fn free_service_server_errors_resend_without_blocking_later_requests() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let payload = serde_json::json!({"text":"one"});
+        let spec = RequestSpec {
+            service: "llm",
+            purpose: "proofreading",
+            description: "segment",
+            endpoint: "https://example.test",
+            identity: &payload,
+            resend: Resend::Free,
+        };
+        let failed = || {
+            Ok(HttpResponse {
+                status: 502,
+                body: b"bad gateway".to_vec(),
+            })
+        };
+        let first = ledger
+            .send_described(&spec, failed, |_| Ok(()))
+            .unwrap_err();
+        assert!(first.retryable && !first.uncertain());
+        // The body of a failed response is never kept; the attempt stays unresolved
+        // so a later billed request still sees it.
+        let receipt = &receipts(dir.path()).unwrap()[0];
+        assert_eq!(receipt.state, State::Uncertain);
+        assert_eq!(receipt.http_status, Some(502));
+        assert!(receipt.response.is_none());
+        let resent = ledger.send_described(&spec, success, |_| Ok(())).unwrap();
+        assert!(!resent.replayed);
+        assert_eq!(receipts(dir.path()).unwrap()[0].attempt, 2);
     }
 
     #[test]
@@ -1273,6 +1462,12 @@ mod ephemeral_tests {
         assert!(request(429, b"{}", Resend::AskUser).unwrap_err().retryable);
         let unknown = request(503, b"", Resend::AskUser).unwrap_err();
         assert!(unknown.uncertain() && !unknown.retryable);
+        // A free service's server error is an ordinary retryable failure, not a
+        // question about charges: the transport branch already treats it so.
+        let free = request(503, b"", Resend::Free).unwrap_err();
+        assert!(free.retryable && !free.uncertain());
+        assert_eq!(free.status, Some(503));
+        assert_eq!(free.kind, crate::artifact::FailureKind::Service);
         // Nothing persists between calls: the same payload sends again.
         assert!(request(200, br#"{"ok":true}"#, Resend::AskUser).is_ok());
         let lost = TaskControl::default()

@@ -178,7 +178,10 @@ pub(crate) fn write_document(
                 text = crate::summarize::insert_into_md(&text, summary);
             }
             if let Some(name) = &local_file {
-                text.push_str(&format!("\n源文件：{}\n", name.replace(['\r', '\n'], " ")));
+                text.push_str(&crate::tr!(
+                    "\n源文件：{}\n",
+                    name.replace(['\r', '\n'], " ")
+                ));
             }
             let mut zip = zip::ZipWriter::new(file.as_file_mut());
             let options = zip::write::SimpleFileOptions::default()

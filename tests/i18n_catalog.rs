@@ -218,20 +218,10 @@ fn collapse(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Keys as the engine's own parser reads them, so this test cannot unescape
+/// a row differently from the lookup it is checking.
 fn catalog() -> Vec<String> {
-    let text =
-        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("i18n/catalog.tsv"))
-            .unwrap();
-    text.lines()
-        .skip(1)
-        .filter(|line| !line.is_empty())
-        .map(|line| {
-            let key = line.split('\t').next().unwrap();
-            key.replace("\\n", "\n")
-                .replace("\\t", "\t")
-                .replace("\\\\", "\\")
-        })
-        .collect()
+    course2md::i18n::catalog_keys().map(str::to_owned).collect()
 }
 
 /// A "中文 / English" key falls back to its halves without a row.

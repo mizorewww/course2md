@@ -317,7 +317,12 @@ pub fn validate_events(events: &[TranscriptEvent]) -> Result<()> {
 
 pub fn digest(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    format!("{:x}", Sha256::digest(bytes))
+    hex(&Sha256::digest(bytes))
+}
+
+/// Lowercase hexadecimal, the form digests take in receipts and manifests.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 pub fn file_digest(path: &Path) -> Result<String> {
@@ -351,7 +356,7 @@ pub fn file_digest_cancellable(
         }
         hash.update(&buffer[..n]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hex(&hash.finalize()))
 }
 
 /// A running task's layout and control, kept apart from its settings: the
@@ -534,6 +539,15 @@ mod identity_snapshot;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Receipts and manifests on disk hold this exact form.
+    #[test]
+    fn digests_keep_their_lowercase_hex_form() {
+        assert_eq!(
+            digest(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     #[test]
     fn ids_are_valid_windows_directory_names() {

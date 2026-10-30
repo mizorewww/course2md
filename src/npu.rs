@@ -92,10 +92,18 @@ fn detect_device() -> bool {
     false
 }
 
-/// The packages the worker script imports.
-const WORKER_PACKAGES: [&str; 3] = ["openvino-genai", "huggingface_hub", "numpy"];
-/// openvino-genai publishes wheels for these Python versions.
-const WORKER_PYTHON: &str = ">=3.10";
+/// The packages the worker script imports, pinned so that a new upstream release
+/// cannot change what runs on a machine that resolved the environment later.
+/// Checked together with `uv pip compile` on Linux, Windows and macOS at Python
+/// 3.10 and 3.13, and by importing them. openvino-genai pins openvino and
+/// openvino-tokenizers itself. Bump them together, and re-check that way.
+const WORKER_PACKAGES: [&str; 3] = [
+    "openvino-genai==2026.4.1.0",
+    "huggingface_hub==2.4.0",
+    "numpy==2.2.6",
+];
+/// Python versions with wheels for every pinned package: numpy 2.2 stops at 3.13.
+const WORKER_PYTHON: &str = ">=3.10,<3.14";
 
 /// What starts the NPU worker script.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -370,7 +378,7 @@ pub fn run_npu(
 
     let mut worker = NpuWorker::start(model_id, control)?;
     let (base, token) = (worker.base.clone(), worker.token.clone());
-    let client = ureq::AgentBuilder::new().timeout(NPU_HTTP_TIMEOUT).build();
+    let client = crate::runtime::http_agent(NPU_HTTP_TIMEOUT);
 
     let r = crate::asr::run_chunks(
         wav,
@@ -383,16 +391,16 @@ pub fn run_npu(
             let req_body = serde_json::json!({
                 "path": chunk.to_string_lossy(),
             });
-            let resp = client
+            let mut resp = client
                 .post(&format!("{base}/audio/transcriptions"))
-                .set("X-Auth-Token", &token)
+                .header("X-Auth-Token", &token)
                 .send_json(req_body)
                 .map_err(|e| {
                     anyhow::anyhow!(
                         "Intel NPU 识别进程无响应 / Intel NPU worker did not respond: {e}"
                     )
                 })?;
-            let v: serde_json::Value = resp.into_json().map_err(|e| {
+            let v: serde_json::Value = resp.body_mut().read_json().map_err(|e| {
                 anyhow::anyhow!("NPU 无法解析服务响应 / Could not parse the service response: {e}")
             })?;
             if let Some(e) = v.get("error").and_then(|e| e.as_str()) {
@@ -498,10 +506,10 @@ impl NpuWorker {
     /// 优雅关闭：POST /shutdown → 等待 → 终止进程树（避免 uv 衍生的孙子进程残留）
     /// → 短等 → 仍未退由 ManagedChild Drop 兜底。
     fn stop(&mut self) {
-        let client = ureq::AgentBuilder::new().timeout(SHUTDOWN_TIMEOUT).build();
+        let client = crate::runtime::http_agent(SHUTDOWN_TIMEOUT);
         let _ = client
             .post(&format!("{}/shutdown", self.base))
-            .set("X-Auth-Token", &self.token)
+            .header("X-Auth-Token", &self.token)
             .send_json(serde_json::json!({}));
         if self.child.wait_within(SHUTDOWN_WAIT).is_err() {
             crate::runtime::terminate_tree(&mut self.child);
@@ -601,11 +609,18 @@ mod tests {
     fn uv_launcher_ignores_projects_and_requests_a_supported_python() {
         let cmd = Launcher::Uv(PathBuf::from("uv")).command();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert_eq!(&args[..4], ["run", "--no-project", "--python", ">=3.10"]);
+        assert_eq!(
+            &args[..4],
+            ["run", "--no-project", "--python", WORKER_PYTHON]
+        );
         let py = Launcher::PyLauncher(PathBuf::from("py")).command();
         assert_eq!(py.get_args().collect::<Vec<_>>(), ["-3"]);
         assert_eq!(args.last(), Some(&"python"));
         for package in WORKER_PACKAGES {
+            assert!(
+                package.contains("=="),
+                "an unpinned package changes under users: {package}"
+            );
             assert!(
                 args.windows(2).any(|w| w == ["--with", package]),
                 "{package}"

@@ -409,10 +409,12 @@ pub fn file_track(path: PathBuf, language: Option<String>) -> SubtitleTrack {
 /// 解析 SRT / VTT 字幕为转写事件。
 /// - 时间戳兼容 `HH:MM:SS,mmm`（SRT）与 `HH:MM:SS.mmm`（VTT）及 `MM:SS.mmm`
 /// - 去除 VTT 行内标签（`<c>...</c>` 等）与常见 HTML 实体
-/// - 合并同一 cue 的多行文本；滚动字幕（YouTube/B站自动字幕常见）按相邻去重
+/// - 合并同一 cue 的多行文本；滚动字幕（YouTube/B站自动字幕常见）只保留新出现的文字
 pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
     let mut out: Vec<TranscriptEvent> = vec![];
     let lines: Vec<&str> = content.lines().collect();
+    // The lines of the previous cue, as they were on screen.
+    let mut on_screen: Vec<String> = vec![];
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i];
@@ -435,27 +437,54 @@ pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
                 }
                 i += 1;
             }
-            let text = text_parts.join(" ");
-            // 滚动字幕去重：相邻 cue 文本相同则只保留首个（并延长时长）
-            if !text.is_empty() {
-                match out.last_mut() {
-                    Some(prev) if prev.text == text && start <= prev.end => {
-                        prev.end = end.max(prev.end)
-                    }
-                    _ => out.push(TranscriptEvent {
-                        start,
-                        end,
-                        text,
-                        raw: None,
-                        translation: None,
-                    }),
-                }
+            if text_parts.is_empty() {
+                continue;
             }
+            // Rolling captions repeat what is already on screen. Only a cue that
+            // continues without a pause can be repeating the one before it.
+            let previous = out.last_mut().filter(|previous| start <= previous.end);
+            let repeated = previous
+                .as_ref()
+                .map_or(0, |_| repeated_lines(&on_screen, &text_parts));
+            let fresh = text_parts[repeated..].join(" ");
+            match previous {
+                // Everything is already there: the same caption stays up longer.
+                Some(previous) if fresh.is_empty() => previous.end = end.max(previous.end),
+                // The caption grew by a few words, in place.
+                Some(previous) if repeated == 0 && grows_from(&previous.text, &fresh) => {
+                    previous.text = fresh;
+                    previous.end = end.max(previous.end);
+                }
+                _ => out.push(TranscriptEvent {
+                    start,
+                    end,
+                    text: fresh,
+                    raw: None,
+                    translation: None,
+                }),
+            }
+            on_screen = text_parts;
         } else {
             i += 1;
         }
     }
     out
+}
+
+/// How many leading lines of `next` end `previous`: the longest overlap.
+fn repeated_lines(previous: &[String], next: &[String]) -> usize {
+    (1..=previous.len().min(next.len()))
+        .rev()
+        .find(|count| previous[previous.len() - count..] == next[..*count])
+        .unwrap_or(0)
+}
+
+/// Whether `next` is `previous` with more words after it (not more letters in
+/// the same word).
+fn grows_from(previous: &str, next: &str) -> bool {
+    next.strip_prefix(previous).is_some_and(|rest| {
+        !rest.is_empty() && !rest.starts_with(|c: char| c.is_ascii_alphanumeric())
+    })
 }
 
 fn parse_cue_header(line: &str) -> Option<(f64, f64)> {
@@ -468,30 +497,103 @@ fn parse_cue_header(line: &str) -> Option<(f64, f64)> {
     ))
 }
 
-/// 去掉 `<...>` 标签并还原常见实体。
+/// Removes cue markup and decodes entities. Only the markup subtitle formats use
+/// counts as a tag, so `x < 3 and y > 2` stays text.
 fn clean_cue_text(line: &str) -> String {
-    let mut s = String::with_capacity(line.len());
-    let mut in_tag = false;
-    for c in line.trim().chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => s.push(c),
-            _ => {}
+    let mut text = String::with_capacity(line.len());
+    let mut rest = line.trim();
+    while let Some(open) = rest.find('<') {
+        text.push_str(&rest[..open]);
+        let tag = &rest[open + 1..];
+        match tag.find('>').filter(|close| is_cue_tag(&tag[..*close])) {
+            Some(close) => rest = &tag[close + 1..],
+            None => {
+                text.push('<');
+                rest = tag;
+            }
         }
     }
-    // 注意顺序：&amp; 必须最后替换，否则 "&amp;lt;" 会先被还原成 "&lt;"
-    // 再被二次还原成 "<"，造成双重反转义
-    for (from, to) in [
-        ("&nbsp;", " "),
-        ("&lt;", "<"),
-        ("&gt;", ">"),
-        ("&quot;", "\""),
-        ("&amp;", "&"),
-    ] {
-        s = s.replace(from, to);
+    text.push_str(rest);
+    decode_entities(&text).trim().to_string()
+}
+
+/// `inner` is what stands between `<` and `>`: a WebVTT word timestamp or a tag
+/// from SRT and WebVTT. Tags that carry free text (`<v Speaker>`) may have it;
+/// the rest allow only a class (`<c.yellow>`), so `a<b and c>d` is not a tag.
+fn is_cue_tag(inner: &str) -> bool {
+    if inner.contains('<') {
+        return false;
     }
-    s.trim().to_string()
+    if inner.starts_with(|c: char| c.is_ascii_digit()) {
+        return inner
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b == b':' || b == b'.');
+    }
+    let inner = inner.strip_prefix('/').unwrap_or(inner);
+    let end = inner
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .unwrap_or(inner.len());
+    let (name, rest) = inner.split_at(end);
+    match name.to_ascii_lowercase().as_str() {
+        "v" | "lang" | "font" | "span" => rest.is_empty() || rest.starts_with([' ', '\t', '.']),
+        "b" | "i" | "u" | "s" | "c" | "em" | "strong" | "ruby" | "rt" | "br" => {
+            rest.is_empty() || rest == "/" || rest.starts_with('.')
+        }
+        _ => false,
+    }
+}
+
+/// One pass, so `&amp;lt;` becomes `&lt;` and goes no further. Anything that is
+/// not a known entity stays as written.
+fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let tail = &rest[amp + 1..];
+        let decoded = tail
+            .find(';')
+            .and_then(|end| Some((decode_entity(&tail[..end])?, end)));
+        match decoded {
+            Some((character, end)) => {
+                out.push(character);
+                rest = &tail[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = tail;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn decode_entity(name: &str) -> Option<char> {
+    let numeric = name.strip_prefix('#').map(|number| {
+        match number.strip_prefix(['x', 'X']) {
+            Some(hex) => u32::from_str_radix(hex, 16),
+            None => number.parse(),
+        }
+        .ok()
+        .and_then(char::from_u32)
+    });
+    let character = match (name, numeric) {
+        (_, Some(character)) => character?,
+        ("nbsp", _) => ' ',
+        ("lt", _) => '<',
+        ("gt", _) => '>',
+        ("quot", _) => '"',
+        ("apos", _) => '\'',
+        ("amp", _) => '&',
+        _ => return None,
+    };
+    // A cue is one line of text: spacing entities are spaces, controls are not text.
+    Some(if character == '\u{a0}' || character.is_control() {
+        ' '
+    } else {
+        character
+    })
 }
 
 /// 在已有目录中挑一个字幕文件。新调用方会把确定的一条字幕抓取到独立目录；
@@ -727,6 +829,96 @@ second cue
         assert_eq!(ev[0].text, "hello world !");
         assert!((ev[0].start - 61.0).abs() < 1e-3);
         assert_eq!(ev[1].text, "second cue");
+    }
+
+    #[test]
+    fn angle_brackets_outside_tags_are_text() {
+        assert_eq!(clean_cue_text("x < 3 and y > 2"), "x < 3 and y > 2");
+        assert_eq!(clean_cue_text("if a<b and c>d then"), "if a<b and c>d then");
+        assert_eq!(clean_cue_text("1 <2"), "1 <2");
+        assert_eq!(clean_cue_text("a &lt; b"), "a < b");
+        // Real cue markup still goes, in every form subtitle files use it.
+        for (cue, text) in [
+            ("<i>word</i>", "word"),
+            ("<font color=\"#fff\">word</font>", "word"),
+            ("<v Speaker One>word</v>", "word"),
+            ("<c.colorE5E5E5>word</c>", "word"),
+            ("<lang en-GB>word</lang>", "word"),
+            ("<B>word</B>", "word"),
+            ("wo<00:00:01.500><c>rd</c>", "word"),
+        ] {
+            assert_eq!(clean_cue_text(cue), text, "{cue}");
+        }
+    }
+
+    #[test]
+    fn entities_decode_once_including_numeric_ones() {
+        for (cue, text) in [
+            ("it&#39;s", "it's"),
+            ("it&#x27;s", "it's"),
+            ("it&#X27;s &apos;ok&apos;", "it's 'ok'"),
+            ("a&nbsp;b &#160; c", "a b   c"),
+            ("&amp;lt;", "&lt;"),
+            ("&#38;lt;", "&lt;"),
+            (
+                "R&D; fish & chips &unknown; &#xZZ; &#1114112;",
+                "R&D; fish & chips &unknown; &#xZZ; &#1114112;",
+            ),
+            ("中&#25991;", "中文"),
+        ] {
+            assert_eq!(clean_cue_text(cue), text, "{cue}");
+        }
+    }
+
+    #[test]
+    fn rolling_lines_are_not_repeated() {
+        // YouTube automatic captions: each cue repeats the line before it.
+        let vtt = "\
+WEBVTT
+
+00:00:01.000 --> 00:00:03.000 align:start position:0%
+machine<00:00:01.500><c> learning</c>
+
+00:00:03.000 --> 00:00:03.010 align:start position:0%
+machine learning
+
+00:00:03.010 --> 00:00:05.000 align:start position:0%
+machine learning
+is<00:00:03.500><c> fun</c>
+
+00:00:05.000 --> 00:00:07.000 align:start position:0%
+is fun
+and<00:00:05.500><c> useful</c>
+";
+        let events = parse_subtitle(vtt);
+        let texts: Vec<_> = events.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, ["machine learning", "is fun", "and useful"]);
+        assert_eq!((events[0].start, events[0].end), (1.0, 3.01));
+        assert_eq!((events[1].start, events[1].end), (3.01, 5.0));
+        assert_eq!(events[2].end, 7.0);
+
+        // A cue that grows word by word is one sentence.
+        let growing = parse_subtitle(
+            "00:00:01,000 --> 00:00:02,000\nhello\n\n\
+             00:00:02,000 --> 00:00:03,000\nhello world\n\n\
+             00:00:03,000 --> 00:00:04,000\nhello world again\n",
+        );
+        assert_eq!(growing.len(), 1);
+        assert_eq!(growing[0].text, "hello world again");
+        assert_eq!((growing[0].start, growing[0].end), (1.0, 4.0));
+    }
+
+    #[test]
+    fn words_that_only_look_rolling_stay_separate() {
+        // A pause between cues, and a shared prefix inside one word.
+        let events = parse_subtitle(
+            "00:00:01,000 --> 00:00:02,000\nyes\nno\n\n\
+             00:00:05,000 --> 00:00:06,000\nno\nmaybe\n\n\
+             00:00:06,000 --> 00:00:07,000\nmaybe\n\n\
+             00:00:07,000 --> 00:00:08,000\nmaybes\n",
+        );
+        let texts: Vec<_> = events.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, ["yes no", "no maybe", "maybes"]);
     }
 
     #[test]
