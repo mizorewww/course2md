@@ -33,6 +33,17 @@ struct Cache {
     next_path: u64,
 }
 
+impl Cache {
+    /// Starts over rather than track use: a formula still on screen is
+    /// typeset again under a new path the next time it is drawn.
+    fn reset_if_full(&mut self) {
+        if self.formulas.len() >= CACHE_LIMIT || self.svgs.len() >= CACHE_LIMIT {
+            self.formulas.clear();
+            self.svgs.clear();
+        }
+    }
+}
+
 static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
     Mutex::new(Cache {
         formulas: HashMap::new(),
@@ -50,12 +61,7 @@ pub fn formula(latex: &str, display: bool) -> Option<Formula> {
     }
     let typeset = typeset(latex, display);
     let mut cache = CACHE.lock().ok()?;
-    if cache.formulas.len() >= CACHE_LIMIT {
-        // Start over rather than track use: a formula still on screen is
-        // typeset again under a new path the next time it is drawn.
-        cache.formulas.clear();
-        cache.svgs.clear();
-    }
+    cache.reset_if_full();
     let formula = typeset.map(|(svg, width, height, depth)| {
         let path = SharedString::from(format!("{ASSET_PREFIX}{}.svg", cache.next_path));
         cache.next_path += 1;
@@ -103,6 +109,7 @@ pub fn tile(path: &str, index: usize, count: usize) -> Option<SharedString> {
     if !cache.svgs.contains_key(&tile) {
         let svg = std::str::from_utf8(cache.svgs.get(path)?).ok()?;
         let sliced = slice_svg(svg, index, count)?;
+        cache.reset_if_full();
         cache.svgs.insert(tile.clone(), sliced.into_bytes().into());
     }
     Some(tile)
@@ -184,6 +191,7 @@ mod tests {
 
     #[test]
     fn a_wide_formula_is_sliced_into_equal_views_of_one_drawing() {
+        let _filling = FILLING.lock().unwrap();
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 40" width="300pt" height="40pt"><path d="M0 0"/></svg>"#;
         assert_eq!(
             slice_svg(svg, 1, 3).unwrap(),
@@ -195,8 +203,22 @@ mod tests {
         assert!(asset(&second).is_some());
     }
 
+    /// The tests below fill the one shared cache, which resets it for the others.
+    static FILLING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn slices_count_against_the_cache_limit() {
+        let _filling = FILLING.lock().unwrap();
+        for index in 0..=CACHE_LIMIT {
+            let typeset = formula("x^2+y^2", false).unwrap();
+            assert!(tile(&typeset.path(), index, CACHE_LIMIT * 2).is_some());
+            assert!(CACHE.lock().unwrap().svgs.len() <= CACHE_LIMIT);
+        }
+    }
+
     #[test]
     fn the_formula_cache_is_bounded_and_never_reuses_a_path() {
+        let _filling = FILLING.lock().unwrap();
         let first = formula("a_{0}", false).unwrap();
         for n in 1..=CACHE_LIMIT {
             formula(&format!("a_{{{n}}}"), false);
