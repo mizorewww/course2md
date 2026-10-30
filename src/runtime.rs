@@ -250,6 +250,7 @@ pub fn wait_ready(
 ) -> Result<()> {
     let t0 = Instant::now();
     let url = format!("{base}/health");
+    let agent = http_agent(Duration::from_secs(2));
     loop {
         if let Some(check) = control {
             // 暂停/取消原样上抛：调用方要据此区分「用户中止」与「启动失败」
@@ -271,12 +272,13 @@ pub fn wait_ready(
                 timeout.as_secs_f64()
             );
         }
-        if let Ok(resp) = ureq::get(&url).timeout(Duration::from_secs(2)).call() {
+        if let Ok(mut resp) = agent.get(&url).call() {
             match expect_status {
                 None => return Ok(()),
                 Some(expected) => {
                     if resp
-                        .into_json::<serde_json::Value>()
+                        .body_mut()
+                        .read_json::<serde_json::Value>()
                         .is_ok_and(|body| body["status"] == expected)
                     {
                         return Ok(());
@@ -352,13 +354,29 @@ pub fn interruptible_sleep(control: &crate::dispatch::TaskControl, wait: Duratio
 /// 安全纪律（与 dispatch.rs 请求账本注释一致）：请求经 3xx 重定向后失败，
 /// 无法证明服务端「未提交」——可能已产生费用/副作用，因此凡走账本的调用
 /// 必须禁止跟随重定向。这里在构造处统一内置，不靠每个调用点自觉。
-/// 需要 connect/read 细分超时的场景（fetch.rs 元数据、models.rs 大文件下载）
-/// 形态不合，保留各自 AgentBuilder，不套用本 helper。
-pub fn http_agent(timeout: Duration) -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(timeout)
-        .redirects(0)
+/// 需要 connect/read 细分超时的场景（fetch.rs 元数据、download.rs 大文件下载）
+/// 从 [`agent_builder`] 自行配置。
+pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
+    agent_builder()
+        .timeout_global(Some(timeout))
         .build()
+        .new_agent()
+}
+
+/// [`http_agent`] whose error statuses arrive as responses, so that a caller can
+/// read the body. Whoever uses it checks the status; `dispatch::receive` does.
+pub(crate) fn http_agent_keeping_errors(timeout: Duration) -> ureq::Agent {
+    agent_builder()
+        .timeout_global(Some(timeout))
+        .http_status_as_error(false)
+        .build()
+        .new_agent()
+}
+
+/// What every agent starts from: no redirects (see [`http_agent`]), and no proxy from
+/// the environment, which would otherwise also catch local services on loopback.
+pub(crate) fn agent_builder() -> ureq::config::ConfigBuilder<ureq::typestate::AgentScope> {
+    ureq::Agent::config_builder().proxy(None).max_redirects(0)
 }
 
 /// Windows: start a console helper without opening a console window. The

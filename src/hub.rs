@@ -217,12 +217,16 @@ fn lookup_country() -> Option<String> {
     for (url, parse) in PROBES {
         let sender = sender.clone();
         std::thread::spawn(move || {
-            let agent = ureq::AgentBuilder::new().timeout(LOOKUP_DEADLINE).build();
+            let agent = ureq::Agent::config_builder()
+                .proxy(None)
+                .timeout_global(Some(LOOKUP_DEADLINE))
+                .build()
+                .new_agent();
             let country = agent
                 .get(url)
                 .call()
                 .ok()
-                .and_then(|response| response.into_string().ok())
+                .and_then(|mut response| response.body_mut().read_to_string().ok())
                 .and_then(|body| parse(&body));
             let _ = sender.send(country);
         });

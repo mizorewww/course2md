@@ -190,16 +190,30 @@ const MAX_CONCURRENCY: usize = 16;
 const MAX_ATTEMPTS: u32 = 3;
 
 /// 校对/摘要共享的 HTTP agent：整个任务复用同一连接池（clone 共享底层池）。
-/// A response that sends nothing for [`STALL_TIMEOUT`] has stalled; it is
-/// abandoned then instead of holding the task for the whole request budget.
-pub(crate) fn chat_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(300))
-        .timeout_read(STALL_TIMEOUT)
-        .redirects(0)
-        .build()
+pub(crate) fn chat_agent(s: &LlmSettings) -> ureq::Agent {
+    stall_limited_agent(crate::provider::is_sse(s), STALL_TIMEOUT)
 }
 
+/// A response that stops arriving for `stall` is abandoned then, instead of holding
+/// the task for the whole request budget. The two shapes stall differently:
+///
+/// - A plain response has nothing to send until the model finishes, which can take
+///   minutes, so only its body is limited: once headers arrive the body follows.
+/// - A stream can legitimately outlast `stall`, but sends something all along, so
+///   the limit applies to each read and not to the stream.
+fn stall_limited_agent(streaming: bool, stall: Duration) -> ureq::Agent {
+    let builder = crate::runtime::agent_builder()
+        .timeout_global(Some(REQUEST_BUDGET))
+        .http_status_as_error(false);
+    let builder = if streaming {
+        builder.timeout_per_read(Some(stall))
+    } else {
+        builder.timeout_recv_body(Some(stall))
+    };
+    builder.build().new_agent()
+}
+
+const REQUEST_BUDGET: Duration = Duration::from_secs(300);
 const STALL_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Upper bound on a streamed (SSE) response body read in one connection test.
@@ -280,7 +294,7 @@ pub fn polish_sections_report(
     }
     let pb = crate::progress::Bar::new(Stage::Llm, chunks.len() as u64)
         .with_template("{spinner:.green} llm {pos}/{len} [{bar:32.cyan/blue}] {msg}");
-    let agent = chat_agent();
+    let agent = chat_agent(s);
     let first_error = std::sync::Mutex::new(None::<String>);
     let succeeded = run_pool(
         chunks,
@@ -355,7 +369,7 @@ pub fn translate_sections_report(
     }
     let pb = crate::progress::Bar::new(Stage::Translate, chunks.len() as u64)
         .with_template("{spinner:.green} translate {pos}/{len} [{bar:32.cyan/blue}] {msg}");
-    let agent = chat_agent();
+    let agent = chat_agent(s);
     let warned = std::sync::atomic::AtomicBool::new(false);
     let first_error = std::sync::Mutex::new(None::<String>);
     let succeeded = run_pool(
@@ -950,9 +964,9 @@ fn request_chat_once(
             },
         },
         || {
-            let mut request = agent.post(&url).set("Content-Type", "application/json");
+            let mut request = agent.post(&url).header("Content-Type", "application/json");
             for (name, value) in &headers {
-                request = request.set(name, value);
+                request = request.header(name, value);
             }
             let response = crate::dispatch::receive(request.send_json(body))?;
             // Codex Responses API 只提供 SSE 流：聚合为 chat/completions 形状，
@@ -1018,6 +1032,35 @@ fn effective_prompt(s: &LlmSettings) -> &str {
 /// 避免「文本请求通了但实际图片请求不可用」的假阳性。
 const TEST_PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
+/// Why [`test_connection`]'s request got no usable answer, in the error chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestError {
+    /// The service answered with this HTTP error status.
+    Status(u16),
+    /// No answer arrived; the text says why.
+    Transport(String),
+}
+
+impl std::fmt::Display for RequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Status(status) => write!(f, "HTTP {status}"),
+            Self::Transport(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for RequestError {}
+
+impl From<ureq::Error> for RequestError {
+    fn from(error: ureq::Error) -> Self {
+        match error {
+            ureq::Error::StatusCode(status) => Self::Status(status),
+            other => Self::Transport(other.to_string()),
+        }
+    }
+}
+
 /// 用最小请求验证端点与凭据可用；vision=true 时附带测试图片，
 /// 同时验证图片输入路径（失败会明确报出，不会显示为已验证可用）。
 pub fn test_connection(s: &LlmSettings) -> Result<()> {
@@ -1044,14 +1087,18 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
     let agent = crate::runtime::http_agent(Duration::from_secs(60));
     let mut request = agent.post(&crate::provider::endpoint(s));
     for (name, value) in crate::provider::auth_headers(s)? {
-        request = request.set(&name, &value);
+        request = request.header(&name, &value);
     }
-    let resp = request.send_json(body).context(fail_hint)?;
+    let mut resp = request
+        .send_json(body)
+        .map_err(RequestError::from)
+        .context(fail_hint)?;
     let v: serde_json::Value = if crate::provider::is_sse(s) {
-        let bytes = read_sse_body(resp.into_reader())?;
+        let bytes = read_sse_body(resp.into_body().into_reader())?;
         crate::provider::sse_to_chat_json(&bytes)?
     } else {
-        resp.into_json()
+        resp.body_mut()
+            .read_json()
             .context(crate::tr!("无法解析响应 / Cannot parse response"))?
     };
     let text = v["choices"][0]["message"]["content"]
@@ -1245,6 +1292,122 @@ mod tests {
         // A complete formula followed by another stays two formulas.
         assert_eq!(events[2].text, "这是 $x$");
         assert_eq!(events[3].text, "$y$ 不变");
+    }
+
+    /// Answers one connection by running `script` on it, after reading the request.
+    fn stalling_server(script: impl FnOnce(&mut std::net::TcpStream) + Send + 'static) -> String {
+        use std::io::Read as _;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut chunk = [0u8; 4096];
+            let _ = stream.read(&mut chunk);
+            script(&mut stream);
+        });
+        url
+    }
+
+    fn hold(seconds: f64) {
+        std::thread::sleep(Duration::from_secs_f64(seconds));
+    }
+
+    #[test]
+    fn a_body_that_stops_arriving_is_abandoned_at_the_stall_limit() {
+        use std::io::Write as _;
+        let url = stalling_server(|stream| {
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial"
+            )
+            .unwrap();
+            stream.flush().unwrap();
+            hold(30.0);
+        });
+        let agent = stall_limited_agent(false, Duration::from_millis(500));
+        let started = std::time::Instant::now();
+        let failure = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+            .err()
+            .expect("a stalled body is not a response");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(!failure.definitely_unsent, "the request was already sent");
+    }
+
+    #[test]
+    fn a_slow_model_is_not_a_stalled_response() {
+        use std::io::Write as _;
+        // Thinks for longer than the stall limit before the first byte.
+        let url = stalling_server(|stream| {
+            hold(1.5);
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").unwrap();
+        });
+        let agent = stall_limited_agent(false, Duration::from_millis(500));
+        let response = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+            .ok()
+            .expect("waiting for the first byte is not a stall");
+        assert_eq!(response.body, b"ok");
+    }
+
+    #[test]
+    fn a_stream_may_outlast_the_limit_but_not_go_quiet() {
+        use std::io::Write as _;
+        // Longer in total than the limit, with no silence as long as it.
+        let url = stalling_server(|stream| {
+            write!(stream, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n").unwrap();
+            for event in 0..5 {
+                write!(stream, "data: {event}\n\n").unwrap();
+                stream.flush().unwrap();
+                hold(0.4);
+            }
+        });
+        let agent = stall_limited_agent(true, Duration::from_secs(2));
+        let started = std::time::Instant::now();
+        let response = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+            .ok()
+            .expect("a stream that keeps sending is alive");
+        assert!(started.elapsed() > Duration::from_millis(1500));
+        assert!(response.body.ends_with(b"data: 4\n\n"));
+
+        let url = stalling_server(|stream| {
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\ndata: 0\n\n"
+            )
+            .unwrap();
+            stream.flush().unwrap();
+            hold(30.0);
+        });
+        let agent = stall_limited_agent(true, Duration::from_millis(500));
+        let started = std::time::Instant::now();
+        let failure = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+            .err()
+            .expect("a silent stream is stalled");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(!failure.definitely_unsent);
+    }
+
+    #[test]
+    fn connection_test_failures_name_their_cause_without_exposing_the_http_client() {
+        use std::io::Write as _;
+        let url = stalling_server(|stream| {
+            write!(
+                stream,
+                "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+        let settings = LlmSettings {
+            base_url: url,
+            model: "m".into(),
+            ..Default::default()
+        };
+        let error = test_connection(&settings).unwrap_err();
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.downcast_ref() == Some(&RequestError::Status(401))),
+            "{error:#}"
+        );
     }
 
     #[test]

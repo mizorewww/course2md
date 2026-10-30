@@ -368,18 +368,18 @@ pub fn candidate_identity(candidate: &SourceCandidate) -> Option<String> {
 }
 
 fn bilibili_view(agent: &ureq::Agent, bvid: &str) -> Result<BilibiliViewData> {
-    let response = agent
+    let mut response = agent
         .get(&format!(
             "https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
         ))
-        .set(
+        .header(
             "User-Agent",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
         )
-        .set("Referer", "https://www.bilibili.com")
+        .header("Referer", "https://www.bilibili.com")
         .call()
         .context(crate::tr!("读取 Bilibili 分集信息失败"))?;
-    let view: BilibiliView = serde_json::from_str(&response.into_string()?)?;
+    let view: BilibiliView = serde_json::from_str(&response.body_mut().read_to_string()?)?;
     view.data.context(crate::tr!("Bilibili 没有返回分集信息"))
 }
 
@@ -444,11 +444,12 @@ pub fn enrich_bilibili_candidates(candidates: &mut [SourceCandidate]) {
             break;
         }
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(3))
-        .timeout_read(std::time::Duration::from_secs(3))
-        .timeout(std::time::Duration::from_secs(8))
-        .build();
+    let agent = crate::runtime::agent_builder()
+        .timeout_connect(Some(std::time::Duration::from_secs(3)))
+        .timeout_per_read(Some(std::time::Duration::from_secs(3)))
+        .timeout_global(Some(std::time::Duration::from_secs(8)))
+        .build()
+        .new_agent();
     // 每个请求最长 8s：并发补全，避免几十个分集串行等待。单个失败只记日志。
     let views = crate::runtime::map_pool(
         bvids.iter().collect(),

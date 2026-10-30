@@ -248,7 +248,7 @@ pub async fn summarize(
     llm::validate(s)?;
     let ctx = meta_context(meta);
     let transcript = format!("{ctx}{}", build_transcript(events));
-    let agent = llm::chat_agent();
+    let agent = llm::chat_agent(s);
     if total_chars <= DIRECT_CHAR_LIMIT {
         let t = transcript;
         let s2 = s.clone();

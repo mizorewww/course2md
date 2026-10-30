@@ -223,10 +223,14 @@ fn native(t: &Transfer) -> Result<()> {
         let _ = fs::remove_file(part);
         let _ = fs::remove_file(aria2_file);
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(15))
-        .timeout_read(STALL)
-        .build();
+    // Hosts hand large files to a CDN, so downloads alone follow redirects.
+    let agent = crate::runtime::agent_builder()
+        .max_redirects(5)
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_per_read(Some(STALL))
+        .http_status_as_error(false)
+        .build()
+        .new_agent();
     let mut idle = 0;
     let mut phase = Phase::Connect;
     loop {
@@ -287,32 +291,29 @@ fn native_attempt(agent: &ureq::Agent, t: &Transfer, have: u64) -> Result<()> {
     tracing::info!(url, from = have, "download");
     let mut request = agent.get(url);
     if have > 0 {
-        request = request.set("Range", &format!("bytes={have}-"));
+        request = request.header("Range", &format!("bytes={have}-"));
     }
-    let response = match request.call() {
-        Ok(response) => response,
-        Err(ureq::Error::Status(code, response)) => {
-            // The server's error page or JSON usually names the cause.
-            let body = response.into_string().unwrap_or_default();
-            let n = body.chars().count();
-            let tail: String = body.chars().skip(n.saturating_sub(200)).collect();
-            let message = format!("HTTP {code}: {tail}");
-            if code == 416 && have > 0 {
-                // The range no longer fits this file; start over.
-                fs::remove_file(part)?;
-                anyhow::bail!(message);
-            }
-            if is_permanent_status(code) {
-                return Err(anyhow::Error::new(PermanentHttp(message)));
-            }
+    let mut response = request.call().map_err(|error| {
+        anyhow::Error::new(error).context(crate::tr!("模型请求失败 / Model request failed"))
+    })?;
+    let code = response.status().as_u16();
+    if code >= 400 {
+        // The server's error page or JSON usually names the cause.
+        let body = response.body_mut().read_to_string().unwrap_or_default();
+        let n = body.chars().count();
+        let tail: String = body.chars().skip(n.saturating_sub(200)).collect();
+        let message = format!("HTTP {code}: {tail}");
+        if code == 416 && have > 0 {
+            // The range no longer fits this file; start over.
+            fs::remove_file(part)?;
             anyhow::bail!(message);
         }
-        Err(error) => {
-            return Err(anyhow::Error::new(error)
-                .context(crate::tr!("模型请求失败 / Model request failed")));
+        if is_permanent_status(code) {
+            return Err(anyhow::Error::new(PermanentHttp(message)));
         }
-    };
-    let mut done = if response.status() == 206 { have } else { 0 };
+        anyhow::bail!(message);
+    }
+    let mut done = if code == 206 { have } else { 0 };
     let mut out = if done > 0 {
         fs::OpenOptions::new().append(true).open(part)?
     } else {
@@ -320,7 +321,7 @@ fn native_attempt(agent: &ureq::Agent, t: &Transfer, have: u64) -> Result<()> {
     };
     set_phase(bar, remote, host, Phase::Download);
     bar.set_position(done);
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     let mut buffer = vec![0u8; 512 * 1024];
     let mut since_check = 0u64;
     loop {
@@ -427,9 +428,7 @@ fn aria2(program: &Path, t: &Transfer) -> Result<()> {
     let stderr = child
         .take_stderr()
         .map(|stderr| crate::runtime::drain_stderr(stderr, "aria2c"));
-    let rpc = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(5))
-        .build();
+    let rpc = crate::runtime::http_agent(Duration::from_secs(5));
     let endpoint = format!("http://127.0.0.1:{port}/jsonrpc");
     let call = |method: &str, params: serde_json::Value| -> Result<serde_json::Value> {
         let mut all = vec![serde_json::json!(format!("token:{secret}"))];
@@ -441,7 +440,8 @@ fn aria2(program: &Path, t: &Transfer) -> Result<()> {
             .send_json(
                 serde_json::json!({"jsonrpc":"2.0","id":"c2m","method":method,"params":all}),
             )?
-            .into_json()?;
+            .body_mut()
+            .read_json()?;
         response
             .get("result")
             .cloned()

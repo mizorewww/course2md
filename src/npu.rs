@@ -378,7 +378,7 @@ pub fn run_npu(
 
     let mut worker = NpuWorker::start(model_id, control)?;
     let (base, token) = (worker.base.clone(), worker.token.clone());
-    let client = ureq::AgentBuilder::new().timeout(NPU_HTTP_TIMEOUT).build();
+    let client = crate::runtime::http_agent(NPU_HTTP_TIMEOUT);
 
     let r = crate::asr::run_chunks(
         wav,
@@ -391,16 +391,16 @@ pub fn run_npu(
             let req_body = serde_json::json!({
                 "path": chunk.to_string_lossy(),
             });
-            let resp = client
+            let mut resp = client
                 .post(&format!("{base}/audio/transcriptions"))
-                .set("X-Auth-Token", &token)
+                .header("X-Auth-Token", &token)
                 .send_json(req_body)
                 .map_err(|e| {
                     anyhow::anyhow!(
                         "Intel NPU 识别进程无响应 / Intel NPU worker did not respond: {e}"
                     )
                 })?;
-            let v: serde_json::Value = resp.into_json().map_err(|e| {
+            let v: serde_json::Value = resp.body_mut().read_json().map_err(|e| {
                 anyhow::anyhow!("NPU 无法解析服务响应 / Could not parse the service response: {e}")
             })?;
             if let Some(e) = v.get("error").and_then(|e| e.as_str()) {
@@ -506,10 +506,10 @@ impl NpuWorker {
     /// 优雅关闭：POST /shutdown → 等待 → 终止进程树（避免 uv 衍生的孙子进程残留）
     /// → 短等 → 仍未退由 ManagedChild Drop 兜底。
     fn stop(&mut self) {
-        let client = ureq::AgentBuilder::new().timeout(SHUTDOWN_TIMEOUT).build();
+        let client = crate::runtime::http_agent(SHUTDOWN_TIMEOUT);
         let _ = client
             .post(&format!("{}/shutdown", self.base))
-            .set("X-Auth-Token", &self.token)
+            .header("X-Auth-Token", &self.token)
             .send_json(serde_json::json!({}));
         if self.child.wait_within(SHUTDOWN_WAIT).is_err() {
             crate::runtime::terminate_tree(&mut self.child);

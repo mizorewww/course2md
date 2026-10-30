@@ -354,9 +354,7 @@ fn run_blocking(
     crate::progress::done(Stage::ModelLoad);
 
     // 共享 agent：各 chunk 复用连接
-    let client = ureq::AgentBuilder::new()
-        .timeout(LLAMA_HTTP_TIMEOUT)
-        .build();
+    let client = crate::runtime::http_agent_keeping_errors(LLAMA_HTTP_TIMEOUT);
     let tmp = crate::runtime::TempWorkDir::new("asr")?;
     let r = run_chunks(wav, &segs, cp, tmp.path(), "asr", control, |chunk| {
         transcribe_file(&client, &base, chunk, control).map(|t| {
@@ -513,7 +511,7 @@ fn run_api(
         "{spinner:.green} asr {pos}/{len} [{bar:32.cyan/blue}] {elapsed} {eta} {msg}",
     );
 
-    let client = crate::runtime::http_agent(API_HTTP_TIMEOUT);
+    let client = crate::runtime::http_agent_keeping_errors(API_HTTP_TIMEOUT);
     // 断点续跑：预先过滤出未完成的 chunk（worker 只拿真正需要执行的任务）
     let pending: Vec<usize> = (0..segs.len())
         .filter(|&i| !cp.is_done(segs[i].start, segs[i].end))
@@ -578,8 +576,8 @@ fn post_local_json(
     use crate::dispatch::Failure;
     let bytes = serde_json::to_vec(body)?;
     crate::runtime::retry(control, MAX_ATTEMPTS, || {
-        let request = agent.post(url).set("Content-Type", "application/json");
-        match crate::dispatch::receive(request.send_bytes(&bytes)) {
+        let request = agent.post(url).header("Content-Type", "application/json");
+        match crate::dispatch::receive(request.send(&bytes)) {
             Ok(response) if (200..300).contains(&response.status) => {
                 serde_json::from_slice(&response.body).map_err(Failure::local)
             }
@@ -618,13 +616,13 @@ fn post_cloud(
     );
     crate::runtime::retry(t.control, MAX_ATTEMPTS, || {
         let send = || {
-            let request = t.client.post(t.url).set("Content-Type", content_type);
+            let request = t.client.post(t.url).header("Content-Type", content_type);
             let request = if t.key.is_empty() {
                 request
             } else {
-                request.set("Authorization", &format!("Bearer {}", t.key))
+                request.header("Authorization", &format!("Bearer {}", t.key))
             };
-            crate::dispatch::receive(request.send_bytes(body))
+            crate::dispatch::receive(request.send(body))
         };
         t.control.request(
             &crate::dispatch::RequestSpec {
@@ -713,6 +711,9 @@ fn transcribe_api(t: &ApiTarget, chunk: &Path, seg: Seg, wav: &Path) -> Result<O
 }
 
 /// Standard OpenAI-compatible file upload, also accepted by OpenRouter.
+/// Built here rather than with ureq's multipart form: that API is outside ureq's
+/// version promise, and its form is consumed by sending, while a retry sends these
+/// same bytes again.
 fn transcription_form(model: &str, audio: &[u8]) -> (String, Vec<u8>) {
     let boundary = format!(
         "course2md-{}-{}",

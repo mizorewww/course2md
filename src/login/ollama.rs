@@ -33,7 +33,7 @@ fn agent() -> ureq::Agent {
 
 /// 已下载的模型名列表（GET {host}/api/tags）。
 pub(super) fn models(host: &str) -> Result<Vec<String>> {
-    let response = agent()
+    let mut response = agent()
         .get(&format!("{host}/api/tags"))
         .call()
         .map_err(|_| {
@@ -41,7 +41,7 @@ pub(super) fn models(host: &str) -> Result<Vec<String>> {
                 "无法连接 Ollama 服务 {host}；请确认已安装并正在运行（ollama serve） / Cannot reach the Ollama service at {host}; make sure it is installed and running (ollama serve)"
             )
         })?;
-    let value: serde_json::Value = response.into_json().context(crate::tr!(
+    let value: serde_json::Value = response.body_mut().read_json().context(crate::tr!(
         "Ollama 响应无法解析 / Cannot parse the Ollama response"
     ))?;
     let Some(list) = value["models"].as_array() else {

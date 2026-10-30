@@ -38,24 +38,24 @@ fn fetch_models(tokens: &CodexTokens) -> Result<Vec<(String, String)>> {
             "{}/models?client_version={CLIENT_VERSION}",
             crate::provider::CODEX_BASE_URL
         ))
-        .set("Authorization", &format!("Bearer {}", tokens.access_token))
-        .set("originator", "codex_cli_rs");
+        .header("Authorization", &format!("Bearer {}", tokens.access_token))
+        .header("originator", "codex_cli_rs");
     if let Some(account_id) = &tokens.account_id {
-        request = request.set("ChatGPT-Account-ID", account_id);
+        request = request.header("ChatGPT-Account-ID", account_id);
     }
     // The root cause stays specific (status or transport failure); the
     // context names what failed.
-    let response = request.call().map_err(|e| {
+    let mut response = request.call().map_err(|e| {
         let cause = match e {
-            ureq::Error::Status(401 | 403, _) => return anyhow::Error::new(CodexLoginRequired),
-            ureq::Error::Status(status, _) => anyhow::anyhow!("HTTP {status}"),
-            ureq::Error::Transport(transport) => anyhow::anyhow!("{transport}"),
+            ureq::Error::StatusCode(401 | 403) => return anyhow::Error::new(CodexLoginRequired),
+            ureq::Error::StatusCode(status) => anyhow::anyhow!("HTTP {status}"),
+            other => anyhow::anyhow!("{other}"),
         };
         cause.context(crate::tr!(
             "无法获取 Codex 模型目录 / Cannot fetch the Codex model catalog"
         ))
     })?;
-    let value: Value = response.into_json().context(crate::tr!(
+    let value: Value = response.body_mut().read_json().context(crate::tr!(
         "Codex 模型目录无法解析 / Cannot parse the Codex model catalog"
     ))?;
     let Some(models) = value["models"].as_array() else {
@@ -200,23 +200,23 @@ fn needs_refresh(tokens: &CodexTokens) -> bool {
 /// 刷新（refresh token 单次使用且会轮换：成功必须写回；4xx = 登录已失效）。
 fn refresh(tokens: &CodexTokens) -> Result<CodexTokens> {
     let agent = crate::runtime::http_agent(Duration::from_secs(30));
-    let response = agent
+    let mut response = agent
         .post(TOKEN_URL)
-        .set("Content-Type", "application/json")
+        .header("Content-Type", "application/json")
         .send_json(serde_json::json!({
             "client_id": CLIENT_ID,
             "grant_type": "refresh_token",
             "refresh_token": tokens.refresh_token,
         }))
         .map_err(|e| match e {
-            ureq::Error::Status(status, _) if (400..500).contains(&status) => {
+            ureq::Error::StatusCode(status) if (400..500).contains(&status) => {
                 anyhow::Error::new(CodexLoginRequired)
             }
             _ => anyhow::anyhow!(
                 crate::tr!("无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later")
             ),
         })?;
-    let value: Value = response.into_json().context(crate::tr!(
+    let value: Value = response.body_mut().read_json().context(crate::tr!(
         "无法解析刷新响应 / Cannot parse the token refresh response"
     ))?;
     let refreshed = CodexTokens {
@@ -422,25 +422,25 @@ fn open_browser(url: &str) {
 /// 授权码换取令牌（form 编码；对照 login/src/oauth/client.rs TokenEncoding::Form）。
 fn exchange_code(code: &str, verifier: &str, port: u16) -> Result<CodexTokens> {
     let agent = crate::runtime::http_agent(Duration::from_secs(30));
-    let response = agent
+    let mut response = agent
         .post(TOKEN_URL)
-        .send_form(&[
+        .send_form([
             ("grant_type", "authorization_code"),
             ("client_id", CLIENT_ID),
             ("code", code),
-            ("redirect_uri", &callback_url(port)),
+            ("redirect_uri", callback_url(port).as_str()),
             ("code_verifier", verifier),
         ])
         .map_err(|e| {
             let status = match e {
-                ureq::Error::Status(code, _) => format!(" (HTTP {code})"),
+                ureq::Error::StatusCode(code) => format!(" (HTTP {code})"),
                 _ => String::new(),
             };
             anyhow::anyhow!(
                 "授权码交换失败，请重试登录{status} / Authorization code exchange failed; retry the login{status}"
             )
         })?;
-    let value: Value = response.into_json().context(crate::tr!(
+    let value: Value = response.body_mut().read_json().context(crate::tr!(
         "无法解析令牌响应 / Cannot parse the token response"
     ))?;
     let access = value["access_token"].as_str().unwrap_or_default();
