@@ -436,6 +436,23 @@ fn reader(
         }
     })
 }
+
+fn line_event(line: &str, json: bool, redactions: &Redactions) -> Event {
+    let line = redactions.line(line);
+    if !json {
+        return Event::log(line);
+    }
+    match serde_json::from_str(&line) {
+        Ok(event) => Event::Engine(event),
+        // A JSON object this build does not recognize is a
+        // protocol drift, not a log line; keep it visible.
+        Err(error) if line.starts_with('{') => {
+            Event::log(course2md::tr!("无法识别的任务事件（{}）：{}", error, line))
+        }
+        Err(_) => Event::log(line),
+    }
+}
+
 pub(crate) fn terminate(child: &mut std::process::Child) {
     #[cfg(unix)]
     unsafe {
@@ -489,10 +506,10 @@ fn compute_tool_path() -> std::ffi::OsString {
 /// Presence of a llama.cpp runtime is independent of `--list-devices` succeeding.
 /// That flag can fail on CPU-only builds or older binaries that are still installed.
 pub(crate) fn llama_binary_on_path(path: &std::ffi::OsStr) -> bool {
-    ["llama-server", "llama-cli"].iter().any(|name| {
-        let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-        std::env::split_paths(path).any(|dir| dir.join(&file).is_file())
-    })
+    // The working directory only matters for names with a path in them; these have none.
+    ["llama-server", "llama-cli"]
+        .iter()
+        .any(|name| which::which_in(name, Some(path), ".").is_ok())
 }
 
 pub fn resolve_cli() -> Result<PathBuf> {

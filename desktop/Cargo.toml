@@ -29,6 +29,7 @@ tempfile = "3"
 url = "2"
 ureq = { version = "2", features = ["json"] }
 uuid = { version = "1", features = ["v4"] }
+which = "8.0.6"
 zeroize = "1"
 base64 = "0.22"
 chrono = "0.4"

@@ -1404,6 +1404,7 @@ dependencies = [
  "ureq 2.12.1",
  "url",
  "uuid",
+ "which",
  "zeroize",
 ]
 
