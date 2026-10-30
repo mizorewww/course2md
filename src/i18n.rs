@@ -51,17 +51,16 @@ impl Lang {
         }
         let value = value.split(['.', '@']).next().unwrap_or_default();
         if value.starts_with("zh") || value.starts_with("cmn") || value.starts_with("yue") {
-            return Some(
-                if value.contains("hant")
-                    || value.contains("tw")
-                    || value.contains("hk")
-                    || value.contains("mo")
-                {
-                    Self::ZhHant
-                } else {
-                    Self::ZhHans
-                },
-            );
+            // An explicit script decides; the region is only a default for tags without one.
+            let mut subtags = value.split('-').skip(1);
+            let traditional = subtags.clone().any(|tag| tag == "hant")
+                || (!subtags.clone().any(|tag| tag == "hans")
+                    && subtags.any(|tag| matches!(tag, "tw" | "hk" | "mo")));
+            return Some(if traditional {
+                Self::ZhHant
+            } else {
+                Self::ZhHans
+            });
         }
         if value.starts_with("ja") {
             return Some(Self::Ja);
@@ -74,17 +73,25 @@ impl Lang {
 
     /// `COURSE2MD_LANG`, then the POSIX locale variables, then the platform locale.
     pub fn detect() -> Self {
+        Self::detect_from(
+            |name| std::env::var(name).ok(),
+            sys_locale::get_locale().as_deref(),
+        )
+    }
+
+    fn detect_from(env: impl Fn(&str) -> Option<String>, system: Option<&str>) -> Self {
         for name in ["COURSE2MD_LANG", "LC_ALL", "LC_MESSAGES", "LANG"] {
-            if let Ok(value) = std::env::var(name)
-                && let Some(lang) = Self::from_code(&value)
-            {
+            let Some(value) = env(name) else { continue };
+            if let Some(lang) = Self::from_code(&value) {
                 return lang;
             }
+            // The C locale asks for untranslated output: it is a choice, not an
+            // absence of one, so it does not fall through to a lower-priority source.
+            if name != "COURSE2MD_LANG" && is_c_locale(&value) {
+                return Self::En;
+            }
         }
-        sys_locale::get_locale()
-            .as_deref()
-            .and_then(Self::from_code)
-            .unwrap_or(Self::En)
+        system.and_then(Self::from_code).unwrap_or(Self::En)
     }
 
     fn index(self) -> u8 {
@@ -104,6 +111,11 @@ impl Lang {
             _ => Self::ZhHans,
         }
     }
+}
+
+fn is_c_locale(value: &str) -> bool {
+    let name = value.trim().split(['.', '@']).next().unwrap_or_default();
+    name.eq_ignore_ascii_case("C") || name.eq_ignore_ascii_case("POSIX")
 }
 
 // Library callers (tests, embedded use) keep the source language until an
@@ -158,8 +170,9 @@ fn leak(value: String) -> &'static str {
 fn parse_catalog(source: &'static str) -> HashMap<&'static str, Entry> {
     let mut entries = HashMap::new();
     // The first line is the column header; every other line has five columns.
+    // There are no comment lines: a key may begin with `#`.
     for line in source.lines().skip(1) {
-        if line.is_empty() || line.starts_with('#') {
+        if line.is_empty() {
             continue;
         }
         let fields = split_fields(line);
@@ -317,8 +330,8 @@ macro_rules! eprint_tr {
 
 /// Fills `{}` placeholders in an already translated template.
 ///
-/// `{{` and `}}` are literal braces. A missing translation keeps the source
-/// template; placeholders are consumed left to right.
+/// `{{` and `}}` are literal braces, and so is a brace outside `{}`. A missing
+/// translation keeps the source template; placeholders are consumed left to right.
 pub fn template(source: &str, args: &[&dyn Display]) -> String {
     let template = t(source);
     let mut out = String::with_capacity(template.len());
@@ -334,11 +347,10 @@ pub fn template(source: &str, args: &[&dyn Display]) -> String {
                 chars.next();
                 out.push('}');
             }
-            '{' => {
-                // Only the plain `{}` form is used by the catalog.
-                if chars.peek() == Some(&'}') {
-                    chars.next();
-                }
+            // Only the plain `{}` form is a placeholder; any other brace is text
+            // and consumes no argument.
+            '{' if chars.peek() == Some(&'}') => {
+                chars.next();
                 if let Some(arg) = args.next() {
                     out.push_str(&arg.to_string());
                 }
@@ -358,6 +370,11 @@ pub fn t_for(source: &str, lang: Lang) -> &str {
 /// Catalog coverage for a source string (diagnostics and tests).
 pub fn has_translation(source: &str) -> bool {
     catalog().contains_key(source)
+}
+
+/// Every catalog key as `tr!` sees it, for tooling that audits coverage.
+pub fn catalog_keys() -> impl Iterator<Item = &'static str> {
+    catalog().keys().copied()
 }
 
 /// Rendered translation table used by tooling that audits coverage.
@@ -384,6 +401,53 @@ mod tests {
     }
 
     #[test]
+    fn an_explicit_script_outranks_the_region() {
+        for code in ["zh-Hans-HK", "zh-Hans-TW", "zh_Hans_MO", "cmn-Hans-TW"] {
+            assert_eq!(Lang::from_code(code), Some(Lang::ZhHans), "{code}");
+        }
+        for code in [
+            "zh-Hant-CN",
+            "zh-Hant",
+            "zh-HK",
+            "zh-MO",
+            "zh_TW.Big5",
+            "yue-Hant",
+        ] {
+            assert_eq!(Lang::from_code(code), Some(Lang::ZhHant), "{code}");
+        }
+        assert_eq!(Lang::from_code("zh-CN"), Some(Lang::ZhHans));
+    }
+
+    fn detect(vars: &[(&str, &str)], system: Option<&str>) -> Lang {
+        Lang::detect_from(
+            |name| {
+                vars.iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| (*value).to_owned())
+            },
+            system,
+        )
+    }
+
+    #[test]
+    fn the_c_locale_selects_untranslated_output() {
+        for value in ["C", "POSIX", "C.UTF-8", "c"] {
+            let vars = [("LC_ALL", value), ("LANG", "zh_CN.UTF-8")];
+            assert_eq!(detect(&vars, Some("ja-JP")), Lang::En, "{value}");
+        }
+        assert_eq!(detect(&[("LANG", "C")], Some("zh-CN")), Lang::En);
+        // An explicit language outranks it, and an empty variable is unset.
+        let vars = [("COURSE2MD_LANG", "ja"), ("LC_ALL", "C")];
+        assert_eq!(detect(&vars, None), Lang::Ja);
+        let vars = [("LC_ALL", ""), ("LANG", "zh_TW.UTF-8")];
+        assert_eq!(detect(&vars, None), Lang::ZhHant);
+        assert_eq!(detect(&[], Some("zh-Hans-HK")), Lang::ZhHans);
+        // A language without a catalog keeps looking for one that has it.
+        let vars = [("LC_ALL", "fr_FR.UTF-8"), ("LANG", "ja_JP.UTF-8")];
+        assert_eq!(detect(&vars, None), Lang::Ja);
+    }
+
+    #[test]
     fn bilingual_messages_split_into_halves() {
         let source = "读取失败 / Failed to read";
         assert_eq!(t_for(source, Lang::ZhHans), "读取失败");
@@ -403,6 +467,20 @@ mod tests {
             "共 3 项，2 项完成"
         );
         assert_eq!(template("花括号 {{}} 保留", &[]), "花括号 {} 保留");
+    }
+
+    #[test]
+    fn only_the_plain_form_is_a_placeholder() {
+        set_lang(Lang::ZhHans);
+        assert_eq!(template("{name} 和 {}", &[&1]), "{name} 和 1");
+        assert_eq!(template("{0} 末尾 {", &[&1]), "{0} 末尾 {");
+    }
+
+    #[test]
+    fn rows_starting_with_a_hash_are_rows() {
+        let source = "zh\tzh_hans\ten\tzh_hant\tja\n#一\t#一\t#one\t#一\t#いち\n";
+        let entries = parse_catalog(source);
+        assert_eq!(entries["#一"].en, "#one");
     }
 
     #[test]
