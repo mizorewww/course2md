@@ -1,9 +1,14 @@
 //! Where model files come from: Hugging Face, or domestic copies for mainland China.
 //!
-//! `HF_ENDPOINT` is authoritative when set. Otherwise the public IP's country
-//! orders the hosts and the rest remain fallbacks, so a wrong guess (VPN,
-//! proxy, failed lookup) costs one failed connection, not the download. The
-//! lookup runs only when files are actually missing.
+//! `HF_ENDPOINT` is authoritative when set. Otherwise this machine's own locale and
+//! time zone order the hosts, and the rest remain fallbacks, so a wrong guess (a
+//! traveller, an English system in Beijing) costs one failed connection, not the
+//! download. Nothing is sent anywhere to decide this.
+//!
+//! Asking public services for this machine's country is more accurate behind a VPN
+//! or on an unusual system, but it tells them the address of everyone who downloads
+//! a model. It happens only when chosen: [`allow_ip_lookup`] for an application,
+//! `COURSE2MD_IP_LOOKUP=1` for a person. Then it runs only when files are missing.
 //!
 //! hf-mirror.com proxies the Hub API but redirects large files to Hugging
 //! Face's overseas CDN; ModelScope serves the same repositories, byte for
@@ -71,6 +76,21 @@ impl Endpoints {
     }
 }
 
+static IP_LOOKUP: OnceLock<bool> = OnceLock::new();
+
+/// An application's decision about public IP lookups, made before the first
+/// [`endpoints`] call. Returns false if the decision was already taken.
+pub fn allow_ip_lookup(allowed: bool) -> bool {
+    IP_LOOKUP.set(allowed).is_ok()
+}
+
+fn ip_lookup_allowed() -> bool {
+    *IP_LOOKUP.get_or_init(|| {
+        std::env::var("COURSE2MD_IP_LOOKUP")
+            .is_ok_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
+    })
+}
+
 /// The endpoints for this process, resolved once on first use.
 pub fn endpoints() -> &'static Endpoints {
     static RESOLVED: OnceLock<Endpoints> = OnceLock::new();
@@ -79,7 +99,8 @@ pub fn endpoints() -> &'static Endpoints {
         let country = if normalize(configured.clone()).is_some() {
             None
         } else {
-            lookup_country()
+            let looked_up = ip_lookup_allowed().then(lookup_country).flatten();
+            looked_up.or_else(|| local_country(sys_locale::get_locale().as_deref(), time_zone().as_deref()))
         };
         let endpoints = choose(configured, country.as_deref());
         tracing::info!(
@@ -93,11 +114,54 @@ pub fn endpoints() -> &'static Endpoints {
             && !crate::progress::is_quiet()
         {
             crate::eprintln_tr!(
-                "检测到中国大陆网络，从国内镜像下载模型 / Mainland China network detected; downloading models from a domestic mirror"
+                "位于中国大陆，优先从国内镜像下载模型（可用 HF_ENDPOINT 指定地址） / In mainland China: trying domestic mirrors first for models (HF_ENDPOINT sets a host)"
             );
         }
         endpoints
     })
+}
+
+/// `CN` when this machine says it is set up for mainland China: a locale in that
+/// region (`zh-CN`, `en-CN`, `zh_CN.UTF-8`), or a mainland time zone. Taiwan, Hong
+/// Kong and Macau have their own regions and zones and keep the default order.
+fn local_country(locale: Option<&str>, time_zone: Option<&str>) -> Option<String> {
+    let region = locale.is_some_and(|locale| {
+        locale
+            .split(['.', '@'])
+            .next()
+            .unwrap_or_default()
+            .split(['-', '_'])
+            .skip(1)
+            .any(|subtag| subtag.eq_ignore_ascii_case("CN"))
+    });
+    let zone = time_zone.is_some_and(|zone| {
+        // `/usr/share/zoneinfo/Asia/Shanghai`, `:Asia/Shanghai` or a bare name.
+        let name = zone.rsplit("zoneinfo/").next().unwrap_or(zone);
+        matches!(
+            name.trim_start_matches(':').trim(),
+            "Asia/Shanghai"
+                | "Asia/Urumqi"
+                | "Asia/Chongqing"
+                | "Asia/Chungking"
+                | "Asia/Harbin"
+                | "Asia/Kashgar"
+                | "PRC"
+        )
+    });
+    (region || zone).then(|| "CN".to_owned())
+}
+
+/// The system's IANA time zone, where it can be read without another dependency:
+/// `TZ`, then `/etc/localtime`'s link. Windows has neither; its locale decides.
+fn time_zone() -> Option<String> {
+    std::env::var("TZ")
+        .ok()
+        .filter(|zone| !zone.trim().is_empty())
+        .or_else(|| {
+            std::fs::read_link("/etc/localtime")
+                .ok()
+                .map(|target| target.to_string_lossy().into_owned())
+        })
 }
 
 fn normalize(endpoint: Option<String>) -> Option<String> {
@@ -241,6 +305,40 @@ mod tests {
             let chosen = choose(None, country);
             assert_eq!(chosen.hosts[0], origin);
             assert_eq!(chosen.hub_override(), None);
+        }
+    }
+
+    #[test]
+    fn local_settings_alone_find_mainland_china() {
+        for (locale, zone) in [
+            (Some("zh-CN"), None),
+            (Some("zh-Hans-CN"), None),
+            (Some("zh_CN.UTF-8"), None),
+            (Some("en-CN"), None),
+            (Some("en-US"), Some("Asia/Shanghai")),
+            (None, Some("/var/db/timezone/zoneinfo/Asia/Shanghai")),
+            (None, Some("/usr/share/zoneinfo/Asia/Urumqi")),
+            (None, Some(":PRC")),
+        ] {
+            assert_eq!(
+                local_country(locale, zone).as_deref(),
+                Some("CN"),
+                "{locale:?} {zone:?}"
+            );
+        }
+        for (locale, zone) in [
+            (Some("zh-TW"), Some("Asia/Taipei")),
+            (Some("zh-HK"), Some("Asia/Hong_Kong")),
+            (Some("zh-Hant-MO"), Some("Asia/Macau")),
+            (Some("zh"), Some("America/Vancouver")),
+            (Some("en-US"), Some("UTC")),
+            // Neither a language nor a word that merely contains the region.
+            (Some("cn"), None),
+            (Some("en_US.CN"), None),
+            (None, Some("Not/Asia/Shanghai")),
+            (None, None),
+        ] {
+            assert_eq!(local_country(locale, zone), None, "{locale:?} {zone:?}");
         }
     }
 

@@ -2075,7 +2075,7 @@ ChatGPT 账号	ChatGPT 账号	ChatGPT account	ChatGPT 帳號	ChatGPT アカウ�
 所选项目不是视频文件，请选择一个视频文件	所选项目不是视频文件，请选择一个视频文件	The selected item is not a video file. Choose a video file.	所選項目不是影片檔案，請選擇一個影片檔案	選択した項目は動画ファイルではありません。動画ファイルを選んでください
 暂时无法获取模型列表，可以直接填写模型名称（{}）	暂时无法获取模型列表，可以直接填写模型名称（{}）	Could not load the model list; you can type a model name ({})	暫時無法取得模型列表，可以直接填寫模型名稱（{}）	モデル一覧を取得できません。モデル名を直接入力できます（{}）
 用时 {}	用时 {}	{} elapsed	用時 {}	経過 {}
-检测到中国大陆网络，从国内镜像下载模型 / Mainland China network detected; downloading models from a domestic mirror	检测到中国大陆网络，从国内镜像下载模型	Mainland China network detected; downloading models from a domestic mirror	偵測到中國大陸網路，從國內鏡像下載模型	中国本土のネットワークを検出しました。国内ミラーからモデルをダウンロードします
+位于中国大陆，优先从国内镜像下载模型（可用 HF_ENDPOINT 指定地址） / In mainland China: trying domestic mirrors first for models (HF_ENDPOINT sets a host)	位于中国大陆，优先从国内镜像下载模型（可用 HF_ENDPOINT 指定地址）	In mainland China: trying domestic mirrors first for models (HF_ENDPOINT sets a host)	位於中國大陸，優先從國內鏡像下載模型（可用 HF_ENDPOINT 指定位址）	中国本土のため、国内ミラーからのモデルダウンロードを優先します（HF_ENDPOINT で指定可能）
 所有下载地址均失败 / Every download host failed	所有下载地址均失败	Every download host failed	所有下載網址均失敗	すべてのダウンロード元で失敗しました
 文件校验不符 / Checksum mismatch	文件校验不符	Checksum mismatch	檔案校驗不符	チェックサムが一致しません
 一分钟没有收到数据 / No data for a minute	一分钟没有收到数据	No data for a minute	一分鐘沒有收到資料	1 分間データを受信していません

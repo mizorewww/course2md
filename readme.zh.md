@@ -132,7 +132,7 @@ Intel Mac 和 Linux ARM64 暂无桌面应用，可以使用[命令行工具](#�
 
 **Bilibili 视频失败或清晰度低。**在「设置 → 服务与账号 → Bilibili 账号」扫码登录。
 
-**模型有多大，保存在哪里？**Apple 芯片约 1–2.3 GB（`~/Library/Caches/qwen3-speech/`），其他平台约 2.4 GB（`~/.cache/course2md/models/`）。在中国大陆从国内镜像（ModelScope / hf-mirror.com）下载，其他地区以镜像作为备用。下载中断后可以续传，GPU/CPU 模型另按 SHA-256 校验。
+**模型有多大，保存在哪里？**Apple 芯片约 1–2.3 GB（`~/Library/Caches/qwen3-speech/`），其他平台约 2.4 GB（`~/.cache/course2md/models/`）。系统地区或时区为中国大陆时从国内镜像（ModelScope / hf-mirror.com）下载，其他地区以镜像作为备用。可用 `HF_ENDPOINT` 直接指定地址；设置 `COURSE2MD_IP_LOOKUP=1` 后，course2md 会向公共服务查询所在国家，这会把你的 IP 地址发送给这些服务。下载中断后可以续传，GPU/CPU 模型另按 SHA-256 校验。
 
 **从 1.7 升级后，旧笔记在哪里？**1.x 生成的笔记仍以 `course.md` / `course.html` 保存在原目录，可以用任意编辑器或浏览器打开，但 2.0 的笔记库只列出 2.0 生成的笔记。已下载的模型、Bilibili 登录和 CLI 的 `config.toml` 继续可用；识别方式和 AI 服务需要在首次引导中重新设置。
 
