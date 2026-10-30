@@ -29,6 +29,17 @@ pub const MATH_RULE: &str = "数学公式、符号与表达式一律写成 LaTeX
 口述的公式（如“x 的平方”“从 a 到 b 积分”）同样改写为 LaTeX；没有公式时不要添加 $。\
 JSON 字符串里的反斜杠必须写成 \\\\（如 \\\\frac）。";
 
+/// 视觉校对的附加说明。
+///
+/// Everything sent to a service stays one fixed text, like [`DEFAULT_PROMPT`]: the
+/// request is the ledger's identity, so a prompt that followed the interface
+/// language would make a resumed task pay for its finished requests again.
+const VISION_NOTE: &str =
+    " 消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。";
+
+/// The connection test's question; see [`VISION_NOTE`].
+const TEST_QUESTION: &str = "只回复两个字符：ok";
+
 /// 每次请求合并的语音段数。
 const BATCH: usize = 20;
 
@@ -631,20 +642,10 @@ fn build_chat_body(
         .enumerate()
         .map(|(i, t)| serde_json::json!({"id": i, "text": t}))
         .collect();
-    let vision_note = if image_b64.is_some() {
-        crate::tr!(
-            " 消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。"
-        )
-    } else {
-        ""
-    };
+    let vision_note = if image_b64.is_some() { VISION_NOTE } else { "" };
     let system = format!(
-        "{} {MATH_RULE}",
-        crate::tr!(
-            "{} 输出为 JSON 对象 {{\"segments\":[{{\"id\":序号,\"text\":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{}",
-            effective_prompt(s),
-            vision_note
-        )
+        "{} 输出为 JSON 对象 {{\"segments\":[{{\"id\":序号,\"text\":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{vision_note} {MATH_RULE}",
+        effective_prompt(s),
     );
     let mut content = vec![serde_json::json!({
         "type": "text",
@@ -1004,11 +1005,11 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
     validate(s)?;
     let user: serde_json::Value = if s.vision {
         serde_json::json!([
-            {"type": "text", "text": "只回复两个字符：ok"},
+            {"type": "text", "text": TEST_QUESTION},
             {"type": "image_url", "image_url": {"url": format!("data:image/png;base64,{TEST_PNG_B64}")}},
         ])
     } else {
-        serde_json::Value::String(crate::tr!("只回复两个字符：ok").into())
+        serde_json::Value::String(TEST_QUESTION.into())
     };
     let body = crate::provider::test_body(s, user);
     let fail_hint = if s.vision {

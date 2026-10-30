@@ -12,7 +12,6 @@ Microsoft Visual C++ 运行库	Microsoft Visual C++ 运行库	Microsoft Visual C
   仅 gpu/cpu 需要；下载约 2.4GB：course2md models download --dir "{}"	  仅 gpu/cpu 需要；下载约 2.4GB：course2md models download --dir "{}"	  Only needed for gpu/cpu (~2.4GB): course2md models download --dir "{}"	  僅 gpu/cpu 需要；下載約 2.4GB：course2md models download --dir "{}"	  gpu/cpu のみ必要です（約 2.4GB）：course2md models download --dir "{}"
  · 当前使用修改前的配置	 · 当前使用修改前的配置	 · Currently using the configuration from before the change	 · 目前使用修改前的配置	 · 現在は変更前の設定を使用しています
  · 部分完成	 · 部分完成	 · Partially completed	 · 部分完成	 · 一部完了
- 消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。	 消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。	 The message is accompanied by a screenshot of the courseware corresponding to the paragraph. It is only used to correct the spelling of terms and proper nouns. Do not describe or comment on the picture itself.	 訊息附帶該段對應的課件截圖，僅用於校正術語拼寫與專有名詞，不要描述或評論圖片本身。	 メッセージには、その段落に対応するコースウェアのスクリーンショットが添付されています。用語や固有名詞のスペルを修正するためにのみ使用されます。画像自体について説明したりコメントしたりしないでください。
 ! GPU  无法检查设备：{}	! GPU  无法检查设备：{}	! GPU  Cannot check device: {}	! GPU  無法檢查裝置：{}	! GPU  デバイスを確認できません：{}
 ! coreml  缺少 Metal 着色器资源，请重新安装 / Metal shader resources missing; reinstall course2md	! coreml  缺少 Metal 着色器资源，请重新安装	! coreml  Metal shader resources missing; reinstall course2md	! coreml  缺少 Metal 著色器資源，請重新安裝	! coreml  Metal シェーダー リソースがありません。再インストールしてください
 (已设置，隐藏 / set, hidden)	(已设置，隐藏)	(set, hidden)	(已設定，隱藏)	(設定済み、非表示)
@@ -152,7 +151,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 的笔记名称记录无法读取	{} 的笔记名称记录无法读取	The note name record for {} cannot be read.	{} 的筆記名稱記錄無法讀取	{} のノート名の記録を読み取れません。
 {} 秒	{} 秒	{}s	{} 秒	{} 秒
 {} 视频 {}	{} 视频 {}	{} video {}	{} 影片 {}	{} 動画 {}
-{} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{}	{} 输出为 JSON 对象 {{"segments":[{{"id":序号,"text":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{}	{} Output a JSON object {{"segments":[{{"id":index,"text":proofread text}}]}}; each id must match the input one-to-one; for entries that contain only filler words, text is an empty string. {}	{} 輸出為 JSON 物件 {{"segments":[{{"id":序號,"text":校對後的文字}}]}}，id 必須與輸入一一對應；純語氣詞條目的 text 為空字串。{}	{} JSON オブジェクト {{"segments":[{{"id":番号,"text":校正後のテキスト}}]}} として出力してください。id は入力と一対一で対応させてください。フィラー（つなぎ言葉）だけの項目は text を空文字列にしてください。{}
 {}。保存位置尚未切换，已复制的内容保留在目标位置。	{}。保存位置尚未切换，已复制的内容保留在目标位置。	{}. The save location has not been switched and the copied content remains at the target location.	{}。儲存位置尚未切換，已複製的內容保留在目標位置。	{}。保存場所はまだ切り替えられていません。コピー済みの内容はコピー先に残っています。
 {}。请备份后删除该文件再重试：{}	{}。请备份后删除该文件再重试：{}	{}. Back up and delete the file, then try again: {}	{}。請備份後刪除該檔案再重試：{}	{}。バックアップ後にファイルを削除して、再試行してください: {}
 {}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{} は {} に送信されます
@@ -486,7 +484,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 另有 {} 个位置未纳入搜索	另有 {} 个位置未纳入搜索	{} more locations were not included in the search	另有 {} 個位置未納入搜尋	ほかに {} か所が検索の対象外です
 另有 {} 个条目无法确认	另有 {} 个条目无法确认	There are {} more entries that cannot be confirmed	另有 {} 個條目無法確認	確認できないエントリがさらに {} 件あります
 另有 {} 份笔记无法读取。\n	另有 {} 份笔记无法读取。\n	{} more notes could not be read.\n	另有 {} 份筆記無法讀取。\n	ほかに {} 件のノートを読み込めませんでした。\n
-只回复两个字符：ok	只回复两个字符：ok	Reply with only two characters: ok	只回覆兩個字元：ok	2 文字だけ返信してください: ok
 只想用视频自带字幕？按 Esc 退出，加 --transcript-source subtitle 重新运行。 / Subtitles only? Press Esc and rerun with --transcript-source subtitle.	只想用视频自带字幕？按 Esc 退出，加 --transcript-source subtitle 重新运行。	Subtitles only? Press Esc and rerun with --transcript-source subtitle.	只想用影片自帶字幕？按 Esc 退出，加 --transcript-source subtitle 重新執行。	動画付属の字幕だけを使いたい場合は、Esc で終了し、--transcript-source subtitle を付けて再実行してください。
 只看画面的某块区域判断翻页，格式：左%,上%-右%,下% / Detect slide changes in a region: left%,top%-right%,bottom%	只看画面的某块区域判断翻页，格式：左%,上%-右%,下%	Detect slide changes in a region: left%,top%-right%,bottom%	只看畫面的某塊區域判斷翻頁，格式：左%,上%-右%,下%	画面の特定の領域だけを見てページ送りを判定します。形式：左%,上%-右%,下%
 可用	可用	Available	可用	利用可能
