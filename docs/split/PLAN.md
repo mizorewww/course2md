@@ -31,6 +31,16 @@ directory when the project is accepted.
     and check `df -h` during long builds. Never delete anything in the owner's
     `gpui-kit-material` checkout or other sibling repositories.
 
+11. **Needs go upstream by pull request.** When the app needs something from a repository
+    the owner maintains (`gpui-kit-material`, `gpui-material-symbols`, and the crates split
+    out by this project), make it generic, have an independent subagent review it, then open
+    a PR to that repository directly, without waiting for the rest of this project. The owner
+    merges these. Do not carry app-local workarounds for such needs. A PR holds one concern,
+    branched from that repository's `origin/main`, not the whole integration branch.
+    Repositories the owner does not maintain (Longbridge GPUI Kit, Zed) are different: their
+    fixes stay in the kit's `vendor/` with provenance, and opening PRs there needs the owner's
+    say-so.
+
 ## Locations
 
 | What | Where | Branch |
