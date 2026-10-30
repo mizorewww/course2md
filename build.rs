@@ -200,7 +200,8 @@ fn build_swift_package(pkg: &Path) -> Result<(), Vec<String>> {
     });
     let build = |extra: &[String]| {
         run(Command::new("swift")
-            .args(["build", "-c", "release"])
+            // Only what Package.resolved records: a build never moves a dependency.
+            .args(["build", "-c", "release", "--force-resolved-versions"])
             .args(extra)
             .current_dir(pkg))
     };
