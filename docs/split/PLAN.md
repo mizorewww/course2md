@@ -44,6 +44,17 @@ directory when the project is accepted.
     `gpui-kit-material`. Removing patches from `vendor/` is welcome where the audit shows
     they aren't needed.
 
+13. **Code reduction targets (owner, 2026-10-31).** Componentization removes about 20%
+    as a first target (adjustable if not achievable); removing wheels removes more;
+    the eventual goal is **60-90% less code**.
+    - Baseline at `3db4a88`: 78,518 production Rust lines (`src` 20,413, `desktop/src`
+      58,105), plus 18,113 test lines, 2,423 script lines, 453 Swift lines.
+    - Primary metric: production Rust lines in this repository, all workspace crates included.
+    - Secondary metric, always reported beside it: lines added to repositories the owner
+      maintains (kit, split-out crates). Moving code to one of those counts toward the
+      primary metric but is visible here, so relocation isn't mistaken for deletion.
+    - Record both in `STATUS.md` at each phase end.
+
 ## Locations
 
 | What | Where | Branch |
