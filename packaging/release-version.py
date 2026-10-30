@@ -17,8 +17,20 @@ def api(path):
         return json.load(response)
 
 
+def release_job_succeeded(run_id):
+    """A dry run succeeds with its `release` job skipped: nothing was published."""
+    jobs = api(f"actions/runs/{run_id}/jobs?per_page=100")["jobs"]
+    return any(job["name"] == "release" and job["conclusion"] == "success" for job in jobs)
+
+
 def main():
     version = os.environ.get("REQUESTED_VERSION", "")
+    run_id = os.environ.get("RELEASE_RUN_ID", "")
+    if not version and run_id and not release_job_succeeded(run_id):
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            output.write("publish=false\n")
+        print("Skipping: the triggering release workflow did not publish a release")
+        return
     if not version:
         branch = os.environ.get("RELEASE_BRANCH", "")
         if branch.startswith("v") and parse_release(branch[1:]):
