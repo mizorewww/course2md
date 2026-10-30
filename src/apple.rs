@@ -534,6 +534,71 @@ mod helper_tests {
         );
     }
 
+    /// Runs the real Silero VAD through the shim. Downloads only its model (about
+    /// 1.4 MB). Run with `QWEN3_CACHE_DIR=<scratch dir outside /private> cargo test
+    /// --lib -- --ignored --nocapture vad_detects`; needs macOS `say` and ffmpeg.
+    #[test]
+    #[ignore = "downloads the VAD model and synthesizes speech"]
+    fn vad_detects_speech_and_loads_its_model_once() {
+        assert!(std::env::var_os("QWEN3_CACHE_DIR").is_some());
+        let work = tempfile::tempdir().unwrap();
+        let (speech, silence) = (work.path().join("speech.wav"), work.path().join("quiet.wav"));
+        let aiff = work.path().join("speech.aiff");
+        let run = |command: &mut std::process::Command| {
+            let status = command.status().unwrap();
+            assert!(status.success(), "{command:?}");
+        };
+        run(std::process::Command::new("say")
+            .arg("-o")
+            .arg(&aiff)
+            .arg("The blue notebook contains seven pages. Water freezes at zero degrees."));
+        for (args, output) in [
+            (vec!["-i".into(), aiff.display().to_string()], &speech),
+            (
+                ["-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "3"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                &silence,
+            ),
+        ] {
+            run(std::process::Command::new("ffmpeg")
+                .args(["-v", "error", "-y"])
+                .args(args)
+                .args(["-ar", "16000", "-ac", "1"])
+                .arg(output));
+        }
+
+        let vad_part = &crate::models::status::APPLE_VAD;
+        let mut files: Vec<String> = vad_part.files.iter().map(|f| (*f).to_owned()).collect();
+        files.extend(vad_part.bundles.iter().map(|b| format!("{b}/**")));
+        let manifest =
+            CString::new(serde_json::json!([{"repo": vad_part.repo, "files": files}]).to_string())
+                .unwrap();
+        let model = CString::new("qwen3-0.6b").unwrap();
+        let status = unsafe { ffi::c2m_asr_prepare_cache(model.as_ptr(), manifest.as_ptr()) };
+        finish_transfer();
+        assert_eq!(status, 0, "{}", last_error());
+
+        let started = Instant::now();
+        assert_eq!(unsafe { ffi::c2m_vad_load() }, 0, "{}", last_error());
+        let load = started.elapsed();
+        // Each call after the load only has inference left to do.
+        let timed = |wav: &Path| {
+            let started = Instant::now();
+            let segments = vad(wav, 0.25, 0.35).unwrap();
+            (segments, started.elapsed())
+        };
+        let (found, first) = timed(&speech);
+        let (again, second) = timed(&speech);
+        let (none, third) = timed(&silence);
+        println!("load {load:?}; detect {first:?}, {second:?}, {third:?}; segments {found:?}");
+        assert!(!found.is_empty(), "speech was detected");
+        assert!(found.iter().all(|(start, end)| end > start));
+        assert_eq!(found, again, "state does not leak between files");
+        assert!(none.is_empty(), "silence has no speech: {none:?}");
+        assert_eq!(unsafe { ffi::c2m_vad_load() }, 0, "{}", last_error());
+    }
+
     fn walk(dir: &Path) -> u64 {
         std::fs::read_dir(dir)
             .map(|entries| {
