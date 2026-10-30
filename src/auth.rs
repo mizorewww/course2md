@@ -25,23 +25,16 @@ type Cookies = BTreeMap<String, String>;
 pub const BILIBILI_SETUP_TIP: &str = "使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。 / For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.";
 
 #[derive(Debug)]
-struct LoginTip {
-    error: anyhow::Error,
-    hint: &'static str,
-}
+struct LoginTip(&'static str);
 
 impl std::fmt::Display for LoginTip {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.hint)
-    }
-}
-impl std::error::Error for LoginTip {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.error.as_ref())
+        f.write_str(self.0)
     }
 }
 
-/// Keep the original failure visible; login is a suggested next step, not a diagnosis.
+/// Keep the original failure visible and recognisable: login is a suggested next
+/// step, not a diagnosis, so markers in `error` still answer to `downcast_ref`.
 pub fn with_bilibili_login_tip(url: &str, error: anyhow::Error) -> anyhow::Error {
     if !is_bilibili_url(url) || error.downcast_ref::<LoginTip>().is_some() {
         return error;
@@ -51,7 +44,7 @@ pub fn with_bilibili_login_tip(url: &str, error: anyhow::Error) -> anyhow::Error
     } else {
         "提示：可运行 course2md --login bilibili 扫码登录后重试；已登录时可重新登录。 / Hint: run course2md --login bilibili and scan the QR code to retry; if already logged in, log in again."
     };
-    anyhow::Error::new(LoginTip { error, hint })
+    error.context(LoginTip(hint))
 }
 
 pub fn cookie_path() -> PathBuf {
@@ -524,6 +517,20 @@ mod tests {
             anyhow::anyhow!("HTTP Error 403"),
         );
         assert_eq!(error.to_string(), "HTTP Error 403");
+    }
+
+    #[test]
+    fn login_tip_leaves_typed_causes_reachable() {
+        #[derive(Debug)]
+        struct Marker;
+        impl std::fmt::Display for Marker {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("marker")
+            }
+        }
+        impl std::error::Error for Marker {}
+        let error = with_bilibili_login_tip("https://b23.tv/example", Marker.into());
+        assert!(error.downcast_ref::<Marker>().is_some());
     }
 
     #[test]
