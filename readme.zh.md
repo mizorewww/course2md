@@ -12,7 +12,7 @@
 [![License: MIT](https://img.shields.io/github/license/mizorewww/course2md)](LICENSE)
 ![macOS · Windows · Linux](https://img.shields.io/badge/desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-blue)
 
-[English](readme.md) · **中文** · [下载](#安装) · [Wiki](https://github.com/mizorewww/course2md/wiki)
+[English](readme.md) · **中文** · [日本語](readme.ja.md) · [下载](#安装) · [Wiki](https://github.com/mizorewww/course2md/wiki)
 
 </div>
 

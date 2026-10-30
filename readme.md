@@ -12,7 +12,7 @@ Paste a YouTube or Bilibili link, or drop in a local video. course2md captures a
 [![License: MIT](https://img.shields.io/github/license/mizorewww/course2md)](LICENSE)
 ![macOS · Windows · Linux](https://img.shields.io/badge/desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-blue)
 
-**English** · [中文](readme.zh.md) · [Download](#install) · [Wiki](https://github.com/mizorewww/course2md/wiki)
+**English** · [中文](readme.zh.md) · [日本語](readme.ja.md) · [Download](#install) · [Wiki](https://github.com/mizorewww/course2md/wiki)
 
 </div>
 
