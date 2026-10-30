@@ -302,10 +302,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                             course2md::tr!("配置已存在：{}。使用 --force 替换", path.display())
                         );
                     }
-                    if let Some(dir) = path.parent() {
-                        std::fs::create_dir_all(dir)?;
-                    }
-                    std::fs::write(&path, settings::template())?;
+                    let path = settings::write_template()?;
                     println!(
                         "已生成配置模板 / Configuration template created: {}",
                         path.display()

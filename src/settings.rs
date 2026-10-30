@@ -162,6 +162,16 @@ pub fn load() -> anyhow::Result<ConfigFile> {
 }
 
 pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {
+    write_config(toml::to_string_pretty(cfg)?.as_bytes())
+}
+
+/// Replaces the configuration with the commented template (`config init`).
+pub fn write_template() -> Result<PathBuf> {
+    write_config(template().as_bytes())
+}
+
+/// Writes the configuration atomically, keeping the previous file beside it.
+fn write_config(bytes: &[u8]) -> Result<PathBuf> {
     let p = config_path();
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir)?;
@@ -179,8 +189,7 @@ pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {
             );
         }
     }
-    let bytes = toml::to_string_pretty(cfg)?;
-    crate::checkpoint::atomic_write(&p, bytes.as_bytes())?;
+    crate::checkpoint::atomic_write(&p, bytes)?;
     Ok(p)
 }
 
