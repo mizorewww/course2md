@@ -524,7 +524,7 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
                 course2md::subtitle::sort_tracks(
                     tracks,
                     &[],
-                    "zh",
+                    course2md::i18n::lang().code(),
                     source.original_language.as_deref(),
                 );
             }
@@ -816,7 +816,7 @@ fn local_subtitle_evidence(
     for (index, track) in tracks.iter_mut().enumerate() {
         track.source_order = index;
     }
-    course2md::subtitle::sort_tracks(&mut tracks, &[], "zh", None);
+    course2md::subtitle::sort_tracks(&mut tracks, &[], course2md::i18n::lang().code(), None);
     if !tracks.is_empty() {
         SubtitleEvidence::Found {
             tracks,
@@ -870,7 +870,7 @@ pub fn refresh_subtitles(
                 course2md::subtitle::sort_tracks(
                     tracks,
                     &[],
-                    "zh",
+                    course2md::i18n::lang().code(),
                     source.original_language.as_deref(),
                 );
             }
@@ -1350,6 +1350,22 @@ mod tests {
         ] {
             assert_eq!(video_links(input), expected, "{input}");
         }
+    }
+
+    #[test]
+    fn local_subtitle_tracks_put_the_interface_language_first() {
+        let metadata = serde_json::json!({"streams": [
+            {"index": 1, "codec_type": "subtitle", "codec_name": "subrip", "tags": {"language": "zh-Hant"}},
+            {"index": 2, "codec_type": "subtitle", "codec_name": "subrip", "tags": {"language": "zh-Hans"}},
+        ]});
+        let directory = tempfile::tempdir().unwrap();
+        let evidence =
+            local_subtitle_evidence(&directory.path().join("video.mp4"), &metadata, "local:id");
+        let course2md::subtitle::SubtitleEvidence::Found { tracks, .. } = evidence else {
+            panic!("expected tracks");
+        };
+        assert_eq!(course2md::i18n::lang().code(), "zh-Hans");
+        assert_eq!(tracks[0].language.as_deref(), Some("zh-Hans"));
     }
 
 }

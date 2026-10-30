@@ -890,7 +890,7 @@ impl Desktop {
                             course2md::subtitle::sort_tracks(
                                 tracks,
                                 &this.preferences.generation().preferred_subtitle_languages,
-                                "zh-Hans",
+                                course2md::i18n::lang().code(),
                                 original,
                             );
                         }

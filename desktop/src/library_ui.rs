@@ -172,7 +172,7 @@ impl Desktop {
                         Ok(source::SourceProbe::Single(source)) => {
                             let mut source = *source;
                             if let course2md::subtitle::SubtitleEvidence::Found { tracks, .. } = &mut source.subtitles {
-                                course2md::subtitle::sort_tracks(tracks, &this.preferences.generation().preferred_subtitle_languages, "zh-Hans", source.original_language.as_deref());
+                                course2md::subtitle::sort_tracks(tracks, &this.preferences.generation().preferred_subtitle_languages, course2md::i18n::lang().code(), source.original_language.as_deref());
                             }
                             let title = this.workspace.as_ref().and_then(|workspace| workspace.state.draft())
                                 .filter(|draft| draft.custom_title).map(|draft| draft.title.clone()).unwrap_or_else(|| source.title.clone());
