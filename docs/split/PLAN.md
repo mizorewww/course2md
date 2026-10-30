@@ -54,6 +54,9 @@ directory when the project is accepted.
       maintains (kit, split-out crates). Moving code to one of those counts toward the
       primary metric but is visible here, so relocation isn't mistaken for deletion.
     - Record both in `STATUS.md` at each phase end.
+    - **No feature is dropped (owner, 2026-10-31).** Behaviour may be simplified, but
+      every feature stays. The working target is the largest reduction the audit finds
+      achievable under that rule, whatever it comes to.
 
 ## Locations
 
