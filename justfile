@@ -19,9 +19,6 @@ install:
         echo "just install needs Python 3.11 or later (brew install python)." >&2
         exit 1
     fi
-    # Prepare or refresh the GPUI sources at the locked revisions, replaying the
-    # current reviewed patches; a remembered --developer-dir is reused.
-    "$python" desktop/scripts/sources.py --locked
     app="$("$python" desktop/scripts/package.py --app-only | tail -1)"
 
     dest=/Applications/course2md.app

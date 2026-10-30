@@ -4,21 +4,18 @@ GPUI and GPUI Component client for macOS, Windows and Linux. It runs the CLI fro
 
 ## Build and run
 
-Requires Rust stable, Python 3.11+ and Git; Xcode Command Line Tools on macOS; Visual Studio C++ Build Tools and LLVM on Windows; on Linux, the packages listed in `.github/actions/desktop-deps/action.yml`. Converting videos needs ffmpeg, and links need yt-dlp.
+Requires the Rust toolchain named in `desktop/rust-toolchain.toml`, Python 3.11+ and Git; Xcode Command Line Tools on macOS; Visual Studio C++ Build Tools and LLVM on Windows; on Linux, the packages listed in `.github/actions/desktop-deps/action.yml`. Converting videos needs ffmpeg, and links need yt-dlp.
 
 ```sh
-python3 desktop/scripts/sources.py
 cargo build
 cargo build --manifest-path desktop/Cargo.toml
 # Point the app at the engine you just built (PowerShell: $env:COURSE2MD_BIN)
 COURSE2MD_BIN="$PWD/target/debug/course2md" cargo run --manifest-path desktop/Cargo.toml
 ```
 
-`just install` (macOS) installs the current checkout as `/Applications/course2md.app`, keeping existing notes and settings. It finds a Python 3.11+ (macOS's own `python3` is too old), prepares or refreshes the GPUI sources with `sources.py --locked`, and builds the app; nothing needs to exist outside the checkout.
+`just install` (macOS) installs the current checkout as `/Applications/course2md.app`, keeping existing notes and settings. It finds a Python 3.11+ (macOS's own `python3` is too old) and builds the app.
 
-`sources.py` clones Zed and GPUI Component into the ignored `desktop/.deps/upstream/`, fast-forwards them to `main` (skip with `--no-pull`), and creates worktrees under `desktop/.deps`. It maps GPUI Component's `gpui-pre` crates to Zed's GPUI, with the `gpui_platform` features listed in `desktop/Cargo.toml`, and applies the reviewed patches in [`patches/`](patches/README.md). Release builds use `--locked`, which checks out the revisions frozen in `sources.lock.json`.
-
-To build against your own `zed` and `gpui-component` checkouts, pass `--developer-dir <dir>`. They are never patched and are only fast-forwarded with `--pull-developer`. The directory is remembered in `desktop/.deps/developer-dir`, so later runs (including `just install`) reuse it; delete `desktop/.deps` to switch back to the managed clones.
+The UI stack comes from [`gpui-kit-material`](https://github.com/mizorewww/gpui-kit-material), which vendors patched GPUI and GPUI Base sources. `desktop/Cargo.toml` repeats that repository's `[patch]` tables, because Cargo applies patches only in the workspace that declares them; keep the two equal when updating. While `docs/split/PLAN.md` is in progress the dependencies are paths into a sibling `gpui-kit-material-course2md` worktree of its `course2md-integration` branch.
 
 The app looks for the engine in `COURSE2MD_BIN`, then beside its own executable, then on PATH.
 

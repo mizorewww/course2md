@@ -19,8 +19,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/desktop-deps
-        with:
-          locked: true
       - name: Build engine and desktop (normal and capture)
         shell: pwsh
         run: |

@@ -3,7 +3,6 @@
 import argparse
 import hashlib
 import importlib.util
-import json
 import os
 from pathlib import Path
 import platform
@@ -226,18 +225,6 @@ def main():
                              "system package manager)")
     profile = "debug" if args.debug else "release"
     flags = [] if args.debug else ["--release", *(["--locked"] if distribution else [])]
-    revisions = {
-        name: subprocess.check_output(
-            ["git", "-C", str(ROOT / ".deps" / name), "rev-parse", "HEAD"], text=True
-        ).strip()
-        for name in ("zed", "component")
-    }
-    if distribution:
-        if not (ROOT / "sources.lock.json").is_file():
-            raise SystemExit("Freeze the tested source revisions with scripts/sources.py --freeze before release")
-        expected = json.loads((ROOT / "sources.lock.json").read_text())
-        if revisions != expected:
-            raise SystemExit("Prepared sources differ from the tested release revisions; prepare sources with --locked")
     if not args.no_build:
         # build.rs reads COURSE2MD_NO_APPLE; pass the flag on to it.
         env = {**os.environ, "COURSE2MD_NO_APPLE": "1"} if args.no_apple else None
@@ -317,12 +304,8 @@ def main():
         verify_windows_icon(binaries / "course2md-desktop.exe")
     copy_licenses(base, tool_licenses)
     shutil.copy2(PROJECT / "readme.md", base / "README.md")
-    # A development archive follows main and must not claim the previous release
-    # revisions. Release builds have already checked this snapshot against the lock.
-    (base / "sources.lock.json").write_text(json.dumps(revisions, indent=2) + "\n")
     if system == "Darwin":
         copy_licenses(resources, tool_licenses)
-        shutil.copy2(base / "sources.lock.json", resources / "sources.lock.json")
         identity = "-" if args.app_only else args.signing_identity
         signed = identity != "-"
         signing = ["--force", "--sign", identity]

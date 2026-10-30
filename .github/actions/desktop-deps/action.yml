@@ -1,9 +1,5 @@
 name: Desktop build dependencies
-description: Rust toolchain with cache, packaging tools, native libraries and prepared GPUI sources.
-inputs:
-  locked:
-    description: Prepare the GPUI revisions frozen in desktop/sources.lock.json
-    default: 'true'
+description: Rust toolchain with cache, packaging tools and native libraries.
 runs:
   using: composite
   steps:
@@ -56,11 +52,3 @@ runs:
       run: |
         choco install llvm --no-progress -y
         "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
-    - name: Prepare GPUI sources
-      shell: bash
-      env:
-        LOCKED: ${{ inputs.locked }}
-      run: |
-        mode=()
-        if [ "$LOCKED" = true ]; then mode=(--locked); fi
-        python desktop/scripts/sources.py "${mode[@]}"
