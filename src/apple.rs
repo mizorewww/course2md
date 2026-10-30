@@ -542,7 +542,10 @@ mod helper_tests {
     fn vad_detects_speech_and_loads_its_model_once() {
         assert!(std::env::var_os("QWEN3_CACHE_DIR").is_some());
         let work = tempfile::tempdir().unwrap();
-        let (speech, silence) = (work.path().join("speech.wav"), work.path().join("quiet.wav"));
+        let (speech, silence) = (
+            work.path().join("speech.wav"),
+            work.path().join("quiet.wav"),
+        );
         let aiff = work.path().join("speech.aiff");
         let run = |command: &mut std::process::Command| {
             let status = command.status().unwrap();
