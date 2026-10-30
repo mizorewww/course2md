@@ -31,15 +31,18 @@ directory when the project is accepted.
     and check `df -h` during long builds. Never delete anything in the owner's
     `gpui-kit-material` checkout or other sibling repositories.
 
-11. **Needs go upstream by pull request.** When the app needs something from a repository
-    the owner maintains (`gpui-kit-material`, `gpui-material-symbols`, and the crates split
-    out by this project), make it generic, have an independent subagent review it, then open
-    a PR to that repository directly, without waiting for the rest of this project. The owner
-    merges these. Do not carry app-local workarounds for such needs. A PR holds one concern,
-    branched from that repository's `origin/main`, not the whole integration branch.
-    Repositories the owner does not maintain (Longbridge GPUI Kit, Zed) are different: their
-    fixes stay in the kit's `vendor/` with provenance, and opening PRs there needs the owner's
-    say-so.
+11. **The goal is less code, not relocated code.** A need is presumed false until audited;
+    the owner expects most are. For each thing the app seems to need from below, in order:
+    (a) drop the need (change the app's wording, layout or behaviour); (b) write it the
+    Kit-native way, with the existing `gpui-kit-material` and Kit APIs; (c) only if the kit's
+    API is genuinely awkward, make it generic and open a PR **to `gpui-kit-material`** (or
+    `gpui-material-symbols`, or a crate split out here), after independent review. One concern
+    per PR, branched from that repository's `origin/main`, not the integration branch. The
+    owner merges these.
+12. **No new engine patches, and no PRs to Longbridge or Zed.** Nothing from this project
+    is added to the kit's `vendor/` to serve the app. The upstream ends at
+    `gpui-kit-material`. Removing patches from `vendor/` is welcome where the audit shows
+    they aren't needed.
 
 ## Locations
 
