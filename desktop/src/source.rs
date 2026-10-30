@@ -419,18 +419,42 @@ pub fn validate_url(input: &str) -> Result<url::Url> {
 pub fn video_links(input: &str) -> Vec<String> {
     let mut links = Vec::new();
     for word in input.split_whitespace() {
-        let Some(start) = word.find("https://").or_else(|| word.find("http://")) else {
-            continue;
-        };
-        let candidate = word[start..].trim_end_matches([
-            '。', '，', ',', '；', ';', '！', '!', '）', ')', '】', ']', '》', '>', '"', '”', '’',
-            '\'',
-        ]);
-        if validate_url(candidate).is_ok() && !links.iter().any(|link| link == candidate) {
-            links.push(candidate.to_owned());
+        let mut rest = word;
+        while let Some(start) = ["https://", "http://"]
+            .iter()
+            .filter_map(|scheme| rest.find(scheme))
+            .min()
+        {
+            let tail = &rest[start..];
+            let end = tail.find(ends_link).unwrap_or(tail.len());
+            let candidate = tail[..end].trim_end_matches([',', ';', '!', ')', ']', '\'']);
+            if validate_url(candidate).is_ok() && !links.iter().any(|link| link == candidate) {
+                links.push(candidate.to_owned());
+            }
+            rest = &tail[end..];
         }
     }
     links
+}
+
+/// Characters a pasted link cannot contain unencoded, so the text glued after it
+/// starts here: CJK and fullwidth punctuation, typographic quotes and URL delimiters.
+/// Letters do not count; a path may be written in any script.
+fn ends_link(c: char) -> bool {
+    matches!(
+        c,
+        '\u{3000}'..='\u{303F}'
+            | '\u{FF01}'..='\u{FF0F}'
+            | '\u{FF1A}'..='\u{FF20}'
+            | '\u{FF3B}'..='\u{FF40}'
+            | '\u{FF5B}'..='\u{FF65}'
+            | '\u{2018}'..='\u{201F}'
+            | '\u{2026}'
+            | '"'
+            | '<'
+            | '>'
+            | '`'
+    )
 }
 
 /// Read metadata and subtitle candidates without downloading video or running AI.
@@ -1306,4 +1330,26 @@ mod tests {
             .is_err()
         );
     }
+    #[test]
+    fn text_glued_to_a_link_is_not_part_of_it() {
+        for (input, expected) in [
+            ("https://b23.tv/abc，看这个", vec!["https://b23.tv/abc"]),
+            ("【课】https://b23.tv/abc。", vec!["https://b23.tv/abc"]),
+            ("看「https://b23.tv/abc」吧", vec!["https://b23.tv/abc"]),
+            ("(https://b23.tv/abc),", vec!["https://b23.tv/abc"]),
+            (
+                "https://b23.tv/a，https://b23.tv/b；http://b23.tv/c",
+                vec!["https://b23.tv/a", "https://b23.tv/b", "http://b23.tv/c"],
+            ),
+            // Not punctuation: part of the path.
+            (
+                "https://example.com/课程/1?p=2",
+                vec!["https://example.com/课程/1?p=2"],
+            ),
+            ("no link here", vec![]),
+        ] {
+            assert_eq!(video_links(input), expected, "{input}");
+        }
+    }
+
 }
