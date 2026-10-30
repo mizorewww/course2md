@@ -2086,7 +2086,7 @@ impl Desktop {
                     .filter(|(component, ..)| {
                         !(requires_repair && ai_component(component).is_some())
                     })
-                    .map(|(_, label, outcome)| activity::outcome_failure_message(label, outcome)),
+                    .map(|(_, part, outcome)| activity::outcome_failure_message(*part, outcome)),
             );
         } else if !uncertain {
             reasons.push(task_attention_summary(task));
@@ -2096,7 +2096,7 @@ impl Desktop {
                 "{}尚未完成，笔记的其余部分已保存",
                 failures
                     .iter()
-                    .map(|(_, label, _)| label.as_str())
+                    .map(|(_, part, _)| part.label())
                     .collect::<Vec<_>>()
                     .join(course2md::tr!("、"))
             )
@@ -2607,7 +2607,7 @@ impl Desktop {
             {
                 actions = actions.child(self.repair_ai_action(task, style, cx));
             }
-            for (component, label, outcome) in &failures {
+            for (component, part, outcome) in &failures {
                 let unknown_component = uncertain.iter().any(|request| {
                     request
                         .purpose
@@ -2618,7 +2618,7 @@ impl Desktop {
                 if unknown_component {
                     continue;
                 }
-                let reason = activity::outcome_failure_message(label, outcome);
+                let reason = activity::outcome_failure_message(*part, outcome);
                 let ai_component = ai_component(component).is_some();
                 if !(requires_repair && ai_component) && !card {
                     details = details.child(
@@ -3154,9 +3154,9 @@ impl Desktop {
                 .map(|_| {
                     task_component_failures(task)
                         .into_iter()
-                        .map(|(component, label, outcome)| {
-                            let reason = activity::outcome_failure_message(&label, &outcome);
-                            (component, label, reason)
+                        .map(|(component, part, outcome)| {
+                            let reason = activity::outcome_failure_message(part, &outcome);
+                            (component, part.label().to_owned(), reason)
                         })
                         .collect()
                 })
@@ -3426,25 +3426,25 @@ fn request_scope(request: &workspace::BlockedRequest) -> String {
 /// Unfinished parts of a published note: (component, label, outcome).
 pub(crate) fn task_component_failures(
     task: &TaskRecord,
-) -> Vec<(String, String, course2md::artifact::Outcome)> {
+) -> Vec<(String, activity::NotePart, course2md::artifact::Outcome)> {
     let Some(outcomes) = &task.outcomes else {
         return Vec::new();
     };
     let mut results = Vec::new();
-    for (component, label, outcome) in [
+    for (component, part, outcome) in [
         (
             Component::Screenshots,
-            course2md::tr!("截图"),
+            activity::NotePart::Screenshots,
             &outcomes.screenshots,
         ),
         (
             Component::Proofreading,
-            course2md::tr!("校对"),
+            activity::NotePart::Proofreading,
             &outcomes.proofreading,
         ),
         (
             Component::Summary,
-            course2md::tr!("摘要"),
+            activity::NotePart::Summary,
             &outcomes.summary,
         ),
     ] {
@@ -3452,7 +3452,7 @@ pub(crate) fn task_component_failures(
             outcome.status,
             course2md::artifact::Status::Failed | course2md::artifact::Status::Partial
         ) {
-            results.push((component.as_str().into(), label.into(), outcome.clone()));
+            results.push((component.as_str().into(), part, outcome.clone()));
         }
     }
     {
@@ -3470,7 +3470,7 @@ pub(crate) fn task_component_failures(
         if !failures.is_empty() {
             results.push((
                 Component::Exports.as_str().into(),
-                course2md::tr!("导出").into(),
+                activity::NotePart::Exports,
                 course2md::artifact::Outcome::failed(
                     failures
                         .iter()

@@ -502,11 +502,41 @@ fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> 
     }
 }
 
+/// A part of a published note that can be left unfinished.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotePart {
+    Screenshots,
+    Proofreading,
+    Summary,
+    Exports,
+}
+
+impl NotePart {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Screenshots => course2md::tr!("截图"),
+            Self::Proofreading => course2md::tr!("校对"),
+            Self::Summary => course2md::tr!("摘要"),
+            Self::Exports => course2md::tr!("导出"),
+        }
+    }
+
+    /// The label as old saved messages spell it, whatever the interface language is.
+    fn saved_label(self) -> &'static str {
+        match self {
+            Self::Screenshots => "截图",
+            Self::Proofreading => "校对",
+            Self::Summary => "摘要",
+            Self::Exports => "导出",
+        }
+    }
+}
+
 /// The one term naming what is missing.
-fn missing_term(label: &str) -> String {
-    match label {
-        "截图" | "摘要" => course2md::tr!("{}未生成", label),
-        _ => course2md::tr!("{}未完成", label),
+fn missing_term(part: NotePart) -> String {
+    match part {
+        NotePart::Screenshots | NotePart::Summary => course2md::tr!("{}未生成", part.label()),
+        NotePart::Proofreading | NotePart::Exports => course2md::tr!("{}未完成", part.label()),
     }
 }
 
@@ -517,7 +547,7 @@ fn missing_term(label: &str) -> String {
 ///
 /// One term names what is missing; a cause follows only when it says more than
 /// the term (the retry button beside it already names the next step).
-pub fn outcome_failure_message(label: &str, outcome: &course2md::artifact::Outcome) -> String {
+pub fn outcome_failure_message(part: NotePart, outcome: &course2md::artifact::Outcome) -> String {
     use course2md::artifact::FailureKind;
     let cause = match outcome.kind {
         Some(FailureKind::Authentication) => course2md::tr!("服务拒绝了 API Key"),
@@ -527,17 +557,17 @@ pub fn outcome_failure_message(label: &str, outcome: &course2md::artifact::Outco
         Some(FailureKind::Service) => course2md::tr!("服务暂时无法完成请求"),
         Some(FailureKind::Uncertain) => course2md::tr!("请求结果未确认"),
         Some(FailureKind::Local | FailureKind::Other) | None => {
-            return legacy_outcome_message(label, outcome.message.as_deref());
+            return legacy_outcome_message(part, outcome.message.as_deref());
         }
     };
-    course2md::tr!("{}：{}", missing_term(label), cause)
+    course2md::tr!("{}：{}", missing_term(part), cause)
 }
 
 /// Older saved outcomes combined a stage label, retention message and English
 /// diagnostics as one bilingual text. This reads them by matching that text;
 /// delete it once saved records carry a failure kind and a plain cause.
-pub fn legacy_outcome_message(label: &str, message: Option<&str>) -> String {
-    let term = missing_term(label);
+pub fn legacy_outcome_message(part: NotePart, message: Option<&str>) -> String {
+    let term = missing_term(part);
     let chinese = message
         .unwrap_or_default()
         .split(" / ")
@@ -545,9 +575,13 @@ pub fn legacy_outcome_message(label: &str, message: Option<&str>) -> String {
         .unwrap_or_default()
         .trim();
     let mut cause = chinese;
+    let saved = part.saved_label();
     for prefix in [
-        course2md::tr!("{}尚未完成", label),
-        course2md::tr!("{}未完成", label),
+        format!("{saved}尚未完成"),
+        format!("{saved}未完成"),
+        format!("{saved}未生成"),
+        course2md::tr!("{}尚未完成", part.label()),
+        course2md::tr!("{}未完成", part.label()),
         term.clone(),
     ] {
         if let Some(rest) = cause.strip_prefix(prefix.as_str()) {
@@ -1041,34 +1075,49 @@ mod tests {
     fn saved_component_failures_have_one_label_and_no_english_diagnostics() {
         assert_eq!(
             legacy_outcome_message(
-                "摘要",
+                NotePart::Summary,
                 Some("摘要尚未完成，已保留正文 / Summary incomplete; body retained")
             ),
             "摘要未生成"
         );
         assert_eq!(
-            legacy_outcome_message("摘要", Some("服务拒绝了请求（HTTP 400）。")),
+            legacy_outcome_message(NotePart::Summary, Some("服务拒绝了请求（HTTP 400）。")),
             "摘要未生成：服务拒绝了请求（HTTP 400）"
         );
         // 截图失败只说一次：旧记录里的「无法提取截图」与术语重复，不再作为原因
         assert_eq!(
             legacy_outcome_message(
-                "截图",
+                NotePart::Screenshots,
                 Some("无法提取截图 / Could not extract slide 2 (t=4.0s): ffmpeg")
             ),
             "截图未生成"
         );
         assert_eq!(
             legacy_outcome_message(
-                "截图",
+                NotePart::Screenshots,
                 Some("第 2 张截图（0:04）提取失败 / Could not extract slide 2")
             ),
             "截图未生成：第 2 张截图（0:04）提取失败"
         );
         assert_eq!(
-            legacy_outcome_message("校对", Some("校对未全部完成，原文已保留")),
+            legacy_outcome_message(NotePart::Proofreading, Some("校对未全部完成，原文已保留")),
             "校对未完成"
         );
+    }
+    #[test]
+    fn the_missing_term_comes_from_the_part_not_from_its_translated_label() {
+        // Each part picks its own catalog row, so this holds in every language.
+        for (part, term) in [
+            (NotePart::Screenshots, "截图未生成"),
+            (NotePart::Summary, "摘要未生成"),
+            (NotePart::Proofreading, "校对未完成"),
+            (NotePart::Exports, "导出未完成"),
+        ] {
+            assert_eq!(missing_term(part), term);
+        }
+        use course2md::i18n::{Lang, t_for};
+        assert_eq!(t_for("{}未生成", Lang::En), "{} was not generated");
+        assert_eq!(t_for("摘要", Lang::En), "Summary");
     }
     #[test]
     fn classified_failures_are_worded_from_their_kind() {
@@ -1079,18 +1128,18 @@ mod tests {
             FailureKind::Authentication,
         );
         assert_eq!(
-            outcome_failure_message("摘要", &rejected),
+            outcome_failure_message(NotePart::Summary, &rejected),
             "摘要未生成：服务拒绝了 API Key"
         );
         let limited = Outcome::failed_kind("anything", FailureKind::RateLimit);
         assert_eq!(
-            outcome_failure_message("校对", &limited),
+            outcome_failure_message(NotePart::Proofreading, &limited),
             "校对未完成：服务暂时限制了请求次数"
         );
         // A local failure's cause exists only as its text.
         let local = Outcome::failed("第 2 张截图（0:04）提取失败 / Could not extract slide 2");
         assert_eq!(
-            outcome_failure_message("截图", &local),
+            outcome_failure_message(NotePart::Screenshots, &local),
             "截图未生成：第 2 张截图（0:04）提取失败"
         );
         // Records from before classification have no kind.
@@ -1098,7 +1147,10 @@ mod tests {
             kind: None,
             ..Outcome::failed("摘要尚未完成，已保留正文 / Summary incomplete; body retained")
         };
-        assert_eq!(outcome_failure_message("摘要", &legacy), "摘要未生成");
+        assert_eq!(
+            outcome_failure_message(NotePart::Summary, &legacy),
+            "摘要未生成"
+        );
     }
     #[test]
     fn retry_and_cached_work_do_not_inflate_eta() {
