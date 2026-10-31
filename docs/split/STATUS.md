@@ -2,8 +2,8 @@
 
 Update this file in the same commit as the work it records.
 
-**Current phase:** Wave 1 (see `PLAN.md` § Phases). P0, P1, P2 are finished; D12 goes with the kit scrollbar, T7 with `split/tooling`.
-**Dependency form:** git, kit `a5acb0c`, six `[patch]` entries. Windows and Linux depend on the desktop workflow run (dispatched on `split/workspace`).
+**Current phase:** Wave 1 (see `PLAN.md` § Phases). P0, P1, P2 are finished; D12 goes with the kit scrollbar.
+**Dependency form:** git, kit `a5acb0c`, six `[patch]` entries, enough on all three platforms (desktop run 41160350984).
 
 ## Done
 
@@ -11,6 +11,8 @@ Update this file in the same commit as the work it records.
 - P1: the desktop builds and runs on the `gpui-kit-material` stack: `gpui-kit` facade, `gpui-base`,
   `gpui-kit-material`, the kit's `[patch]` tables, `gpui-fast`, toolchain 1.99.1. Source pinning
   (`sources.py`, `sources.lock.json`, `patches/`, `.deps`) is gone.
+- T7: packages carry `THIRD-PARTY-LICENSES.txt` from `cargo-about` plus the Swift checkouts; see `docs/PACKAGING.md`.
+  It has 804 stars, below the audit's 1k bar, and so has every candidate; no release has been dry-run with it.
 
 ## Patch triage
 
