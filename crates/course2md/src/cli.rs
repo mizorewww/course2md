@@ -319,6 +319,22 @@ pub fn localize_rendered(text: &str) -> String {
         .collect()
 }
 
+pub fn login(platform: LoginPlatform) -> anyhow::Result<()> {
+    match platform {
+        LoginPlatform::Bilibili => crate::auth::login_bilibili(),
+        LoginPlatform::Ollama => crate::login::ollama::login(),
+        LoginPlatform::Codex => crate::login::codex::login(),
+    }
+}
+
+pub fn logout(platform: LoginPlatform) -> anyhow::Result<()> {
+    match platform {
+        LoginPlatform::Bilibili => crate::auth::logout_bilibili(),
+        LoginPlatform::Ollama => crate::login::ollama::logout(),
+        LoginPlatform::Codex => crate::login::codex::logout(),
+    }
+}
+
 #[cfg(test)]
 mod i18n_tests {
     use super::*;
@@ -340,21 +356,5 @@ mod i18n_tests {
         let mut command = localize_command(Cli::command());
         let rendered = command.render_help().to_string();
         assert!(rendered.contains("快速开始"), "{rendered}");
-    }
-}
-
-pub fn login(platform: LoginPlatform) -> anyhow::Result<()> {
-    match platform {
-        LoginPlatform::Bilibili => crate::auth::login_bilibili(),
-        LoginPlatform::Ollama => crate::login::ollama::login(),
-        LoginPlatform::Codex => crate::login::codex::login(),
-    }
-}
-
-pub fn logout(platform: LoginPlatform) -> anyhow::Result<()> {
-    match platform {
-        LoginPlatform::Bilibili => crate::auth::logout_bilibili(),
-        LoginPlatform::Ollama => crate::login::ollama::logout(),
-        LoginPlatform::Codex => crate::login::codex::logout(),
     }
 }

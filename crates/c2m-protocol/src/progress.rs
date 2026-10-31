@@ -508,12 +508,10 @@ impl TransferLedger {
     }
 }
 
-#[cfg_attr(not(apple_native), allow(dead_code))]
 fn repo_size(repo: &RepoTransfer) -> u64 {
     repo.files.iter().map(|(size, _)| size).sum()
 }
 
-#[cfg_attr(not(apple_native), allow(dead_code))]
 fn repo_present(repo: &RepoTransfer) -> u64 {
     repo.files
         .iter()
