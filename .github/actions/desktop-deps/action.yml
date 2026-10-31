@@ -46,10 +46,4 @@ runs:
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential clang cmake pkg-config libasound2-dev libx11-xcb-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig1-dev libssl-dev libclang-dev libgit2-dev libstdc++-14-dev nasm zlib1g-dev libgnutls28-dev
-    - name: Windows LLVM
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        choco install llvm --no-progress -y
-        "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+        sudo apt-get install -y build-essential pkg-config libx11-xcb-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig1-dev nasm zlib1g-dev libgnutls28-dev
