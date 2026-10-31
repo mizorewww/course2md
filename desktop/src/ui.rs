@@ -689,7 +689,8 @@ mod tests {
         Context, InteractiveElement, IntoElement, ParentElement, Pixels, Render, Styled,
         TestAppContext, VisualTestContext, Window, div, px,
     };
-    use gpui_kit_material::prelude::MaterialMenu;
+    use gpui_kit_material::prelude::{MaterialDialog, MaterialMenu};
+    use std::{cell::Cell, rc::Rc};
 
     struct Line(Pixels);
 
@@ -750,6 +751,41 @@ mod tests {
                 ))
                 .children(confirm_host(cx))
         }
+    }
+
+    struct Chooser(Rc<Cell<bool>>);
+
+    impl Render for Chooser {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let dismissed = self.0.clone();
+            MaterialDialog::new("chooser")
+                .headline("Chooser")
+                .content(div().occlude().w_full().h(px(200.)))
+                .modal(true)
+                .on_dismiss(move |_, _| dismissed.set(true))
+        }
+    }
+
+    /// The kit's dialog surface does not block the pointer: only what occludes keeps
+    /// a press off its scrim, and pressing the scrim itself still dismisses.
+    #[gpui::test]
+    fn an_occluded_dialog_body_keeps_a_press_off_the_scrim(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit_material::init(cx);
+        });
+        let dismissed = Rc::new(Cell::new(false));
+        let shown = dismissed.clone();
+        let (_, cx) = cx.add_window_view(|_, _| Chooser(shown));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let size = cx.update(|window, _| window.viewport_size());
+        let center = gpui::point(size.width / 2., size.height / 2.);
+        cx.simulate_click(center, Default::default());
+        assert!(!dismissed.get(), "a press in the body stays in the dialog");
+        cx.simulate_click(gpui::point(px(2.), px(2.)), Default::default());
+        assert!(dismissed.get(), "a press on the scrim dismisses");
     }
 
     /// Every primitive draws, and a question shows until it is answered.
