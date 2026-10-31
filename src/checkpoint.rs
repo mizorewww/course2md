@@ -60,16 +60,6 @@ fn key(start: f64, end: f64) -> (u64, u64) {
     (start.to_bits(), end.to_bits())
 }
 
-/// load_events 的结果：解析出的事件 + 供 append 前修复文件尾部的信息。
-struct LoadedEvents {
-    events: Vec<TranscriptEvent>,
-    /// 文件的安全前缀长度（最后一个完整 `\n` 之后；合法末行无尾换行时 = 文件全长）。
-    /// 残行（崩溃残留的半截 JSON）不计入。
-    valid_len: u64,
-    /// 末行合法但缺尾换行（手改文件）：追加前必须先补一个 `\n`。
-    needs_newline: bool,
-}
-
 /// Every recorded chunk counts as done (an empty chunk is a completed
 /// silent span), while only chunks with text are kept as events.
 fn split_done(events: Vec<TranscriptEvent>) -> (HashSet<(u64, u64)>, Vec<TranscriptEvent>) {
@@ -85,7 +75,7 @@ impl Checkpoint {
     /// Read completed chunks for a failed task's material preview without opening a
     /// writer, repairing a truncated tail, or marking the transcription complete.
     pub fn saved_events(out_dir: &Path) -> Result<Vec<TranscriptEvent>> {
-        let (_, mut events) = split_done(Self::load_events(&out_dir.join("asr.jsonl"))?.events);
+        let (_, mut events) = split_done(Self::load_events(&out_dir.join("asr.jsonl"))?.0);
         events.sort_by(|a, b| a.start.total_cmp(&b.start));
         Ok(events)
     }
@@ -123,55 +113,20 @@ impl Checkpoint {
         if !usable {
             // 不复用：清掉全部旧进度（否则旧记录会叠加进本次结果）
             Self::clear(&path, &done_path, &identity_path)?;
-        } else if done_path.is_file() {
-            (cp.done, cp.events) = split_done(Self::load_events(&path)?.events);
-            tracing::info!(n = cp.events.len(), "asr checkpoint complete, reusing");
         } else {
-            let loaded = Self::load_events(&path)?;
-            if path.is_file() {
-                tracing::info!(n = loaded.events.len(), "asr checkpoint resumed (partial)");
-                (cp.done, cp.events) = split_done(loaded.events);
-                let mut f = std::fs::OpenOptions::new()
-                    .create(true)
-                    .read(true)
-                    .write(true)
-                    // 保留既有内容（partial resume），显式不 truncate
-                    .truncate(false)
-                    .open(&path)
-                    .with_context(|| {
-                        crate::tr!(
-                            "打开 checkpoint {} / Failed to open checkpoint {}",
-                            path.display(),
-                            path.display()
-                        )
-                    })?;
-                let file_len = f.metadata().map(|m| m.len()).unwrap_or(0);
-                if loaded.valid_len < file_len {
-                    // 打开写入句柄前把文件截断到最后一个完整行：
-                    // 否则崩溃残留的半截行会和新记录拼成一行中间损坏 JSON，
-                    // 下次 resume 直接硬错误（自我污染）。
-                    // 注意：不能用 append-only 句柄做 set_len——Windows 上
-                    // FILE_APPEND_DATA 不含写长度权限，会 Access denied。
-                    f.set_len(loaded.valid_len)
-                        .with_context(|| crate::tr!("截断 checkpoint 残行 {} / Failed to truncate checkpoint partial line {}", path.display(), path.display()))?;
-                } else if loaded.needs_newline {
-                    // 末行是合法 JSON 但缺尾换行（手改文件）：先补换行再追加
-                    use std::io::Seek as _;
-                    f.seek(std::io::SeekFrom::End(0))?;
-                    f.write_all(b"\n").with_context(|| {
-                        crate::tr!(
-                            "补换行 {} / Failed to append newline to {}",
-                            path.display(),
-                            path.display()
-                        )
-                    })?;
+            let (events, clean) = Self::load_events(&path)?;
+            tracing::info!(n = events.len(), "asr checkpoint resumed");
+            // 崩溃残留的半截行会和新记录拼成一行中间损坏 JSON，下次 resume 直接硬错误
+            // （自我污染）：追加前把文件换成完整的行。
+            if !clean {
+                let mut lines = String::new();
+                for event in &events {
+                    lines.push_str(&serde_json::to_string(event)?);
+                    lines.push('\n');
                 }
-                // 非 append 句柄：后续 record 前定位到文件尾（单写者进程，一次即可）
-                use std::io::Seek as _;
-                f.seek(std::io::SeekFrom::End(0))
-                    .with_context(|| format!("seek checkpoint {}", path.display()))?;
-                cp.file = Some(f);
+                atomic_write(&path, lines.as_bytes())?;
             }
+            (cp.done, cp.events) = split_done(events);
         }
         // 记录本次身份（原子写；同时也作为「清档后」的新标记）
         let id = serde_json::to_string(identity)?;
@@ -225,30 +180,23 @@ impl Checkpoint {
         Ok(())
     }
 
-    /// 读取事件行。最后一行允许半截（崩溃残留）；中间损坏 → 硬错误。
-    /// 同一 (start,end) 只保留首条（防御历史文件中的重复行）。
-    fn load_events(path: &Path) -> Result<LoadedEvents> {
+    /// 读取事件行，并告知文件是否可直接追加。最后一行允许半截（崩溃残留）；
+    /// 中间损坏 → 硬错误。同一 (start,end) 只保留首条（防御历史文件中的重复行）。
+    fn load_events(path: &Path) -> Result<(Vec<TranscriptEvent>, bool)> {
         if !path.is_file() {
-            return Ok(LoadedEvents {
-                events: vec![],
-                valid_len: 0,
-                needs_newline: false,
-            });
+            return Ok((vec![], true));
         }
-        let bytes = std::fs::read(path).with_context(|| {
+        let read_failed = || {
             crate::tr!(
                 "读取 {} / Failed to read {}",
                 path.display(),
                 path.display()
             )
-        })?;
-        let content = complete_text(bytes).with_context(|| {
-            crate::tr!(
-                "读取 {} / Failed to read {}",
-                path.display(),
-                path.display()
-            )
-        })?;
+        };
+        let bytes = std::fs::read(path).with_context(read_failed)?;
+        let size = bytes.len();
+        let content = complete_text(bytes).with_context(read_failed)?;
+        let clean = content.len() == size && (content.is_empty() || content.ends_with('\n'));
         let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
         let last_idx = lines.len().saturating_sub(1);
         let mut out: Vec<TranscriptEvent> = vec![];
@@ -256,8 +204,7 @@ impl Checkpoint {
         for (i, line) in lines.iter().enumerate() {
             match serde_json::from_str::<TranscriptEvent>(line) {
                 Ok(ev) => {
-                    let k = key(ev.start, ev.end);
-                    if seen.insert(k) {
+                    if seen.insert(key(ev.start, ev.end)) {
                         out.push(ev);
                     } else if i != last_idx {
                         tracing::warn!(
@@ -266,35 +213,18 @@ impl Checkpoint {
                         );
                     }
                 }
-                Err(e) => {
-                    if i == last_idx && !content.ends_with('\n') {
-                        // 崩溃时最后一行可能只写了一半：容忍
-                        tracing::debug!("checkpoint 末行解析失败（按崩溃残留忽略）：{e}");
-                    } else {
-                        anyhow::bail!(
-                            "识别进度文件第 {1} 行已损坏，请重新识别 / Line {1} of the transcription progress file is damaged; transcribe again ({0}): {e}",
-                            path.display(),
-                            i + 1
-                        );
-                    }
+                // 崩溃时最后一行可能只写了一半：容忍
+                Err(e) if i == last_idx && !content.ends_with('\n') => {
+                    tracing::debug!("checkpoint 末行解析失败（按崩溃残留忽略）：{e}");
                 }
+                Err(e) => anyhow::bail!(
+                    "识别进度文件第 {1} 行已损坏，请重新识别 / Line {1} of the transcription progress file is damaged; transcribe again ({0}): {e}",
+                    path.display(),
+                    i + 1
+                ),
             }
         }
-        // 尾部状态：决定 resume 后 append 前是否需要截断/补换行
-        let last_nl = content.rfind('\n').map(|i| i + 1).unwrap_or(0);
-        let tail = &content[last_nl..];
-        let (valid_len, needs_newline) = if tail.trim().is_empty() {
-            (content.len() as u64, false) // 以换行结尾（或空文件）：直接可追加
-        } else if serde_json::from_str::<TranscriptEvent>(tail.trim()).is_ok() {
-            (content.len() as u64, true) // 合法末行但无尾换行
-        } else {
-            (last_nl as u64, false) // 半截残行：截到最后一个完整行
-        };
-        Ok(LoadedEvents {
-            events: out,
-            valid_len,
-            needs_newline,
-        })
+        Ok((out, clean))
     }
 
     /// 该 chunk 是否已完成（可跳过）。空文本（静音）chunk 同样算完成。
