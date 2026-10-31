@@ -119,7 +119,12 @@ mod tests {
     fn a_generated_function_loads_and_an_unknown_symbol_draws_nothing() {
         let path = search().asset_path();
         assert!(Assets.load(&path).unwrap().unwrap().starts_with(b"<svg"));
-        assert!(Assets.load(&star().filled(true).asset_path()).unwrap().is_some());
+        assert!(
+            Assets
+                .load(&star().filled(true).asset_path())
+                .unwrap()
+                .is_some()
+        );
         let absent = "material-symbols/rounded/not_embedded/0/400/0/24.svg";
         assert!(Assets.load(absent).unwrap().is_none());
     }

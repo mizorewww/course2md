@@ -108,19 +108,3 @@ pub fn bilibili_mark() -> Icon {
 pub fn bilibili() -> Icon {
     bilibili_mark().text_color(gpui::rgb(0x00a1d6))
 }
-
-pub fn caption_close() -> Icon {
-    symbols::close().component()
-}
-
-pub fn caption_maximize() -> Icon {
-    symbols::crop_square().component()
-}
-
-pub fn caption_minimize() -> Icon {
-    symbols::remove().component()
-}
-
-pub fn caption_restore() -> Icon {
-    symbols::filter_none().component()
-}

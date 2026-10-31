@@ -190,39 +190,6 @@ pub fn on_image_scrim() -> Rgba {
     rgb(0xffffff)
 }
 
-/// Window caption buttons (see `window_controls`). Minimize and maximize take
-/// the M3 hover and press state layers of the title bar's ink, translucent so
-/// they also read over a dialog's scrim. Close turns the platform's red with
-/// white glyphs, as Windows draws it, whatever the palette.
-pub fn caption_hover() -> Rgba {
-    Rgba {
-        a: 0.08,
-        ..color(INK)
-    }
-}
-
-pub fn caption_pressed() -> Rgba {
-    Rgba {
-        a: 0.10,
-        ..color(INK)
-    }
-}
-
-pub fn caption_close_hover() -> Rgba {
-    rgb(0xc42b1c)
-}
-
-pub fn caption_close_pressed() -> Rgba {
-    Rgba {
-        a: 0.9,
-        ..rgb(0xc42b1c)
-    }
-}
-
-pub fn on_caption_close() -> Rgba {
-    rgb(0xffffff)
-}
-
 /* ---------- Column widths (rems; structure that scales with text) ---------- */
 pub const COLUMN: Rems = rems(65.714);
 
@@ -1510,91 +1477,6 @@ fn custom_fill(
         .bg(bg)
 }
 
-/// Top-level destination in the app bar. The current destination sits on the
-/// tonal secondary container; others are quiet.
-pub fn nav_action(
-    id: impl Into<gpui::ElementId>,
-    selected: bool,
-    cx: &App,
-) -> gpui_kit::component::button::Button {
-    use gpui::Styled;
-    use gpui_kit::component::Sizable;
-    let (bg, fg) = if selected {
-        (color(SECONDARY_CONTAINER), color(ON_SECONDARY_CONTAINER))
-    } else {
-        (
-            gpui::Rgba {
-                a: 0.,
-                ..color(CANVAS)
-            },
-            color(INK),
-        )
-    };
-    custom_fill(control(id), bg, fg, true, cx)
-        .pl(rems(NAV_PAD_START / 14.))
-        .pr(rems(NAV_PAD_END / 14.))
-        .label_text_size(rems(NAV_LABEL_SIZE / 14.))
-        .with_size(component_icon_size(NAV_ICON, cx))
-}
-
-// App bar destination geometry at the 14px base, shared by the buttons and by
-// the measurement that decides whether their labels fit.
-const NAV_PAD_START: f32 = 12.;
-const NAV_PAD_END: f32 = 16.;
-const NAV_ICON: f32 = 20.;
-/// The component's icon–label gap (`gap_2`, half a rem) rounded up.
-const NAV_ICON_GAP: f32 = 8.;
-const NAV_LABEL_SIZE: f32 = 15.;
-
-/// An app bar destination with its icon and `shown` text: its label, or a
-/// shorter form (a task count) or nothing when the bar cannot hold labels.
-/// The full label always names the button, and shows as its tooltip while it
-/// is not drawn in full; a collapsed destination (its icon, or the icon and
-/// a count) keeps even padding.
-pub fn nav_destination(
-    id: impl Into<gpui::ElementId>,
-    selected: bool,
-    icon: gpui_kit::component::Icon,
-    label: impl Into<gpui::SharedString>,
-    shown: Option<gpui::SharedString>,
-    cx: &App,
-) -> gpui_kit::component::button::Button {
-    use gpui::Styled;
-    use gpui::prelude::FluentBuilder as _;
-    let label = label.into();
-    let collapsed = shown.as_ref() != Some(&label);
-    nav_action(id, selected, cx)
-        .icon(icon)
-        .when(collapsed, |button| button.pr(rems(NAV_PAD_START / 14.)))
-        .when_some(shown, |button, shown| button.label(shown))
-        .accessibility_label(label.clone())
-        .when(collapsed, |button| button.tooltip(label))
-}
-
-/// The width, in window pixels, of a `nav_destination` drawing `shown` at the
-/// current text scale; `collapsed` when `shown` is not the full label, which
-/// gives the destination even padding.
-pub fn nav_destination_width(shown: Option<&str>, collapsed: bool, window: &Window) -> f32 {
-    let scaled = |value: f32| value * f32::from(window.rem_size()) / 14.;
-    let end = if collapsed {
-        NAV_PAD_START
-    } else {
-        NAV_PAD_END
-    };
-    match shown {
-        None => scaled(NAV_PAD_START + NAV_ICON + end),
-        Some(text) => {
-            scaled(NAV_PAD_START + NAV_ICON + NAV_ICON_GAP + end)
-                + shaped_width(
-                    text,
-                    scaled(NAV_LABEL_SIZE),
-                    gpui::FontWeight::MEDIUM,
-                    window,
-                )
-        }
-    }
-}
-
 /// The shaped width of one line of `text` in the window's font.
 pub fn shaped_width(text: &str, size: f32, weight: gpui::FontWeight, window: &Window) -> f32 {
     let mut style = window.text_style();
@@ -1606,16 +1488,6 @@ pub fn shaped_width(text: &str, size: f32, weight: gpui::FontWeight, window: &Wi
             .shape_line(text.clone(), px(size), &[style.to_run(text.len())], None)
             .width,
     )
-}
-
-/// The component `Size` that makes a gpui-component Button draw its icon at
-/// `design` px of the 14px base, following the text scale. The Button sizes
-/// its icon to 75% of a custom size and overrides the icon's own size; every
-/// other dimension a custom size would set is replaced by our explicit
-/// height, padding and label size.
-fn component_icon_size(design: f32, cx: &App) -> gpui_kit::component::Size {
-    let font = Theme::global(cx).font_size;
-    gpui_kit::component::Size::Size(font * (design / 14. / 0.75))
 }
 
 /// M3 filled tonal button: a secondary action that still carries weight,

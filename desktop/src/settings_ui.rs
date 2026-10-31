@@ -3495,10 +3495,9 @@ impl Desktop {
         &self,
         bar: Div,
         window: &mut Window,
-        _: &mut Context<Self>,
-    ) -> TitleBar {
-        crate::views::apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window)))
-            .child(bar)
+        cx: &mut Context<Self>,
+    ) -> gpui_kit_material::components::TitleBar {
+        crate::views::app_bar(title_bar_height(window), window, cx).child(bar)
     }
 }
 

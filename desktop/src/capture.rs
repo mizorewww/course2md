@@ -43,7 +43,7 @@ use std::{cell::Cell, path::PathBuf, time::Duration};
 thread_local! {
     static PALETTE: Cell<Option<PaletteId>> = const { Cell::new(None) };
     static SCALE: Cell<Option<f32>> = const { Cell::new(None) };
-    static CAPTION: Cell<Option<crate::window_controls::Caption>> = const { Cell::new(None) };
+    static CAPTION: Cell<Option<gpui_kit_material::components::Caption>> = const { Cell::new(None) };
     /// The saved library presentation (cards, grouped), restored before each
     /// library shot so one shot's state does not leak into the next.
     static LIBRARY_PRESENTATION: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
@@ -70,7 +70,7 @@ pub fn override_appearance(appearance: &mut crate::palettes::ThemePreferences) {
 }
 
 /// The caption buttons to draw instead of this platform's.
-pub fn caption_override() -> Option<crate::window_controls::Caption> {
+pub fn caption_override() -> Option<gpui_kit_material::components::Caption> {
     CAPTION.with(Cell::get)
 }
 
@@ -95,8 +95,8 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
     }
     if let Ok(chrome) = std::env::var("COURSE2MD_CAPTURE_CHROME") {
         let caption = match chrome.as_str() {
-            "windows" => crate::window_controls::Caption::Windows,
-            "linux" => crate::window_controls::Caption::Linux,
+            "windows" => gpui_kit_material::components::Caption::Windows,
+            "linux" => gpui_kit_material::components::Caption::Linux,
             _ => panic!("unknown capture chrome {chrome}"),
         };
         CAPTION.with(|cell| cell.set(Some(caption)));

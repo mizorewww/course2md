@@ -1,62 +1,23 @@
-//! Scrollbar presentation shared by every scrolling page.
-use std::process::{Command, Stdio};
-use std::thread;
+//! Scrollbars take their policy from Kit's theme, which `Theme::sync_scrollbar_appearance`
+//! keeps with the system.
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode};
 
-/// macOS「始终显示滚动条」系统偏好（states-and-motion 滚动条契约要求尊重该偏好）。
-/// 首次调用在后台线程读取 `defaults`，渲染期只读缓存值；读到之前与非 macOS 均按
-/// Automatic（滚动时显示）。
-pub fn scrollbars_always_visible() -> bool {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    static ALWAYS: AtomicBool = AtomicBool::new(false);
-    static PROBE: std::sync::Once = std::sync::Once::new();
-    if cfg!(target_os = "macos") {
-        PROBE.call_once(|| {
-            thread::spawn(|| {
-                let always = Command::new("defaults")
-                    .args(["read", "-g", "AppleShowScrollBars"])
-                    .stdin(Stdio::null())
-                    .stderr(Stdio::null())
-                    .output()
-                    .ok()
-                    .filter(|out| out.status.success())
-                    .is_some_and(|out| String::from_utf8_lossy(&out.stdout).trim() == "Always");
-                ALWAYS.store(always, Ordering::Relaxed);
-            });
-        });
+pub(crate) fn vertical_scrollbar(handle: &gpui::ScrollHandle) -> Scrollbar {
+    Scrollbar::vertical(handle)
+}
+
+/// A horizontal scrollbar, as on a formula wider than its line: `overflowing` content
+/// keeps it showing, so a person can see the line goes on.
+pub(crate) fn horizontal_scrollbar(handle: &gpui::ScrollHandle, overflowing: bool) -> Scrollbar {
+    let scrollbar = Scrollbar::horizontal(handle);
+    if overflowing {
+        scrollbar.mode(ScrollbarMode::Always)
+    } else {
+        scrollbar
     }
-    ALWAYS.load(Ordering::Relaxed)
 }
 
-/// 滚动条模式：常显偏好→Always；其余滚动时显示、闲置淡出。
-pub(crate) fn vertical_scrollbar(
-    handle: &gpui::ScrollHandle,
-) -> gpui_kit::component::scroll::Scrollbar {
-    vertical_scrollbar_for(handle)
-}
-
-/// 横向滚动条（如过宽的公式行），模式与纵向相同；`overflowing` 的内容常显，
-/// 让人看出这一行还有后续。
-pub(crate) fn horizontal_scrollbar(
-    handle: &gpui::ScrollHandle,
-    overflowing: bool,
-) -> gpui_kit::component::scroll::Scrollbar {
-    use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
-    Scrollbar::horizontal(handle).mode(if overflowing || scrollbars_always_visible() {
-        ScrollbarMode::Always
-    } else {
-        ScrollbarMode::Scrolling
-    })
-}
-
-/// 任意 ScrollbarHandle（含 gpui::ListState 虚拟列表）都走同一模式决策：
-/// 系统「始终显示滚动条」偏好开启时常驻，否则滚动时显示。
-pub(crate) fn vertical_scrollbar_for<H: gpui_kit::component::scroll::ScrollbarHandle + Clone>(
-    handle: &H,
-) -> gpui_kit::component::scroll::Scrollbar {
-    use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
-    Scrollbar::vertical(handle).mode(if scrollbars_always_visible() {
-        ScrollbarMode::Always
-    } else {
-        ScrollbarMode::Scrolling
-    })
+/// For any scrollable handle, including a virtualized list's state.
+pub(crate) fn vertical_scrollbar_for<H: ScrollbarHandle + Clone>(handle: &H) -> Scrollbar {
+    Scrollbar::vertical(handle)
 }

@@ -1,5 +1,4 @@
-//! Preserve the visual background while making modal dialogs the only accessible scope.
-use gpui::*;
+//! Validation-build diagnostics.
 
 /// Opt-in diagnostics for validation builds launched through LaunchServices.
 /// Do not capture field values or broad application logs. A panic records its
@@ -38,78 +37,5 @@ pub fn init_validation_diagnostics() {
                 let _ = file.flush();
             }
         }));
-    }
-}
-
-pub struct ModalBackground {
-    child: AnyElement,
-    hidden: bool,
-}
-
-impl ModalBackground {
-    pub fn new(child: impl IntoElement, hidden: bool) -> Self {
-        Self {
-            child: child.into_any_element(),
-            hidden,
-        }
-    }
-}
-
-impl IntoElement for ModalBackground {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-impl Element for ModalBackground {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<ElementId> {
-        Some("modal-background".into())
-    }
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
-        None
-    }
-    fn a11y_role(&self) -> Option<Role> {
-        Some(Role::Pane)
-    }
-    fn write_a11y_info(&self, node: &mut accesskit::Node) {
-        if self.hidden {
-            node.set_hidden();
-        }
-    }
-    fn request_layout(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, ()) {
-        (self.child.request_layout(window, cx), ())
-    }
-    fn prepaint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut (),
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        self.child.prepaint(window, cx);
-    }
-    fn paint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut (),
-        _: &mut (),
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        self.child.paint(window, cx);
     }
 }
