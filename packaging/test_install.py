@@ -9,6 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 BINARY = b'prebuilt course2md\n'
+NOTICES = 'course2md-third-party-licenses.txt'
 
 FAKE_CURL = """#!/bin/sh
 # curl -fsSL [--max-time N] URL -o FILE: serves $FAKE_RELEASE/<basename of URL>.
@@ -33,7 +34,7 @@ def tool(directory, name, body='#!/bin/sh\nexit 0\n'):
 
 
 class InstallChecksumTests(unittest.TestCase):
-    def run_install(self, sums):
+    def run_install(self, sums, notices=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             release, fake_bin, bin_dir = root / 'release', root / 'path', root / 'bin'
@@ -47,6 +48,8 @@ class InstallChecksumTests(unittest.TestCase):
                 (release / name).write_bytes(BINARY)
             if sums is not None:
                 (release / 'SHA256SUMS').write_text(sums)
+            if notices is not None:
+                (release / NOTICES).write_bytes(notices)
             result = subprocess.run(
                 ['bash', str(ROOT / 'install.sh')],
                 capture_output=True, text=True,
@@ -55,6 +58,7 @@ class InstallChecksumTests(unittest.TestCase):
                      'FAKE_RELEASE': str(release),
                      'COURSE2MD_BIN_DIR': str(bin_dir)},
             )
+            self.notices_installed = (bin_dir / NOTICES).exists()
             return result, (bin_dir / 'course2md').exists()
 
     @staticmethod
@@ -68,6 +72,15 @@ class InstallChecksumTests(unittest.TestCase):
         result, installed = self.run_install(self.listing())
         self.assertTrue(installed, result.stderr)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_published_license_notices_install_and_older_releases_lack_them(self):
+        result, _ = self.run_install(self.listing())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.notices_installed)
+        digest = hashlib.sha256(b'notices').hexdigest()
+        result, _ = self.run_install(f'{self.listing()}{digest}  {NOTICES}\n', b'notices')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.notices_installed)
 
     def test_missing_sums_stop_the_install(self):
         result, installed = self.run_install(None)

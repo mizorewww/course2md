@@ -8,6 +8,11 @@ class @FORMULA_CLASS@ < Formula
   depends_on "yt-dlp"
   depends_on "aria2"
 
+  resource "third_party_licenses" do
+    url "https://github.com/mizorewww/course2md/releases/download/v@VERSION@/course2md-third-party-licenses.txt"
+    sha256 "@SHA_NOTICES@"
+  end
+
   on_macos do
     on_arm do
       url "https://github.com/mizorewww/course2md/releases/download/v@VERSION@/course2md-macos-arm64"
@@ -38,6 +43,7 @@ class @FORMULA_CLASS@ < Formula
   def install
     binary = Dir["course2md-*"].first
     bin.install binary => "course2md"
+    resource("third_party_licenses").stage { doc.install "course2md-third-party-licenses.txt" => "THIRD-PARTY-LICENSES.txt" }
     # MLX Metal kernels：CoreML 推理需要与二进制同目录（macOS arm64）
     if OS.mac? && Hardware::CPU.arm?
       resource("mlx_metallib").stage { bin.install "mlx-macos-arm64.metallib" => "mlx.metallib" }

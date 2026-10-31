@@ -15,6 +15,7 @@ cd "$WORK"
 curl --retry 3 -fsSLo linux-x86_64 "$BASE/course2md-linux-x86_64"
 curl --retry 3 -fsSLo linux-aarch64 "$BASE/course2md-linux-aarch64"
 curl --retry 3 -fsSLo gui.tar.gz "$BASE/course2md-desktop-linux-x86_64.tar.gz"
+curl --retry 3 -fsSLo notices.txt "$BASE/course2md-third-party-licenses.txt"
 curl --retry 3 -fsSLo LICENSE "https://raw.githubusercontent.com/${REPO}/v${VERSION}/LICENSE"
 sha() { sha256sum "$1" | cut -d' ' -f1; }
 mkdir cli gui
@@ -22,6 +23,7 @@ sed -e "s/@VERSION@/${VERSION}/g" \
     -e "s/@SHA_X86_64@/$(sha linux-x86_64)/" \
     -e "s/@SHA_AARCH64@/$(sha linux-aarch64)/" \
     -e "s/@SHA_LICENSE@/$(sha LICENSE)/" \
+    -e "s/@SHA_NOTICES@/$(sha notices.txt)/" \
     "${HERE}/PKGBUILD.template" > cli/PKGBUILD
 sed -e "s/@VERSION@/${VERSION}/g" \
     -e "s/@SHA_GUI@/$(sha gui.tar.gz)/" \

@@ -20,14 +20,16 @@ optdepends=(
 )
 provides=(course2md)
 conflicts=(course2md)
-source=("LICENSE-${pkgver}::${url}/raw/v${pkgver}/LICENSE")
+source=("LICENSE-${pkgver}::${url}/raw/v${pkgver}/LICENSE"
+        "THIRD-PARTY-LICENSES-${pkgver}.txt::${url}/releases/download/v${pkgver}/course2md-third-party-licenses.txt")
 source_x86_64=("${pkgname}-${pkgver}-x86_64::${url}/releases/download/v${pkgver}/course2md-linux-x86_64")
 source_aarch64=("${pkgname}-${pkgver}-aarch64::${url}/releases/download/v${pkgver}/course2md-linux-aarch64")
-sha256sums=('@SHA_LICENSE@')
+sha256sums=('@SHA_LICENSE@' '@SHA_NOTICES@')
 sha256sums_x86_64=('@SHA_X86_64@')
 sha256sums_aarch64=('@SHA_AARCH64@')
 
 package() {
     install -Dm755 "${pkgname}-${pkgver}-${CARCH}" "${pkgdir}/usr/bin/course2md"
     install -Dm644 "LICENSE-${pkgver}" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 "THIRD-PARTY-LICENSES-${pkgver}.txt" "${pkgdir}/usr/share/licenses/${pkgname}/THIRD-PARTY-LICENSES.txt"
 }

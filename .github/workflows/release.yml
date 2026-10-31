@@ -105,12 +105,22 @@ jobs:
         if: matrix.target == 'aarch64-apple-darwin'
         run: cp target/aarch64-apple-darwin/release/mlx.metallib mlx-macos-arm64.metallib
 
+      # One notice file for every CLI binary. Only this build has the Swift checkouts.
+      - uses: taiki-e/install-action@v2
+        if: matrix.target == 'aarch64-apple-darwin'
+        with:
+          tool: cargo-about@0.9.3
+      - name: Dependency licenses
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: python3 desktop/scripts/licenses.py --swift course2md-third-party-licenses.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
           path: |
             ${{ matrix.asset }}
             mlx-macos-arm64.metallib
+            course2md-third-party-licenses.txt
 
       - name: Remove signing material
         if: always() && runner.os == 'macOS'
