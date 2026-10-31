@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[path = "build_support/git.rs"]
+#[path = "../../build_support/git.rs"]
 mod git;
 
 fn main() {
@@ -13,10 +13,10 @@ fn main() {
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let skip = std::env::var_os("COURSE2MD_NO_APPLE").is_some();
     println!("cargo:rerun-if-env-changed=COURSE2MD_NO_APPLE");
-    println!("cargo:rerun-if-changed=native/apple-asr/Package.swift");
+    println!("cargo:rerun-if-changed=../../native/apple-asr/Package.swift");
     // swift package update 只改 resolved 文件；漏掉它会让本地构建静默链接旧静态库
-    println!("cargo:rerun-if-changed=native/apple-asr/Package.resolved");
-    println!("cargo:rerun-if-changed=native/apple-asr/Sources");
+    println!("cargo:rerun-if-changed=../../native/apple-asr/Package.resolved");
+    println!("cargo:rerun-if-changed=../../native/apple-asr/Sources");
 
     if target_os != "macos" || target_arch != "aarch64" || skip {
         return;
@@ -29,8 +29,7 @@ fn main() {
         return;
     }
 
-    let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let pkg = manifest.join("native/apple-asr");
+    let pkg = workspace_root().join("native/apple-asr");
     let build_dir = pkg.join(".build/release");
 
     // 无条件跑 swift build：SPM 自己做增量（无变动时秒级返回）。
@@ -364,9 +363,13 @@ fn find_file_recursive(dir: &Path, name: &str, depth: u32) -> Option<PathBuf> {
 }
 
 /// Embed build provenance, including when this checkout is a linked worktree.
+fn workspace_root() -> PathBuf {
+    let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    manifest.join("../..").canonicalize().unwrap()
+}
+
 fn emit_commit_hash() {
-    let root = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let commit = git::git_commit(&root);
+    let commit = git::git_commit(&workspace_root());
     println!(
         "cargo:rustc-env=COURSE2MD_COMMIT_HASH={}",
         commit.as_deref().unwrap_or("unknown")

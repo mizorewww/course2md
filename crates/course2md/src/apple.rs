@@ -472,7 +472,7 @@ mod helper_tests {
             std::env::var_os("QWEN3_CACHE_DIR")
                 .expect("set QWEN3_CACHE_DIR to a scratch directory"),
         );
-        let program = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/course2md");
+        let program = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/course2md");
         assert!(program.is_file(), "build course2md first");
         let work = tempfile::tempdir().unwrap();
         let control_path = work.path().join("control.json");

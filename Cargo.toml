@@ -1,11 +1,16 @@
-[package]
-name = "course2md"
+[workspace]
+resolver = "3"
+members = ["crates/*", "desktop"]
+# A plain `cargo build` or `cargo test` covers the engine and the CLI, which build on
+# machines without the desktop's native libraries. `--workspace` adds the desktop.
+default-members = ["crates/*"]
+
+[workspace.package]
 version = "2.0.1"
 edition = "2024"
-description = "Turn online course videos (YouTube/Bilibili) into image+transcript markdown notes"
 license = "MIT"
 
-[dependencies]
+[workspace.dependencies]
 ratex-layout = "0.1.15"
 ratex-parser = "0.1.15"
 ratex-svg = { version = "0.1.15", features = ["embed-fonts"] }
@@ -43,9 +48,26 @@ model-fetch = { version = "0.1", git = "https://github.com/mizorewww/model-fetch
 slide-detect = { version = "0.1", git = "https://github.com/mizorewww/slide-detect", rev = "87f8b78a8a70d8330a4bf1cb09924fe845c6c4ab" }
 subtitle-parse = { version = "0.1", git = "https://github.com/mizorewww/subtitle-parse", rev = "53e0ab4aaf02ca2600e05f9b13085f97228c65ad", features = ["serde"] }
 
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package.gpui-pre]
+opt-level = 3
+
+[profile.dev.package.gpui-fast]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 strip = true
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(apple_native)'] }
+# Only the workspace root's patches count, so the desktop's stack is pinned here.
+[patch.crates-io]
+gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
+gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
+gpui-fast-macos = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
+
+[patch."https://github.com/longbridge/gpui-kit"]
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }

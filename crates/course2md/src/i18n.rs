@@ -121,7 +121,7 @@ pub fn init_from_env() -> Lang {
     lang
 }
 
-const CATALOG: &str = include_str!("../i18n/catalog.tsv");
+const CATALOG: &str = include_str!("../../../i18n/catalog.tsv");
 
 /// A row's texts, in the order of [`LANGUAGES`].
 type Entry = [&'static str; 4];

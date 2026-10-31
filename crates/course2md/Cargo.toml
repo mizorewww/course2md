@@ -1,0 +1,47 @@
+[package]
+name = "course2md"
+version.workspace = true
+edition.workspace = true
+description = "Turn online course videos (YouTube/Bilibili) into image+transcript markdown notes"
+license.workspace = true
+
+[dependencies]
+ratex-layout.workspace = true
+ratex-parser.workspace = true
+ratex-svg.workspace = true
+ratex-types.workspace = true
+qrcode.workspace = true
+anyhow.workspace = true
+tempfile.workspace = true
+url.workspace = true
+tokio.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+zip.workspace = true
+image.workspace = true
+ureq.workspace = true
+base64.workspace = true
+getrandom.workspace = true
+strum.workspace = true
+thiserror.workspace = true
+open.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+indicatif.workspace = true
+hound.workspace = true
+indexmap.workspace = true
+libc.workspace = true
+dialoguer.workspace = true
+walkdir.workspace = true
+whatlang.workspace = true
+which.workspace = true
+sys-locale.workspace = true
+model-fetch.workspace = true
+slide-detect.workspace = true
+subtitle-parse.workspace = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(apple_native)'] }

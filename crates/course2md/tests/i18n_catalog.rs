@@ -12,16 +12,27 @@ const MACROS: [&str; 5] = [
     "eprint_tr!",
 ];
 
+/// Every `src` tree of every crate under `crates/` and `desktop/`, so a new crate
+/// is scanned without being listed here.
 fn sources() -> Vec<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files = Vec::new();
-    let mut stack = vec![root.join("src"), root.join("desktop/src")];
+    let mut stack = vec![root.join("crates"), root.join("desktop")];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let name = path.file_name().unwrap_or_default();
+                if !["target", "tests", "assets", "scripts"]
+                    .iter()
+                    .any(|n| name == *n)
+                    && !name.to_string_lossy().starts_with('.')
+                {
+                    stack.push(path);
+                }
+            } else if path.extension().is_some_and(|ext| ext == "rs")
+                && path.components().any(|part| part.as_os_str() == "src")
+            {
                 files.push(path);
             }
         }
@@ -255,8 +266,10 @@ fn every_catalog_row_is_looked_up() {
     for file in sources() {
         let text = source(&file);
         all_literals(&text, &mut keys);
-        if file.ends_with("src/cli.rs") {
-            cli = collapse(&cli_texts(&text));
+        // The command line's definition: its commands, and the options they share.
+        if file.ends_with("src/cli.rs") || file.ends_with("src/options.rs") {
+            cli.push_str(&collapse(&cli_texts(&text)));
+            cli.push(' ');
         }
     }
     let unused: Vec<_> = catalog()

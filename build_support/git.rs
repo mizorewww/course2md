@@ -1,4 +1,4 @@
-//! Build provenance shared by `build.rs` and `desktop/build.rs` (`#[path]` include).
+//! Build provenance shared by the crates' and `desktop/build.rs`'s build scripts (`#[path]` include).
 //!
 //! Reads `.git/HEAD` and the ref it names directly, so neither build script
 //! needs a git binary or a git library. Handles linked worktrees, whose `.git`

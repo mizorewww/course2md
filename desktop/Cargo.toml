@@ -1,11 +1,9 @@
 [package]
 name = "course2md-desktop"
-version = "2.0.1"
-edition = "2024"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Native course2md desktop application"
-
-[workspace]
 
 [features]
 # Explicitly opt in when investigating native frame pacing. Ordinary builds
@@ -15,7 +13,7 @@ performance = ["gpui-kit/profiler"]
 capture = ["gpui-kit/test-support"]
 
 [dependencies]
-course2md = { path = ".." }
+course2md = { path = "../crates/course2md" }
 # The stack gpui-kit-material pins, at one revision of that repository.
 gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb", features = ["gpui-fast"] }
 gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
@@ -56,26 +54,3 @@ gpui-material-symbols = { git = "https://github.com/mizorewww/gpui-material-symb
 
 [dev-dependencies]
 gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb", features = ["gpui-fast", "test-support"] }
-
-[profile.dev]
-debug = "line-tables-only"
-
-[profile.dev.package.gpui-pre]
-opt-level = 3
-
-[profile.dev.package.gpui-fast]
-opt-level = 3
-
-[profile.release]
-lto = "thin"
-strip = true
-
-[patch.crates-io]
-gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
-gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
-gpui-fast-macos = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
-gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
-
-[patch."https://github.com/longbridge/gpui-kit"]
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
-gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a22271e75b96133fd323a744e2b43654745a24bb" }
