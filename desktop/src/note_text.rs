@@ -439,11 +439,11 @@ impl MarkdownPlugin for SourceLink {
             CONTROL_HEIGHT.to_pixels(context.rem_size()) * 0.4 + context.font_size() * 0.35;
         Some(
             InlineElement::new(
-                MaterialTooltip::plain(("source-link-tip", at), label).trigger(
-                    IconButton::new(("source-link", at), crate::symbols::play_arrow(), label)
-                        .button_size(ButtonSize::ExtraSmall)
-                        .on_click(move |_, _, cx| cx.open_url(&url)),
-                ),
+                material_button(("source-link", at), ButtonVariant::Tonal)
+                    .button_size(ButtonSize::ExtraSmall)
+                    .icon(crate::symbols::play_arrow())
+                    .child(label)
+                    .on_click(move |_, _, cx| cx.open_url(&url)),
             )
             .with_baseline(middle),
         )

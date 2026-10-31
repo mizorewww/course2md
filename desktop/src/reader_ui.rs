@@ -1020,7 +1020,7 @@ const GALLERY_GAP: Rems = rem(12.);
 const GALLERY_MIN_COLUMN: Rems = rem(260.);
 /// A window with less height than this for the page shows no view tabs.
 const SHORT_MAX_HEIGHT: Rems = rem(336.);
-const TITLE_BAR_HEIGHT: Rems = rem(56.);
+const TITLE_BAR_HEIGHT: Rems = rem(64.);
 /// The widest the search field grows.
 const SEARCH_MAX_WIDTH: Rems = rem(560.);
 
@@ -2126,6 +2126,7 @@ impl Desktop {
                             .items_center()
                             .child(
                                 material_button(child("retry"), ButtonVariant::Outlined)
+                                    .tone(ButtonTone::Accent)
                                     .icon(symbols::refresh())
                                     .child(course2md::tr!("重试导出"))
                                     .disabled(self.reader_exporting())
@@ -2277,6 +2278,7 @@ impl Desktop {
                 .child(tool(
                     IconButton::new("reader-loading-back", symbols::arrow_back(), label.clone())
                         .variant(IconButtonVariant::Tonal)
+                        .tone(ButtonTone::Neutral)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.navigate(this.result_origin, cx);
                         })),
@@ -2352,26 +2354,27 @@ impl Desktop {
             .items_center()
             .child(
                 div().flex_1().min_w_0().child(
-                    MaterialTabs::new("reader-tabs", course2md::tr!("阅读视图"))
-                        .variant(TabsVariant::Secondary)
-                        .items([
-                            TabItem::new("note", course2md::tr!("笔记")).icon(symbols::article()),
-                            TabItem::new(
+                    ConnectedButtonGroup::new("reader-tabs", course2md::tr!("阅读视图"))
+                        .tone(ButtonTone::Neutral)
+                        .options([
+                            ("note", course2md::tr!("笔记").to_owned()),
+                            (
                                 "images",
                                 if shots > 0 {
                                     course2md::tr!("截图 · {}", shots)
                                 } else {
                                     course2md::tr!("截图").to_owned()
                                 },
-                            )
-                            .icon(symbols::image()),
+                            ),
                         ])
+                        .icon("note", symbols::article())
+                        .icon("images", symbols::image())
                         .selected(if self.result_tab == 0 {
                             "note"
                         } else {
                             "images"
                         })
-                        .on_change(cx.listener(|this, selected: &SharedString, window, cx| {
+                        .on_activate(cx.listener(|this, selected: &SharedString, window, cx| {
                             this.select_reader_view(
                                 usize::from(selected.as_ref() == "images"),
                                 window,
@@ -2458,7 +2461,7 @@ impl Desktop {
                         .selection_format(SelectionFormat::Source)
                         .markdown_extensions(note.extensions.clone())
                         .style(note_text::note_style(cx))
-                        .text_size(TEXT_READER)
+                        .text_size(rem(17.))
                         .line_height(relative(1.8))
                         .size_full()
                         .px(metrics.inset),
@@ -2564,14 +2567,15 @@ impl Desktop {
             )
             .gap(TILE_GAP)
             .children(self.reader_ui.outline.iter().enumerate().map(
-                |(place, (index, label, seconds))| {
+                |(_, (index, label, seconds))| {
                     let index = *index;
                     let time = seconds
                         .filter(|seconds| *label != course2md::render::fmt_ts(*seconds))
                         .map(course2md::render::fmt_ts);
                     ListItem::new(("toc-item", index), label.clone())
                         .density(ListDensity::Compact)
-                        .segment(list_corners(place, self.reader_ui.outline.len()))
+                        .container(ColorRole::SURFACE_CONTAINER)
+                        .segment([true; 4])
                         .selected(current == Some(index))
                         .when_some(time, |item, time| item.trailing_text(time))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -2630,6 +2634,7 @@ impl Desktop {
         });
         let slot = screenshot_slot(("note-figure-slot", block), Some(loaded));
         let card = MaterialCard::new(("note-figure", block), CardVariant::Filled)
+            .rounded(RADIUS_LARGE_INCREASED)
             .accessibility_label(course2md::tr!("放大{}", label))
             .w_full()
             .overflow_hidden()
@@ -2682,10 +2687,11 @@ impl Desktop {
                     .flex_wrap()
                     .items_center()
                     .gap_x(rem(12.))
-                    .child(
-                        ui::status_line("reader-facts", &facts.join(" · "))
-                            .text_size(TEXT_BODY)
-                            .text_color(color(ON_SURFACE_VARIANT)),
+                    .gap_y(rem(8.))
+                    .children(
+                        facts
+                            .into_iter()
+                            .map(|fact| status_chip(StatusKind::Neutral).child(fact)),
                     )
                     .children(self.reader_version_menu(preview, window, cx)),
             )
@@ -2919,6 +2925,7 @@ impl Desktop {
                 )
                 .child(
                     material_button("open-newer-version", ButtonVariant::Outlined)
+                        .tone(ButtonTone::Accent)
                         .icon(symbols::history())
                         .child(course2md::tr!("查看新版"))
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -2948,6 +2955,7 @@ impl Desktop {
                 "reader-file-notice",
                 notice_banner("reader-file-notice-text", NoticeKind::Danger, text).child(
                     material_button("reload-reader-files", ButtonVariant::Outlined)
+                        .tone(ButtonTone::Accent)
                         .icon(symbols::refresh())
                         .child(course2md::tr!("重新读取"))
                         .loading(reading, course2md::tr!("重新读取"))
@@ -3018,6 +3026,7 @@ impl Desktop {
                 let label = crate::task_ui::retry_components_label(&components);
                 actions = actions.child(
                     material_button("reader-retry-incomplete", ButtonVariant::Outlined)
+                        .tone(ButtonTone::Accent)
                         .icon(symbols::refresh())
                         .child(label)
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -3040,6 +3049,7 @@ impl Desktop {
                 let repair = id.clone();
                 actions = actions.child(
                     material_button("reader-repair-ai", ButtonVariant::Outlined)
+                        .tone(ButtonTone::Accent)
                         .icon(symbols::settings())
                         .child(course2md::tr!("检查 AI 服务后重试"))
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -3105,7 +3115,7 @@ impl Desktop {
         }
         motion::enter(
             "reader-processing-notice",
-            notice_banner("reader-incomplete-processing", NoticeKind::Danger, notice)
+            notice_banner("reader-incomplete-processing", NoticeKind::Warning, notice)
                 .child(actions)
                 .child(motion::disclosure(
                     "reader-processing-detail-panel",
@@ -3231,6 +3241,7 @@ impl Desktop {
             .into_any_element()
         } else {
             material_button("reader-play", ButtonVariant::Outlined)
+                .tone(ButtonTone::Accent)
                 .icon(symbols::play_arrow())
                 .child(label)
                 .loading(opening, label)
@@ -3334,6 +3345,7 @@ impl Desktop {
             tool(
                 IconButton::new("export-note", symbols::content_copy(), label)
                     .variant(IconButtonVariant::Tonal)
+                    .tone(ButtonTone::Neutral)
                     .disabled(exporting),
                 "export-note-tip",
                 label,
@@ -3508,7 +3520,11 @@ impl Desktop {
                         .flex_basis(rem(200.))
                         .min_w_0()
                         .max_w(SEARCH_MAX_WIDTH)
-                        .child(SearchField::new(&input).leading(Icon::from(symbols::search()))),
+                        .child(
+                            SearchField::new(&input)
+                                .field_style(SearchFieldStyle::Tonal)
+                                .leading(Icon::from(symbols::search())),
+                        ),
                 )
                 .children(status)
                 .when(reading_note && searching, |bar| {
@@ -3674,6 +3690,7 @@ impl Desktop {
                     })
                     .child(
                         material_button("empty-images-to-note", ButtonVariant::Outlined)
+                            .tone(ButtonTone::Accent)
                             .icon(symbols::article())
                             .child(course2md::tr!("阅读笔记"))
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -3736,14 +3753,21 @@ impl Desktop {
         let to_note = course2md::tr!("在笔记中查看");
         let card = MaterialCard::new(
             SharedString::from(frame.anchor.clone()),
-            CardVariant::Filled,
+            CardVariant::Surface,
         )
+        .rounded(TILE_RADIUS)
         .accessibility_label(course2md::tr!("放大{}", frame_label(frame)))
         .w_full()
         .h_full()
         .min_w_0()
         .overflow_hidden()
-        .child(screenshot_slot(("screenshot", index), loaded))
+        .child(
+            div()
+                .w_full()
+                .p(rem(10.))
+                .pb_0()
+                .child(screenshot_slot(("screenshot", index), loaded).rounded(RADIUS_LARGE)),
+        )
         .child(
             v_flex()
                 .w_full()
@@ -4077,6 +4101,7 @@ impl Desktop {
         let dismiss = cx.weak_entity();
         Some(
             MaterialDialog::new("reader-image-viewer")
+                .container(ColorRole::SURFACE)
                 .full_screen(course2md::tr!("关闭截图"), None)
                 .headline(headline)
                 .content(content)
@@ -4510,6 +4535,7 @@ impl Desktop {
                     div().flex_shrink_0().child(tool(
                         IconButton::new("reader-back", symbols::arrow_back(), back.clone())
                             .variant(IconButtonVariant::Tonal)
+                            .tone(ButtonTone::Neutral)
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.navigate(this.result_origin, cx)),
                             ),
