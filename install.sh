@@ -77,6 +77,13 @@ if [ "$apple" = 1 ]; then
   fi
 fi
 
+# 依赖的许可声明放在程序旁；较早的版本没有这个文件。
+# Dependency license notices sit beside the binary; older releases do not publish them.
+if curl -fsSL "$RELEASE/course2md-third-party-licenses.txt" -o "$tmp/licenses.txt"; then
+  verify "$tmp/licenses.txt" "course2md-third-party-licenses.txt"
+  install -m 644 "$tmp/licenses.txt" "$BIN_DIR/course2md-third-party-licenses.txt"
+fi
+
 # 在线视频需要 yt-dlp：PATH 中已有就沿用，否则在程序旁安装官方独立版本。
 if command -v yt-dlp >/dev/null 2>&1; then
   say "使用已安装的 yt-dlp / Using installed yt-dlp: $(command -v yt-dlp)"

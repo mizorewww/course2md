@@ -27,11 +27,16 @@ class PinTests(unittest.TestCase):
     def test_windows_and_linux_bundle_uv_and_the_vulkan_llama_server(self):
         for platform in [("Windows", "AMD64"), ("Linux", "x86_64")]:
             tools = {tool.name: tool for tool in prebuilt.PREBUILT[platform]}
-            self.assertEqual(set(tools), {"uv", "llama.cpp"})
+            self.assertLessEqual({"uv", "llama.cpp"}, set(tools))
             self.assertIn("vulkan", tools["llama.cpp"].url)
             self.assertEqual(tools["llama.cpp"].subdir, "llama.cpp")
             self.assertEqual(tools["uv"].subdir, "")
         self.assertNotIn(("Darwin", "arm64"), prebuilt.PREBUILT)
+
+    def test_only_windows_bundles_aria2(self):
+        names = {platform: {tool.name for tool in tools} for platform, tools in prebuilt.PREBUILT.items()}
+        self.assertIn("aria2", names[("Windows", "AMD64")])
+        self.assertNotIn("aria2", names[("Linux", "x86_64")])
 
     def test_only_llama_servers_libraries_are_kept(self):
         import fnmatch

@@ -2,7 +2,7 @@ name: native desktop
 
 on:
   push:
-    branches: [main]
+    branches: [main, split/workspace]
     paths:
       - 'desktop/**'
       - 'src/**'
@@ -13,6 +13,7 @@ on:
       - 'Cargo.lock'
       - 'i18n/**'
       - 'tests/i18n_catalog.rs'
+      - 'packaging/licenses/**'
       - '.github/actions/**'
       - '.github/workflows/desktop.yml'
       - '!**.md'
@@ -27,6 +28,7 @@ on:
       - 'Cargo.lock'
       - 'i18n/**'
       - 'tests/i18n_catalog.rs'
+      - 'packaging/licenses/**'
       - '.github/actions/**'
       - '.github/workflows/desktop.yml'
       - '!**.md'
@@ -65,10 +67,9 @@ jobs:
           name: ffmpeg-windows
           path: desktop/.cache/tools
       - name: Format
-        # The package only; the vendored GPUI sources keep their upstream style.
         run: cargo fmt --manifest-path desktop/Cargo.toml --check
       - name: Clippy
-        # --no-deps keeps the vendored GPUI crates' deprecation warnings out of the log.
+        # --no-deps keeps the GPUI crates' deprecation warnings out of the log.
         run: cargo clippy --manifest-path desktop/Cargo.toml --all-targets --no-deps -- -D warnings
       - name: Check and test desktop
         run: cargo test --manifest-path desktop/Cargo.toml

@@ -1,0 +1,25 @@
+# cargo-about: which crates count as shipped, and which licenses may ship.
+# A crate under a license not listed here fails the package build.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+ignore-dev-dependencies = true
+ignore-build-dependencies = true
+workarounds = ["ring", "rustls"]
+accepted = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]

@@ -4,7 +4,7 @@ Native client for macOS, Windows and Linux, built on GPUI Kit and `gpui-kit-mate
 
 ## Build and run
 
-Requires the Rust toolchain named in `desktop/rust-toolchain.toml` and Python 3.11+ for the scripts; Xcode Command Line Tools on macOS; Visual Studio C++ Build Tools and LLVM on Windows; on Linux, the packages listed in `.github/actions/desktop-deps/action.yml`. Converting videos needs ffmpeg, and links need yt-dlp.
+Requires the Rust toolchain named in `desktop/rust-toolchain.toml` and Python 3.11+ for the scripts; on macOS, Xcode with its Metal toolchain for the Apple speech module (Command Line Tools alone build a development engine without it); Visual Studio C++ Build Tools on Windows; on Linux, the packages listed in `.github/actions/desktop-deps/action.yml`. Converting videos needs ffmpeg, and links need yt-dlp.
 
 ```sh
 cargo build
@@ -14,7 +14,7 @@ cargo run --manifest-path desktop/Cargo.toml
 
 `just install` (macOS) installs the current checkout as `/Applications/course2md.app`, keeping existing notes and settings.
 
-The UI stack comes from [`gpui-kit-material`](https://github.com/mizorewww/gpui-kit-material), which vendors patched GPUI and GPUI Base sources. `desktop/Cargo.toml` repeats that repository's `[patch]` tables, because Cargo applies patches only in the workspace that declares them; keep the two equal when updating. For now its dependencies are paths into a sibling checkout, `../gpui-kit-material-course2md` (branch `course2md-integration`), so the desktop does not build without one.
+The UI stack comes from [`gpui-kit-material`](https://github.com/mizorewww/gpui-kit-material), which vendors patched GPUI and GPUI Base sources. `desktop/Cargo.toml` pins one revision of it in the dependencies and in a `[patch]` table holding only what the build needs; bump them together.
 
 The app looks for the engine in `COURSE2MD_BIN`, then beside its own executable, then in a debug build `target/` of this repository, then on PATH.
 

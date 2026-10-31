@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Build and package the native app and its matching CLI on the current platform."""
 import argparse
-import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -10,11 +9,11 @@ import plistlib
 import shutil
 import subprocess
 import tomllib
-import urllib.request
 import zipfile
 
 from dmg import build_install_dmg
 import ffmpeg_bundle
+import licenses
 import prebuilt
 import ytdlp_bundle
 
@@ -64,6 +63,18 @@ def copy_licenses(dest, tools=()):
     shutil.copytree(ROOT / "assets/themes/licenses", dest / "design-licenses", dirs_exist_ok=True)
 
 
+def third_party_notices(dest, swift, required):
+    """The dependency notices (licenses.py), or None in a development build that cannot make them."""
+    try:
+        return licenses.generate(dest / licenses.FILE_NAME, ROOT / "Cargo.toml", swift)
+    except (OSError, subprocess.CalledProcessError) as error:
+        if required:
+            raise SystemExit(f"Release builds must carry dependency licenses: {error}. "
+                             "Install cargo-about (see docs/PACKAGING.md).") from error
+        print(f"warning: dependency licenses not generated ({error})")
+        return None
+
+
 def notarize(path, key_path, key_id, issuer):
     run("xcrun", "notarytool", "submit", str(path), "--key", key_path,
         "--key-id", key_id, "--issuer", issuer, "--wait")
@@ -90,41 +101,13 @@ def bundle_ytdlp(parent, required, local=None, suffix=""):
         return None
 
 
-# aria2 downloads speech models over several connections. Package managers
-# supply it on macOS and Linux; Windows archives bundle the official static
-# build. It is GPL-2.0 and ships beside the app with its license.
-ARIA2_VERSION = "1.37.0"
-ARIA2_WINDOWS = "aria2-1.37.0-win-64bit-build1"
-ARIA2_WINDOWS_SHA256 = "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288"
-
-
-def bundle_aria2(binaries, licenses, required):
-    """Place aria2c.exe beside the Windows binaries; the engine finds it there."""
-    url = (f"https://github.com/aria2/aria2/releases/download/release-{ARIA2_VERSION}/"
-           f"{ARIA2_WINDOWS}.zip")
-    tmp = binaries / "aria2.zip.download"
-    try:
-        with urllib.request.urlopen(url, timeout=300) as response, tmp.open("wb") as out:
-            shutil.copyfileobj(response, out)
-        digest = hashlib.sha256(tmp.read_bytes()).hexdigest()
-        if digest != ARIA2_WINDOWS_SHA256:
-            raise OSError(f"{ARIA2_WINDOWS} checksum mismatch: {digest}")
-        with zipfile.ZipFile(tmp) as archive:
-            (binaries / "aria2c.exe").write_bytes(archive.read(f"{ARIA2_WINDOWS}/aria2c.exe"))
-            (licenses / "LICENSE-aria2").write_bytes(archive.read(f"{ARIA2_WINDOWS}/COPYING"))
-        return binaries / "aria2c.exe"
-    except (OSError, KeyError, zipfile.BadZipFile) as error:
-        if required:
-            raise SystemExit(f"Release builds must bundle aria2: {error}") from error
-        print(f"warning: aria2 not bundled ({error}); models download without it")
-        return None
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
 def verify_tools(binaries, system, skip=(), ytdlp=None):
     """Run each bundled tool once, so a missing library or an ffmpeg without
     TLS fails the package build rather than a user's first conversion."""
+    # yt-dlp's onedir build carries the notices of what it bundles.
+    if ytdlp and ytdlp.parent.name == ytdlp_bundle.DIRECTORY:
+        if not (ytdlp.parent / "_internal/THIRD_PARTY_LICENSES.txt").is_file():
+            raise SystemExit("The bundled yt-dlp has no THIRD_PARTY_LICENSES.txt")
     suffix = ".exe" if system == "Windows" else ""
     checks = []
     if ytdlp:
@@ -137,6 +120,8 @@ def verify_tools(binaries, system, skip=(), ytdlp=None):
         checks.append((["uv", "--version"], "uv "))
     if "llama.cpp" in names and "llama.cpp" not in skip:
         checks.append((["llama.cpp/llama-server", "--version"], "version"))
+    if "aria2" in names and "aria2" not in skip:
+        checks.append((["aria2c", "--version"], "aria2 version"))
     if system == "Linux":
         # Shared libraries the archive expects from the system: printed for the
         # log, and a missing one fails here.
@@ -288,20 +273,23 @@ def main():
         if bundled:
             placed, tool_licenses = bundled
             print("bundled " + ", ".join(path.name for path in placed))
-    # Windows/Linux: uv beside the engine (NPU worker) and llama-server in
-    # llama.cpp/ (GPU/CPU transcription); the app searches both before PATH.
-    skip = [name for name, off in (("uv", args.no_uv), ("llama.cpp", args.no_llama)) if off]
+    # Windows/Linux: uv and (Windows) aria2 beside the engine, llama-server in
+    # llama.cpp/; the app searches these before PATH.
+    skip = [name for name, off in (("uv", args.no_uv), ("llama.cpp", args.no_llama),
+                                   ("aria2", args.no_aria2)) if off]
     for name in prebuilt.bundle(system, platform.machine(), binaries, base,
                                 TOOL_CACHE / "downloads", required=tools_required, skip=skip):
         print(f"bundled {name}")
-    if system == "Windows" and not args.no_aria2:
-        if bundle_aria2(binaries, base, required=tools_required):
-            print("bundled aria2c.exe")
     if tools_required:
         verify_tools(binaries, system, skip=[*skip, *(["ffmpeg"] if args.no_ffmpeg else [])],
                      ytdlp=ytdlp)
     if system == "Windows":
         verify_windows_icon(binaries / "course2md-desktop.exe")
+    # The desktop's dependency graph includes the engine's. The Swift module is
+    # part of arm64 macOS builds only (build.rs).
+    swift = system == "Darwin" and platform.machine() == "arm64" and not args.no_apple
+    if notices := third_party_notices(base.parent, swift, required=tools_required):
+        tool_licenses = [*tool_licenses, notices]
     copy_licenses(base, tool_licenses)
     shutil.copy2(PROJECT / "readme.md", base / "README.md")
     if system == "Darwin":
