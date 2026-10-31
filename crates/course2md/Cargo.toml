@@ -10,6 +10,7 @@ c2m-config = { path = "../c2m-config" }
 c2m-core = { path = "../c2m-core" }
 c2m-i18n = { path = "../c2m-i18n" }
 c2m-process = { path = "../c2m-process" }
+c2m-protocol = { path = "../c2m-protocol" }
 anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
@@ -18,7 +19,6 @@ getrandom.workspace = true
 hound.workspace = true
 image.workspace = true
 indexmap.workspace = true
-indicatif.workspace = true
 model-fetch.workspace = true
 open.workspace = true
 qrcode.workspace = true

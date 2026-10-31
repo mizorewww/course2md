@@ -932,6 +932,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "c2m-protocol"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "c2m-config",
+ "c2m-core",
+ "c2m-i18n",
+ "c2m-process",
+ "indicatif",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "c2m-test-http"
 version = "2.0.1"
 
@@ -1416,6 +1433,7 @@ dependencies = [
  "c2m-core",
  "c2m-i18n",
  "c2m-process",
+ "c2m-protocol",
  "c2m-test-http",
  "clap",
  "dialoguer",
@@ -1423,7 +1441,6 @@ dependencies = [
  "hound",
  "image",
  "indexmap",
- "indicatif",
  "model-fetch",
  "open",
  "qrcode",

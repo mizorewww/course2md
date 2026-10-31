@@ -1,4 +1,5 @@
 pub use c2m_config::{llm_settings, settings};
+pub use c2m_protocol::{model_state, progress};
 
 /// The settings types, and the provider this machine defaults to.
 pub mod config {
@@ -26,14 +27,12 @@ pub mod job;
 pub mod llm;
 pub mod login;
 pub mod math;
-pub mod model_state;
 pub mod models;
 pub mod npu;
 pub mod options;
 pub mod pipeline;
 pub mod pool;
 pub mod portable;
-pub mod progress;
 pub mod provider;
 pub mod render;
 pub mod scene;
