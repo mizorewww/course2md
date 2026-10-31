@@ -23,6 +23,7 @@ pub mod login;
 pub mod math;
 pub mod media;
 pub mod meta;
+pub mod model_state;
 pub mod models;
 pub mod npu;
 pub mod options;

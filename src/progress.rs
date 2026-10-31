@@ -302,7 +302,7 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        status: Option<Box<crate::models::status::LocalModelStatus>>,
+        status: Option<Box<crate::model_state::LocalModelStatus>>,
     },
 }
 
@@ -452,13 +452,11 @@ pub struct RepoTransfer {
 /// resumes, as soon as it reaches it. Counted that way, cached bytes would
 /// arrive mid-transfer and read as speed. Here they are counted once, up front,
 /// so the counter only grows by bytes that crossed the network.
-#[cfg_attr(not(apple_native), allow(dead_code))]
-pub(crate) struct TransferLedger {
+pub struct TransferLedger {
     plan: TransferPlan,
     reported: u64,
 }
 
-#[cfg_attr(not(apple_native), allow(dead_code))]
 impl TransferLedger {
     pub fn new(plan: TransferPlan) -> Self {
         let mut ledger = Self { plan, reported: 0 };
