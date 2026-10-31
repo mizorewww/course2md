@@ -86,12 +86,12 @@ impl Activity {
     pub fn live_counter(&self) -> String {
         let mut parts = vec![elapsed_label(self.elapsed())];
         if self.completion_tokens > 0 {
-            parts.push(glued(&course2md::tr!(
+            parts.push(course2md::tr!(
                 "↓ {} 词元",
                 compact_count(self.completion_tokens)
-            )));
+            ));
         }
-        parts.join(SEPARATOR)
+        parts.join(" · ")
     }
     pub fn fraction(&self) -> Option<f32> {
         (self.total > 0).then(|| (self.current as f32 / self.total as f32).clamp(0., 1.))
@@ -151,10 +151,10 @@ impl Activity {
         if *stage == Stage::ModelApple && !byte_download {
             return TransferMetrics {
                 quantity,
-                note: Some(glued(&course2md::tr!(
+                note: Some(course2md::tr!(
                     "已用 {}",
                     duration_label(now.saturating_duration_since(self.started).as_secs())
-                ))),
+                )),
                 ..TransferMetrics::default()
             };
         }
@@ -249,10 +249,10 @@ impl Activity {
         } else if self.total > 0 {
             Some(TransferEta::Note(course2md::tr!("收尾中…").into()))
         } else if !byte_download {
-            Some(TransferEta::Note(glued(&course2md::tr!(
+            Some(TransferEta::Note(course2md::tr!(
                 "已用 {}",
                 duration_label(now.saturating_duration_since(self.started).as_secs())
-            ))))
+            )))
         } else {
             None
         };
@@ -315,24 +315,22 @@ pub struct TransferMetrics {
 
 impl TransferMetrics {
     pub fn summary(&self) -> String {
-        self.parts(true).join(SEPARATOR)
+        self.parts(true).join(" · ")
     }
     pub fn compact_summary(&self) -> String {
-        self.parts(false).join(SEPARATOR)
+        self.parts(false).join(" · ")
     }
-    /// Measurements and labeled values wrap as units; notes and asides are
-    /// sentences and wrap normally.
     fn parts(&self, full: bool) -> Vec<String> {
         let mut parts = Vec::new();
         if !self.quantity.is_empty() {
-            parts.push(glued(&self.quantity));
+            parts.push(self.quantity.clone());
         }
         if let Some(speed) = &self.speed {
-            parts.push(glued(&course2md::tr!("速度 {}", speed)));
+            parts.push(course2md::tr!("速度 {}", speed));
         }
         if let Some(eta) = &self.eta {
             parts.push(match eta {
-                TransferEta::Remaining(value) => glued(&course2md::tr!("预计剩余 {}", value)),
+                TransferEta::Remaining(value) => course2md::tr!("预计剩余 {}", value),
                 TransferEta::Note(value) => value.clone(),
             });
         }
@@ -341,7 +339,7 @@ impl TransferMetrics {
         }
         if full {
             parts.extend(self.aside.clone());
-            parts.extend(self.source.as_deref().map(glued));
+            parts.extend(self.source.clone());
         }
         parts
     }
@@ -350,63 +348,14 @@ impl TransferMetrics {
 /// "用时 45 秒", "用时 1 分 23 秒": how long work has run, in the interface
 /// language.
 pub fn elapsed_label(elapsed: Duration) -> String {
-    glued(&course2md::tr!(
-        "用时 {}",
-        duration_label(elapsed.as_secs())
-    ))
-}
-
-/// Joins the parts of a status line. The no-break space keeps each "·" at
-/// the end of the part before it, so a wrapped line never starts with one;
-/// lines break only after a separator or inside a sentence.
-pub const SEPARATOR: &str = "\u{a0}· ";
-
-/// A label and its value, or a measurement such as "360.0 MB / 1.56 GB",
-/// that wraps as one unit. Its spaces become no-break spaces, and a word
-/// joiner (U+2060, zero width) goes wherever the wrapper could otherwise
-/// break: between CJK characters, which break anywhere ("预计⏎剩余"), and
-/// before `/`, `?` or `(`.
-pub fn glued(text: &str) -> String {
-    const NO_BREAK_SPACE: char = '\u{a0}';
-    let mut out = String::with_capacity(text.len() * 2);
-    let mut previous: Option<char> = None;
-    for character in text.chars() {
-        let character = if character == ' ' {
-            NO_BREAK_SPACE
-        } else {
-            character
-        };
-        if let Some(previous) = previous
-            && previous != NO_BREAK_SPACE
-            && character != NO_BREAK_SPACE
-            && (!previous.is_ascii() || !character.is_ascii() || "/?(".contains(character))
-        {
-            out.push('\u{2060}');
-        }
-        out.push(character);
-        previous = Some(character);
-    }
-    out
-}
-
-/// Status text as read aloud or compared: no-break spaces as spaces and
-/// without word joiners.
-#[cfg(test)]
-pub fn plain(text: &str) -> String {
-    text.replace('\u{2060}', "").replace('\u{a0}', " ")
+    course2md::tr!("用时 {}", duration_label(elapsed.as_secs()))
 }
 
 /// The one way the desktop words a span of time, for elapsed clocks and
 /// remaining-time estimates alike: "16 秒", "1 分 05 秒", "1 小时 02 分"
 /// ("16s", "1m 05s", "1h 02m" in English). Within a larger unit the smaller
-/// one keeps two digits, so a ticking clock does not change width. Its
-/// spaces do not break, so a wrapped line never separates a number from its
-/// unit or one unit from the next.
+/// one keeps two digits, so a ticking clock does not change width.
 pub fn duration_label(seconds: u64) -> String {
-    glued(&duration_words(seconds))
-}
-
-fn duration_words(seconds: u64) -> String {
     if seconds >= 3600 {
         course2md::tr!(
             "{} 小时 {} 分",
@@ -698,80 +647,12 @@ mod tests {
         assert_eq!(compact_count_in(250_000_000, Lang::ZhHans), "2.5 亿");
         assert_eq!(compact_count_in(250_000_000, Lang::ZhHant), "2.5 億");
         assert_eq!(compact_count_in(250_000_000, Lang::Ja), "2.5 億");
-        assert_eq!(plain(&elapsed_label(Duration::from_secs(16))), "用时 16 秒");
+        assert_eq!(elapsed_label(Duration::from_secs(16)), "用时 16 秒");
+        assert_eq!(elapsed_label(Duration::from_secs(65)), "用时 1 分 05 秒");
         assert_eq!(
-            plain(&elapsed_label(Duration::from_secs(65))),
-            "用时 1 分 05 秒"
-        );
-        assert_eq!(
-            plain(&elapsed_label(Duration::from_secs(3720))),
+            elapsed_label(Duration::from_secs(3720)),
             "用时 1 小时 02 分"
         );
-        assert!(break_points(&elapsed_label(Duration::from_secs(3720))).is_empty());
-    }
-
-    /// Where the desktop's text wrapper may start a new line: before a space
-    /// that follows a word, before a CJK character or `/`, `?` or `(`, but
-    /// never beside a no-break space or word joiner (the reviewed GPUI
-    /// line-break patch).
-    fn break_points(text: &str) -> Vec<usize> {
-        let glue = |c: char| matches!(c, '\u{a0}' | '\u{202f}' | '\u{2060}');
-        let mut points = Vec::new();
-        let mut previous: Option<char> = None;
-        for (index, character) in text.char_indices() {
-            if let Some(previous) = previous
-                && !glue(previous)
-                && !glue(character)
-                && character != ' '
-                && (previous == ' ' || !character.is_ascii() || "/?(".contains(character))
-                && !"，。、；：！？）」』".contains(character)
-            {
-                points.push(index);
-            }
-            previous = Some(character);
-        }
-        points
-    }
-
-    /// A status line breaks only after a separator: labels stay with their
-    /// values and a wrapped line never starts with "·". Sentences (notes and
-    /// asides) still wrap inside.
-    #[test]
-    fn status_lines_break_only_after_separators() {
-        let metrics = TransferMetrics {
-            quantity: "500.0 MB / 1.56 GB".into(),
-            speed: Some("10.0 MB/s".into()),
-            eta: Some(TransferEta::Remaining(duration_label(110))),
-            note: None,
-            aside: None,
-            source: Some(course2md::tr!("来源 {}", "huggingface.co")),
-        };
-        let summary = metrics.summary();
-        assert_eq!(
-            plain(&summary),
-            "500.0 MB / 1.56 GB · 速度 10.0 MB/s · 预计剩余 1 分 50 秒 · 来源 huggingface.co"
-        );
-        // The only places a line may break are right after a separator.
-        let points = break_points(&summary);
-        assert_eq!(points.len(), 3, "{summary:?}");
-        for index in points {
-            assert!(summary[..index].ends_with("\u{a0}· "), "{summary:?}");
-        }
-        let compact = metrics.compact_summary();
-        assert_eq!(
-            plain(&compact),
-            "500.0 MB / 1.56 GB · 速度 10.0 MB/s · 预计剩余 1 分 50 秒"
-        );
-        assert_eq!(break_points(&compact).len(), 2);
-        // A sentence still wraps inside.
-        let noted = TransferMetrics {
-            aside: Some(course2md::tr!(
-                "数据分块到达，上一块于 {}前到达",
-                duration_label(40)
-            )),
-            ..metrics
-        };
-        assert!(break_points(&noted.summary()).len() > 4);
     }
 
     /// Every language words a span with its own units; no Latin unit leaks
@@ -841,9 +722,7 @@ mod tests {
         activity.update(1700, 10000, None);
         let detail = activity
             .transfer_metrics_at(&Stage::parse("model/apple"), true, now)
-            .summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+            .summary();
         assert!(
             detail.contains("17%") && detail.contains("已用 3 分"),
             "{detail}"
@@ -856,9 +735,7 @@ mod tests {
         activity.updated = now - Duration::from_secs(60);
         let waiting = activity
             .transfer_metrics_at(&Stage::parse("model/apple"), true, now)
-            .summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+            .summary();
         assert!(
             waiting.contains("已用") && !waiting.contains("等待响应"),
             "{waiting}"
@@ -866,18 +743,14 @@ mod tests {
         assert_eq!(
             activity
                 .transfer_metrics_at(&Stage::parse("model/apple"), false, now)
-                .summary()
-                .replace('\u{2060}', "")
-                .replace('\u{a0}', " "),
+                .summary(),
             "已停止"
         );
         activity.done = true;
         assert_eq!(
             activity
                 .transfer_metrics_at(&Stage::parse("model/apple"), true, now)
-                .summary()
-                .replace('\u{2060}', "")
-                .replace('\u{a0}', " "),
+                .summary(),
             "已完成"
         );
     }
@@ -913,14 +786,11 @@ mod tests {
         assert_eq!(metrics.speed.as_deref(), Some("10.0 MB/s"));
         // 1100 MB left at 10 MB/s, measured at one instant.
         assert!(
-            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "1\u{a0}分\u{a0}50\u{a0}秒"),
+            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "1 分 50 秒"),
             "{metrics:?}"
         );
         assert_eq!(metrics.source.as_deref(), Some("来源 huggingface.co"));
-        let summary = metrics
-            .summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+        let summary = metrics.summary();
         assert!(
             summary.starts_with("500.0 MB / 1.56 GB · 速度 10.0 MB/s · 预计剩余 1 分 50 秒")
                 && summary.ends_with(" · 来源 huggingface.co"),
@@ -932,11 +802,7 @@ mod tests {
         activity.update(2000, 10000, Some("正在加载本机模型…".into()));
         activity.phase = Some(Phase::Load);
         activity.unit = None;
-        let loading = activity
-            .transfer_metrics_at(&apple, true, now)
-            .summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+        let loading = activity.transfer_metrics_at(&apple, true, now).summary();
         assert!(
             loading.contains("20%") && loading.contains("已用"),
             "{loading}"
@@ -966,9 +832,7 @@ mod tests {
         );
         let detail = activity
             .transfer_metrics_at(&Stage::parse("model/model.gguf"), true, now)
-            .summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+            .summary();
         assert!(detail.contains("4.0 MB / 8.0 MB"), "{detail}");
         assert!(
             detail.contains("速度 ") && detail.contains("预计剩余"),
@@ -1005,9 +869,7 @@ mod tests {
         activity.phase = Some(Phase::Retry);
         let detail = activity
             .transfer_metrics_at(&Stage::parse("model/model.gguf"), true, now)
-            .summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+            .summary();
         assert!(detail.contains("正在重新连接 modelscope.cn"), "{detail}");
 
         activity.phase = Some(Phase::Verify);
@@ -1033,8 +895,6 @@ mod tests {
         assert!(
             scan.transfer_metrics_at(&Stage::parse("scenes/scan"), true, now)
                 .summary()
-                .replace('\u{2060}', "")
-                .replace('\u{a0}', " ")
                 .contains("已检查 18 张画面")
         );
         scan.done = true;
@@ -1043,9 +903,7 @@ mod tests {
         extract.started = now - Duration::from_secs(25);
         let detail = extract
             .transfer_metrics_at(&Stage::parse("scenes/extract"), true, now)
-            .summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+            .summary();
         assert!(detail.contains("已保存 0 / 1 张截图"), "{detail}");
         assert!(
             !detail.contains("100%") && !detail.contains("收尾") && !detail.contains("预计剩余")
@@ -1056,9 +914,7 @@ mod tests {
         assert_eq!(
             extract
                 .transfer_metrics_at(&Stage::parse("scenes/extract"), true, now)
-                .summary()
-                .replace('\u{2060}', "")
-                .replace('\u{a0}', " "),
+                .summary(),
             "已完成"
         );
         let mut persisted = crate::workspace::StageRecord {
@@ -1170,7 +1026,7 @@ mod tests {
         let stalled = item.transfer_metrics_at(&Stage::parse("model/test"), true, now);
         assert_eq!(stalled.speed.as_deref(), Some("—"));
         assert_eq!(stalled.eta, None);
-        assert_eq!(stalled.note.as_deref(), Some("已 31\u{a0}秒没有收到新数据"));
+        assert_eq!(stalled.note.as_deref(), Some("已 31 秒没有收到新数据"));
         assert_eq!(stalled.quantity, "5 字节 / 100 字节");
         // Work that is not a byte transfer waits for its response.
         let mut proofreading = Activity::new();
@@ -1180,8 +1036,6 @@ mod tests {
             proofreading
                 .transfer_metrics_at(&Stage::Transcribe, true, now)
                 .summary()
-                .replace('\u{2060}', "")
-                .replace('\u{a0}', " ")
                 .contains("等待响应")
         );
     }
@@ -1222,7 +1076,7 @@ mod tests {
         assert_eq!(metrics.speed.as_deref(), Some("10.0 MB/s"), "{metrics:?}");
         // 300 MB left at 10 MB/s, not at the 70 MB/s the resumed bytes imply.
         assert!(
-            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "30\u{a0}秒"),
+            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "30 秒"),
             "{metrics:?}"
         );
         assert_eq!(aria2.fraction(), Some(0.7));
@@ -1275,35 +1129,22 @@ mod tests {
         // The average falls between blocks instead of disappearing.
         assert_eq!(slow.speed.as_deref(), Some("1.1 MB/s"), "{slow:?}");
         assert!(
-            matches!(&slow.eta, Some(TransferEta::Remaining(v)) if v == "18\u{a0}分\u{a0}05\u{a0}秒"),
+            matches!(&slow.eta, Some(TransferEta::Remaining(v)) if v == "18 分 05 秒"),
             "{slow:?}"
         );
         assert_eq!(slow.note, None);
         assert_eq!(
             slow.aside.as_deref(),
-            Some("数据分块到达，上一块于 40\u{a0}秒前到达")
+            Some("数据分块到达，上一块于 40 秒前到达")
         );
         assert_eq!(slow.source.as_deref(), Some("来源 hf-mirror.com"));
-        assert!(
-            !slow
-                .summary()
-                .replace('\u{2060}', "")
-                .replace('\u{a0}', " ")
-                .contains("等待响应")
-        );
+        assert!(!slow.summary().contains("等待响应"));
         // The full details explain the quiet spell; the one-line status
         // keeps only what moves.
-        assert!(
-            slow.summary()
-                .replace('\u{2060}', "")
-                .replace('\u{a0}', " ")
-                .contains("上一块于")
-        );
+        assert!(slow.summary().contains("上一块于"));
         let compact = activity
             .transfer_metrics_at(&apple, true, now)
-            .compact_summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+            .compact_summary();
         assert!(
             compact.starts_with("360.0 MB / 1.56 GB · 速度 1.1 MB/s · 预计剩余 18 分")
                 && !compact.contains("上一块")
@@ -1317,10 +1158,7 @@ mod tests {
         assert_eq!(stalled.quantity, "360.0 MB / 1.56 GB");
         assert_eq!(stalled.speed.as_deref(), Some("—"));
         assert_eq!(stalled.eta, None);
-        assert_eq!(
-            stalled.note.as_deref(),
-            Some("已 5\u{a0}分\u{a0}05\u{a0}秒没有收到新数据")
-        );
+        assert_eq!(stalled.note.as_deref(), Some("已 5 分 05 秒没有收到新数据"));
     }
     /// A resumed Apple download with little left is timed on its first
     /// blocks rather than waiting for 5% of the whole model.
@@ -1338,7 +1176,7 @@ mod tests {
         assert_eq!(metrics.speed.as_deref(), Some("4.0 MB/s"), "{metrics:?}");
         // 24 MB left at 4 MB/s, measured at one instant.
         assert!(
-            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "6\u{a0}秒"),
+            matches!(&metrics.eta, Some(TransferEta::Remaining(v)) if v == "6 秒"),
             "{metrics:?}"
         );
         assert_eq!(metrics.note, None);
@@ -1365,15 +1203,11 @@ mod tests {
             !item
                 .transfer_metrics_at(&Stage::parse("model/test"), true, now)
                 .summary()
-                .replace('\u{2060}', "")
-                .replace('\u{a0}', " ")
                 .contains("预计剩余")
         );
         assert_eq!(
             item.transfer_metrics_at(&Stage::parse("model/test"), false, now)
-                .summary()
-                .replace('\u{2060}', "")
-                .replace('\u{a0}', " "),
+                .summary(),
             "已停止"
         );
     }
@@ -1387,9 +1221,7 @@ mod tests {
         item.update(8 * 1024 * 1024, 16 * 1024 * 1024, None);
         let detail = item
             .transfer_metrics_at(&Stage::parse("download"), true, now)
-            .summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+            .summary();
         assert!(detail.contains("8.0 MB / 16.0 MB"), "{detail}");
         assert!(
             detail.contains("速度") && detail.contains("预计剩余"),
@@ -1401,9 +1233,7 @@ mod tests {
         unknown.update(3 * 1024 * 1024, 0, None);
         let detail = unknown
             .transfer_metrics_at(&Stage::parse("download"), true, now)
-            .summary()
-            .replace('\u{2060}', "")
-            .replace('\u{a0}', " ");
+            .summary();
         assert!(
             detail.contains("3.0 MB") && !detail.contains("预计剩余"),
             "{detail}"

@@ -693,3 +693,45 @@ pub fn modal_open(window: &mut Window, cx: &mut App) -> bool {
     use gpui_kit::component::WindowExt as _;
     window.has_active_dialog(cx) || active_focus_trap(window, cx).is_some()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::status_line;
+    use gpui::{
+        Context, IntoElement, ParentElement, Pixels, Render, Styled, TestAppContext,
+        VisualTestContext, Window, div, px,
+    };
+
+    struct Line(Pixels);
+
+    impl Render for Line {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(self.0).child(status_line(
+                "line",
+                "360.0 MB / 1.56 GB · 速度 12 MB/s · 预计剩余 1 分 50 秒",
+            ))
+        }
+    }
+
+    /// Parts wrap as whole children, so a line never starts with a separator.
+    #[gpui::test]
+    fn a_status_line_breaks_between_its_parts(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| Line(px(1000.)));
+        let height = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let child = cx
+                .debug_bounds("status-line")
+                .expect("the line")
+                .size
+                .height;
+            child
+        };
+        let wide = height(cx);
+        view.update_in(cx, |view, _, cx| {
+            view.0 = px(120.);
+            cx.notify();
+        });
+        let narrow = height(cx);
+        assert!(narrow >= wide * 3., "{wide:?} then {narrow:?}");
+    }
+}

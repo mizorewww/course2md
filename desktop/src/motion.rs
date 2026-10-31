@@ -1,10 +1,7 @@
 //! Small, shared motion vocabulary: entrances, retargetable values and live work.
-use crate::activity::{TransferEta, TransferMetrics};
-use crate::theme::{
-    ACCENT, CONTROL, GRAY, INK, SECONDARY_CONTAINER, TEXT_AUX, TEXT_BODY, accessible_text, color,
-};
+use crate::theme::{ACCENT, CONTROL, SECONDARY_CONTAINER, color};
 use gpui::{prelude::*, *};
-use gpui_kit::component::{Sizable, h_flex, v_flex};
+use gpui_kit::component::{Sizable, h_flex};
 use std::time::Duration;
 
 const SPINNER_TURN_MS: u64 = 1000;
@@ -317,107 +314,6 @@ pub fn linear_progress(
             )
         })
         .into_any_element()
-}
-
-/// Model downloads keep quantity, labeled speed and labeled remaining time
-/// on one stable block so the numbers do not hide behind a single sentence.
-pub fn transfer_status(
-    id: impl Into<ElementId>,
-    title: impl Into<SharedString>,
-    metrics: &TransferMetrics,
-    fraction: Option<f32>,
-    window: &mut Window,
-    cx: &mut App,
-) -> Div {
-    let id = id.into();
-    let title = title.into();
-    let mut view = v_flex().w_full().min_w_0().gap_2().child(
-        accessible_text(SharedString::from(format!("{id:?}-title")), title)
-            .text_size(TEXT_BODY)
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(color(INK)),
-    );
-    if !metrics.quantity.is_empty() {
-        view = view.child(
-            accessible_text(
-                SharedString::from(format!("{id:?}-quantity")),
-                metrics.quantity.clone(),
-            )
-            .text_size(TEXT_BODY)
-            .text_color(color(INK)),
-        );
-    }
-    if metrics.speed.is_some() || matches!(&metrics.eta, Some(TransferEta::Remaining(_))) {
-        let mut meters = h_flex().w_full().min_w_0().gap_6().flex_wrap();
-        if let Some(speed) = &metrics.speed {
-            meters = meters.child(transfer_meter(
-                SharedString::from(format!("{id:?}-speed")),
-                course2md::tr!("速度"),
-                speed.clone(),
-            ));
-        }
-        if let Some(TransferEta::Remaining(value)) = &metrics.eta {
-            meters = meters.child(transfer_meter(
-                SharedString::from(format!("{id:?}-eta")),
-                course2md::tr!("预计剩余"),
-                value.clone(),
-            ));
-        }
-        view = view.child(meters);
-    }
-    if let Some(TransferEta::Note(value)) = &metrics.eta {
-        view = view.child(
-            accessible_text(
-                SharedString::from(format!("{id:?}-eta-note")),
-                value.clone(),
-            )
-            .text_size(TEXT_AUX)
-            .text_color(color(GRAY)),
-        );
-    }
-    for (key, text) in [
-        ("note", &metrics.note),
-        ("aside", &metrics.aside),
-        ("source", &metrics.source),
-    ] {
-        if let Some(text) = text {
-            view = view.child(
-                accessible_text(SharedString::from(format!("{id:?}-{key}")), text.clone())
-                    .text_size(TEXT_AUX)
-                    .text_color(color(GRAY)),
-            );
-        }
-    }
-    view.when_some(fraction, |view, fraction| {
-        view.child(progress(
-            SharedString::from(format!("{id:?}-bar")),
-            fraction,
-            window,
-            cx,
-        ))
-    })
-}
-
-fn transfer_meter(
-    id: impl Into<SharedString>,
-    label: &'static str,
-    value: impl Into<SharedString>,
-) -> Div {
-    let id = id.into();
-    v_flex()
-        .min_w(rems(7.))
-        .gap_1()
-        .child(
-            accessible_text(SharedString::from(format!("{id}-label")), label)
-                .text_size(TEXT_AUX)
-                .text_color(color(GRAY)),
-        )
-        .child(
-            accessible_text(SharedString::from(format!("{id}-value")), value)
-                .text_size(TEXT_BODY)
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(color(INK)),
-        )
 }
 
 pub fn disclosure(id: impl Into<ElementId>, open: bool, content: Div) -> AnyElement {

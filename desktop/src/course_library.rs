@@ -2699,13 +2699,10 @@ impl Desktop {
                     ))
                 })
                 .child(
-                    div()
-                        .min_w_0()
-                        .whitespace_normal()
+                    crate::ui::status_line(SharedString::from(format!("{key}-status")), &status)
                         .text_size(TEXT_BODY)
                         .line_height(line)
-                        .text_color(color(GRAY))
-                        .child(status),
+                        .text_color(color(GRAY)),
                 )
                 .into_any_element(),
         ];

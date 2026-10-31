@@ -56,8 +56,13 @@ fn render_symbols() {
         let symbol = Symbol::named(name)
             .unwrap_or_else(|| panic!("assets/symbols.txt: {name} is not a Material Symbol"));
         let icon = symbol.icon().style(Style::Rounded);
-        for icon in [Some(icon), fill.then(|| icon.filled(true))].into_iter().flatten() {
-            let svg = icon.to_svg().unwrap_or_else(|error| panic!("{name}: {error}"));
+        for icon in [Some(icon), fill.then(|| icon.filled(true))]
+            .into_iter()
+            .flatten()
+        {
+            let svg = icon
+                .to_svg()
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
             assets.insert(icon.asset_path(), svg);
         }
         writeln!(
