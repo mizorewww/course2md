@@ -1,48 +1,28 @@
 # States, motion and scrolling
 
-Use for shared controls, asynchronous work, progress, overlays and scroll containers. Read [the source notes](material-sources.md#states-and-motion) and the complete licensed [motion](material/offline/android-motion.md), [ripple](material/offline/web-ripple.md) and [progress](material/offline/android-progress.md) documentation as relevant. Recipes and durations below are **course2md choices** unless explicitly identified as official values.
+Use for asynchronous work, progress, overlays and scroll containers. The kit's components paint their own state layers and play their own motion; this file covers what the app decides.
 
 ## Persistent meaning and transient feedback
 
-Official basis: M3 puts a state overlay between container and content. Selection coexists with hover, focus and press. Only one transient state layer applies at once. Current published opacities are hover 8%, focus 10%, press 10% and drag 16%; older 12% focus/press summaries are not this captured guidance.
-
-Determine persistent meaning first, then feedback:
-
-| Layer | Responsibility |
-| --- | --- |
-| Base / selected container | Durable choice or navigation location |
-| One state overlay | Immediate hover, focus, press or drag feedback in the current content's semantic color |
-| Content | Stationary icon and label with the appropriate on-container color |
-| Focus indicator where needed | Keyboard location, visible within the clipping contract |
-
-For combined pointer states, choose one overlay, for example drag → press → focus → hover. Do not sum four alpha values. Preserve a keyboard focus indicator when it carries additional meaning. Disabled controls perform no action and do not replay hover/press motion. Apply feedback to the actionable child, not its entire non-interactive toolbar.
-
-Selected hover must not replace a tonal base with an unselected background. Selection persists as focus moves or the pointer leaves. Pointer entry, press and release do not change text width or move neighbors. Inspect selected + hover, selected + press and selected + keyboard focus separately in the native app.
-
-Painted bounds include ring, border and overlay. Keep them visible by using consistent inset paint or a shared reserved gutter. Do not remove focus to fix clipping or give each page's edge control a unique spacer.
+Selection is durable; hover, focus and press are transient and sit over it. Selected hover must not replace the selected surface, and selection persists as focus moves or the pointer leaves. Pointer entry, press and release do not change text width or move neighbors. Disabled controls perform no action. Apply feedback to the actionable child, not its entire non-interactive toolbar. Inspect selected + hover, selected + press and selected + keyboard focus separately in the native app.
 
 ## Motion has an object and a reason
 
-Official basis: M3 separates spatial movement from color/opacity effects; effects do not overshoot. It provides a functional Standard scheme for utilitarian products. Transitions still use easing/duration, with coherent direction, stable content and clean fades. Common transitions should not move every child independently.
+Before animating, state what changed and what remains a landmark. Use the kit's `motion`, never a page-local curve or timer. The app does not tune curves or durations.
 
-Before animating, state what changed and what remains a landmark. Use a shared motion role, not a page-local curve/timer. These are project starting recipes, not official token mappings:
-
-| Intent | Animate | Starting range | Stable elements |
+| Intent | Animate | Kit | Stable elements |
 | --- | --- | --- | --- |
-| Hover/press | One low-emphasis state layer | Immediate | Bounds, text and icon |
-| Choice changes | Selected option's shape and color | Fast spatial spring (0.9 / 1400) | Labels, segment widths and neighboring layout |
-| Theme changes | Semantic color roles | Slow effects spring (1 / 800) | Text geometry, chooser height and page location |
-| Expand detail / page region arrives | One content region's reveal/extent or offset, its opacity separately | Default spatial (0.9 / 700) + default effects (1 / 1600) | Group heading and initial reading anchor |
-| Show/dismiss overlay | Overlay as one unit | About 160ms; dismissal may be shorter | Background location and initiating control |
-| Active process | Real loading/progress indicator | While its process is active | Input context, state text and actions |
+| Hover, press | The component's state layer | The component | Bounds, text and icon |
+| Choice changes | The selected option | `ConnectedButtonGroup`, `motion::selection_value` | Labels, segment widths and neighboring layout |
+| Theme changes | Color roles | `theme::advance_component_theme` | Text geometry, chooser height and page location |
+| Expand detail | One content region | `motion::disclosure` | Group heading and initial reading anchor |
+| A page region arrives | One region | `motion::page_enter`, `state_enter` | Navigation and reading anchor |
+| Show or dismiss an overlay | The overlay as one unit | The component | Background location and initiating control |
+| Active process | A real indicator | Progress components | Input context, state text and actions |
 
-The springs are Material's Standard motion scheme tokens (damping / stiffness, from [Material Android motion](material/offline/android-motion.md)), implemented once in `motion.rs` (`Spring`, `FAST_SPATIAL`, `DEFAULT_SPATIAL`, `DEFAULT_EFFECTS`, `SLOW_EFFECTS`); spatial springs move and reshape, effects springs fade color and opacity and never overshoot. A matching constant does not prove good motion. Selectors and gestures retarget from their current presentation value immediately. Do not finish an obsolete animation, queue a new one or restart from an old endpoint after a rapid click.
+Use one principal animated response per intent. A theme click must not also re-enter the whole page, move every label and resize the preset grid. Ordinary category navigation retains stable composition. A disclosure stays subordinate to its heading; do not vertically recenter the whole panel when detail height changes. Keep progress motion within its status region. Avoid overlapping partly transparent paragraphs during replacement.
 
-Use one principal animated response per intent. A theme click must not also re-enter/fade the whole page, move every label and resize the preset grid. Ordinary category navigation retains stable composition with restrained feedback. A disclosure stays subordinate to its heading; do not vertically recenter the whole panel when detail height changes.
-
-Avoid overlapping partly transparent paragraphs during replacement. Keep fades short and orientation clear. Any spatial transition has one coherent direction. Keep progress motion within its status region.
-
-With existing reduced motion, show settled state directly, suppress decorative movement and keep activity text truthful. Never delay an action until animation finishes. Verify retargeting, exit during animation and interrupted asynchronous work.
+With reduced motion, show settled state directly and keep activity text truthful. Never delay an action until animation finishes. Verify retargeting after a rapid click, exit during animation and interrupted asynchronous work.
 
 ## Conversion states and result access
 
@@ -61,11 +41,11 @@ These states stay on the workbench. Preview and conversion are distinct user act
 
 Determinate progress represents actual measured completion, never a timer or equal fractions assigned to unequal backend stages. Without a meaningful denominator, show indeterminate progress and the real phase. Switch when measurements become available without resetting surrounding content.
 
-Use one indicator per grouped operation. Independently started operations may have their own. Keep each process consistent throughout the app. Linear progress belongs to its loading container; circular progress belongs where content is loading or inside the acknowledged action. Long work does not require a blocking wait screen. Do not invent percentages, durations, ETA, hardware availability or successful persistence.
+Use one indicator per grouped operation. Independently started operations may have their own. Linear progress belongs to its loading container; circular progress belongs where content is loading or inside the acknowledged action. Long work does not require a blocking wait screen. Do not invent percentages, durations, ETA, hardware availability or successful persistence.
 
 ## Scrollbars
 
-This is the user's requested **desktop project behavior**, not a claim about M3 mobile scrollbars.
+This is the user's requested desktop behavior.
 
 - Show while the region scrolls, the pointer is over its scrollable area/gutter, or the thumb is dragged. Keep visible through inertia and active dragging even when the pointer leaves.
 - When interaction ends, fade after a short shared idle grace period. Avoid flicker between wheel events. Re-entry cancels pending hiding; dragging retains its hit target.
@@ -77,8 +57,8 @@ Review idle, hovered, wheel-active, inertial, thumb-dragged, post-idle and no-ov
 
 ## Dialogs and contextual help
 
-Official basis: M3 dialogs interrupt for one consequential task. If a dialog scrolls, title/actions remain available and its background does not scroll with it. Critical information must not exist only in a tooltip.
+A dialog interrupts for one consequential task. If it scrolls, title and actions remain available and its background does not scroll with it. Critical information must not exist only in a tooltip.
 
 State the consequence specifically, group fields/errors and provide clear confirm/cancel actions. A scrolling service editor keeps its action and external-request consequence visible. Dismissal restores the initiating context without publishing an unfinished edit. See [business invariants](interaction.md#business-invariants).
 
-Information panels explain in place. They can expand into structured detail without becoming a modal workflow. Share their type, icon, surface and spacing roles across first use, workbench and settings.
+Information panels explain in place. They can expand into structured detail without becoming a modal workflow.
