@@ -846,7 +846,15 @@ impl Desktop {
             .min_h_0()
             .h_full()
             .gap(rem(16.))
-            .children(self.settings_notices(cx))
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .flex_shrink_0()
+                    .pr(rem(12.))
+                    .gap(rem(8.))
+                    .children(self.settings_notices(cx)),
+            )
             .child(
                 div()
                     .id("settings-content-scroll")
@@ -1025,7 +1033,7 @@ impl Desktop {
         );
         let items = actions.iter().map(|action| {
             let (kind, version) = (action.kind, version.clone());
-            let icon = Icon::from(action.icon.clone());
+            let icon = Icon::from(action.icon);
             MaterialMenuItem::new(action.label)
                 .leading(if action.danger {
                     icon.color(color(ColorRole::ERROR))
@@ -1081,7 +1089,7 @@ impl Desktop {
                             (action.kind, context_version.clone(), this.clone());
                         let item = menu.item(
                             PopupMenuItem::new(action.label)
-                                .icon(action.icon.clone().component())
+                                .icon(action.icon.component())
                                 .disabled(action.disabled)
                                 .on_click(move |_, window, cx| {
                                     let _ = this.update(cx, |this, cx| {
@@ -1533,25 +1541,18 @@ impl Desktop {
             prompt: Some(course2md::tr!("添加笔记库位置").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
-            let result = prompt.await;
-            let path = match result {
+            let path = match prompt.await {
                 Ok(Ok(Some(mut paths))) => paths.drain(..).next(),
-                Ok(Ok(None)) => return,
+                Ok(Ok(None)) => None,
                 Ok(Err(error)) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.workspace_error =
-                            Some(course2md::tr!("无法选择文件夹：{}", format!("{error:#}")));
-                        cx.notify();
-                    });
-                    return;
+                    let message = course2md::tr!("无法选择文件夹：{}", format!("{error:#}"));
+                    let _ = this.update(cx, |this, cx| this.storage_location_failed(message, cx));
+                    None
                 }
                 Err(error) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.workspace_error =
-                            Some(course2md::tr!("无法打开文件选择器：{}", error));
-                        cx.notify();
-                    });
-                    return;
+                    let message = course2md::tr!("无法打开文件选择器：{}", error);
+                    let _ = this.update(cx, |this, cx| this.storage_location_failed(message, cx));
+                    None
                 }
             };
             let Some(path) = path else { return };
@@ -1561,26 +1562,15 @@ impl Desktop {
                 .unwrap_or(course2md::tr!("笔记库"))
                 .to_owned();
             let lists = this.update(cx, |this, _| {
-                let workspace = this
-                    .workspace
-                    .as_ref()
-                    .ok_or_else(|| anyhow!(course2md::tr!("笔记库记录暂时不可用")))?;
-                Ok::<_, anyhow::Error>((
-                    workspace
-                        .state
-                        .libraries
-                        .iter()
-                        .map(|l| l.root.clone())
-                        .collect::<Vec<_>>(),
-                    workspace
-                        .state
-                        .libraries
-                        .iter()
-                        .map(|l| l.id.clone())
-                        .collect::<Vec<_>>(),
+                let libraries = &this.workspace.as_ref()?.state.libraries;
+                Some((
+                    libraries.iter().map(|l| l.root.clone()).collect::<Vec<_>>(),
+                    libraries.iter().map(|l| l.id.clone()).collect::<Vec<_>>(),
                 ))
             });
-            let Ok(Ok((roots, ids))) = lists else { return };
+            let Ok(Some((roots, ids))) = lists else {
+                return;
+            };
             let task = crate::spawn_blocking_io(move || {
                 crate::workspace::Workspace::prepare_library(path, name, false, &roots, &ids)
             });
@@ -1589,45 +1579,39 @@ impl Desktop {
                 .await
                 .unwrap_or_else(|_| Err(anyhow!(crate::interrupted())));
             let _ = this.update(cx, |this, cx| {
-                match prepared {
-                    Ok(prepared) => {
-                        let duplicate = prepared.duplicate;
-                        let registered = this
-                            .workspace
-                            .as_mut()
-                            .ok_or_else(|| anyhow!(course2md::tr!("笔记库记录暂时不可用")))
-                            .and_then(|workspace| workspace.register_prepared_library(&prepared));
-                        match registered {
-                            Ok(_) => {
-                                this.message = Some(
-                                    if duplicate {
-                                        course2md::tr!("这个文件夹已是笔记库位置")
-                                    } else {
-                                        course2md::tr!("已添加笔记库位置")
-                                    }
-                                    .into(),
-                                );
-                                this.refresh_library(cx);
+                let registered = prepared.and_then(|prepared| {
+                    let workspace = this
+                        .workspace
+                        .as_mut()
+                        .ok_or_else(|| anyhow!(course2md::tr!("笔记库记录暂时不可用")))?;
+                    workspace.register_prepared_library(&prepared)?;
+                    Ok(prepared.duplicate)
+                });
+                match registered {
+                    Ok(duplicate) => {
+                        this.message = Some(
+                            if duplicate {
+                                course2md::tr!("这个文件夹已是笔记库位置")
+                            } else {
+                                course2md::tr!("已添加笔记库位置")
                             }
-                            Err(error) => {
-                                this.workspace_error = Some(course2md::tr!(
-                                    "笔记库位置尚未添加：{}",
-                                    format!("{error:#}")
-                                ))
-                            }
-                        }
+                            .into(),
+                        );
+                        this.refresh_library(cx);
                     }
-                    Err(error) => {
-                        this.workspace_error = Some(course2md::tr!(
-                            "笔记库位置尚未添加：{}",
-                            format!("{error:#}")
-                        ))
-                    }
+                    Err(error) => this.storage_location_failed(
+                        course2md::tr!("笔记库位置尚未添加：{}", format!("{error:#}")),
+                        cx,
+                    ),
                 }
                 cx.notify();
             });
         })
         .detach();
+    }
+    fn storage_location_failed(&mut self, message: String, cx: &mut Context<Self>) {
+        self.workspace_error = Some(message);
+        cx.notify();
     }
     fn application_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
         v_flex()
@@ -1921,7 +1905,8 @@ impl Desktop {
                         symbols::code(),
                         course2md::tr!("所需程序"),
                     ))
-                    .child(v_flex().w_full().children(programs))
+                    // A list item's own inset would break the group's left edge.
+                    .child(v_flex().mx(rem(-16.)).children(programs))
                     .children(repair),
             )
             .children(self.model_hardware_details(cx))

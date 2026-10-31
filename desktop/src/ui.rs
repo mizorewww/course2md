@@ -151,7 +151,7 @@ enum Control {
     /// A row that goes somewhere or adds something.
     Link(RowClick),
     /// A row that shows or hides its detail in place.
-    Disclosure(bool, RowClick, Div),
+    Disclosure(bool, RowClick, Box<Div>),
     /// Content with the row's inset and no label of its own.
     Content(AnyElement),
     /// A row that draws its own surface, given its corners.
@@ -233,7 +233,7 @@ impl Field {
         Self::new(
             id,
             label,
-            Control::Disclosure(open, Box::new(on_toggle), detail),
+            Control::Disclosure(open, Box::new(on_toggle), Box::new(detail)),
         )
     }
 

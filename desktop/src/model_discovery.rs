@@ -404,17 +404,22 @@ fn parse_models(body: &[u8], authorization: Option<&Secret>) -> Result<Vec<Strin
     Ok(models.into_iter().collect())
 }
 
-/// Shared settings/setup model control. The input remains editable in every
-/// discovery state; a chosen candidate fills it, emitting its ordinary change event.
-/// Candidates list below the field, however many a service returns.
+/// What the model field asks of its form.
+pub enum ModelFieldEvent {
+    Fetch,
+    ToggleChoices,
+    Choose(String),
+}
+
+/// Shared settings/setup model control. The input remains editable in every discovery
+/// state. Candidates list below the field, however many a service returns.
 pub fn model_field(
     id: &'static str,
     input: &gpui::Entity<gpui_kit::component::input::InputState>,
     state: &State,
     disabled: bool,
     error: Option<&str>,
-    on_fetch: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
-    on_show_choices: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+    on_event: impl Fn(&ModelFieldEvent, &mut gpui::Window, &mut gpui::App) + 'static,
     cx: &mut gpui::App,
 ) -> gpui::Div {
     use crate::{symbols, ui};
@@ -423,6 +428,13 @@ pub fn model_field(
     use gpui_kit_material::prelude::*;
 
     let child = |name: &str| SharedString::from(format!("{id}-{name}"));
+    let on_event = std::rc::Rc::new(on_event);
+    let send = |event: fn() -> ModelFieldEvent| {
+        let on_event = on_event.clone();
+        move |_: &gpui::ClickEvent, window: &mut gpui::Window, cx: &mut gpui::App| {
+            on_event(&event(), window, cx)
+        }
+    };
     let fetch_label = if matches!(state.status(), Status::Ready(_)) {
         course2md::tr!("刷新模型列表")
     } else {
@@ -436,7 +448,7 @@ pub fn model_field(
                 IconButton::new(child("fetch"), symbols::refresh(), fetch_label)
                     .button_size(ButtonSize::Small)
                     .disabled(disabled)
-                    .on_click(on_fetch),
+                    .on_click(send(|| ModelFieldEvent::Fetch)),
             )
             .into_any_element()
     };
@@ -471,34 +483,24 @@ pub fn model_field(
                 course2md::tr!("选择模型")
             })
             .disabled(disabled)
-            .on_click(on_show_choices)
+            .on_click(send(|| ModelFieldEvent::ToggleChoices))
             .into_any_element()
     });
     let choices = (state.choices_open && !disabled && !state.models().is_empty()).then(|| {
         let models = state.models().to_vec();
         let count = models.len();
         let selected = input.read(cx).value().to_string();
-        let field = input.clone();
-        // A primed (account-bound) list has no ticket; a cancelled ticket disables
-        // choices already on screen.
-        let current = state.active.as_ref().map(|ticket| ticket.cancelled.clone());
+        let on_event = on_event.clone();
         gpui::uniform_list(child("choices"), count, move |range, _, _| {
             range
                 .map(|index| {
                     let model = models[index].clone();
-                    let (field, current) = (field.clone(), current.clone());
+                    let on_event = on_event.clone();
                     ListItem::new(("model-choice", index), model.clone())
                         .density(ListDensity::Compact)
                         .selected(model == selected)
                         .on_click(move |_, window, cx| {
-                            if current
-                                .as_ref()
-                                .is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
-                            {
-                                return;
-                            }
-                            field
-                                .update(cx, |input, cx| input.set_value(model.clone(), window, cx));
+                            on_event(&ModelFieldEvent::Choose(model.clone()), window, cx)
                         })
                 })
                 .collect()

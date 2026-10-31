@@ -145,6 +145,15 @@ impl Desktop {
             }))
     }
 
+    fn has_services(&self, purpose: ServicePurpose) -> bool {
+        self.preferences.latest_versions().values().any(|version| {
+            version.config.protocol.purpose() == purpose
+                && !self
+                    .preferences
+                    .service_retired_in_snapshot(&version.service_id)
+        })
+    }
+
     /// The default service of a purpose, as a row of the generation page.
     pub(super) fn service_field(
         &self,
@@ -152,10 +161,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> ui::Field {
         let index = purpose as usize;
-        let label = match purpose {
-            ServicePurpose::Speech => course2md::tr!("语音服务"),
-            ServicePurpose::Ai => course2md::tr!("AI 服务"),
-        };
+        let label = purpose_label(purpose);
         let has_services = self.preferences.latest_versions().values().any(|version| {
             version.config.protocol.purpose() == purpose
                 && !self
@@ -169,10 +175,7 @@ impl Desktop {
                 label,
                 material_button(("configure-service", index), ButtonVariant::Outlined)
                     .icon(symbols::add())
-                    .child(match purpose {
-                        ServicePurpose::Speech => course2md::tr!("添加语音服务"),
-                        ServicePurpose::Ai => course2md::tr!("添加 AI 服务"),
-                    })
+                    .child(add_service_label(purpose))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_settings_service_editor(purpose, None, window, cx);
                     })),
@@ -216,14 +219,8 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Div {
         let index = purpose as usize;
-        let has_services = self.preferences.latest_versions().values().any(|version| {
-            version.config.protocol.purpose() == purpose
-                && !self
-                    .preferences
-                    .service_retired_in_snapshot(&version.service_id)
-        });
         let mut view = v_flex().w_full().min_w_0().gap(rem(8.));
-        if has_services {
+        if self.has_services(purpose) {
             let (version, detail, menu) = self.service_choices(purpose, true, cx);
             let scale = TileScale::Compact;
             let popup = ElementId::from(("task-service-choice", index));
@@ -235,10 +232,7 @@ impl Desktop {
                 Some(detail) => format!("{name} · {detail}").into(),
                 None => name,
             };
-            let label = match purpose {
-                ServicePurpose::Speech => course2md::tr!("语音服务"),
-                ServicePurpose::Ai => course2md::tr!("AI 服务"),
-            };
+            let label = purpose_label(purpose);
             let trigger = scale
                 .button(("task-service-trigger", index), [true; 4])
                 .accessibility_label(label)
@@ -257,10 +251,7 @@ impl Desktop {
             view = view.child(
                 material_button(("configure-task-service", index), ButtonVariant::Outlined)
                     .icon(symbols::add())
-                    .child(match purpose {
-                        ServicePurpose::Speech => course2md::tr!("添加语音服务"),
-                        ServicePurpose::Ai => course2md::tr!("添加 AI 服务"),
-                    })
+                    .child(add_service_label(purpose))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_task_service_editor(purpose, window, cx)
                     })),
@@ -1236,6 +1227,8 @@ impl Desktop {
                         if !persisted {
                             editor.status = Some(course2md::tr!("测试结果尚未保存").into());
                         }
+                        // The result is at the form's end: bring it into view.
+                        editor.scroll.scroll_to_bottom();
                     }
                 }
                 cx.notify();
@@ -1724,6 +1717,20 @@ impl Desktop {
             }
         }
         cx.notify();
+    }
+}
+
+fn purpose_label(purpose: ServicePurpose) -> &'static str {
+    match purpose {
+        ServicePurpose::Speech => course2md::tr!("语音服务"),
+        ServicePurpose::Ai => course2md::tr!("AI 服务"),
+    }
+}
+
+fn add_service_label(purpose: ServicePurpose) -> &'static str {
+    match purpose {
+        ServicePurpose::Speech => course2md::tr!("添加语音服务"),
+        ServicePurpose::Ai => course2md::tr!("添加 AI 服务"),
     }
 }
 

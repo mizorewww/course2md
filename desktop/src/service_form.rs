@@ -473,13 +473,31 @@ impl Desktop {
             &form.models,
             disabled,
             form.error(FormField::Model),
-            cx.listener(move |this, _, _, cx| this.fetch_service_models(owner, cx)),
-            cx.listener(move |this, _, _, cx| {
-                if let Some(form) = this.service_form_mut(owner) {
-                    form.models.choices_open = !form.models.choices_open;
-                }
-                cx.notify();
-            }),
+            cx.listener(
+                move |this, event: &model_discovery::ModelFieldEvent, window, cx| {
+                    use model_discovery::ModelFieldEvent::*;
+                    match event {
+                        Fetch => this.fetch_service_models(owner, cx),
+                        ToggleChoices => {
+                            if let Some(form) = this.service_form_mut(owner) {
+                                form.models.choices_open = !form.models.choices_open;
+                            }
+                        }
+                        // A value set from here emits no change event, so this is the edit.
+                        Choose(model) => {
+                            if let Some(form) = this.service_form_mut(owner) {
+                                form.models.choices_open = false;
+                                form.errors.clear();
+                                form.input(FormField::Model).update(cx, |input, cx| {
+                                    input.set_value(model.clone(), window, cx)
+                                });
+                            }
+                            this.service_form_edited(owner, true);
+                        }
+                    }
+                    cx.notify();
+                },
+            ),
             cx,
         )
     }

@@ -122,26 +122,47 @@ pub(crate) fn autofill_input(
 }
 
 impl Desktop {
-    /// Read the account status from the local token file (no network), still off the render thread.
-    pub(crate) fn codex_refresh_status(&mut self, surface: CodexSurface, cx: &mut Context<Self>) {
+    /// Runs one account action off the UI thread. Its result returns only while it is
+    /// still the current action; a busy account starts nothing.
+    fn codex_work<T: Send + 'static>(
+        &mut self,
+        surface: CodexSurface,
+        work: CodexWork,
+        action: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
+        then: impl FnOnce(&mut Self, anyhow::Result<T>, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
         if self.codex.busy() {
             return;
         }
-        let generation = self.codex.begin(surface, CodexWork::Checking);
-        let task = crate::spawn_blocking_io(|| {
-            course2md::login::codex::status().map_err(|error| error.to_string())
-        });
+        let generation = self.codex.begin(surface, work);
+        let task = crate::spawn_blocking_io(action);
         cx.spawn(async move |this, cx| {
             let result = task
                 .recv()
                 .await
-                .unwrap_or_else(|_| Err(crate::interrupted().into()));
+                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
             let _ = this.update(cx, |this, cx| {
-                if !this.codex.current(generation, CodexWork::Checking) {
+                if !this.codex.current(generation, work) {
                     return;
                 }
                 this.codex.working = None;
                 this.codex.authorize_cancel = None;
+                then(this, result, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Read the account status from the local token file (no network), still off the render thread.
+    pub(crate) fn codex_refresh_status(&mut self, surface: CodexSurface, cx: &mut Context<Self>) {
+        self.codex_work(
+            surface,
+            CodexWork::Checking,
+            course2md::login::codex::status,
+            move |this, result, cx| {
                 match result {
                     Ok(status) => this.codex.status = Some(status),
                     Err(error) => this
@@ -149,16 +170,14 @@ impl Desktop {
                         .fail(course2md::tr!("暂时无法读取 Codex 登录状态：{}", error)),
                 }
                 // A connected Codex surface without a catalog fetches it next (an empty model input takes the first candidate).
-                let needs_catalog = matches!(this.codex.status, Some(LoginStatus::Connected))
-                    && this.codex_form_needs_catalog(surface);
-                if needs_catalog {
+                if matches!(this.codex.status, Some(LoginStatus::Connected))
+                    && this.codex_form_needs_catalog(surface)
+                {
                     this.codex_refresh_models(surface, cx);
                 }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+            },
+            cx,
+        );
     }
 
     pub(crate) fn codex_import(&mut self, surface: CodexSurface, cx: &mut Context<Self>) {
@@ -191,58 +210,44 @@ impl Desktop {
         + 'static,
         cx: &mut Context<Self>,
     ) {
-        if self.codex.busy() {
-            return;
-        }
-        let generation = self.codex.begin(surface, work);
-        let task = crate::spawn_blocking_io(action);
-        cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let _ = this.update(cx, |this, cx| {
-                if !this.codex.current(generation, work) {
-                    return;
+        self.codex_work(
+            surface,
+            work,
+            action,
+            move |this, result, cx| match result {
+                Ok(catalog) => {
+                    this.codex.status = Some(LoginStatus::Connected);
+                    if catalog.catalog_is_fallback {
+                        this.codex
+                            .inform(course2md::tr!("模型目录暂不可用，已使用默认模型").into());
+                    } else {
+                        this.codex.notice = None;
+                    }
+                    this.codex_apply_catalog(surface, catalog.models, cx);
+                    // Re-read the login so the account details show instead of a generic placeholder.
+                    this.codex_refresh_status(surface, cx);
                 }
-                this.codex.working = None;
-                this.codex.authorize_cancel = None;
-                match result {
-                    Ok(catalog) => {
-                        this.codex.status = Some(LoginStatus::Connected);
-                        if catalog.catalog_is_fallback {
-                            this.codex.inform(course2md::tr!("模型目录暂不可用，已使用默认模型").into());
+                Err(error) => {
+                    let importing = work == CodexWork::Importing;
+                    this.codex.fail(if !login_required(&error) {
+                        if importing {
+                            course2md::tr!("导入 Codex 登录未完成：{}", format!("{error:#}"))
                         } else {
-                            this.codex.notice = None;
+                            course2md::tr!("浏览器授权未完成：{}", format!("{error:#}"))
                         }
-                        this.codex_apply_catalog(surface, catalog.models, cx);
-                        // Re-read the login so the account details show instead of a generic placeholder.
-                        this.codex_refresh_status(surface, cx);
-                    }
-                    Err(error) => {
-                        let message = if login_required(&error) {
-                            // Missing or expired login: point to the in-app connect action, not a CLI command.
-                            match work {
-                                CodexWork::Importing => {
-                                    course2md::tr!("命令行 Codex 的登录已失效，请先在 Codex 中重新登录再导入，或改用浏览器授权")
-                                        .into()
-                                }
-                                _ => course2md::tr!("Codex 登录已失效，请重新连接").into(),
-                            }
-                        } else {
-                            match work {
-                                CodexWork::Importing => course2md::tr!("导入 Codex 登录未完成：{}", format!("{error:#}")),
-                                _ => course2md::tr!("浏览器授权未完成：{}", format!("{error:#}")),
-                            }
-                        };
-                        this.codex.fail(message);
-                    }
+                    } else if importing {
+                        // Missing or expired login: point to the in-app connect action, not a CLI command.
+                        course2md::tr!(
+                            "命令行 Codex 的登录已失效，请先在 Codex 中重新登录再导入，或改用浏览器授权"
+                        )
+                        .into()
+                    } else {
+                        course2md::tr!("Codex 登录已失效，请重新连接").into()
+                    });
                 }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+            },
+            cx,
+        );
     }
 
     /// Fetch the account's model catalog again with the saved login.
@@ -258,84 +263,57 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let generation = self.codex.begin(surface, CodexWork::Models);
-        let task = crate::spawn_blocking_io(course2md::login::codex::refresh_models_for_desktop);
-        cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let _ = this.update(cx, |this, cx| {
-                if !this.codex.current(generation, CodexWork::Models) {
-                    return;
+        self.codex_work(
+            surface,
+            CodexWork::Models,
+            course2md::login::codex::refresh_models_for_desktop,
+            move |this, result, cx| match result {
+                Ok(catalog) => {
+                    this.codex.notice = None;
+                    this.codex_apply_catalog(surface, catalog, cx);
                 }
-                this.codex.working = None;
-                this.codex.authorize_cancel = None;
-                match result {
-                    Ok(catalog) => {
-                        this.codex.notice = None;
-                        this.codex_apply_catalog(surface, catalog, cx);
-                    }
-                    Err(error) => {
-                        let message = if login_required(&error) {
-                            // The service refused the saved login: the account
-                            // state follows, so sign-in is offered again.
-                            this.codex.status = Some(LoginStatus::Expired);
-                            course2md::tr!("ChatGPT 登录已失效，请重新登录").to_string()
-                        } else {
-                            course2md::tr!(
-                                "暂时无法获取模型列表，可以直接填写模型名称（{}）",
-                                error.root_cause().to_string()
-                            )
-                        };
-                        this.codex_form_models_failed(surface, message);
-                    }
+                Err(error) => {
+                    let message = if login_required(&error) {
+                        // The service refused the saved login: the account
+                        // state follows, so sign-in is offered again.
+                        this.codex.status = Some(LoginStatus::Expired);
+                        course2md::tr!("ChatGPT 登录已失效，请重新登录").to_string()
+                    } else {
+                        course2md::tr!(
+                            "暂时无法获取模型列表，可以直接填写模型名称（{}）",
+                            error.root_cause().to_string()
+                        )
+                    };
+                    this.codex_form_models_failed(surface, message);
                 }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+            },
+            cx,
+        );
     }
 
     /// Sign out of Codex: delete the CLI token copy and unbind defaults that point at the Codex service.
     pub(crate) fn codex_logout(&mut self, surface: CodexSurface, cx: &mut Context<Self>) {
-        if self.codex.busy() {
-            return;
-        }
-        let generation = self.codex.begin(surface, CodexWork::LoggingOut);
-        let task = crate::spawn_blocking_io(course2md::login::codex::remove_credentials);
-        cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let _ = this.update(cx, |this, cx| {
-                if !this.codex.current(generation, CodexWork::LoggingOut) {
-                    return;
-                }
-                this.codex.working = None;
-                this.codex.authorize_cancel = None;
-                match result {
-                    Ok(_) => {
-                        this.codex.status = Some(LoginStatus::Disconnected);
-                        if this.codex_detach_default_service() {
-                            this.codex.inform(
-                                course2md::tr!("已退出 Codex 登录；默认 AI 服务已解除绑定").into(),
-                            );
-                        }
-                        this.codex_forms_logged_out();
+        self.codex_work(
+            surface,
+            CodexWork::LoggingOut,
+            course2md::login::codex::remove_credentials,
+            |this, result, _| match result {
+                Ok(_) => {
+                    this.codex.status = Some(LoginStatus::Disconnected);
+                    if this.codex_detach_default_service() {
+                        this.codex.inform(
+                            course2md::tr!("已退出 Codex 登录；默认 AI 服务已解除绑定").into(),
+                        );
                     }
-                    Err(error) => {
-                        this.codex
-                            .fail(course2md::tr!("退出登录尚未完成：{}", format!("{error:#}")));
-                    }
+                    this.codex_forms_logged_out();
                 }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+                Err(error) => {
+                    this.codex
+                        .fail(course2md::tr!("退出登录尚未完成：{}", format!("{error:#}")));
+                }
+            },
+            cx,
+        );
     }
 
     /// Unbind the default AI service when it points at Codex; returns whether anything changed.

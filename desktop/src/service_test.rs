@@ -550,54 +550,69 @@ fn words(text: &str) -> String {
         .join(" ")
 }
 
+fn has_word(text: &str, word: &str) -> bool {
+    text.split_whitespace().any(|actual| actual == word)
+}
+
+fn filled(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+}
+
 fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, String)> {
-    let mismatch = |message: &str| (TestOutcome::SampleMismatch, message.to_owned());
+    let mismatch = |message: &str| Err((TestOutcome::SampleMismatch, message.to_owned()));
     let contract = |message: &str| (TestOutcome::ContractMismatch, message.to_owned());
     match kind {
         TestKind::Speech => {
             let text = words(content).replace("7", "seven");
             if !["blue", "notebook", "seven", "pages"]
                 .iter()
-                .all(|word| text.split_whitespace().any(|actual| actual == *word))
+                .all(|word| has_word(&text, word))
             {
-                return Err(mismatch(course2md::tr!(
+                return mismatch(course2md::tr!(
                     "内置音频：The blue notebook contains seven pages.；回应未保留其中的关键信息"
-                )));
+                ));
             }
         }
         TestKind::Proofread | TestKind::Vision => {
             let pairs = course2md::llm::parse_segments(content)
                 .ok_or_else(|| contract(course2md::tr!("需要 segments 列表，每项有 id 与 text")))?;
+            let mut ids = pairs.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+            ids.sort_unstable();
             let expected: &[usize] = if kind == TestKind::Proofread {
                 &[0, 1]
             } else {
                 &[0]
             };
-            let mut ids = pairs.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-            ids.sort_unstable();
             if ids != expected || pairs.iter().any(|(_, text)| text.trim().is_empty()) {
                 return Err(contract(course2md::tr!(
                     "返回段落 ID 必须与内置输入一一对应，且每段包含有效文字"
                 )));
             }
-            let first = words(&pairs.iter().find(|(id, _)| *id == 0).unwrap().1);
+            let segment = |id: usize| {
+                pairs
+                    .iter()
+                    .find(|(found, _)| *found == id)
+                    .map(|(_, text)| words(text))
+                    .unwrap_or_default()
+            };
+            let first = segment(0);
             if kind == TestKind::Vision {
-                if !first.split_whitespace().any(|word| word == "blue")
-                    || first.split_whitespace().any(|word| word == "red")
-                {
-                    return Err(mismatch(course2md::tr!(
+                if !has_word(&first, "blue") || has_word(&first, "red") {
+                    return mismatch(course2md::tr!(
                         "内置图片为蓝色卡片，校对后应将原文的 red 改为 blue"
-                    )));
+                    ));
                 }
             } else {
-                let second = words(&pairs.iter().find(|(id, _)| *id == 1).unwrap().1);
+                let second = segment(1);
                 if !(first.contains("has three books") || first.contains("has 3 books"))
                     || !second.contains("water")
                     || !second.contains("celsius")
                 {
-                    return Err(mismatch(course2md::tr!(
+                    return mismatch(course2md::tr!(
                         "第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意"
-                    )));
+                    ));
                 }
             }
         }
@@ -611,38 +626,24 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
                     course2md::tr!("需要摘要 JSON 对象")
                 })
             })?;
-            let tldr = value
-                .get("tldr")
-                .and_then(Value::as_str)
-                .filter(|text| !text.trim().is_empty());
-            let points = value
-                .get("key_points")
-                .and_then(Value::as_array)
-                .filter(|points| {
-                    !points.is_empty()
-                        && points
-                            .iter()
-                            .all(|point| point.as_str().is_some_and(|text| !text.trim().is_empty()))
+            let list = |name| {
+                value
+                    .get(name)
+                    .and_then(Value::as_array)
+                    .filter(|items| !items.is_empty())
+            };
+            let structured = filled(value.get("tldr"))
+                && list("key_points")
+                    .is_some_and(|points| points.iter().all(|point| filled(Some(point))))
+                && list("outline").is_some_and(|items| {
+                    items.iter().all(|item| {
+                        item.get("t")
+                            .is_some_and(|time| time.is_number() || time.is_string())
+                            && filled(item.get("title"))
+                            && filled(item.get("detail"))
+                    })
                 });
-            let outline = value
-                .get("outline")
-                .and_then(Value::as_array)
-                .filter(|items| {
-                    !items.is_empty()
-                        && items.iter().all(|item| {
-                            item.get("t")
-                                .is_some_and(|time| time.is_number() || time.is_string())
-                                && item
-                                    .get("title")
-                                    .and_then(Value::as_str)
-                                    .is_some_and(|text| !text.trim().is_empty())
-                                && item
-                                    .get("detail")
-                                    .and_then(Value::as_str)
-                                    .is_some_and(|text| !text.trim().is_empty())
-                        })
-                });
-            if tldr.is_none() || points.is_none() || outline.is_none() {
+            if !structured {
                 return Err(contract(course2md::tr!(
                     "需要有效的 tldr、key_points 和带时间的 outline"
                 )));
@@ -652,9 +653,9 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
                 .iter()
                 .all(|word| text.contains(word))
             {
-                return Err(mismatch(course2md::tr!(
+                return mismatch(course2md::tr!(
                     "短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息"
-                )));
+                ));
             }
         }
     }
