@@ -576,9 +576,9 @@ fn summarize_note(
         ))?;
         let file = out.join(format!(
             "{}.summary.md",
-            course2md::summarize::sanitize_filename(&saved.meta.title)
+            course2md::summary_doc::sanitize_filename(&saved.meta.title)
         ));
-        let text = course2md::summarize::render_standalone_md(&saved.meta.title, &summary);
+        let text = course2md::summary_doc::render_standalone_md(&saved.meta.title, &summary);
         course2md::checkpoint::atomic_write(&file, text.as_bytes())?;
         if !progress::is_quiet() {
             println!("已导出摘要 / Summary exported: {}", file.display());

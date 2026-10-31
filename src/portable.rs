@@ -170,7 +170,7 @@ pub(crate) fn write_document(
         OutputFormat::Md => {
             let mut text = render::render_markdown(&portable.meta, &portable.sections);
             if let Some(summary) = &portable.summary {
-                text = crate::summarize::insert_into_md(&text, summary);
+                text = crate::summary_doc::insert_into_md(&text, summary);
             }
             if let Some(name) = &local_file {
                 text.push_str(&crate::tr!(
@@ -195,7 +195,7 @@ pub(crate) fn write_document(
         OutputFormat::Html => {
             let mut text = render::render_html(&portable.meta, &portable.sections);
             if let Some(summary) = &portable.summary {
-                text = crate::summarize::insert_into_html(&text, summary);
+                text = crate::summary_doc::insert_into_html(&text, summary);
             }
             file.write_all(text.as_bytes())?;
         }

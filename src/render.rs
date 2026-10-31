@@ -237,11 +237,11 @@ fn document_language(sections: &[Section]) -> &'static str {
 }
 
 /// Note text with its formulas typeset; everything else escaped.
-pub(crate) fn rich(s: &str) -> String {
+pub fn rich(s: &str) -> String {
     crate::math::html(s, esc)
 }
 
-pub(crate) fn esc(s: &str) -> String {
+pub fn esc(s: &str) -> String {
     // 单趟扫描：四趟 replace 会反复分配与搬移整串
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

@@ -41,6 +41,7 @@ pub mod scene;
 pub mod settings;
 pub mod subtitle;
 pub mod summarize;
+pub mod summary_doc;
 #[cfg(test)]
 mod test_http;
 pub mod timeline;

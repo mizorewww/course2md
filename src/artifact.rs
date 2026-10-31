@@ -287,7 +287,7 @@ pub(crate) fn publish(
     )?;
     let mut markdown = render::render_markdown(meta, sections);
     if let Some(summary) = summary {
-        markdown = crate::summarize::insert_into_md(&markdown, summary);
+        markdown = crate::summary_doc::insert_into_md(&markdown, summary);
     }
     atomic_write_shared(&staging.path().join("course.md"), markdown.as_bytes())?;
     meta.save(&staging.path().join("meta.json"))?;

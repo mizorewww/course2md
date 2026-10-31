@@ -209,7 +209,7 @@ impl ErrorCode {
             return Self::InvalidConfiguration;
         }
         match error
-            .downcast_ref::<crate::dispatch::Failure>()
+            .downcast_ref::<crate::outcome::Failure>()
             .map(|failure| failure.kind)
         {
             Some(FailureKind::Authentication) => Self::Authentication,
