@@ -42,8 +42,6 @@ const PARAGRAPH_GAP_SECS: f64 = 3.5;
 /// 段落组织：单段最大字符数（超过则强制分段）。
 const MAX_PARAGRAPH_CHARS: usize = 420;
 
-pub(crate) use subtitle_parse::parse_timestamp;
-
 /// timeline.jsonl 的一行。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]

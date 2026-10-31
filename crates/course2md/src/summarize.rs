@@ -57,7 +57,7 @@ fn parse_time(v: Option<&serde_json::Value>) -> f64 {
     // 字符串形式（"01:30" / "120s" / "[90s]" 等）走共享的宽容解析；
     // 解析失败按 0.0 处理（outline 条目缺时间不至于丢弃整条摘要）
     v.and_then(|x| x.as_str())
-        .and_then(crate::timeline::parse_timestamp)
+        .and_then(subtitle_parse::parse_timestamp)
         .unwrap_or(0.0)
 }
 

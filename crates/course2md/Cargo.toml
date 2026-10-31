@@ -6,6 +6,7 @@ description = "Turn online course videos (YouTube/Bilibili) into image+transcrip
 license.workspace = true
 
 [dependencies]
+c2m-core = { path = "../c2m-core" }
 c2m-i18n = { path = "../c2m-i18n" }
 anyhow.workspace = true
 base64.workspace = true

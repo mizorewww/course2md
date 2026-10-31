@@ -1142,7 +1142,7 @@ impl Task<'_> {
             report.succeeded = 0;
             report.failed = report.attempted;
         }
-        outcomes.proofreading = Outcome::from_report(&report);
+        outcomes.proofreading = outcome_from_report(&report);
         progress::done(Stage::Llm);
         Ok(sections)
     }
@@ -1188,7 +1188,7 @@ impl Task<'_> {
                 ),
                 &report,
             ),
-            ..Outcome::from_report(&report)
+            ..outcome_from_report(&report)
         };
         progress::done(Stage::Translate);
         Ok(sections)
@@ -1375,30 +1375,27 @@ fn report_message(base: String, report: &crate::llm::PolishReport) -> Option<Str
     })
 }
 
-impl Outcome {
-    /// Map a polish run onto the version outcome. The impl lives next to its
-    /// only callers; the type itself belongs to the version manifest.
-    pub fn from_report(report: &crate::llm::PolishReport) -> Self {
-        Self {
-            kind: None,
-            status: if report.failed == 0 {
-                Status::Succeeded
-            } else if report.succeeded > 0 {
-                Status::Partial
-            } else {
-                Status::Failed
-            },
-            message: report_message(
-                tr!(
-                    "校对未全部完成（{}/{} 失败），原文已保留",
-                    report.failed,
-                    report.attempted
-                ),
-                report,
+/// Map a polish run onto the version outcome.
+fn outcome_from_report(report: &crate::llm::PolishReport) -> Outcome {
+    Outcome {
+        kind: None,
+        status: if report.failed == 0 {
+            Status::Succeeded
+        } else if report.succeeded > 0 {
+            Status::Partial
+        } else {
+            Status::Failed
+        },
+        message: report_message(
+            tr!(
+                "校对未全部完成（{}/{} 失败），原文已保留",
+                report.failed,
+                report.attempted
             ),
-            completed: Some(report.succeeded),
-            total: Some(report.attempted),
-        }
+            report,
+        ),
+        completed: Some(report.succeeded),
+        total: Some(report.attempted),
     }
 }
 
@@ -1647,7 +1644,7 @@ mod tests {
             failed: 137,
             note: Some("HTTP 404 model not found".into()),
         };
-        let outcome = super::Outcome::from_report(&report);
+        let outcome = super::outcome_from_report(&report);
         assert_eq!(outcome.status, crate::artifact::Status::Partial);
         let msg = outcome.message.unwrap();
         assert!(msg.contains("137/200"), "应包含失败计数: {msg}");
@@ -1659,7 +1656,7 @@ mod tests {
             failed: 0,
             note: None,
         };
-        let outcome = super::Outcome::from_report(&clean);
+        let outcome = super::outcome_from_report(&clean);
         assert_eq!(outcome.status, crate::artifact::Status::Succeeded);
         assert!(outcome.message.is_none());
     }

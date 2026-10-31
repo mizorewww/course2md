@@ -1,0 +1,16 @@
+[package]
+name = "c2m-core"
+version.workspace = true
+edition.workspace = true
+description = "Types and small helpers every other crate shares"
+license.workspace = true
+publish = false
+
+[dependencies]
+c2m-i18n = { path = "../c2m-i18n" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
