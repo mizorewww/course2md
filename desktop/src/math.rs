@@ -1,7 +1,6 @@
-//! LaTeX formulas in notes: `$…$` inside a sentence and `$$…$$` on a line of
-//! its own, typeset by RaTeX into monochrome SVG. The SVG is served through the
-//! app's asset source and drawn as a tinted mask, so formulas follow the theme
-//! and stay sharp at every text scale.
+//! LaTeX formulas in notes, typeset by RaTeX into monochrome SVG. The SVG is served
+//! through the app's asset source and drawn as a tinted mask, so formulas follow the
+//! theme and stay sharp at every text scale.
 use gpui::*;
 use std::{
     borrow::Cow,
@@ -15,10 +14,10 @@ pub use course2md::math::{Piece, pieces};
 /// `height` below the top.
 #[derive(Clone, Debug)]
 pub struct Formula {
-    path: SharedString,
-    width: f32,
-    height: f32,
-    depth: f32,
+    pub path: SharedString,
+    pub width: f32,
+    pub height: f32,
+    pub depth: f32,
 }
 
 const ASSET_PREFIX: &str = "math/";
@@ -53,44 +52,30 @@ static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
 });
 
 /// The typeset formula, or `None` when RaTeX cannot parse it; the note then
-/// shows the source. Results are cached; `prepare` warms the cache off the UI thread.
+/// shows the source. Results are cached. The note's parser asks off the UI thread.
 pub fn formula(latex: &str, display: bool) -> Option<Formula> {
     let key = (latex.to_owned(), display);
     if let Some(found) = CACHE.lock().ok()?.formulas.get(&key) {
         return found.clone();
     }
-    let typeset = typeset(latex, display);
+    let typeset = course2md::math::typeset(latex, display);
     let mut cache = CACHE.lock().ok()?;
     cache.reset_if_full();
-    let formula = typeset.map(|(svg, width, height, depth)| {
+    let formula = typeset.map(|typeset| {
         let path = SharedString::from(format!("{ASSET_PREFIX}{}.svg", cache.next_path));
         cache.next_path += 1;
-        cache.svgs.insert(path.clone(), svg.into_bytes().into());
+        cache
+            .svgs
+            .insert(path.clone(), typeset.svg.into_bytes().into());
         Formula {
             path,
-            width,
-            height,
-            depth,
+            width: typeset.width,
+            height: typeset.height,
+            depth: typeset.depth,
         }
     });
     cache.formulas.insert(key, formula.clone());
     formula
-}
-
-/// Typesets every formula in `texts`, so opening a note does not do it while drawing.
-pub fn prepare<'a>(texts: impl IntoIterator<Item = &'a str>) {
-    for text in texts {
-        for piece in pieces(text) {
-            if let Piece::Math { latex, display } = piece {
-                formula(latex, display);
-            }
-        }
-    }
-}
-
-fn typeset(latex: &str, display: bool) -> Option<(String, f32, f32, f32)> {
-    let formula = course2md::math::typeset(latex, display)?;
-    Some((formula.svg, formula.width, formula.height, formula.depth))
 }
 
 /// The asset path of slice `index` of `count` equal vertical slices of the
@@ -163,28 +148,6 @@ pub fn asset(path: &str) -> Option<Cow<'static, [u8]>> {
     cache.svgs.get(path).map(|svg| Cow::Owned(svg.to_vec()))
 }
 
-impl Formula {
-    /// The asset path its SVG is served under (see `note_text`, which paints it).
-    pub fn path(&self) -> SharedString {
-        self.path.clone()
-    }
-
-    /// Its width in em.
-    pub fn width(&self) -> f32 {
-        self.width
-    }
-
-    /// From its top to its baseline, in em.
-    pub fn height(&self) -> f32 {
-        self.height
-    }
-
-    /// Below its baseline, in em.
-    pub fn depth(&self) -> f32 {
-        self.depth
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{CACHE, CACHE_LIMIT, asset, formula, slice_svg, tile};
@@ -198,8 +161,8 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 0 100 40" width="100pt" height="40pt"><path d="M0 0"/></svg>"#
         );
         let typeset = formula("a+b+c", false).unwrap();
-        assert_eq!(tile(&typeset.path(), 0, 1).unwrap(), typeset.path());
-        let second = tile(&typeset.path(), 1, 2).unwrap();
+        assert_eq!(tile(&typeset.path, 0, 1).unwrap(), typeset.path);
+        let second = tile(&typeset.path, 1, 2).unwrap();
         assert!(asset(&second).is_some());
     }
 
@@ -211,7 +174,7 @@ mod tests {
         let _filling = FILLING.lock().unwrap();
         for index in 0..=CACHE_LIMIT {
             let typeset = formula("x^2+y^2", false).unwrap();
-            assert!(tile(&typeset.path(), index, CACHE_LIMIT * 2).is_some());
+            assert!(tile(&typeset.path, index, CACHE_LIMIT * 2).is_some());
             assert!(CACHE.lock().unwrap().svgs.len() <= CACHE_LIMIT);
         }
     }

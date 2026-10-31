@@ -16,6 +16,7 @@ mod codex_ui;
 mod conversion;
 mod course_library;
 mod credentials;
+#[allow(dead_code)]
 mod focus_scroll;
 mod folder_tree;
 mod i18n;
@@ -40,6 +41,7 @@ mod provider_serde;
 mod reader_images;
 mod reader_navigation;
 mod reader_ui;
+#[allow(dead_code)]
 mod scroll;
 mod service_test;
 mod settings_ui;
@@ -1407,7 +1409,6 @@ impl Desktop {
                         settle_reader_notice(&mut this.message, &mut this.reader_failure_notice);
                         if reader_origin.is_none() {
                             this.result_tab = 0;
-                            this.sync_reader_tab_stops();
                         }
                         this.preview = Some(Rc::new(preview));
                         this.ensure_reader_data(cx);

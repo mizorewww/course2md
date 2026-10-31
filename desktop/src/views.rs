@@ -38,11 +38,6 @@ pub(crate) fn title_bar_trailing(window: &Window) -> f32 {
     CaptionButtons::trailing(window)
 }
 
-/// Whether the window draws its caption buttons itself, taking room from the bar.
-pub(crate) fn draws_captions(window: &Window) -> bool {
-    caption(window) != Caption::System
-}
-
 /// The window's title bar on the page's ground. It moves the window and draws what
 /// caption buttons the platform lacks; children call `title_bar_control` to take their
 /// presses. The Linux close button asks first, as the window manager's close does.
@@ -750,7 +745,7 @@ pub fn video_site_name(url: &str) -> Option<&'static str> {
 pub(crate) struct DesktopView<F> {
     desktop: Entity<Desktop>,
     render: F,
-    _observation: Option<Subscription>,
+    _observation: Subscription,
 }
 
 impl<F> DesktopView<F>
@@ -760,17 +755,7 @@ where
     /// Repaints whenever the desktop changes.
     pub(crate) fn observing(desktop: Entity<Desktop>, cx: &mut App, render: F) -> Entity<Self> {
         cx.new(|cx| Self {
-            _observation: Some(cx.observe(&desktop, |_, _, cx| cx.notify())),
-            desktop,
-            render,
-        })
-    }
-
-    /// Repaints only when notified directly, for parts whose state changes
-    /// far less often than the desktop.
-    pub(crate) fn notified(desktop: Entity<Desktop>, cx: &mut App, render: F) -> Entity<Self> {
-        cx.new(|_| Self {
-            _observation: None,
+            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
             desktop,
             render,
         })

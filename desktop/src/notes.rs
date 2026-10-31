@@ -252,16 +252,6 @@ pub enum PreviewBlock {
     },
 }
 impl PreviewBlock {
-    /// Summary blocks are identified here once, not by anchor prefixes in the reader.
-    pub fn is_summary(&self) -> bool {
-        match self {
-            Self::Heading { anchor, .. } => anchor == "summary",
-            Self::Paragraph { anchor, .. } => {
-                anchor == "summary-tldr" || anchor.starts_with("key-point-")
-            }
-            Self::Image(_) | Self::Translation { .. } => false,
-        }
-    }
     /// Section headings are the document's own frame timestamps.
     pub fn is_timestamp_heading(&self) -> bool {
         match self {
@@ -385,7 +375,7 @@ pub fn read_preview(mut course: Course) -> Result<Preview> {
         plain_text.push_str("\n\n");
         for (i, point) in summary.key_points.iter().enumerate() {
             blocks.push(PreviewBlock::Paragraph {
-                text: format!("• {point}").into(),
+                text: point.clone().into(),
                 anchor: format!("key-point-{i}"),
             });
             plain_text.push_str(point);

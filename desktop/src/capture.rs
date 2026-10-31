@@ -283,6 +283,7 @@ impl Desktop {
         let (page, category) = page.split_once(':').unwrap_or((page, ""));
         // One dialog per shot: close whatever the previous capture opened.
         window.close_all_dialogs(cx);
+        self.close_reader_image(cx);
         // First use is reviewed on its own; captured pages show the app behind it.
         if page != "onboarding" {
             self.onboarding.active = false;

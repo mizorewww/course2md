@@ -1,500 +1,541 @@
-//! Note text in the window's text selection, with typeset formulas.
+//! A note as Markdown for Kit's `TextView`: prose escaped so it stays as written,
+//! formulas where `math::pieces` finds them, typeset by two small plugins, and
+//! figures as image paragraphs a third plugin hands to the reader.
 //!
-//! A paragraph is laid out as GPUI text. An inline formula is held in the
-//! text by a run of no-break spaces as wide as the typeset formula, which is
-//! painted over them, so prose wraps around it like a word. A display
-//! formula, or an inline one wider than the line, takes a row of its own
-//! that scrolls sideways instead of being cut off.
-//!
-//! The whole paragraph is one selection participant: dragging, double- and
-//! triple-clicking select as in plain text, find highlights and scroll
-//! targets apply to the source text, and copying yields the selected span
-//! of the source, so a formula comes back as its LaTeX with its `$…$` or
-//! `$$…$$` delimiters. A label shown before the text is not copied, a list
-//! item copies as `- item`, and each paragraph ends with a blank line so a
-//! copied passage reads as Markdown.
-use gpui::{
-    AnyElement, App, Bounds, Corners, Edges, ElementId, GlobalElementId, HighlightStyle, Hitbox,
-    HitboxBehavior, Hsla, InspectorElementId, LayoutId, MouseDownEvent, PaintQuad, Pixels, Point,
-    SharedString, StyledText, Subscription, TextLayout, TextRun, TransformationMatrix, Window, div,
-    prelude::*, px, rems, transparent_black,
-};
+//! One document holds a whole note, so selection, find and scrolling cross its
+//! paragraphs inside one virtualized list. Copying yields its source: a formula
+//! with its delimiters, a list item as `- item`, paragraphs a blank line apart.
+use crate::math::{self, Formula, Piece};
+use gpui::{prelude::*, *};
+use gpui_base::text::markdown_ast::Node;
 use gpui_base::{
-    TextSelectionEvent, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
-    TextSelectionSnapshot,
+    h_flex,
+    text::{
+        InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
+        MarkdownPlugin, TextViewStyle,
+    },
 };
-use std::{cell::RefCell, ops::Range, rc::Rc};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_kit_material::{color::ColorRole, prelude::*};
+use std::{
+    ops::Range,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
+};
 
-/// Holds an inline formula's place in the text: wraps neither inside nor
-/// next to it, and is measured to the formula's width.
-const PLACEHOLDER: char = '\u{00A0}';
-/// A clamped preview's placeholder, drawn transparent. GPUI's line clamp
-/// counts lines with its own, simpler wrapping, which breaks inside a run of
-/// no-break spaces; it keeps a run of these word characters together as
-/// line wrapping does, and trims them before its ellipsis.
-const PREVIEW_PLACEHOLDER: char = '_';
-/// Allows a line break on either side of an inline formula.
-const BREAK: char = '\u{200B}';
-/// The widest one formula image is drawn, in device pixels: GPUI rasterises an
-/// SVG at twice that size and draws none wider than 8192 pixels, so a wider
-/// formula is drawn as several tiles side by side.
+/// A link with this text is the control that plays the source from a section's time.
+pub const SOURCE_LINK_LABEL: &str = "▶";
+
+/// The widest one formula image is drawn, in device pixels: GPUI rasterises an SVG
+/// at twice that size and draws none wider than 8192 pixels, so a wider formula is
+/// drawn as several tiles side by side.
 const MAX_FORMULA_PIXELS: f32 = 4000.;
-/// The smallest a preview shrinks a formula to fit its line's width, as a
-/// share of its line-height size.
-const PREVIEW_MIN_SCALE: f32 = 0.5;
-/// How tall an inline formula may be, in lines, before it is scaled down.
-const INLINE_ROOM: f32 = 1.4;
 
-/// How the paragraph copies.
-#[derive(Clone, Default)]
-pub enum Copy {
-    #[default]
-    Plain,
-    /// A list item, copied as `- item`.
-    ListItem,
-    /// Shown before the text but not copied, such as a caption.
-    Labeled(SharedString),
-}
-
-type SourcePosition = Box<dyn FnOnce(Point<Pixels>, Pixels)>;
-
-/// Selectable note text; see the module documentation.
-pub struct NoteText {
-    id: ElementId,
-    source: SharedString,
-    copy: Copy,
-    document_order: u64,
-    highlights: Vec<(Range<usize>, HighlightStyle)>,
-    source_position: Option<(usize, SourcePosition)>,
-    selection_color: Hsla,
-    surface: Hsla,
-    group: Option<SharedString>,
-    preview: bool,
-    child: Option<AnyElement>,
-}
-
-impl NoteText {
-    pub fn new(id: impl Into<ElementId>, source: impl Into<SharedString>) -> Self {
-        Self {
-            id: id.into(),
-            source: source.into(),
-            copy: Copy::Plain,
-            document_order: 0,
-            highlights: Vec::new(),
-            source_position: None,
-            selection_color: transparent_black(),
-            surface: crate::theme::color(crate::theme::SURFACE).into(),
-            group: None,
-            preview: false,
-            child: None,
-        }
-    }
-
-    pub fn copy(mut self, copy: Copy) -> Self {
-        self.copy = copy;
-        self
-    }
-
-    /// Places the text in reading order among the note's other text.
-    pub fn document_order(mut self, order: u64) -> Self {
-        self.document_order = order;
-        self
-    }
-
-    /// Find matches, as byte ranges of the source text.
-    pub fn highlights(mut self, highlights: Vec<(Range<usize>, HighlightStyle)>) -> Self {
-        self.highlights = highlights;
-        self
-    }
-
-    /// Reports where the source byte `byte` was laid out (its line's top left
-    /// in window coordinates) and the line height, once known.
-    pub fn on_source_position(
-        mut self,
-        byte: usize,
-        callback: impl FnOnce(Point<Pixels>, Pixels) + 'static,
-    ) -> Self {
-        self.source_position = Some((byte, Box::new(callback)));
-        self
-    }
-
-    pub fn selection_color(mut self, color: Hsla) -> Self {
-        self.selection_color = color;
-        self
-    }
-
-    /// The surface behind the text, which a wide formula row fades into.
-    pub fn surface(mut self, color: Hsla) -> Self {
-        self.surface = color;
-        self
-    }
-
-    /// A clamped preview, such as a screenshot card's excerpt: every formula
-    /// stays in the line, scaled to the line's height (and its width, down to
-    /// half that size, beyond which it is cut), so the text can end in an
-    /// ellipsis; it is not selectable.
-    pub fn preview(mut self) -> Self {
-        self.preview = true;
-        self
-    }
-
-    /// Paragraphs laid out at one width, such as the article column: a new
-    /// one assumes the group's width until it has its own.
-    pub fn width_group(mut self, group: impl Into<SharedString>) -> Self {
-        self.group = Some(group.into());
-        self
-    }
-}
-
-/// One laid-out line of selectable text: its display text, the source span
-/// each part shows, and the formulas painted over it.
-struct Block {
-    display: SharedString,
-    segments: Vec<Segment>,
-    layout: TextLayout,
-}
-
-/// What a range of display text shows of the source.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Segment {
-    pub display: Range<usize>,
-    pub source: Range<usize>,
-    /// Shown as a whole (a formula or a label): any part selects all of it.
-    pub atomic: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct PlacedFormula {
-    /// The no-break spaces holding its place.
-    display: Range<usize>,
-    path: SharedString,
-    width: Pixels,
-    height: Pixels,
-    /// Distance from its top to its baseline (inline formulas only).
-    ascent: Option<Pixels>,
-}
-
-/// Shared between the element, its selection subscription and its copy.
-#[derive(Default)]
-struct Shared {
-    source: SharedString,
-    copy: Copy,
-    snapshot: Option<TextSelectionSnapshot>,
-    runs: Vec<(SharedString, TextLayout, Vec<Segment>)>,
-    /// Selected display ranges per block, as projected for painting.
-    painted: Vec<Option<Range<usize>>>,
-    /// A triple click's whole paragraph, when it spans formula rows.
-    paragraph: Paragraph,
-}
-
-/// Window text selection selects the line under a triple click within one
-/// run of text; a paragraph split by a formula row spans several, so the
-/// element selects the paragraph itself. Armed by the click, it takes over
-/// the selection that click makes and ends with the next one.
-#[derive(Clone, Debug, Default, PartialEq)]
-enum Paragraph {
-    #[default]
-    None,
-    Armed(Range<usize>),
-    Selected(Range<usize>),
-}
-
-impl Shared {
-    fn selection_event(&mut self, event: &TextSelectionEvent) {
-        match event {
-            TextSelectionEvent::SelectionChanged(snapshot) => {
-                self.snapshot = *snapshot;
-                self.paragraph = match (std::mem::take(&mut self.paragraph), snapshot) {
-                    (Paragraph::Armed(range), Some(_)) => Paragraph::Selected(range),
-                    (Paragraph::Selected(_), None) => Paragraph::None,
-                    (paragraph, _) => paragraph,
-                };
-            }
-            TextSelectionEvent::Cleared => {
-                if let Paragraph::Selected(_) = self.paragraph {
-                    self.paragraph = Paragraph::None;
-                }
-            }
-            TextSelectionEvent::AutoScroll(_) | TextSelectionEvent::TouchSelectionChanged => {}
-        }
-    }
-
-    /// The source paragraph (text between blank lines) under `position`,
-    /// when it spans more than one of the laid-out blocks.
-    fn paragraph_at(&self, position: Point<Pixels>) -> Option<Range<usize>> {
-        let byte = self.runs.iter().find_map(|(_, layout, segments)| {
-            if !layout.bounds().contains(&position) {
-                return None;
-            }
-            let index = match layout.index_for_position(position) {
-                Ok(index) | Err(index) => index,
-            };
-            source_range(segments, index..index + 1).map(|range| range.start)
-        })?;
-        let range = paragraph_range(&self.source, byte);
-        let blocks = self
-            .runs
-            .iter()
-            .filter(|(_, _, segments)| !display_ranges(segments, &range).is_empty())
-            .count();
-        (blocks > 1).then_some(range)
-    }
-
-    /// The copied text for the current selection, from the current content.
-    fn copied(&self) -> String {
-        if let Paragraph::Selected(range) = &self.paragraph {
-            return copied_text(&self.source, &self.copy, std::slice::from_ref(range));
-        }
-        let Some(points) = self.snapshot.and_then(|snapshot| snapshot.window_points()) else {
-            return String::new();
-        };
-        let selected: Vec<Range<usize>> = self
-            .runs
-            .iter()
-            .filter_map(|(text, layout, segments)| {
-                let range = selected_range(text, layout, points.anchor(), points.cursor())?;
-                source_range(segments, range)
-            })
-            .collect();
-        copied_text(&self.source, &self.copy, &selected)
-    }
-}
-
-struct Retained {
-    handle: TextSelectionHandle,
-    shared: Rc<RefCell<Shared>>,
-    width: Option<Pixels>,
-    /// Scroll positions of the formula rows, in order.
-    rows: Vec<gpui::ScrollHandle>,
-    _subscription: Subscription,
-}
-
-impl Retained {
-    fn new(source: SharedString, cx: &mut App) -> Self {
-        let handle = TextSelectionHandle::new(source, cx);
-        let shared = Rc::new(RefCell::new(Shared::default()));
-        let selection = shared.clone();
-        let subscription = handle.subscribe(
-            move |event, _| {
-                selection.borrow_mut().selection_event(event);
-            },
-            cx,
-        );
-        let copied = shared.clone();
-        handle.copy_with(move |_| copied.borrow().copied(), cx);
-        Self {
-            handle,
-            shared,
-            width: None,
-            rows: Vec::new(),
-            _subscription: subscription,
-        }
-    }
-}
-
-/// Typeset sizes of one formula at the paragraph's text size.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FormulaSize {
-    pub width: f32,
-    pub height: f32,
-    pub ascent: f32,
-}
-
-/// How a formula is placed: in the line with `n` placeholders, or on its own row.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Placement {
-    Inline {
-        placeholders: usize,
-        size: FormulaSize,
-    },
-    Row {
-        placeholders: usize,
-        size: FormulaSize,
-    },
-}
-
-/// One planned block: its display text and segments, and where formulas go.
-#[derive(Debug, PartialEq)]
-pub struct PlannedBlock {
-    pub display: String,
-    pub segments: Vec<Segment>,
-    pub row: bool,
-    /// Display range of each formula's placeholders, with its LaTeX and display flag.
-    pub formulas: Vec<(Range<usize>, String, bool, FormulaSize)>,
-}
-
-/// Splits `source` into blocks: prose with inline formulas, and rows for
-/// display formulas and inline ones `place` puts on a row. Unreadable LaTeX
-/// stays in the prose as written. Prose next to a row is trimmed.
-#[cfg(test)]
-fn plan(
-    source: &str,
-    label: Option<&str>,
-    place: impl FnMut(&str, bool) -> Option<Placement>,
-) -> Vec<PlannedBlock> {
-    plan_with(source, label, PLACEHOLDER, place)
-}
-
-/// `plan`, holding inline formulas' places with `placeholder`.
-fn plan_with(
-    source: &str,
-    label: Option<&str>,
-    placeholder: char,
-    mut place: impl FnMut(&str, bool) -> Option<Placement>,
-) -> Vec<PlannedBlock> {
-    let mut blocks: Vec<PlannedBlock> = Vec::new();
-    let mut current = PlannedBlock {
-        display: String::new(),
-        segments: Vec::new(),
-        row: false,
-        formulas: Vec::new(),
-    };
-    if let Some(label) = label.filter(|label| !label.is_empty()) {
-        current.display.push_str(label);
-        current.segments.push(Segment {
-            display: 0..label.len(),
-            source: 0..0,
-            atomic: true,
-        });
-    }
-    let push_prose = |block: &mut PlannedBlock, source_range: Range<usize>| {
-        let mut range = source_range;
-        if block.display.is_empty() {
-            // A block never begins with the space or line break after a row.
-            let text = &source[range.clone()];
-            range.start += text.len() - text.trim_start().len();
-        }
-        if range.is_empty() {
-            return;
-        }
-        let start = block.display.len();
-        block.display.push_str(&source[range.clone()]);
-        block.segments.push(Segment {
-            display: start..block.display.len(),
-            source: range,
-            atomic: false,
-        });
-    };
-    let finish = |block: &mut PlannedBlock, blocks: &mut Vec<PlannedBlock>| {
-        // Nor ends with the space or line break before one.
-        let trimmed = block.display.trim_end().len();
-        block.display.truncate(trimmed);
-        block.segments.retain_mut(|segment| {
-            if segment.display.start >= trimmed {
-                return false;
-            }
-            if segment.display.end > trimmed {
-                let cut = segment.display.end - trimmed;
-                segment.display.end = trimmed;
-                if !segment.atomic {
-                    segment.source.end -= cut;
-                }
-            }
-            true
-        });
-        if !block.display.is_empty() {
-            blocks.push(std::mem::replace(
-                block,
-                PlannedBlock {
-                    display: String::new(),
-                    segments: Vec::new(),
-                    row: false,
-                    formulas: Vec::new(),
-                },
-            ));
-        }
-    };
-    for (range, piece) in piece_sources(source) {
-        match piece {
-            crate::math::Piece::Text(_) => {
-                let mut range = range;
-                // Closing punctuation never starts a line: after a formula
-                // row it stays on the row, following the formula.
-                if current.display.is_empty()
-                    && let Some(row) = blocks.last_mut().filter(|block| block.row)
-                {
-                    let text = &source[range.clone()];
-                    let start = range.start + text.len() - text.trim_start().len();
-                    let end = start
-                        + source[start..range.end]
-                            .chars()
-                            .take_while(|c| closes_line(*c))
-                            .map(char::len_utf8)
-                            .sum::<usize>();
-                    if end > start {
-                        let from = row.display.len();
-                        row.display.push_str(&source[start..end]);
-                        row.segments.push(Segment {
-                            display: from..row.display.len(),
-                            source: start..end,
-                            atomic: false,
-                        });
-                        range.start = end;
-                    }
-                }
-                push_prose(&mut current, range)
-            }
-            crate::math::Piece::Math { latex, display } => match place(latex, display) {
-                Some(Placement::Inline { placeholders, size }) => {
-                    let start = current.display.len();
-                    current.display.push(BREAK);
-                    let holder = current.display.len();
-                    current
-                        .display
-                        .extend(std::iter::repeat_n(placeholder, placeholders.max(1)));
-                    let holder = holder..current.display.len();
-                    current.display.push(BREAK);
-                    current.segments.push(Segment {
-                        display: start..current.display.len(),
-                        source: range,
-                        atomic: true,
-                    });
-                    current
-                        .formulas
-                        .push((holder, latex.to_owned(), false, size));
-                }
-                Some(Placement::Row { placeholders, size }) => {
-                    finish(&mut current, &mut blocks);
-                    let display: String =
-                        std::iter::repeat_n(placeholder, placeholders.max(1)).collect();
-                    let len = display.len();
-                    blocks.push(PlannedBlock {
-                        display,
-                        segments: vec![Segment {
-                            display: 0..len,
-                            source: range,
-                            atomic: true,
-                        }],
-                        row: true,
-                        formulas: vec![(0..len, latex.to_owned(), true, size)],
-                    });
-                }
-                None => push_prose(&mut current, range),
-            },
-        }
-    }
-    finish(&mut current, &mut blocks);
-    blocks
-}
-
-/// Punctuation that may not begin a line (CJK and Latin closing marks).
+/// Closing punctuation stays in the sentence: a display formula it follows is laid
+/// out inline, so a line never starts with it.
 fn closes_line(c: char) -> bool {
     "，。、；：！？）」』”’》〉】,.;:!?)]}".contains(c)
 }
 
+/// Text as it reads once Markdown has parsed it. `dollars` escapes `$` too, for text
+/// that also holds a formula; elsewhere a stray pair stays literal through [`formula_of`].
+/// Only what could start markup is escaped, because whole paragraphs copy as their source.
+fn escape(text: &str, dollars: bool, out: &mut String) {
+    let mut lines = text.split('\n').peekable();
+    while let Some(line) = lines.next() {
+        let line = line.trim();
+        // What opens a block at a line's start. A numbered list's delimiter is after its digits.
+        let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+        let (number, rest) = line.split_at(digits);
+        out.push_str(number);
+        if rest.starts_with(['#', '>', '=', '|'])
+            || rest.starts_with("- ")
+            || rest.starts_with("+ ")
+            || rest.starts_with("---")
+            || (digits > 0 && rest.starts_with(['.', ')']))
+        {
+            out.push('\\');
+        }
+        escape_inline(rest, dollars, out);
+        // Two spaces hold the source's line break.
+        if lines.peek().is_some() {
+            out.push_str("  \n");
+        }
+    }
+}
+
+fn escape_inline(line: &str, dollars: bool, out: &mut String) {
+    let mut chars = line.chars().peekable();
+    let mut before = None;
+    while let Some(c) = chars.next() {
+        let next = chars.peek().copied();
+        let markup = match c {
+            // `\$` already is a literal dollar, in the source and in Markdown.
+            '\\' => next != Some('$'),
+            '`' | '[' | ']' | '~' => true,
+            '$' => dollars && before != Some('\\'),
+            '*' => {
+                !(next.is_none_or(char::is_whitespace) && before.is_none_or(char::is_whitespace))
+            }
+            '_' => {
+                !(next.is_some_and(char::is_alphanumeric)
+                    && before.is_some_and(char::is_alphanumeric))
+            }
+            '<' => next.is_some_and(|next| next.is_alphabetic() || "/!?".contains(next)),
+            '&' => next.is_some_and(|next| next.is_alphanumeric() || next == '#'),
+            _ => false,
+        };
+        if markup {
+            out.push('\\');
+        }
+        out.push(c);
+        before = Some(c);
+    }
+}
+
+/// `$…$`. Inside it a backslash is no escape, so a `\$` would end it: then `$$…$$`.
+fn inline_formula(latex: &str, display: bool, out: &mut String) {
+    let fence = if display || latex.contains('$') {
+        "$$"
+    } else {
+        "$"
+    };
+    out.push_str(fence);
+    out.push_str(latex);
+    out.push_str(fence);
+}
+
+/// `text` as Markdown blocks, each one top-level block: its paragraphs and display
+/// formulas. A formula Markdown could not hold stays prose.
+pub fn blocks(text: &str) -> Vec<String> {
+    let pieces = math::pieces(text);
+    let has_formula = pieces
+        .iter()
+        .any(|piece| matches!(piece, Piece::Math { .. }));
+    let mut blocks = Vec::new();
+    let mut paragraph = String::new();
+    let mut pieces = pieces.into_iter().peekable();
+    while let Some(piece) = pieces.next() {
+        match piece {
+            Piece::Text(prose) => {
+                let mut parts = prose.split("\n\n");
+                if let Some(first) = parts.next() {
+                    escape(first, has_formula, &mut paragraph);
+                }
+                for part in parts {
+                    flush(&mut paragraph, &mut blocks);
+                    escape(part.trim_start(), has_formula, &mut paragraph);
+                }
+            }
+            Piece::Math { latex, .. } if latex.contains("\n\n") => {
+                escape(latex, true, &mut paragraph);
+            }
+            Piece::Math { latex, display } => {
+                let in_sentence = matches!(
+                    pieces.peek(),
+                    Some(Piece::Text(next)) if next.trim_start().starts_with(closes_line)
+                );
+                if display && !in_sentence {
+                    flush(&mut paragraph, &mut blocks);
+                    blocks.push(format!("$$\n{latex}\n$$"));
+                } else {
+                    inline_formula(latex, display, &mut paragraph);
+                }
+            }
+        }
+    }
+    flush(&mut paragraph, &mut blocks);
+    blocks
+}
+
+fn flush(paragraph: &mut String, blocks: &mut Vec<String>) {
+    let block = paragraph.trim_end();
+    if !block.is_empty() {
+        blocks.push(block.to_owned());
+    }
+    paragraph.clear();
+}
+
+/// `text` as one Markdown document.
+pub fn markdown(text: &str) -> String {
+    blocks(text).join("\n\n")
+}
+
+/// `text` on one line, for a list item or a part of an excerpt: its formulas stay in it.
+pub fn inline_markdown(text: &str) -> String {
+    let flat = text.replace('\n', " ");
+    let pieces = math::pieces(&flat);
+    let has_formula = pieces
+        .iter()
+        .any(|piece| matches!(piece, Piece::Math { .. }));
+    let mut out = String::new();
+    for piece in pieces {
+        match piece {
+            Piece::Text(prose) => escape_inline(prose, has_formula, &mut out),
+            Piece::Math { latex, .. } => inline_formula(latex, false, &mut out),
+        }
+    }
+    out
+}
+
+/// A heading or title: never a formula, always the text as written.
+pub fn plain_inline_markdown(text: &str) -> String {
+    let mut out = String::new();
+    escape_inline(&text.replace('\n', " "), true, &mut out);
+    out
+}
+
+/// The formula a math node's source really is, by the note's own rule: Markdown pairs
+/// any two dollars (`$5 and $10`), `math::pieces` does not.
+fn formula_of(source: &str, display: bool) -> Option<Formula> {
+    let [Piece::Math { latex, .. }] = math::pieces(source)[..] else {
+        return None;
+    };
+    math::formula(latex, display)
+}
+
+/// A formula at `em`, drawn in `ink`: one SVG, or tiles when too wide for one.
+fn formula_image(formula: &Formula, em: Pixels, ink: Hsla, window: &Window) -> AnyElement {
+    let width = em * formula.width;
+    let height = em * (formula.height + formula.depth);
+    let tiles =
+        ((f32::from(width) * window.scale_factor() / MAX_FORMULA_PIXELS).ceil() as usize).max(1);
+    h_flex()
+        .flex_none()
+        .items_start()
+        .children((0..tiles).filter_map(|tile| {
+            let path = math::tile(&formula.path, tile, tiles)?;
+            Some(
+                svg()
+                    .path(path)
+                    .flex_none()
+                    .w(width / tiles as f32)
+                    .h(height)
+                    .text_color(ink),
+            )
+        }))
+        .into_any_element()
+}
+
+/// A row as wide as its parent that scrolls a wider formula sideways, its scrollbar
+/// shown so it never looks complete when it is not.
+fn scrolling_row(
+    id: ElementId,
+    image: AnyElement,
+    overflows: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> Div {
+    let scroll = window
+        .use_keyed_state(
+            ElementId::NamedChild(Arc::new(id.clone()), "scroll".into()),
+            cx,
+            |_, _| ScrollHandle::new(),
+        )
+        .read(cx)
+        .clone();
+    div()
+        .relative()
+        .w_full()
+        .min_w_0()
+        .child(
+            div()
+                .id(id)
+                .w_full()
+                .flex()
+                .overflow_x_scroll()
+                // A vertical wheel keeps scrolling the note around it.
+                .restrict_scroll_to_axis()
+                .track_scroll(&scroll)
+                .when(overflows, |row| row.pb(px(12.)))
+                .child(div().flex_none().mx_auto().child(image)),
+        )
+        .when(overflows, |row| {
+            row.child(Scrollbar::horizontal(&scroll).mode(ScrollbarMode::Always))
+        })
+}
+
+/// `$…$` in a sentence, or `$$…$$` where the sentence goes on after it.
+struct InlineFormula {
+    line_width: Arc<AtomicU32>,
+}
+
+impl MarkdownPlugin for InlineFormula {
+    fn name(&self) -> &str {
+        "formula"
+    }
+
+    fn parse(&self, node: &Node, cx: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+        let Node::InlineMath(math) = node else {
+            return None;
+        };
+        let source = cx.node_source(node)?;
+        let formula = formula_of(source, source.starts_with("$$"))?;
+        Some(MarkdownNode::new("formula", formula).text(math.value.clone()))
+    }
+
+    fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        context: &InlineRenderContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<InlineElement> {
+        let formula = node.data::<Formula>()?;
+        let em = context.font_size();
+        let image = formula_image(formula, em, context.text_style().color, window);
+        let line = px(self.line_width.load(Ordering::Relaxed) as f32);
+        // A box as tall as the line, so a selection over it has no notches and a formula
+        // without depth keeps its baseline inside the box, as `TextView` requires. The
+        // text's baseline sits about 0.35 em below the middle of the line.
+        let ascent = em * formula.height;
+        let above = (context.line_height() / 2. + em * 0.35 - ascent).max(px(0.));
+        let height = (above + em * (formula.height + formula.depth)).max(context.line_height());
+        let content = if line > px(0.) && em * formula.width > line {
+            // Wider than any line: it keeps its size and scrolls in a row of its own.
+            let id = (
+                "formula-row",
+                node.source_range().map_or(0, |range| range.start),
+            );
+            scrolling_row(id.into(), image, true, window, cx)
+                .w(line)
+                .into_any_element()
+        } else {
+            image
+        };
+        Some(
+            InlineElement::new(
+                div()
+                    .h(px(f32::from(height).ceil()))
+                    .pt(above)
+                    .child(content),
+            )
+            .with_baseline(above + ascent),
+        )
+    }
+}
+
+/// `$$…$$` on its own.
+struct DisplayFormula;
+
+impl MarkdownPlugin for DisplayFormula {
+    fn is_block(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "display-formula"
+    }
+
+    fn parse(&self, node: &Node, cx: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+        let Node::Math(math) = node else {
+            return None;
+        };
+        let formula = math::formula(&math.value, true)?;
+        let source = cx.node_source(node).unwrap_or_default();
+        Some(
+            MarkdownNode::new("display-formula", formula)
+                .text(math.value.clone())
+                .markdown(source.to_owned()),
+        )
+    }
+
+    fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let id = (
+            "formula",
+            node.source_range().map_or(0, |range| range.start),
+        );
+        let Some(formula) = node.data::<Formula>() else {
+            return div().into_any_element();
+        };
+        let style = window.text_style();
+        let em = style.font_size.to_pixels(window.rem_size());
+        let image = formula_image(formula, em, style.color, window);
+        let overflows = window
+            .use_keyed_state(ElementId::from(id), cx, |_, _| ScrollHandle::new())
+            .read(cx)
+            .max_offset()
+            .x
+            > px(0.);
+        scrolling_row(id.into(), image, overflows, window, cx)
+            .py(rems(0.5))
+            .into_any_element()
+    }
+}
+
+/// What a reader paragraph draws, keyed by its image's address.
+pub type RenderBlock = Arc<dyn Fn(&str, &mut Window, &mut App) -> AnyElement + Send + Sync>;
+
+/// A paragraph that is one image: the reader draws it. Its source is real Markdown,
+/// which `notes::without_image_references` removes from a copy.
+struct ReaderBlock {
+    render: RenderBlock,
+}
+
+impl MarkdownPlugin for ReaderBlock {
+    fn is_block(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "reader-block"
+    }
+
+    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+        let Node::Paragraph(paragraph) = node else {
+            return None;
+        };
+        let [Node::Image(image)] = &paragraph.children[..] else {
+            return None;
+        };
+        Some(MarkdownNode::new("reader-block", image.url.clone()))
+    }
+
+    fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        match node.data::<String>() {
+            Some(address) => (self.render)(address, window, cx),
+            None => div().into_any_element(),
+        }
+    }
+}
+
+/// `[▶](url)` after a section's time: the control that plays the source from there.
+struct SourceLink;
+
+impl MarkdownPlugin for SourceLink {
+    fn name(&self) -> &str {
+        "source-link"
+    }
+
+    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+        let Node::Link(link) = node else {
+            return None;
+        };
+        let [Node::Text(text)] = &link.children[..] else {
+            return None;
+        };
+        (text.value == SOURCE_LINK_LABEL)
+            .then(|| MarkdownNode::new("source-link", link.url.clone()).text(SOURCE_LINK_LABEL))
+    }
+
+    fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        context: &InlineRenderContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Option<InlineElement> {
+        let url = node.data::<String>()?.clone();
+        let at = node.source_range().map_or(0, |range| range.start);
+        let label = course2md::tr!("从此处观看");
+        // Centred on the text beside it: a Latin x-height above the baseline.
+        let middle =
+            CONTROL_HEIGHT.to_pixels(context.rem_size()) * 0.4 + context.font_size() * 0.35;
+        Some(
+            InlineElement::new(
+                MaterialTooltip::plain(("source-link-tip", at), label).trigger(
+                    IconButton::new(("source-link", at), crate::symbols::play_arrow(), label)
+                        .button_size(ButtonSize::ExtraSmall)
+                        .on_click(move |_, _, cx| cx.open_url(&url)),
+                ),
+            )
+            .with_baseline(middle),
+        )
+    }
+}
+
+/// The plugins of note text. `line_width` is the note's text column, in pixels.
+pub fn extensions(line_width: Arc<AtomicU32>) -> MarkdownExtensions {
+    MarkdownExtensions::default()
+        .parser_revision(1)
+        .plugin(InlineFormula { line_width })
+        .plugin(DisplayFormula)
+}
+
+/// [`extensions`], plus what only a whole note holds.
+pub fn note_extensions(line_width: Arc<AtomicU32>, render: RenderBlock) -> MarkdownExtensions {
+    extensions(line_width)
+        .parser_revision(2)
+        .plugin(ReaderBlock { render })
+        .plugin(SourceLink)
+}
+
+/// How note text reads: the kit's type roles on the note's surface.
+pub fn note_style(cx: &App) -> TextViewStyle {
+    TextViewStyle::from_theme(&gpui_base::Theme::global(cx))
+        .with_foreground(color(ColorRole::ON_SURFACE).into())
+        .with_muted_foreground(color(ColorRole::ON_SURFACE_VARIANT).into())
+        .with_link(color(ColorRole::PRIMARY).into())
+        .with_selection(color(ColorRole::READING_SELECTION).into())
+        .with_border(color(ColorRole::OUTLINE_VARIANT).into())
+        .with_paragraph_gap(rems(1.))
+        .with_heading(|level| {
+            let role = match level {
+                1 => TypeRole::HeadlineMedium,
+                2 => TypeRole::TitleLarge,
+                _ => TypeRole::TitleSmall,
+            };
+            let scale = role.scale();
+            StyleRefinement::default()
+                .text_size(scale.font_size)
+                .line_height(scale.line_height)
+                .font_weight(FontWeight::MEDIUM)
+        })
+}
+
+/// `text` as one paragraph of Markdown with `marks`, byte ranges of its prose, highlighted.
+pub fn marked_markdown(text: &str, marks: &[Range<usize>], highlight: Rgba) -> String {
+    let formulas: Vec<_> = piece_sources(text)
+        .into_iter()
+        .filter(|(_, piece)| matches!(piece, Piece::Math { .. }))
+        .map(|(range, _)| range)
+        .collect();
+    let mut out = String::new();
+    let mut end = 0;
+    for mark in marks {
+        // A mark inside a formula would end it.
+        if !formulas
+            .iter()
+            .any(|formula| formula.start < mark.end && mark.start < formula.end)
+        {
+            out.push_str(&inline_markdown(&text[end..mark.start]));
+            out.push_str(&format!(
+                "<mark color=\"#{:06x}\">{}</mark>",
+                u32::from(highlight) >> 8,
+                inline_markdown(&text[mark.clone()]),
+            ));
+            end = mark.end;
+        }
+    }
+    out.push_str(&inline_markdown(&text[end..]));
+    out
+}
+
+/// What a selection of a note copies: its source, without the figures and the blank
+/// lines they leave.
+pub fn copied_text(selected: &str) -> String {
+    let mut text = crate::notes::without_image_references(selected);
+    while text.contains("\n\n\n") {
+        text = text.replace("\n\n\n", "\n\n");
+    }
+    text.trim().to_owned()
+}
+
 /// The byte ranges `pieces` cover in `text`: prose as written, and a formula
 /// together with its delimiters (and any space inside them).
-pub fn piece_sources(text: &str) -> Vec<(Range<usize>, crate::math::Piece<'_>)> {
+pub fn piece_sources(text: &str) -> Vec<(Range<usize>, Piece<'_>)> {
     let offset = |slice: &str| slice.as_ptr() as usize - text.as_ptr() as usize;
     let mut position = 0;
-    crate::math::pieces(text)
+    math::pieces(text)
         .into_iter()
         .map(|piece| {
             let end = match &piece {
-                crate::math::Piece::Text(prose) => offset(prose) + prose.len(),
+                Piece::Text(prose) => offset(prose) + prose.len(),
                 // `pieces` trims the LaTeX inside its delimiters; the source
                 // runs on through that space and the closing delimiter.
-                crate::math::Piece::Math { latex, display } => {
+                Piece::Math { latex, display } => {
                     let inner_end = offset(latex) + latex.len();
                     let rest = &text[inner_end..];
                     let space = rest.len() - rest.trim_start().len();
@@ -508,1017 +549,12 @@ pub fn piece_sources(text: &str) -> Vec<(Range<usize>, crate::math::Piece<'_>)> 
         .collect()
 }
 
-/// The source span a selected display range shows; a formula or label
-/// counts whole once any part of it is selected.
-pub fn source_range(segments: &[Segment], display: Range<usize>) -> Option<Range<usize>> {
-    let mut found: Option<Range<usize>> = None;
-    for segment in segments {
-        if segment.display.end <= display.start || display.end <= segment.display.start {
-            continue;
-        }
-        let part = if segment.atomic {
-            segment.source.clone()
-        } else {
-            let from = display.start.max(segment.display.start) - segment.display.start;
-            let to = display.end.min(segment.display.end) - segment.display.start;
-            segment.source.start + from..segment.source.start + to
-        };
-        found = Some(match found {
-            Some(range) => range.start.min(part.start)..range.end.max(part.end),
-            None => part,
-        });
-    }
-    found
-}
-
-/// The display ranges that show a source range.
-pub fn display_ranges(segments: &[Segment], source: &Range<usize>) -> Vec<Range<usize>> {
-    segments
-        .iter()
-        .filter(|segment| {
-            !segment.source.is_empty()
-                && segment.source.start < source.end
-                && source.start < segment.source.end
-        })
-        .map(|segment| {
-            if segment.atomic {
-                segment.display.clone()
-            } else {
-                let from = source.start.max(segment.source.start) - segment.source.start;
-                let to = source.end.min(segment.source.end) - segment.source.start;
-                segment.display.start + from..segment.display.start + to
-            }
-        })
-        .collect()
-}
-
-/// A selected display range grown to cover every formula (or other whole
-/// segment) it touches, so it is painted as it is copied.
-fn widened(segments: &[Segment], range: Range<usize>) -> Range<usize> {
-    let selected = range.clone();
-    segments
-        .iter()
-        .filter(|segment| {
-            segment.atomic
-                && !segment.source.is_empty()
-                && segment.display.start < selected.end
-                && selected.start < segment.display.end
-        })
-        .fold(range, |range, segment| {
-            range.start.min(segment.display.start)..range.end.max(segment.display.end)
-        })
-}
-
-/// Whether laid-out (possibly cut) text still holds a formula's whole
-/// place: every placeholder of `holder` and the break after it.
-fn holds_formula(text: &str, holder: &Range<usize>, placeholder: char) -> bool {
-    text.get(holder.clone())
-        .is_some_and(|place| !place.is_empty() && place.chars().all(|c| c == placeholder))
-        && text[holder.end..].starts_with(BREAK)
-}
-
-/// The ellipsis GPUI's line clamp ends cut text with.
-const ELLIPSIS: &str = "…";
-
-/// Where cut text's ellipsis starts, when it took the style of a formula's
-/// placeholders (it follows the run it was appended to).
-fn ellipsis_in_formula<'a>(
-    text: &str,
-    mut holders: impl Iterator<Item = &'a Range<usize>>,
-) -> Option<usize> {
-    let at = text.strip_suffix(ELLIPSIS)?.len();
-    holders
-        .any(|holder| holder.start <= at && at < holder.end)
-        .then_some(at)
-}
-
-/// Where a source byte is shown, if this block shows it.
-fn display_index(segments: &[Segment], byte: usize) -> Option<usize> {
-    segments
-        .iter()
-        .find(|segment| segment.source.start <= byte && byte < segment.source.end)
-        .map(|segment| {
-            if segment.atomic {
-                segment.display.start
-            } else {
-                segment.display.start + byte - segment.source.start
-            }
-        })
-}
-
-/// The paragraph around `byte`: the text between the blank lines before and
-/// after it.
-fn paragraph_range(source: &str, byte: usize) -> Range<usize> {
-    let byte = byte.min(source.len());
-    let start = source[..byte].rfind("\n\n").map_or(0, |found| found + 2);
-    let end = source[byte..]
-        .find("\n\n")
-        .map_or(source.len(), |found| byte + found);
-    start..end
-}
-
-/// The copied text for the selected source spans.
-pub fn copied_text(source: &str, copy: &Copy, selected: &[Range<usize>]) -> String {
-    let start = selected.iter().map(|range| range.start).min();
-    let end = selected.iter().map(|range| range.end).max();
-    let (Some(start), Some(end)) = (start, end) else {
-        return String::new();
-    };
-    let Some(text) = source
-        .get(start..end)
-        .filter(|text| !text.trim().is_empty())
-    else {
-        return String::new();
-    };
-    let item = matches!(copy, Copy::ListItem) && start == 0;
-    // The blank line separates it from the next paragraph; the copy as a
-    // whole is trimmed.
-    format!("{}{text}\n", if item { "- " } else { "" })
-}
-
-/// The selected byte range of laid-out text between two window points,
-/// character by character as window text selection projects it.
-fn selected_range(
-    text: &str,
-    layout: &TextLayout,
-    anchor: Point<Pixels>,
-    cursor: Point<Pixels>,
-) -> Option<Range<usize>> {
-    if text.len() != layout.len() {
-        return None;
-    }
-    let line_height = layout.line_height();
-    let mut range: Option<Range<usize>> = None;
-    for (offset, character) in text.char_indices() {
-        let next = offset + character.len_utf8();
-        let Some(position) = layout.position_for_index(offset) else {
-            continue;
-        };
-        let width = layout
-            .position_for_index(next)
-            .filter(|next| next.y == position.y)
-            .map_or(line_height / 2., |next| next.x - position.x);
-        if in_selection_band(position, width, anchor, cursor, line_height) {
-            range.get_or_insert(offset..offset).end = next;
-        }
-    }
-    range
-}
-
-fn in_selection_band(
-    position: Point<Pixels>,
-    width: Pixels,
-    start: Point<Pixels>,
-    end: Point<Pixels>,
-    line_height: Pixels,
-) -> bool {
-    let on_line =
-        |point: Point<Pixels>| point.y >= position.y && point.y < position.y + line_height;
-    let top = start.y.min(end.y);
-    let bottom = start.y.max(end.y);
-    let x = position.x + width / 2.;
-    if position.y + line_height <= top || position.y > bottom {
-        return false;
-    }
-    if on_line(start) && on_line(end) {
-        return x >= start.x.min(end.x) && x <= start.x.max(end.x);
-    }
-    let (upper, lower) = if start.y < end.y {
-        (start, end)
-    } else {
-        (end, start)
-    };
-    if on_line(upper) {
-        x >= upper.x
-    } else if on_line(lower) {
-        x <= lower.x
-    } else {
-        true
-    }
-}
-
-/// The quads that paint a selection from `start` to `end` in `bounds`.
-fn selection_quads(
-    start: Point<Pixels>,
-    end: Point<Pixels>,
-    bounds: Bounds<Pixels>,
-    line_height: Pixels,
-) -> Vec<Bounds<Pixels>> {
-    if start.y == end.y {
-        return vec![Bounds::from_corners(
-            start,
-            Point::new(end.x, end.y + line_height),
-        )];
-    }
-    let mut quads = vec![Bounds::from_corners(
-        start,
-        Point::new(bounds.right(), start.y + line_height),
-    )];
-    if end.y > start.y + line_height {
-        quads.push(Bounds::from_corners(
-            Point::new(bounds.left(), start.y + line_height),
-            Point::new(bounds.right(), end.y),
-        ));
-    }
-    quads.push(Bounds::from_corners(
-        Point::new(bounds.left(), end.y),
-        Point::new(end.x, end.y + line_height),
-    ));
-    quads
-}
-
-/// Merges overlapping highlight ranges (several matches in one formula),
-/// keeping them in order as styled text requires.
-fn merged(
-    mut highlights: Vec<(Range<usize>, HighlightStyle)>,
-) -> Vec<(Range<usize>, HighlightStyle)> {
-    highlights.sort_by_key(|(range, _)| range.start);
-    let mut result: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
-    for (range, style) in highlights {
-        match result.last_mut() {
-            Some((last, _)) if range.start < last.end => last.end = last.end.max(range.end),
-            _ => result.push((range, style)),
-        }
-    }
-    result
-}
-
-impl IntoElement for NoteText {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-pub struct NoteTextLayout {
-    handle: TextSelectionHandle,
-    shared: Rc<RefCell<Shared>>,
-    blocks: Vec<Block>,
-    /// The width this layout's formula placement assumed.
-    placed_for: Option<Pixels>,
-    /// Inline formula widths and whether each fitted, to tell whether a new
-    /// width moves any to or from a row.
-    inline_widths: Vec<(Pixels, bool)>,
-    margin: Pixels,
-}
-
-/// How many tiles a formula `width` pixels wide is drawn in.
-fn tile_count(width: f32, scale_factor: f32) -> usize {
-    ((width * scale_factor / MAX_FORMULA_PIXELS).ceil() as usize).max(1)
-}
-
-thread_local! {
-    /// The width each group of paragraphs was last laid out at.
-    static GROUP_WIDTHS: RefCell<std::collections::HashMap<SharedString, Pixels>> =
-        RefCell::default();
-}
-
-fn group_width(group: &SharedString) -> Option<Pixels> {
-    GROUP_WIDTHS.with(|widths| widths.borrow().get(group).copied())
-}
-
-/// Whether an inline formula fits a line `width` wide (unknown: it does).
-fn fits_inline(formula: Pixels, width: Option<Pixels>, margin: Pixels) -> bool {
-    width.is_none_or(|width| formula <= width - margin)
-}
-
-impl Element for NoteText {
-    type RequestLayoutState = NoteTextLayout;
-    type PrepaintState = Hitbox;
-
-    fn id(&self) -> Option<ElementId> {
-        Some(self.id.clone())
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        global_id: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, NoteTextLayout) {
-        let (handle, shared, own_width) = window.with_element_state(
-            global_id.expect("note text has a stable element id"),
-            |retained: Option<Retained>, _| {
-                let retained = retained.unwrap_or_else(|| Retained::new(self.source.clone(), cx));
-                (
-                    (
-                        retained.handle.clone(),
-                        retained.shared.clone(),
-                        retained.width,
-                    ),
-                    retained,
-                )
-            },
-        );
-        // Before its first layout, a paragraph assumes the width last found
-        // for its group (the article column, the viewer), so a formula too
-        // wide for the line takes its row from the first frame.
-        let width = own_width.or_else(|| self.group.as_ref().and_then(group_width));
-        let rem = window.rem_size();
-        let style = window.text_style();
-        let font_size = style.font_size.to_pixels(rem);
-        let line_height = style.line_height_in_pixels(rem);
-        // Formulas are drawn in the text's own color.
-        let ink = style.color;
-        let placeholder = if self.preview {
-            PREVIEW_PLACEHOLDER
-        } else {
-            PLACEHOLDER
-        };
-        // The placeholder's width as the text will actually be shaped.
-        const SAMPLE: usize = 64;
-        let sample: SharedString = std::iter::repeat_n(placeholder, SAMPLE)
-            .collect::<String>()
-            .into();
-        let runs = [style.to_run(sample.len())];
-        let space = (window
-            .text_system()
-            .shape_line(sample, font_size, &runs, None)
-            .width
-            / SAMPLE as f32)
-            .max(px(1.));
-        let margin = space * 2.;
-        let em = f32::from(font_size);
-        let placeholders = |width: f32| (width / f32::from(space)).ceil() as usize;
-        let mut inline_widths = Vec::new();
-        let label = match &self.copy {
-            Copy::Labeled(label) => Some(label.to_string()),
-            _ => None,
-        };
-        let planned = plan_with(
-            &self.source,
-            label.as_deref(),
-            placeholder,
-            |latex, display| {
-                let formula = crate::math::formula(latex, display)?;
-                let full = FormulaSize {
-                    width: formula.width() * em,
-                    height: (formula.height() + formula.depth()) * em,
-                    ascent: formula.height() * em,
-                };
-                let row = Placement::Row {
-                    placeholders: placeholders(full.width),
-                    size: full,
-                };
-                if self.preview {
-                    // Scaled to the line, and to its width while it stays at
-                    // least half as tall; a longer one keeps that size and shows
-                    // its beginning, cut at the line's end.
-                    let height = (f32::from(line_height) / full.height).min(1.);
-                    let line = width.map(|width| f32::from(width - margin).max(0.));
-                    let across = line.map_or(1., |line| (line / full.width).min(1.));
-                    let scale = height.min(across.max(height * PREVIEW_MIN_SCALE));
-                    inline_widths
-                        .push((px(full.width), fits_inline(px(full.width), width, margin)));
-                    let size = FormulaSize {
-                        width: full.width * scale,
-                        height: full.height * scale,
-                        ascent: full.ascent * scale,
-                    };
-                    let held = line.map_or(size.width, |line| size.width.min(line));
-                    return Some(Placement::Inline {
-                        placeholders: placeholders(held),
-                        size,
-                    });
-                }
-                if display {
-                    return Some(row);
-                }
-                // A tall inline formula, such as a fraction, may reach into the
-                // space between lines (a line is 1.8 em, its glyphs about 1 em);
-                // only a taller one is scaled down rather than pushing lines apart.
-                let room = f32::from(line_height) * INLINE_ROOM;
-                let scale = (room / full.height).min(1.);
-                let inline = FormulaSize {
-                    width: full.width * scale,
-                    height: full.height * scale,
-                    ascent: full.ascent * scale,
-                };
-                let fits = fits_inline(px(inline.width), width, margin);
-                inline_widths.push((px(inline.width), fits));
-                Some(if fits {
-                    Placement::Inline {
-                        placeholders: placeholders(inline.width),
-                        size: inline,
-                    }
-                } else {
-                    row
-                })
-            },
-        );
-        let source_len = self.source.len();
-        let display_highlights = |segments: &[Segment], holders: &[Range<usize>]| {
-            let overlaps = |range: &Range<usize>| {
-                holders
-                    .iter()
-                    .any(|h| h.start < range.end && range.start < h.end)
-            };
-            let mut highlights = merged(
-                self.highlights
-                    .iter()
-                    .filter(|(range, _)| range.start < range.end && range.end <= source_len)
-                    .flat_map(|(range, style)| {
-                        display_ranges(segments, range)
-                            .into_iter()
-                            .map(move |range| (range, *style))
-                    })
-                    .filter(|(range, _)| !overlaps(range))
-                    .collect(),
-            );
-            // A preview's placeholders are characters that must not show.
-            highlights.extend(holders.iter().map(|holder| {
-                (
-                    holder.clone(),
-                    HighlightStyle {
-                        fade_out: Some(1.),
-                        ..Default::default()
-                    },
-                )
-            }));
-            highlights.sort_by_key(|(range, _)| range.start);
-            highlights
-        };
-        let row_count = planned.iter().filter(|block| block.row).count();
-        let rows = window.with_element_state(
-            global_id.expect("note text has a stable element id"),
-            |retained: Option<Retained>, _| {
-                let mut retained = retained.expect("created above");
-                retained
-                    .rows
-                    .resize_with(row_count, gpui::ScrollHandle::new);
-                (retained.rows.clone(), retained)
-            },
-        );
-        let mut rows = rows.into_iter();
-        let mut blocks = Vec::with_capacity(planned.len());
-        let mut children = Vec::with_capacity(planned.len());
-        for (index, block) in planned.into_iter().enumerate() {
-            let display = SharedString::from(block.display);
-            let holders: Vec<Range<usize>> = if self.preview {
-                block
-                    .formulas
-                    .iter()
-                    .map(|(range, ..)| range.clone())
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            let highlights = display_highlights(&block.segments, &holders);
-            let text = if highlights.is_empty() {
-                StyledText::new(display.clone())
-            } else {
-                StyledText::new(display.clone()).with_highlights(highlights)
-            };
-            let layout = text.layout().clone();
-            let formulas = block
-                .formulas
-                .iter()
-                .filter_map(|(range, latex, display_mode, size)| {
-                    Some(PlacedFormula {
-                        display: range.clone(),
-                        path: crate::math::formula(latex, *display_mode)?.path(),
-                        width: px(size.width),
-                        height: px(size.height),
-                        ascent: (!block.row).then(|| px(size.ascent)),
-                    })
-                })
-                .collect::<Vec<_>>();
-            let tallest = formulas
-                .iter()
-                .map(|formula| formula.height)
-                .fold(line_height, Pixels::max);
-            let row_width = formulas.first().map(|formula| formula.width);
-            let line = Line {
-                text,
-                index,
-                shared: shared.clone(),
-                formulas,
-                ink,
-                selection_color: self.selection_color,
-                font_size,
-                fade: block.row.then_some(self.surface),
-                display_len: display.len(),
-                placeholder,
-            };
-            children.push(
-                if let Some(scroll) = block.row.then(|| rows.next()).flatten() {
-                    // A row scrolls sideways when the formula is wider than the
-                    // paragraph, and centers it otherwise. An overflowing row
-                    // keeps its scrollbar shown, and the formula fades at each
-                    // edge it continues past (see `Line`), so it never looks
-                    // complete when it is not.
-                    let overflows = matches!(
-                        (row_width, width),
-                        (Some(formula), Some(width)) if formula > width
-                    );
-                    div()
-                        .relative()
-                        .w_full()
-                        .child(
-                            div()
-                                .id(("note-formula-row", index))
-                                .w_full()
-                                .flex()
-                                .overflow_x_scroll()
-                                // A vertical wheel keeps scrolling the text around it.
-                                .restrict_scroll_to_axis()
-                                .track_scroll(&scroll)
-                                .pt(rems(0.5))
-                                // Room for the scrollbar under an overflowing formula.
-                                .pb(if overflows { rems(1.) } else { rems(0.5) })
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .mx_auto()
-                                        .h(tallest)
-                                        .flex()
-                                        .items_center()
-                                        .whitespace_nowrap()
-                                        .child(line),
-                                ),
-                        )
-                        .child(crate::scroll::horizontal_scrollbar(&scroll, overflows))
-                        .into_any_element()
-                } else {
-                    line.into_any_element()
-                },
-            );
-            blocks.push(Block {
-                display,
-                segments: block.segments,
-                layout,
-            });
-        }
-        let mut child = div()
-            .w_full()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(rems(0.25))
-            .children(children)
-            .into_any_element();
-        let layout_id = child.request_layout(window, cx);
-        self.child = Some(child);
-        (
-            layout_id,
-            NoteTextLayout {
-                handle,
-                shared,
-                blocks,
-                placed_for: width,
-                inline_widths,
-                margin,
-            },
-        )
-    }
-
-    fn prepaint(
-        &mut self,
-        global_id: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        state: &mut NoteTextLayout,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Hitbox {
-        if let Some(child) = &mut self.child {
-            child.prepaint(window, cx);
-        }
-        let text_bounds: Vec<_> = state
-            .blocks
-            .iter()
-            .map(|block| block.layout.bounds())
-            .collect();
-        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        if !self.preview {
-            state.handle.register(
-                TextSelectionRegistration::new(hitbox.clone(), bounds)
-                    .with_document_order(self.document_order)
-                    .with_text_bounds(text_bounds),
-                window,
-                cx,
-            );
-        }
-        let width = bounds.size.width;
-        if let Some(group) = &self.group {
-            GROUP_WIDTHS.with(|widths| widths.borrow_mut().insert(group.clone(), width));
-        }
-        if state.placed_for != Some(width) {
-            if let Some(global_id) = global_id {
-                window.with_element_state(global_id, |retained: Option<Retained>, _| {
-                    let mut retained = retained.expect("laid out this frame");
-                    retained.width = Some(width);
-                    ((), retained)
-                });
-            }
-            // Another frame places the formulas for the width found.
-            if state
-                .inline_widths
-                .iter()
-                .any(|(formula, fits)| fits_inline(*formula, Some(width), state.margin) != *fits)
-            {
-                window.refresh();
-            }
-        }
-        if let Some((byte, callback)) = self.source_position.take() {
-            let found = state.blocks.iter().find_map(|block| {
-                let index = display_index(&block.segments, byte)?;
-                Some((
-                    block.layout.position_for_index(index)?,
-                    block.layout.line_height(),
-                ))
-            });
-            if let Some((position, line_height)) = found {
-                callback(position, line_height);
-            }
-        }
-        hitbox
-    }
-
-    fn paint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        state: &mut NoteTextLayout,
-        _: &mut Hitbox,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        if self.preview {
-            if let Some(child) = &mut self.child {
-                child.paint(window, cx);
-            }
-            return;
-        }
-        let runs: Vec<TextSelectionRun> = state
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(index, block)| {
-                TextSelectionRun::new(
-                    block.display.clone(),
-                    block.layout.clone(),
-                    block.layout.bounds(),
-                )
-                .with_document_order(index as u64)
-            })
-            .collect();
-        let projection = state.handle.update_runs(&runs, cx);
-        {
-            let mut shared = state.shared.borrow_mut();
-            shared.source = self.source.clone();
-            shared.copy = self.copy.clone();
-            shared.runs = state
-                .blocks
-                .iter()
-                .map(|block| {
-                    (
-                        block.display.clone(),
-                        block.layout.clone(),
-                        block.segments.clone(),
-                    )
-                })
-                .collect();
-            // A label is not copied, so it is not shown as selected either.
-            let label = match &self.copy {
-                Copy::Labeled(label) => label.len(),
-                _ => 0,
-            };
-            shared.painted = projection
-                .ranges()
-                .iter()
-                .enumerate()
-                .map(|(index, range)| {
-                    let range = range.clone()?;
-                    let start = if index == 0 {
-                        range.start.max(label)
-                    } else {
-                        range.start
-                    };
-                    // A formula is selected whole, as it is copied.
-                    (start < range.end)
-                        .then(|| widened(&state.blocks[index].segments, start..range.end))
-                })
-                .collect();
-            if let Paragraph::Selected(paragraph) = &shared.paragraph {
-                shared.painted = state
-                    .blocks
-                    .iter()
-                    .map(|block| {
-                        let ranges = display_ranges(&block.segments, paragraph);
-                        let start = ranges.iter().map(|range| range.start).min()?;
-                        let end = ranges.iter().map(|range| range.end).max()?;
-                        Some(start..end)
-                    })
-                    .collect();
-            }
-        }
-        if state.blocks.len() > 1 {
-            let shared = state.shared.clone();
-            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _| {
-                if phase.bubble() && event.click_count >= 3 {
-                    let mut shared = shared.borrow_mut();
-                    if let Some(range) = shared.paragraph_at(event.position) {
-                        shared.paragraph = Paragraph::Armed(range);
-                        window.refresh();
-                    }
-                }
-            });
-        }
-        if let Some(child) = &mut self.child {
-            child.paint(window, cx);
-        }
-    }
-}
-
-/// One block's text: its selection, the text, then the formulas over it.
-struct Line {
-    text: StyledText,
-    index: usize,
-    shared: Rc<RefCell<Shared>>,
-    formulas: Vec<PlacedFormula>,
-    ink: Hsla,
-    selection_color: Hsla,
-    font_size: Pixels,
-    /// On a formula row: the surface the formula fades into where it runs
-    /// past the row's edge.
-    fade: Option<Hsla>,
-    /// The length of the display text as planned; a clamped preview's laid
-    /// out text is shorter where it was cut.
-    display_len: usize,
-    placeholder: char,
-}
-
-impl IntoElement for Line {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-impl Element for Line {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        global_id: Option<&GlobalElementId>,
-        inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, ()) {
-        self.text
-            .request_layout(global_id, inspector_id, window, cx)
-    }
-
-    fn prepaint(
-        &mut self,
-        global_id: Option<&GlobalElementId>,
-        inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _: &mut (),
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        self.text
-            .prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
-    }
-
-    fn paint(
-        &mut self,
-        global_id: Option<&GlobalElementId>,
-        inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _: &mut (),
-        _: &mut (),
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let layout = self.text.layout().clone();
-        let line_height = layout.line_height();
-        let selected = self
-            .shared
-            .borrow()
-            .painted
-            .get(self.index)
-            .cloned()
-            .flatten();
-        let quads = selected
-            .and_then(|range| {
-                Some(selection_quads(
-                    layout.position_for_index(range.start)?,
-                    layout.position_for_index(range.end)?,
-                    layout.bounds(),
-                    line_height,
-                ))
-            })
-            .unwrap_or_default();
-        let selection_color = self.selection_color;
-        let paint_selection = |window: &mut Window| {
-            for quad in &quads {
-                window.paint_quad(PaintQuad {
-                    bounds: *quad,
-                    background: selection_color.into(),
-                    corner_radii: Corners::default(),
-                    border_widths: Edges::default(),
-                    border_color: transparent_black(),
-                    border_style: Default::default(),
-                });
-            }
-        };
-        // Selection lies under prose, and over a formula row and its fades.
-        if self.fade.is_none() {
-            paint_selection(window);
-        }
-        self.text.paint(
-            global_id,
-            inspector_id,
-            bounds,
-            &mut (),
-            &mut (),
-            window,
-            cx,
-        );
-        let visible = window.content_mask().bounds;
-        let mut runs_before = false;
-        let mut runs_after = false;
-        // A clamped preview cut its text, ending it in an ellipsis: a formula
-        // whose place the cut reached is not drawn, so it is shown whole or
-        // not at all and never covers the ellipsis.
-        let laid_out = (layout.len() != self.display_len).then(|| layout.text());
-        // GPUI gives the clamp's ellipsis the style of the run it follows;
-        // cut right before a formula, that is the formula's hidden
-        // placeholders, so the ellipsis is drawn again in the text's ink.
-        if let Some(text) = &laid_out
-            && let Some(at) = ellipsis_in_formula(text, self.formulas.iter().map(|f| &f.display))
-            && let Some(position) = layout.position_for_index(at)
-        {
-            let style = window.text_style();
-            let runs = [TextRun {
-                color: self.ink,
-                ..style.to_run(ELLIPSIS.len())
-            }];
-            let line =
-                window
-                    .text_system()
-                    .shape_line(ELLIPSIS.into(), self.font_size, &runs, None);
-            let _ = line.paint(
-                position,
-                line_height,
-                gpui::TextAlign::Left,
-                None,
-                window,
-                cx,
-            );
-        }
-        for formula in &self.formulas {
-            if let Some(text) = &laid_out
-                && !holds_formula(text, &formula.display, self.placeholder)
-            {
-                continue;
-            }
-            let Some(mut start) = layout.position_for_index(formula.display.start) else {
-                continue;
-            };
-            // A line wrapped just before the formula reports its first
-            // placeholder at the end of the previous line; the formula
-            // starts the next one.
-            let second = formula.display.start + self.placeholder.len_utf8();
-            if let Some(next) = layout.position_for_index(second)
-                && next.y > start.y
-            {
-                start = Point::new(layout.bounds().left(), next.y);
-            }
-            let held = layout
-                .position_for_index(formula.display.end)
-                .filter(|end| end.y == start.y)
-                .map_or(formula.width, |end| end.x - start.x);
-            let x = start.x + ((held - formula.width) / 2.).max(px(0.));
-            // Inline formulas share the text's baseline, which sits about
-            // 0.35 em below the middle of the line; a row centers its own.
-            let y = match formula.ascent {
-                Some(ascent) => start.y + line_height / 2. + self.font_size * 0.35 - ascent,
-                None => start.y + (line_height - formula.height) / 2.,
-            };
-            // A formula wider than one image is drawn as tiles, each the
-            // same drawing seen through its own slice, and only the tiles
-            // in view are drawn.
-            runs_before |= x < visible.left() - px(0.5);
-            runs_after |= x + formula.width > visible.right() + px(0.5);
-            let tiles = tile_count(f32::from(formula.width), window.scale_factor());
-            let tile_width = formula.width / tiles as f32;
-            // A preview's formula longer than its place is cut at its end.
-            let place = Bounds::new(
-                Point::new(start.x, visible.top()),
-                gpui::size(held.min(formula.width), visible.size.height),
-            );
-            let mask = gpui::ContentMask {
-                bounds: if held < formula.width - px(0.5) {
-                    place
-                } else {
-                    visible
-                },
-            };
-            let visible = mask.bounds.intersect(&visible);
-            window.with_content_mask(Some(mask), |window| {
-                for tile in 0..tiles {
-                    let bounds = Bounds::new(
-                        Point::new(x + tile_width * tile as f32, y),
-                        gpui::size(tile_width, formula.height),
-                    );
-                    if !bounds.intersects(&visible) {
-                        continue;
-                    }
-                    let Some(path) = crate::math::tile(&formula.path, tile, tiles) else {
-                        continue;
-                    };
-                    let _ = window.paint_svg(
-                        bounds,
-                        path,
-                        None,
-                        TransformationMatrix::unit(),
-                        self.ink,
-                        cx,
-                    );
-                }
-            });
-        }
-        if let Some(surface) = self.fade {
-            let width = window.rem_size() * 2.;
-            let clear = Hsla { a: 0., ..surface };
-            let mut fade = |left: Pixels, angle: f32| {
-                window.paint_quad(PaintQuad {
-                    bounds: Bounds::new(
-                        Point::new(left, visible.top()),
-                        gpui::size(width, visible.size.height),
-                    ),
-                    background: gpui::linear_gradient(
-                        angle,
-                        gpui::linear_color_stop(clear, 0.),
-                        gpui::linear_color_stop(surface, 1.),
-                    ),
-                    corner_radii: Corners::default(),
-                    border_widths: Edges::default(),
-                    border_color: transparent_black(),
-                    border_style: Default::default(),
-                });
-            };
-            if runs_after {
-                fade(visible.right() - width, 90.);
-            }
-            if runs_before {
-                fade(visible.left(), 270.);
-            }
-            paint_selection(window);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn size() -> FormulaSize {
-        FormulaSize {
-            width: 40.,
-            height: 20.,
-            ascent: 14.,
-        }
-    }
-
-    fn inline(_: &str, display: bool) -> Option<Placement> {
-        Some(if display {
-            Placement::Row {
-                placeholders: 3,
-                size: size(),
-            }
-        } else {
-            Placement::Inline {
-                placeholders: 2,
-                size: size(),
-            }
-        })
-    }
-
-    fn source_of<'a>(
-        text: &'a str,
-        sources: &[(Range<usize>, crate::math::Piece<'_>)],
-    ) -> Vec<&'a str> {
-        sources
+    fn source_of<'a>(text: &'a str) -> Vec<&'a str> {
+        piece_sources(text)
             .iter()
             .map(|(range, _)| &text[range.clone()])
             .collect()
@@ -1528,7 +564,7 @@ mod tests {
     fn formulas_keep_their_delimiters_in_the_source() {
         let text = "收益率 $r = \\frac{P_1}{P_0}$，以及\n$$\nE = mc^2\n$$\n结束";
         assert_eq!(
-            source_of(text, &piece_sources(text)),
+            source_of(text),
             vec![
                 "收益率 ",
                 "$r = \\frac{P_1}{P_0}$",
@@ -1537,186 +573,74 @@ mod tests {
                 "\n结束"
             ]
         );
-        let text = "$a$$$b$$";
-        assert_eq!(source_of(text, &piece_sources(text)), vec!["$a$", "$$b$$"]);
+        assert_eq!(source_of("$a$$$b$$"), vec!["$a$", "$$b$$"]);
     }
 
     #[test]
-    fn an_inline_formula_holds_its_place_in_the_text() {
-        let blocks = plan("设 $x$ 为", None, inline);
-        assert_eq!(blocks.len(), 1);
-        let block = &blocks[0];
-        assert_eq!(block.display, "设 \u{200B}\u{A0}\u{A0}\u{200B} 为");
+    fn prose_stays_as_written_and_only_markup_is_escaped() {
         assert_eq!(
-            block.formulas[0].0,
-            "设 \u{200B}".len().."设 \u{200B}\u{A0}\u{A0}".len()
-        );
-        // Selecting part of the placeholder copies the whole formula.
-        let holder = block.formulas[0].0.clone();
-        let source = source_range(&block.segments, holder.start..holder.start + 1).unwrap();
-        assert_eq!(&"设 $x$ 为"[source], "$x$");
-    }
-
-    #[test]
-    fn a_display_formula_takes_a_row_and_the_prose_around_it_is_trimmed() {
-        let text = "如下：\n$$E = mc^2$$\n 和后文";
-        let blocks = plan(text, None, inline);
-        assert_eq!(blocks.len(), 3);
-        assert_eq!(blocks[0].display, "如下：");
-        assert!(blocks[1].row);
-        assert_eq!(blocks[2].display, "和后文");
-        assert_eq!(&text[blocks[2].segments[0].source.clone()], "和后文");
-        assert_eq!(&text[blocks[1].segments[0].source.clone()], "$$E = mc^2$$");
-    }
-
-    #[test]
-    fn a_triple_click_selects_its_paragraph_until_the_next_selection() {
-        assert_eq!(paragraph_range("一\n\n二 $x$ 三\n\n四", 9), 5..16);
-        assert_eq!(paragraph_range("只有一段", 3), 0..12);
-        let mut shared = Shared {
-            paragraph: Paragraph::Armed(0..4),
-            ..Shared::default()
-        };
-        // The click's own clearing comes first and leaves it armed; the
-        // selection the click makes turns it into the selection.
-        shared.selection_event(&TextSelectionEvent::Cleared);
-        shared.selection_event(&TextSelectionEvent::SelectionChanged(None));
-        assert_eq!(shared.paragraph, Paragraph::Armed(0..4));
-        shared.paragraph = match std::mem::take(&mut shared.paragraph) {
-            Paragraph::Armed(range) => Paragraph::Selected(range),
-            other => other,
-        };
-        // The next click clears it.
-        shared.selection_event(&TextSelectionEvent::Cleared);
-        assert_eq!(shared.paragraph, Paragraph::None);
-    }
-
-    #[test]
-    fn closing_punctuation_after_a_formula_row_stays_on_the_row() {
-        let text = "如下\n$$E$$\n，以及后文";
-        let blocks = plan(text, None, inline);
-        assert_eq!(blocks.len(), 3);
-        assert!(blocks[1].row);
-        assert!(blocks[1].display.ends_with('，'));
-        assert_eq!(blocks[2].display, "以及后文");
-        // The row copies as the formula and its punctuation.
-        let all = source_range(&blocks[1].segments, 0..blocks[1].display.len()).unwrap();
-        assert_eq!(&text[all], "$$E$$\n，");
-    }
-
-    #[test]
-    fn copying_spans_formulas_and_paragraphs_as_markdown() {
-        let text = "设 $\\sigma^2$ 为方差\n\n第二段";
-        let blocks = plan(text, Some("讲解："), inline);
-        let block = &blocks[0];
-        // From inside the label to inside "方差": the label is not copied.
-        let display_end = block.display.find("方差").unwrap() + "方".len();
-        let source = source_range(&block.segments, 1..display_end).unwrap();
-        assert_eq!(
-            copied_text(text, &Copy::Plain, &[source]),
-            "设 $\\sigma^2$ 为方\n"
-        );
-        // Only the label: nothing.
-        let source = source_range(&block.segments, 0..3);
-        assert_eq!(
-            copied_text(text, &Copy::Plain, &source.into_iter().collect::<Vec<_>>()),
-            ""
-        );
-        // The whole text keeps its blank line.
-        let all = source_range(&block.segments, 0..block.display.len()).unwrap();
-        assert_eq!(copied_text(text, &Copy::Plain, &[all]), format!("{text}\n"));
-        // A list item copies as one.
-        let (whole, second) = (0..6, 3..6);
-        assert_eq!(copied_text("要点", &Copy::ListItem, &[whole]), "- 要点\n");
-        assert_eq!(copied_text("要点", &Copy::ListItem, &[second]), "点\n");
-    }
-
-    #[test]
-    fn a_selection_touching_a_formula_paints_all_of_it() {
-        let text = "a $x$ b";
-        let blocks = plan(text, None, inline);
-        let segments = &blocks[0].segments;
-        let holder = blocks[0].formulas[0].0.clone();
-        let widened = widened(segments, holder.start + 1..holder.start + 2);
-        assert!(widened.start < holder.start && widened.end > holder.end);
-        // Prose alone is unchanged.
-        assert_eq!(super::widened(segments, 0..1), 0..1);
-    }
-
-    #[test]
-    fn a_preview_cut_through_a_formula_drops_it() {
-        let p = PREVIEW_PLACEHOLDER;
-        let blocks = plan_with("就得到 $AP = PD$ 之后", None, p, inline);
-        let display = &blocks[0].display;
-        let holder = blocks[0].formulas[0].0.clone();
-        assert!(holds_formula(display, &holder, p));
-        // GPUI's clamp keeps the text up to its cut, trims trailing spaces
-        // and ASCII punctuation (the preview's placeholders) and adds an
-        // ellipsis, which the formula must then not cover.
-        let clamp = |cut: usize| {
-            let kept = display[..cut]
-                .trim_end_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation());
-            format!("{kept}…")
-        };
-        assert!(clamp(holder.start + 1).ends_with("\u{200B}…"));
-        assert!(!holds_formula(&clamp(holder.start + 1), &holder, p));
-        assert!(!holds_formula(&clamp(holder.end), &holder, p));
-        assert!(holds_formula(
-            &clamp(holder.end + BREAK.len_utf8() + 1),
-            &holder,
-            p
-        ));
-        // An ellipsis right where the formula's place began is redrawn.
-        let cut = clamp(holder.start + 1);
-        assert_eq!(
-            ellipsis_in_formula(&cut, std::iter::once(&holder)),
-            Some(cut.len() - ELLIPSIS.len())
+            markdown("snake_case and 2 * 3 * 4"),
+            "snake_case and 2 * 3 * 4"
         );
         assert_eq!(
-            ellipsis_in_formula(
-                &clamp(holder.start - BREAK.len_utf8()),
-                std::iter::once(&holder)
-            ),
-            None
+            markdown("*强调* [链接](x) `代码` <b>粗</b>"),
+            "\\*强调\\* \\[链接\\](x) \\`代码\\` \\<b>粗\\</b>"
         );
-        // GPUI's clamp breaks lines at any non-word character, so the
-        // preview's placeholders are word characters, kept together.
-        assert!(p.is_ascii_punctuation());
+        assert_eq!(markdown("# 不是标题"), "\\# 不是标题");
+        assert_eq!(markdown("- 不是列表"), "\\- 不是列表");
+        assert_eq!(markdown("1. 不是列表"), "1\\. 不是列表");
+        assert_eq!(markdown("> 不是引用"), "\\> 不是引用");
+        assert_eq!(markdown("a & b &amp; c"), "a & b \\&amp; c");
+        // A line break stays one; a blank line starts a paragraph.
+        assert_eq!(blocks("一\n二\n\n三"), ["一  \n二", "三"]);
     }
 
     #[test]
-    fn find_matches_map_onto_the_display_text() {
-        let text = "a $x$ b";
-        let blocks = plan(text, None, inline);
-        let segments = &blocks[0].segments;
-        // A match in the prose maps one to one; one in the formula covers its place.
+    fn dollars_that_are_no_formula_stay_prose() {
+        // `math::pieces` says no formula: left as written, the plugin declines it.
+        assert_eq!(markdown("$5 and $10"), "$5 and $10");
+        assert!(formula_of("$5 and $", false).is_none());
+        // Beside a real formula, Markdown must not pair them differently.
+        assert_eq!(markdown("$5 and $10 with $x$"), "\\$5 and \\$10 with $x$");
+        assert_eq!(markdown("\\$5 and $x$"), "\\$5 and $x$");
+    }
+
+    #[test]
+    fn a_display_formula_is_a_block_unless_the_sentence_goes_on() {
         assert_eq!(
-            display_ranges(segments, &(6..7)),
-            vec![blocks[0].display.len() - 1..blocks[0].display.len()]
+            blocks("如下：\n$$E = mc^2$$\n 和后文"),
+            ["如下：", "$$\nE = mc^2\n$$", "和后文"]
         );
-        let holder = display_ranges(segments, &(3..4));
-        assert_eq!(holder.len(), 1);
+        // Closing punctuation never starts a line.
         assert_eq!(
-            &blocks[0].display[holder[0].clone()],
-            "\u{200B}\u{A0}\u{A0}\u{200B}"
+            blocks("如下\n$$E$$\n，以及后文"),
+            ["如下  \n$$E$$  \n，以及后文"]
         );
+        // A formula holding a dollar cannot use one as its fence.
+        assert_eq!(blocks("设 $a\\$b$ 为"), ["设 $$a\\$b$$ 为"]);
+    }
+
+    #[test]
+    fn a_copy_leaves_figures_behind() {
         assert_eq!(
-            display_index(segments, 6),
-            Some(blocks[0].display.len() - 1)
+            copied_text("一段\n\n![](figure:5)\n\n### 01:00\n\n![](figure:9)"),
+            "一段\n\n### 01:00"
         );
     }
 
     #[test]
-    fn unreadable_latex_stays_in_the_prose() {
-        let blocks = plan("a $\\bad$ b", None, |_, _| None);
-        assert_eq!(blocks[0].display, "a $\\bad$ b");
-        assert!(blocks[0].formulas.is_empty());
+    fn a_list_item_keeps_its_formula_inline() {
+        assert_eq!(inline_markdown("要点 $x$\n和 $$y$$"), "要点 $x$ 和 $y$");
     }
 
     #[test]
-    fn a_wide_inline_formula_moves_to_its_own_row() {
-        assert!(fits_inline(px(100.), None, px(4.)));
-        assert!(fits_inline(px(100.), Some(px(200.)), px(4.)));
-        assert!(!fits_inline(px(199.), Some(px(200.)), px(4.)));
+    fn marks_highlight_prose_and_leave_formulas_whole() {
+        let highlight = gpui::rgb(0xffe082);
+        let text = "a match $match$ *b*";
+        let marks = [2..7, 9..14];
+        assert_eq!(
+            marked_markdown(text, &marks, highlight),
+            "a <mark color=\"#ffe082\">match</mark> $match$ \\*b\\*"
+        );
     }
 }

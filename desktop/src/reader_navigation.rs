@@ -1,51 +1,9 @@
-//! Reader identities, source links, search, proportional anchors and display timestamps.
+//! Reader identities, source links, search and display timestamps.
 use std::{
     collections::BTreeMap,
     ops::Range,
     path::{Path, PathBuf},
 };
-
-/// Content coordinates keyed by document block (or frame), regardless of layout nesting.
-///
-/// The note and screenshot lists record window coordinates: only differences
-/// within one item and item heights are read (`search_within`, `item_height`),
-/// so the scroll base cancels out, and a list state cannot be queried while
-/// its items prepaint.
-#[derive(Default)]
-pub struct ReadingLayout {
-    blocks: BTreeMap<usize, (f32, f32)>,
-    search_lines: BTreeMap<(usize, usize), (f32, f32)>,
-}
-
-impl ReadingLayout {
-    pub fn record(&mut self, index: usize, top: f32, height: f32) {
-        self.blocks.insert(index, (top, height));
-    }
-
-    pub fn record_search_line(&mut self, block: usize, byte: usize, top: f32, height: f32) {
-        self.search_lines.insert((block, byte), (top, height));
-    }
-
-    /// Forget measurements after the layout or the measured content changes.
-    pub fn clear(&mut self) {
-        self.blocks.clear();
-        self.search_lines.clear();
-    }
-
-    /// Height of a rendered item, without interpreting its position.
-    pub fn item_height(&self, index: usize) -> Option<f32> {
-        self.blocks.get(&index).map(|&(_, height)| height)
-    }
-
-    /// Offset of a found line inside its own item, leaving one line of context
-    /// above it. Both ends were recorded against the same viewport base, so the
-    /// base cancels out of the difference.
-    pub fn search_within(&self, block: usize, byte: usize) -> Option<f32> {
-        let &(line_top, line_height) = self.search_lines.get(&(block, byte))?;
-        let &(block_top, _) = self.blocks.get(&block)?;
-        Some((line_top - block_top - line_height).max(0.))
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceTarget {
@@ -118,23 +76,6 @@ pub fn relocated_source(path: &Path, locations: &[(PathBuf, Vec<PathBuf>)]) -> P
         .max_by_key(|(depth, _)| *depth)
         .map(|(_, path)| path)
         .unwrap_or_else(|| path.to_path_buf())
-}
-
-pub fn within_fraction(within: f32, item_height: f32) -> f32 {
-    if !within.is_finite() || !item_height.is_finite() || item_height <= 0. {
-        return 0.;
-    }
-    (-within / item_height).clamp(0., 0.999)
-}
-
-pub fn restore_within(fraction: Option<f32>, within: f32, item_height: f32) -> f32 {
-    if let Some(fraction) = fraction.filter(|value| value.is_finite()) {
-        -(fraction.clamp(0., 0.999) * item_height.max(0.))
-    } else if within.is_finite() {
-        within.min(0.).max(-item_height.max(0.))
-    } else {
-        0.
-    }
 }
 
 pub fn nearest_time(
@@ -312,19 +253,6 @@ mod tests {
     }
 
     #[test]
-    fn search_within_is_relative_to_the_owning_item() {
-        let mut layout = ReadingLayout::default();
-        layout.record(1, 500., 320.);
-        layout.record_search_line(1, 130, 584., 32.);
-        assert_eq!(layout.search_within(1, 130), Some(52.));
-        layout.record_search_line(1, 0, 508., 32.);
-        assert_eq!(layout.search_within(1, 0), Some(0.));
-        assert_eq!(layout.search_within(1, 42), None);
-        assert_eq!(layout.search_within(2, 130), None);
-        assert_eq!(layout.item_height(1), Some(320.));
-        assert_eq!(layout.item_height(2), None);
-    }
-    #[test]
     fn source_links_do_not_invent_local_or_unknown_seek_support() {
         assert!(source_target("", false).is_none());
         assert!(source_target("javascript:alert(1)", false).is_none());
@@ -349,14 +277,6 @@ mod tests {
             relocated_source(Path::new("/outside/video.mp4"), &locations),
             PathBuf::from("/outside/video.mp4")
         );
-    }
-    #[test]
-    fn anchor_restores_inside_paragraph_after_font_reflow() {
-        let fraction = within_fraction(-75., 300.);
-        assert_eq!(fraction, 0.25);
-        assert_eq!(restore_within(Some(fraction), -75., 600.), -150.);
-        assert_eq!(restore_within(Some(f32::NAN), -75., 600.), -75.);
-        assert_eq!(within_fraction(f32::NAN, 10.), 0.);
     }
     #[test]
     fn nearest_time_uses_known_data_and_reports_approximate_matches() {
