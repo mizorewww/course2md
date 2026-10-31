@@ -276,7 +276,7 @@ impl InterfaceLanguage {
 pub struct ApplicationPreferences {
     pub desktop: DesktopSettings,
     pub font_scale: f32,
-    pub appearance: crate::palettes::ThemePreferences,
+    pub appearance: gpui_kit_material::color::ThemePreferences,
     /// Interface language; `System` follows the operating system at launch.
     pub language: InterfaceLanguage,
 }
@@ -2443,8 +2443,20 @@ mod tests {
     }
 
     #[test]
+    fn saved_theme_preferences_keep_their_form() {
+        use gpui_kit_material::color::{Appearance, PaletteId, ThemePreferences, palette::ALL};
+        let saved = r#"{"mode":"dark","light":"catppuccin_latte","dark":"tokyo_night"}"#;
+        let parsed: ThemePreferences = serde_json::from_str(saved).unwrap();
+        assert_eq!(parsed.mode, Appearance::Dark);
+        assert_eq!(parsed.resolve(false), PaletteId::TokyoNight);
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), saved);
+        assert!(serde_json::from_str::<PaletteId>("\"unknown_theme\"").is_err());
+        assert_eq!(ALL.len(), 10);
+    }
+
+    #[test]
     fn theme_changes_survive_restart_without_changing_generation_defaults() {
-        use crate::palettes::{Appearance, PaletteId};
+        use gpui_kit_material::color::{Appearance, PaletteId};
         let (directory, mut store) = isolated();
         let generation = store.generation().clone();
         let mut app = store.application().clone();
@@ -2467,7 +2479,7 @@ mod tests {
 
     #[test]
     fn failed_theme_save_preserves_active_palette() {
-        use crate::palettes::PaletteId;
+        use gpui_kit_material::color::PaletteId;
         let (directory, mut store) = isolated();
         store.save_application(store.application().clone()).unwrap();
         std::fs::remove_file(directory.path().join("application.json")).unwrap();
@@ -2488,7 +2500,10 @@ mod tests {
                 .unwrap();
         assert_eq!(app.font_scale, 1.25);
         assert!(app.desktop.reduce_motion);
-        assert_eq!(app.appearance, crate::palettes::ThemePreferences::default());
+        assert_eq!(
+            app.appearance,
+            gpui_kit_material::color::ThemePreferences::default()
+        );
     }
 
     #[test]

@@ -59,7 +59,6 @@ def copy_licenses(dest, tools=()):
         shutil.copy2(path, dest / path.name)
     shutil.copy2(PROJECT / "LICENSE", dest / "LICENSE")
     shutil.copy2(ROOT / "assets/material/LICENSE", dest / "LICENSE-material-icons")
-    shutil.copy2(ROOT / "assets/outline/LICENSE", dest / "LICENSE-lucide-icons")
     shutil.copytree(ROOT / "assets/themes/licenses", dest / "design-licenses", dirs_exist_ok=True)
 
 
