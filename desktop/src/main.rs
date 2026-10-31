@@ -16,26 +16,17 @@ mod codex_ui;
 mod conversion;
 mod course_library;
 mod credentials;
-#[allow(dead_code)]
-mod focus_scroll;
 mod folder_tree;
 mod i18n;
-// Old names, emptied as pages move to the kit in wave 2 and deleted in wave 3.
-#[allow(dead_code)]
-mod icons;
 mod import_ui;
 mod library_ui;
 mod math;
 mod model_discovery;
-#[allow(dead_code)] // Wave 3 deletes it.
-mod motion;
 mod note_text;
 mod notes;
 mod ollama_ui;
 mod onboarding;
 mod organize;
-#[allow(unused_imports)] // Wave 3 deletes it.
-mod palettes;
 #[cfg(feature = "performance")]
 mod performance;
 mod preferences;
@@ -43,8 +34,6 @@ mod provider_serde;
 mod reader_images;
 mod reader_navigation;
 mod reader_ui;
-#[allow(dead_code)]
-mod scroll;
 mod service_test;
 mod settings_ui;
 mod source;
@@ -54,10 +43,9 @@ mod store;
 mod symbols;
 mod task_runner;
 mod task_ui;
+// Held for the design restoration; see its header.
 #[allow(dead_code, unused_imports)]
 mod theme;
-// Primitives for the page rewrites of wave 2; the attribute goes once they have callers.
-#[allow(dead_code)]
 mod ui;
 mod views;
 mod workspace;
@@ -337,6 +325,10 @@ struct Desktop {
     event_repaint_pending: bool,
     message: Option<String>,
     _subscriptions: Vec<Subscription>,
+    /// One pending next-frame callback advances a running theme transition.
+    theme_frame_pending: bool,
+    /// The paint the unprojected Kit theme fields were last written for.
+    unprojected_paint: Option<(gpui_kit_material::color::Scheme, f32)>,
     _poll: Task<()>,
 }
 
@@ -570,6 +562,14 @@ impl Desktop {
                 }
             }),
         );
+        // Appearance and scale reach the theme before Root renders, not during it: a
+        // preference change notifies this view, and the system's appearance tells the window.
+        subscriptions.push(cx.observe_in(&cx.entity(), window, |this: &mut Self, _, window, cx| {
+            this.prepare_theme(window, cx);
+        }));
+        subscriptions.push(cx.observe_window_appearance(window, |this, window, cx| {
+            this.prepare_theme(window, cx);
+        }));
         // The system's scrollbar preference can change while the window is away.
         subscriptions.push(cx.observe_window_activation(window, |_, _, cx| {
             sync_scrollbars(cx);
@@ -721,6 +721,8 @@ impl Desktop {
             event_repaint_pending: false,
             message,
             _subscriptions: subscriptions,
+            theme_frame_pending: false,
+            unprojected_paint: None,
             _poll: poll,
         };
         // Preferences and workspace records are saved separately. Reconcile
@@ -1625,7 +1627,6 @@ fn main() {
         symbols::register_fonts(cx);
         gpui_kit::init(cx);
         gpui_kit_material::init(cx);
-        theme::init(cx);
         sync_scrollbars(cx);
         // Debug validation uses the same native window and render path at an exact size.
         // Release builds always use the ordinary initial window size.
@@ -1670,12 +1671,10 @@ fn main() {
                 window.set_window_title("course2md");
                 #[cfg(feature = "performance")]
                 performance::start(window, cx);
-                window
-                    .observe_window_appearance(|window, _| window.refresh())
-                    .detach();
                 let view = cx.new(|cx| Desktop::new(window, cx));
                 #[cfg(feature = "capture")]
                 capture::start(view.downgrade(), window, cx);
+                view.update(cx, |this, cx| this.init_theme(window, cx));
                 let weak = view.downgrade();
                 let quit_view = weak.clone();
                 let settings_view = weak.clone();

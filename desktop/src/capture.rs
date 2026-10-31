@@ -35,9 +35,10 @@
 //! shows the idle result state ("操作已完成"). `dialog:storage~move:<folder>` runs a
 //! real move of the first library, and `dialog:storage~link` a real reassociation,
 //! so use them only on a fixture; the harness fakes none of their states.
-use crate::{Desktop, Page, palettes::PaletteId, settings_ui::SettingsTab};
+use crate::{Desktop, Page, settings_ui::SettingsTab};
 use gpui::{App, AsyncWindowContext, WeakEntity, Window};
 use gpui_kit::component::WindowExt as _;
+use gpui_kit_material::color::{Appearance, PaletteId, ThemePreferences};
 use std::{cell::Cell, path::PathBuf, time::Duration};
 
 thread_local! {
@@ -58,13 +59,13 @@ pub fn palette_override() -> Option<PaletteId> {
 
 /// Applies the capture palette to an appearance the way the window paints
 /// it: that palette selected, in its own light or dark mode.
-pub fn override_appearance(appearance: &mut crate::palettes::ThemePreferences) {
+pub fn override_appearance(appearance: &mut ThemePreferences) {
     if let Some(palette) = palette_override() {
         appearance.select(palette);
         appearance.mode = if palette.is_dark() {
-            crate::palettes::Appearance::Dark
+            Appearance::Dark
         } else {
-            crate::palettes::Appearance::Light
+            Appearance::Light
         };
     }
 }
