@@ -1,34 +1,45 @@
-//! Four independently saved setting groups and a shared service editor.
-use super::*;
+//! Settings: its navigation, the categories' pages, and how their saves report.
 #[path = "generation_settings.rs"]
 mod generation_settings;
+#[path = "settings_legacy.rs"]
+mod legacy;
 #[path = "model_diagnostics.rs"]
 pub(crate) mod model_diagnostics;
 #[path = "service_editor.rs"]
 mod service_editor;
 #[path = "service_form.rs"]
 pub(crate) mod service_form;
+pub(crate) use legacy::*;
+
 use crate::credentials::Secret;
 use crate::preferences::{
-    ApplicationPreferences, Authentication, BindingScope, GenerationPreferences, PreferenceGroup,
-    ServiceDraft, ServiceProtocol, ServicePurpose, ServiceVersion,
+    self, ApplicationPreferences, Authentication, BindingScope, GenerationPreferences,
+    PreferenceGroup, ServiceDraft, ServiceProtocol, ServicePurpose, ServiceVersion,
 };
 use crate::service_test::{self, TestKind};
-use crate::theme::*;
-use anyhow::{Context as _, anyhow};
+use crate::{ConversionOptions, Desktop, Page, symbols, ui};
+use anyhow::{Context as _, Result, anyhow};
 use course2md::execution::Component;
+use gpui::{prelude::*, *};
+use gpui_base::{h_flex, v_flex};
 use gpui_kit::component::{
-    button::*,
-    input::{InputContentType, Textarea, TextareaState},
-    menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
-    switch::Switch,
+    input::{InputEvent, InputState, TextareaState},
+    menu::{ContextMenuExt, PopupMenuItem},
+    scroll::Scrollbar,
+};
+use gpui_kit_material::{
+    icons::{Icon, SymbolIcon},
+    motion,
+    prelude::*,
 };
 use service_form::{FormField, FormOwner, ServiceForm};
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::Duration;
 
 actions!(
     course2md_settings,
@@ -40,7 +51,7 @@ actions!(
     ]
 );
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy)]
 enum EditField {
     LocalModel,
     Languages,
@@ -52,7 +63,6 @@ struct ServiceEditor {
     repair_task: Option<(String, Vec<Component>)>,
     scroll: ScrollHandle,
     also_default: bool,
-    return_focus: Option<FocusHandle>,
     status: Option<String>,
     test_kind: TestKind,
     test_running: Option<Arc<AtomicBool>>,
@@ -64,9 +74,6 @@ struct ServiceEditor {
     save_failed: bool,
     /// A credential is being written to or checked in the system vault.
     vault_busy: bool,
-    /// The settings category the inline editor was opened from (e.g. 生成笔记);
-    /// closing it returns there instead of leaving the user on 服务与账号.
-    origin_tab: Option<SettingsTab>,
 }
 
 pub struct OrdinaryPreferenceIssue {
@@ -77,36 +84,42 @@ pub struct OrdinaryPreferenceIssue {
 
 /// What continues once a typed key has been stored and the draft committed.
 #[derive(Clone, Copy)]
-pub(crate) enum AfterDraftSaved {
+enum AfterDraftSaved {
     Test,
     Publish { continue_repair: bool },
 }
 
-/// How long a success notice such as 已保存 stays.
-const SUCCESS_NOTICE_SECS: u64 = 6;
+/// A settings menu's width in design px: its longest labels stay whole.
+const MENU_WIDTH: f32 = 280.;
 
 /// Pause after the last keystroke before typed settings text is written.
 const TEXT_SAVE_DELAY_MS: u64 = 600;
 
 pub(crate) struct State {
     model_diagnostics: model_diagnostics::State,
-    tab_focus: [FocusHandle; SettingsTab::ALL.len()],
+    /// Arrow keys move among the categories while focus is in their list.
+    navigation_focus: FocusHandle,
     /// Settings search in the navigation pane.
     search: Entity<InputState>,
-    inputs: BTreeMap<EditField, Entity<InputState>>,
+    languages: Entity<InputState>,
+    local_model: Entity<InputState>,
     prompt: Entity<TextareaState>,
     editor: Option<ServiceEditor>,
+    /// The closed editor, kept until the dialog has played its exit.
+    closed_editor: Option<ServiceEditor>,
+    /// Which mode's palettes the chooser shows, and whether it is open.
+    pub(crate) palette_picker: (bool, bool),
+    pub(crate) palette_scroll: ScrollHandle,
     initialized: bool,
     show_prompt: bool,
-    language_details_open: bool,
-    asr_details_open: bool,
+    custom_languages: bool,
     model_details_open: bool,
     diagnostics_details_open: bool,
-    feedback: BTreeMap<PreferenceGroup, (String, bool)>,
-    feedback_expiry: BTreeMap<PreferenceGroup, Task<()>>,
-    feedback_details: BTreeMap<PreferenceGroup, String>,
-    expanded_feedback: std::collections::BTreeSet<PreferenceGroup>,
-    generation_block_messages: std::collections::BTreeSet<String>,
+    /// The last failed save of each group, and what lies behind it.
+    failures: BTreeMap<PreferenceGroup, String>,
+    failure_details: BTreeMap<PreferenceGroup, String>,
+    expanded_feedback: BTreeSet<PreferenceGroup>,
+    generation_block_messages: BTreeSet<String>,
     pub(crate) pending_generation: Option<GenerationPreferences>,
     pub(crate) pending_application: Option<ApplicationPreferences>,
     /// Typed text not yet written to disk; flushed after a pause, on blur and on exit.
@@ -125,32 +138,20 @@ impl State {
             KeyBinding::new("home", FirstSettingsTab, Some("SettingsTabs")),
             KeyBinding::new("end", LastSettingsTab, Some("SettingsTabs")),
         ]);
-        let inputs: BTreeMap<_, _> = [EditField::LocalModel, EditField::Languages]
-            .into_iter()
-            .map(|field| {
-                let placeholder = match field {
-                    EditField::Languages => {
-                        course2md::tr!("按优先顺序填写语言代码，如 zh-Hans, en")
-                    }
-                    EditField::LocalModel => "",
-                };
-                (
-                    field,
-                    cx.new(|cx| InputState::new(window, cx).placeholder(placeholder)),
-                )
-            })
-            .collect();
         let mut subscriptions = Vec::new();
-        for (field, input) in &inputs {
-            let field = *field;
+        let mut text_input = |field: EditField, window: &mut Window, cx: &mut Context<Desktop>| {
+            let input = cx.new(|cx| InputState::new(window, cx));
             subscriptions.push(
-                cx.subscribe_in(input, window, move |this, _, event, _, cx| match event {
+                cx.subscribe_in(&input, window, move |this, _, event, _, cx| match event {
                     InputEvent::Change => this.setting_input_changed(field, cx),
                     InputEvent::Blur => this.flush_generation_text(cx),
                     _ => {}
                 }),
             );
-        }
+            input
+        };
+        let languages = text_input(EditField::Languages, window, cx);
+        let local_model = text_input(EditField::LocalModel, window, cx);
         let search = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(course2md::tr!("搜索设置"))
@@ -169,20 +170,22 @@ impl State {
         }));
         Self {
             model_diagnostics: Default::default(),
-            tab_focus: std::array::from_fn(|_| cx.focus_handle()),
+            navigation_focus: cx.focus_handle(),
             search,
-            inputs,
+            languages,
+            local_model,
             prompt,
             editor: None,
+            closed_editor: None,
+            palette_picker: (false, false),
+            palette_scroll: ScrollHandle::new(),
             initialized: false,
             show_prompt: false,
-            language_details_open: false,
-            asr_details_open: false,
+            custom_languages: false,
             model_details_open: false,
             diagnostics_details_open: false,
-            feedback: BTreeMap::new(),
-            feedback_expiry: BTreeMap::new(),
-            feedback_details: BTreeMap::new(),
+            failures: BTreeMap::new(),
+            failure_details: BTreeMap::new(),
             expanded_feedback: Default::default(),
             generation_block_messages: Default::default(),
             pending_generation: None,
@@ -194,440 +197,94 @@ impl State {
     }
 }
 
-pub(super) fn field_label(
-    id: impl Into<ElementId>,
-    value: impl Into<SharedString>,
-) -> Stateful<Div> {
-    accessible_text(id, value)
-        .text_size(TEXT_SETTINGS_BODY)
-        .font_weight(FontWeight::SEMIBOLD)
+/// The room a dialog leaves its content: the window less the dialog's margins,
+/// headline and actions. Titles and actions stay in view while the content scrolls.
+pub(crate) fn dialog_body_height(window: &Window) -> Pixels {
+    let chrome = rem(152.).to_pixels(window.rem_size()) + px(48.);
+    (window.viewport_size().height - chrome).max(px(120.))
 }
 
-fn setting_label(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Div {
-    div().child(tile_label(id, value))
-}
-
-/// A complete preference owns its label, value, help and trailing actions.
-/// Controls align to this item's trailing edge and reflow as a unit.
-pub(super) fn settings_row(
-    id: impl Into<ElementId>,
-    label: &'static str,
-    hint: &'static str,
-    control: impl IntoElement,
-) -> Div {
-    let id = id.into();
-    // Label and its hint read as one unit, centered against the control.
-    let row = h_flex()
-        .w_full()
-        .min_w_0()
-        .min_h(CONTROL_HEIGHT)
-        .items_center()
-        .flex_wrap()
-        .gap_4()
-        .child(
-            tile_text(id.clone(), label, (!hint.is_empty()).then(|| hint.into()))
-                .flex_basis(rems(120. / 14.))
-                .max_w_full(),
-        )
-        .child(
-            h_flex()
-                .flex_1()
-                .flex_grow(3.)
-                .flex_basis(rems(400. / 14.))
-                .max_w_full()
-                .min_w_0()
-                .min_h(CONTROL_HEIGHT)
-                .items_center()
-                .justify_end()
-                .child(control),
-        );
-    setting_surface().child(row)
-}
-
-/// Editing fields use a top label: errors and related actions stay with the
-/// input without forcing long values into the preference label/control grid.
-pub(super) fn settings_field_row(
-    id: impl Into<ElementId>,
-    label: &'static str,
-    field: impl IntoElement,
-) -> Div {
-    let id = id.into();
-    v_flex()
-        .w_full()
-        .min_w_0()
-        .gap_2()
-        .child(setting_label(id, label))
-        .child(div().w_full().min_w_0().child(field))
-}
-
-/// A setting whose control sits under its label.
-pub(super) fn settings_stacked_row(
-    id: impl Into<ElementId>,
-    label: &'static str,
-    hint: &'static str,
-    control: impl IntoElement,
-) -> Div {
-    let id = id.into();
-    setting_surface().child(
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .gap(rems(1.))
-            .child(tile_label(id.clone(), label))
-            .child(control)
-            .when(!hint.is_empty(), |view| {
-                view.child(tile_info(SharedString::from(format!("{id:?}-hint")), hint))
-            }),
-    )
-}
-
-/// A preference switch: label and explanation, the switch on the tile's edge.
-pub(super) fn settings_switch_row(label: &'static str, hint: &'static str, control: Switch) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .min_h(rems(32. / 14.))
-        .items_center()
-        .gap(rems(16. / 14.))
-        .child(tile_text(
-            SharedString::from(format!("switch-label-{label}")),
-            label,
-            (!hint.is_empty()).then(|| hint.into()),
-        ))
-        .child(
-            div()
-                .flex_shrink_0()
-                .child(preference_switch(control).accessibility_label(label)),
-        )
-}
-
-/// Status rows inside an existing card: label on the shared axis, value trailing.
-/// Do not wrap these in `settings_row`; that would give each item its own surface.
-pub(super) fn settings_status_row(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    value: impl IntoElement,
-) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .min_h(CONTROL_HEIGHT)
-        .items_center()
-        .gap_4()
-        .child(field_label(id, label).flex_1().min_w_0().max_w_full())
-        .child(
-            h_flex()
-                .flex_shrink_0()
-                .items_center()
-                .justify_end()
-                .child(value),
-        )
-}
-
-/// One setting's content box inside a settings card; the card owns the surface.
-pub(super) fn setting_surface() -> Div {
-    v_flex()
-        .w_full()
-        .min_w_0()
-        .flex_shrink_0()
-        .px(SETTING_ITEM_INSET)
-        .py(rems(16. / 14.))
-        .gap_2()
-}
-
-/// Diagnostic facts as on the canvas: an accent heading over one inset block of
-/// label/value rows separated by hairlines. `after` holds actions that follow
-/// the block rather than belong to a row.
-#[derive(gpui::IntoElement)]
-pub(crate) struct DetailGroup {
-    id: ElementId,
-    icon: Icon,
-    title: &'static str,
-    rows: Vec<AnyElement>,
-    after: Vec<AnyElement>,
-}
-
-pub(super) fn settings_detail_group(
-    id: impl Into<ElementId>,
-    icon: Icon,
-    title: &'static str,
-) -> DetailGroup {
-    DetailGroup {
-        id: id.into(),
-        icon,
-        title,
-        rows: Vec::new(),
-        after: Vec::new(),
-    }
-}
-
-impl DetailGroup {
-    /// One fact: a quiet label on a common ruler and its value.
-    pub(crate) fn row(
-        mut self,
-        id: impl Into<ElementId>,
-        label: impl Into<SharedString>,
-        value: impl IntoElement,
-    ) -> Self {
-        self.rows.push(
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .flex_wrap()
-                .items_center()
-                .gap_x_4()
-                .gap_y_1()
-                .child(
-                    accessible_text(id, label)
-                        .flex_basis(rems(180. / 14.))
-                        .flex_shrink_0()
-                        .text_size(TEXT_SETTINGS_AUX)
-                        .text_color(color(GRAY)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .flex_basis(rems(200. / 14.))
-                        .min_w_0()
-                        .text_size(TEXT_SETTINGS_AUX)
-                        .child(value),
-                )
-                .into_any_element(),
-        );
-        self
-    }
-
-    pub(crate) fn after(mut self, element: impl IntoElement) -> Self {
-        self.after.push(element.into_any_element());
-        self
-    }
-}
-
-impl ParentElement for DetailGroup {
-    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
-        self.rows.extend(elements);
-    }
-}
-
-impl RenderOnce for DetailGroup {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        // Label/value rows separated by hairlines, as on the canvas.
-        let mut block = v_flex().w_full().min_w_0();
-        for (index, row) in self.rows.into_iter().enumerate() {
-            block = block.child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .min_h(rems(48. / 14.))
-                    .py(rems(8. / 14.))
-                    .flex()
-                    .items_center()
-                    .when(index > 0, |row| {
-                        row.border_t_1().border_color(color(HAIRLINE))
-                    })
-                    .child(row),
-            );
-        }
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .gap_2()
-            .child(theme::section_heading(self.id, self.icon, self.title))
-            .child(block)
-            .children(self.after)
-    }
-}
-
-/// Shared skeleton of the Bilibili, Codex and Ollama account sections. The title
-/// row owns one trailing slot (busy spinner, status badge, then actions) that stays
-/// on the title line when it fits and wraps below as a unit when narrow. Each
-/// connection's state machine stays in its module; this is render-only.
-pub(crate) struct AccountCard {
-    pub(crate) id: &'static str,
+/// One thing the person keeps (an account or a service): what it is, how it stands
+/// and its commands. A long name wraps within its column; when the column and the
+/// commands no longer fit side by side, the commands wrap below as one group.
+pub(crate) struct Resource {
+    pub(crate) id: SharedString,
     pub(crate) icon: Icon,
-    pub(crate) tint: Tint,
-    pub(crate) title: &'static str,
-    pub(crate) status: (BadgeKind, &'static str),
-    pub(crate) detail: Option<String>,
+    pub(crate) title: SharedString,
+    pub(crate) status: Vec<(StatusKind, &'static str)>,
     pub(crate) busy: bool,
-    /// Lines under the status: element id suffix, text, and whether it is a failure.
-    pub(crate) lines: Vec<(&'static str, String, bool)>,
+    /// Lines under the name, and whether each is a failure.
+    pub(crate) lines: Vec<(String, bool)>,
     pub(crate) actions: Vec<AnyElement>,
 }
 
-impl AccountCard {
-    pub(crate) fn render(self, cx: &App) -> Div {
+impl Resource {
+    pub(crate) fn row(self, cx: &App) -> Div {
         let id = self.id;
-        let (kind, label) = self.status;
-        let identity = h_flex()
-            .gap_2()
-            .items_center()
-            .flex_wrap()
-            .child(tile_label(
-                SharedString::from(format!("{id}-heading")),
-                self.title,
-            ))
-            .when(self.busy, |row| {
-                row.child(crate::motion::spinner(
-                    SharedString::from(format!("{id}-busy")),
-                    cx,
-                ))
-            })
-            .child(badge(kind).child(label));
-        let line = move |suffix: &str, message: String, error: bool| {
-            tile_support(SharedString::from(format!("{id}-{suffix}")), message)
-                .text_color(color(if error { DANGER } else { GRAY }))
-        };
-        resource_layout(
-            resource_icon(self.icon, self.tint),
-            v_flex()
-                .child(identity)
-                .when_some(self.detail, |view, detail| {
-                    view.child(line("detail", detail, false))
+        let child = |name: &'static str| ElementId::Name(format!("{id}-{name}").into());
+        let scale = TileScale::Regular;
+        let mut text = v_flex().flex_1().min_w_0().gap(rem(2.)).child(
+            h_flex()
+                .min_w_0()
+                .flex_wrap()
+                .gap(rem(8.))
+                .items_center()
+                .child(scale.label(child("title"), self.title))
+                .when(self.busy, |row| {
+                    row.child(spinner(child("busy"), course2md::tr!("正在检查"), cx))
                 })
                 .children(
-                    self.lines
+                    self.status
                         .into_iter()
-                        .map(|(suffix, message, error)| line(suffix, message, error)),
+                        .map(|(kind, label)| status_chip(kind).child(label)),
                 ),
-            h_flex()
-                .gap_2()
-                .items_center()
-                .flex_wrap()
-                .max_w_full()
-                .children(self.actions),
-        )
+        );
+        for (index, (line, failed)) in self.lines.into_iter().enumerate() {
+            let line_id = ElementId::NamedChild(Arc::new(child("line")), index.to_string().into());
+            text = text.child(if failed {
+                error_text(line_id, line).min_w_0().whitespace_normal()
+            } else {
+                scale.support(line_id, line)
+            });
+        }
+        h_flex()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .items_center()
+            .gap(rem(12.))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .flex_basis(rem(240.))
+                    .min_w_0()
+                    .gap(rem(16.))
+                    .items_center()
+                    .child(
+                        self.icon
+                            .size(rem(24.))
+                            .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                    )
+                    .child(text),
+            )
+            .when(!self.actions.is_empty(), |row| {
+                row.child(
+                    h_flex()
+                        .flex_shrink_0()
+                        .max_w_full()
+                        .ml_auto()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(rem(8.))
+                        // A command in a row that opens something does only its command.
+                        .id(child("actions"))
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .children(self.actions),
+                )
+            })
     }
 }
 
-/// A resource item's layout (an account or a library location): its icon,
-/// its text column, and trailing status or actions on the item's edge.
-/// The leading icon circle of a resource row (an account, a service, a
-/// library location). It, the gap after it and the rows' insets are all in
-/// rems, so the text ruler holds at every text scale.
-pub(crate) const RESOURCE_ICON: Rems = rems(48. / 14.);
-/// Between a resource's icon and its text.
-pub(crate) const RESOURCE_GAP: Rems = rems(16. / 14.);
-/// Where a resource's text starts, measured from its icon's leading edge:
-/// later lines of the same resource (a problem, a policy) start here.
-pub(crate) const RESOURCE_TEXT_INSET: Rems = rems(RESOURCE_ICON.0 + RESOURCE_GAP.0);
-
-/// A resource's tinted icon circle.
-pub(crate) fn resource_icon(icon: Icon, tint: Tint) -> Div {
-    tinted_icon(icon, tint, RESOURCE_ICON)
-}
-
-/// The plus of an 「添加…」 tile, in the resource rows' icon column.
-pub(crate) fn add_slot() -> Div {
-    h_flex()
-        .size(RESOURCE_ICON)
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .text_color(color(INK))
-        .child(icons::plus().size(rems(24. / 14.)))
-}
-
-/// The text keeps a readable measure; when it and the trailing actions no
-/// longer fit side by side (a narrow window, a large text scale), the actions
-/// wrap onto their own line across the item's whole width instead of
-/// squeezing the text or running past the item's edge.
-pub(crate) fn resource_layout(icon: impl IntoElement, text: Div, trailing: Div) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .flex_wrap()
-        .items_center()
-        .gap(rems(12. / 14.))
-        .child(
-            h_flex()
-                .flex_1()
-                .flex_basis(rems(RESOURCE_TEXT_INSET.0 + RESOURCE_TEXT_MEASURE.0))
-                .min_w_0()
-                .gap(RESOURCE_GAP)
-                .items_center()
-                .child(icon)
-                .child(text.flex_1().min_w_0().gap_1()),
-        )
-        .child(trailing.flex_shrink_0().max_w_full().ml_auto())
-}
-
-/// The narrowest a resource's text column gets before its actions wrap.
-const RESOURCE_TEXT_MEASURE: Rems = rems(180. / 14.);
-
-/// One row of a resource list (an account or a saved service): icon, text,
-/// status and actions, on the same trailing inset as a tile's chevron, so a
-/// pill ends where the chevrons do. A ⋯ menu (`resource_menu`) reaches out
-/// past that inset by its own padding, so its dots line up across rows.
-fn resource_row(id: impl Into<ElementId>) -> Stateful<Div> {
-    h_flex()
-        .id(id)
-        .w_full()
-        .min_w_0()
-        .gap(RESOURCE_GAP)
-        .items_center()
-        .py(rems(16. / 14.))
-        .px(SETTING_ITEM_INSET)
-}
-
-/// How far a resource row's ⋯ button reaches past the row's trailing inset:
-/// its round target ends 12px from the tile's edge, as on the canvas.
-const RESOURCE_MENU_OUTSET: f32 = (20. - 12.) / 14.;
-
-/// The ⋯ button at the end of a resource row (an account, a saved service,
-/// a library location). Callers attach its label, tooltip and menu.
-pub(crate) fn resource_menu(
-    id: impl Into<ElementId>,
-    cx: &App,
-) -> gpui_kit::component::button::Button {
-    icon_button(id, CONTROL_HEIGHT, false, cx)
-        .mr(rems(-RESOURCE_MENU_OUTSET))
-        .icon(icons::more_vertical())
-}
-
-/// Diagnostic values begin on a common reading axis. They can wrap and grow
-/// vertically without moving short values to the far edge of the window.
-pub(super) fn settings_detail_row(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    value: impl IntoElement,
-) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .min_h(rems(28. / 14.))
-        .items_start()
-        .flex_wrap()
-        .gap_x_4()
-        .gap_y_1()
-        .child(
-            field_label(id, label)
-                .min_w(rems(96. / 14.))
-                .max_w_full()
-                .flex_shrink_0()
-                .whitespace_normal(),
-        )
-        .child(
-            v_flex()
-                .flex_1()
-                .flex_basis(rems(240. / 14.))
-                .min_w_0()
-                .items_start()
-                .child(value),
-        )
-}
-
-pub(super) fn settings_value(
-    id: impl Into<ElementId>,
-    value: impl Into<SharedString>,
-) -> Stateful<Div> {
-    accessible_text(id, value)
-        .w_full()
-        .min_w_0()
-        .whitespace_normal()
-        .text_size(TEXT_SETTINGS_BODY)
-        .text_color(color(INK))
-}
 /// Settings categories in navigation order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SettingsTab {
@@ -667,13 +324,13 @@ impl SettingsTab {
             other => other.label(),
         }
     }
-    fn icon(self) -> Icon {
+    fn icon(self) -> SymbolIcon {
         match self {
-            Self::Appearance => icons::palette(),
-            Self::Generation => icons::article(),
-            Self::Services => icons::cloud(),
-            Self::Storage => icons::storage(),
-            Self::Application => icons::info(),
+            Self::Appearance => symbols::palette(),
+            Self::Generation => symbols::article(),
+            Self::Services => symbols::cloud(),
+            Self::Storage => symbols::storage(),
+            Self::Application => symbols::info(),
         }
     }
     /// What the category holds, under its name in the navigation.
@@ -684,15 +341,6 @@ impl SettingsTab {
             Self::Services => course2md::tr!("来源账号、AI 与语音服务"),
             Self::Storage => course2md::tr!("笔记库位置"),
             Self::Application => course2md::tr!("运行检查、版本、许可"),
-        }
-    }
-    fn tint(self) -> Tint {
-        match self {
-            Self::Appearance => Tint::Orange,
-            Self::Generation => Tint::Blue,
-            Self::Services => Tint::Teal,
-            Self::Storage => Tint::Amber,
-            Self::Application => Tint::Green,
         }
     }
     /// The labels of the settings a category contains, for settings search.
@@ -714,11 +362,10 @@ impl SettingsTab {
                 course2md::tr!("字幕与识别"),
                 course2md::tr!("文字来源"),
                 course2md::tr!("字幕语言"),
-                course2md::tr!("自定义语言优先级"),
+                course2md::tr!("自定义优先级"),
                 course2md::tr!("语音识别"),
                 course2md::tr!("识别方式"),
                 course2md::tr!("识别模型"),
-                course2md::tr!("高级识别设置"),
                 course2md::tr!("本机引擎"),
                 course2md::tr!("AI 处理"),
                 course2md::tr!("校对文字和标点"),
@@ -776,52 +423,30 @@ impl SettingsTab {
     }
 }
 
-fn group(id: &'static str, title: &'static str) -> SettingsGroup {
-    TileGroup::new(id, title)
-}
-
-/// A settings section: a titled group of `TileScale::Regular` tiles.
-pub(crate) type SettingsGroup = TileGroup;
-
-/// The settings arrangement for the current window: a navigation pane (or a
-/// compact rail), the gap after it and the content width. As on the canvas,
-/// the whole layout is centered and at most 1180px wide with 24px gutters;
-/// the pane takes 300–340px and the content at most 760px.
-pub(crate) struct SettingsLayout {
-    pub(crate) compact: bool,
-    pub(crate) nav: f32,
-    pub(crate) gap: f32,
-    pub(crate) content: f32,
-}
-
-pub(crate) fn settings_layout(window: &Window) -> SettingsLayout {
-    let scale = f32::from(window.rem_size()) / 14.;
-    let width = f32::from(window.bounds().size.width);
-    let compact = is_compact(window);
-    let gutter = if compact { 16. } else { 24. };
-    let available = (width.min(1180. * scale) - gutter * 2.).max(0.);
-    if compact {
-        let nav = 88. * scale;
-        let gap = 16.;
-        SettingsLayout {
-            compact,
-            nav,
-            gap,
-            content: (available - nav - gap).max(0.),
-        }
-    } else {
-        let gap = 40.;
-        let nav = (available - gap - 760. * scale).clamp(300. * scale, 340. * scale);
-        SettingsLayout {
-            compact,
-            nav,
-            gap,
-            content: (available - nav - gap).clamp(0., 760. * scale),
-        }
-    }
-}
-
 impl Desktop {
+    /// The dialogs settings owns. They live in the shell's tree, because any page can
+    /// open a service editor or the login.
+    pub(crate) fn settings_dialogs(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> [AnyElement; 3] {
+        [
+            self.service_editor_dialog(window, cx),
+            self.palette_dialog(window, cx),
+            self.account_dialog(window, cx),
+        ]
+    }
+
+    /// One section of a settings page: its rows scroll into view as they take focus.
+    pub(crate) fn settings_fields(
+        &self,
+        id: &'static str,
+        title: &'static str,
+        fields: Vec<ui::Field>,
+    ) -> ui::FieldTable {
+        ui::field_table(id, title, fields).reveal_in(self.scrolls[Page::Settings as usize].clone())
+    }
     fn generation_edit_base(&self) -> GenerationPreferences {
         self.settings_ui
             .unsaved_text
@@ -837,164 +462,14 @@ impl Desktop {
             .unwrap_or_else(|| self.preferences.application())
             .clone()
     }
-    fn setting_value(&self, field: EditField, cx: &App) -> String {
-        self.settings_ui.inputs[&field].read(cx).value().to_string()
-    }
-    /// Scroll handle owning the active settings editor (or the settings page
-    /// itself) when reveal-on-focus applies.
-    fn active_editor_scroll(&self) -> (bool, Option<ScrollHandle>) {
-        let editor = self.settings_ui.editor.as_ref().filter(|editor| {
-            editor.target.is_some()
-                || editor.repair_task.is_some()
-                || (self.page == Page::Settings && self.settings_tab == SettingsTab::Services)
-        });
-        (
-            self.page == Page::Settings || editor.is_some(),
-            editor.map(|editor| editor.scroll.clone()),
-        )
-    }
-    fn reveal_setting(&self, id: impl Into<ElementId>, child: impl IntoElement) -> Div {
-        let child = child.into_any_element();
-        let (reveals, editor_scroll) = self.active_editor_scroll();
-        if reveals {
-            div()
-                .w_full()
-                .min_w_0()
-                .flex_shrink_0()
-                .child(crate::focus_scroll::RevealFocus::new(
-                    id,
-                    child,
-                    editor_scroll.unwrap_or_else(|| self.scrolls[Page::Settings as usize].clone()),
-                ))
-        } else {
-            div().w_full().min_w_0().flex_shrink_0().child(child)
+    fn setting_input(&self, field: EditField, cx: &App) -> String {
+        match field {
+            EditField::LocalModel => &self.settings_ui.local_model,
+            EditField::Languages => &self.settings_ui.languages,
         }
-    }
-    fn setting_choices(
-        &self,
-        id: impl Into<ElementId>,
-        label: impl Into<SharedString>,
-    ) -> SingleChoiceGroup {
-        let (reveals, editor_scroll) = self.active_editor_scroll();
-        SingleChoiceGroup::new(id, label)
-            .settings_text()
-            .segmented()
-            .when(reveals, |group| {
-                group.reveal_in(
-                    editor_scroll.unwrap_or_else(|| self.scrolls[Page::Settings as usize].clone()),
-                )
-            })
-    }
-    fn setting_field(&self, field: EditField, label: &'static str) -> Div {
-        let input = text_input(&self.settings_ui.inputs[&field]);
-        self.input_field(field as usize, label, input, None, None)
-    }
-    /// A service editor input with its field error and an optional trailing action.
-    /// A connection field on the service form: outlined, its label floating
-    /// on the outline, an optional trailing action and its error below.
-    /// An outlined field of the service editor; `suffix` is an icon action
-    /// inside the field's boundary (the key's eye).
-    fn service_field(
-        &self,
-        field: FormField,
-        label: &'static str,
-        suffix: Option<AnyElement>,
-        window: &Window,
-        cx: &App,
-    ) -> AnyElement {
-        let Some(editor) = &self.settings_ui.editor else {
-            return div().into_any_element();
-        };
-        let state = editor.form.input(field);
-        let error = editor.form.error(field).map(str::to_owned);
-        let input = text_input(state)
-            .settings_text()
-            .w_full()
-            .readonly(editor.pending_binding.is_some())
-            .when(field == FormField::Key, |input| {
-                input.content_type(InputContentType::Password)
-            })
-            .aria_label(
-                error
-                    .as_ref()
-                    .map(|error| course2md::tr!("{}，{}", label, error))
-                    .unwrap_or_else(|| label.to_owned()),
-            )
-            .when(error.is_some(), |input| input.border_color(color(DANGER)))
-            .when_some(suffix, |input, suffix| input.suffix(suffix));
-        let index = 8 + field as usize;
-        let field = labeled_input(
-            ("setting-field-label", index),
-            label,
-            state,
-            input,
-            window,
-            cx,
-        );
-        self.reveal_setting(
-            ("setting-field-reveal", index),
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .gap_1()
-                .child(field)
-                .when_some(error, |view, error| {
-                    view.child(
-                        accessible_text(("setting-error", index), error)
-                            .px(rems(16. / 14.))
-                            .text_size(TEXT_SETTINGS_AUX)
-                            .text_color(color(DANGER)),
-                    )
-                }),
-        )
-        .into_any_element()
-    }
-    fn input_field(
-        &self,
-        index: usize,
-        label: &'static str,
-        input: gpui_kit::component::input::Input,
-        error: Option<String>,
-        action: Option<AnyElement>,
-    ) -> Div {
-        let input = input
-            .settings_text()
-            .w_full()
-            .aria_label(
-                error
-                    .as_ref()
-                    .map(|error| course2md::tr!("{}，{}", label, error))
-                    .unwrap_or_else(|| label.to_owned()),
-            )
-            .when(error.is_some(), |input| input.border_color(color(DANGER)));
-        self.reveal_setting(
-            ("setting-field-reveal", index),
-            settings_field_row(
-                ("setting-field-label", index),
-                label,
-                v_flex()
-                    .w_full()
-                    .gap_2()
-                    .child(match action {
-                        Some(action) => h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .gap_2()
-                            .items_center()
-                            .child(div().flex_1().min_w_0().child(input))
-                            .child(action)
-                            .into_any_element(),
-                        None => input.into_any_element(),
-                    })
-                    .when_some(error, |view, error| {
-                        view.child(
-                            accessible_text(("setting-error", index), error)
-                                .text_size(TEXT_SETTINGS_AUX)
-                                .text_color(color(DANGER)),
-                        )
-                    }),
-            ),
-        )
+        .read(cx)
+        .value()
+        .to_string()
     }
     fn hydrate_settings_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings_ui.initialized {
@@ -1008,9 +483,11 @@ impl Desktop {
         let model = value
             .local_model_draft
             .unwrap_or_else(|| value.options.asr_model.unwrap_or_default());
-        self.settings_ui.inputs[&EditField::Languages]
+        self.settings_ui
+            .languages
             .update(cx, |input, cx| input.set_value(languages, window, cx));
-        self.settings_ui.inputs[&EditField::LocalModel]
+        self.settings_ui
+            .local_model
             .update(cx, |input, cx| input.set_value(model, window, cx));
         self.settings_ui.prompt.update(cx, |input, cx| {
             input.set_value(
@@ -1030,7 +507,7 @@ impl Desktop {
         .any(|group| self.preferences.is_blocked(group))
             || self.settings_ui.pending_generation.is_some()
             || self.settings_ui.pending_application.is_some()
-            || self.settings_ui.feedback.values().any(|(_, error)| *error)
+            || !self.settings_ui.failures.is_empty()
             || self
                 .settings_ui
                 .editor
@@ -1043,10 +520,10 @@ impl Desktop {
             self.settings_origin = Some((self.page, window.focused(cx)));
         }
         self.navigate(Page::Settings, cx);
-        // Event-time preparation, not a render side effect: tab stops, first
-        // hydration of inputs and the deduplicated model check.
+        // Event-time preparation, not a render side effect: first hydration of inputs
+        // and the deduplicated model check.
         self.prepare_settings_view(window, cx);
-        self.settings_ui.tab_focus[self.settings_tab.index()].focus(window, cx);
+        self.settings_ui.navigation_focus.focus(window, cx);
     }
 
     /// Settings returns to where it was opened from, refocusing what opened it.
@@ -1062,17 +539,11 @@ impl Desktop {
     }
 
     pub(crate) fn prepare_settings_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.sync_settings_tab_stops();
         self.hydrate_settings_inputs(window, cx);
         self.ensure_settings_model_diagnostic(cx);
         self.ensure_account_cards(cx);
     }
 
-    fn sync_settings_tab_stops(&mut self) {
-        for (index, focus) in self.settings_ui.tab_focus.iter_mut().enumerate() {
-            *focus = focus.clone().tab_stop(index == self.settings_tab.index());
-        }
-    }
     pub(crate) fn select_settings_tab(
         &mut self,
         tab: SettingsTab,
@@ -1080,7 +551,6 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         self.settings_tab = tab;
-        self.sync_settings_tab_stops();
         self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
         // Capture builds can review the lower part of a category.
         #[cfg(feature = "capture")]
@@ -1096,8 +566,8 @@ impl Desktop {
             let ui = &mut self.settings_ui;
             ui.diagnostics_details_open = true;
             ui.model_details_open = true;
-            ui.asr_details_open = true;
-            ui.language_details_open = true;
+            ui.custom_languages = true;
+            ui.show_prompt = true;
         }
         #[cfg(feature = "capture")]
         if let Ok(query) = std::env::var("COURSE2MD_CAPTURE_SETTINGS_SEARCH") {
@@ -1106,17 +576,17 @@ impl Desktop {
                 .update(cx, |search, cx| search.set_value(query, window, cx));
             self.settings_search_changed(cx);
         }
-        self.settings_ui.tab_focus[tab.index()].focus(window, cx);
+        self.settings_ui.navigation_focus.focus(window, cx);
         self.ensure_account_cards(cx);
         cx.notify();
     }
 
-    /// Services and accounts: bring both account cards up to date (busy and checked guards avoid repeats).
+    /// Services and accounts: bring the ChatGPT account up to date (busy and checked guards avoid repeats).
     fn ensure_account_cards(&mut self, cx: &mut Context<Self>) {
-        if self.settings_tab != SettingsTab::Services {
-            return;
-        }
-        if self.codex.status.is_none() && !self.codex.busy() {
+        if self.settings_tab == SettingsTab::Services
+            && self.codex.status.is_none()
+            && !self.codex.busy()
+        {
             self.codex_refresh_status(crate::codex_ui::CodexSurface::Settings, cx);
         }
     }
@@ -1138,7 +608,6 @@ impl Desktop {
             && let Some(first) = visible.first()
         {
             self.settings_tab = *first;
-            self.sync_settings_tab_stops();
             self.scrolls[Page::Settings as usize].set_offset(point(px(0.), px(0.)));
             self.ensure_account_cards(cx);
         }
@@ -1163,7 +632,7 @@ impl Desktop {
         self.select_settings_tab(visible[next], window, cx);
     }
 
-    fn settings_back_button(&self, cx: &mut Context<Self>) -> Button {
+    fn settings_back_button(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let origin = self
             .settings_origin
             .as_ref()
@@ -1173,59 +642,47 @@ impl Desktop {
             Page::Task => course2md::tr!("任务"),
             _ => course2md::tr!("主页"),
         };
-        icon_button("settings-back", BUTTON_MEDIUM, true, cx)
-            .icon(icons::arrow_left())
-            .accessibility_label(course2md::tr!("返回「{}」", name))
-            .tooltip(course2md::tr!("返回「{}」", name))
-            .on_click(cx.listener(|this, _, window, cx| this.leave_settings(window, cx)))
+        let label = course2md::tr!("返回「{}」", name);
+        MaterialTooltip::plain("settings-back-tip", label.clone()).trigger(
+            IconButton::new("settings-back", symbols::arrow_back(), label)
+                .variant(IconButtonVariant::Tonal)
+                .on_click(cx.listener(|this, _, window, cx| this.leave_settings(window, cx))),
+        )
     }
 
-    /// The outlined settings search field of the navigation pane.
-    fn settings_search_field(&self, window: &Window, cx: &App) -> Div {
-        let focused = self
-            .settings_ui
-            .search
-            .read(cx)
-            .focus_handle(cx)
-            .is_focused(window);
-        h_flex()
+    /// The leading pane: the way back, the 设置 title, search and the categories as
+    /// segmented lists grouped by relationship. It scrolls on its own.
+    fn settings_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
+        let visible = self.visible_settings_tabs(cx);
+        let groups: [&[SettingsTab]; 3] = [
+            &[SettingsTab::Appearance, SettingsTab::Generation],
+            &[SettingsTab::Services, SettingsTab::Storage],
+            &[SettingsTab::Application],
+        ];
+        let lists = groups.into_iter().filter_map(|tabs| {
+            let items: Vec<_> = tabs
+                .iter()
+                .filter(|tab| visible.contains(tab))
+                .map(|&tab| {
+                    ListItem::new(("settings-tab", tab.index()), tab.label())
+                        .supporting(tab.subtitle())
+                        .leading(ListLeading::Icon(tab.icon().into()))
+                        .selected(self.settings_tab == tab)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.select_settings_tab(tab, window, cx)
+                        }))
+                })
+                .collect();
+            (!items.is_empty()).then(|| segmented_list(items))
+        });
+        let list = v_flex()
+            .id("settings-categories")
             .w_full()
             .min_w_0()
-            .h(BUTTON_LARGE)
-            .flex_shrink_0()
-            .pl(rems(22. / 14.))
-            .pr(rems(12. / 14.))
-            .gap(rems(1.))
-            .items_center()
-            .rounded(RADIUS_PILL)
-            .bg(color(SURFACE))
-            .border_1()
-            .border_color(color(if focused { ACCENT } else { HAIRLINE }))
-            .child(
-                icons::search()
-                    .size(rems(22. / 14.))
-                    .flex_shrink_0()
-                    .text_color(color(GRAY)),
-            )
-            .child(
-                div().flex_1().min_w_0().child(
-                    gpui_kit::component::input::Input::new(&self.settings_ui.search)
-                        .appearance(false)
-                        .aria_label(course2md::tr!("搜索设置"))
-                        .w_full()
-                        .px_0()
-                        .text_size(TEXT_TILE_LABEL)
-                        .cleanable(true),
-                ),
-            )
-    }
-
-    fn settings_navigation_actions(
-        &self,
-        view: Stateful<Div>,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        view.key_context("SettingsTabs")
+            .gap(rem(16.))
+            .key_context("SettingsTabs")
+            .track_focus(&self.settings_ui.navigation_focus)
+            .tab_stop(false)
             .on_action(cx.listener(|this, _: &NextSettingsTab, window, cx| {
                 this.step_settings_tab(true, window, cx);
             }))
@@ -1242,357 +699,162 @@ impl Desktop {
                     this.select_settings_tab(*last, window, cx)
                 }
             }))
-    }
-
-    /// One category tile: tinted icon circle, name and what it holds. The
-    /// open category fills with the secondary container and its circle turns
-    /// to the surface.
-    fn settings_category_tile(
-        &self,
-        tab: SettingsTab,
-        outer: [bool; 4],
-        icon_size: Pixels,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let index = tab.index();
-        let selected = self.settings_tab == tab;
-        let fill = color(if selected {
-            SECONDARY_CONTAINER
-        } else {
-            SURFACE
-        });
-        let hover = theme::blend(fill, color(INK), 0.08);
-        let icon = tinted_icon(tab.icon(), tab.tint(), icon_size)
-            .when(selected, |circle| circle.bg(color(SURFACE)));
-        tile_corners(
-            gpui_base::Tab::new(("settings-tab", index))
-                .selected(selected)
-                .track_focus(&self.settings_ui.tab_focus[index].clone().tab_stop(selected))
-                .accessibility_label(tab.label())
-                .w_full()
-                .h_auto()
-                .min_h(rems(72. / 14.))
-                .px(rems(16. / 14.))
-                .py(rems(1.))
-                .justify_start()
-                .bg(fill)
-                .border_2()
-                .border_color(gpui::transparent_black())
-                .cursor_pointer()
-                .hover(move |style| style.bg(hover))
-                .focus_visible(|style| style.border_color(color(ACCENT)))
-                .child(
-                    h_flex()
-                        .w_full()
-                        .min_w_0()
-                        .items_center()
-                        .gap(rems(16. / 14.))
-                        .child(icon)
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap(rems(2. / 14.))
-                                .child(
-                                    div()
-                                        .text_size(TEXT_SETTINGS_BODY)
-                                        .line_height(rems(22. / 14.))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(color(INK))
-                                        .child(tab.label()),
-                                )
-                                .child(
-                                    div()
-                                        .whitespace_normal()
-                                        .text_size(rems(13. / 14.))
-                                        .line_height(rems(18. / 14.))
-                                        .text_color(color(GRAY))
-                                        .child(tab.subtitle()),
-                                ),
-                        ),
+            .children(lists)
+            .when(visible.is_empty(), |list| {
+                list.child(
+                    TileScale::Regular
+                        .support("settings-search-empty", course2md::tr!("没有匹配的设置"))
+                        .px(ITEM_INSET),
                 )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.select_settings_tab(tab, window, cx)
-                })),
-            outer,
-        )
-        .into_any_element()
-    }
-
-    /// The leading pane: the way back, the 设置 title, search and the
-    /// categories as connected tile groups. It scrolls on its own.
-    fn settings_navigation(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let visible = self.visible_settings_tabs(cx);
-        // Category icons grow with the interface text.
-        let icon_size = rems(40. / 14.).to_pixels(window.rem_size());
-        let mut navigation = v_flex()
-            .w_full()
-            .min_w_0()
-            .gap(rems(16. / 14.))
-            .pb(px(64.))
+            });
+        div()
+            .id("settings-navigation")
+            .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
             .child(
-                h_flex()
-                    .h(BUTTON_LARGE)
-                    .flex_shrink_0()
-                    .items_center()
-                    .gap(rems(16. / 14.))
-                    .child(self.settings_back_button(cx))
-                    .child(theme::page_heading(
-                        "settings-page-title",
-                        course2md::tr!("设置"),
-                    )),
-            )
-            .child(self.settings_search_field(window, cx));
-        let groups: [&[SettingsTab]; 3] = [
-            &[SettingsTab::Appearance, SettingsTab::Generation],
-            &[SettingsTab::Services, SettingsTab::Storage],
-            &[SettingsTab::Application],
-        ];
-        let mut first = true;
-        for tabs in groups {
-            let shown: Vec<_> = tabs
-                .iter()
-                .copied()
-                .filter(|tab| visible.contains(tab))
-                .collect();
-            if shown.is_empty() {
-                continue;
-            }
-            let count = shown.len();
-            navigation = navigation.child(
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .gap(TILE_GAP)
-                    .when(first, |group| group.mt(rems(4. / 14.)))
-                    .children(shown.into_iter().enumerate().map(|(index, tab)| {
-                        self.settings_category_tile(tab, list_corners(index, count), icon_size, cx)
-                    })),
-            );
-            first = false;
-        }
-        if visible.is_empty() {
-            navigation = navigation.child(
-                tile_support("settings-search-empty", course2md::tr!("没有匹配的设置"))
-                    .px(SETTING_ITEM_INSET)
-                    .mt(rems(4. / 14.)),
-            );
-        }
-        let view = div()
-            .id("settings-navigation")
-            .size_full()
-            .min_h_0()
-            .overflow_y_scroll()
-            .role(Role::TabList)
-            .aria_label(course2md::tr!("设置分类"))
-            .child(navigation);
-        self.settings_navigation_actions(view, cx)
+                    .gap(rem(16.))
+                    .pb(rem(64.))
+                    .child(
+                        h_flex()
+                            .min_h(rem(56.))
+                            .items_center()
+                            .gap(rem(16.))
+                            .child(self.settings_back_button(cx))
+                            .child(page_heading("settings-page-title", course2md::tr!("设置"))),
+                    )
+                    .child(
+                        SearchField::new(&self.settings_ui.search)
+                            .id("settings-search")
+                            .leading(
+                                Icon::from(symbols::search())
+                                    .size(rem(24.))
+                                    .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                            ),
+                    )
+                    .child(list),
+            )
             .into_any_element()
     }
 
-    /// Narrow windows keep the categories in a compact rail beside the content.
-    fn settings_rail(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let icon_size = rems(40. / 14.).to_pixels(window.rem_size());
-        let mut rail = v_flex()
-            .w_full()
-            .items_center()
-            .gap(rems(4. / 14.))
-            .pb(px(24.))
-            .child(
-                div()
-                    .h(BUTTON_LARGE)
-                    .flex()
-                    .items_center()
-                    .mb(rems(8. / 14.))
-                    .child(self.settings_back_button(cx)),
-            );
-        for tab in SettingsTab::ALL {
-            let index = tab.index();
-            let selected = self.settings_tab == tab;
-            let fill = color(if selected {
-                SECONDARY_CONTAINER
-            } else {
-                CANVAS
-            });
-            let hover = theme::blend(fill, color(INK), 0.08);
-            rail = rail.child(
-                gpui_base::Tab::new(("settings-tab", index))
-                    .selected(selected)
-                    .track_focus(&self.settings_ui.tab_focus[index].clone().tab_stop(selected))
-                    .accessibility_label(tab.label())
-                    .w_full()
-                    .h_auto()
-                    .py(rems(8. / 14.))
-                    .px(rems(2. / 14.))
-                    .rounded(TILE_RADIUS)
-                    .bg(fill)
-                    .border_2()
-                    .border_color(gpui::transparent_black())
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(hover))
-                    .focus_visible(|style| style.border_color(color(ACCENT)))
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .items_center()
-                            .gap(rems(4. / 14.))
-                            .child(
-                                tinted_icon(tab.icon(), tab.tint(), icon_size)
-                                    .when(selected, |circle| circle.bg(color(SURFACE))),
-                            )
-                            .child(
-                                div()
-                                    .w_full()
-                                    .text_center()
-                                    .whitespace_normal()
-                                    .text_size(TEXT_AUX)
-                                    .line_height(rems(16. / 14.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(color(INK))
-                                    .child(tab.short_label()),
-                            ),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_settings_tab(tab, window, cx)
-                    })),
-            );
-        }
-        let view = div()
-            .id("settings-navigation")
-            .size_full()
-            .min_h_0()
-            .overflow_y_scroll()
-            .role(Role::TabList)
-            .aria_label(course2md::tr!("设置分类"))
-            .child(rail);
-        self.settings_navigation_actions(view, cx)
+    /// Narrow windows keep the categories in a navigation rail beside the content.
+    fn settings_rail(&self, cx: &mut Context<Self>) -> AnyElement {
+        let current = self.settings_tab;
+        NavigationRail::new("settings-rail", course2md::tr!("设置分类"))
+            .menu(self.settings_back_button(cx))
+            .items(SettingsTab::ALL.map(|tab| {
+                NavItem::new(
+                    tab.index().to_string(),
+                    tab.short_label(),
+                    NavIcon::symbol(tab.icon().symbol()),
+                )
+            }))
+            .selected(current.index().to_string())
+            .on_change(cx.listener(|this, value: &SharedString, window, cx| {
+                let tab = value
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|index| SettingsTab::ALL.get(index));
+                if let Some(tab) = tab {
+                    this.select_settings_tab(*tab, window, cx);
+                }
+            }))
             .into_any_element()
+    }
+
+    /// What is wrong with this category's saves, and a way to the others' failures.
+    fn settings_notices(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut notices = Vec::new();
+        for (group, target) in [
+            (PreferenceGroup::Generation, SettingsTab::Generation),
+            (PreferenceGroup::Services, SettingsTab::Services),
+            (PreferenceGroup::Application, SettingsTab::Appearance),
+        ] {
+            let failed = self
+                .settings_group_notice(group)
+                .filter(|(_, error)| *error);
+            if self.settings_tab.group() == Some(group) {
+                if self.preferences.is_blocked(group) || failed.is_some() {
+                    notices.push(self.group_feedback(group, cx).into_any_element());
+                }
+            } else if let Some((message, _)) = failed {
+                notices.push(
+                    notice_banner(
+                        ("settings-failed-group", target.index()),
+                        NoticeKind::Danger,
+                        message,
+                    )
+                    .child(
+                        material_button(
+                            ("open-failed-settings-group", target.index()),
+                            ButtonVariant::Text,
+                        )
+                        .child(course2md::tr!("前往「{}」", target.label()))
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.select_settings_tab(target, window, cx);
+                            },
+                        )),
+                    )
+                    .into_any_element(),
+                );
+            }
+        }
+        notices
     }
 
     pub fn settings_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         // Rendering has no side effects: hydration and diagnostics run from event entries such as
         // open_settings, select_settings_tab and restore_settings_group.
-        let layout = settings_layout(window);
-        let navigation = if layout.compact {
-            self.settings_rail(window, cx)
+        let compact = is_compact(window);
+        let navigation = if compact {
+            self.settings_rail(cx)
         } else {
-            self.settings_navigation(window, cx)
+            self.settings_navigation(cx)
         };
-        let mut panel = v_flex()
-            .relative()
-            .id("settings-panel")
-            .role(Role::TabPanel)
-            .aria_label(self.settings_tab.label())
-            .flex_shrink_0()
-            .min_w_0()
-            .min_h_0()
-            .h_full()
-            .w(px(layout.content))
-            .gap(px(16.));
-        for group in [
-            PreferenceGroup::Generation,
-            PreferenceGroup::Services,
-            PreferenceGroup::Application,
-        ] {
-            if self.settings_tab.group() == Some(group) {
-                if self.preferences.is_blocked(group)
-                    || self
-                        .settings_group_notice(group)
-                        .is_some_and(|(_, error)| error)
-                {
-                    panel = panel.child(
-                        div()
-                            .id(("fixed-settings-feedback", group as usize))
-                            .w_full()
-                            .min_w_0()
-                            .flex_shrink_0()
-                            .p(px(16.))
-                            .rounded(TILE_RADIUS)
-                            .bg(color(DANGER_BG))
-                            .child(self.group_feedback(group, cx)),
-                    );
-                }
-                continue;
-            }
-            let target = match group {
-                PreferenceGroup::Generation => SettingsTab::Generation,
-                PreferenceGroup::Services => SettingsTab::Services,
-                PreferenceGroup::Application => SettingsTab::Appearance,
-            };
-            if let Some((message, true)) = self.settings_group_notice(group) {
-                panel = panel.child(
-                    h_flex()
-                        .w_full()
-                        .min_w_0()
-                        .flex_shrink_0()
-                        .gap_2()
-                        .flex_wrap()
-                        .py(px(8.))
-                        .pl(px(20.))
-                        .pr(px(8.))
-                        .items_center()
-                        .rounded(TILE_RADIUS)
-                        .bg(color(DANGER_BG))
-                        .child(
-                            accessible_text(("settings-failed-group", target.index()), message)
-                                .role(Role::Alert)
-                                .flex_1()
-                                .min_w_0()
-                                .text_color(color(DANGER))
-                                .text_size(TEXT_SETTINGS_AUX),
-                        )
-                        .child(
-                            text_button(("open-failed-settings-group", target.index()), cx)
-                                .settings_text()
-                                .label(course2md::tr!("前往「{}」", target.label()))
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.select_settings_tab(target, window, cx);
-                                })),
-                        ),
-                );
-            }
-        }
         let content = match self.settings_tab {
             SettingsTab::Generation => self.generation_settings_page(window, cx),
             SettingsTab::Services => self.services_settings_page(window, cx),
             SettingsTab::Storage => self.storage_settings_page(cx),
-            SettingsTab::Application => self.application_settings_page(window, cx),
+            SettingsTab::Application => self.application_settings_page(cx),
             SettingsTab::Appearance => self.appearance_page(window, cx),
         };
-        let editing_service = self.settings_tab == SettingsTab::Services
-            && self
-                .settings_ui
-                .editor
-                .as_ref()
-                .is_some_and(|editor| editor.target.is_none() && editor.repair_task.is_none());
         let heading = v_flex()
             .w_full()
             .min_w_0()
-            .gap(rems(6. / 14.))
-            .child(
-                div()
-                    .min_h(BUTTON_LARGE)
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .child(theme::page_heading(
-                        "settings-category-heading",
-                        self.settings_tab.label(),
-                    )),
-            )
+            .gap(rem(6.))
+            .child(h_flex().min_h(rem(56.)).child(page_heading(
+                "settings-category-heading",
+                self.settings_tab.label(),
+            )))
             .when(self.settings_tab == SettingsTab::Generation, |view| {
-                view.child(
-                    accessible_text(
-                        "generation-default-explanation",
-                        course2md::tr!("这里是长期默认值，主页的「处理选项」可以只对单次生效"),
-                    )
-                    .px(rems(2. / 14.))
-                    .whitespace_normal()
-                    .text_size(rems(15. / 14.))
-                    .text_color(color(GRAY)),
-                )
+                view.child(TileScale::Regular.support(
+                    "generation-default-explanation",
+                    course2md::tr!("这里是长期默认值，主页的「处理选项」可以只对单次生效"),
+                ))
             });
-        let panel = panel
+        let scroll = &self.scrolls[Page::Settings as usize];
+        let panel = v_flex()
+            .relative()
+            .id("settings-panel")
+            .flex_1()
+            .max_w(rem(760.))
+            .min_w_0()
+            .min_h_0()
+            .h_full()
+            .gap(rem(16.))
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .flex_shrink_0()
+                    .pr(rem(12.))
+                    .gap(rem(8.))
+                    .children(self.settings_notices(cx)),
+            )
             .child(
                 div()
                     .id("settings-content-scroll")
@@ -1600,83 +862,53 @@ impl Desktop {
                     .min_w_0()
                     .min_h_0()
                     .w_full()
-                    .when(!editing_service, |view| view.overflow_y_scroll())
-                    .track_scroll(&self.scrolls[Page::Settings as usize])
+                    .overflow_y_scroll()
+                    .track_scroll(scroll)
                     .child(
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .when(editing_service, |view| view.h_full().min_h_0())
-                            .when(!editing_service, |view| view.pb(px(64.)))
-                            // A category, or the secondary page inside it, arrives as one unit.
-                            .child(crate::motion::page_enter(
-                                (
-                                    "settings-category",
-                                    self.settings_tab.index() * 2 + editing_service as usize,
-                                ),
+                        // A category arrives as one unit; the navigation stays a landmark.
+                        // The right inset is the scrollbar's gutter, so it never covers a tile.
+                        div().w_full().min_w_0().pr(rem(12.)).pb(rem(64.)).child(
+                            motion::page_enter(
+                                ("settings-category", self.settings_tab.index()),
                                 v_flex()
                                     .w_full()
                                     .min_w_0()
-                                    .gap(px(28.))
-                                    .when(editing_service, |view| view.h_full().min_h_0())
-                                    .when(!editing_service, |view| view.child(heading))
+                                    .gap(rem(28.))
+                                    .child(heading)
                                     .child(content),
-                            )),
+                            ),
+                        ),
                     ),
             )
-            .when(!editing_service, |panel| {
-                panel.child(crate::backend::vertical_scrollbar(
-                    &self.scrolls[Page::Settings as usize],
-                ))
-            });
-        let body = h_flex()
-            .w(px(layout.nav + layout.gap + layout.content))
-            .max_w_full()
+            .child(Scrollbar::vertical(scroll));
+        h_flex()
+            .size_full()
+            .max_w(rem(1120.))
             .mx_auto()
-            .h_full()
             .min_h_0()
             .items_start()
-            .gap(px(layout.gap))
+            .pt(rem(8.))
+            .gap(rem(if compact { 8. } else { 40. }))
             .child(
                 div()
-                    .w(px(layout.nav))
+                    .when(!compact, |pane| pane.w(rem(320.)))
                     .flex_shrink_0()
                     .h_full()
                     .min_h_0()
                     .child(navigation),
             )
-            .child(panel);
-        v_flex()
-            .w_full()
-            .h_full()
-            .min_w_0()
-            .min_h_0()
-            .pt(px(8.))
-            .child(div().flex_1().min_h_0().w_full().child(body))
+            .child(panel)
             .into_any_element()
     }
 
     fn services_settings_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let mut view = v_flex().w_full().min_w_0().flex_shrink_0().gap(px(28.));
-        // Adding or editing a service is a secondary page of this category.
-        if self
-            .settings_ui
-            .editor
-            .as_ref()
-            .is_some_and(|editor| editor.target.is_none() && editor.repair_task.is_none())
-        {
-            return view
-                .h_full()
-                .min_h_0()
-                .child(self.service_editor_card(window, cx))
-                .into_any_element();
-        }
-        // The account is a resource row like the services below, on the same
-        // insets, so every row's ⋯ sits on one vertical line.
-        view = view.child(
-            group("account-settings-heading", course2md::tr!("来源账号"))
-                .child(resource_row("bilibili-account-row").child(self.account_settings_page(cx))),
-        );
+        let mut view = v_flex().w_full().min_w_0().gap(rem(28.));
+        let account = self.account_row(course2md::tr!("Bilibili 账号"), window, cx);
+        view = view.child(self.settings_fields(
+            "account-settings-heading",
+            course2md::tr!("来源账号"),
+            vec![ui::Field::content("bilibili-account-row", account)],
+        ));
         let latest = self.preferences.latest_versions();
         for (purpose, heading_id, heading, add_label) in [
             (
@@ -1701,47 +933,40 @@ impl Desktop {
                             .service_retired_in_snapshot(&version.service_id)
                 })
                 .collect();
-            let count = services.len() + 1;
-            let mut section = group(heading_id, heading);
-            for (index, version) in services.iter().enumerate() {
-                let first = index == 0;
-                let row = self.service_row(version, [first, first, false, false], cx);
-                section = section.tile(move |_| row);
-            }
-            let first = count == 1;
             // Without a speech service, recognition runs on this device.
-            let hint = (purpose == ServicePurpose::Speech && services.is_empty())
-                .then(|| course2md::tr!("未添加时使用本机识别").into());
-            let add = tile_button(
-                ("add-service", purpose as usize),
-                [first, first, true, true],
-                cx,
-            )
-            .min_h(rems(72. / 14.))
-            .accessibility_label(add_label)
-            // The plus sits in the rows' icon column, the label on their text ruler.
-            .child(tile_row().child(add_slot()).child(tile_text(
-                SharedString::from(format!("add-service-label-{}", purpose as usize)),
-                add_label,
-                hint,
-            )))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.open_settings_service_editor(purpose, None, window, cx);
-            }));
-            section = section.tile(move |_| add.into_any_element());
-            view = view.child(section);
+            let hint = if purpose == ServicePurpose::Speech && services.is_empty() {
+                course2md::tr!("未添加时使用本机识别")
+            } else {
+                ""
+            };
+            let mut fields: Vec<_> = services
+                .iter()
+                .map(|version| self.service_row(version, window, cx))
+                .collect();
+            fields.push(
+                ui::Field::link(
+                    format!("add-service-{}", purpose as usize),
+                    add_label,
+                    cx.listener(move |this, _, window, cx| {
+                        this.open_settings_service_editor(purpose, None, window, cx);
+                    }),
+                )
+                .icon(symbols::add())
+                .hint(hint),
+            );
+            view = view.child(self.settings_fields(heading_id, heading, fields));
         }
         view.into_any_element()
     }
 
-    /// One saved service: what it is, whether it works, and its commands in a
-    /// menu that the row's ⋯ button and a right-click open alike.
+    /// One saved service: what it is, whether it works, and its commands in a menu that
+    /// the row's ⋯ button and a right-click open alike. The row itself opens the editor.
     fn service_row(
         &self,
         version: &ServiceVersion,
-        outer: [bool; 4],
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> ui::Field {
         let id = version.id.clone();
         let protocol = version.config.protocol;
         let purpose = protocol.purpose();
@@ -1753,143 +978,231 @@ impl Desktop {
         .and_then(|id| self.preferences.version(id))
         .filter(|default| default.service_id == version.service_id);
         let is_default = default_version.is_some_and(|default| default.id == version.id);
-        let outdated_default = default_version.filter(|default| default.id != version.id);
         let tests = self.service_tests(version);
-        let (kind, status) = self.service_status(version, &tests);
-        // An account action started here reports here.
-        let notice = (protocol == ServiceProtocol::CodexResponses)
-            .then(|| {
-                self.codex
-                    .notice_on(crate::codex_ui::CodexSurface::Settings)
-            })
-            .flatten();
         let mut detail = vec![protocol.choice_label().to_owned()];
         let host = version.config.host();
         if protocol != ServiceProtocol::CodexResponses && !host.is_empty() {
             detail.push(host);
         }
         detail.push(version.config.model.clone());
-        let failures: Vec<_> = tests
-            .iter()
-            .filter(|(_, evidence)| evidence.outcome != preferences::TestOutcome::Passed)
-            .map(|(kind, evidence)| course2md::tr!("{}：{}", kind.label(), evidence.message))
-            .collect();
-        let menu = self.service_menu(version, is_default, cx);
-        let row_menu = menu.clone();
-        let edit_id = id.clone();
-        let hover = theme::blend(color(SURFACE), color(INK), 0.08);
-        tile_corners(
-            resource_row(SharedString::from(format!("saved-service-{id}"))),
-            outer,
-        )
-        .bg(color(SURFACE))
-        .min_h(rems(88. / 14.))
-        // The whole row opens the editor, as「编辑…」in its menu does.
-        .cursor_pointer()
-        .hover(move |style| style.bg(hover))
-        .on_click(cx.listener(move |this, _, window, cx| {
-            this.open_settings_service_editor(purpose, Some(edit_id.clone()), window, cx);
-        }))
-        .child(resource_icon(
-            service_form::protocol_icon(protocol),
-            if purpose == ServicePurpose::Ai {
-                Tint::Purple
-            } else {
-                Tint::Teal
-            },
-        ))
-        .child(
-            v_flex()
-                .flex_1()
-                .min_w_0()
-                .gap(rems(2. / 14.))
-                .child(
-                    h_flex()
-                        .min_w_0()
-                        .gap_2()
-                        .items_center()
-                        .flex_wrap()
-                        .child(tile_label(
-                            SharedString::from(format!("saved-service-title-{id}")),
-                            version.config.name.clone(),
-                        ))
-                        .when(is_default, |row| {
-                            row.child(badge(BadgeKind::Tonal).child(course2md::tr!("默认")))
-                        }),
-                )
-                .child(
-                    accessible_text(
-                        SharedString::from(format!("saved-service-description-{id}")),
-                        detail.join(" · "),
-                    )
-                    .truncate()
-                    .text_size(TEXT_SETTINGS_AUX)
-                    .text_color(color(GRAY)),
-                )
-                .when_some(outdated_default, |column, default| {
-                    column.child(
-                        accessible_text(
-                            SharedString::from(format!("saved-service-old-default-{id}")),
-                            course2md::tr!(
-                                "以后生成的笔记仍使用修改前的配置 · {}",
-                                default.config.model
-                            ),
-                        )
-                        .whitespace_normal()
-                        .text_size(TEXT_SETTINGS_AUX)
-                        .text_color(color(GRAY)),
-                    )
-                })
-                .when_some(notice, |column, (message, failed)| {
-                    column.child(
-                        accessible_text(
-                            SharedString::from(format!("saved-service-notice-{id}")),
-                            message,
-                        )
-                        .whitespace_normal()
-                        .text_size(TEXT_SETTINGS_AUX)
-                        .text_color(color(if failed {
-                            DANGER
-                        } else {
-                            GRAY
-                        })),
-                    )
-                })
-                .when(!failures.is_empty(), |column| {
-                    column.child(
-                        accessible_text(
-                            SharedString::from(format!("saved-service-test-status-{id}")),
-                            failures.join("\n"),
-                        )
-                        .whitespace_normal()
-                        .text_size(TEXT_SETTINGS_AUX)
-                        .text_color(color(GRAY)),
+        let mut lines = vec![(detail.join(" · "), false)];
+        if let Some(default) = default_version.filter(|default| default.id != version.id) {
+            lines.push((
+                course2md::tr!(
+                    "以后生成的笔记仍使用修改前的配置 · {}",
+                    default.config.model
+                ),
+                false,
+            ));
+        }
+        // An account action started here reports here.
+        if protocol == ServiceProtocol::CodexResponses {
+            lines.extend(
+                self.codex
+                    .notice_on(crate::codex_ui::CodexSurface::Settings),
+            );
+        }
+        lines.extend(
+            tests
+                .iter()
+                .filter(|(_, evidence)| evidence.outcome != preferences::TestOutcome::Passed)
+                .map(|(kind, evidence)| {
+                    (
+                        course2md::tr!("{}：{}", kind.label(), evidence.message),
+                        false,
                     )
                 }),
+        );
+        let mut status = vec![self.service_status(version, &tests)];
+        if is_default {
+            status.insert(0, (StatusKind::Tonal, course2md::tr!("默认")));
+        }
+        let actions = self.service_actions(version, is_default);
+        let menu_id = ElementId::Name(format!("service-actions-{id}").into());
+        let trigger = MaterialTooltip::plain(
+            SharedString::from(format!("service-actions-tip-{id}")),
+            course2md::tr!("服务操作"),
         )
-        .child(
-            badge(kind)
-                .flex_shrink_0()
-                .text_size(TEXT_AUX)
-                .child(status),
+        .trigger(
+            IconButton::new(
+                SharedString::from(format!("service-actions-button-{id}")),
+                symbols::more_vert(),
+                course2md::tr!("{} 操作", version.config.name),
+            )
+            .on_click(ui::menu_key_toggle(&menu_id, window, cx)),
+        );
+        let items = actions.iter().map(|action| {
+            let (kind, version) = (action.kind, version.clone());
+            let icon = Icon::from(action.icon);
+            MaterialMenuItem::new(action.label)
+                .leading(if action.danger {
+                    icon.color(color(ColorRole::ERROR))
+                } else {
+                    icon
+                })
+                .disabled(action.disabled)
+                .divider(action.divider)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.run_service_action(kind, &version, window, cx)
+                }))
+        });
+        let menu = ui::menu(
+            menu_id,
+            trigger,
+            MaterialMenu::new(SharedString::from(format!("service-action-items-{id}")))
+                .width(MENU_WIDTH)
+                .items(items),
+            window,
+            cx,
         )
-        .child(
-            // The menu button keeps its click from also opening the row.
+        .anchor(Anchor::TopRight);
+        let row = Resource {
+            id: SharedString::from(format!("saved-service-{id}")),
+            icon: service_form::protocol_icon(protocol).into(),
+            title: version.config.name.clone().into(),
+            status,
+            busy: false,
+            lines,
+            actions: vec![menu.into_any_element()],
+        }
+        .row(cx);
+        let this = cx.weak_entity();
+        let context_version = version.clone();
+        let open_version = id.clone();
+        let open = cx.listener(move |this, _, window, cx| {
+            this.open_settings_service_editor(purpose, Some(open_version.clone()), window, cx);
+        });
+        ui::Field::tile(format!("saved-service-row-{id}"), move |outer| {
             div()
-                .id(SharedString::from(format!("service-actions-slot-{id}")))
-                .flex_shrink_0()
-                .on_click(|_, _, cx| cx.stop_propagation())
+                .id(SharedString::from(format!("service-context-{id}")))
+                .w_full()
+                .min_w_0()
                 .child(
-                    resource_menu(SharedString::from(format!("service-actions-{id}")), cx)
-                        .accessibility_label(course2md::tr!("{} 操作", version.config.name))
-                        .tooltip(course2md::tr!("服务操作"))
-                        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
-                            menu(popup, window, cx)
-                        }),
-                ),
-        )
-        .context_menu(move |popup, window, cx| row_menu(popup, window, cx))
-        .into_any_element()
+                    TileScale::Regular
+                        .button(SharedString::from(format!("saved-service-{id}")), outer)
+                        .on_click(open)
+                        .child(row),
+                )
+                .context_menu(move |menu, _, _| {
+                    actions.iter().fold(menu, |menu, action| {
+                        let (kind, version, this) =
+                            (action.kind, context_version.clone(), this.clone());
+                        let item = menu.item(
+                            PopupMenuItem::new(action.label)
+                                .icon(action.icon.component())
+                                .disabled(action.disabled)
+                                .on_click(move |_, window, cx| {
+                                    let _ = this.update(cx, |this, cx| {
+                                        this.run_service_action(kind, &version, window, cx)
+                                    });
+                                }),
+                        );
+                        if action.divider {
+                            item.separator()
+                        } else {
+                            item
+                        }
+                    })
+                })
+                .into_any_element()
+        })
+    }
+
+    /// 打开 → 处理 → 管理 → 危险, the order every context menu follows.
+    fn service_actions(
+        &self,
+        version: &ServiceVersion,
+        is_default: bool,
+    ) -> Rc<Vec<ServiceAction>> {
+        let action = |kind, label, icon| ServiceAction {
+            kind,
+            label,
+            icon,
+            disabled: false,
+            divider: false,
+            danger: false,
+        };
+        let mut actions = vec![
+            action(
+                ServiceCommand::Test,
+                course2md::tr!("测试连接"),
+                symbols::science(),
+            ),
+            action(
+                ServiceCommand::Edit,
+                course2md::tr!("编辑…"),
+                symbols::edit(),
+            ),
+            ServiceAction {
+                disabled: is_default,
+                divider: true,
+                ..action(
+                    ServiceCommand::MakeDefault,
+                    if is_default {
+                        course2md::tr!("已是默认服务")
+                    } else {
+                        course2md::tr!("设为默认服务…")
+                    },
+                    symbols::check_circle(),
+                )
+            },
+        ];
+        if version.config.protocol == ServiceProtocol::CodexResponses
+            && matches!(
+                self.codex.status,
+                Some(course2md::login::codex::LoginStatus::Connected)
+            )
+        {
+            actions.push(ServiceAction {
+                disabled: self.codex.busy(),
+                ..action(
+                    ServiceCommand::SignOut,
+                    course2md::tr!("退出 ChatGPT 账号"),
+                    symbols::logout(),
+                )
+            });
+        }
+        actions.push(ServiceAction {
+            danger: true,
+            ..action(
+                ServiceCommand::Delete,
+                course2md::tr!("删除服务…"),
+                symbols::delete(),
+            )
+        });
+        Rc::new(actions)
+    }
+
+    fn run_service_action(
+        &mut self,
+        command: ServiceCommand,
+        version: &ServiceVersion,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let purpose = version.config.protocol.purpose();
+        match command {
+            ServiceCommand::Test | ServiceCommand::Edit => {
+                let opened = self.open_settings_service_editor(
+                    purpose,
+                    Some(version.id.clone()),
+                    window,
+                    cx,
+                );
+                if opened && matches!(command, ServiceCommand::Test) {
+                    self.start_service_test(window, cx);
+                }
+            }
+            ServiceCommand::MakeDefault => {
+                self.confirm_default_service(version.id.clone(), window, cx)
+            }
+            ServiceCommand::SignOut => {
+                self.codex_logout(crate::codex_ui::CodexSurface::Settings, cx)
+            }
+            ServiceCommand::Delete => {
+                self.confirm_delete_service(version.service_id.clone(), window, cx)
+            }
+        }
     }
 
     fn service_tests(
@@ -1911,144 +1224,49 @@ impl Desktop {
             .collect()
     }
 
-    /// One badge per service: an account's sign-in state, otherwise what its
-    /// tests established.
+    /// One status per service: an account's sign-in state, otherwise what its tests
+    /// established.
     fn service_status(
         &self,
         version: &ServiceVersion,
         tests: &[(TestKind, &preferences::ServiceTestEvidence)],
-    ) -> (BadgeKind, &'static str) {
+    ) -> (StatusKind, &'static str) {
         if version.config.protocol == ServiceProtocol::CodexResponses {
             return self.codex.badge();
         }
         if tests.is_empty() {
-            (BadgeKind::Neutral, course2md::tr!("尚未测试"))
+            (StatusKind::Neutral, course2md::tr!("尚未测试"))
         } else if tests
             .iter()
             .all(|(_, evidence)| evidence.outcome == preferences::TestOutcome::Passed)
         {
-            (BadgeKind::Success, course2md::tr!("测试通过"))
+            (StatusKind::Success, course2md::tr!("测试通过"))
         } else {
-            (BadgeKind::Warning, course2md::tr!("测试未通过"))
+            (StatusKind::Warning, course2md::tr!("测试未通过"))
         }
-    }
-
-    /// 打开 → 处理 → 管理 → 危险, the order every context menu follows.
-    fn service_menu(
-        &self,
-        version: &ServiceVersion,
-        is_default: bool,
-        cx: &mut Context<Self>,
-    ) -> MenuBuilder {
-        let entity = cx.weak_entity();
-        let id = version.id.clone();
-        let service_id = version.service_id.clone();
-        let purpose = version.config.protocol.purpose();
-        let codex_connected = version.config.protocol == ServiceProtocol::CodexResponses
-            && matches!(
-                self.codex.status,
-                Some(course2md::login::codex::LoginStatus::Connected)
-            );
-        let busy = self.codex.busy();
-        Rc::new(move |menu, _, _| {
-            let open = |test: bool| {
-                let entity = entity.clone();
-                let id = id.clone();
-                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                    let _ = entity.update(cx, |this, cx| {
-                        if this.open_settings_service_editor(purpose, Some(id.clone()), window, cx)
-                            && test
-                        {
-                            this.start_service_test(window, cx);
-                        }
-                    });
-                }
-            };
-            let default = {
-                let entity = entity.clone();
-                let id = id.clone();
-                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                    let _ = entity.update(cx, |this, cx| {
-                        this.confirm_default_service(id.clone(), window, cx)
-                    });
-                }
-            };
-            let delete = {
-                let entity = entity.clone();
-                let service_id = service_id.clone();
-                move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                    let _ = entity.update(cx, |this, cx| {
-                        this.confirm_delete_service(service_id.clone(), window, cx)
-                    });
-                }
-            };
-            let logout = entity.clone();
-            menu.item(
-                PopupMenuItem::new(course2md::tr!("测试连接"))
-                    .icon(icons::science())
-                    .on_click(open(true)),
-            )
-            .item(
-                PopupMenuItem::new(course2md::tr!("编辑…"))
-                    .icon(icons::edit())
-                    .on_click(open(false)),
-            )
-            .item(
-                PopupMenuItem::new(if is_default {
-                    course2md::tr!("已是默认服务")
-                } else {
-                    course2md::tr!("设为默认服务…")
-                })
-                .icon(icons::check_circle())
-                .disabled(is_default)
-                .on_click(default),
-            )
-            .separator()
-            .when(codex_connected, |menu| {
-                menu.item(
-                    PopupMenuItem::new(course2md::tr!("退出 ChatGPT 账号"))
-                        .icon(icons::logout())
-                        .disabled(busy)
-                        .on_click(move |_, _, cx| {
-                            let _ = logout.update(cx, |this, cx| {
-                                this.codex_logout(crate::codex_ui::CodexSurface::Settings, cx)
-                            });
-                        }),
-                )
-            })
-            .item(
-                crate::theme::danger_menu_item(course2md::tr!("删除服务…"), icons::delete())
-                    .on_click(delete),
-            )
-        })
     }
 
     fn setting_input_changed(&mut self, field: EditField, cx: &mut Context<Self>) {
         if !self.settings_ui.initialized {
             return;
         }
-        {
-            let input = self.setting_value(field, cx);
-            let mut next = self.generation_edit_base();
-            let previous = if field == EditField::LocalModel {
-                next.local_model_draft
-                    .clone()
-                    .unwrap_or_else(|| next.options.asr_model.clone().unwrap_or_default())
-            } else {
-                next.subtitle_languages_draft
-                    .clone()
-                    .unwrap_or_else(|| next.preferred_subtitle_languages.join(", "))
-            };
-            if previous == input {
-                return;
+        let input = self.setting_input(field, cx);
+        let mut next = self.generation_edit_base();
+        let draft = match field {
+            EditField::LocalModel => {
+                let saved = next.options.asr_model.clone().unwrap_or_default();
+                (&mut next.local_model_draft, saved)
             }
-            if field == EditField::LocalModel {
-                next.local_model_draft = Some(input);
-            } else {
-                next.subtitle_languages_draft = Some(input);
+            EditField::Languages => {
+                let saved = next.preferred_subtitle_languages.join(", ");
+                (&mut next.subtitle_languages_draft, saved)
             }
-            self.stage_generation_text(next, cx);
+        };
+        if draft.0.as_ref().unwrap_or(&draft.1) == &input {
+            return;
         }
+        *draft.0 = Some(input);
+        self.stage_generation_text(next, cx);
     }
     fn save_prompt_draft(&mut self, cx: &mut Context<Self>) {
         if !self.settings_ui.initialized {
@@ -2103,19 +1321,14 @@ impl Desktop {
         self.settings_ui.pending_generation = pending_after_save(&result, next);
         match result {
             Ok(()) => {
-                self.set_settings_feedback(
-                    PreferenceGroup::Generation,
-                    course2md::tr!("已暂存，点击「应用」后生效").into(),
-                    false,
-                    cx,
-                );
+                self.clear_settings_failure(PreferenceGroup::Generation);
                 if had_pending {
                     self.refresh_preference_defaults(cx);
                 }
                 self.clear_resolved_generation_errors(previous);
             }
             Err(error) => {
-                self.set_settings_save_failure(PreferenceGroup::Generation, &error, cx);
+                self.set_settings_save_failure(PreferenceGroup::Generation, &error);
             }
         }
         cx.notify();
@@ -2155,133 +1368,8 @@ impl Desktop {
         }));
     }
 
-    /// Records the open editor's fields. A typed key is first stored in the
-    /// vault off the UI thread; the call then returns false and `after`
-    /// continues once the draft has been committed with it.
-    fn save_open_service_draft(
-        &mut self,
-        include_key: bool,
-        after: AfterDraftSaved,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(editor) = &self.settings_ui.editor else {
-            return true;
-        };
-        if editor.vault_busy {
-            return false;
-        }
-        if editor.pending_binding.is_some() || editor.saved_configuration.is_some() {
-            return true;
-        }
-        let draft = editor.form.current_draft(cx);
-        let key = include_key
-            .then(|| editor.form.typed_key(cx))
-            .filter(|key| !key.trim().is_empty());
-        if key.is_none()
-            && draft.revision == 0
-            && draft.name.is_empty()
-            && draft.address.is_empty()
-            && draft.model.is_empty()
-            && draft.credential.is_none()
-        {
-            return true;
-        }
-        if key.is_none() && self.preferences.draft(&draft.id) == Some(&draft) {
-            return true;
-        }
-        if let Some(key) = key {
-            if let Some(editor) = &mut self.settings_ui.editor {
-                editor.vault_busy = true;
-                editor.status = Some(course2md::tr!("正在保存密钥…").into());
-            }
-            let secret = Secret::new(key);
-            self.run_vault_step(
-                cx,
-                move |vault| preferences::Store::insert_credential(vault, secret),
-                move |this, stored, window, cx| {
-                    this.finish_service_key(draft, stored, after, window, cx)
-                },
-            );
-            cx.notify();
-            return false;
-        }
-        match self.preferences.commit_service_draft(draft, None) {
-            Ok(draft) => {
-                if let Some(editor) = &mut self.settings_ui.editor {
-                    editor.form.draft = draft;
-                    editor.save_failed = false;
-                    editor.status = None;
-                    if include_key {
-                        editor.form.clear_key(window, cx);
-                    }
-                }
-                cx.notify();
-                true
-            }
-            Err(error) => {
-                if let Some(editor) = &mut self.settings_ui.editor {
-                    editor.status =
-                        Some(course2md::tr!("这些修改尚未保存：{}", format!("{error:#}")));
-                    editor.save_failed = true;
-                }
-                cx.notify();
-                false
-            }
-        }
-    }
-    /// The commit step after a typed key reached the vault.
-    fn finish_service_key(
-        &mut self,
-        draft: ServiceDraft,
-        stored: Result<crate::credentials::CredentialRef>,
-        after: AfterDraftSaved,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self
-            .settings_ui
-            .editor
-            .as_mut()
-            .filter(|editor| editor.form.draft.id == draft.id);
-        let Some(editor) = open else {
-            // The editor closed meanwhile; nothing refers to the stored key.
-            if let Ok(reference) = stored {
-                self.forget_credentials(vec![reference]);
-            }
-            return;
-        };
-        editor.vault_busy = false;
-        let committed = stored.and_then(|reference| {
-            self.preferences
-                .commit_service_draft(draft, Some(reference.clone()))
-                .inspect_err(|_| self.forget_credentials(vec![reference]))
-        });
-        let Some(editor) = &mut self.settings_ui.editor else {
-            return;
-        };
-        match committed {
-            Ok(draft) => {
-                editor.form.draft = draft;
-                editor.save_failed = false;
-                editor.status = None;
-                editor.form.clear_key(window, cx);
-                match after {
-                    AfterDraftSaved::Test => self.start_service_test(window, cx),
-                    AfterDraftSaved::Publish { continue_repair } => {
-                        self.publish_service_editor(continue_repair, window, cx)
-                    }
-                }
-            }
-            Err(error) => {
-                editor.status = Some(course2md::tr!("这些修改尚未保存：{}", format!("{error:#}")));
-                editor.save_failed = true;
-            }
-        }
-        cx.notify();
-    }
     fn apply_language_preferences(&mut self, cx: &mut Context<Self>) {
-        let raw = self.setting_value(EditField::Languages, cx);
+        let raw = self.setting_input(EditField::Languages, cx);
         let languages: Vec<String> = raw
             .split([',', '，', '\n'])
             .map(str::trim)
@@ -2292,11 +1380,9 @@ impl Desktop {
             .iter()
             .any(|v| v.len() > 35 || !v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
         {
-            self.set_settings_feedback(
+            self.set_settings_failure(
                 PreferenceGroup::Generation,
                 course2md::tr!("语言代码只能包含字母、数字和连字符，请用逗号分隔各语言").into(),
-                true,
-                cx,
             );
             cx.notify();
             return;
@@ -2306,54 +1392,28 @@ impl Desktop {
         next.subtitle_languages_draft = None;
         self.commit_generation(next, cx);
     }
-    /// Shows a group's result. A success notice clears itself after a few seconds.
-    pub(crate) fn set_settings_feedback(
-        &mut self,
-        group: PreferenceGroup,
-        message: String,
-        error: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if group == PreferenceGroup::Generation && error {
+    /// Records why a group's save failed; it shows until the next save succeeds.
+    pub(crate) fn set_settings_failure(&mut self, group: PreferenceGroup, message: String) {
+        if group == PreferenceGroup::Generation {
             self.settings_ui
                 .generation_block_messages
                 .insert(message.clone());
         }
-        self.settings_ui.feedback_details.remove(&group);
-        if !error {
-            self.settings_ui.expanded_feedback.remove(&group);
-        }
-        self.settings_ui.feedback_expiry.remove(&group);
-        if !error {
-            let shown = message.clone();
-            let expiry = cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(Duration::from_secs(SUCCESS_NOTICE_SECS))
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    if success_notice_current(this.settings_ui.feedback.get(&group), &shown) {
-                        this.settings_ui.feedback.remove(&group);
-                        cx.notify();
-                    }
-                });
-            });
-            self.settings_ui.feedback_expiry.insert(group, expiry);
-        }
-        self.settings_ui.feedback.insert(group, (message, error));
+        self.settings_ui.failure_details.remove(&group);
+        self.settings_ui.failures.insert(group, message);
+    }
+    pub(crate) fn clear_settings_failure(&mut self, group: PreferenceGroup) {
+        self.settings_ui.failures.remove(&group);
+        self.settings_ui.failure_details.remove(&group);
+        self.settings_ui.expanded_feedback.remove(&group);
     }
     pub(crate) fn set_settings_save_failure(
         &mut self,
         group: PreferenceGroup,
         error: &anyhow::Error,
-        cx: &mut Context<Self>,
     ) {
-        self.set_settings_feedback(
-            group,
-            preferences::save_failure_message(group, error),
-            true,
-            cx,
-        );
-        self.settings_ui.feedback_details.insert(
+        self.set_settings_failure(group, preferences::save_failure_message(group, error));
+        self.settings_ui.failure_details.insert(
             group,
             course2md::tr!(
                 "设置目录：{}\n{}",
@@ -2363,8 +1423,8 @@ impl Desktop {
         );
     }
     pub(crate) fn settings_group_notice(&self, group: PreferenceGroup) -> Option<(String, bool)> {
-        if let Some((message, error)) = self.settings_ui.feedback.get(&group) {
-            return Some((message.clone(), *error));
+        if let Some(message) = self.settings_ui.failures.get(&group) {
+            return Some((message.clone(), true));
         }
         self.preferences
             .issues()
@@ -2378,145 +1438,96 @@ impl Desktop {
                 )
             })
     }
+    /// A group's failure with its recovery: retry a kept edit, read what went wrong,
+    /// or set aside a file that cannot be read. The edit stays until one of them works.
     pub(crate) fn group_feedback(&self, group: PreferenceGroup, cx: &mut Context<Self>) -> Div {
-        self.group_feedback_with_retry_emphasis(group, false, cx)
-    }
-    pub(crate) fn group_feedback_with_retry_emphasis(
-        &self,
-        group: PreferenceGroup,
-        primary_retry: bool,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let mut view = v_flex().w_full().min_w_0().gap_2();
-        if let Some((message, error)) = self.settings_group_notice(group) {
-            view = view.child(crate::motion::enter(
-                SharedString::from(format!("preference-feedback-{}-{message}", group as usize)),
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap_2()
-                    .items_center()
-                    .child(
-                        if error {
-                            icons::warning()
-                        } else {
-                            icons::check_circle()
-                        }
-                        .size_4()
-                        .flex_shrink_0()
-                        .text_color(color(if error {
-                            DANGER
-                        } else {
-                            SUCCESS
-                        })),
-                    )
-                    .child(
-                        accessible_text(
-                            ("settings-group-feedback", group as usize),
-                            message.clone(),
-                        )
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(TEXT_SETTINGS_BODY)
-                        .text_color(color(if error {
-                            DANGER
-                        } else {
-                            GRAY
-                        })),
-                    ),
-            ));
-            let has_pending = match group {
-                PreferenceGroup::Generation => self.settings_ui.pending_generation.is_some(),
-                PreferenceGroup::Application => self.settings_ui.pending_application.is_some(),
-                PreferenceGroup::Services => false,
-            };
-            if error && has_pending {
-                let id = ("retry-settings-save", group as usize);
-                let retry = if primary_retry {
-                    primary_pill(id)
+        let index = group as usize;
+        let (message, error) = self.settings_group_notice(group).unwrap_or_default();
+        let pending = match group {
+            PreferenceGroup::Generation => self.settings_ui.pending_generation.is_some(),
+            PreferenceGroup::Application => self.settings_ui.pending_application.is_some(),
+            PreferenceGroup::Services => false,
+        };
+        let detail = self
+            .settings_ui
+            .failure_details
+            .get(&group)
+            .cloned()
+            .or_else(|| {
+                self.preferences
+                    .issues()
+                    .iter()
+                    .rev()
+                    .find(|issue| issue.group == group)
+                    .and_then(|issue| issue.detail.clone())
+            });
+        let expanded = self.settings_ui.expanded_feedback.contains(&group);
+        let toggle = detail.is_some().then(|| {
+            material_button(("settings-feedback-details", index), ButtonVariant::Text)
+                .icon(symbols::info())
+                .child(if expanded {
+                    course2md::tr!("收起技术详情")
                 } else {
-                    control(id).settings_text()
-                };
-                view = view.child(
-                    retry
-                        .icon(icons::refresh())
-                        .label(course2md::tr!("重试保存"))
-                        .self_start()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.retry_ordinary_preferences(group, cx);
-                        })),
-                );
-            }
-            let detail = self
-                .settings_ui
-                .feedback_details
-                .get(&group)
-                .cloned()
-                .or_else(|| {
-                    self.preferences
-                        .issues()
-                        .iter()
-                        .rev()
-                        .find(|issue| issue.group == group)
-                        .and_then(|issue| issue.detail.clone())
-                });
-            if let Some(detail) = detail {
-                let expanded = self.settings_ui.expanded_feedback.contains(&group);
-                view = view.child(
-                    control(("settings-feedback-details", group as usize))
-                        .settings_text()
-                        .icon(icons::info())
-                        .ghost()
-                        .self_start()
-                        .label(if expanded {
-                            course2md::tr!("收起技术详情")
-                        } else {
-                            course2md::tr!("查看技术详情")
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if !this.settings_ui.expanded_feedback.remove(&group) {
-                                this.settings_ui.expanded_feedback.insert(group);
-                            }
-                            cx.notify();
-                        })),
-                );
-                if expanded {
-                    view = view.child(
-                        div()
-                            .id(("settings-feedback-technical-scroll", group as usize))
-                            .w_full()
-                            .min_w_0()
-                            .max_h(px(140.))
-                            .overflow_y_scroll()
-                            .p_2()
-                            .child(
-                                accessible_text(
-                                    ("settings-feedback-technical", group as usize),
-                                    detail,
-                                )
-                                .w_full()
-                                .min_w_0()
-                                .whitespace_normal()
-                                .text_size(TEXT_SETTINGS_AUX)
-                                .text_color(color(GRAY)),
-                            ),
-                    );
-                }
-            }
-        }
-        if self.preferences.is_blocked(group) {
-            view = view.child(
-                control(("reset-settings-group", group as usize))
-                    .settings_text()
-                    .icon(icons::refresh())
-                    .label(course2md::tr!("保留原文件并重置这些设置"))
-                    .self_start()
+                    course2md::tr!("查看技术详情")
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !this.settings_ui.expanded_feedback.remove(&group) {
+                        this.settings_ui.expanded_feedback.insert(group);
+                    }
+                    cx.notify();
+                }))
+        });
+        let banner = notice_banner(
+            ("settings-group-feedback", index),
+            if error {
+                NoticeKind::Danger
+            } else {
+                NoticeKind::Info
+            },
+            message,
+        )
+        .when(error && pending, |banner| {
+            banner.child(
+                material_button(("retry-settings-save", index), ButtonVariant::Tonal)
+                    .icon(symbols::refresh())
+                    .child(course2md::tr!("重试保存"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.retry_ordinary_preferences(group, cx);
+                    })),
+            )
+        })
+        .children(toggle)
+        .when(self.preferences.is_blocked(group), |banner| {
+            banner.child(
+                material_button(("reset-settings-group", index), ButtonVariant::Text)
+                    .icon(symbols::refresh())
+                    .child(course2md::tr!("保留原文件并重置这些设置"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.restore_settings_group(group, window, cx);
                     })),
-            );
-        }
-        view
+            )
+        });
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .flex_shrink_0()
+            .gap(rem(8.))
+            .child(banner)
+            .when_some(detail.filter(|_| expanded), |view, detail| {
+                view.child(
+                    div()
+                        .id(("settings-feedback-technical-scroll", index))
+                        .w_full()
+                        .min_w_0()
+                        .max_h(rem(140.))
+                        .overflow_y_scroll()
+                        .px(rem(12.))
+                        .child(
+                            TileScale::Regular
+                                .support(("settings-feedback-technical", index), detail),
+                        ),
+                )
+            })
     }
     pub(super) fn register_storage_location(
         &mut self,
@@ -2530,25 +1541,18 @@ impl Desktop {
             prompt: Some(course2md::tr!("添加笔记库位置").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
-            let result = prompt.await;
-            let path = match result {
+            let path = match prompt.await {
                 Ok(Ok(Some(mut paths))) => paths.drain(..).next(),
-                Ok(Ok(None)) => return,
+                Ok(Ok(None)) => None,
                 Ok(Err(error)) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.workspace_error =
-                            Some(course2md::tr!("无法选择文件夹：{}", format!("{error:#}")));
-                        cx.notify();
-                    });
-                    return;
+                    let message = course2md::tr!("无法选择文件夹：{}", format!("{error:#}"));
+                    let _ = this.update(cx, |this, cx| this.storage_location_failed(message, cx));
+                    None
                 }
                 Err(error) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.workspace_error =
-                            Some(course2md::tr!("无法打开文件选择器：{}", error));
-                        cx.notify();
-                    });
-                    return;
+                    let message = course2md::tr!("无法打开文件选择器：{}", error);
+                    let _ = this.update(cx, |this, cx| this.storage_location_failed(message, cx));
+                    None
                 }
             };
             let Some(path) = path else { return };
@@ -2558,26 +1562,15 @@ impl Desktop {
                 .unwrap_or(course2md::tr!("笔记库"))
                 .to_owned();
             let lists = this.update(cx, |this, _| {
-                let workspace = this
-                    .workspace
-                    .as_ref()
-                    .ok_or_else(|| anyhow!(course2md::tr!("笔记库记录暂时不可用")))?;
-                Ok::<_, anyhow::Error>((
-                    workspace
-                        .state
-                        .libraries
-                        .iter()
-                        .map(|l| l.root.clone())
-                        .collect::<Vec<_>>(),
-                    workspace
-                        .state
-                        .libraries
-                        .iter()
-                        .map(|l| l.id.clone())
-                        .collect::<Vec<_>>(),
+                let libraries = &this.workspace.as_ref()?.state.libraries;
+                Some((
+                    libraries.iter().map(|l| l.root.clone()).collect::<Vec<_>>(),
+                    libraries.iter().map(|l| l.id.clone()).collect::<Vec<_>>(),
                 ))
             });
-            let Ok(Ok((roots, ids))) = lists else { return };
+            let Ok(Some((roots, ids))) = lists else {
+                return;
+            };
             let task = crate::spawn_blocking_io(move || {
                 crate::workspace::Workspace::prepare_library(path, name, false, &roots, &ids)
             });
@@ -2586,222 +1579,65 @@ impl Desktop {
                 .await
                 .unwrap_or_else(|_| Err(anyhow!(crate::interrupted())));
             let _ = this.update(cx, |this, cx| {
-                match prepared {
-                    Ok(prepared) => {
-                        let duplicate = prepared.duplicate;
-                        let registered = this
-                            .workspace
-                            .as_mut()
-                            .ok_or_else(|| anyhow!(course2md::tr!("笔记库记录暂时不可用")))
-                            .and_then(|workspace| workspace.register_prepared_library(&prepared));
-                        match registered {
-                            Ok(_) => {
-                                this.message = Some(
-                                    if duplicate {
-                                        course2md::tr!("这个文件夹已是笔记库位置")
-                                    } else {
-                                        course2md::tr!("已添加笔记库位置")
-                                    }
-                                    .into(),
-                                );
-                                this.refresh_library(cx);
+                let registered = prepared.and_then(|prepared| {
+                    let workspace = this
+                        .workspace
+                        .as_mut()
+                        .ok_or_else(|| anyhow!(course2md::tr!("笔记库记录暂时不可用")))?;
+                    workspace.register_prepared_library(&prepared)?;
+                    Ok(prepared.duplicate)
+                });
+                match registered {
+                    Ok(duplicate) => {
+                        this.message = Some(
+                            if duplicate {
+                                course2md::tr!("这个文件夹已是笔记库位置")
+                            } else {
+                                course2md::tr!("已添加笔记库位置")
                             }
-                            Err(error) => {
-                                this.workspace_error = Some(course2md::tr!(
-                                    "笔记库位置尚未添加：{}",
-                                    format!("{error:#}")
-                                ))
-                            }
-                        }
+                            .into(),
+                        );
+                        this.refresh_library(cx);
                     }
-                    Err(error) => {
-                        this.workspace_error = Some(course2md::tr!(
-                            "笔记库位置尚未添加：{}",
-                            format!("{error:#}")
-                        ))
-                    }
+                    Err(error) => this.storage_location_failed(
+                        course2md::tr!("笔记库位置尚未添加：{}", format!("{error:#}")),
+                        cx,
+                    ),
                 }
                 cx.notify();
             });
         })
         .detach();
     }
-    pub(crate) fn appearance_controls(&self, cx: &mut Context<Self>) -> Div {
-        use crate::preferences::InterfaceLanguage;
-        let current = self.application_edit_base().language;
-        let label = |language: InterfaceLanguage| match language {
-            InterfaceLanguage::System => course2md::tr!("跟随系统"),
-            other => other.resolve().native_name(),
-        };
-        let value: SharedString = if current == InterfaceLanguage::System {
-            format!("{} · {}", label(current), current.resolve().native_name()).into()
-        } else {
-            label(current).into()
-        };
-        let entity = cx.weak_entity();
-        let language_menu = move |menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>| {
-            InterfaceLanguage::ALL
-                .into_iter()
-                .fold(menu.min_w(px(240.)), |menu, language| {
-                    let entity = entity.clone();
-                    let menu = menu.item(
-                        PopupMenuItem::new(label(language))
-                            .checked(language == current)
-                            .on_click(move |_, _, cx| {
-                                let _ = entity.update(cx, |this, cx| {
-                                    let mut next = this.application_edit_base();
-                                    next.language = language;
-                                    if this.commit_application(next, cx) {
-                                        crate::i18n::apply(language);
-                                        cx.notify();
-                                    }
-                                });
-                            }),
-                    );
-                    // 跟随系统 stands apart from the fixed languages.
-                    if language == InterfaceLanguage::System {
-                        menu.separator()
-                    } else {
-                        menu
-                    }
-                })
-        };
-        let language = tile_button("app-language", [true, true, false, false], cx)
-            .min_h(rems(76. / 14.))
-            .accessibility_label(course2md::tr!("{}：{}", course2md::tr!("界面语言"), value))
-            .child(
-                tile_row()
-                    .child(tile_text(
-                        "app-language-label",
-                        course2md::tr!("界面语言"),
-                        Some(value),
-                    ))
-                    .child(tile_chevron()),
-            )
-            .dropdown_menu_with_anchor(Anchor::TopRight, language_menu);
-        v_flex()
-            .w_full()
-            .gap(px(28.))
-            .child(
-                group("appearance-motion", course2md::tr!("界面偏好"))
-                    .tile(move |_| language.into_any_element())
-                    .child(settings_stacked_row(
-                        "app-font-scale-label",
-                        course2md::tr!("界面文字大小"),
-                        "",
-                        self.setting_choices("app-font-scale", course2md::tr!("应用文字大小"))
-                            .options(crate::preferences::FONT_SCALES.into_iter().map(|scale| {
-                                (
-                                    (scale * 100.).round().to_string(),
-                                    format!("{}%", (scale * 100.) as u32),
-                                )
-                            }))
-                            .full_width()
-                            .selected(
-                                (self.preferences.application().font_scale * 100.)
-                                    .round()
-                                    .to_string(),
-                            )
-                            .on_change(cx.listener(
-                                move |this, selected: &SharedString, window, cx| {
-                                    let Ok(percent) = selected.parse::<f32>() else {
-                                        return;
-                                    };
-                                    let scale = percent / 100.;
-                                    let mut next = this.application_edit_base();
-                                    next.font_scale = scale;
-                                    if this.commit_application(next, cx) {
-                                        theme::apply_scale(scale, window, cx);
-                                    }
-                                },
-                            )),
-                    ))
-                    .child(
-                        setting_surface().child(settings_switch_row(
-                            course2md::tr!("减少动态效果"),
-                            course2md::tr!("关闭过渡动画和进度条的流动效果"),
-                            Switch::new("app-reduce-motion")
-                                .checked(self.preferences.application().desktop.reduce_motion)
-                                .on_click(cx.listener(|this, enabled, _, cx| {
-                                    let mut next = this.application_edit_base();
-                                    next.desktop.reduce_motion = *enabled;
-                                    this.commit_application(next, cx);
-                                })),
-                        )),
-                    ),
-            )
-            .child(
-                group("appearance-home", course2md::tr!("主页")).child(
-                    setting_surface().child(settings_switch_row(
-                        course2md::tr!("显示最近的笔记"),
-                        course2md::tr!("关闭后主页不显示已完成的笔记"),
-                        Switch::new("app-home-recent-notes")
-                            .checked(self.preferences.application().desktop.home_recent_notes)
-                            .on_click(cx.listener(|this, enabled, _, cx| {
-                                let mut next = this.application_edit_base();
-                                next.desktop.home_recent_notes = *enabled;
-                                this.commit_application(next, cx);
-                            })),
-                    )),
-                ),
-            )
+    fn storage_location_failed(&mut self, message: String, cx: &mut Context<Self>) {
+        self.workspace_error = Some(message);
+        cx.notify();
     }
-    fn application_settings_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let licenses = crate::about::licenses([false; 4], window, cx);
+    fn application_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
         v_flex()
             .w_full()
             .min_w_0()
-            .gap(px(28.))
-            .child(self.environment_page(cx))
+            .gap(rem(28.))
+            .child(self.settings_fields(
+                "diagnostics-heading",
+                course2md::tr!("运行检查"),
+                self.environment_fields(cx),
+            ))
             .child(
-                group("about-heading", course2md::tr!("关于"))
-                    .child(crate::about::identity())
-                    .pair(
-                        |outer| {
-                            crate::about::link(
-                                "about-project",
-                                crate::symbols::open_in_new(),
-                                course2md::tr!("项目主页"),
-                                "https://github.com/mizorewww/course2md",
-                                outer,
-                            )
-                        },
-                        |outer| {
-                            crate::about::link(
-                                "about-issue",
-                                crate::symbols::chat_bubble(),
-                                course2md::tr!("发送反馈"),
-                                "https://github.com/mizorewww/course2md/issues",
-                                outer,
-                            )
-                        },
-                    )
-                    .tile(move |_| licenses)
-                    .child(
-                        setting_surface().py(rems(12. / 14.)).child(
-                            h_flex()
-                                .w_full()
-                                .min_w_0()
-                                .min_h(rems(48. / 14.))
-                                .gap_4()
-                                .items_center()
-                                .child(tile_text(
-                                    "restart-onboarding-label",
-                                    course2md::tr!("首次设置"),
-                                    None,
-                                ))
-                                .child(
-                                    outline_pill("restart-onboarding", cx)
-                                        .settings_text()
-                                        .pl(rems(12. / 14.))
-                                        .label(course2md::tr!("重新运行"))
-                                        .icon(icons::restart())
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.start_onboarding(window, cx);
-                                        })),
-                                ),
-                        ),
-                    ),
+                self.settings_fields(
+                    "about-heading",
+                    course2md::tr!("关于"),
+                    crate::about::fields(ui::Field::inline(
+                        "restart-onboarding-row",
+                        course2md::tr!("首次设置"),
+                        material_button("restart-onboarding", ButtonVariant::Outlined)
+                            .icon(symbols::restart_alt())
+                            .child(course2md::tr!("重新运行"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.start_onboarding(window, cx);
+                            })),
+                    )),
+                ),
             )
             .into_any_element()
     }
@@ -2810,27 +1646,22 @@ impl Desktop {
         next: ApplicationPreferences,
         cx: &mut Context<Self>,
     ) -> bool {
-        match self.preferences.save_application(next.clone()) {
+        let saved = match self.preferences.save_application(next.clone()) {
             Ok(()) => {
                 self.settings_ui.pending_application = None;
                 self.desktop_settings = self.preferences.application().desktop.clone();
                 cx.set_reduce_motion(self.desktop_settings.reduce_motion);
-                self.set_settings_feedback(
-                    PreferenceGroup::Application,
-                    course2md::tr!("已保存").into(),
-                    false,
-                    cx,
-                );
-                cx.notify();
+                self.clear_settings_failure(PreferenceGroup::Application);
                 true
             }
             Err(error) => {
                 self.settings_ui.pending_application = Some(next);
-                self.set_settings_save_failure(PreferenceGroup::Application, &error, cx);
-                cx.notify();
+                self.set_settings_save_failure(PreferenceGroup::Application, &error);
                 false
             }
-        }
+        };
+        cx.notify();
+        saved
     }
     /// Programs the app runs, and whether each was found.
     fn program_facts(
@@ -2862,25 +1693,21 @@ impl Desktop {
         tools
     }
 
-    /// 运行检查 as on the canvas: one conclusion with the capabilities it
-    /// covers, then 诊断详情 with the facts behind it. Failures stay visible:
-    /// the conclusion turns to a warning and each capability says whether it
-    /// is ready.
-    fn environment_page(&self, cx: &mut Context<Self>) -> SettingsGroup {
-        let checks = group("diagnostics-heading", course2md::tr!("运行检查"));
+    /// 运行检查: one conclusion, the capabilities it covers, then 诊断详情 with the facts
+    /// behind it. Failures stay visible: the conclusion says so and each capability says
+    /// whether it is ready.
+    fn environment_fields(&self, cx: &mut Context<Self>) -> Vec<ui::Field> {
         let Some(e) = &self.environment else {
-            return checks.child(
-                setting_surface().p(px(20.)).child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .child(crate::motion::spinner("diagnostic-checking-spinner", cx))
-                        .child(settings_value(
-                            "diagnostic-checking",
-                            course2md::tr!("正在检查本机能力…"),
-                        )),
-                ),
-            );
+            let status = ui::AsyncStatus::Busy(course2md::tr!("正在检查本机能力…").into());
+            return vec![ui::Field::content(
+                "diagnostic-checking",
+                div().children(ui::async_status(
+                    "diagnostic-checking-status",
+                    &status,
+                    None,
+                    cx,
+                )),
+            )];
         };
         let provider = self
             .preferences
@@ -2906,172 +1733,83 @@ impl Desktop {
             (course2md::tr!("读取在线视频"), e.ytdlp, false),
             (course2md::tr!("本机识别环境"), local_ready, speech_service),
         ];
-        let checked = capabilities
-            .iter()
-            .filter(|(_, _, optional)| !optional)
-            .count();
+        let checked = capabilities.iter().filter(|(_, _, unused)| !unused).count();
         let failed = capabilities
             .iter()
-            .filter(|(_, ready, optional)| !ready && !optional)
+            .filter(|(_, ready, unused)| !ready && !unused)
             .count();
-        let all_ready = failed == 0;
-        let recheck = tonal_pill("refresh-environment", cx)
-            .settings_text()
-            .pl(rems(12. / 14.))
-            .icon(icons::refresh())
-            .label(course2md::tr!("重新检查"))
+        let recheck = material_button("refresh-environment", ButtonVariant::Tonal)
+            .icon(symbols::refresh())
+            .child(course2md::tr!("重新检查"))
             .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx)));
-        let summary = setting_surface()
-            .p(rems(20. / 14.))
-            .gap(rems(16. / 14.))
-            .child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .items_center()
-                    .flex_wrap()
-                    .gap(RESOURCE_GAP)
-                    .child(if all_ready {
-                        resource_icon(icons::check_circle(), Tint::Green)
-                    } else {
-                        resource_icon(icons::warning(), Tint::Amber)
-                    })
-                    .child(
-                        tile_text(
-                            "diagnostic-summary",
-                            if all_ready {
-                                course2md::tr!("一切正常")
-                            } else {
-                                course2md::tr!("需要修复")
-                            },
-                            Some(
-                                if all_ready {
-                                    course2md::tr!("{} 项检查全部通过", checked)
-                                } else {
-                                    course2md::tr!("{} 项检查未通过", failed)
-                                }
-                                .into(),
-                            ),
-                        )
-                        .flex_basis(rems(200. / 14.)),
-                    )
-                    .child(recheck),
-            )
-            // The capabilities sit on the summary's text ruler.
-            .child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .pl(RESOURCE_TEXT_INSET)
-                    .gap_2()
-                    .flex_wrap()
-                    .children(capabilities.iter().enumerate().map(
-                        |(index, (label, ready, optional))| {
-                            let (icon, tone, state) = if *optional {
-                                (icons::info(), GRAY, course2md::tr!("当前未使用"))
-                            } else if *ready {
-                                (icons::check(), SUCCESS, course2md::tr!("可用"))
-                            } else {
-                                (icons::warning(), WARNING, course2md::tr!("待修复"))
-                            };
-                            chip(true)
-                                .border_1()
-                                .border_color(color(HAIRLINE))
-                                .id(("diagnostic-capability", index))
-                                .role(Role::Label)
-                                .aria_label(course2md::tr!("{}：{}", *label, state))
-                                .text_size(TEXT_SETTINGS_AUX)
-                                .text_color(color(if *ready || *optional { INK } else { WARNING }))
-                                .when(!*ready && !*optional, |chip| {
-                                    chip.border_color(color(WARNING)).bg(color(WARNING_BG))
-                                })
-                                .child(icon.size(px(16.)).text_color(color(tone)))
-                                .child(*label)
-                                .when(*optional, |chip| {
-                                    chip.child(
-                                        div()
-                                            .text_color(color(if *optional {
-                                                GRAY
-                                            } else {
-                                                WARNING
-                                            }))
-                                            .child(format!("· {state}")),
-                                    )
-                                })
-                        },
-                    )),
-            )
-            .when_some(
-                (!speech_service && !local_ready)
-                    .then(|| self.engine_issue(provider))
-                    .flatten()
-                    .filter(|issue| *issue != model_diagnostics::DeviceIssue::Engine),
-                |summary, issue| {
-                    summary.child(
-                        div()
-                            .pl(RESOURCE_TEXT_INSET)
-                            .child(self.engine_obstacle_with(
-                                "diagnostic-engine-obstacle",
-                                issue,
-                                false,
-                                cx,
-                            )),
-                    )
-                },
-            );
-        let mut checks = checks.child(summary);
-        if !e.engine {
-            checks = checks.child(
-                setting_surface()
-                    .child(tile_info(
-                        "repair-bundled-engine",
-                        course2md::tr!("转换程序无法运行，重新安装应用后笔记仍会保留"),
-                    ))
-                    .child(
-                        outline_pill("download-repair-app", cx)
-                            .settings_text()
-                            .icon(icons::download())
-                            .label(course2md::tr!("下载安装包"))
-                            .self_start()
-                            .on_click(|_, _, cx| {
-                                cx.open_url("https://github.com/mizorewww/course2md/releases")
-                            }),
-                    ),
-            );
-        }
-        let open = self.settings_ui.diagnostics_details_open;
-        let toggle = tile_disclosure(
-            "toggle-diagnostics-details",
-            [false, false, !open, !open],
-            open,
+        let conclusion = ui::async_status(
+            "diagnostic-summary",
+            &if failed == 0 {
+                ui::AsyncStatus::Success(course2md::tr!("{} 项检查全部通过", checked).into())
+            } else {
+                ui::AsyncStatus::Warning(course2md::tr!("{} 项检查未通过", failed).into())
+            },
+            Some(recheck.into_any_element()),
             cx,
-        )
-        .accessibility_label(course2md::tr!("诊断详情"))
-        .child(
-            tile_row()
-                .child(tile_text(
-                    "diagnostics-details-label",
-                    course2md::tr!("诊断详情"),
-                    None,
-                ))
-                .child(disclosure_chevron(open)),
-        )
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.settings_ui.diagnostics_details_open = !this.settings_ui.diagnostics_details_open;
-            cx.notify();
-        }));
-        checks = checks.tile(move |_| toggle.into_any_element());
-        if open {
-            checks = checks.child(crate::motion::disclosure(
-                "diagnostics-detail-content",
-                true,
-                self.diagnostic_details(e, cx)
-                    .px(SETTING_ITEM_INSET)
-                    .pt(rems(16. / 14.))
-                    .pb(rems(16. / 14.)),
+        );
+        let mut fields = vec![ui::Field::content(
+            "diagnostic-conclusion",
+            div().children(conclusion),
+        )];
+        fields.extend(
+            capabilities
+                .iter()
+                .enumerate()
+                .map(|(index, (label, ready, unused))| {
+                    let (kind, state) = if *unused {
+                        (StatusKind::Neutral, course2md::tr!("当前未使用"))
+                    } else if *ready {
+                        (StatusKind::Success, course2md::tr!("可用"))
+                    } else {
+                        (StatusKind::Warning, course2md::tr!("待修复"))
+                    };
+                    ui::Field::inline(
+                        format!("diagnostic-capability-{index}"),
+                        *label,
+                        status_chip(kind).child(state),
+                    )
+                }),
+        );
+        if !speech_service
+            && !local_ready
+            && let Some(issue) = self
+                .engine_issue(provider)
+                .filter(|issue| *issue != model_diagnostics::DeviceIssue::Engine)
+        {
+            fields.push(ui::Field::content(
+                "diagnostic-engine-obstacle-row",
+                self.engine_obstacle_with("diagnostic-engine-obstacle", issue, false, cx),
             ));
         }
-        checks
+        if !e.engine {
+            fields.push(ui::Field::inline(
+                "repair-bundled-engine",
+                course2md::tr!("转换程序无法运行，重新安装应用后笔记仍会保留"),
+                material_button("download-repair-app", ButtonVariant::Outlined)
+                    .icon(symbols::download())
+                    .child(course2md::tr!("下载安装包"))
+                    .on_click(|_, _, cx| {
+                        cx.open_url("https://github.com/mizorewww/course2md/releases")
+                    }),
+            ));
+        }
+        fields.push(ui::Field::disclosure(
+            "toggle-diagnostics-details",
+            course2md::tr!("诊断详情"),
+            self.settings_ui.diagnostics_details_open,
+            cx.listener(|this, _, _, cx| {
+                this.settings_ui.diagnostics_details_open =
+                    !this.settings_ui.diagnostics_details_open;
+                cx.notify();
+            }),
+            self.diagnostic_details(e, cx),
+        ));
+        fields
     }
 
     fn diagnostic_details(
@@ -3080,78 +1818,63 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Div {
         let tools = self.program_facts(environment);
-        let mut programs = tools.iter().enumerate().fold(
-            settings_detail_group(
-                "diagnostic-programs-heading",
-                icons::code(),
-                course2md::tr!("所需程序"),
-            ),
-            |group, (index, (name, found))| {
-                // A found tool says where it runs from: shipped with the app or installed.
-                let (icon, tone, state) = if *found {
-                    let state = match environment.origins.get(name) {
-                        Some(course2md::tools::Origin::Bundled) => {
-                            course2md::tools::Origin::Bundled.label()
-                        }
-                        Some(course2md::tools::Origin::Override) => {
-                            course2md::tools::Origin::Override.label()
-                        }
-                        _ => course2md::tr!("已安装"),
-                    };
-                    (icons::check(), SUCCESS, state)
-                } else {
-                    (icons::warning(), WARNING, course2md::tr!("未安装"))
-                };
-                group.row(
-                    ("diagnostic-tool-label", index),
-                    *name,
-                    h_flex()
-                        .gap(rems(6. / 14.))
-                        .items_center()
-                        .text_color(color(tone))
-                        .child(icon.size(px(16.)))
-                        .child(accessible_text(("diagnostic-tool", index), state)),
-                )
-            },
-        );
-        if !environment.ffmpeg || !environment.ffprobe || !environment.ytdlp {
-            let (help, command) = if cfg!(target_os = "macos") {
-                (course2md::tr!("在终端运行"), "brew install ffmpeg yt-dlp")
-            } else if cfg!(target_os = "windows") {
-                (
-                    course2md::tr!("在 PowerShell 运行"),
-                    "winget install Gyan.FFmpeg; winget install yt-dlp.yt-dlp",
-                )
+        // A found tool says where it runs from: shipped with the app or installed.
+        let programs = tools.iter().enumerate().map(|(index, (name, found))| {
+            let state = if !*found {
+                course2md::tr!("未安装")
             } else {
-                (
-                    course2md::tr!("用系统包管理器安装 ffmpeg，再运行"),
-                    "pipx install yt-dlp",
-                )
+                match environment.origins.get(name) {
+                    Some(course2md::tools::Origin::Bundled) => {
+                        course2md::tools::Origin::Bundled.label()
+                    }
+                    Some(course2md::tools::Origin::Override) => {
+                        course2md::tools::Origin::Override.label()
+                    }
+                    _ => course2md::tr!("已安装"),
+                }
             };
-            programs = programs.row(
-                "media-tools-repair-label",
-                course2md::tr!("修复方式"),
+            let icon = if *found {
+                Icon::from(symbols::check()).color(color(ColorRole::SUCCESS))
+            } else {
+                Icon::from(symbols::warning()).color(color(ColorRole::WARNING))
+            };
+            ListItem::new(("diagnostic-tool", index), *name)
+                .density(ListDensity::Compact)
+                .leading(ListLeading::Icon(icon))
+                .trailing_text(state)
+        });
+        let repair =
+            (!environment.ffmpeg || !environment.ffprobe || !environment.ytdlp).then(|| {
+                let (help, command) = if cfg!(target_os = "macos") {
+                    (course2md::tr!("在终端运行"), "brew install ffmpeg yt-dlp")
+                } else if cfg!(target_os = "windows") {
+                    (
+                        course2md::tr!("在 PowerShell 运行"),
+                        "winget install Gyan.FFmpeg; winget install yt-dlp.yt-dlp",
+                    )
+                } else {
+                    (
+                        course2md::tr!("用系统包管理器安装 ffmpeg，再运行"),
+                        "pipx install yt-dlp",
+                    )
+                };
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .gap_2()
-                    .child(settings_value("install-media-tools-help", help))
-                    .child(settings_value("install-media-tools-command", command))
+                    .gap(rem(4.))
+                    .items_start()
+                    .child(TileScale::Regular.support("install-media-tools-help", help))
+                    .child(accessible_text("install-media-tools-command", command))
                     .child(
-                        quiet("copy-media-install-command")
-                            .settings_text()
-                            .ml(-QUIET_INSET)
-                            .icon(icons::content_copy())
-                            .label(course2md::tr!("复制安装命令"))
-                            .self_start()
+                        material_button("copy-media-install-command", ButtonVariant::Text)
+                            .icon(symbols::content_copy())
+                            .child(course2md::tr!("复制安装命令"))
                             .on_click(move |_, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(command.into()))
                             }),
-                    ),
-            );
-        }
+                    )
+            });
         // The copied text is what the page shows, one fact per line.
-        let hardware = self.hardware_facts();
         let mut report = vec![course2md::tr!("所需程序").to_owned()];
         report.extend(tools.iter().map(|(name, found)| {
             format!(
@@ -3165,26 +1888,33 @@ impl Desktop {
         }));
         report.push(course2md::tr!("设备与运行时").to_owned());
         report.extend(
-            hardware
+            self.hardware_facts()
                 .iter()
                 .map(|(_, label, value)| format!("{label}: {value}")),
         );
         let report = report.join("\n");
         v_flex()
-            .w_full()
-            .min_w_0()
-            .gap_5()
-            .pt_1()
-            .child(programs)
+            .gap(rem(20.))
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .child(section_heading(
+                        "diagnostic-programs-heading",
+                        symbols::code(),
+                        course2md::tr!("所需程序"),
+                    ))
+                    // A list item's own inset would break the group's left edge.
+                    .child(v_flex().mx(rem(-16.)).children(programs))
+                    .children(repair),
+            )
             .children(self.model_hardware_details(cx))
             .child(
                 h_flex().w_full().justify_end().child(
-                    quiet("copy-diagnostics")
-                        .settings_text()
-                        .mr(-QUIET_INSET)
-                        .text_color(color(ACCENT))
-                        .icon(icons::content_copy())
-                        .label(course2md::tr!("复制诊断信息"))
+                    material_button("copy-diagnostics", ButtonVariant::Text)
+                        .icon(symbols::content_copy())
+                        .child(course2md::tr!("复制诊断信息"))
                         .on_click(move |_, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(report.clone()))
                         }),
@@ -3285,12 +2015,7 @@ impl Desktop {
                 self.settings_ui.initialized = false;
                 // Rehydrate on the event path now rather than on the next visit; rendering never does this.
                 self.hydrate_settings_inputs(window, cx);
-                self.set_settings_feedback(
-                    group,
-                    course2md::tr!("原文件已保留，这些设置已重置").into(),
-                    false,
-                    cx,
-                );
+                self.clear_settings_failure(group);
                 if group == PreferenceGroup::Application {
                     self.desktop_settings = self.preferences.application().desktop.clone();
                     cx.set_reduce_motion(self.desktop_settings.reduce_motion);
@@ -3307,7 +2032,7 @@ impl Desktop {
                 true
             }
             Err(error) => {
-                self.set_settings_save_failure(group, &error, cx);
+                self.set_settings_save_failure(group, &error);
                 cx.notify();
                 false
             }
@@ -3339,14 +2064,12 @@ impl Desktop {
             .map(|issue| issue.message);
         let result = self.preferences.relocate_generation_paths(old, new);
         if let Err(error) = &result {
-            self.set_settings_feedback(
+            self.set_settings_failure(
                 PreferenceGroup::Generation,
                 course2md::tr!(
                     "模型位置尚未更新，修改已保留，可重试保存：{}",
                     format!("{error:#}")
                 ),
-                true,
-                cx,
             );
         } else {
             self.refresh_preference_defaults(cx);
@@ -3384,54 +2107,34 @@ impl Desktop {
     }
 }
 
-/// A success notice clears itself only while it is still the group's notice;
-/// a newer message, or an error that replaced it, stays.
-fn success_notice_current(current: Option<&(String, bool)>, shown: &str) -> bool {
-    matches!(current, Some((message, false)) if message == shown)
-}
-
 /// The staged edit after a save attempt: cleared once the store accepted it,
 /// kept for retry and exit when the save failed.
 fn pending_after_save<T, E>(result: &std::result::Result<(), E>, next: T) -> Option<T> {
     result.is_err().then_some(next)
 }
 
-impl Desktop {
-    /// Settings is a place of its own: as on the canvas, its title bar is
-    /// empty (window controls and dragging only); the way back and the 设置
-    /// title lead the navigation pane instead.
-    pub(crate) fn settings_title_bar(
-        &self,
-        bar: Div,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit_material::components::TitleBar {
-        crate::views::app_bar(title_bar_height(window), window, cx).child(bar)
-    }
+/// The commands of a saved service, drawn by its ⋯ menu and its context menu alike.
+#[derive(Clone, Copy)]
+enum ServiceCommand {
+    Test,
+    Edit,
+    MakeDefault,
+    SignOut,
+    Delete,
+}
+
+struct ServiceAction {
+    kind: ServiceCommand,
+    label: &'static str,
+    icon: SymbolIcon,
+    disabled: bool,
+    divider: bool,
+    danger: bool,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{pending_after_save, success_notice_current};
-
-    #[test]
-    fn a_success_notice_expires_only_while_it_is_still_shown() {
-        let shown = "已保存".to_owned();
-        assert!(success_notice_current(
-            Some(&(shown.clone(), false)),
-            &shown
-        ));
-        // Cleared already, or replaced by a newer notice or by an error.
-        assert!(!success_notice_current(None, &shown));
-        assert!(!success_notice_current(
-            Some(&("服务已保存".to_owned(), false)),
-            &shown
-        ));
-        assert!(!success_notice_current(
-            Some(&(shown.clone(), true)),
-            &shown
-        ));
-    }
+    use super::pending_after_save;
 
     #[test]
     fn a_failed_save_keeps_the_staged_edit_and_a_successful_one_clears_it() {

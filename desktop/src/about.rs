@@ -3,12 +3,7 @@
 use crate::{symbols, ui};
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
-use gpui_kit_material::{
-    color::ColorRole,
-    icons::{Icon, SymbolIcon},
-    prelude::*,
-    tokens::shape::OuterCorners,
-};
+use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};
 
 /// The licenses the app ships under and where each text lives.
 const LICENSES: [(&str, &str); 3] = [
@@ -26,8 +21,8 @@ const LICENSES: [(&str, &str); 3] = [
     ),
 ];
 
-/// The identity tile: app icon, name, version and build.
-pub fn identity() -> Div {
+/// The identity row: app icon, name, version and build.
+fn identity() -> Div {
     let commit = env!("COURSE2MD_DESKTOP_COMMIT");
     let version = if commit.is_empty() {
         env!("CARGO_PKG_VERSION").to_owned()
@@ -39,7 +34,6 @@ pub fn identity() -> Div {
         .min_w_0()
         .items_center()
         .gap(rem(16.))
-        .p(ITEM_INSET)
         .child(img("images/course2md.png").size(rem(56.)).flex_shrink_0())
         .child(
             v_flex()
@@ -57,58 +51,38 @@ pub fn identity() -> Div {
         )
 }
 
-/// A link tile of the 关于 group (项目主页, 发送反馈).
-pub fn link(
-    id: &'static str,
-    icon: SymbolIcon,
-    label: &'static str,
-    url: &'static str,
-    outer: OuterCorners,
-) -> AnyElement {
-    let scale = TileScale::Regular;
-    scale
-        .button(id, outer)
-        .accessibility_label(label)
-        .child(
-            scale
-                .row()
-                .child(Icon::from(icon).color(color(ColorRole::ON_SURFACE_VARIANT)))
-                .child(scale.label(SharedString::from(format!("{id}-label")), label)),
-        )
-        .on_click(move |_, _, cx| cx.open_url(url))
-        .into_any_element()
-}
-
-/// 开源许可: the licenses the app ships under; the row opens a menu of their texts.
-pub fn licenses(outer: OuterCorners, window: &mut Window, cx: &mut App) -> AnyElement {
-    let scale = TileScale::Regular;
-    let label = course2md::tr!("开源许可");
+/// The rows of the 关于 group, in reading order, with the page's own `last` row.
+pub fn fields(last: ui::Field) -> Vec<ui::Field> {
     let summary = LICENSES
         .iter()
         .map(|(name, _)| *name)
         .collect::<Vec<_>>()
         .join(course2md::tr!("、"));
-    let trigger = scale
-        .button("about-license", outer)
-        .accessibility_label(label)
-        .child(
-            scale
-                .row()
-                .child(scale.text("about-license-title", label, Some(summary.into())))
-                .child(tile_chevron()),
-        );
-    let items = LICENSES.into_iter().map(|(name, url)| {
+    let licenses = LICENSES.into_iter().map(|(name, url)| {
         MaterialMenuItem::new(name)
             .leading(Icon::from(symbols::open_in_new()))
             .on_click(move |_, _, cx| cx.open_url(url))
     });
-    ui::menu(
-        "about-license-menu",
-        trigger,
-        MaterialMenu::new("about-license-items").items(items),
-        window,
-        cx,
-    )
-    .anchor(Anchor::TopRight)
-    .into_any_element()
+    vec![
+        ui::Field::content("about-identity", identity()),
+        ui::Field::link(
+            "about-project",
+            course2md::tr!("项目主页"),
+            |_, _, cx| cx.open_url("https://github.com/mizorewww/course2md"),
+        )
+        .icon(symbols::open_in_new()),
+        ui::Field::link("about-issue", course2md::tr!("发送反馈"), |_, _, cx| {
+            cx.open_url("https://github.com/mizorewww/course2md/issues")
+        })
+        .icon(symbols::chat_bubble()),
+        ui::Field::menu(
+            "about-license",
+            course2md::tr!("开源许可"),
+            summary,
+            MaterialMenu::new("about-license-items")
+                .width(320.)
+                .items(licenses),
+        ),
+        last,
+    ]
 }

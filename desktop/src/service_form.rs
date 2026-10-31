@@ -42,6 +42,12 @@ pub(crate) enum FormOwner {
 }
 
 impl FormOwner {
+    fn index(self) -> usize {
+        match self {
+            Self::Editor => 0,
+            Self::Setup(purpose) => 1 + purpose as usize,
+        }
+    }
     fn codex_surface(self) -> CodexSurface {
         match self {
             Self::Editor => CodexSurface::Editor,
@@ -70,16 +76,8 @@ impl ServiceForm {
         let inputs: BTreeMap<_, _> = fields
             .iter()
             .map(|&field| {
-                let input = cx.new(|cx| {
-                    InputState::new(window, cx)
-                        .placeholder(match field {
-                            FormField::Address => "https://api.example.com/v1",
-                            FormField::Name => course2md::tr!("例如：我的 API"),
-                            FormField::Model => course2md::tr!("模型 ID，或从服务获取列表"),
-                            _ => "",
-                        })
-                        .masked(field == FormField::Key)
-                });
+                let input =
+                    cx.new(|cx| InputState::new(window, cx).masked(field == FormField::Key));
                 (field, input)
             })
             .collect();
@@ -155,15 +153,7 @@ impl ServiceForm {
                 input.update(cx, |input, cx| input.set_value(value, window, cx));
             }
         }
-        let placeholder = if draft.credential.is_some() {
-            "••••••••"
-        } else {
-            ""
-        };
-        self.inputs[&FormField::Key].update(cx, |input, cx| {
-            input.set_placeholder(placeholder, window, cx);
-            input.set_masked(true, window, cx);
-        });
+        self.inputs[&FormField::Key].update(cx, |input, cx| input.set_masked(true, window, cx));
         self.draft = draft;
         self.errors.clear();
         self.models.invalidate();
@@ -258,45 +248,26 @@ impl ServiceForm {
     }
 }
 
-/// A menu entry with a name and a quieter line saying what it means.
-pub(crate) fn two_line_item(
-    name: impl Into<SharedString>,
-    detail: impl Into<SharedString>,
-) -> impl IntoElement {
-    v_flex()
-        .flex_1()
-        .min_w_0()
-        .py(rems(8. / 14.))
-        .child(
-            div()
-                .font_weight(FontWeight::MEDIUM)
-                .line_height(rems(20. / 14.))
-                .child(name.into()),
-        )
-        .child(
-            div()
-                .text_size(TEXT_AUX)
-                .line_height(rems(16. / 14.))
-                .opacity(0.8)
-                .whitespace_normal()
-                .child(detail.into()),
-        )
-}
-
-pub(crate) fn protocol_icon(protocol: ServiceProtocol) -> Icon {
+pub(crate) fn protocol_icon(protocol: ServiceProtocol) -> SymbolIcon {
     match protocol {
-        ServiceProtocol::SpeechTranscriptions => icons::mic(),
-        ServiceProtocol::SpeechChat => icons::article(),
-        ServiceProtocol::AiChat => icons::cloud(),
-        ServiceProtocol::OllamaChat => icons::server(),
-        ServiceProtocol::CodexResponses => icons::sparkles(),
+        ServiceProtocol::SpeechTranscriptions => symbols::mic(),
+        ServiceProtocol::SpeechChat => symbols::article(),
+        ServiceProtocol::AiChat => symbols::cloud(),
+        ServiceProtocol::OllamaChat => symbols::dns(),
+        ServiceProtocol::CodexResponses => symbols::auto_awesome(),
     }
 }
 
 impl Desktop {
     pub(crate) fn service_form(&self, owner: FormOwner) -> Option<&ServiceForm> {
         match owner {
-            FormOwner::Editor => self.settings_ui.editor.as_ref().map(|editor| &editor.form),
+            // The closed editor still draws while its dialog plays the exit.
+            FormOwner::Editor => self
+                .settings_ui
+                .editor
+                .as_ref()
+                .or(self.settings_ui.closed_editor.as_ref())
+                .map(|editor| &editor.form),
             FormOwner::Setup(purpose) => self.setup_form(purpose),
         }
     }
@@ -365,95 +336,127 @@ impl Desktop {
         cx.notify();
     }
 
-    /// The service type select for this form's purpose: one menu grouped by
-    /// how each type is reached, each entry saying what choosing it means.
-    /// Each form labels it the way it labels its other fields.
+    /// The service type: a few choices that each need a word of explanation, so they
+    /// stand as tiles rather than behind a menu.
     pub(crate) fn service_type_field(
         &self,
         owner: FormOwner,
         id: impl Into<ElementId>,
         disabled: bool,
         cx: &mut Context<Self>,
-    ) -> SelectField {
+    ) -> ChoiceGroup {
         let current = self
             .service_form(owner)
             .map_or(ServiceProtocol::AiChat, |form| form.draft.protocol);
-        let ollama = self.ollama.status_line();
-        let detail = move |protocol: ServiceProtocol| -> SharedString {
-            match (&ollama, protocol) {
-                (Some(line), ServiceProtocol::OllamaChat) => line.clone().into(),
-                _ => protocol.choice_detail().into(),
-            }
-        };
-        let entity = cx.weak_entity();
-        SelectField::new(id, current.choice_label(), {
-            let detail = detail.clone();
-            move |menu, _, _| {
-                let mut group = None;
-                ServiceProtocol::for_purpose(current.purpose()).fold(menu, |mut menu, protocol| {
-                    if group != Some(protocol.choice_group()) {
-                        group = Some(protocol.choice_group());
-                        menu = menu.label(protocol.choice_group());
-                    }
-                    let entity = entity.clone();
-                    let detail = detail(protocol);
-                    menu.item(
-                        PopupMenuItem::element(move |_, _| {
-                            two_line_item(protocol.choice_label(), detail.clone())
-                        })
-                        .icon(protocol_icon(protocol))
-                        .checked(protocol == current)
-                        .on_click(move |_, window, cx| {
-                            let _ = entity.update(cx, |this, cx| {
-                                this.switch_service_protocol(owner, protocol, window, cx)
-                            });
-                        }),
+        let protocols: Vec<_> = ServiceProtocol::for_purpose(current.purpose()).collect();
+        let count = protocols.len();
+        let id = id.into();
+        let group = protocols.iter().enumerate().fold(
+            ChoiceGroup::new(id.clone(), course2md::tr!("服务类型")),
+            |group, (index, protocol)| {
+                let detail = match (&self.ollama.status_line(), protocol) {
+                    (Some(line), ServiceProtocol::OllamaChat) => line.clone().into(),
+                    _ => SharedString::from(protocol.choice_detail()),
+                };
+                group.tile(
+                    ChoiceTile::new(
+                        (id.clone(), protocol.choice_label()),
+                        index,
+                        count,
+                        protocol.choice_label(),
+                        *protocol == current,
                     )
-                })
-            }
-        })
-        .icon(protocol_icon(current))
-        .detail(detail(current))
-        .disabled(disabled)
+                    .icon(Icon::from(protocol_icon(*protocol)).size(rem(24.)))
+                    .description(detail)
+                    .enabled(!disabled),
+                )
+            },
+        );
+        group.on_change(cx.listener(move |this, index: &usize, window, cx| {
+            this.switch_service_protocol(owner, protocols[*index], window, cx);
+        }))
     }
 
-    /// The trailing eye of the key input: it shows or hides the key inside
-    /// the field's own boundary, as the model field's actions do.
+    /// A text input of a service form: labelled, with its error or `hint` below.
+    /// While `read_only` the value can be selected but not changed.
+    pub(crate) fn service_text_field(
+        &self,
+        owner: FormOwner,
+        field: FormField,
+        label: &'static str,
+        hint: Option<String>,
+        read_only: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<TextField> {
+        let form = self.service_form(owner)?;
+        let error = form.error(field).map(str::to_owned);
+        let saved_key = field == FormField::Key && form.draft.credential.is_some();
+        let placeholder = match field {
+            FormField::Address => "https://api.example.com/v1",
+            FormField::Name => course2md::tr!("例如：我的 API"),
+            _ if saved_key => "••••••••",
+            _ => "",
+        };
+        let trailing = (field == FormField::Key)
+            .then(|| self.service_key_visibility(owner, ("service-key", owner.index()), cx));
+        let id = ElementId::NamedChild(
+            Arc::new(ElementId::from(("service-field", owner.index()))),
+            field.error_key().into(),
+        );
+        let support = error.clone().or(hint);
+        Some(
+            TextField::new(id, form.input(field))
+                .outlined()
+                .w_full()
+                .label(label)
+                .placeholder(placeholder)
+                .read_only(read_only)
+                .error(error.is_some())
+                .when_some(support, |field, support| field.supporting_text(support))
+                .when_some(trailing, |field, trailing| field.trailing_icon(trailing)),
+        )
+    }
+
+    /// The trailing eye of the key input: it shows or hides the key inside the field.
     pub(crate) fn service_key_visibility(
         &self,
         owner: FormOwner,
         id: impl Into<ElementId>,
         cx: &mut Context<Self>,
-    ) -> Button {
+    ) -> AnyElement {
+        let id = id.into();
         let shown = self.service_form(owner).is_some_and(|form| form.show_key);
-        input_action(id)
-            .icon(if shown {
-                icons::eye_off()
-            } else {
-                icons::eye()
-            })
-            .accessibility_label(if shown {
-                course2md::tr!("隐藏密钥")
-            } else {
-                course2md::tr!("显示密钥")
-            })
-            .tooltip(if shown {
-                course2md::tr!("隐藏密钥")
-            } else {
-                course2md::tr!("显示密钥")
-            })
-            .on_click(cx.listener(move |this, _, window, cx| {
-                if let Some(form) = this.service_form_mut(owner) {
-                    form.show_key = !form.show_key;
-                    let masked = !form.show_key;
-                    form.inputs[&FormField::Key]
-                        .update(cx, |input, cx| input.set_masked(masked, window, cx));
-                }
-                cx.notify();
-            }))
+        let label = if shown {
+            course2md::tr!("隐藏密钥")
+        } else {
+            course2md::tr!("显示密钥")
+        };
+        MaterialTooltip::plain((id.clone(), "tip"), label)
+            .trigger(
+                IconButton::new(
+                    (id, "button"),
+                    if shown {
+                        symbols::visibility_off()
+                    } else {
+                        symbols::visibility()
+                    },
+                    label,
+                )
+                .button_size(ButtonSize::Small)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if let Some(form) = this.service_form_mut(owner) {
+                        form.show_key = !form.show_key;
+                        let masked = !form.show_key;
+                        form.inputs[&FormField::Key]
+                            .update(cx, |input, cx| input.set_masked(masked, window, cx));
+                    }
+                    cx.notify();
+                })),
+            )
+            .into_any_element()
     }
 
-    /// The model input with its discovery menu and field error.
+    /// The model input with its discovery and field error.
     pub(crate) fn service_model_field(
         &self,
         owner: FormOwner,
@@ -470,7 +473,31 @@ impl Desktop {
             &form.models,
             disabled,
             form.error(FormField::Model),
-            cx.listener(move |this, _, _, cx| this.fetch_service_models(owner, cx)),
+            cx.listener(
+                move |this, event: &model_discovery::ModelFieldEvent, window, cx| {
+                    use model_discovery::ModelFieldEvent::*;
+                    match event {
+                        Fetch => this.fetch_service_models(owner, cx),
+                        ToggleChoices => {
+                            if let Some(form) = this.service_form_mut(owner) {
+                                form.models.choices_open = !form.models.choices_open;
+                            }
+                        }
+                        // A value set from here emits no change event, so this is the edit.
+                        Choose(model) => {
+                            if let Some(form) = this.service_form_mut(owner) {
+                                form.models.choices_open = false;
+                                form.errors.clear();
+                                form.input(FormField::Model).update(cx, |input, cx| {
+                                    input.set_value(model.clone(), window, cx)
+                                });
+                            }
+                            this.service_form_edited(owner, true);
+                        }
+                    }
+                    cx.notify();
+                },
+            ),
             cx,
         )
     }
@@ -510,9 +537,12 @@ impl Desktop {
                     )
                     .ok()
                 });
-                // A reloaded or closed form has dropped this ticket.
-                if let Some(form) = this.service_form_mut(owner) {
-                    form.models.complete(ticket, current.as_ref(), result);
+                // A reloaded or closed form has dropped this ticket. A list the person
+                // just asked for shows at once.
+                if let Some(form) = this.service_form_mut(owner)
+                    && form.models.complete(ticket, current.as_ref(), result)
+                {
+                    form.models.choices_open = !form.models.models().is_empty();
                     cx.notify();
                 }
             });

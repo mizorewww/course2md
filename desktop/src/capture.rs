@@ -302,6 +302,7 @@ impl Desktop {
         self.name_dialog = None;
         self.move_dialog = None;
         self.close_reader_image(cx);
+        self.close_settings_dialogs(cx);
         // First use is reviewed on its own; captured pages show the app behind it.
         if page != "onboarding" {
             self.onboarding.active = false;
@@ -413,7 +414,7 @@ impl Desktop {
             let _ = this.update_in(cx, |this, window, cx| {
                 let newest = this.courses.first().map(|course| (**course).clone());
                 match name.as_str() {
-                    "palette" => this.open_palette_picker(false, window, cx),
+                    "palette" => this.open_palette_picker(false, cx),
                     "storage" => this.open_storage_dialog(window, cx),
                     "login" => this.open_account_dialog(window, cx),
                     "image" => {

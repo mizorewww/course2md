@@ -268,7 +268,9 @@ impl Desktop {
             .gap(px(4.))
             .items_center();
         if page == Page::Settings {
-            return self.settings_title_bar(bar, window, cx);
+            // Settings is a place of its own: window controls and dragging only; the way
+            // back and its title lead its navigation pane instead.
+            return app_bar(title_bar_height(window), window, cx).child(bar);
         }
         if let (Page::Result, Some(tools)) = (page, reader_tools) {
             return self.reader_title_bar(bar, tools, window, cx);
@@ -538,6 +540,7 @@ impl Render for Desktop {
                         .child(bar)
                         .child(content),
                 )
+                .children(self.settings_dialogs(window, cx))
                 .children(crate::ui::confirm_host(cx))
                 .into_any_element();
         }
@@ -613,21 +616,9 @@ impl Render for Desktop {
                         .settings_group_notice(crate::preferences::PreferenceGroup::Application)
                         .is_some_and(|(_, error)| error),
                 |v| {
-                    v.child(
-                        shell_column_for(self.page).pb_3().flex_shrink_0().child(
-                            div()
-                                .id("library-settings-feedback")
-                                .w_full()
-                                .min_w_0()
-                                .p_3()
-                                .rounded(gpui_kit_material::tokens::shape::RADIUS_LARGE)
-                                .bg(color(ColorRole::ERROR_CONTAINER))
-                                .child(self.group_feedback(
-                                    crate::preferences::PreferenceGroup::Application,
-                                    cx,
-                                )),
-                        ),
-                    )
+                    v.child(shell_column_for(self.page).pb_3().flex_shrink_0().child(
+                        self.group_feedback(crate::preferences::PreferenceGroup::Application, cx),
+                    ))
                 },
             )
             .when_some(self.workspace_error.clone(), |v, message| {
@@ -741,6 +732,7 @@ impl Render for Desktop {
             })
             .children(self.name_dialog_view(window, cx))
             .children(self.move_dialog_view(cx))
+            .children(self.settings_dialogs(window, cx))
             .children(crate::ui::confirm_host(cx))
             .into_any_element()
     }

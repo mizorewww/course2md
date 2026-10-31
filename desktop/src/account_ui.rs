@@ -1,18 +1,20 @@
 //! Bilibili account settings and cancellable QR login. No ticket is logged or stored in UI text.
-use super::*;
-use crate::theme::*;
+use crate::settings_ui::Resource;
+use crate::{Desktop, Field, Page, symbols, ui};
+use anyhow::Result;
 use course2md::auth::{AccountProfile, AccountStatus, QrPoll, QrSession};
-use gpui_kit::component::{
-    button::*,
-    menu::{DropdownMenu, PopupMenuItem},
-};
-use std::sync::Arc;
+use gpui::{prelude::*, *};
+use gpui_base::{h_flex, v_flex};
+use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};
+use std::{sync::Arc, time::Duration};
 
 #[derive(Default)]
 pub(crate) struct AccountUi {
     generation: u64,
     status_generation: u64,
     dialog: Option<QrDialogState>,
+    /// The closed dialog's last state, so it can play its exit.
+    closing: Option<QrDialogState>,
     modules: Option<Arc<Vec<Vec<bool>>>>,
     status: Option<AccountStatus>,
     checking: bool,
@@ -22,7 +24,6 @@ pub(crate) struct AccountUi {
     /// copy change cannot silently break the status derivation.
     logout_failed: bool,
     retry_source: Option<(u64, String)>,
-    return_focus: Option<FocusHandle>,
 }
 #[derive(Clone)]
 enum QrDialogState {
@@ -42,50 +43,21 @@ enum QrPollResult {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct QrLayout {
-    dialog_width: f32,
-    content_width: f32,
-    content_height: f32,
-    side_by_side: bool,
-    code_size: f32,
-    text_height: f32,
-    gap: f32,
-}
-
-/// Match the dialog's 16px padding and 1px border, reserving its existing
-/// title/footer budget. The QR itself never belongs to a scrolling region.
-fn qr_layout(viewport_width: f32, viewport_height: f32, rem_size: f32) -> QrLayout {
-    let scale = rem_size / 14.;
-    let dialog_width = (crate::theme::DIALOG_WIDTH.0 * rem_size)
-        .min((viewport_width - f32::from(crate::theme::DIALOG_MARGIN) * 2.).max(0.));
-    let content_width = (dialog_width - 34.).max(0.);
-    let content_height = (viewport_height - rem_size * (180. / 14.) - 64.).max(80.);
-    let gap = 16. * scale;
-    let preferred_code = 260_f32.min(content_width);
-    let text_reserve = rem_size * 4.5;
-    let side_by_side = content_height < preferred_code + gap + text_reserve
-        && content_width >= preferred_code.min(content_height) + gap + rem_size * 12.;
-    let code_size = if side_by_side {
-        preferred_code.min(content_height)
+/// The QR code's size and whether the text sits beside it. A short window keeps the
+/// code whole: the text moves beside it before the code shrinks. The code never
+/// scrolls, and `body` is the height the dialog leaves for its content.
+fn qr_layout(content_width: f32, body: f32, rem_size: f32) -> (f32, bool) {
+    let gap = rem_size * (16. / 14.);
+    let preferred = 260_f32.min(content_width);
+    let text = rem_size * 4.5;
+    let beside = body < preferred + gap + text
+        && content_width >= preferred.min(body) + gap + rem_size * 12.;
+    let code = if beside {
+        preferred.min(body)
     } else {
-        preferred_code.min((content_height - gap - text_reserve).max(0.))
-    }
-    .floor();
-    let text_height = if side_by_side {
-        content_height
-    } else {
-        (content_height - code_size - gap).max(0.)
+        preferred.min((body - gap - text).max(0.))
     };
-    QrLayout {
-        dialog_width,
-        content_width,
-        content_height,
-        side_by_side,
-        code_size,
-        text_height,
-        gap,
-    }
+    (code.floor(), beside)
 }
 
 /// Whole physical pixels avoid blurry modules. Centering includes at least
@@ -99,6 +71,9 @@ fn qr_raster(code_size: f32, module_count: usize, scale: f32) -> (f32, f32) {
     (unit, offset)
 }
 
+/// The login dialog's width in design px.
+const DIALOG_LOGIN_WIDTH: f32 = 448.;
+
 impl AccountUi {
     fn current(&self, generation: u64) -> bool {
         self.generation == generation && self.dialog.is_some()
@@ -110,7 +85,8 @@ impl AccountUi {
     }
 
     fn close(&mut self) {
-        self.invalidate();
+        self.generation = self.generation.wrapping_add(1);
+        self.closing = self.dialog.take().or(self.closing.take());
         self.retry_source = None;
     }
 
@@ -204,13 +180,92 @@ impl Desktop {
         cx.notify();
     }
 
-    pub fn account_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
-        self.account_summary(false, cx).into_any_element()
-    }
-
-    /// Shared account state and actions only; the guide owns its heading and footer.
-    pub(crate) fn account_onboarding_page(&self, cx: &mut Context<Self>) -> Div {
-        self.account_summary(true, cx)
+    /// The account's row, for settings and first use alike.
+    pub(crate) fn account_row(
+        &self,
+        title: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let saved = self.account.has_saved_login;
+        let status = if self.account.checking {
+            (StatusKind::Progress, course2md::tr!("验证中"))
+        } else if self.account.status_error.is_some() {
+            (StatusKind::Warning, course2md::tr!("暂时无法验证"))
+        } else {
+            match &self.account.status {
+                Some(AccountStatus::Expired) => (StatusKind::Warning, course2md::tr!("登录已失效")),
+                Some(AccountStatus::Connected(_)) => {
+                    (StatusKind::Success, course2md::tr!("已登录"))
+                }
+                _ if saved => (StatusKind::Neutral, course2md::tr!("已保存登录信息")),
+                _ => (StatusKind::Neutral, course2md::tr!("未登录")),
+            }
+        };
+        let policy = if saved {
+            course2md::tr!("退出登录不会删除笔记")
+        } else {
+            course2md::tr!("登录后可读取账号有权访问的视频与字幕")
+        };
+        let mut actions = Vec::new();
+        if let Some(login) = self.account.login_action() {
+            actions.push(
+                material_button("account-login", ButtonVariant::Outlined)
+                    .icon(symbols::login())
+                    .child(login)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_account_dialog(window, cx)),
+                    )
+                    .into_any_element(),
+            );
+        }
+        // Only a saved login has anything to check again or sign out of.
+        if saved {
+            let menu_id = ElementId::from("account-actions");
+            let trigger = MaterialTooltip::plain("account-actions-tip", course2md::tr!("账号操作"))
+                .trigger(
+                    IconButton::new(
+                        "account-actions-button",
+                        symbols::more_vert(),
+                        course2md::tr!("{} 操作", course2md::tr!("Bilibili 账号")),
+                    )
+                    .on_click(ui::menu_key_toggle(&menu_id, window, cx)),
+                );
+            let items = MaterialMenu::new("account-action-items")
+                .width(240.)
+                .item(
+                    MaterialMenuItem::new(course2md::tr!("重新检查"))
+                        .leading(Icon::from(symbols::refresh()))
+                        .disabled(self.account.checking)
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh_account(cx))),
+                )
+                .item(
+                    MaterialMenuItem::new(course2md::tr!("退出登录"))
+                        .leading(Icon::from(symbols::logout()))
+                        .divider(true)
+                        .on_click(cx.listener(|this, _, _, cx| this.clear_account(cx))),
+                );
+            actions.push(
+                ui::menu(menu_id, trigger, items, window, cx)
+                    .anchor(Anchor::TopRight)
+                    .into_any_element(),
+            );
+        }
+        Resource {
+            id: "bilibili-account".into(),
+            icon: symbols::tv().into(),
+            title: title.into(),
+            status: vec![status],
+            busy: self.account.checking,
+            lines: self
+                .account_detail()
+                .map(|detail| (detail, false))
+                .into_iter()
+                .chain([(policy.to_owned(), false)])
+                .collect(),
+            actions,
+        }
+        .row(cx)
     }
 
     /// The single detail source shared by the summary card and status text.
@@ -232,94 +287,6 @@ impl Desktop {
                 _ => None,
             }
         }
-    }
-
-    fn account_summary(&self, onboarding: bool, cx: &mut Context<Self>) -> Div {
-        let saved = self.account.has_saved_login;
-        let (kind, label) = if self.account.checking {
-            (BadgeKind::Progress, course2md::tr!("验证中"))
-        } else if self.account.status_error.is_some() {
-            (BadgeKind::Warning, course2md::tr!("暂时无法验证"))
-        } else {
-            match &self.account.status {
-                Some(AccountStatus::Expired) => (BadgeKind::Warning, course2md::tr!("登录已失效")),
-                Some(AccountStatus::Connected(_)) => (BadgeKind::Success, course2md::tr!("已登录")),
-                _ if saved => (BadgeKind::Neutral, course2md::tr!("已保存登录信息")),
-                _ => (BadgeKind::Neutral, course2md::tr!("未登录")),
-            }
-        };
-        // The badge carries the state; the line adds only what it does not say.
-        let detail = self.account_detail();
-        let mut actions = Vec::new();
-        if let Some(login) = self.account.login_action() {
-            actions.push(
-                outline_pill("account-login", cx)
-                    .settings_text()
-                    .icon(icons::bilibili())
-                    .label(login)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.open_account_dialog(window, cx)),
-                    )
-                    .into_any_element(),
-            );
-        }
-        // Only a saved login has anything to re-verify or sign out of; like
-        // every resource row, its commands sit in one ⋯ menu.
-        if saved {
-            let entity = cx.weak_entity();
-            let checking = self.account.checking;
-            actions.push(
-                crate::settings_ui::resource_menu("account-actions", cx)
-                    .accessibility_label(course2md::tr!("{} 操作", course2md::tr!("Bilibili 账号")))
-                    .tooltip(course2md::tr!("账号操作"))
-                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
-                        let refresh = entity.clone();
-                        let logout = entity.clone();
-                        menu.item(
-                            PopupMenuItem::new(course2md::tr!("重新检查"))
-                                .icon(icons::refresh())
-                                .disabled(checking)
-                                .on_click(move |_, _, cx| {
-                                    let _ = refresh.update(cx, |this, cx| this.refresh_account(cx));
-                                }),
-                        )
-                        .separator()
-                        .item(
-                            PopupMenuItem::new(course2md::tr!("退出登录"))
-                                .icon(icons::logout())
-                                .on_click(move |_, _, cx| {
-                                    let _ = logout.update(cx, |this, cx| this.clear_account(cx));
-                                }),
-                        )
-                    })
-                    .into_any_element(),
-            );
-        }
-        crate::settings_ui::AccountCard {
-            id: "bilibili-account",
-            icon: icons::tv(),
-            tint: Tint::Pink,
-            title: if onboarding {
-                course2md::tr!("账号状态")
-            } else {
-                course2md::tr!("Bilibili 账号")
-            },
-            status: (kind, label),
-            detail,
-            busy: self.account.checking,
-            lines: vec![(
-                "policy",
-                if saved {
-                    course2md::tr!("退出登录不会删除笔记")
-                } else {
-                    course2md::tr!("登录后可读取账号有权访问的视频与字幕")
-                }
-                .into(),
-                false,
-            )],
-            actions,
-        }
-        .render(cx)
     }
 
     /// Status text without the「Bilibili：」prefix and the「已登录 · 」name
@@ -356,38 +323,28 @@ impl Desktop {
     /// Only rendered inside source details or a permission repair, never a permanent status row.
     pub fn source_account_row(&self, cx: &mut Context<Self>) -> Div {
         let status = course2md::tr!("Bilibili：{}", self.account_status_text());
-        let login_action = self.account.login_action();
         h_flex()
             .w_full()
             .items_center()
-            .gap_3()
+            .gap(rem(12.))
             .flex_wrap()
             .child(
-                div()
-                    .id("source-bilibili-account-status")
-                    .role(Role::Label)
-                    .aria_label(status.clone())
-                    .child(status)
-                    .flex_1()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .text_sm()
-                    .text_color(color(GRAY)),
+                TileScale::Regular
+                    .support("source-bilibili-account-status", status)
+                    .flex_1(),
             )
             .child(
-                control("source-account-refresh")
-                    .ghost()
-                    .icon(icons::refresh())
-                    .label(course2md::tr!("重新检查"))
+                material_button("source-account-refresh", ButtonVariant::Text)
+                    .icon(symbols::refresh())
+                    .child(course2md::tr!("重新检查"))
                     .disabled(self.account.checking)
                     .on_click(cx.listener(|this, _, _, cx| this.refresh_account(cx))),
             )
-            .when_some(login_action, |view, label| {
+            .when_some(self.account.login_action(), |view, label| {
                 view.child(
-                    control("source-account-login")
-                        .icon(icons::login())
-                        .ghost()
-                        .label(label)
+                    material_button("source-account-login", ButtonVariant::Text)
+                        .icon(symbols::login())
+                        .child(label)
                         .on_click(
                             cx.listener(|this, _, window, cx| this.open_account_dialog(window, cx)),
                         ),
@@ -448,58 +405,14 @@ impl Desktop {
         if self.account.dialog.is_some() {
             return;
         }
-        self.account.retry_source = if !self.onboarding.active
+        self.account.retry_source = (!self.onboarding.active
             && matches!(self.page, Page::New)
             && self.online()
             && (self.preview_error.is_some() || self.subtitle_attention_required())
-            && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx))
-        {
-            Some((self.preview_generation, self.value(Field::Source, cx)))
-        } else {
-            None
-        };
-        self.account.return_focus = window.focused(cx);
+            && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx)))
+        .then(|| (self.preview_generation, self.value(Field::Source, cx)));
         self.start_account_qr(cx);
-        let desktop = cx.entity();
-        let content =
-            crate::views::DesktopView::observing(desktop.clone(), cx, |desktop, window, cx| {
-                desktop
-                    .account_dialog_content(window, cx)
-                    .into_any_element()
-            });
-        let footer = crate::views::DesktopView::observing(desktop, cx, |desktop, _, cx| {
-            desktop.account_dialog_actions(cx).into_any_element()
-        });
-        let weak = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, window, _| {
-            let weak = weak.clone();
-            let closed = weak.clone();
-            let layout = qr_layout(
-                f32::from(window.bounds().size.width),
-                f32::from(window.bounds().size.height),
-                f32::from(window.rem_size()),
-            );
-            dialog
-                .material("bilibili-dialog-title", course2md::tr!("登录 Bilibili"))
-                .close_button(false)
-                .w(px(layout.dialog_width))
-                .margin_top(task_dialog_top(window))
-                .overlay_closable(false)
-                .child(content.clone())
-                .footer(footer.clone())
-                .on_close(move |_, window, cx| {
-                    let _ = closed.update(cx, |this, cx| {
-                        this.close_account_dialog(cx);
-                        if let Some(focus) = this.account.return_focus.take() {
-                            focus.focus(window, cx);
-                        }
-                    });
-                })
-                .on_cancel(move |_, _, cx| {
-                    let _ = weak.update(cx, |this, cx| this.close_account_dialog(cx));
-                    true
-                })
-        });
+        window.refresh();
     }
 
     fn start_account_qr(&mut self, cx: &mut Context<Self>) {
@@ -634,18 +547,82 @@ impl Desktop {
         cx.notify();
     }
 
-    fn account_dialog_content(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let layout = qr_layout(
-            f32::from(window.bounds().size.width),
-            f32::from(window.bounds().size.height),
-            f32::from(window.rem_size()),
-        );
-        let state = self
+    /// The login dialog, while it is open or playing its exit.
+    pub(crate) fn account_dialog(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let open = self.account.dialog.is_some();
+        let Some(state) = self
             .account
             .dialog
-            .clone()
-            .unwrap_or(QrDialogState::Generating);
-        let (message, hint): (String, String) = match &state {
+            .as_ref()
+            .or(self.account.closing.as_ref())
+        else {
+            return div().into_any_element();
+        };
+        let retry = matches!(state, QrDialogState::Expired | QrDialogState::Error(_));
+        let success = matches!(state, QrDialogState::Success(_));
+        let retry_source = success && self.can_retry_account_source(cx);
+        let close = cx.listener(|this, _: &ClickEvent, window, cx| {
+            let retry = matches!(this.account.dialog, Some(QrDialogState::Success(_)))
+                && this.can_retry_account_source(cx);
+            this.close_account_dialog(cx);
+            if retry {
+                this.inspect_source(window, cx);
+            }
+        });
+        let close = material_button(
+            "account-qr-close",
+            if success {
+                ButtonVariant::Filled
+            } else {
+                ButtonVariant::Text
+            },
+        )
+        .when(success, |button| button.icon(symbols::check_circle()))
+        .child(if retry_source {
+            course2md::tr!("重新预览")
+        } else if success {
+            course2md::tr!("完成")
+        } else {
+            course2md::tr!("取消")
+        })
+        .on_click(close);
+        MaterialDialog::new("bilibili-dialog")
+            .headline(course2md::tr!("登录 Bilibili"))
+            .width(DIALOG_LOGIN_WIDTH)
+            .content(self.account_dialog_content(state, window, cx))
+            .action(close)
+            .when(retry, |dialog| {
+                dialog.action(
+                    material_button("account-qr-retry", ButtonVariant::Filled)
+                        .icon(symbols::refresh())
+                        .child(course2md::tr!("刷新二维码"))
+                        .on_click(cx.listener(|this, _, _, cx| this.start_account_qr(cx))),
+                )
+            })
+            .dismiss_on_scrim(false)
+            .modal(open)
+            .on_dismiss({
+                let this = cx.weak_entity();
+                move |_, cx| {
+                    let _ = this.update(cx, |this, cx| this.close_account_dialog(cx));
+                }
+            })
+            .into_any_element()
+    }
+
+    fn account_dialog_content(
+        &self,
+        state: &QrDialogState,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let rem_size = f32::from(window.rem_size());
+        let width = (DIALOG_LOGIN_WIDTH / 14. * rem_size)
+            .min(f32::from(window.viewport_size().width) - 48.)
+            - rem_size * (48. / 14.);
+        let body = f32::from(crate::settings_ui::dialog_body_height(window));
+        let (code_size, beside) = qr_layout(width, body, rem_size);
+        let (message, hint): (String, String) = match state {
             QrDialogState::Generating => (course2md::tr!("正在获取二维码").into(), String::new()),
             QrDialogState::Waiting(seconds) => (
                 course2md::tr!("请使用 Bilibili App 扫码").into(),
@@ -662,185 +639,106 @@ impl Desktop {
                 profile.name.trim().to_owned(),
             ),
         };
-        let retry = matches!(state, QrDialogState::Expired | QrDialogState::Error(_));
-        let success = matches!(state, QrDialogState::Success(_));
-        let mut visual = v_flex()
-            .w(px(layout.code_size))
-            .h(px(layout.code_size))
+        let confirming = matches!(state, QrDialogState::Confirming(_));
+        let (status, tone) = match state {
+            QrDialogState::Success(_) => (
+                Some(symbols::check_circle()),
+                (ColorRole::SUCCESS, ColorRole::SUCCESS_BG),
+            ),
+            QrDialogState::Expired | QrDialogState::Error(_) => (
+                Some(symbols::warning()),
+                (ColorRole::WARNING, ColorRole::WARNING_BG),
+            ),
+            _ => (None, (ColorRole::PRIMARY, ColorRole::INSET)),
+        };
+        let visual = h_flex()
+            .size(px(code_size))
             .flex_shrink_0()
             .items_center()
             .justify_center()
             .rounded(RADIUS_CARD)
-            .bg(color(if success {
-                SUCCESS_BG
-            } else if retry {
-                WARNING_BG
-            } else {
-                INSET
-            }));
-        if let Some(modules) = &self.account.modules {
-            let modules = modules.clone();
-            // A real QR code intentionally keeps its high-contrast white scanning surface.
-            visual = visual.rounded(px(0.)).bg(gpui::rgb(0xffffff)).child(
-                canvas(
-                    |_, _, _| {},
-                    move |bounds, _, window, _| {
-                        // Whole physical-pixel modules and a >=4-module quiet zone keep QR edges crisp.
-                        let scale = window.scale_factor();
-                        let (unit, offset) = qr_raster(
-                            bounds.size.width.as_f32().min(bounds.size.height.as_f32()),
-                            modules.len(),
-                            scale,
-                        );
-                        for (y, row) in modules.iter().enumerate() {
-                            for (x, dark) in row.iter().enumerate() {
-                                if *dark {
-                                    window.paint_quad(fill(
-                                        Bounds::new(
-                                            point(
-                                                px(((bounds.origin.x.as_f32()
-                                                    + offset
-                                                    + x as f32 * unit)
-                                                    * scale)
-                                                    .round()
-                                                    / scale),
-                                                px(((bounds.origin.y.as_f32()
-                                                    + offset
-                                                    + y as f32 * unit)
-                                                    * scale)
-                                                    .round()
-                                                    / scale),
-                                            ),
-                                            size(px(unit), px(unit)),
-                                        ),
-                                        gpui::rgb(0x000000),
-                                    ));
-                                }
-                            }
-                        }
-                    },
-                )
-                .w_full()
-                .h_full(),
-            );
-        } else if success || retry {
-            visual = visual.child(
-                if success {
-                    icons::check_circle()
-                } else {
-                    icons::warning()
-                }
-                .size_8()
-                .text_color(color(if success { SUCCESS } else { WARNING })),
-            );
+            .bg(color(tone.1));
+        let visual = if let Some(modules) = self.account.modules.clone() {
+            // A real QR code keeps its high-contrast white scanning surface.
+            visual
+                .rounded(px(0.))
+                .bg(gpui::rgb(0xffffff))
+                .child(qr_canvas(modules))
+        } else if let Some(icon) = status {
+            visual.child(Icon::from(icon).size(rem(32.)).color(color(tone.0)))
         } else {
-            visual = visual.child(crate::motion::spinner("qr-code-generating", cx));
-        }
-        let phase = match state {
-            QrDialogState::Generating => 0,
-            QrDialogState::Waiting(_) => 1,
-            QrDialogState::Confirming(_) => 2,
-            QrDialogState::Expired => 3,
-            QrDialogState::Error(_) => 4,
-            QrDialogState::Success(_) => 5,
+            visual.child(spinner("qr-code-generating", message.clone(), cx))
         };
-        let explanation = v_flex()
-            .id("account-login-explanation")
-            .min_w_0()
-            .min_h_0()
-            .max_h(px(layout.text_height))
-            .overflow_y_scroll()
-            .gap_2()
-            .when(layout.side_by_side, |view| view.flex_1())
-            .when(!layout.side_by_side, |view| view.w_full().items_center())
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .when(matches!(state, QrDialogState::Confirming(_)), |row| {
-                        row.child(crate::motion::spinner("qr-awaiting-confirmation", cx))
-                    })
-                    .child(
-                        accessible_text("bilibili-login-step", message)
-                            .min_w_0()
-                            .whitespace_normal()
-                            .when(!layout.side_by_side, |text| text.text_center())
-                            .font_weight(FontWeight::SEMIBOLD),
-                    ),
-            )
-            .when(!hint.is_empty(), |view| {
-                view.child(
-                    accessible_text("bilibili-login-detail", hint)
-                        .w_full()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .when(!layout.side_by_side, |text| text.text_center())
-                        .text_sm()
-                        .text_color(color(GRAY)),
-                )
-            });
         v_flex()
-            .id("account-login-body")
             .w_full()
-            .max_w(px(layout.content_width))
             .min_w_0()
-            .min_h_0()
-            .max_h(px(layout.content_height))
-            .gap(px(layout.gap))
+            .px(rem(24.))
+            .gap(rem(16.))
             .items_center()
-            .when(layout.side_by_side, |view| view.flex_row())
-            .child(crate::motion::enter(
-                SharedString::from(format!("qr-visual-{}-{phase}", self.account.generation)),
-                visual,
-            ))
-            .child(explanation)
-            .into_any_element()
-    }
-
-    fn account_dialog_actions(&self, cx: &mut Context<Self>) -> Div {
-        let retry = matches!(
-            self.account.dialog,
-            Some(QrDialogState::Expired | QrDialogState::Error(_))
-        );
-        let success = matches!(self.account.dialog, Some(QrDialogState::Success(_)));
-        let retry_source = success && self.can_retry_account_source(cx);
-        let close = if success {
-            primary_pill("account-qr-close").icon(icons::check_circle())
-        } else {
-            text_button("account-qr-close", cx)
-        };
-        // The dialog already spaces its footer from the body; the actions'
-        // own top inset would leave a hole under the countdown.
-        dialog_actions()
-            .pt_0()
+            .when(beside, |view| view.flex_row())
+            .child(visual)
             .child(
-                close
-                    .label(if retry_source {
-                        course2md::tr!("重新预览")
-                    } else if success {
-                        course2md::tr!("完成")
-                    } else {
-                        course2md::tr!("取消")
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        let retry = matches!(this.account.dialog, Some(QrDialogState::Success(_)))
-                            && this.can_retry_account_source(cx);
-                        this.close_account_dialog(cx);
-                        window.close_dialog(cx);
-                        if retry {
-                            this.inspect_source(window, cx);
-                        }
-                    })),
+                v_flex()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .when(beside, |view| view.flex_1())
+                    .when(!beside, |view| view.w_full().items_center())
+                    .child(
+                        h_flex()
+                            .gap(rem(8.))
+                            .items_center()
+                            .when(confirming, |row| {
+                                row.child(spinner("qr-awaiting-confirmation", message.clone(), cx))
+                            })
+                            .child(
+                                accessible_text("bilibili-login-step", message.clone())
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .when(!beside, |text| text.text_center())
+                                    .font_weight(FontWeight::MEDIUM),
+                            ),
+                    )
+                    .when(!hint.is_empty(), |view| {
+                        view.child(
+                            TileScale::Regular
+                                .support("bilibili-login-detail", hint)
+                                .when(!beside, |text| text.text_center()),
+                        )
+                    }),
             )
-            .when(retry, |view| {
-                view.child(
-                    primary_pill("account-qr-retry")
-                        .icon(icons::refresh())
-                        .label(course2md::tr!("刷新二维码"))
-                        .on_click(cx.listener(|this, _, _, cx| this.start_account_qr(cx))),
-                )
-            })
     }
+}
+
+/// Whole physical-pixel modules and a four-module quiet zone keep the edges crisp.
+fn qr_canvas(modules: Arc<Vec<Vec<bool>>>) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let scale = window.scale_factor();
+            let (unit, offset) = qr_raster(
+                bounds.size.width.as_f32().min(bounds.size.height.as_f32()),
+                modules.len(),
+                scale,
+            );
+            let snap = |position: f32| px((position * scale).round() / scale);
+            for (y, row) in modules.iter().enumerate() {
+                for (x, dark) in row.iter().enumerate() {
+                    if *dark {
+                        let origin = point(
+                            snap(bounds.origin.x.as_f32() + offset + x as f32 * unit),
+                            snap(bounds.origin.y.as_f32() + offset + y as f32 * unit),
+                        );
+                        window.paint_quad(fill(
+                            Bounds::new(origin, size(px(unit), px(unit))),
+                            gpui::rgb(0x000000),
+                        ));
+                    }
+                }
+            }
+        },
+    )
+    .w_full()
+    .h_full()
 }
 
 #[cfg(test)]
@@ -850,32 +748,20 @@ mod tests {
 
     #[test]
     fn qr_layout_keeps_the_complete_code_inside_short_and_regular_dialogs() {
-        // The rejected native frame had 196px of body height and a 260px code.
-        let short = qr_layout(860., 620., 28.);
-        assert!(short.side_by_side);
-        assert!(short.code_size <= 196.);
-        assert!(short.code_size + short.gap + 28. * 12. <= short.content_width);
+        // A short window at 200% text: the text moves beside a whole code.
+        let (code, beside) = qr_layout(812., 268., 28.);
+        assert!(beside);
+        assert!(code <= 268.);
+        assert!(code >= 196.);
 
-        let regular = qr_layout(1068., 768., 14.);
-        assert!(!regular.side_by_side);
-        assert_eq!(regular.dialog_width, 448.);
-        assert!(regular.code_size >= 240.);
+        let (code, beside) = qr_layout(400., 500., 14.);
+        assert!(!beside);
+        assert_eq!(code, 260.);
 
-        for (width, height) in [(860., 620.), (1068., 768.), (1600., 1000.)] {
+        for (width, height) in [(400., 300.), (812., 268.), (560., 800.)] {
             for scale in crate::preferences::FONT_SCALES {
-                let layout = qr_layout(width, height, 14. * scale);
-                assert!(layout.code_size > 0.);
-                assert!(layout.code_size <= layout.content_width);
-                assert!(layout.code_size <= layout.content_height);
-                if layout.side_by_side {
-                    assert!(layout.code_size + layout.gap < layout.content_width);
-                    assert!(layout.text_height <= layout.content_height);
-                } else {
-                    assert!(
-                        layout.code_size + layout.gap + layout.text_height
-                            <= layout.content_height + 0.001,
-                    );
-                }
+                let (code, _) = qr_layout(width, height, 14. * scale);
+                assert!(code > 0. && code <= width && code <= height);
             }
         }
     }

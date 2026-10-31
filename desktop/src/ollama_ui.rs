@@ -1,8 +1,9 @@
 //! Local Ollama discovery: probe the local service and downloaded models as address and model candidates for the Ollama service form.
 //! Ollama's OpenAI-compatible endpoint needs no credential; "signing in" is discovery plus configuration (see core login/ollama).
-use super::*;
+use crate::Desktop;
 use crate::preferences::{ServiceProtocol, ServicePurpose};
 use crate::settings_ui::service_form::{FormField, FormOwner};
+use gpui::{prelude::*, *};
 
 #[derive(Default)]
 pub(crate) struct OllamaUi {

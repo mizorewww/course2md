@@ -118,13 +118,6 @@ pub(crate) const LOCAL_ENGINES: [AsrProvider; 4] = [
     AsrProvider::Npu,
 ];
 
-/// Choice id of an engine; automatic selection is the empty id.
-pub(crate) use crate::provider_id as engine_id;
-pub(crate) fn engine_from_id(id: &str) -> Option<AsrProvider> {
-    LOCAL_ENGINES
-        .into_iter()
-        .find(|provider| provider.as_str() == id)
-}
 pub(crate) fn engine_icon(provider: Option<AsrProvider>) -> Icon {
     match provider {
         None => icons::auto_fix(),

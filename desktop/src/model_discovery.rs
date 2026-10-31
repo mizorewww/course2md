@@ -152,6 +152,8 @@ pub enum Status {
 pub struct State {
     active: Option<Ticket>,
     status: Status,
+    /// Whether the model field lists its candidates.
+    pub choices_open: bool,
 }
 
 impl State {
@@ -172,6 +174,7 @@ impl State {
             active.cancelled.store(true, Ordering::Release);
         }
         self.status = Status::Idle;
+        self.choices_open = false;
     }
     /// Seed choices obtained without HTTP discovery (an account login's own catalog).
     /// There is no connection to invalidate; the next `invalidate` clears them.
@@ -401,138 +404,117 @@ fn parse_models(body: &[u8], authorization: Option<&Secret>) -> Result<Vec<Strin
     Ok(models.into_iter().collect())
 }
 
-/// Shared settings/setup model control. The input remains editable in every
-/// discovery state; choosing a candidate emits its ordinary input-change event.
+/// What the model field asks of its form.
+pub enum ModelFieldEvent {
+    Fetch,
+    ToggleChoices,
+    Choose(String),
+}
+
+/// Shared settings/setup model control. The input remains editable in every discovery
+/// state. Candidates list below the field, however many a service returns.
 pub fn model_field(
     id: &'static str,
     input: &gpui::Entity<gpui_kit::component::input::InputState>,
     state: &State,
     disabled: bool,
     error: Option<&str>,
-    on_fetch: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+    on_event: impl Fn(&ModelFieldEvent, &mut gpui::Window, &mut gpui::App) + 'static,
     cx: &mut gpui::App,
 ) -> gpui::Div {
-    use crate::{icons, theme::*};
+    use crate::{symbols, ui};
     use gpui::{SharedString, prelude::*};
-    use gpui_kit::component::{
-        Disableable as _, h_flex,
-        menu::{DropdownMenu, PopupMenuItem},
-        v_flex,
-    };
+    use gpui_base::v_flex;
+    use gpui_kit_material::prelude::*;
 
-    let models = state.models().to_vec();
-    let choices_current = state.active.as_ref().map(|ticket| ticket.cancelled.clone());
-    let selected = input.read(cx).value().to_string();
-    let field = input.clone();
-    let status = match state.status() {
-        // 空闲时不加说明：输入框与右侧获取按钮已说明可做的事
-        Status::Idle => None,
-        Status::Loading => Some(course2md::tr!("正在获取模型列表…").into()),
-        Status::Ready(models) if models.is_empty() => Some(course2md::tr!("服务未返回模型").into()),
-        Status::Ready(models) => Some(course2md::tr!("找到 {} 个模型", models.len())),
-        Status::Failed(error) => Some(error.message()),
+    let child = |name: &str| SharedString::from(format!("{id}-{name}"));
+    let on_event = std::rc::Rc::new(on_event);
+    let send = |event: fn() -> ModelFieldEvent| {
+        let on_event = on_event.clone();
+        move |_: &gpui::ClickEvent, window: &mut gpui::Window, cx: &mut gpui::App| {
+            on_event(&event(), window, cx)
+        }
     };
-    let failed = matches!(state.status(), Status::Failed(_));
-    let suffix = h_flex()
-        .flex_shrink_0()
-        .items_center()
-        .gap_1()
-        .child(
-            input_action(SharedString::from(format!("{id}-fetch")))
-                .icon(icons::refresh())
-                .tooltip(if matches!(state.status(), Status::Ready(_)) {
-                    course2md::tr!("刷新模型列表")
-                } else {
-                    course2md::tr!("获取模型列表")
-                })
-                .accessibility_label(if matches!(state.status(), Status::Ready(_)) {
-                    course2md::tr!("刷新模型列表")
-                } else {
-                    course2md::tr!("获取模型列表")
-                })
-                .loading(state.loading())
-                .disabled(disabled || state.loading())
-                .on_click(on_fetch),
-        )
-        .when(!models.is_empty(), |row| {
-            row.child(
-                input_action(SharedString::from(format!("{id}-choose")))
-                    .icon(icons::chevron_down())
-                    .tooltip(course2md::tr!("选择模型"))
-                    .accessibility_label(course2md::tr!("从服务返回的候选中选择模型"))
+    let fetch_label = if matches!(state.status(), Status::Ready(_)) {
+        course2md::tr!("刷新模型列表")
+    } else {
+        course2md::tr!("获取模型列表")
+    };
+    let trailing = if state.loading() {
+        icon_spinner(child("fetching"), fetch_label, rem(20.), cx)
+    } else {
+        MaterialTooltip::plain(child("fetch-tip"), fetch_label)
+            .trigger(
+                IconButton::new(child("fetch"), symbols::refresh(), fetch_label)
+                    .button_size(ButtonSize::Small)
                     .disabled(disabled)
-                    .dropdown_menu(move |menu, _, _| {
-                        // 候选可能很多：弹层按共享约定限高并滚动（窗口半高，上限 450px）
-                        models.iter().fold(menu.scrollable(true), |menu, model| {
-                            let value = model.clone();
-                            let field = field.clone();
-                            let choices_current = choices_current.clone();
-                            menu.item(
-                                PopupMenuItem::new(model.clone())
-                                    .checked(*model == selected)
-                                    .on_click(move |_, window, cx| {
-                                        // A primed (account-bound) list has no ticket; a
-                                        // cancelled ticket disables an already-open menu.
-                                        if choices_current.as_ref().is_some_and(|cancelled| {
-                                            cancelled.load(Ordering::Acquire)
-                                        }) {
-                                            return;
-                                        }
-                                        field.update(cx, |input, cx| {
-                                            input.set_value(value.clone(), window, cx)
-                                        });
-                                    }),
-                            )
-                        })
-                    }),
+                    .on_click(send(|| ModelFieldEvent::Fetch)),
             )
+            .into_any_element()
+    };
+    let field = TextField::new(child("input"), input)
+        .outlined()
+        .w_full()
+        .label(course2md::tr!("模型"))
+        .placeholder(course2md::tr!("模型 ID，或从服务获取列表"))
+        .disabled(disabled)
+        .trailing_icon(trailing)
+        .error(error.is_some())
+        .when_some(error, |field, error| {
+            field.supporting_text(error.to_owned())
         });
+    let status = match state.status() {
+        // Idle needs no words: the field and its button say what can be done.
+        Status::Idle => ui::AsyncStatus::Idle,
+        Status::Loading => ui::AsyncStatus::Busy(course2md::tr!("正在获取模型列表…").into()),
+        Status::Ready(models) if models.is_empty() => {
+            ui::AsyncStatus::Warning(course2md::tr!("服务未返回模型").into())
+        }
+        Status::Ready(models) => {
+            ui::AsyncStatus::Success(course2md::tr!("找到 {} 个模型", models.len()).into())
+        }
+        Status::Failed(error) => ui::AsyncStatus::Failed(error.message().into()),
+    };
+    let toggle = (!state.models().is_empty()).then(|| {
+        material_button(child("choose"), ButtonVariant::Text)
+            .child(if state.choices_open {
+                course2md::tr!("收起模型列表")
+            } else {
+                course2md::tr!("选择模型")
+            })
+            .disabled(disabled)
+            .on_click(send(|| ModelFieldEvent::ToggleChoices))
+            .into_any_element()
+    });
+    let choices = (state.choices_open && !disabled && !state.models().is_empty()).then(|| {
+        let models = state.models().to_vec();
+        let count = models.len();
+        let selected = input.read(cx).value().to_string();
+        let on_event = on_event.clone();
+        gpui::uniform_list(child("choices"), count, move |range, _, _| {
+            range
+                .map(|index| {
+                    let model = models[index].clone();
+                    let on_event = on_event.clone();
+                    ListItem::new(("model-choice", index), model.clone())
+                        .density(ListDensity::Compact)
+                        .selected(model == selected)
+                        .on_click(move |_, window, cx| {
+                            on_event(&ModelFieldEvent::Choose(model.clone()), window, cx)
+                        })
+                })
+                .collect()
+        })
+        .h(rem(200.))
+        .w_full()
+    });
     v_flex()
         .w_full()
         .min_w_0()
-        .gap_2()
-        .child(
-            text_input(input)
-                .w_full()
-                .min_w_0()
-                .disabled(disabled)
-                .suffix(suffix)
-                .aria_label(
-                    error
-                        .map(|error| course2md::tr!("模型 ID，{}", error))
-                        .unwrap_or_else(|| course2md::tr!("模型 ID").into()),
-                )
-                .when(error.is_some(), |input| input.border_color(color(DANGER))),
-        )
-        .when_some(error, |view, error| {
-            view.child(
-                accessible_text(
-                    SharedString::from(format!("{id}-field-error")),
-                    error.to_owned(),
-                )
-                .w_full()
-                .min_w_0()
-                .whitespace_normal()
-                .text_size(TEXT_AUX)
-                .text_color(color(DANGER)),
-            )
-        })
-        .when_some(status, |view, status: String| {
-            // 非失败的常态说明走共享 ⓘ 辅助信息；失败与字段错误同一危险色文本，紧贴字段下方
-            view.child(if failed {
-                accessible_text(SharedString::from(format!("{id}-status")), status)
-                    .w_full()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .text_size(TEXT_AUX)
-                    .text_color(color(DANGER))
-                    .into_any_element()
-            } else {
-                supporting_info(SharedString::from(format!("{id}-status")), status)
-                    .text_size(TEXT_AUX)
-                    .into_any_element()
-            })
-        })
+        .gap(rem(8.))
+        .child(field)
+        .children(ui::async_status(child("status"), &status, toggle, cx))
+        .children(choices)
 }
 
 #[cfg(test)]

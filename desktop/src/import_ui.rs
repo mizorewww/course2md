@@ -2018,7 +2018,7 @@ impl Desktop {
 
     /// AI 处理: one switch per step, then the translation target and the service
     /// the text is sent to.
-    fn import_ai_options(&self, cx: &mut Context<Self>) -> ui::FieldTable {
+    fn import_ai_options(&self, window: &mut Window, cx: &mut Context<Self>) -> ui::FieldTable {
         let custom_rule = self.task_options().llm
             && self
                 .import_base_config()
@@ -2103,7 +2103,7 @@ impl Desktop {
                 ui::Field::below(
                     "import-ai-service",
                     course2md::tr!("AI 服务"),
-                    self.task_service_picker(ServicePurpose::Ai, cx),
+                    self.task_service_picker(ServicePurpose::Ai, window, cx),
                 )
                 .hint(consequence.unwrap_or_default()),
             );
@@ -2187,7 +2187,7 @@ impl Desktop {
             ui::Field::below(
                 "import-speech-service",
                 course2md::tr!("语音识别服务"),
-                self.task_service_picker(ServicePurpose::Speech, cx),
+                self.task_service_picker(ServicePurpose::Speech, window, cx),
             )
             .hint(course2md::tr!("音频会发送到所选语音识别服务"))
         } else {
@@ -2511,7 +2511,7 @@ impl Desktop {
                 .pt(HERO_GAP)
                 .gap(rem(24.))
                 .child(self.import_text_mode_options(window, cx))
-                .child(self.import_ai_options(cx))
+                .child(self.import_ai_options(window, cx))
                 .child(self.import_destination(cx)),
         };
         v_flex()

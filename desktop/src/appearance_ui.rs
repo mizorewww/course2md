@@ -1,192 +1,107 @@
 //! Appearance preferences with real palette previews and immediate, durable selection.
-use super::*;
-use crate::palettes::{ALL, Appearance, PaletteId};
-use crate::preferences::PreferenceGroup;
-use crate::theme::*;
+use crate::preferences::{InterfaceLanguage, PreferenceGroup};
+use crate::{Desktop, symbols, ui};
+use gpui::{prelude::*, *};
+use gpui_base::{h_flex, v_flex};
+use gpui_kit_material::{
+    color::{Scheme, palette::ALL},
+    icons::Icon,
+    motion,
+    prelude::*,
+    theme::{is_dark, rgba},
+    tokens::shape::OuterCorners,
+};
 
-const PALETTE_GAP: f32 = 16.;
-const PICKER_GUTTER: f32 = 24.;
-const PICKER_PADDING: f32 = 24.;
-/// The M3 dialog surface has no outline.
-const PICKER_BORDER: f32 = 0.;
-const PICKER_MAX_WIDTH: f32 = 920.;
+/// Between palette cards, and the narrowest a card gets, in design px.
+const CARD_GAP: f32 = 16.;
+const CARD_MIN_WIDTH: f32 = 168.;
 
-fn picker_width(window: &Window) -> f32 {
-    (f32::from(window.viewport_size().width) - PICKER_GUTTER * 2.).clamp(0., PICKER_MAX_WIDTH)
+/// As many columns as `width` holds, each following the text size so a longer name
+/// or larger text reduces the columns before the names collide.
+fn palette_columns(width: f32, rem_size: f32) -> u16 {
+    let unit = rem_size / 14.;
+    (((width + CARD_GAP * unit) / ((CARD_MIN_WIDTH + CARD_GAP) * unit)).floor() as u16).clamp(1, 4)
 }
 
-fn picker_inner_width(window: &Window) -> f32 {
-    // The dialog below owns this width and padding. Its scrollbar overlays the
-    // body, so there is no second page-width estimate or scrollbar deduction.
-    (picker_width(window) - (PICKER_PADDING + PICKER_BORDER) * 2.).max(0.)
-}
-
-fn palette_minimum_width(palettes: &[PaletteId], window: &Window) -> f32 {
-    let mut style = window.text_style();
-    style.font_weight = FontWeight::SEMIBOLD;
-    let label_width = palettes
-        .iter()
-        .map(|palette| {
-            let label = SharedString::from(palette.name());
-            f32::from(
-                window
-                    .text_system()
-                    .shape_line(
-                        label.clone(),
-                        TEXT_SETTINGS_BODY.to_pixels(window.rem_size()),
-                        &[style.to_run(label.len())],
-                        None,
-                    )
-                    .width,
-            )
-        })
-        .fold(0., f32::max);
-    // Match the actual footer: 12px padding, 8px gap, an 18px marker and the
-    // card's 2px border. A larger font changes the required width immediately.
-    (label_width + 24. + 8. + 18. + 4.).max(168.)
-}
-
-fn palette_columns(width: f32, minimum_width: f32, maximum: u16) -> u16 {
-    (((width + PALETTE_GAP) / (minimum_width + PALETTE_GAP)).floor() as u16).clamp(1, maximum)
-}
-
-/// A miniature window in the palette's own colors (not application chrome):
-/// window controls, a sidebar and a page with a title, text and a button.
-fn sample(palette: PaletteId, height: f32) -> Div {
-    let p = palette.colors();
-    let bar = |height: f32, width: gpui::DefiniteLength, fill: u32| {
+/// A miniature window in the palette's own colors, not application chrome: window
+/// controls, a sidebar and a page with a title, text and a button.
+fn sample(palette: PaletteId, height: Rems) -> Div {
+    let scheme = Scheme::from_palette(palette);
+    let paint = |role| rgba(scheme.get(role));
+    let bar = |height: f32, width: f32, role| {
         div()
-            .h(px(height))
-            .w(width)
+            .h(rem(height))
+            .w(relative(width))
             .flex_shrink_0()
             .rounded_full()
-            .bg(rgb(fill))
+            .bg(paint(role))
     };
     v_flex()
         .w_full()
-        .h(px(height))
+        .h(height)
         .flex_shrink_0()
         .overflow_hidden()
-        .bg(rgb(p.canvas))
-        .p(px(10.))
-        .gap(px(8.))
+        .bg(paint(ColorRole::SURFACE_CONTAINER))
+        .p(rem(10.))
+        .gap(rem(8.))
         .child(
-            h_flex().gap(px(4.)).children(
-                [p.danger, p.warning, p.success]
-                    .into_iter()
-                    .map(|c| div().size(px(6.)).rounded_full().bg(rgb(c))),
+            h_flex().gap(rem(4.)).children(
+                [ColorRole::ERROR, ColorRole::WARNING, ColorRole::SUCCESS]
+                    .map(|role| div().size(rem(6.)).rounded_full().bg(paint(role))),
             ),
         )
         .child(
             h_flex()
                 .flex_1()
                 .min_h_0()
-                .gap(px(8.))
+                .gap(rem(8.))
                 .items_stretch()
                 .child(
                     v_flex()
                         .w(relative(0.26))
-                        .rounded(px(8.))
-                        .bg(rgb(p.inset))
-                        .p(px(8.))
-                        .gap(px(6.))
-                        .child(bar(6., relative(1.), p.accent))
-                        .child(bar(6., relative(1.), p.subtle))
-                        .child(bar(6., relative(1.), p.subtle)),
+                        .rounded(RADIUS_SMALL)
+                        .bg(paint(ColorRole::INSET))
+                        .p(rem(8.))
+                        .gap(rem(6.))
+                        .child(bar(6., 1., ColorRole::PRIMARY))
+                        .child(bar(6., 1., ColorRole::OUTLINE_VARIANT))
+                        .child(bar(6., 1., ColorRole::OUTLINE_VARIANT)),
                 )
                 .child(
                     v_flex()
                         .flex_1()
-                        .rounded(px(8.))
-                        .bg(rgb(p.surface))
-                        .p(px(10.))
-                        .gap(px(7.))
-                        .child(bar(7., relative(0.7), p.text))
-                        .child(bar(5., relative(0.9), p.border))
-                        .child(bar(5., relative(0.8), p.border))
+                        .rounded(RADIUS_SMALL)
+                        .bg(paint(ColorRole::SURFACE))
+                        .p(rem(10.))
+                        .gap(rem(7.))
+                        .child(bar(7., 0.7, ColorRole::ON_SURFACE))
+                        .child(bar(5., 0.9, ColorRole::OUTLINE_VARIANT))
+                        .child(bar(5., 0.8, ColorRole::OUTLINE_VARIANT))
                         .child(div().flex_1())
                         .child(
                             div()
-                                .h(px(16.))
-                                .w(px(40.))
-                                .rounded(px(8.))
-                                .bg(rgb(p.accent)),
+                                .h(rem(16.))
+                                .w(rem(40.))
+                                .rounded(RADIUS_SMALL)
+                                .bg(paint(ColorRole::PRIMARY)),
                         ),
                 ),
         )
 }
 
-fn palette_choice(palette: PaletteId, selected: bool, amount: f32) -> gpui_base::Button {
-    selection_card(("palette", palette as usize), selected, amount)
-        .w_full()
-        .p(px(0.))
-        .overflow_hidden()
-        .accessibility_label(course2md::tr!(
-            "{}，{}{}",
-            palette.name(),
-            if palette.is_dark() {
-                course2md::tr!("深色主题")
-            } else {
-                course2md::tr!("浅色主题")
-            },
-            if selected {
-                course2md::tr!("，已选择")
-            } else {
-                ""
-            }
-        ))
-        .when(cfg!(test), |card| {
-            card.debug_selector(move || format!("palette-card-{}", palette as usize))
-        })
-        .child(
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .whitespace_normal()
-                .text_left()
-                // Inside the card's 2px border; GPUI clips to the card's
-                // bounds but not to its radius.
-                .child(sample(palette, 120.).rounded_t(RADIUS_CARD - px(2.)))
-                // The label sits on the card's own tonal fill, so nothing
-                // paints past its rounded bottom.
-                .child(
-                    h_flex()
-                        .w_full()
-                        .min_h(rems(3.43))
-                        .flex_1()
-                        .gap(px(8.))
-                        .p(px(12.))
-                        .items_center()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_size(TEXT_SETTINGS_BODY)
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(color(INK))
-                                .when(cfg!(test), |label| {
-                                    label.debug_selector(move || {
-                                        format!("palette-label-{}", palette as usize)
-                                    })
-                                })
-                                .child(palette.name()),
-                        )
-                        .child(
-                            icons::check_circle()
-                                .text_color(color(ACCENT))
-                                .size(px(18.))
-                                .opacity(amount)
-                                .flex_shrink_0(),
-                        ),
-                ),
-        )
+/// The label a palette preview goes under: which mode it serves.
+fn mode_label(dark: bool) -> &'static str {
+    if dark {
+        course2md::tr!("深色主题")
+    } else {
+        course2md::tr!("浅色主题")
+    }
 }
 
 impl Desktop {
-    /// The appearance this page shows: the saved one, or in capture builds
-    /// the palette a capture paints instead, so the page agrees with the
-    /// colors on screen.
-    fn displayed_appearance(&self) -> crate::palettes::ThemePreferences {
+    /// The appearance this page shows: the saved one, or in capture builds the palette
+    /// a capture paints instead, so the page agrees with the colors on screen.
+    fn displayed_appearance(&self) -> ThemePreferences {
         #[allow(unused_mut)]
         let mut appearance = self.preferences.application().appearance.clone();
         #[cfg(feature = "capture")]
@@ -194,229 +109,257 @@ impl Desktop {
         appearance
     }
 
-    fn palette_grid(
+    fn palette_card(
         &self,
-        dark: bool,
-        selected_palette: PaletteId,
-        width: f32,
-        scroll: ScrollHandle,
+        palette: PaletteId,
+        selected: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Div {
-        let cards = ALL
-            .into_iter()
-            .filter(|id| id.is_dark() == dark)
-            .collect::<Vec<_>>();
-        let columns = palette_columns(width, palette_minimum_width(&cards, window), 4);
-        div()
+    ) -> impl IntoElement + use<> {
+        let amount = motion::selection_value(
+            ("palette-selection", palette as usize),
+            if selected { 1. } else { 0. },
+            window,
+            cx,
+        );
+        let dark = palette.is_dark();
+        MaterialCard::new(
+            ("palette", palette as usize),
+            if selected {
+                CardVariant::Filled
+            } else {
+                CardVariant::Outlined
+            },
+        )
+        .w_full()
+        .overflow_hidden()
+        .accessibility_label(course2md::tr!(
+            "{}，{}{}",
+            palette.name(),
+            mode_label(dark),
+            if selected {
+                course2md::tr!("，已选择")
+            } else {
+                ""
+            }
+        ))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            let saved = &this.preferences.application().appearance;
+            if (if dark { saved.dark } else { saved.light }) == palette {
+                return;
+            }
+            let mut next = this.application_edit_base();
+            next.appearance.select(palette);
+            this.commit_application(next, cx);
+        }))
+        .child(sample(palette, rem(120.)).rounded_t(RADIUS_CARD))
+        .child(
+            h_flex()
+                .w_full()
+                .min_h(rem(48.))
+                .gap(rem(8.))
+                .p(rem(12.))
+                .items_center()
+                .child(
+                    TileScale::Regular
+                        .label(("palette-name", palette as usize), palette.name())
+                        .flex_1()
+                        .min_w_0()
+                        .whitespace_normal(),
+                )
+                .child(
+                    div().flex_shrink_0().opacity(amount).child(
+                        Icon::from(symbols::check_circle())
+                            .size(rem(18.))
+                            .color(color(ColorRole::PRIMARY)),
+                    ),
+                ),
+        )
+    }
+
+    /// The palette chooser: every palette of one mode as a real preview. A choice
+    /// applies at once; a failed save stays visible here with its retry.
+    pub(crate) fn palette_dialog(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let (dark, open) = self.settings_ui.palette_picker;
+        let appearance = self.displayed_appearance();
+        let selected = if dark {
+            appearance.dark
+        } else {
+            appearance.light
+        };
+        let inner_width = (f32::from(window.viewport_size().width) - 48.)
+            .min(rem(720.).to_pixels(window.rem_size()).as_f32())
+            - rem(48.).to_pixels(window.rem_size()).as_f32();
+        let columns = palette_columns(inner_width, f32::from(window.rem_size()));
+        let failed = self
+            .settings_group_notice(PreferenceGroup::Application)
+            .is_some_and(|(_, error)| error);
+        let scroll = self.settings_ui.palette_scroll.clone();
+        let grid = div()
             .grid()
             .grid_cols(columns)
             .w_full()
             .min_w_0()
-            .gap(px(PALETTE_GAP))
-            .children(cards.into_iter().map(|palette| {
-                let selected = palette == selected_palette;
-                let amount = crate::motion::value(
-                    ("palette-selection", palette as usize),
-                    if selected { 1. } else { 0. },
-                    window,
-                    cx,
-                );
-                crate::focus_scroll::RevealFocus::new(
-                    ("palette-choice-focus", palette as usize),
-                    palette_choice(palette, selected, amount).on_click(cx.listener(
-                        move |this, _, window, cx| {
-                            let previous = if dark {
-                                this.preferences.application().appearance.dark
-                            } else {
-                                this.preferences.application().appearance.light
-                            };
-                            if previous == palette {
-                                return;
-                            }
-                            let mut next = this.application_edit_base();
-                            next.appearance.select(palette);
-                            if this.commit_application(next, cx) {
-                                window.refresh();
-                            }
-                        },
-                    )),
-                    scroll.clone(),
-                )
-            }))
-    }
-
-    fn palette_picker_content(
-        &self,
-        dark: bool,
-        scroll: ScrollHandle,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let preference = &self.displayed_appearance();
-        let grid = self.palette_grid(
-            dark,
-            if dark {
-                preference.dark
-            } else {
-                preference.light
-            },
-            picker_inner_width(window),
-            scroll.clone(),
-            window,
-            cx,
-        );
-        let available_height = (f32::from(window.viewport_size().height)
-            - f32::from(task_dialog_top(window))
-            - PICKER_GUTTER
-            - PICKER_PADDING * 2.
-            - PICKER_BORDER * 2.
-            - f32::from(window.rem_size()) * 3.
-            - 16.)
-            .max(120.);
-        let save_failed = self
-            .settings_group_notice(PreferenceGroup::Application)
-            .is_some_and(|(_, error)| error);
-        let finish = if save_failed {
-            outline_pill("finish-palette-picker", cx)
-                .settings_text()
-                .icon(icons::close())
-                .label(course2md::tr!("关闭"))
-        } else {
-            primary_pill("finish-palette-picker")
-                .icon(icons::check_circle())
-                .label(course2md::tr!("完成"))
-        };
-        v_flex()
-            .w_full()
-            .min_w_0()
-            .max_h(px(available_height))
-            .gap(px(16.))
-            .when(save_failed, |view| {
-                view.child(
-                    self.group_feedback_with_retry_emphasis(PreferenceGroup::Application, true, cx)
-                        .flex_shrink_0(),
-                )
-            })
-            .child(
-                div()
-                    .id(("palette-picker-scroll", usize::from(dark)))
+            .gap(rem(CARD_GAP))
+            .children(
+                ALL.into_iter()
+                    .filter(|palette| palette.is_dark() == dark)
+                    .map(|palette| {
+                        RevealFocus::new(
+                            ("palette-reveal", palette as usize),
+                            self.palette_card(palette, palette == selected, window, cx),
+                            scroll.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        let close = cx.listener(|this, _: &ClickEvent, _, cx| this.close_palette_picker(cx));
+        MaterialDialog::new("palette-dialog")
+            .headline(mode_label(dark))
+            .size(DialogSize::Large)
+            .content(
+                v_flex()
                     .w_full()
                     .min_w_0()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&scroll)
-                    .child(grid),
+                    .max_h(crate::settings_ui::dialog_body_height(window))
+                    .px(rem(24.))
+                    .gap(rem(16.))
+                    .when(failed, |view| {
+                        view.child(self.group_feedback(PreferenceGroup::Application, cx))
+                    })
+                    .child(
+                        div()
+                            .id("palette-scroll")
+                            .w_full()
+                            .min_w_0()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&scroll)
+                            .child(grid),
+                    ),
             )
-            .child(
-                dialog_actions()
-                    .flex_shrink_0()
-                    .child(finish.on_click(|_, window, cx| window.close_dialog(cx))),
-            )
-    }
-
-    pub(crate) fn open_palette_picker(
-        &mut self,
-        dark: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let desktop = cx.entity();
-        let scroll = ScrollHandle::new();
-        let content =
-            crate::views::DesktopView::observing(desktop, cx, move |desktop, window, cx| {
-                desktop
-                    .palette_picker_content(dark, scroll.clone(), window, cx)
-                    .into_any_element()
-            });
-        window.open_dialog(cx, move |dialog, window, _| {
-            dialog
-                .material(
-                    "palette-dialog-title",
-                    if dark {
-                        course2md::tr!("深色主题")
+            .action(
+                material_button(
+                    "finish-palette-picker",
+                    if failed {
+                        ButtonVariant::Outlined
                     } else {
-                        course2md::tr!("浅色主题")
+                        ButtonVariant::Filled
                     },
                 )
-                .w(px(picker_width(window)))
-                .p(px(PICKER_PADDING))
-                .close_button(false)
-                .margin_top(task_dialog_top(window))
-                .child(content.clone())
-        });
+                .icon(if failed {
+                    symbols::close()
+                } else {
+                    symbols::check_circle()
+                })
+                .child(if failed {
+                    course2md::tr!("关闭")
+                } else {
+                    course2md::tr!("完成")
+                })
+                .on_click(close),
+            )
+            .modal(open)
+            .on_dismiss({
+                let this = cx.weak_entity();
+                move |_, cx| {
+                    let _ = this.update(cx, |this, cx| this.close_palette_picker(cx));
+                }
+            })
+            .into_any_element()
     }
 
-    /// One saved palette as a tile of the 主题 group: its real preview, which
-    /// mode it serves and its name. The palette in use carries 使用中, as on
-    /// the canvas; keyboard focus keeps the button's own focus ring. The tile
-    /// opens the palette chooser.
+    pub(crate) fn open_palette_picker(&mut self, dark: bool, cx: &mut Context<Self>) {
+        self.settings_ui.palette_picker = (dark, true);
+        cx.notify();
+    }
+
+    pub(crate) fn close_palette_picker(&mut self, cx: &mut Context<Self>) {
+        self.settings_ui.palette_picker.1 = false;
+        cx.notify();
+    }
+
+    /// One saved palette as a tile: its real preview, the mode it serves and its name.
+    /// The palette painted now carries 使用中. The tile opens the chooser.
     fn palette_preset(
         &self,
         dark: bool,
         palette: PaletteId,
-        active: bool,
-        outer: [bool; 4],
+        outer: OuterCorners,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let caption = if dark {
-            course2md::tr!("深色主题")
-        } else {
-            course2md::tr!("浅色主题")
-        };
-        tile_button(("palette-preset", usize::from(dark)), outer, cx)
-            .p(rems(16. / 14.))
-            .accessibility_label(course2md::tr!("{}：{}", caption, palette.name()))
+        let scale = TileScale::Regular;
+        scale
+            .button(("palette-preset", usize::from(dark)), outer)
+            .accessibility_label(course2md::tr!("{}：{}", mode_label(dark), palette.name()))
+            .on_click(cx.listener(move |this, _, _, cx| this.open_palette_picker(dark, cx)))
             .child(
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .gap(rems(1.))
+                    .gap(rem(14.))
                     .child(
                         div()
                             .w_full()
-                            .rounded(px(16.))
+                            .rounded(RADIUS_LARGE)
                             .overflow_hidden()
-                            .child(sample(palette, 128.).rounded(px(16.))),
+                            .child(sample(palette, rem(128.))),
                     )
                     .child(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .items_center()
-                            .gap(rems(12. / 14.))
-                            .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .gap(rems(2. / 14.))
-                                    .child(
-                                        div()
-                                            .text_size(rems(13. / 14.))
-                                            .line_height(rems(18. / 14.))
-                                            .text_color(color(GRAY))
-                                            .child(caption),
-                                    )
-                                    .child(
-                                        div()
-                                            .whitespace_normal()
-                                            .text_size(TEXT_SETTINGS_BODY)
-                                            .line_height(rems(22. / 14.))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(color(INK))
-                                            .child(palette.name()),
-                                    ),
-                            )
-                            .when(active, |row| {
-                                row.child(badge(BadgeKind::Tonal).child(course2md::tr!("使用中")))
+                        scale
+                            .row()
+                            .child(scale.text(
+                                ("palette-preset-label", usize::from(dark)),
+                                mode_label(dark),
+                                Some(palette.name().into()),
+                            ))
+                            .when(is_dark() == dark, |row| {
+                                row.child(
+                                    status_chip(StatusKind::Tonal).child(course2md::tr!("使用中")),
+                                )
                             })
                             .child(tile_chevron()),
                     ),
             )
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.open_palette_picker(dark, window, cx);
-            }))
             .into_any_element()
+    }
+
+    fn interface_language_field(&self, cx: &mut Context<Self>) -> ui::Field {
+        let current = self.application_edit_base().language;
+        let label = |language: InterfaceLanguage| match language {
+            InterfaceLanguage::System => course2md::tr!("跟随系统"),
+            other => other.resolve().native_name(),
+        };
+        let value: SharedString = if current == InterfaceLanguage::System {
+            format!("{} · {}", label(current), current.resolve().native_name()).into()
+        } else {
+            label(current).into()
+        };
+        // 跟随系统 stands apart from the fixed languages.
+        let items = ui::choice_items(
+            InterfaceLanguage::ALL
+                .into_iter()
+                .map(|language| (language, label(language))),
+            &current,
+            cx.listener(|this, language: &InterfaceLanguage, _, cx| {
+                let mut next = this.application_edit_base();
+                next.language = *language;
+                if this.commit_application(next, cx) {
+                    crate::i18n::apply(*language);
+                    cx.notify();
+                }
+            }),
+        )
+        .enumerate()
+        .map(|(index, item)| item.divider(index == 0));
+        ui::Field::menu(
+            "app-language",
+            course2md::tr!("界面语言"),
+            value,
+            MaterialMenu::new("app-language-items")
+                .width(240.)
+                .items(items),
+        )
     }
 
     pub(crate) fn appearance_page(
@@ -424,173 +367,137 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let preference = self.displayed_appearance();
-        let modes = SingleChoiceGroup::new("appearance-mode", course2md::tr!("外观模式"))
+        let appearance = self.displayed_appearance();
+        let modes = ConnectedButtonGroup::new("appearance-mode", course2md::tr!("外观模式"))
             .segmented()
-            .full_width()
-            .settings_text()
+            .button_size(ButtonSize::Small)
             .options([
                 ("system", course2md::tr!("跟随系统")),
                 ("light", course2md::tr!("浅色")),
                 ("dark", course2md::tr!("深色")),
             ])
-            .icon("system", icons::computer())
-            .icon("light", icons::sun())
-            .icon("dark", icons::moon())
-            .selected(match preference.mode {
+            .icon("system", symbols::computer())
+            .icon("light", symbols::light_mode())
+            .icon("dark", symbols::dark_mode())
+            .selected(match appearance.mode {
                 Appearance::System => "system",
                 Appearance::Light => "light",
                 Appearance::Dark => "dark",
             })
-            .reveal_in(self.scrolls[Page::Settings as usize].clone())
-            .on_change(cx.listener(|this, selected: &SharedString, window, cx| {
+            .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
                 let mode = match selected.as_ref() {
                     "light" => Appearance::Light,
                     "dark" => Appearance::Dark,
                     _ => Appearance::System,
                 };
                 let mut next = this.application_edit_base();
-                if next.appearance.mode == mode {
-                    return;
-                }
-                next.appearance.mode = mode;
-                if this.commit_application(next, cx) {
-                    window.refresh();
+                if next.appearance.mode != mode {
+                    next.appearance.mode = mode;
+                    this.commit_application(next, cx);
                 }
             }));
-        // The palette in use is the one painted now: the mode's choice, or
-        // the system's when following it.
-        let dark_active = theme::is_dark_paint();
-        // Both tiles always stay in place, whatever the mode, so a mode change
-        // never moves the preference groups below them. They sit side by side
-        // below the mode tile, or stack when the pane is narrow.
-        let side_by_side = crate::settings_ui::settings_layout(window).content
-            >= 440. * f32::from(window.rem_size()) / 14.;
-        let (light_corners, dark_corners) = if side_by_side {
-            ([false, false, false, true], [false, false, true, false])
-        } else {
-            ([false; 4], [false, false, true, true])
-        };
-        let light = self.palette_preset(false, preference.light, !dark_active, light_corners, cx);
-        let dark = self.palette_preset(true, preference.dark, dark_active, dark_corners, cx);
-        let group =
-            crate::settings_ui::SettingsGroup::new("appearance-theme", course2md::tr!("主题"))
-                .child(crate::settings_ui::settings_stacked_row(
-                    "appearance-mode-row",
-                    course2md::tr!("外观模式"),
-                    "",
-                    modes,
-                ));
-        let presets = if side_by_side {
-            group.pair(move |_| light, move |_| dark)
-        } else {
-            group.tile(move |_| light).tile(move |_| dark)
-        };
+        // Both previews always stay in place, whatever the mode, so a mode change never
+        // moves the preference groups below them. They stack when the pane is narrow.
+        let side_by_side = !is_compact(window);
+        let light_corners = [false, false, false, side_by_side];
+        let dark_corners = [false, false, true, !side_by_side];
+        let light = self.palette_preset(false, appearance.light, light_corners, cx);
+        let dark = self.palette_preset(true, appearance.dark, dark_corners, cx);
+        let application = self.preferences.application();
+        let scales = crate::preferences::FONT_SCALES;
+        let font_scale =
+            ConnectedButtonGroup::new("app-font-scale", course2md::tr!("界面文字大小"))
+                .segmented()
+                .button_size(ButtonSize::Small)
+                .options(scales.into_iter().map(|scale| {
+                    let percent = (scale * 100.).round() as u32;
+                    (percent.to_string(), format!("{percent}%"))
+                }))
+                .selected(((application.font_scale * 100.).round() as u32).to_string())
+                .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
+                    let Ok(percent) = selected.parse::<f32>() else {
+                        return;
+                    };
+                    let mut next = this.application_edit_base();
+                    next.font_scale = percent / 100.;
+                    this.commit_application(next, cx);
+                }));
+        let previews = ui::Field::tile("palette-previews", move |_| {
+            div()
+                .grid()
+                .grid_cols(if side_by_side { 2 } else { 1 })
+                .w_full()
+                .min_w_0()
+                .gap(TILE_GAP)
+                .child(light)
+                .child(dark)
+                .into_any_element()
+        });
         v_flex()
             .w_full()
             .min_w_0()
-            .gap(px(28.))
-            .child(presets)
-            .child(self.appearance_controls(cx))
+            .gap(rem(28.))
+            .child(self.settings_fields(
+                "appearance-theme",
+                course2md::tr!("主题"),
+                vec![
+                    ui::Field::below("appearance-mode-row", course2md::tr!("外观模式"), modes),
+                    previews,
+                ],
+            ))
+            .child(self.settings_fields(
+                "appearance-motion",
+                course2md::tr!("界面偏好"),
+                vec![
+                    self.interface_language_field(cx),
+                    ui::Field::below(
+                        "app-font-scale-row",
+                        course2md::tr!("界面文字大小"),
+                        font_scale,
+                    ),
+                    ui::Field::switch(
+                        "app-reduce-motion",
+                        course2md::tr!("减少动态效果"),
+                        application.desktop.reduce_motion,
+                        cx.listener(|this, on: &bool, _, cx| {
+                            let mut next = this.application_edit_base();
+                            next.desktop.reduce_motion = *on;
+                            this.commit_application(next, cx);
+                        }),
+                    )
+                    .hint(course2md::tr!("关闭过渡动画和进度条的流动效果")),
+                ],
+            ))
+            .child(self.settings_fields(
+                "appearance-home",
+                course2md::tr!("主页"),
+                vec![
+                    ui::Field::switch(
+                        "app-home-recent-notes",
+                        course2md::tr!("显示最近的笔记"),
+                        application.desktop.home_recent_notes,
+                        cx.listener(|this, on: &bool, _, cx| {
+                            let mut next = this.application_edit_base();
+                            next.desktop.home_recent_notes = *on;
+                            this.commit_application(next, cx);
+                        }),
+                    )
+                    .hint(course2md::tr!("关闭后主页不显示已完成的笔记")),
+                ],
+            ))
             .into_any_element()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PALETTE_GAP, palette_choice, palette_columns, palette_minimum_width};
-    use crate::palettes::ALL;
-    use gpui::{
-        Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _,
-        TestAppContext, VisualTestContext, Window, div, px,
-    };
+    use super::palette_columns;
 
-    struct PaletteLayoutHarness {
-        width: f32,
-        rem: f32,
-    }
-
-    impl Render for PaletteLayoutHarness {
-        fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            window.set_rem_size(px(self.rem));
-            let cards = ALL
-                .into_iter()
-                .filter(|id| id.is_dark())
-                .collect::<Vec<_>>();
-            let columns = palette_columns(self.width, palette_minimum_width(&cards, window), 4);
-            div()
-                .w(px(self.width))
-                .grid()
-                .grid_cols(columns)
-                .gap(px(PALETTE_GAP))
-                .debug_selector(|| "palette-layout-grid".into())
-                .children(
-                    cards
-                        .into_iter()
-                        .map(|palette| palette_choice(palette, false, 0.)),
-                )
-        }
-    }
-
-    fn inspect_palette_layout(cx: &mut VisualTestContext) -> usize {
-        let grid = cx.debug_bounds("palette-layout-grid").unwrap();
-        let mut first_row = 0;
-        for palette in ALL.into_iter().filter(|id| id.is_dark()) {
-            let card = cx
-                .debug_bounds(Box::leak(
-                    format!("palette-card-{}", palette as usize).into_boxed_str(),
-                ))
-                .unwrap();
-            let label = cx
-                .debug_bounds(Box::leak(
-                    format!("palette-label-{}", palette as usize).into_boxed_str(),
-                ))
-                .unwrap();
-            assert!(card.left() >= grid.left() && card.right() <= grid.right() + px(0.5));
-            assert!(
-                card.size.height >= px(144.),
-                "the preview keeps its natural height"
-            );
-            let required = cx.update(|window, _| palette_minimum_width(&[palette], window) - 54.);
-            assert!(
-                label.size.width + px(0.5) >= px(required),
-                "{} needs room for its name",
-                palette.name()
-            );
-            if card.top() == grid.top() {
-                first_row += 1;
-            }
-        }
-        first_row
-    }
-
-    #[gpui::test]
-    fn palette_names_reflow_on_the_first_font_and_width_change(cx: &mut TestAppContext) {
-        let (view, cx) = cx.add_window_view(|_, _| PaletteLayoutHarness {
-            width: 760.,
-            rem: 14.,
-        });
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-        let original_columns = inspect_palette_layout(cx);
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.rem = 28.;
-                cx.notify();
-            });
-            window.draw(cx).clear(cx);
-        });
-        let large_columns = inspect_palette_layout(cx);
-        assert!(
-            large_columns < original_columns,
-            "200% text must reduce columns before labels collide"
-        );
-        cx.update(|window, cx| {
-            view.update(cx, |view, cx| {
-                view.width = 520.;
-                cx.notify();
-            });
-            window.draw(cx).clear(cx);
-        });
-        assert!(inspect_palette_layout(cx) <= large_columns);
+    #[test]
+    fn larger_text_and_narrower_panes_reduce_the_palette_columns() {
+        assert_eq!(palette_columns(760., 14.), 4);
+        assert!(palette_columns(760., 28.) < palette_columns(760., 14.));
+        assert!(palette_columns(520., 28.) <= palette_columns(760., 28.));
+        assert_eq!(palette_columns(100., 28.), 1);
     }
 }
