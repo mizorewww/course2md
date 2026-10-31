@@ -402,10 +402,12 @@ impl Desktop {
                             this.open_course(course, cx);
                         }
                     }
-                    "confirm" => crate::ui::Confirm::new("删除笔记", "保留笔记", "移到废纸篓")
-                        .danger()
-                        .text("这份笔记将移到废纸篓，可以从那里恢复。")
-                        .ask(|_, _, _| {}, window, cx),
+                    "confirm" => {
+                        crate::ui::Confirm::new("Delete note", "Keep note", "Move to Trash")
+                            .danger()
+                            .text("The note moves to the Trash. You can restore it from there.")
+                            .ask(|_, _, _| {}, window, cx)
+                    }
                     "folder" => this.begin_folder(None, window, cx),
                     "rename" => {
                         if let Some(course) = newest {
