@@ -1,33 +1,79 @@
 use super::*;
-use crate::theme::*;
-use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use crate::{symbols, ui};
+use gpui_kit_material::{
+    color::ColorRole,
+    icons::Icon,
+    prelude::{
+        ButtonVariant, ExposedDropdown, ListDensity, ListItem, ListLeading, MaterialDialog,
+        TextField, TextFieldVariant, material_button, rem, segmented_list,
+    },
+};
+use std::{
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 fn folders_unavailable() -> &'static str {
     course2md::tr!("文件夹暂不可用，请重新扫描笔记库。")
 }
 
+/// What the name dialog names.
 #[derive(Clone)]
-pub struct FolderOrigin {
-    pub root: PathBuf,
-    pub draft_id: Option<String>,
-    /// A rename or create is being written; further saves wait for it.
-    pub saving: bool,
+pub(crate) enum NameTarget {
+    /// A new folder inside `parent`, chosen for `draft` when it was asked for from one.
+    NewFolder {
+        root: PathBuf,
+        parent: Option<u64>,
+        draft: Option<String>,
+    },
+    Folder {
+        root: PathBuf,
+        id: u64,
+    },
+    Note {
+        root: PathBuf,
+        storage: PathBuf,
+    },
 }
 
-/// Resolved picker state shared by the full picker and the compact chip.
+/// The dialog naming a new folder, a folder or a note. It outlives its answer, so it
+/// can play its exit; `open` says whether the question still stands.
+pub(crate) struct NameDialog {
+    target: NameTarget,
+    error: Option<String>,
+    saving: bool,
+    open: bool,
+    /// Its field takes focus once the dialog has taken it, a frame after opening.
+    focus_field: bool,
+}
+
+/// What the move dialog moves.
+#[derive(Clone)]
+pub(crate) enum Moving {
+    Note(PathBuf),
+    Folder(u64),
+}
+
+/// The dialog choosing where to move a note or folder, inside library `root`.
+pub(crate) struct MoveDialog {
+    root: PathBuf,
+    moving: Moving,
+    open: bool,
+}
+
+/// Resolved picker state for the draft or a note.
 #[derive(Clone)]
 pub(crate) struct FolderContext {
-    pub(crate) storage: Option<PathBuf>,
-    pub(crate) origin: FolderOrigin,
-    pub(crate) folder: Option<u64>,
+    pub(crate) root: PathBuf,
+    draft_id: Option<String>,
+    folder: Option<u64>,
     pub(crate) load_error: Option<String>,
     pub(crate) label: String,
     /// Every folder in tree order, labelled with its path.
-    pub(crate) folders: Vec<(u64, String)>,
+    folders: Vec<(u64, String)>,
 }
 
 impl Desktop {
@@ -317,28 +363,29 @@ impl Desktop {
         }
     }
 
-    fn current_folder_origin(&self) -> FolderOrigin {
+    /// The library a new folder goes in, and the draft it is for on the workbench.
+    fn current_folder_origin(&self) -> (PathBuf, Option<String>) {
         if self.page == Page::New
             && let Some(workspace) = &self.workspace
             && let Some(draft) = workspace.state.draft()
             && let Some(library) = workspace.state.library(&draft.library_id)
         {
-            return FolderOrigin {
-                root: library.root.clone(),
-                draft_id: Some(draft.id.clone()),
-                saving: false,
-            };
+            return (library.root.clone(), Some(draft.id.clone()));
         }
-        FolderOrigin {
-            root: self.library_root.clone(),
-            draft_id: None,
-            saving: false,
-        }
+        (self.library_root.clone(), None)
     }
 
     pub fn begin_folder(&mut self, id: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
-        let origin = self.current_folder_origin();
-        self.begin_folder_with(origin, id, None, window, cx)
+        let (root, draft) = self.current_folder_origin();
+        let target = match id {
+            Some(id) => NameTarget::Folder { root, id },
+            None => NameTarget::NewFolder {
+                root,
+                parent: None,
+                draft,
+            },
+        };
+        self.begin_naming(target, window, cx)
     }
 
     /// Rename folder `id`, or create a folder inside `parent`, in the library at `root`.
@@ -350,85 +397,89 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let origin = FolderOrigin {
-            root,
-            draft_id: None,
-            saving: false,
+        let target = match id {
+            Some(id) => NameTarget::Folder { root, id },
+            None => NameTarget::NewFolder {
+                root,
+                parent,
+                draft: None,
+            },
         };
-        self.begin_folder_with(origin, id, parent, window, cx)
+        self.begin_naming(target, window, cx)
     }
 
-    fn begin_folder_with(
+    /// Opens the name dialog, holding the target's current name.
+    pub(crate) fn begin_naming(
         &mut self,
-        origin: FolderOrigin,
-        id: Option<u64>,
-        parent: Option<u64>,
+        target: NameTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let name = match &target {
+            NameTarget::NewFolder { .. } => String::new(),
+            NameTarget::Folder { root, id } => {
+                let Some(library) = self.library_indexes.get(root) else {
+                    self.message = Some(folders_unavailable().into());
+                    cx.notify();
+                    return;
+                };
+                library.folders.get(id).cloned().unwrap_or_default()
+            }
+            NameTarget::Note { storage, .. } => self
+                .courses
+                .iter()
+                .find(|course| &course.storage_dir() == storage)
+                .map(|course| course.title.clone())
+                .unwrap_or_default(),
+        };
         if !matches!(self.page, Page::Library | Page::New) {
             self.navigate(Page::Library, cx);
         }
-        let Some(library) = self.library_indexes.get(&origin.root) else {
-            self.message = Some(folders_unavailable().into());
-            cx.notify();
-            return;
-        };
-        let name = id
-            .and_then(|id| library.folders.get(&id))
-            .cloned()
-            .unwrap_or_default();
-        self.folder_origin = Some(origin);
-        self.folder_editor = Some(id);
-        self.folder_parent = parent;
-        self.folder_error = None;
-        self.inputs[&Field::FolderName].update(cx, |state, cx| {
-            state.set_value(name, window, cx);
-            // The visible field label already names the field.
-            state.set_placeholder("", window, cx);
-        });
-        let desktop = cx.entity();
-        let title = if id.is_some() {
-            course2md::tr!("重命名文件夹")
-        } else if parent.is_some() {
-            course2md::tr!("新建子文件夹")
-        } else {
-            course2md::tr!("新建文件夹")
-        };
-        let content = crate::views::DesktopView::observing(desktop, cx, move |desktop, _, cx| {
-            div()
-                .id("folder-dialog-content")
-                .role(Role::Dialog)
-                .aria_label(title)
-                .child(desktop.folder_editor_view(cx))
-                .into_any_element()
-        });
-        let weak = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, window, _| {
-            let weak = weak.clone();
-            dialog
-                .material("folder-dialog-title", title)
-                .w(crate::theme::dialog_width(
-                    crate::theme::DIALOG_WIDTH,
-                    window,
-                ))
-                .overlay_closable(false)
-                .close_button(false)
-                .child(content.clone())
-                .on_close(move |_, _, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.folder_editor = None;
-                        this.folder_origin = None;
-                        this.folder_error = None;
-                        cx.notify();
-                    });
-                })
-        });
-        let input = self.inputs[&Field::FolderName].clone();
-        window.defer(cx, move |window, cx| {
-            input.update(cx, |input, cx| input.focus(window, cx))
+        self.inputs[&Field::Name].update(cx, |state, cx| state.set_value(name, window, cx));
+        self.name_dialog = Some(NameDialog {
+            target,
+            error: None,
+            saving: false,
+            open: true,
+            focus_field: true,
         });
         cx.notify();
+    }
+
+    pub(crate) fn close_name_dialog(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = &mut self.name_dialog {
+            dialog.open = false;
+        }
+        cx.notify();
+    }
+
+    /// The name changed: an earlier failure no longer applies.
+    pub(crate) fn name_edited(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = &mut self.name_dialog {
+            dialog.error = None;
+        }
+        cx.notify();
+    }
+
+    /// Runs blocking `work` off the UI thread, then hands its outcome to `done`.
+    pub(crate) fn in_background<T: Send + 'static>(
+        &mut self,
+        work: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
+        done: impl FnOnce(&mut Self, anyhow::Result<T>, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let task = crate::spawn_blocking_io(work);
+        cx.spawn(async move |this, cx| {
+            let result = task
+                .recv()
+                .await
+                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let _ = this.update(cx, |this, cx| {
+                done(this, result, cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Writes the folder record on a blocking thread, then stores the result in
@@ -441,35 +492,28 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let worker_root = root.clone();
-        let task = crate::spawn_blocking_io(move || {
-            let mut value = None;
-            let library = organize::Library::edit(&worker_root, |library| {
-                value = Some(change(library)?);
-                Ok(())
-            })?;
-            Ok((
-                library,
-                anyhow::Context::context(value, course2md::tr!("文件夹记录未更新"))?,
-            ))
-        });
-        cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let _ = this.update(cx, |this, cx| {
+        self.in_background(
+            move || {
+                let mut value = None;
+                let library = organize::Library::edit(&worker_root, |library| {
+                    value = Some(change(library)?);
+                    Ok(())
+                })?;
+                let value = anyhow::Context::context(value, course2md::tr!("文件夹记录未更新"))?;
+                Ok((library, value))
+            },
+            move |this, result, cx| {
                 let result = result.map(|(library, value)| {
                     this.store_folders(&root, library);
                     value
                 });
                 done(this, result, cx);
-                cx.notify();
-            });
-        })
-        .detach();
+            },
+            cx,
+        );
     }
 
-    pub(crate) fn store_folders(&mut self, root: &std::path::Path, library: organize::Library) {
+    pub(crate) fn store_folders(&mut self, root: &Path, library: organize::Library) {
         if self.library_root == root {
             self.library = library.clone();
             self.library_error = None;
@@ -477,135 +521,277 @@ impl Desktop {
         self.library_indexes.insert(root.to_owned(), library);
     }
 
-    pub fn save_folder(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.folder_editor else {
+    /// Saves the dialog's name. Pressing Return in its field lands here too.
+    pub fn save_name(&mut self, cx: &mut Context<Self>) {
+        let name = self.value(Field::Name, cx);
+        let Some(dialog) = self
+            .name_dialog
+            .as_mut()
+            .filter(|dialog| dialog.open && !dialog.saving && !name.is_empty())
+        else {
             return;
         };
-        if self.folder_origin.is_none() {
-            self.folder_origin = Some(self.current_folder_origin());
+        dialog.saving = true;
+        let target = dialog.target.clone();
+        match target.clone() {
+            NameTarget::Note { root, storage } => self.in_background(
+                move || organize::rename_course(&root, &storage, &name),
+                move |this, result, cx| {
+                    let done = result.is_ok();
+                    this.name_saved(result.map(|()| 0), &target, cx);
+                    if done {
+                        this.refresh_library(cx);
+                    }
+                },
+                cx,
+            ),
+            NameTarget::Folder { root, id } => self.edit_folders(
+                root,
+                move |library| library.rename(Some(id), &name),
+                move |this, result, cx| this.name_saved(result, &target, cx),
+                cx,
+            ),
+            NameTarget::NewFolder { root, parent, .. } => self.edit_folders(
+                root,
+                move |library| library.create(parent, &name),
+                move |this, result, cx| this.name_saved(result, &target, cx),
+                cx,
+            ),
         }
-        let Some(origin) = self.folder_origin.as_mut().filter(|origin| !origin.saving) else {
-            return;
-        };
-        origin.saving = true;
-        let root = origin.root.clone();
-        let name = self.value(Field::FolderName, cx);
-        let parent = self.folder_parent;
-        self.edit_folders(
-            root,
-            move |library| match id {
-                Some(id) => library.rename(Some(id), &name),
-                None => library.create(parent, &name),
-            },
-            |this, result, cx| {
-                // A closed dialog keeps the saved folder but no longer navigates.
-                let Some(origin) = this.folder_origin.as_mut() else {
-                    return;
-                };
-                origin.saving = false;
-                let origin = origin.clone();
-                match result {
-                    Ok(saved) => this.folder_saved(origin, saved, cx),
-                    Err(error) => this.folder_error = Some(format!("{error:#}")),
-                }
-            },
-            cx,
-        );
         cx.notify();
     }
 
-    fn folder_saved(&mut self, origin: FolderOrigin, saved: u64, cx: &mut Context<Self>) {
-        if let Some(draft_id) = &origin.draft_id {
-            if let Some(workspace) = &mut self.workspace
-                && let Err(error) = workspace.transaction(|state| {
-                    if let Some(draft) = state.drafts.iter_mut().find(|draft| &draft.id == draft_id)
-                    {
-                        draft.folder = Some(saved);
-                    }
-                    Ok(())
-                })
-            {
-                self.folder_error = Some(course2md::tr!(
-                    "文件夹已创建，保存位置尚未更新：{}",
-                    format!("{error:#}")
-                ));
-                self.folder_editor = Some(Some(saved));
+    /// A save finished. `saved` is the folder it wrote. A closed dialog keeps the
+    /// saved name but no longer navigates.
+    fn name_saved(
+        &mut self,
+        result: anyhow::Result<u64>,
+        target: &NameTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dialog) = self.name_dialog.as_mut().filter(|dialog| dialog.open) else {
+            return;
+        };
+        dialog.saving = false;
+        let saved = match result {
+            Ok(saved) => saved,
+            Err(error) => {
+                dialog.error = Some(format!("{error:#}"));
+                cx.notify();
                 return;
             }
-        } else {
-            self.select_library_scope(origin.root, crate::FolderFilter::Folder(saved), cx);
-            if self.page != Page::Library {
-                self.navigate(Page::Library, cx);
+        };
+        match target {
+            NameTarget::Note { .. } => {}
+            NameTarget::NewFolder {
+                root,
+                draft: Some(draft_id),
+                ..
+            } => {
+                if let Some(workspace) = &mut self.workspace
+                    && let Err(error) = workspace.transaction(|state| {
+                        if let Some(draft) =
+                            state.drafts.iter_mut().find(|draft| &draft.id == draft_id)
+                        {
+                            draft.folder = Some(saved);
+                        }
+                        Ok(())
+                    })
+                    && let Some(dialog) = &mut self.name_dialog
+                {
+                    dialog.error = Some(course2md::tr!(
+                        "文件夹已创建，保存位置尚未更新：{}",
+                        format!("{error:#}")
+                    ));
+                    dialog.target = NameTarget::Folder {
+                        root: root.clone(),
+                        id: saved,
+                    };
+                    cx.notify();
+                    return;
+                }
+            }
+            NameTarget::NewFolder { root, .. } | NameTarget::Folder { root, .. } => {
+                self.select_library_scope(root.clone(), FolderFilter::Folder(saved), cx);
+                if self.page != Page::Library {
+                    self.navigate(Page::Library, cx);
+                }
             }
         }
-        self.folder_editor = None;
-        self.folder_origin = None;
-        self.folder_error = None;
-        let handle = self.window;
-        cx.defer(move |cx| {
-            let _ = cx.update_window(handle, |_, window, cx| window.close_dialog(cx));
-        });
+        self.close_name_dialog(cx);
     }
 
-    pub fn folder_editor_view(&self, cx: &mut Context<Self>) -> Div {
-        let mut view = v_flex().gap_3();
-        if let Some(id) = self.folder_editor {
-            view = view
-                .child(
-                    accessible_text("folder-name-label", course2md::tr!("文件夹名称"))
-                        .font_weight(FontWeight::MEDIUM),
-                )
-                .child(
-                    text_input(&self.inputs[&Field::FolderName])
-                        .aria_label(course2md::tr!("文件夹名称"))
-                        .when(self.folder_error.is_some(), |v| {
-                            v.border_color(color(DANGER))
-                        }),
-                )
-                .when_some(self.folder_error.clone(), |v, error| {
-                    v.child(
-                        accessible_text("folder-editor-error", error)
-                            .text_sm()
-                            .text_color(color(DANGER)),
-                    )
-                })
-                .child(
-                    dialog_actions()
-                        .child(
-                            text_button("cancel-folder", cx)
-                                .label(course2md::tr!("取消"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.folder_editor = None;
-                                    this.folder_origin = None;
-                                    this.folder_error = None;
-                                    window.close_dialog(cx);
-                                    cx.notify();
-                                })),
-                        )
-                        .child(
-                            primary_pill("save-folder")
-                                .icon(if id.is_some() {
-                                    icons::check()
-                                } else {
-                                    icons::folder_plus()
-                                })
-                                .disabled(
-                                    self.inputs[&Field::FolderName]
-                                        .read(cx)
-                                        .value()
-                                        .trim()
-                                        .is_empty(),
-                                )
-                                .label(if id.is_some() {
-                                    course2md::tr!("保存名称")
-                                } else {
-                                    course2md::tr!("创建文件夹")
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| this.save_folder(cx))),
-                        ),
-                );
+    /// The dialog naming a folder or note, drawn by the shell.
+    pub(crate) fn name_dialog_view(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let input = self.inputs[&Field::Name].clone();
+        let dialog = self.name_dialog.as_mut()?;
+        if std::mem::take(&mut dialog.focus_field) {
+            let input = input.clone();
+            window.on_next_frame(move |window, cx| {
+                input.update(cx, |input, cx| input.focus(window, cx))
+            });
         }
-        view
+        let (headline, label, action, icon) = match &dialog.target {
+            NameTarget::NewFolder { parent, .. } => (
+                if parent.is_some() {
+                    course2md::tr!("新建子文件夹")
+                } else {
+                    course2md::tr!("新建文件夹")
+                },
+                course2md::tr!("文件夹名称"),
+                course2md::tr!("创建文件夹"),
+                symbols::create_new_folder(),
+            ),
+            NameTarget::Folder { .. } => (
+                course2md::tr!("重命名文件夹"),
+                course2md::tr!("文件夹名称"),
+                course2md::tr!("保存名称"),
+                symbols::check(),
+            ),
+            NameTarget::Note { .. } => (
+                course2md::tr!("重命名笔记"),
+                course2md::tr!("笔记名称"),
+                course2md::tr!("保存名称"),
+                symbols::check(),
+            ),
+        };
+        let error = dialog.error.clone();
+        let (open, saving) = (dialog.open, dialog.saving);
+        let empty = input.read(cx).value().trim().is_empty();
+        Some(
+            MaterialDialog::new("name-dialog")
+                .headline(headline)
+                .content(
+                    div().px(rem(24.)).child(
+                        TextField::new("name-field", &input)
+                            .label(label)
+                            .outlined()
+                            .w_full()
+                            .error(error.is_some())
+                            .when_some(error, |field, error| field.supporting_text(error)),
+                    ),
+                )
+                .action(
+                    material_button("name-cancel", ButtonVariant::Text)
+                        .child(course2md::tr!("取消"))
+                        .on_click(cx.listener(|this, _, _, cx| this.close_name_dialog(cx))),
+                )
+                .action(
+                    material_button("name-save", ButtonVariant::Filled)
+                        .icon(icon)
+                        .child(action)
+                        .disabled(empty)
+                        .loading(saving, action)
+                        .on_click(cx.listener(|this, _, _, cx| this.save_name(cx))),
+                )
+                .modal(open)
+                .dismiss_on_scrim(false)
+                .on_dismiss({
+                    let desktop = cx.weak_entity();
+                    move |_, cx| {
+                        let _ = desktop.update(cx, |this, cx| this.close_name_dialog(cx));
+                    }
+                })
+                .into_any_element(),
+        )
+    }
+
+    pub(crate) fn begin_move(&mut self, root: PathBuf, moving: Moving, cx: &mut Context<Self>) {
+        self.move_dialog = Some(MoveDialog {
+            root,
+            moving,
+            open: true,
+        });
+        cx.notify();
+    }
+
+    fn close_move_dialog(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = &mut self.move_dialog {
+            dialog.open = false;
+        }
+        cx.notify();
+    }
+
+    /// The dialog choosing a destination, drawn by the shell. A list of folders can
+    /// outgrow a menu, and a folder cannot move inside itself.
+    pub(crate) fn move_dialog_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dialog = self.move_dialog.as_ref()?;
+        let library = self.library_indexes.get(&dialog.root)?;
+        let (top, top_icon, current, inside) = match &dialog.moving {
+            Moving::Note(storage) => (
+                course2md::tr!("未分类").to_owned(),
+                symbols::inbox(),
+                self.library_view_cache
+                    .locations
+                    .get(storage)
+                    .and_then(|location| library.folder_key(&location.relative)),
+                Vec::new(),
+            ),
+            Moving::Folder(id) => (
+                self.library_name(&dialog.root),
+                symbols::storage(),
+                library.parent(*id),
+                library.subtree(*id),
+            ),
+        };
+        let folders = library
+            .tree()
+            .into_iter()
+            .filter(|(id, _)| !inside.contains(id))
+            .map(|(id, _)| (Some(id), library.path(id).join(" / ")));
+        let rows = std::iter::once((None, top)).chain(folders).enumerate();
+        let rows = rows.map(|(index, (destination, label))| {
+            let (root, moving) = (dialog.root.clone(), dialog.moving.clone());
+            ListItem::new(("move-destination", index), label)
+                .density(ListDensity::Compact)
+                .container(ColorRole::SURFACE_CONTAINER_HIGH)
+                .leading(ListLeading::Icon(if destination.is_some() {
+                    Icon::from(symbols::folder())
+                } else {
+                    Icon::from(top_icon)
+                }))
+                .selected(destination == current)
+                .disabled(destination == current)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.close_move_dialog(cx);
+                    match &moving {
+                        Moving::Note(storage) => {
+                            this.file_note(root.clone(), storage.clone(), destination, cx)
+                        }
+                        Moving::Folder(id) => {
+                            this.move_folder_into(root.clone(), *id, destination, cx)
+                        }
+                    }
+                }))
+        });
+        Some(
+            MaterialDialog::new("move-dialog")
+                .headline(course2md::tr!("移动到"))
+                .content(
+                    div()
+                        .id("move-destinations")
+                        .max_h(rem(320.))
+                        .overflow_y_scroll()
+                        .child(segmented_list(rows.collect::<Vec<_>>())),
+                )
+                .action(
+                    material_button("move-cancel", ButtonVariant::Text)
+                        .child(course2md::tr!("取消"))
+                        .on_click(cx.listener(|this, _, _, cx| this.close_move_dialog(cx))),
+                )
+                .modal(dialog.open)
+                .on_dismiss({
+                    let desktop = cx.weak_entity();
+                    move |_, cx| {
+                        let _ = desktop.update(cx, |this, cx| this.close_move_dialog(cx));
+                    }
+                })
+                .into_any_element(),
+        )
     }
 
     /// Deleting a folder removes the folders inside it; notes are kept and
@@ -617,12 +803,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let origin = FolderOrigin {
-            root,
-            draft_id: None,
-            saving: false,
-        };
-        let library = self.library_indexes.get(&origin.root);
+        let library = self.library_indexes.get(&root);
         let name = library
             .and_then(|library| library.folders.get(&id))
             .cloned()
@@ -636,20 +817,19 @@ impl Desktop {
         } else {
             course2md::tr!("其中的笔记会移到未分类").to_owned()
         };
-        let answer = window.prompt(
-            PromptLevel::Warning,
-            &course2md::tr!("删除「{}」文件夹？", name),
-            Some(&detail),
-            &[course2md::tr!("删除文件夹"), course2md::tr!("保留文件夹")],
-            cx,
-        );
-        cx.spawn_in(window, async move |this, cx| {
-            if answer.await.ok() != Some(0) {
-                return;
-            }
-            let _ = this.update(cx, |this, cx| {
+        ui::Confirm::new(
+            course2md::tr!("删除「{}」文件夹？", name),
+            course2md::tr!("保留文件夹"),
+            course2md::tr!("删除文件夹"),
+        )
+        .danger()
+        .text(detail)
+        .ask(
+            cx.listener(move |this, _, _, cx| {
+                let root = root.clone();
+                let removed_root = root.clone();
                 this.edit_folders(
-                    origin.root.clone(),
+                    root,
                     move |library| {
                         library.remove(id);
                         Ok(())
@@ -660,11 +840,11 @@ impl Desktop {
                         Ok(()) => {
                             let removed = this.folder_filter.folder_id().is_some_and(|folder| {
                                 this.library_indexes
-                                    .get(&origin.root)
+                                    .get(&removed_root)
                                     .is_none_or(|library| !library.folders.contains_key(&folder))
                             });
-                            if this.library_root == origin.root && removed {
-                                this.folder_filter = crate::FolderFilter::Unfiled;
+                            if this.library_root == removed_root && removed {
+                                this.folder_filter = FolderFilter::Unfiled;
                             }
                         }
                         Err(error) => {
@@ -674,9 +854,10 @@ impl Desktop {
                     },
                     cx,
                 );
-            });
-        })
-        .detach();
+            }),
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn folder_context(&self, course: Option<PathBuf>) -> FolderContext {
@@ -687,36 +868,29 @@ impl Desktop {
                 .map(|course| course.storage_dir())
                 .unwrap_or_else(|| path.clone())
         });
-        let origin = if let Some(path) = &storage {
-            let root = self
+        let (root, draft_id) = match &storage {
+            Some(path) => (
+                self.library_view_cache
+                    .locations
+                    .get(path)
+                    .map(|location| location.root.clone())
+                    .unwrap_or_else(|| self.library_root.clone()),
+                None,
+            ),
+            None => self.current_folder_origin(),
+        };
+        let loaded = self.library_indexes.get(&root);
+        let checking = loaded.is_none() && self.loading;
+        let load_error = (loaded.is_none() && !checking).then(|| folders_unavailable().to_owned());
+        let folder = match &storage {
+            Some(path) => self
                 .library_view_cache
                 .locations
                 .get(path)
-                .map(|location| location.root.clone())
-                .unwrap_or_else(|| self.library_root.clone());
-            FolderOrigin {
-                root,
-                draft_id: None,
-                saving: false,
-            }
-        } else {
-            self.current_folder_origin()
+                .filter(|location| location.root == root)
+                .and_then(|location| loaded?.folder_key(&location.relative)),
+            None => self.target_folder(),
         };
-        let loaded = self.library_indexes.get(&origin.root);
-        let checking = loaded.is_none() && self.loading;
-        let load_error = (loaded.is_none() && !checking).then(|| folders_unavailable().to_owned());
-        let folder = storage
-            .as_ref()
-            .and_then(|path| self.library_view_cache.locations.get(path))
-            .filter(|location| location.root == origin.root)
-            .and_then(|location| loaded?.folder_key(&location.relative))
-            .or_else(|| {
-                if storage.is_none() {
-                    self.target_folder()
-                } else {
-                    None
-                }
-            });
         let label = if checking {
             course2md::tr!("正在读取文件夹…").to_owned()
         } else if load_error.is_some() {
@@ -730,8 +904,8 @@ impl Desktop {
             course2md::tr!("未分类").into()
         };
         FolderContext {
-            storage,
-            origin,
+            root,
+            draft_id,
             folder,
             load_error,
             label,
@@ -747,85 +921,44 @@ impl Desktop {
         }
     }
 
-    pub(crate) fn folder_menu(
-        entity: WeakEntity<Desktop>,
-        origin: FolderOrigin,
-        storage: Option<PathBuf>,
-        folders: Vec<(u64, String)>,
-        current: Option<u64>,
-    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
-        move |menu, _, _| {
-            let mut entries = vec![(None, course2md::tr!("未分类").to_owned())];
-            entries.extend(folders.iter().map(|(id, path)| (Some(*id), path.clone())));
-            entries.into_iter().fold(menu, |menu, (id, name)| {
-                let entity = entity.clone();
-                let storage = storage.clone();
-                let origin = origin.clone();
-                menu.item(
-                    PopupMenuItem::new(name)
-                        .icon(crate::icons::folder())
-                        .checked(id == current)
-                        .on_click(move |_, _, cx| {
-                            let _ = entity.update(cx, |this, cx| {
-                                if let Some(path) = storage.clone() {
-                                    let root = origin.root.clone();
-                                    this.edit_folders(
-                                        origin.root.clone(),
-                                        move |library| library.assign(&root, &path, id),
-                                        |this, result, _| {
-                                            if let Err(error) = result {
-                                                this.message = Some(course2md::tr!(
-                                                    "无法移动笔记：{}",
-                                                    format!("{error:#}")
-                                                ))
-                                            }
-                                        },
-                                        cx,
-                                    );
-                                } else if this
-                                    .workspace
-                                    .as_ref()
-                                    .and_then(|workspace| workspace.state.draft())
-                                    .is_some_and(|draft| {
-                                        Some(&draft.id) == origin.draft_id.as_ref()
-                                    })
-                                {
-                                    this.update_draft(|draft| draft.folder = id, cx);
-                                }
-                                cx.notify();
-                            });
-                        }),
-                )
-            })
-        }
-    }
-
+    /// Where the workbench's next note is saved: one of many folders, by name.
     pub fn folder_picker(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let context = self.folder_context(None);
-        let load_error = context.load_error.clone();
-        let picker = SelectField::new(
-            "folder-picker",
-            context.label.clone(),
-            Self::folder_menu(
-                cx.entity().downgrade(),
-                context.origin,
-                context.storage,
-                context.folders,
-                context.folder,
-            ),
-        )
-        .label(course2md::tr!("保存到"))
-        .icon(crate::icons::folder())
-        .disabled(self.loading || load_error.is_some());
-        v_flex()
-            .gap_1()
-            .child(picker)
-            .when_some(load_error, |view, error| {
-                view.child(
-                    accessible_text("folder-picker-error", error)
-                        .text_sm()
-                        .text_color(color(DANGER)),
-                )
+        let mut destinations = vec![None];
+        destinations.extend(context.folders.iter().map(|(id, _)| Some(*id)));
+        let selected = destinations.iter().position(|id| *id == context.folder);
+        let draft_id = context.draft_id;
+        ExposedDropdown::new("folder-picker", course2md::tr!("保存到"))
+            .variant(TextFieldVariant::Outlined)
+            .leading_icon(Icon::from(symbols::folder()))
+            .options(
+                std::iter::once(course2md::tr!("未分类").to_owned())
+                    .chain(context.folders.into_iter().map(|(_, path)| path)),
+            )
+            .selected(selected)
+            .width(320.)
+            .open(self.folder_picker_open)
+            .disabled(self.loading || context.load_error.is_some())
+            .error(context.load_error.is_some())
+            .when_some(context.load_error, |picker, error| {
+                picker.supporting_text(error)
             })
+            .on_open_change(cx.listener(|this, open: &bool, _, cx| {
+                this.folder_picker_open = *open;
+                cx.notify();
+            }))
+            .on_select(cx.listener(move |this, index: &usize, _, cx| {
+                this.folder_picker_open = false;
+                let current = this
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.state.draft())
+                    .is_some_and(|draft| Some(&draft.id) == draft_id.as_ref());
+                if current {
+                    let id = destinations[*index];
+                    this.update_draft(|draft| draft.folder = id, cx);
+                }
+                cx.notify();
+            }))
     }
 }
