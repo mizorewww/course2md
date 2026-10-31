@@ -6,8 +6,8 @@ use gpui_kit_material::{
     color::ColorRole,
     components::{
         ButtonVariant, Caption, CaptionLabels, IconButton, MaterialTooltip, NoticeKind, Snackbar,
-        SnackbarDuration, SnackbarPosition, TitleBar as AppBar, material_button, notice_banner,
-        spinner, title_bar_control,
+        SnackbarPosition, TitleBar as AppBar, material_button, notice_banner, spinner,
+        title_bar_control,
     },
     icons::SymbolIcon,
     motion,
@@ -502,7 +502,6 @@ impl Desktop {
         let close = dismiss.clone();
         Snackbar::new(("app-message", notice_key(&message)), message)
             .position(SnackbarPosition::default())
-            .duration(SnackbarDuration::Long)
             .close(course2md::tr!("关闭提示"), move |_, window, cx| {
                 close(window, cx)
             })

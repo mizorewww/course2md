@@ -121,8 +121,6 @@ stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame	
 stderr 管道已配置	stderr 管道已配置	The stderr pipe is configured	stderr 管道已配置	stderr パイプが構成されています
 stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdout 管道已配置	stdout パイプが構成されています
 {} / {} 段	{} / {} 段	{} / {} segments	{} / {} 段	{} / {} セグメント
-{} {}，{} 篇笔记	{} {}，{} 篇笔记	{} {}, {} notes	{} {}，{} 篇筆記	{} {}、{} 件のノート
-{} · 待下载	{} · 待下载	{} · Pending download	{} · 待下載	{} · ダウンロード待ち
 {} · 构建 {}	{} · 构建 {}	{} · Build {}	{} · 建置 {}	{} · ビルド {}
 {} 不支持「{}」，已改用 {}。	{} 不支持「{}」，已改用 {}。	{} does not support “{}”; switched to {}.	{} 不支援「{}」，已改用 {}。	{} は「{}」に対応していないため、{} に切り替えました。
 {} 个与进行中的任务相同，未重复加入	{} 个与进行中的任务相同，未重复加入	{} are identical to tasks in progress and were not added again	{} 個與進行中的任務相同，未重複加入	{} 件は進行中のタスクと同じため、追加しませんでした
