@@ -472,21 +472,6 @@ impl Roi {
         }
         Ok(Self { x1, y1, x2, y2 })
     }
-
-    /// 按帧尺寸换算为像素矩形。
-    pub fn pixels(&self, w: u32, h: u32) -> (u32, u32, u32, u32) {
-        let sx = |v: f64| (v * w as f64).round() as u32;
-        let sy = |v: f64| (v * h as f64).round() as u32;
-        let (x1, x2) = (
-            sx(self.x1).min(w.saturating_sub(1)),
-            sx(self.x2).clamp(1, w),
-        );
-        let (y1, y2) = (
-            sy(self.y1).min(h.saturating_sub(1)),
-            sy(self.y2).clamp(1, h),
-        );
-        (x1, y1, x2.max(x1 + 1), y2.max(y1 + 1))
-    }
 }
 
 fn parse_xy(pair: &str) -> anyhow::Result<(f64, f64)> {
@@ -1261,7 +1246,7 @@ mod tests {
     #[test]
     fn roi_parse() {
         let r = Roi::parse("25%,0%-100%,100%").unwrap();
-        assert_eq!(r.pixels(1000, 800), (250, 0, 1000, 800));
+        assert_eq!((r.x1, r.y1, r.x2, r.y2), (0.25, 0.0, 1.0, 1.0));
         assert!(Roi::parse("nonsense").is_err());
     }
 }
