@@ -131,9 +131,19 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
                     });
                 }
                 cx.background_executor().timer(delay).await;
+                // Draw now: a window hidden behind others gets no frames, and the
+                // image would show whatever it drew last. A page's entrance starts on
+                // the first frame it draws, so draw until that motion has settled.
+                for _ in 0..8 {
+                    let _ = cx.update(|window, cx| {
+                        window.refresh();
+                        window.draw(cx).clear(cx);
+                    });
+                    cx.background_executor()
+                        .timer(Duration::from_millis(150))
+                        .await;
+                }
                 let _ = cx.update(|window, cx| {
-                    // Draw now: a window hidden behind others gets no frames, and
-                    // the image would show whatever it drew last.
                     window.refresh();
                     window.draw(cx).clear(cx);
                 });
