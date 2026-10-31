@@ -1,6 +1,6 @@
 //! Read-only cache evidence. Finding files is deliberately distinct from loading a model.
 use crate::config::AsrProvider;
-use crate::execution::hex;
+use crate::digest::hex;
 use crate::tr;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -517,7 +517,7 @@ pub fn record_result(status: &LocalModelStatus, loaded: bool, error: Option<Stri
         last_error: error,
         version: env!("CARGO_PKG_VERSION").into(),
     };
-    crate::checkpoint::atomic_write(&receipt_path(status), &serde_json::to_vec(&receipt)?)
+    crate::fsio::atomic_write(&receipt_path(status), &serde_json::to_vec(&receipt)?)
 }
 
 #[cfg(test)]

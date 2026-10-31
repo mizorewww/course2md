@@ -2,10 +2,11 @@
 
 use crate::tr;
 use crate::{
-    checkpoint::{atomic_write, atomic_write_shared},
+    digest::file_digest,
     dispatch::TaskControl,
     execution,
     fetch::VideoMeta,
+    fsio::{atomic_write, atomic_write_shared},
     render,
     summarize::Summary,
     timeline::{FrameEvent, Section},
@@ -266,7 +267,7 @@ fn verified_digest(path: &Path) -> Result<String> {
     {
         return Ok(digest.clone());
     }
-    let digest = execution::file_digest(path)?;
+    let digest = file_digest(path)?;
     let mut cache = crate::runtime::lock_recover(cache);
     if cache.len() >= MAX_ENTRIES {
         cache.clear();
@@ -460,7 +461,7 @@ pub(crate) fn publish(
             .with_context(|| tr!("无法同步笔记文件：{}", path))?;
         Ok(Asset {
             bytes: std::fs::metadata(&full)?.len(),
-            sha256: execution::file_digest(&full)?,
+            sha256: file_digest(&full)?,
             path: path.clone(),
         })
     })?;

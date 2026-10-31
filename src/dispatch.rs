@@ -1,8 +1,8 @@
 //! Durable external-request receipts. A lost response is never permission to resend.
 
 use crate::{
-    checkpoint::atomic_write,
-    execution,
+    digest::digest,
+    fsio::atomic_write,
     progress::{BlockReason, Event},
 };
 use anyhow::{Context, Result};
@@ -516,8 +516,8 @@ impl Ledger {
             .service_versions
             .get(service)
             .cloned()
-            .unwrap_or_else(|| snapshot_id(&execution::digest(endpoint.as_bytes())));
-        let stable_id = execution::digest(&serde_json::to_vec(&serde_json::json!({"service_version":service_version,"purpose":purpose,"endpoint":endpoint,"payload":identity})).map_err(Failure::local)?);
+            .unwrap_or_else(|| snapshot_id(&digest(endpoint.as_bytes())));
+        let stable_id = digest(&serde_json::to_vec(&serde_json::json!({"service_version":service_version,"purpose":purpose,"endpoint":endpoint,"payload":identity})).map_err(Failure::local)?);
         let lock = self
             .locks
             .lock()

@@ -275,7 +275,7 @@ impl NpuWorker {
         let t0 = Instant::now();
         let tmp = crate::runtime::temp_work_dir("npu")?;
         let script_path = tmp.path().join("npu_worker.py");
-        crate::checkpoint::atomic_write(&script_path, NPU_WORKER_SCRIPT.as_bytes())?;
+        crate::fsio::atomic_write(&script_path, NPU_WORKER_SCRIPT.as_bytes())?;
 
         let port = crate::runtime::free_port()?;
         // 每次会话一个随机令牌：worker 的 127.0.0.1 服务不应被本机其他进程驱使

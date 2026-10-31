@@ -272,7 +272,7 @@ pub fn write_jsonl(path: &Path, frames: &[FrameEvent], speech: &[TranscriptEvent
         serde_json::to_writer(&mut bytes, ev)?;
         bytes.push(b'\n');
     }
-    crate::checkpoint::atomic_write(path, &bytes)
+    crate::fsio::atomic_write(path, &bytes)
 }
 
 fn time_of(e: &TimelineEvent) -> f64 {

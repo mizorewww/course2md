@@ -281,7 +281,7 @@ impl Task<'_> {
 
     fn write_json(&self, name: &str, value: &impl Serialize) -> Result<()> {
         let bytes = serde_json::to_vec_pretty(value)?;
-        crate::checkpoint::atomic_write(&self.job.dir.join(name), &bytes)
+        crate::fsio::atomic_write(&self.job.dir.join(name), &bytes)
     }
 
     /// `artifact::publish`, off the async workers: it copies, digests and syncs files.
@@ -895,10 +895,7 @@ impl Task<'_> {
                         crate::dispatch::State::Failed | crate::dispatch::State::Rejected
                     )
                     .then(|| receipt.request_id.clone());
-                    crate::checkpoint::atomic_write(
-                        &destination,
-                        &serde_json::to_vec_pretty(&receipt)?,
-                    )?;
+                    crate::fsio::atomic_write(&destination, &serde_json::to_vec_pretty(&receipt)?)?;
                 }
             }
         }
@@ -1037,7 +1034,7 @@ impl Task<'_> {
         if timeline::has_readable_events(&cache.events) {
             let bytes = serde_json::to_vec_pretty(&cache)?;
             let cache_path = cache_path.clone();
-            blocking(move || crate::checkpoint::atomic_write(&cache_path, &bytes)).await?;
+            blocking(move || crate::fsio::atomic_write(&cache_path, &bytes)).await?;
         }
         Ok(cache)
     }
@@ -1265,7 +1262,7 @@ fn export_for_task(
     } else {
         crate::portable::export_in_task(base, format, destination, &job.control)?;
     }
-    crate::checkpoint::atomic_write(
+    crate::fsio::atomic_write(
         &marker,
         &serde_json::to_vec_pretty(
             &serde_json::json!({"sha256":execution::file_digest(destination)?}),
@@ -1290,7 +1287,7 @@ fn verified_file(path: &Path, marker: &Path) -> Result<bool> {
 }
 
 fn save_file_digest(path: &Path, marker: &Path) -> Result<()> {
-    crate::checkpoint::atomic_write(marker, execution::file_digest(path)?.as_bytes())
+    crate::fsio::atomic_write(marker, execution::file_digest(path)?.as_bytes())
 }
 
 /// A completed download has a durable content marker. Preserve unverifiable files
@@ -1578,11 +1575,11 @@ mod tests {
 
         let source_id = format!(
             "local:sha256:{}",
-            crate::execution::file_digest(&video).unwrap()
+            crate::digest::file_digest(&video).unwrap()
         );
         let course = dir
             .join("local")
-            .join(crate::execution::digest(source_id.as_bytes()));
+            .join(crate::digest::digest(source_id.as_bytes()));
         let work = std::fs::read_dir(course.join(".work"))
             .unwrap()
             .next()

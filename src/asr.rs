@@ -583,7 +583,7 @@ impl Transcribe for CloudSpeech {
         let bytes = std::fs::read(chunk).with_context(|| {
             format!("读取音频片段 / Reading audio segment: {}", chunk.display())
         })?;
-        let identity = json!({"model":self.model,"mode":self.mode,"audio_sha256":crate::execution::digest(&bytes),"segment_start":seg.start,"segment_end":seg.end,"cut_start":seg.cut_start,"cut_end":seg.cut_end});
+        let identity = json!({"model":self.model,"mode":self.mode,"audio_sha256":crate::digest::digest(&bytes),"segment_start":seg.start,"segment_end":seg.end,"cut_start":seg.cut_start,"cut_end":seg.cut_end});
         let reply = match self.mode {
             AsrApiMode::Transcriptions => {
                 let (content_type, body) = transcription_form(&self.model, &bytes);
@@ -1362,7 +1362,7 @@ mod cloud_tests {
         };
         let endpoint = crate::config::asr_endpoint(&api).unwrap();
         // The formulas here are the old version's, written out on purpose.
-        let digest = crate::execution::digest;
+        let digest = crate::digest::digest;
         let payload = json!({"model":"test-asr","mode":api.mode,"audio_sha256":digest(&std::fs::read(&chunk).unwrap()),"segment_start":seg.start,"segment_end":seg.end,"cut_start":seg.cut_start,"cut_end":seg.cut_end});
         let service_version = format!("{SNAPSHOT_PREFIX}{}", digest(endpoint.as_bytes()));
         let stable_id = digest(&serde_json::to_vec(&json!({"service_version":service_version,"purpose":"transcription","endpoint":endpoint,"payload":payload})).unwrap());

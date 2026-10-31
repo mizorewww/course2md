@@ -184,7 +184,7 @@ fn write_config(bytes: &[u8]) -> Result<PathBuf> {
         let bak = p.with_extension("toml.bak");
         if let Err(e) = std::fs::read(&p)
             .map_err(anyhow::Error::from)
-            .and_then(|bytes| crate::checkpoint::atomic_write(&bak, &bytes))
+            .and_then(|bytes| crate::fsio::atomic_write(&bak, &bytes))
         {
             tracing::warn!(
                 "无法备份旧配置 / Could not back up configuration to {}: {e}",
@@ -192,7 +192,7 @@ fn write_config(bytes: &[u8]) -> Result<PathBuf> {
             );
         }
     }
-    crate::checkpoint::atomic_write(&p, bytes)?;
+    crate::fsio::atomic_write(&p, bytes)?;
     Ok(p)
 }
 

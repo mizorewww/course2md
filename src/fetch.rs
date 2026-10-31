@@ -67,7 +67,7 @@ impl VideoMeta {
         self.extractor == "local"
     }
     pub fn save(&self, path: &Path) -> Result<()> {
-        crate::checkpoint::atomic_write_shared(path, serde_json::to_string_pretty(self)?.as_bytes())
+        crate::fsio::atomic_write_shared(path, serde_json::to_string_pretty(self)?.as_bytes())
     }
 }
 
@@ -534,7 +534,7 @@ pub fn local_content_identity(
         })
     };
     let before = metadata(path)?;
-    let digest = crate::execution::file_digest_cancellable(path, cancel)?;
+    let digest = crate::digest::file_digest_cancellable(path, cancel)?;
     ensure!(
         !cancel.load(std::sync::atomic::Ordering::Relaxed),
         tr!("已取消读取文件 / File reading cancelled")
@@ -727,7 +727,7 @@ pub async fn fetch_selected_subtitle(
         )
     );
     let path = temp.path().join("selected.srt");
-    crate::checkpoint::atomic_write(&path, crate::subtitle::to_srt(&events).as_bytes())?;
+    crate::fsio::atomic_write(&path, crate::subtitle::to_srt(&events).as_bytes())?;
     let _ = temp.keep();
     Ok(SubtitleFetch {
         path,
@@ -1053,7 +1053,7 @@ mod tests {
             },
         )
         .unwrap();
-        crate::checkpoint::atomic_write(
+        crate::fsio::atomic_write(
             &path,
             &serde_json::to_vec(&crate::dispatch::Control {
                 intent: crate::dispatch::Intent::Cancel,

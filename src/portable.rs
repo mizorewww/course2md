@@ -3,7 +3,8 @@
 use crate::{
     artifact::{self, Document},
     config::OutputFormat,
-    execution, render,
+    digest::digest,
+    render,
 };
 use anyhow::{Context, Result};
 use base64::Engine as _;
@@ -106,7 +107,7 @@ fn images(root: &Path, document: &Document) -> Result<BTreeMap<String, ImageAsse
             continue;
         }
         let bytes = std::fs::read(artifact::safe_asset_path(root, &section.image)?)?;
-        let sha256 = execution::digest(&bytes);
+        let sha256 = digest(&bytes);
         let id = format!("image-{}", &sha256[..24]);
         let (mime, ext) = image_mime(&bytes).context(crate::tr!("截图不是可识别的图片，原文件已保留 / Screenshot is not a recognized image; original file kept"))?;
         images.insert(
@@ -140,7 +141,7 @@ pub(crate) fn write_document(
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent)?;
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    crate::checkpoint::make_shared(file.as_file())?;
+    crate::fsio::make_shared(file.as_file())?;
     let images = images(root, document)?;
     let mut portable = document.clone();
     let local_file = if portable.meta.extractor == "local" {

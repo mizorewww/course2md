@@ -165,7 +165,7 @@ fn netscape(cookies: &Cookies) -> Result<String> {
 fn save_cookies(path: &Path, cookies: &Cookies) -> Result<()> {
     let text = netscape(cookies)?;
     // atomic_write 经 tempfile 落盘，Unix 上权限为 0600
-    crate::checkpoint::atomic_write(path, text.as_bytes()).context(tr!(
+    crate::fsio::atomic_write(path, text.as_bytes()).context(tr!(
         "保存 Bilibili 登录状态失败 / Failed to save Bilibili login state"
     ))
 }

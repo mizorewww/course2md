@@ -162,10 +162,9 @@ pub fn load_tokens() -> Result<Option<CodexTokens>> {
 }
 
 fn save_tokens(tokens: &CodexTokens) -> Result<()> {
-    crate::checkpoint::atomic_write(&credential_path(), &serde_json::to_vec_pretty(tokens)?)
-        .context(tr!(
-            "保存 Codex 登录状态失败 / Failed to save Codex login state"
-        ))
+    crate::fsio::atomic_write(&credential_path(), &serde_json::to_vec_pretty(tokens)?).context(tr!(
+        "保存 Codex 登录状态失败 / Failed to save Codex login state"
+    ))
 }
 
 /// JWT payload 解析（只读 claim，不做签名校验——令牌由本机持有）。
