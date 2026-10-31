@@ -301,6 +301,7 @@ impl Desktop {
         window.close_all_dialogs(cx);
         self.name_dialog = None;
         self.move_dialog = None;
+        self.close_reader_image(cx);
         // First use is reviewed on its own; captured pages show the app behind it.
         if page != "onboarding" {
             self.onboarding.active = false;

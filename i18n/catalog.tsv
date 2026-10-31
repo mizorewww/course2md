@@ -148,7 +148,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{} は {} に送信されます
 {}发送到「{}」	{}发送到「{}」	{} is sent to "{}"	{}傳送到「{}」	{} は「{}」に送信されます
 {}尚未完成	{}尚未完成	{} has not been completed yet	{}尚未完成	{}はまだ完了していません
-{}无法读取	{}无法读取	{} cannot be read	{}無法讀取	{} を読み取れません
 {}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{} は保存されていません: {}
 {}未完成	{}未完成	{} is not completed	{}未完成	{} は完了していません
 {}未生成	{}未生成	{} was not generated	{}未生成	{} は生成されませんでした
@@ -161,7 +160,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}通过 · 重测	{}通过 · 重测	{} passed · Retest	{}通過 · 重測	{} 合格 · 再テスト
 {}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{} は有効な非負の数値である必要があります
 {}（具体内容未记录）	{}（具体内容未记录）	{} (specific content not recorded)	{}（具體內容未記錄）	{}（詳細は記録されていません）
-{}（当前）	{}（当前）	{} (current)	{}（目前）	{} (現在)
 {}（自动选择）	{}（自动选择）	{} (automatic)	{}（自動選擇）	{}（自動）
 {}，{}	{}，{}	{}, {}	{}，{}	{}、{}
 {}，{}{}	{}，{}{}	{}, {}{}	{}，{}{}	{}、{}{}
@@ -248,7 +246,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 从头重新识别 / Transcribe again from the start	从头重新识别	Transcribe again from the start	從頭重新辨識	最初から音声認識をやり直す
 从服务返回的候选中选择模型	从服务返回的候选中选择模型	Select a model from the candidates returned by the service	從服務傳回的候選中選擇模型	サービスから返された候補の中からモデルを選択します
 从此处观看	从此处观看	Watch from here	從此處觀看	ここから見る
-从此处观看原视频	从此处观看原视频	Watch the original video from here	從此處觀看原影片	ここから元の動画を見る
 令牌响应不完整 / The token response is incomplete	令牌响应不完整	The token response is incomplete	令牌回應不完整	トークン応答が不完全です
 以 JSON 输出 / Print JSON	以 JSON 输出	Print JSON	以 JSON 輸出	JSONとして出力
 以 NDJSON 输出进度，禁用交互 / Stream NDJSON progress without prompts	以 NDJSON 输出进度，禁用交互	Stream NDJSON progress without prompts	以 NDJSON 輸出進度，禁用互動	進行状況を NDJSON として出力し、インタラクションを無効にする
@@ -498,7 +495,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 复制与导出	复制与导出	Copy and export	複製與匯出	コピーとエクスポート
 复制安装命令	复制安装命令	Copy install command	複製安裝指令	インストールコマンドをコピー
 复制 Homebrew 安装命令	复制 Homebrew 安装命令	Copy Homebrew install command	複製 Homebrew 安裝指令	Homebrew のインストールコマンドをコピー
-复制或导出整份笔记	复制或导出整份笔记	Copy or export an entire note	複製或匯出整份筆記	ノート全体をコピーまたはエクスポートする
 复制整份笔记 · Markdown 文本	复制整份笔记 · Markdown 文本	Copy entire note · Markdown text	複製整份筆記 · Markdown 文字	ノート全体をコピー · Markdown テキスト
 复制整份笔记 · 纯文本	复制整份笔记 · 纯文本	Copy entire note · Plain text	複製整份筆記 · 純文字	ノート全体をコピー · プレーンテキスト
 外观	外观	Appearance	外觀	外観
@@ -698,7 +694,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 当前服务编辑已结束，请重新打开服务后再试	当前服务编辑已结束，请重新打开服务后再试	The current service editing has ended, please reopen the service and try again	目前服務編輯已結束，請重新開啟服務後再試	現在のサービスの編集は終了しました。サービスを再度開いて、もう一度お試しください。
 当前未使用	当前未使用	Not currently in use	目前未使用	現在は使用されていません
 当前没有默认语音服务，请返回第一步完成配置。	当前没有默认语音服务，请返回第一步完成配置。	No default speech service is set. Go back to step one to finish setup.	目前沒有預設語音服務，請返回第一步完成設定。	現在デフォルトの音声サービスはありません。最初のステップに戻って設定を完了してください。
-当前章节：{}	当前章节：{}	Current chapter: {}	目前章節：{}	現在の章: {}
 当前笔记信息暂时不可用	当前笔记信息暂时不可用	The current note information is temporarily unavailable	目前筆記資訊暫時不可用	現在のノート情報は一時的に利用できません
 当前系统不支持 Apple 芯片识别，请改用其他方式	当前系统不支持 Apple 芯片识别，请改用其他方式	This system does not support recognition on Apple silicon. Please use another method.	目前系統不支援 Apple 晶片辨識，請改用其他方式	このシステムは Apple シリコンでの認識に対応していません。別の方法を使用してください。
 当前视频输入暂时不可用	当前视频输入暂时不可用	The current video input is temporarily unavailable	目前影片輸入暫時不可用	現在の動画入力は一時的に利用できません
@@ -772,7 +767,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 打开位置	打开位置	Open location	開啟位置	場所を開く
 打开保存位置	打开保存位置	Open save location	開啟儲存位置	保存場所を開く
 打开原视频	打开原视频	Open original video	開啟原影片	元の動画を開く
-打开原视频：{}	打开原视频：{}	Open the original video: {}	開啟原影片：{}	元の動画を開きます: {}
 打开备份位置	打开备份位置	Open backup location	開啟備份位置	バックアップ場所を開く
 打开导出位置	打开导出位置	Open export location	開啟匯出位置	書き出し先を開く
 打开导出文件夹	打开导出文件夹	Open export folder	開啟匯出資料夾	書き出しフォルダーを開く
@@ -843,7 +837,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 收起模型	收起模型	Collapse model	收起模型	モデルを折りたたむ
 收起模型文件	收起模型文件	Collapse model file	收起模型檔案	モデルファイルを折りたたむ
 收起测试详情	收起测试详情	Collapse test details	收起測試詳情	テストの詳細を折りたたむ
-收起目录	收起目录	Collapse table of contents	收起目錄	目次を折りたたむ
 收起笔记详情	收起笔记详情	Hide note details	收起筆記詳情	ノートの詳細を非表示にする
 收起详情	收起详情	Collapse details	收起詳情	詳細を折りたたむ
 改用云端 API / Use cloud API	改用云端 API	Use cloud API	改用雲端 API	クラウドAPIに切り替える
@@ -1309,7 +1302,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在连接	正在连接	Connecting	正在連線	接続中
 正在退出	正在退出	Exiting	正在結束	終了しています
 正在验证登录状态…	正在验证登录状态…	Verifying login status...	正在驗證登入狀態…	ログインステータスを確認しています...
-正文	正文	Text	正文	テキスト
 正文已保存	正文已保存	Text has been saved	正文已儲存	テキストが保存されました
 此任务使用的凭据没有访问该服务或模型的权限。 / The credentials used by this task cannot access that service or model.	此任务使用的凭据没有访问该服务或模型的权限。	The credentials used by this task cannot access that service or model.	此任務使用的憑證沒有存取該服務或模型的權限。	このタスクで使用される資格情報には、サービスまたはモデルにアクセスする権限がありません。
 此任务尚无可补做的笔记正文	此任务尚无可补做的笔记正文	This task has no note text for reprocessing yet	此任務尚無可補做的筆記正文	このタスクには再処理できるノート本文がまだありません
@@ -1493,7 +1485,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记版本信息已损坏	笔记版本信息已损坏	Note version information is corrupted	筆記版本資訊已損壞	ノートのバージョン情報が破損しています
 笔记目录，或存放多份笔记的上级目录 / A note directory or a folder of notes	笔记目录，或存放多份笔记的上级目录	A note directory or a folder of notes	筆記目錄，或存放多份筆記的上級目錄	ノート ディレクトリ、または複数のノートが保存される親ディレクトリ
 笔记详情	笔记详情	Note details	筆記詳情	ノートの詳細
-第 {} 版	第 {} 版	Version {}	第 {} 版	バージョン {}
 第 {} 版 · {} 生成	第 {} 版 · {} 生成	Version {} · generated {}	第 {} 版 · {} 生成	バージョン {} · {} に生成
 第 {} 版 · {}{}	第 {} 版 · {}{}	Version {} · {}{}	第 {} 版 · {}{}	バージョン {} · {}{}
 第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	The first paragraph should correct the grammar of have / book; the second paragraph should retain the original meaning of water freezing at zero degrees Celsius	第一段應糾正 have / book 的語法；第二段應保留水在零攝氏度結冰的原意	最初の段落では、have / book の文法を修正する必要があります。 2 番目の段落は、摂氏 0 度で水が凍るという本来の意味を保持する必要があります。
@@ -1529,8 +1520,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 编辑语音服务	编辑语音服务	Edit speech service	編輯語音服務	音声サービスの編集
 缩小	缩小	Zoom out	縮小	縮小
 缩小 · −	缩小 · −	Zoom out · −	縮小 · −	ズームアウト · −
-缩放	缩放	Zoom	縮放	ズーム
-缩放图片	缩放图片	Zoom image	縮放圖片	画像をズームする
 缺失 / Missing	缺失	Missing	缺失	欠落
 缺失或不完整 / Missing or incomplete	缺失或不完整	Missing or incomplete	缺失或不完整	欠落または不完全
 缺失：{}	缺失：{}	Missing: {}	缺失：{}	欠落：{}
@@ -1569,7 +1558,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 补全未完成部分	补全未完成部分	Complete the unfinished parts	補全未完成部分	未完成の部分を補完
 西班牙语	西班牙语	Spanish	西班牙語	スペイン語
 要测试的服务能力	要测试的服务能力	Service capabilities to be tested	要測試的服務能力	テストするサービス機能
-观看	观看	Watch	觀看	視聴
 视频	视频	Video	影片	動画
 视频 {}	视频 {}	Video {}	影片 {}	動画 {}
 视频不存在	视频不存在	Video does not exist	影片不存在	動画が存在しません
@@ -1709,7 +1697,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 跟随系统	跟随系统	Follow system	跟隨系統	システムに合わせる
 跳过登录	跳过登录	Skip login	跳過登入	ログインをスキップする
 转写为空，无法摘要 / Transcript is empty; cannot summarize	转写为空，无法摘要	Transcript is empty; cannot summarize	轉寫為空，無法摘要	文字起こしが空のため要約できません
-转到 {}	转到 {}	Go to {}	前往 {}	{} に移動
 转换未完成	转换未完成	Conversion not completed	轉換未完成	変換が完了していません
 转换程序	转换程序	Conversion program	轉換程式	変換プログラム
 转换程序无法运行，请重新安装应用	转换程序无法运行，请重新安装应用	The conversion program cannot run. Please reinstall the application.	轉換程式無法執行，請重新安裝應用程式	変換プログラムは実行できません。アプリケーションを再インストールしてください。
@@ -1763,7 +1750,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 这份笔记的位置暂时无法访问	这份笔记的位置暂时无法访问	The location of this note is temporarily inaccessible	這份筆記的位置暫時無法存取	このノートの場所に一時的にアクセスできません
 这份笔记的保存位置暂时无法确认，请在笔记库菜单中重新扫描。	这份笔记的保存位置暂时无法确认，请在笔记库菜单中重新扫描。	The storage location of this note cannot be confirmed at the moment. Please scan again in the note library menu.	這份筆記的儲存位置暫時無法確認，請在筆記庫選單中重新掃描。	このノートの保存場所を現在確認できません。ノートライブラリメニューで再度スキャンしてください。
 这张截图没有对应文字	这张截图没有对应文字	This screenshot has no corresponding text	這張截圖沒有對應文字	このスクリーンショットには対応するテキストがありません
-这段讲解：{}	这段讲解：{}	This explanation: {}	這段講解：{}	この説明: {}
 这部分无需补做	这部分无需补做	This part doesn't need reprocessing	這部分無需補做	この部分は再処理の必要がありません
 这里是长期默认值，主页的「处理选项」可以只对单次生效	这里是长期默认值，主页的「处理选项」可以只对单次生效	These are your defaults; “Processing options” on the home page can change them for a single run.	這裡是長期預設值，首頁的「處理選項」可以只對單次生效	ここは長期的な既定値です。ホームの「処理オプション」では今回だけに適用できます。
 这项任务已有后续处理，请打开对应任务继续	这项任务已有后续处理，请打开对应任务继续	This task already has follow-up processing. Open the corresponding task to continue.	這項任務已有後續處理，請開啟對應任務繼續	このタスクには後続の処理があります。続行するには対応するタスクを開いてください。
@@ -1874,7 +1860,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 阅读位置尚未保存：{}	阅读位置尚未保存：{}	Reading position not saved yet: {}	閱讀位置尚未儲存：{}	閲覧位置がまだ保存されていません: {}
 阅读笔记	阅读笔记	Read note	閱讀筆記	ノートを読む
 阅读视图	阅读视图	Reading view	閱讀檢視	閲覧ビュー
-阅读视图与笔记操作	阅读视图与笔记操作	Reading view and note operations	閱讀檢視與筆記操作	閲覧ビューとノート操作
 阅读进度未能保存：{}	阅读进度未能保存：{}	Reading progress failed to save: {}	閱讀進度未能儲存：{}	閲覧の進行状況を保存できませんでした: {}
 阿拉伯语	阿拉伯语	Arabic	阿拉伯語	アラビア語
 附截图辅助校对（需要视觉模型）/ Attach slides for proofreading (requires image support)	附截图辅助校对（需要视觉模型）/ Attach slides for proofreading (requires image support)	Attach slides for proofreading (requires image support)	附截圖輔助校對（需要視覺模型）/ Attach slides for proofreading (requires image support)	校正用のスクリーンショットを添付します (画像のサポートが必要です)
@@ -1983,7 +1968,6 @@ ChatGPT 登录已失效，请重新登录	ChatGPT 登录已失效，请重新登
 ChatGPT 账号	ChatGPT 账号	ChatGPT account	ChatGPT 帳號	ChatGPT アカウント
 例如：我的 API	例如：我的 API	e.g. My API	例如：我的 API	例：マイ API
 播放原视频	播放原视频	Play original video	播放原影片	元の動画を再生
-从 {} 播放原视频	从 {} 播放原视频	Play original video from {}	從 {} 播放原影片	{} から元の動画を再生
 在 {} 打开	在 {} 打开	Open on {}	在 {} 開啟	{} で開く
 所选项目不是视频文件，请选择一个视频文件	所选项目不是视频文件，请选择一个视频文件	The selected item is not a video file. Choose a video file.	所選項目不是影片檔案，請選擇一個影片檔案	選択した項目は動画ファイルではありません。動画ファイルを選んでください
 暂时无法获取模型列表，可以直接填写模型名称（{}）	暂时无法获取模型列表，可以直接填写模型名称（{}）	Could not load the model list; you can type a model name ({})	暫時無法取得模型列表，可以直接填寫模型名稱（{}）	モデル一覧を取得できません。モデル名を直接入力できます（{}）

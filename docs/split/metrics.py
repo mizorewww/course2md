@@ -3,7 +3,7 @@
 import pathlib, re, sys
 
 root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
-skip = {"target", ".git", ".deps", ".cache", "tests", "benches", "examples"}
+skip = {"target", ".git", ".build", ".deps", ".cache", "tests", "benches", "examples"}
 total = {}
 for path in root.rglob("*.rs"):
     rel = path.relative_to(root)

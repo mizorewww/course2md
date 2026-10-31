@@ -5,7 +5,7 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{
     color::ColorRole,
     components::{
-        ButtonVariant, Caption, CaptionLabels, IconButton, MaterialTooltip, NoticeKind, Snackbar,
+        ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind, Snackbar,
         SnackbarPosition, TitleBar as AppBar, material_button, notice_banner, spinner,
         title_bar_control,
     },
@@ -22,15 +22,6 @@ const COLUMN: f32 = 920.;
 /// The height the window opens for: the traffic lights sit centred on it.
 pub(crate) const APP_BAR_HEIGHT: Pixels = px(56.);
 
-/// Which caption buttons the window draws. A capture can ask for another platform's.
-fn caption(window: &Window) -> Caption {
-    #[cfg(feature = "capture")]
-    if let Some(caption) = crate::capture::caption_override() {
-        return caption;
-    }
-    Caption::detect(window)
-}
-
 /// Where the title bar's content starts, after the macOS traffic lights.
 pub(crate) fn title_bar_leading(window: &Window) -> f32 {
     gpui_kit_material::components::title_bar_leading(APP_BAR_HEIGHT, window)
@@ -39,11 +30,6 @@ pub(crate) fn title_bar_leading(window: &Window) -> f32 {
 /// Where the title bar's content ends, before any caption buttons.
 pub(crate) fn title_bar_trailing(window: &Window) -> f32 {
     CaptionButtons::trailing(window)
-}
-
-/// Whether the window draws its caption buttons itself, taking room from the bar.
-pub(crate) fn draws_captions(window: &Window) -> bool {
-    caption(window) != Caption::System
 }
 
 /// The window's title bar on the page's ground. It moves the window and draws what
@@ -67,8 +53,12 @@ pub(crate) fn app_bar(height: Pixels, window: &Window, cx: &mut Context<Desktop>
         view.update(cx, |this, cx| this.request_close(cx))
             .unwrap_or(true)
     });
+    // A capture can ask for another platform's caption buttons.
     #[cfg(feature = "capture")]
-    let bar = bar.caption(caption(window));
+    let bar = bar.caption(
+        crate::capture::caption_override()
+            .unwrap_or_else(|| gpui_kit_material::components::Caption::detect(window)),
+    );
     #[cfg(not(feature = "capture"))]
     let _ = window;
     bar
@@ -771,7 +761,7 @@ pub fn video_site_name(url: &str) -> Option<&'static str> {
 pub(crate) struct DesktopView<F> {
     desktop: Entity<Desktop>,
     render: F,
-    _observation: Option<Subscription>,
+    _observation: Subscription,
 }
 
 impl<F> DesktopView<F>
@@ -781,17 +771,7 @@ where
     /// Repaints whenever the desktop changes.
     pub(crate) fn observing(desktop: Entity<Desktop>, cx: &mut App, render: F) -> Entity<Self> {
         cx.new(|cx| Self {
-            _observation: Some(cx.observe(&desktop, |_, _, cx| cx.notify())),
-            desktop,
-            render,
-        })
-    }
-
-    /// Repaints only when notified directly, for parts whose state changes
-    /// far less often than the desktop.
-    pub(crate) fn notified(desktop: Entity<Desktop>, cx: &mut App, render: F) -> Entity<Self> {
-        cx.new(|_| Self {
-            _observation: None,
+            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
             desktop,
             render,
         })

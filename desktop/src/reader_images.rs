@@ -78,8 +78,6 @@ pub(crate) struct ReaderImages {
     tick: u64,
     /// Bumped by `clear` so decodes started for an earlier note are dropped.
     generation: u64,
-    /// Screenshots the open viewer shows or is about to; never evicted.
-    pinned: Vec<PathBuf>,
 }
 
 impl Default for ReaderImages {
@@ -91,13 +89,9 @@ impl Default for ReaderImages {
             bytes: 0,
             tick: 1,
             generation: 0,
-            pinned: Vec::new(),
         }
     }
 }
-
-/// Finds the cache inside the desktop from async completions.
-pub(crate) type Locate = fn(&mut Desktop) -> &mut ReaderImages;
 
 impl ReaderImages {
     /// Marks the start of a reader frame.
@@ -106,13 +100,7 @@ impl ReaderImages {
     }
 
     /// The image at `size`, starting its decode when it is not cached.
-    pub(crate) fn get(
-        &mut self,
-        path: &Path,
-        size: Size,
-        locate: Locate,
-        cx: &mut Context<Desktop>,
-    ) -> Loaded {
+    pub(crate) fn get(&mut self, path: &Path, size: Size, cx: &mut Context<Desktop>) -> Loaded {
         let tick = self.tick;
         let key = (path.to_path_buf(), size);
         match self.entries.get_mut(&key) {
@@ -140,7 +128,7 @@ impl ReaderImages {
                 self.queue.push_back(key);
             }
         }
-        self.pump(locate, cx);
+        self.pump(cx);
         Loaded::Pending
     }
 
@@ -182,12 +170,6 @@ impl ReaderImages {
         }
     }
 
-    /// Keeps the viewer's screenshots while it shows them; an empty list
-    /// lets them go when the viewer closes.
-    pub(crate) fn pin(&mut self, paths: Vec<PathBuf>) {
-        self.pinned = paths;
-    }
-
     /// Releases everything, as when another note opens.
     pub(crate) fn clear(&mut self, cx: &mut App) {
         let released = self
@@ -207,13 +189,12 @@ impl ReaderImages {
             cx.defer(|_| return_freed_memory());
         }
         self.queue.clear();
-        self.pinned.clear();
         self.bytes = 0;
         self.generation += 1;
         // Decodes in flight finish into the void; their slots free then.
     }
 
-    fn pump(&mut self, locate: Locate, cx: &mut Context<Desktop>) {
+    fn pump(&mut self, cx: &mut Context<Desktop>) {
         let slots = std::thread::available_parallelism()
             .map_or(2, |cores| cores.get() / 2)
             .clamp(2, MAX_IN_FLIGHT);
@@ -238,9 +219,9 @@ impl ReaderImages {
             cx.spawn(async move |this, cx| {
                 let result = decode.await;
                 let _ = this.update(cx, |desktop, cx| {
-                    let images = locate(desktop);
+                    let images = &mut desktop.reader_ui.images;
                     images.finish(key, generation, result, cx);
-                    images.pump(locate, cx);
+                    images.pump(cx);
                     desktop.reader_image_loaded(cx);
                 });
             })
@@ -279,11 +260,7 @@ impl ReaderImages {
                 .entries
                 .iter()
                 .filter_map(|(key, entry)| match entry {
-                    Entry::Ready { tick, .. }
-                        if *tick + 1 < self.tick && !self.pinned.contains(&key.0) =>
-                    {
-                        Some((key, *tick))
-                    }
+                    Entry::Ready { tick, .. } if *tick + 1 < self.tick => Some((key, *tick)),
                     _ => None,
                 })
                 .min_by_key(|(_, tick)| *tick)
