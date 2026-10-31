@@ -5,7 +5,8 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{
     color::ColorRole,
     components::{
-        ButtonVariant, Caption, CaptionLabels, IconButton, MaterialTooltip, NoticeKind, TitleBar as AppBar, material_button, notice_banner,
+        ButtonVariant, Caption, CaptionLabels, IconButton, MaterialTooltip, NoticeKind, Snackbar,
+        SnackbarDuration, SnackbarPosition, TitleBar as AppBar, material_button, notice_banner,
         spinner, title_bar_control,
     },
     icons::SymbolIcon,
@@ -488,6 +489,27 @@ impl Desktop {
     }
 }
 
+impl Desktop {
+    /// What just happened, told in passing; it goes by itself or with its close button.
+    fn message_snackbar(&self, message: String, cx: &mut Context<Self>) -> impl IntoElement {
+        let desktop = cx.weak_entity();
+        let dismiss = move |_: &mut Window, cx: &mut App| {
+            let _ = desktop.update(cx, |this, cx| {
+                this.message = None;
+                cx.notify();
+            });
+        };
+        let close = dismiss.clone();
+        Snackbar::new(("app-message", notice_key(&message)), message)
+            .position(SnackbarPosition::default())
+            .duration(SnackbarDuration::Long)
+            .close(course2md::tr!("关闭提示"), move |_, window, cx| {
+                close(window, cx)
+            })
+            .on_dismiss(dismiss)
+    }
+}
+
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[allow(unused_mut)]
@@ -652,24 +674,6 @@ impl Render for Desktop {
                     ),
                 ))
             })
-            .when_some(self.message.clone(), |v, message| {
-                v.child(motion::state_enter(
-                    ("app-message", notice_key(&message)),
-                    shell_column_for(self.page).pb_3().child(
-                        notice_banner("app-message", NoticeKind::Info, message).child(
-                            IconButton::new(
-                                "dismiss-message",
-                                symbols::close(),
-                                course2md::tr!("关闭提示"),
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.message = None;
-                                cx.notify();
-                            })),
-                        ),
-                    ),
-                ))
-            })
             .child(
                 div()
                     .relative()
@@ -742,6 +746,9 @@ impl Render for Desktop {
             .child(background)
             .when(self.page == Page::New, |view| {
                 view.child(self.workbench_drop_overlay(cx))
+            })
+            .when_some(self.message.clone(), |view, message| {
+                view.child(self.message_snackbar(message, cx))
             })
             .children(self.name_dialog_view(window, cx))
             .children(self.move_dialog_view(cx))
