@@ -41,6 +41,8 @@ Keep choices with their effects. The app detects metadata, reuses established co
 
 ## Implement
 
+Choose a component by what the user is doing and what it means in Material, not by what a control used to be. Motion comes from the kit's `motion` and component defaults; a page doesn't tune its own curves or durations.
+
 When a kit component looks wrong, find out whether the page misuses it or the kit is wrong, then fix it at that level and inspect every affected caller. A component is not shared in practice when callers replace its inner padding, font or selected state.
 
 Measure actual text, icon, container and painted state bounds. Parent width and the current 100/125/150/200% text scale determine layout; character-count widths, silent clipping and fixed-height multiline surfaces do not. Reflow before related elements collide. Preserve ordinary keyboard operation.
