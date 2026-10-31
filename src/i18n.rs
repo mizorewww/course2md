@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 pub const LANGUAGES: [Lang; 4] = [Lang::En, Lang::ZhHans, Lang::ZhHant, Lang::Ja];
 
+/// In the order of [`LANGUAGES`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Lang {
     En,
@@ -93,24 +94,6 @@ impl Lang {
         }
         system.and_then(Self::from_code).unwrap_or(Self::En)
     }
-
-    fn index(self) -> u8 {
-        match self {
-            Self::En => 0,
-            Self::ZhHans => 1,
-            Self::ZhHant => 2,
-            Self::Ja => 3,
-        }
-    }
-
-    fn from_index(index: u8) -> Self {
-        match index {
-            0 => Self::En,
-            2 => Self::ZhHant,
-            3 => Self::Ja,
-            _ => Self::ZhHans,
-        }
-    }
 }
 
 fn is_c_locale(value: &str) -> bool {
@@ -124,11 +107,11 @@ static CURRENT: AtomicU8 = AtomicU8::new(1);
 
 /// Selects the language for subsequent [`t`] lookups.
 pub fn set_lang(lang: Lang) {
-    CURRENT.store(lang.index(), Ordering::Relaxed);
+    CURRENT.store(lang as u8, Ordering::Relaxed);
 }
 
 pub fn lang() -> Lang {
-    Lang::from_index(CURRENT.load(Ordering::Relaxed))
+    LANGUAGES[CURRENT.load(Ordering::Relaxed) as usize]
 }
 
 /// Selects the language from `COURSE2MD_LANG` or the operating system locale.
@@ -140,23 +123,8 @@ pub fn init_from_env() -> Lang {
 
 const CATALOG: &str = include_str!("../i18n/catalog.tsv");
 
-struct Entry {
-    zh: &'static str,
-    en: &'static str,
-    zh_hant: &'static str,
-    ja: &'static str,
-}
-
-impl Entry {
-    fn text(&self, lang: Lang) -> &'static str {
-        match lang {
-            Lang::En => self.en,
-            Lang::ZhHans => self.zh,
-            Lang::ZhHant => self.zh_hant,
-            Lang::Ja => self.ja,
-        }
-    }
-}
+/// A row's texts, in the order of [`LANGUAGES`].
+type Entry = [&'static str; 4];
 
 fn catalog() -> &'static HashMap<&'static str, Entry> {
     static CATALOG_INDEX: OnceLock<HashMap<&'static str, Entry>> = OnceLock::new();
@@ -168,34 +136,18 @@ fn leak(value: String) -> &'static str {
 }
 
 fn parse_catalog(source: &'static str) -> HashMap<&'static str, Entry> {
-    let mut entries = HashMap::new();
     // The first line is the column header; every other line has five columns.
-    // There are no comment lines: a key may begin with `#`.
+    // There are no comment lines: a key may begin with `#`. Escaped tabs are `\t`
+    // in the file, so a literal tab is always a separator.
+    let mut entries = HashMap::new();
     for line in source.lines().skip(1) {
-        if line.is_empty() {
-            continue;
+        let fields: Vec<&str> = line.split('\t').collect();
+        if let [key, zh, en, zh_hant, ja] = fields[..] {
+            let text = |field| leak(unescape(field));
+            entries.insert(text(key), [text(en), text(zh), text(zh_hant), text(ja)]);
         }
-        let fields = split_fields(line);
-        if fields.len() != 5 {
-            continue;
-        }
-        let key = leak(unescape(fields[0]));
-        entries.insert(
-            key,
-            Entry {
-                zh: leak(unescape(fields[1])),
-                en: leak(unescape(fields[2])),
-                zh_hant: leak(unescape(fields[3])),
-                ja: leak(unescape(fields[4])),
-            },
-        );
     }
     entries
-}
-
-fn split_fields(line: &str) -> Vec<&str> {
-    // Escaped tabs are `\t` in the file, so a literal tab is always a separator.
-    line.split('\t').collect()
 }
 
 fn unescape(value: &str) -> String {
@@ -264,7 +216,7 @@ fn contains_cjk(value: &str) -> bool {
 
 fn t_in(source: &str, lang: Lang) -> &str {
     if let Some(entry) = catalog().get(source) {
-        return entry.text(lang);
+        return entry[lang as usize];
     }
     match lang {
         Lang::ZhHans | Lang::ZhHant => bilingual_halves(source).map_or(source, |(zh, _)| zh),
@@ -367,19 +319,9 @@ pub fn t_for(source: &str, lang: Lang) -> &str {
     t_in(source, lang)
 }
 
-/// Catalog coverage for a source string (diagnostics and tests).
-pub fn has_translation(source: &str) -> bool {
-    catalog().contains_key(source)
-}
-
 /// Every catalog key as `tr!` sees it, for tooling that audits coverage.
 pub fn catalog_keys() -> impl Iterator<Item = &'static str> {
     catalog().keys().copied()
-}
-
-/// Rendered translation table used by tooling that audits coverage.
-pub fn catalog_len() -> usize {
-    catalog().len()
 }
 
 #[cfg(test)]
@@ -480,7 +422,7 @@ mod tests {
     fn rows_starting_with_a_hash_are_rows() {
         let source = "zh\tzh_hans\ten\tzh_hant\tja\n#一\t#一\t#one\t#一\t#いち\n";
         let entries = parse_catalog(source);
-        assert_eq!(entries["#一"].en, "#one");
+        assert_eq!(entries["#一"][Lang::En as usize], "#one");
     }
 
     #[test]
@@ -489,7 +431,7 @@ mod tests {
             if line.is_empty() {
                 continue;
             }
-            let fields = split_fields(line);
+            let fields: Vec<&str> = line.split('\t').collect();
             assert_eq!(fields.len(), 5, "malformed catalog row: {line}");
             let placeholders: Vec<usize> = (1..5)
                 .map(|column| fields[column].matches("{}").count())
@@ -509,7 +451,10 @@ mod tests {
     fn known_messages_have_all_languages() {
         // A small sentinel set keeps the catalog from silently losing entries.
         for source in ["笔记库", "设置", "取消"] {
-            assert!(has_translation(source), "missing catalog entry: {source}");
+            assert!(
+                catalog().contains_key(source),
+                "missing catalog entry: {source}"
+            );
         }
     }
 

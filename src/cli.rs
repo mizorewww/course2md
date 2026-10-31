@@ -1,4 +1,5 @@
 use crate::i18n::{Lang, t};
+use crate::tr;
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -30,7 +31,7 @@ First conversion in a terminal offers setup; scripts should pass options explici
 #[command(
     name = "course2md",
     version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("COURSE2MD_COMMIT_HASH"), ")"),
-    about = crate::tr!("将课程视频转换为图文笔记 / Turn course videos into illustrated notes"),
+    about = tr!("将课程视频转换为图文笔记 / Turn course videos into illustrated notes"),
     args_conflicts_with_subcommands = true,
     after_help = QUICK_START
 )]
@@ -468,58 +469,31 @@ pub fn take_lang_arg(args: &mut Vec<std::ffi::OsString>) -> Option<String> {
 /// The catalog is keyed by the original text, so the compiled doc comments stay
 /// the single source of truth and a missing entry falls back to the source.
 pub fn localize_command(command: clap::Command) -> clap::Command {
-    use clap::Command;
-
-    fn localized(value: Option<&clap::builder::StyledStr>) -> Option<String> {
-        value.map(|value| t(&value.to_string()).to_owned())
-    }
-
-    fn about(command: Command) -> Command {
-        let about = localized(command.get_about());
-        let long_about = localized(command.get_long_about());
-        let before = localized(command.get_before_help());
-        let after = localized(command.get_after_help());
-        let mut command = command;
-        if let Some(value) = about {
-            command = command.about(value);
-        }
-        if let Some(value) = long_about {
-            command = command.long_about(value);
-        }
-        if let Some(value) = before {
-            command = command.before_help(value);
-        }
-        if let Some(value) = after {
-            command = command.after_help(value);
-        }
-        command
-    }
-
-    fn args(command: Command) -> Command {
-        command.mut_args(|arg| {
-            let help = localized(arg.get_help());
-            let long_help = localized(arg.get_long_help());
-            let heading = arg.get_help_heading().map(|heading| {
-                // clap's heading type only accepts static strings; this runs once per process.
-                Box::leak(t(heading).to_owned().into_boxed_str()) as &'static str
-            });
-            let mut arg = arg;
-            if let Some(value) = help {
-                arg = arg.help(value);
-            }
-            if let Some(value) = long_help {
-                arg = arg.long_help(value);
-            }
-            if let Some(value) = heading {
-                arg = arg.help_heading(value);
-            }
-            arg
+    use clap::builder::{Resettable, StyledStr};
+    fn localized(value: Option<&StyledStr>) -> Resettable<StyledStr> {
+        value.map_or(Resettable::Reset, |value| {
+            Resettable::Value(t(&value.to_string()).to_owned().into())
         })
     }
-
-    let command = about(command);
-    let command = args(command);
-    command.mut_subcommands(localize_command)
+    let about = localized(command.get_about());
+    let long_about = localized(command.get_long_about());
+    let before = localized(command.get_before_help());
+    let after = localized(command.get_after_help());
+    command
+        .about(about)
+        .long_about(long_about)
+        .before_help(before)
+        .after_help(after)
+        .mut_args(|arg| {
+            let help = localized(arg.get_help());
+            let long_help = localized(arg.get_long_help());
+            // clap's heading type only accepts static strings; this runs once per process.
+            let heading = arg
+                .get_help_heading()
+                .map(|heading| &*Box::leak(t(heading).to_owned().into_boxed_str()));
+            arg.help(help).long_help(long_help).help_heading(heading)
+        })
+        .mut_subcommands(localize_command)
 }
 
 /// Localizes clap's own section headings in rendered help and error text.
@@ -531,21 +505,21 @@ pub fn localize_rendered(text: &str) -> String {
         return text.to_owned();
     }
     let headings = [
-        ("Usage:", crate::tr!("用法：")),
-        ("Options:", crate::tr!("选项：")),
-        ("Commands:", crate::tr!("命令：")),
-        ("Arguments:", crate::tr!("参数：")),
+        ("Usage:", tr!("用法：")),
+        ("Options:", tr!("选项：")),
+        ("Commands:", tr!("命令：")),
+        ("Arguments:", tr!("参数：")),
         (
             "For more information, try '--help'.",
-            crate::tr!("更多信息请运行 --help。"),
+            tr!("更多信息请运行 --help。"),
         ),
     ];
     let phrases = [
-        ("Print help", crate::tr!("显示帮助")),
-        ("Print version", crate::tr!("显示版本")),
+        ("Print help", tr!("显示帮助")),
+        ("Print version", tr!("显示版本")),
         (
             "Print this message or the help of the given subcommand(s)",
-            crate::tr!("显示此消息或子命令的帮助"),
+            tr!("显示此消息或子命令的帮助"),
         ),
     ];
     text.split_inclusive('\n')
@@ -571,7 +545,7 @@ fn parse_translation_target(value: &str) -> Result<String, String> {
                 .iter()
                 .map(|(code, _)| *code)
                 .collect();
-            crate::tr!("支持的语言：{}", codes.join(", "))
+            tr!("支持的语言：{}", codes.join(", "))
         })
 }
 
