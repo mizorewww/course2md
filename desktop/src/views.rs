@@ -748,37 +748,3 @@ pub fn video_site_name(url: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-
-/// A dialog part drawn from the desktop's state. Dialog contents live in
-/// their own entity, so each one re-enters the desktop to render.
-pub(crate) struct DesktopView<F> {
-    desktop: Entity<Desktop>,
-    render: F,
-    _observation: Subscription,
-}
-
-impl<F> DesktopView<F>
-where
-    F: FnMut(&mut Desktop, &mut Window, &mut Context<Desktop>) -> AnyElement + 'static,
-{
-    /// Repaints whenever the desktop changes.
-    pub(crate) fn observing(desktop: Entity<Desktop>, cx: &mut App, render: F) -> Entity<Self> {
-        cx.new(|cx| Self {
-            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
-            desktop,
-            render,
-        })
-    }
-}
-
-impl<F> Render for DesktopView<F>
-where
-    F: FnMut(&mut Desktop, &mut Window, &mut Context<Desktop>) -> AnyElement + 'static,
-{
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Self {
-            desktop, render, ..
-        } = self;
-        desktop.update(cx, |desktop, cx| render(desktop, window, cx))
-    }
-}

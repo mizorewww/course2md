@@ -1,15 +1,12 @@
 //! Settings: its navigation, the categories' pages, and how their saves report.
 #[path = "generation_settings.rs"]
 mod generation_settings;
-#[path = "settings_legacy.rs"]
-mod legacy;
 #[path = "model_diagnostics.rs"]
 pub(crate) mod model_diagnostics;
 #[path = "service_editor.rs"]
 mod service_editor;
 #[path = "service_form.rs"]
 pub(crate) mod service_form;
-pub(crate) use legacy::*;
 
 use crate::credentials::Secret;
 use crate::preferences::{
