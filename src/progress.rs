@@ -192,15 +192,18 @@ pub enum ErrorCode {
 impl ErrorCode {
     /// The code a typed error carries; untyped errors are `Other`.
     pub fn of(error: &anyhow::Error) -> Self {
-        use crate::artifact::FailureKind;
+        use crate::outcome::FailureKind;
         if error.downcast_ref::<crate::error::MissingTool>().is_some() {
             return Self::MissingTool;
         }
-        if error.downcast_ref::<crate::error::InvalidInput>().is_some() {
+        if error
+            .downcast_ref::<crate::invalid::InvalidInput>()
+            .is_some()
+        {
             return Self::InvalidArguments;
         }
         if error
-            .downcast_ref::<crate::error::InvalidConfiguration>()
+            .downcast_ref::<crate::invalid::InvalidConfiguration>()
             .is_some()
         {
             return Self::InvalidConfiguration;
@@ -238,7 +241,7 @@ pub struct Done {
     pub chars: usize,
     pub outputs: Vec<PathBuf>,
     pub partial: Option<bool>,
-    pub outcomes: Option<crate::artifact::Outcomes>,
+    pub outcomes: Option<crate::outcome::Outcomes>,
     pub elapsed_secs: f64,
 }
 
@@ -281,7 +284,7 @@ pub enum Event {
         request_id: Option<String>,
         purpose: Option<String>,
         description: Option<String>,
-        kind: crate::artifact::FailureKind,
+        kind: crate::outcome::FailureKind,
         message: String,
     },
     Error {

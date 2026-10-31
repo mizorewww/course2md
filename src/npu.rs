@@ -279,7 +279,7 @@ impl NpuWorker {
 
         let port = crate::runtime::free_port()?;
         // 每次会话一个随机令牌：worker 的 127.0.0.1 服务不应被本机其他进程驱使
-        let token = crate::random_b64url(32)?;
+        let token = crate::runtime::random_b64url(32)?;
         tracing::info!(model = %model_id, port, "starting npu worker");
         crate::progress::start(Stage::ModelLoad);
         let mut child = spawn_npu_worker(&script_path, model_id, port, npu_kind(model_id), &token)?;

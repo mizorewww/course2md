@@ -1,130 +1,20 @@
 //! Published versions are immutable. Work directories and diagnostic logs are not notes.
 
+pub use crate::outcome::{FailureKind, Outcome, Outcomes, Status};
 use crate::tr;
 use crate::{
     digest::file_digest,
     dispatch::TaskControl,
     execution,
-    fetch::VideoMeta,
     fsio::{atomic_write, atomic_write_shared},
+    meta::Summary,
+    meta::VideoMeta,
     render,
-    summarize::Summary,
     timeline::{FrameEvent, Section},
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    path::{Component, Path, PathBuf},
-};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Status {
-    NotRequested,
-    Succeeded,
-    Partial,
-    Failed,
-}
-
-/// Machine-readable cause of a failed component. Display text stays free-form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FailureKind {
-    Authentication,
-    Model,
-    Parameters,
-    RateLimit,
-    Service,
-    Local,
-    Uncertain,
-    Other,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Outcome {
-    pub status: Status,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub completed: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<FailureKind>,
-}
-impl Default for Outcome {
-    fn default() -> Self {
-        Self::not_requested()
-    }
-}
-
-impl Outcome {
-    pub fn succeeded() -> Self {
-        Self {
-            status: Status::Succeeded,
-            message: None,
-            completed: None,
-            total: None,
-            kind: None,
-        }
-    }
-    pub fn not_requested() -> Self {
-        Self {
-            status: Status::NotRequested,
-            ..Self::succeeded()
-        }
-    }
-    pub fn failed(message: impl Into<String>) -> Self {
-        Self {
-            status: Status::Failed,
-            message: Some(message.into()),
-            kind: Some(FailureKind::Local),
-            ..Self::succeeded()
-        }
-    }
-    /// Copies the structured cause from a dispatcher failure when present.
-    pub fn from_error(error: &anyhow::Error) -> Self {
-        let failure = error.downcast_ref::<crate::dispatch::Failure>();
-        let message = failure.map_or_else(|| format!("{error:#}"), |f| f.message.clone());
-        Self::from_error_with_message(error, message)
-    }
-    pub fn from_error_with_message(error: &anyhow::Error, message: impl Into<String>) -> Self {
-        let failure = error.downcast_ref::<crate::dispatch::Failure>();
-        Self {
-            status: Status::Failed,
-            message: Some(message.into()),
-            kind: Some(failure.map_or(FailureKind::Local, |f| f.kind)),
-            ..Self::succeeded()
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Outcomes {
-    pub transcript: Outcome,
-    pub screenshots: Outcome,
-    pub proofreading: Outcome,
-    pub summary: Outcome,
-    /// Bilingual translation; not requested when the note is already in the target.
-    pub translation: Outcome,
-    pub exports: BTreeMap<String, Outcome>,
-}
-impl Outcomes {
-    pub fn is_partial(&self) -> bool {
-        [
-            &self.transcript,
-            &self.screenshots,
-            &self.proofreading,
-            &self.summary,
-            &self.translation,
-        ]
-        .into_iter()
-        .chain(self.exports.values())
-        .any(|o| matches!(o.status, Status::Failed | Status::Partial))
-    }
-}
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {

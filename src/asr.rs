@@ -498,8 +498,8 @@ impl CloudSpeech {
     /// 结果不确定时绝不自动重发；响应在账本里按模式校验，取值时不必再检查一遍。
     fn post(&self, seg: Seg, content_type: &str, body: &[u8], identity: &Value) -> Result<Value> {
         let (start, end) = (
-            crate::render::fmt_ts(seg.start),
-            crate::render::fmt_ts(seg.end),
+            crate::timeline::fmt_ts(seg.start),
+            crate::timeline::fmt_ts(seg.end),
         );
         let description = tr!(
             "识别视频 {}–{} 的声音 / Transcribe video audio {}–{}",
@@ -607,7 +607,7 @@ impl Transcribe for CloudSpeech {
                 )
             }
         }
-        .with_context(|| tr!("云端语音识别失败：{}", crate::render::fmt_ts(seg.start)))?;
+        .with_context(|| tr!("云端语音识别失败：{}", crate::timeline::fmt_ts(seg.start)))?;
         Ok(reply_text(self.mode, &reply)
             .unwrap_or_default()
             .trim()

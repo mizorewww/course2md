@@ -154,7 +154,7 @@ pub fn load() -> anyhow::Result<ConfigFile> {
                 p.display()
             )
         })
-        .map_err(crate::error::invalid_configuration)?;
+        .map_err(crate::invalid::invalid_configuration)?;
     // The file is the user's own text and is not rewritten: the notice
     // repeats (once per run) until its asr_model line is changed.
     if crate::config::migrate_retired_npu_model(cfg.defaults.provider, &mut cfg.defaults.asr_model)

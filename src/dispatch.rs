@@ -1,5 +1,7 @@
 //! Durable external-request receipts. A lost response is never permission to resend.
 
+pub use crate::outcome::Failure;
+use crate::outcome::FailureKind;
 use crate::{
     digest::digest,
     fsio::atomic_write,
@@ -76,46 +78,6 @@ pub struct Receipt {
     pub retry_authorized: Option<String>,
 }
 
-#[derive(Debug)]
-pub struct Failure {
-    pub status: Option<u16>,
-    pub retryable: bool,
-    pub message: String,
-    pub unsupported_response_format: bool,
-    pub kind: crate::artifact::FailureKind,
-}
-impl std::fmt::Display for Failure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-impl std::error::Error for Failure {}
-impl Failure {
-    /// A definite failure that no service status explains.
-    pub fn local(error: impl std::fmt::Display) -> Self {
-        Self {
-            status: None,
-            retryable: false,
-            message: error.to_string(),
-            unsupported_response_format: false,
-            kind: crate::artifact::FailureKind::Local,
-        }
-    }
-    fn with_status(status: Option<u16>, retryable: bool, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            retryable,
-            message: message.into(),
-            kind: kind_for_status(status),
-            ..Self::local("")
-        }
-    }
-    /// The request may have been processed; sending it again needs consent.
-    pub fn uncertain(&self) -> bool {
-        self.kind == crate::artifact::FailureKind::Uncertain
-    }
-}
-
 /// What identifies one service request in the ledger, and how it may be resent.
 pub struct RequestSpec<'a> {
     /// The configured service ("llm", "asr"), resolved to its version.
@@ -136,18 +98,6 @@ pub struct RequestSpec<'a> {
 pub struct Reply {
     pub value: Value,
     pub replayed: bool,
-}
-
-fn kind_for_status(status: Option<u16>) -> crate::artifact::FailureKind {
-    match status {
-        Some(401 | 403) => crate::artifact::FailureKind::Authentication,
-        Some(404) => crate::artifact::FailureKind::Model,
-        Some(400 | 422) => crate::artifact::FailureKind::Parameters,
-        Some(429) => crate::artifact::FailureKind::RateLimit,
-        Some(500..=599) => crate::artifact::FailureKind::Service,
-        None => crate::artifact::FailureKind::Local,
-        _ => crate::artifact::FailureKind::Other,
-    }
 }
 
 fn rejection_message(status: u16) -> String {
@@ -410,9 +360,9 @@ impl Ledger {
             |r| crate::tr!("{}：{}", r.description, message),
         );
         let kind = if reason == BlockReason::Uncertain {
-            crate::artifact::FailureKind::Uncertain
+            FailureKind::Uncertain
         } else {
-            crate::artifact::FailureKind::Other
+            FailureKind::Other
         };
         crate::progress::emit(&Event::Blocked {
             reason,
@@ -1426,7 +1376,7 @@ mod ephemeral_tests {
             true
         );
         let rejected = request(401, b"{}", Resend::AskUser).unwrap_err();
-        assert_eq!(rejected.kind, crate::artifact::FailureKind::Authentication);
+        assert_eq!(rejected.kind, FailureKind::Authentication);
         assert!(!rejected.retryable && !rejected.uncertain());
         assert!(request(429, b"{}", Resend::AskUser).unwrap_err().retryable);
         let unknown = request(503, b"", Resend::AskUser).unwrap_err();
@@ -1436,7 +1386,7 @@ mod ephemeral_tests {
         let free = request(503, b"", Resend::Free).unwrap_err();
         assert!(free.retryable && !free.uncertain());
         assert_eq!(free.status, Some(503));
-        assert_eq!(free.kind, crate::artifact::FailureKind::Service);
+        assert_eq!(free.kind, FailureKind::Service);
         // Nothing persists between calls: the same payload sends again.
         assert!(request(200, br#"{"ok":true}"#, Resend::AskUser).is_ok());
         let lost = TaskControl::default()

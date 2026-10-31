@@ -56,7 +56,7 @@ struct PortableJson<'a> {
     author: &'a str,
     duration: Option<f64>,
     source: PortableSource,
-    summary: Option<&'a crate::summarize::Summary>,
+    summary: Option<&'a crate::meta::Summary>,
     sections: Vec<PortableSection<'a>>,
     images: Vec<PortableImage<'a>>,
 }

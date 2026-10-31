@@ -463,8 +463,8 @@ fn browser_authorization(cancel: Option<&std::sync::atomic::AtomicBool>) -> Resu
     let port = listener.local_addr()?.port();
     listener.set_nonblocking(true)?;
 
-    let verifier = crate::random_b64url(64)?;
-    let state = crate::random_b64url(32)?;
+    let verifier = crate::runtime::random_b64url(64)?;
+    let state = crate::runtime::random_b64url(32)?;
     let url = authorize_url(port, &pkce_challenge(&verifier), &state);
     println_tr!(
         "正在打开浏览器完成 ChatGPT 授权（{} 分钟内有效，Ctrl+C 取消）…",

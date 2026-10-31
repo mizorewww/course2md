@@ -282,6 +282,17 @@ fn time_of(e: &TimelineEvent) -> f64 {
     }
 }
 
+/// mm:ss 或 h:mm:ss
+pub fn fmt_ts(sec: f64) -> String {
+    let s = sec.max(0.0).floor() as u64;
+    let (h, m, s) = (s / 3600, (s % 3600) / 60, s % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m:02}:{s:02}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,6 @@
 //! yt-dlp 子进程封装：元数据抓取 + 视频下载。
 
+pub use crate::meta::VideoMeta;
 use crate::tr;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -44,31 +45,6 @@ fn is_deterministic_download_error(error_text: &str) -> bool {
     ]
     .iter()
     .any(|needle| lower.contains(needle))
-}
-
-/// 我们关心的元数据字段子集。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct VideoMeta {
-    pub title: String,
-    #[serde(default)]
-    pub uploader: String,
-    #[serde(default)]
-    pub duration: f64,
-    pub webpage_url: String,
-    #[serde(default)]
-    pub extractor: String,
-    #[serde(default)]
-    pub id: String,
-}
-
-impl VideoMeta {
-    /// Local-file metadata uses the `local` extractor marker.
-    pub fn is_local(&self) -> bool {
-        self.extractor == "local"
-    }
-    pub fn save(&self, path: &Path) -> Result<()> {
-        crate::fsio::atomic_write_shared(path, serde_json::to_string_pretty(self)?.as_bytes())
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

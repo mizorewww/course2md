@@ -15,14 +15,18 @@ pub mod fetch;
 pub mod fsio;
 pub mod hub;
 pub mod i18n;
+pub mod invalid;
 pub mod language;
 pub mod llm;
 pub mod login;
 pub mod math;
 pub mod media;
+pub mod meta;
 pub mod models;
 pub mod npu;
 pub mod options;
+pub mod outcome;
+pub mod paths;
 pub mod pipeline;
 pub mod portable;
 pub mod progress;
@@ -39,15 +43,3 @@ pub mod timeline;
 pub mod tools;
 pub mod wizard;
 pub mod ytdlp;
-
-/// 操作系统随机源生成的 URL-safe base64 串（会话令牌、PKCE 参数）。
-pub(crate) fn random_b64url(bytes: usize) -> anyhow::Result<String> {
-    use base64::Engine as _;
-    let mut buf = vec![0u8; bytes];
-    getrandom::fill(&mut buf).map_err(|_| {
-        anyhow::anyhow!(crate::tr!(
-            "无法生成安全随机数 / Cannot generate secure random bytes"
-        ))
-    })?;
-    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf))
-}

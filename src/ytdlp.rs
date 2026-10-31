@@ -48,7 +48,7 @@ fn interpreter_dirs(base: &Path, leaf: &str, prefix: &str) -> Vec<PathBuf> {
 /// PATH 之外的常见安装位置：覆盖「终端里有、桌面会话里没有」的安装方式。
 fn fallback_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    let home = crate::config::home_dir();
+    let home = crate::paths::home_dir();
     #[cfg(unix)]
     {
         if let Some(home) = &home {

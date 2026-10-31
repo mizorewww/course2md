@@ -267,8 +267,8 @@ fn run_batches(
             chunk.last().context("empty batch")?,
         );
         let (start, end) = (
-            crate::render::fmt_ts(first.start),
-            crate::render::fmt_ts(last.end),
+            crate::timeline::fmt_ts(first.start),
+            crate::timeline::fmt_ts(last.end),
         );
         let description = if purpose == Purpose::Proofreading {
             tr!(

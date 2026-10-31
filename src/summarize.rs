@@ -3,12 +3,12 @@
 //! 支持超长视频：字幕超过阈值时自动 map-reduce（分段摘要 → 合并）。
 //! 幻觉防护：仅以字幕为输入、temperature=0、json_object 结构化输出、要点带时间戳可溯源。
 
-use crate::fetch::VideoMeta;
 use crate::llm::{self, LlmSettings};
+use crate::meta::VideoMeta;
+pub use crate::meta::{OutlineItem, Summary};
 use crate::timeline::TranscriptEvent;
 use crate::tr;
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
 
 /// 直接单次摘要的最大字幕字符数。
 /// 依据：中文场景 1 字符 ≈ 1-2 token（Qwen/GPT 系分词），25_000 字符 ≈ 2.5-5 万
@@ -21,21 +21,6 @@ const CHUNK_CHAR_LIMIT: usize = 25_000;
 const PER_EVENT_OVERHEAD: usize = 16;
 /// map-reduce 分段摘要的并发上限：LLM 端点普遍限流，取保守的 4 路。
 const SUMMARIZE_CONCURRENCY: usize = 4;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct OutlineItem {
-    /// 章节起始秒数（绝对时间）
-    pub t: f64,
-    pub title: String,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Summary {
-    pub tldr: String,
-    pub key_points: Vec<String>,
-    pub outline: Vec<OutlineItem>,
-}
 
 /// 摘要区块哨兵注释（md/html 通用；HTML 注释在两种渲染产物中都原样保留）。
 /// 幂等判断与原地替换均以哨兵为准。
@@ -56,7 +41,7 @@ fn system_prompt() -> String {
 fn build_transcript(events: &[TranscriptEvent]) -> String {
     events
         .iter()
-        .map(|e| format!("[{}] {}\n", crate::render::fmt_ts(e.start), e.text))
+        .map(|e| format!("[{}] {}\n", crate::timeline::fmt_ts(e.start), e.text))
         .collect()
 }
 
@@ -218,7 +203,7 @@ fn summarize_blocking(
     let range = |chunk: &[TranscriptEvent]| {
         let edge = |event: Option<&TranscriptEvent>, at: fn(&TranscriptEvent) -> f64| {
             event
-                .map(|e| crate::render::fmt_ts(at(e)))
+                .map(|e| crate::timeline::fmt_ts(at(e)))
                 .unwrap_or_default()
         };
         (
@@ -325,7 +310,7 @@ pub fn render_md_block(sm: &Summary) -> String {
         for o in &sm.outline {
             out.push_str(&format!(
                 "- **{}** {}：{}\n",
-                crate::render::fmt_ts(o.t),
+                crate::timeline::fmt_ts(o.t),
                 o.title,
                 o.detail
             ));
@@ -363,7 +348,7 @@ pub fn render_html_block(sm: &Summary) -> String {
         for o in &sm.outline {
             out.push_str(&tr!(
                 "<li><b>{}</b> {}：{}</li>",
-                crate::render::esc(&crate::render::fmt_ts(o.t)),
+                crate::render::esc(&crate::timeline::fmt_ts(o.t)),
                 crate::render::rich(&o.title),
                 crate::render::rich(&o.detail)
             ));

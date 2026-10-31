@@ -1,21 +1,11 @@
 //! 笔记渲染：Markdown 与独立 HTML。
 
-use crate::fetch::VideoMeta;
+use crate::meta::VideoMeta;
 use crate::timeline::Section;
+pub use crate::timeline::fmt_ts;
 use crate::tr;
 use std::fmt::Write as _;
 use std::path::Path;
-
-/// mm:ss 或 h:mm:ss
-pub fn fmt_ts(sec: f64) -> String {
-    let s = sec.max(0.0).floor() as u64;
-    let (h, m, s) = (s / 3600, (s % 3600) / 60, s % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
-    } else {
-        format!("{m:02}:{s:02}")
-    }
-}
 
 fn source_url(meta: &VideoMeta) -> String {
     let source = meta.webpage_url.trim();

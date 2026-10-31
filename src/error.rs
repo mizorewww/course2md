@@ -1,3 +1,6 @@
+pub use crate::invalid::{
+    InvalidConfiguration, InvalidInput, invalid_configuration, invalid_input,
+};
 use anyhow::Result;
 
 /// 取多行文本的最后 n 行（保持原有先后顺序），供错误摘要附带日志尾部。
@@ -32,25 +35,6 @@ pub fn require_ytdlp() -> Result<()> {
         return Err(missing_tool("yt-dlp"));
     }
     Ok(())
-}
-
-/// The command line or task input was rejected before any work started. It
-/// shows the wrapped error unchanged; the type only names the cause.
-#[derive(Debug, thiserror::Error)]
-#[error("{0:#}")]
-pub struct InvalidInput(pub anyhow::Error);
-
-/// The configuration file could not be used as written.
-#[derive(Debug, thiserror::Error)]
-#[error("{0:#}")]
-pub struct InvalidConfiguration(pub anyhow::Error);
-
-pub fn invalid_input(error: impl Into<anyhow::Error>) -> anyhow::Error {
-    anyhow::Error::new(InvalidInput(error.into()))
-}
-
-pub fn invalid_configuration(error: impl Into<anyhow::Error>) -> anyhow::Error {
-    anyhow::Error::new(InvalidConfiguration(error.into()))
 }
 
 /// A required external program is not installed.
