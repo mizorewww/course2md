@@ -42,7 +42,7 @@ pub struct Tool {
     pub origin: Origin,
 }
 
-fn file_name(name: &str) -> String {
+pub(crate) fn file_name(name: &str) -> String {
     format!("{name}{}", std::env::consts::EXE_SUFFIX)
 }
 
@@ -52,7 +52,7 @@ pub fn override_var(name: &str) -> String {
 }
 
 /// Exists and is executable (Windows: is a regular file).
-fn is_executable(path: &Path) -> bool {
+pub(crate) fn is_executable(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
@@ -120,7 +120,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-fn search_path(path: Option<&OsStr>) -> OsString {
+pub(crate) fn search_path(path: Option<&OsStr>) -> OsString {
     path.map(OsStr::to_os_string)
         .or_else(|| std::env::var_os("PATH"))
         .unwrap_or_default()
@@ -140,35 +140,37 @@ pub fn origin_of(path: &Path, override_var: &str) -> Origin {
     }
 }
 
-fn locate_with(name: &str, bundled: &[PathBuf], search: &OsStr) -> Option<Tool> {
-    let var = override_var(name);
-    if let Some(value) = std::env::var_os(&var).filter(|value| !value.is_empty()) {
-        let path = PathBuf::from(value);
-        if is_executable(&path) {
-            return Some(Tool {
-                path,
-                origin: Origin::Override,
-            });
-        }
-    }
+/// Every copy of a tool that could run, best first: named by `var`, in `bundled`
+/// directories, then on `search`. A value of `var` that is not executable is ignored.
+pub(crate) fn candidates(name: &str, var: &str, bundled: &[PathBuf], search: &OsStr) -> Vec<Tool> {
+    let tool = |origin| move |path| Tool { path, origin };
     let file = file_name(name);
-    if let Some(path) = bundled
-        .iter()
-        .map(|dir| dir.join(&file))
-        .find(|path| is_executable(path))
-    {
-        return Some(Tool {
-            path,
-            origin: Origin::Bundled,
-        });
-    }
     let cwd = std::env::current_dir().unwrap_or_default();
-    which::which_in(name, Some(search), cwd)
-        .ok()
-        .map(|path| Tool {
-            path,
-            origin: Origin::System,
-        })
+    std::env::var_os(var)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .map(tool(Origin::Override))
+        .into_iter()
+        .chain(
+            bundled
+                .iter()
+                .map(|dir| dir.join(&file))
+                .map(tool(Origin::Bundled)),
+        )
+        .chain(
+            which::which_in_all(name, Some(search), cwd)
+                .into_iter()
+                .flatten()
+                .map(tool(Origin::System)),
+        )
+        .filter(|found| is_executable(&found.path))
+        .collect()
+}
+
+fn locate_with(name: &str, bundled: &[PathBuf], search: &OsStr) -> Option<Tool> {
+    candidates(name, &override_var(name), bundled, search)
+        .into_iter()
+        .next()
 }
 
 /// Finds `name` beside the app first, then on `path` (the process PATH when None).
