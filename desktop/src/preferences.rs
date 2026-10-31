@@ -1033,57 +1033,35 @@ impl Store {
     fn write_retire_marker(&self, service_id: &str) -> Result<()> {
         course2md::checkpoint::atomic_write(&self.retired_marker(service_id), b"deleted\n")
     }
+    /// Services deleted earlier stay deleted even if an older services.json comes back.
     fn forget_retired_service_records(&mut self) {
         if self.is_blocked(PreferenceGroup::Services) {
             return;
         }
+        let markers = std::fs::read_dir(self.root.join("stopped-services"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+            .filter(|name| !name.starts_with('.'));
         let retired: BTreeSet<_> = self
             .services
             .stopped
             .keys()
             .cloned()
-            .chain(
-                std::fs::read_dir(self.root.join("stopped-services"))
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .filter_map(|entry| {
-                        entry
-                            .file_name()
-                            .to_str()
-                            .map(str::to_owned)
-                            .filter(|name| !name.starts_with('.'))
-                    }),
-            )
+            .chain(markers)
             .collect();
-        if retired.is_empty() {
-            return;
-        }
-        let leftover: Vec<_> = self
-            .services
-            .versions
-            .values()
-            .filter(|version| retired.contains(&version.service_id))
-            .cloned()
-            .collect();
-        let leftover_drafts = self
-            .services
-            .drafts
-            .values()
-            .any(|draft| retired.contains(&draft.service_id));
-        if leftover.is_empty() && !leftover_drafts {
+        let mut next = self.services.clone();
+        next.forget_services(&retired);
+        if next == self.services {
             return;
         }
         for service_id in &retired {
-            // Legacy tombstones lived only in services.json; ensure the
-            // independent marker exists so a restored backup cannot revive
-            // dispatch for this service.
+            // Older tombstones lived only in services.json.
             if !self.retired_marker(service_id).exists() {
                 let _ = self.write_retire_marker(service_id);
             }
         }
-        let mut next = self.services.clone();
-        next.forget_services(&retired);
         if self.persist(PreferenceGroup::Services, &next).is_ok() {
             self.services = next;
         }
@@ -1524,25 +1502,17 @@ impl Store {
             Err(_) => match read_envelope::<T>(&path.with_extension("json.bak")) {
                 Ok(Some(envelope)) => {
                     let restored = preserve_original(&self.root, &path).and_then(|_| {
-                        let bytes = serde_json::to_vec_pretty(&envelope)?;
-                        course2md::checkpoint::atomic_write(&path, &bytes)
+                        course2md::checkpoint::atomic_write(
+                            &path,
+                            &serde_json::to_vec_pretty(&envelope)?,
+                        )
                     });
                     self.revisions.insert(group, envelope.revision);
+                    // Whether or not the repair could be written, the next save will.
                     self.issues.push(SettingsIssue {
                         group,
-                        kind: if restored.is_ok() {
-                            SettingsIssueKind::Recovered
-                        } else {
-                            SettingsIssueKind::SaveFailed
-                        },
-                        message: if restored.is_ok() {
-                            course2md::tr!("已恢复最近一次可用的设置，原文件已保留").into()
-                        } else {
-                            course2md::tr!(
-                                "正在使用最近一次可用的设置，但恢复文件尚未保存；原文件已保留"
-                            )
-                            .into()
-                        },
+                        kind: SettingsIssueKind::Recovered,
+                        message: course2md::tr!("已恢复最近一次可用的设置，原文件已保留").into(),
                         detail: restored.err().map(|error| {
                             course2md::tr!(
                                 "设置目录：{}\n{}",
@@ -1570,10 +1540,11 @@ impl Store {
         }
     }
 
-    fn persist<T: Serialize>(&mut self, group: PreferenceGroup, value: &T) -> Result<()>
-    where
-        T: Validate,
-    {
+    fn persist<T: Serialize + Validate>(
+        &mut self,
+        group: PreferenceGroup,
+        value: &T,
+    ) -> Result<()> {
         let revision = self.revisions.get(&group).copied().unwrap_or(0) + 1;
         let result = (|| {
             ensure!(

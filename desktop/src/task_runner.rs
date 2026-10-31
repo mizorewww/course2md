@@ -318,33 +318,38 @@ impl Desktop {
         )
     }
 
+    fn workspace_root(&self) -> PathBuf {
+        self.config
+            .defaults
+            .out
+            .clone()
+            .unwrap_or_else(default_output)
+    }
+
+    /// Puts a freshly opened or rebuilt record in place and shows what it holds.
+    fn install_workspace(
+        &mut self,
+        workspace: workspace::Workspace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.message = workspace.recovery.clone();
+        self.workspace = Some(workspace);
+        self.workspace_error = None;
+        self.restore_draft(window, cx);
+        self.refresh_library(cx);
+    }
+
     pub fn retry_workspace_records(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(workspace) = &self.workspace {
-            match workspace.save() {
-                Ok(()) => self.workspace_error = None,
-                Err(error) => {
-                    self.workspace_error =
-                        Some(course2md::tr!("记录仍未保存：{}", format!("{error:#}")))
-                }
-            }
+            self.workspace_error = workspace
+                .save()
+                .err()
+                .map(|error| course2md::tr!("记录仍未保存：{}", format!("{error:#}")));
         } else {
-            let root = self
-                .config
-                .defaults
-                .out
-                .clone()
-                .unwrap_or_else(default_output);
-            match workspace::Workspace::open(
-                root,
-                ConversionOptions::from_config(&self.preferences.defaults_config()),
-            ) {
-                Ok(workspace) => {
-                    self.message = workspace.recovery.clone();
-                    self.workspace = Some(workspace);
-                    self.workspace_error = None;
-                    self.restore_draft(window, cx);
-                    self.refresh_library(cx);
-                }
+            let options = ConversionOptions::from_config(&self.preferences.defaults_config());
+            match workspace::Workspace::open(self.workspace_root(), options) {
+                Ok(workspace) => self.install_workspace(workspace, window, cx),
                 Err(error) => {
                     self.workspace_error = Some(course2md::tr!(
                         "记录仍无法读取，原件已保留：{}",
@@ -371,12 +376,7 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let root = self
-            .config
-            .defaults
-            .out
-            .clone()
-            .unwrap_or_else(default_output);
+        let root = self.workspace_root();
         let options = ConversionOptions::from_config(&self.preferences.defaults_config());
         let result = if let Some(workspace) = &self.workspace {
             workspace::Workspace::rebuild_at(workspace.storage_path().to_owned(), root, options)
@@ -384,13 +384,7 @@ impl Desktop {
             workspace::Workspace::rebuild(root, options)
         };
         match result {
-            Ok(workspace) => {
-                self.message = workspace.recovery.clone();
-                self.workspace = Some(workspace);
-                self.workspace_error = None;
-                self.restore_draft(window, cx);
-                self.refresh_library(cx);
-            }
+            Ok(workspace) => self.install_workspace(workspace, window, cx),
             Err(error) => {
                 self.workspace_error = Some(course2md::tr!(
                     "记录尚未重建，原件仍保留：{}",
@@ -446,32 +440,14 @@ impl Desktop {
         let title = self.value(Field::Title, cx);
         let source = self.source_preview.clone();
         let scroll = f32::from(self.scrolls[Page::New as usize].offset().y);
-        let Some(workspace) = &mut self.workspace else {
-            return false;
-        };
-        let Some(mut next) = workspace.state.draft().cloned() else {
-            self.workspace_error = Some(course2md::tr!("当前输入记录暂时不可用").into());
-            return false;
-        };
         self.draft_deadline = None;
-        let (options, folder) = (next.options.clone(), next.folder);
-        if !update_input_form(&mut next, input, title, source, options, folder, scroll) {
-            return true;
-        }
-        let result = workspace.transaction(|state| {
-            *state
-                .draft_mut()
-                .context(course2md::tr!("没有可保存的输入"))? = next;
-            Ok(())
-        });
-        if let Err(error) = result {
-            self.workspace_error =
-                Some(course2md::tr!("当前输入尚未保存：{}", format!("{error:#}")));
-            cx.notify();
-            return false;
-        }
-        self.workspace_error = None;
-        true
+        self.update_draft(
+            |draft| {
+                let (options, folder) = (draft.options.clone(), draft.folder);
+                update_input_form(draft, input, title, source, options, folder, scroll);
+            },
+            cx,
+        )
     }
 
     pub fn restore_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {

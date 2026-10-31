@@ -1277,7 +1277,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)	模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)	Model (defaults to the backend's default)	模型（預設為該辨識方式的預設模型）	モデル（既定ではこの認識方式のデフォルトモデル）
 欢迎使用 course2md！选择字幕不可用时的语音转写方式。 / Welcome! Choose how to transcribe when subtitles are unavailable.	欢迎使用 course2md！选择字幕不可用时的语音转写方式。	Welcome! Choose how to transcribe when subtitles are unavailable.	歡迎使用 course2md！選擇字幕不可用時的語音轉寫方式。	course2mdへようこそ!字幕が利用できない場合に音声を文字に起こす方法を選択します。
 正在下载识别模型（约 2.4GB）/ Downloading speech models (~2.4GB): {}	正在下载识别模型（约 2.4GB）/ Downloading speech models (~2.4GB): {}	Downloading speech models (~2.4GB): {}	正在下載辨識模型（約 2.4GB）：{}	音声認識モデルをダウンロードしています（約 2.4GB）: {}
-正在使用最近一次可用的设置，但恢复文件尚未保存；原文件已保留	正在使用最近一次可用的设置，但恢复文件尚未保存；原文件已保留	The last available settings are being used, but the recovery file has not been saved; the original file has been retained	正在使用最近一次可用的設定，但恢復檔案尚未儲存；原檔案已保留	最後に使用可能な設定が使用されていますが、リカバリ ファイルは保存されていません。元のファイルは保持されています
 正在保存当前结果…	正在保存当前结果…	Saving current results…	正在儲存目前結果…	現在の結果を保存しています…
 正在保存当前结果，请等候当前任务停止后再补做。	正在保存当前结果，请等候当前任务停止后再补做。	Saving the current results. Wait until the current task stops before running the reprocessing.	正在儲存目前結果，請等候目前任務停止後再補做。	現在の結果を保存しています。現在のタスクが停止するまで待ってから再処理を実行してください。
 正在保存当前结果，请等候当前任务停止后再选择重新发送。	正在保存当前结果，请等候当前任务停止后再选择重新发送。	The current results are being saved. Please wait until the current task stops before choosing to resend.	正在儲存目前結果，請等候目前任務停止後再選擇重新傳送。	現在の結果が保存されています。現在のタスクが停止するまで待ってから、再送信を選択してください。

@@ -1322,12 +1322,14 @@ struct TaskMirror {
 /// control write stops the job, which then sends nothing new.
 #[derive(Clone, Default)]
 pub(crate) struct LibraryWrites {
-    /// Each file with its bytes, and for a mirror the library it belongs to.
-    pending: Arc<Mutex<BTreeMap<PathBuf, (Vec<u8>, Option<LibraryLocation>)>>>,
+    pending: Arc<Mutex<BTreeMap<PathBuf, LibraryWrite>>>,
     writing: Arc<Mutex<()>>,
     failure: Arc<Mutex<Option<WriteFailure>>>,
     wake: Arc<Mutex<Option<smol::channel::Sender<()>>>>,
 }
+
+/// A file's bytes, and for a mirror the library it belongs to.
+type LibraryWrite = (Vec<u8>, Option<LibraryLocation>);
 
 #[derive(Debug)]
 pub struct WriteFailure {
@@ -1758,8 +1760,8 @@ enum TaskFacts {
     Found {
         artifact: ArtifactFact,
         uncertain: Vec<BlockedRequest>,
-        events: JobEvents,
-        outcomes: Option<course2md::artifact::Outcomes>,
+        events: Box<JobEvents>,
+        outcomes: Option<Box<course2md::artifact::Outcomes>>,
     },
     Unreadable(String),
 }
@@ -1775,8 +1777,8 @@ impl TaskFacts {
                 outcomes,
             } => {
                 forget_task_subtitles(task);
-                task.events = events;
-                task.events.outcomes = task.events.outcomes.take().or(outcomes);
+                task.events = *events;
+                task.events.outcomes = task.events.outcomes.take().or(outcomes.map(|o| *o));
                 apply_artifact(task, artifact);
                 apply_receipts(task, uncertain);
             }
@@ -1819,7 +1821,7 @@ fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskF
         .as_ref()
         .filter(|_| events.outcomes.is_none() && !task.exports_only())
         .and_then(|version| course2md::artifact::read_manifest(&version.join("manifest.json")).ok())
-        .map(|manifest| manifest.outcomes);
+        .map(|manifest| Box::new(manifest.outcomes));
     // Catches up on writes made while disconnected.
     write_mirror(
         &task.work_dir.join("task-record.json"),
@@ -1829,7 +1831,7 @@ fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskF
     Ok(TaskFacts::Found {
         artifact,
         uncertain,
-        events,
+        events: Box::new(events),
         outcomes,
     })
 }
@@ -2204,6 +2206,15 @@ impl Workspace {
                 "任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。"
             ));
         }
+        // The first rewrite drops what the record used to carry for each task, and its
+        // mirror in the library normally holds the same. This copy covers the rest.
+        if crate::store::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|record| record["schema"] == 1)
+        {
+            let _ = std::fs::copy(&path, path.with_extension("schema1.json"));
+        }
         let mut state = if path.exists() {
             match Self::read(&path) {
                 Ok(state) => state,
@@ -2519,22 +2530,21 @@ impl Workspace {
 
     pub fn register_prepared_library(&mut self, prepared: &PreparedLibrary) -> Result<String> {
         if prepared.duplicate {
-            if let Some(existing) = self
+            let existing = self
                 .state
                 .libraries
                 .iter()
-                .find(|library| library.root == prepared.root)
-            {
-                let id = existing.id.clone();
-                if prepared.make_default {
-                    self.transaction(|state| {
-                        state.default_library = id.clone();
-                        Ok(())
-                    })?;
-                }
-                return Ok(id);
+                .find(|l| l.root == prepared.root);
+            let Some(id) = existing.map(|library| library.id.clone()) else {
+                return Ok(String::new());
+            };
+            if prepared.make_default {
+                self.transaction(|state| {
+                    state.default_library = id.clone();
+                    Ok(())
+                })?;
             }
-            return Ok(String::new());
+            return Ok(id);
         }
         let id = prepared.id.clone();
         let name = prepared.name.clone();
@@ -2921,6 +2931,8 @@ mod tests {
         assert_eq!(task.events.logs, ["一行日志"]);
         assert!(!task.events.loaded);
         opened.transaction(|_| Ok(())).unwrap();
+        let kept = std::fs::read_to_string(path.with_extension("schema1.json")).unwrap();
+        assert!(kept.contains("一行日志"));
         let rewritten = std::fs::read_to_string(&path).unwrap();
         assert!(!rewritten.contains("一行日志") && rewritten.contains("服务拒绝凭据"));
         assert!(serde_json::from_str::<serde_json::Value>(&rewritten).unwrap()["schema"] == SCHEMA);
