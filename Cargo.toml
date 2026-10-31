@@ -24,6 +24,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 ureq = { version = "3", features = ["json"] }
 base64 = "0.23"
 getrandom = "0.4"
+thiserror = "2"
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

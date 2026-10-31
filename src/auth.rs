@@ -25,14 +25,9 @@ type Response = ureq::http::Response<ureq::Body>;
 
 pub const BILIBILI_SETUP_TIP: &str = "使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。 / For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
 struct LoginTip(&'static str);
-
-impl std::fmt::Display for LoginTip {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
-    }
-}
 
 /// Keep the original failure visible and recognisable: login is a suggested next
 /// step, not a diagnosis, so markers in `error` still answer to `downcast_ref`.

@@ -968,15 +968,9 @@ pub fn bilibili_hint(error: anyhow::Error) -> anyhow::Error {
 }
 
 /// Marker in the error chain: yt-dlp was rejected by Bilibili with HTTP 412.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("bilibili http 412")]
 pub struct Bilibili412;
-
-impl std::fmt::Display for Bilibili412 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("bilibili http 412")
-    }
-}
-impl std::error::Error for Bilibili412 {}
 
 pub const BILIBILI_412_DESKTOP_HINT: &str =
     "B 站暂时限制了访问。请稍后重试；若持续失败，请在设置的账号中重新登录 B 站，或改用本地视频。";

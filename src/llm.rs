@@ -903,6 +903,7 @@ pub(crate) fn send_chat_described(
 ) -> Result<String> {
     let reply = match request_chat(agent, control, s, body, purpose, description, validate) {
         Ok(r) => r,
+    #[error("HTTP {0}")]
         Err(first) => {
             let degradable = first
                 .downcast_ref::<crate::dispatch::Failure>()
@@ -1033,24 +1034,13 @@ fn effective_prompt(s: &LlmSettings) -> &str {
 const TEST_PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
 /// Why [`test_connection`]'s request got no usable answer, in the error chain.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RequestError {
     /// The service answered with this HTTP error status.
     Status(u16),
     /// No answer arrived; the text says why.
     Transport(String),
 }
-
-impl std::fmt::Display for RequestError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Status(status) => write!(f, "HTTP {status}"),
-            Self::Transport(message) => f.write_str(message),
-        }
-    }
-}
-
-impl std::error::Error for RequestError {}
 
 impl From<ureq::Error> for RequestError {
     fn from(error: ureq::Error) -> Self {

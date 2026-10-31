@@ -75,16 +75,9 @@ fn fetch_models(tokens: &CodexTokens) -> Result<Vec<(String, String)>> {
 
 /// 需要（重新）登录 Codex 的标记错误：桌面端在错误链中识别它并替换为
 /// 界面内的连接引导，CLI 直接展示其双语说明。不含任何凭据内容。
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{}", crate::tr!("Codex 登录缺失或已失效，请重新登录 / Codex login is missing or has expired; log in again"))]
 pub struct CodexLoginRequired;
-
-impl std::fmt::Display for CodexLoginRequired {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(crate::tr!("Codex 登录缺失或已失效，请重新登录 / Codex login is missing or has expired; log in again"))
-    }
-}
-
-impl std::error::Error for CodexLoginRequired {}
 
 /// 桌面端登录动作的模型目录结果。`catalog_is_fallback = true` 表示目录拉取失败、
 /// 已回落默认模型——界面应如实说明，而不是把兜底冒充为账号目录。
@@ -342,28 +335,19 @@ fn pkce_challenge(verifier: &str) -> String {
 
 /// The authorization server answered this login with a refusal; waiting longer
 /// cannot change that. Holds what the server said, which may name the cause.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{}", crate::tr!("授权被拒绝：{} / Authorization denied: {}", safe_cause(.0), safe_cause(.0)))]
 struct AuthorizationDenied(String);
 
-impl std::fmt::Display for AuthorizationDenied {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Text from a URL reaches a terminal: no control characters, bounded length.
-        let cause: String = self
-            .0
-            .trim()
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(200)
-            .collect();
-        f.write_str(&crate::tr!(
-            "授权被拒绝：{} / Authorization denied: {}",
-            cause,
-            cause
-        ))
-    }
+/// Text from a URL reaches a terminal: no control characters, bounded length.
+fn safe_cause(cause: &str) -> String {
+    cause
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect()
 }
-
-impl std::error::Error for AuthorizationDenied {}
 
 /// 从回调请求行解析授权码并校验 state（防 CSRF/错会话）。
 fn parse_callback_request(request_line: &str, expected_state: &str) -> Result<String> {
