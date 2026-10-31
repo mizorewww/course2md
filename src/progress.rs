@@ -7,6 +7,7 @@
 //! human 模式下 [`emit`]/[`stage`] 全是 no-op，[`Bar`] 退化为普通可见进度条，
 //! 保证现有终端输出零变化。
 
+use crate::tr;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -15,7 +16,21 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Pipeline stages in pipeline order; the derived `Ord` is the display order.
 /// Serialized as the stage name (`"scenes/scan"`, `"model/<file>"`).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[serde(into = "String", from = "String")]
+#[strum(serialize_all = "lowercase")]
 pub enum Stage {
     Fetch,
     Subtitle,
@@ -23,70 +38,46 @@ pub enum Stage {
     /// Old workers reported scanning and extraction under this one key; it only
     /// survives in saved task records.
     Scenes,
+    #[strum(serialize = "scenes/scan")]
     ScenesScan,
+    #[strum(serialize = "scenes/extract")]
     ScenesExtract,
     Audio,
+    #[strum(serialize = "model/prepare")]
     ModelPrepare,
     /// One model file download, named by its file.
+    #[strum(disabled)]
     ModelFile(String),
+    #[strum(serialize = "model/load")]
     ModelLoad,
+    #[strum(serialize = "model/apple")]
     ModelApple,
     Transcribe,
     Llm,
     Translate,
     Summary,
     Render,
+    #[strum(serialize = "exports", serialize = "export")]
     Exports,
     /// A name this build does not know (a newer or older engine).
+    #[strum(disabled)]
     Other(String),
 }
 
 impl Stage {
     pub fn name(&self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Fetch => "fetch".into(),
-            Self::Subtitle => "subtitle".into(),
-            Self::Download => "download".into(),
-            Self::Scenes => "scenes".into(),
-            Self::ScenesScan => "scenes/scan".into(),
-            Self::ScenesExtract => "scenes/extract".into(),
-            Self::Audio => "audio".into(),
-            Self::ModelPrepare => "model/prepare".into(),
             Self::ModelFile(file) => format!("model/{file}").into(),
-            Self::ModelLoad => "model/load".into(),
-            Self::ModelApple => "model/apple".into(),
-            Self::Transcribe => "transcribe".into(),
-            Self::Llm => "llm".into(),
-            Self::Translate => "translate".into(),
-            Self::Summary => "summary".into(),
-            Self::Render => "render".into(),
-            Self::Exports => "exports".into(),
             Self::Other(name) => name.clone().into(),
+            known => <&'static str>::from(known).into(),
         }
     }
     pub fn parse(name: &str) -> Self {
-        match name {
-            "fetch" => Self::Fetch,
-            "subtitle" => Self::Subtitle,
-            "download" => Self::Download,
-            "scenes" => Self::Scenes,
-            "scenes/scan" => Self::ScenesScan,
-            "scenes/extract" => Self::ScenesExtract,
-            "audio" => Self::Audio,
-            "model/prepare" => Self::ModelPrepare,
-            "model/load" => Self::ModelLoad,
-            "model/apple" => Self::ModelApple,
-            "transcribe" => Self::Transcribe,
-            "llm" => Self::Llm,
-            "translate" => Self::Translate,
-            "summary" => Self::Summary,
-            "render" => Self::Render,
-            "export" | "exports" => Self::Exports,
-            _ => match name.strip_prefix("model/") {
+        name.parse()
+            .unwrap_or_else(|_| match name.strip_prefix("model/") {
                 Some(file) if !file.is_empty() => Self::ModelFile(file.to_owned()),
                 _ => Self::Other(name.to_owned()),
-            },
-        }
+            })
     }
     /// Stages that move model files or video bytes rather than count items.
     pub fn is_model_transfer(&self) -> bool {
@@ -106,21 +97,14 @@ impl std::fmt::Display for Stage {
         f.write_str(&self.name())
     }
 }
-impl std::str::FromStr for Stage {
-    type Err = std::convert::Infallible;
-    fn from_str(name: &str) -> Result<Self, Self::Err> {
-        Ok(Self::parse(name))
+impl From<Stage> for String {
+    fn from(stage: Stage) -> Self {
+        stage.name().into_owned()
     }
 }
-impl Serialize for Stage {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.name())
-    }
-}
-impl<'de> Deserialize<'de> for Stage {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let name = std::borrow::Cow::<str>::deserialize(deserializer)?;
-        Ok(Self::parse(&name))
+impl From<String> for Stage {
+    fn from(name: String) -> Self {
+        Self::parse(&name)
     }
 }
 
@@ -238,32 +222,23 @@ impl ErrorCode {
 
 /// The published note version a finished task reports.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Done {
     /// Set when the task only produced exports for an existing version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
-    #[serde(default)]
     pub task_id: String,
-    #[serde(default)]
     pub course_id: String,
-    #[serde(default)]
     pub version_id: String,
     pub out_dir: PathBuf,
-    #[serde(default)]
     pub manifest: Option<PathBuf>,
     pub title: String,
     pub slides: usize,
-    #[serde(default)]
     pub segments: usize,
-    #[serde(default)]
     pub chars: usize,
-    #[serde(default)]
     pub outputs: Vec<PathBuf>,
-    #[serde(default)]
     pub partial: Option<bool>,
-    #[serde(default)]
     pub outcomes: Option<crate::artifact::Outcomes>,
-    #[serde(default)]
     pub elapsed_secs: f64,
 }
 
@@ -386,23 +361,23 @@ pub fn stage(stage: Stage, status: StageStatus) {
     }
     let label = match stage {
         Stage::ModelLoad | Stage::ModelApple => {
-            crate::tr!(
+            tr!(
                 "加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)"
             )
         }
-        Stage::Fetch => crate::tr!("读取视频信息 / Reading video information"),
-        Stage::Subtitle => crate::tr!("查找字幕 / Looking for subtitles"),
-        Stage::Download => crate::tr!("下载视频 / Downloading video"),
-        Stage::ScenesScan => crate::tr!("扫描画面 / Scanning video frames"),
-        Stage::ScenesExtract => crate::tr!("生成截图 / Saving screenshots"),
-        Stage::Audio => crate::tr!("提取音频 / Extracting audio"),
-        Stage::Transcribe => crate::tr!("识别语音 / Transcribing speech"),
-        Stage::Llm => crate::tr!("校对文字 / Proofreading transcript"),
-        Stage::Translate => crate::tr!("翻译文字 / Translating transcript"),
-        Stage::Summary => crate::tr!("生成摘要 / Generating summary"),
-        Stage::Render => crate::tr!("生成笔记 / Writing notes"),
-        Stage::ModelPrepare => crate::tr!("检查识别模型 / Checking speech model"),
-        Stage::ModelFile(_) => crate::tr!("下载识别模型 / Downloading speech model"),
+        Stage::Fetch => tr!("读取视频信息 / Reading video information"),
+        Stage::Subtitle => tr!("查找字幕 / Looking for subtitles"),
+        Stage::Download => tr!("下载视频 / Downloading video"),
+        Stage::ScenesScan => tr!("扫描画面 / Scanning video frames"),
+        Stage::ScenesExtract => tr!("生成截图 / Saving screenshots"),
+        Stage::Audio => tr!("提取音频 / Extracting audio"),
+        Stage::Transcribe => tr!("识别语音 / Transcribing speech"),
+        Stage::Llm => tr!("校对文字 / Proofreading transcript"),
+        Stage::Translate => tr!("翻译文字 / Translating transcript"),
+        Stage::Summary => tr!("生成摘要 / Generating summary"),
+        Stage::Render => tr!("生成笔记 / Writing notes"),
+        Stage::ModelPrepare => tr!("检查识别模型 / Checking speech model"),
+        Stage::ModelFile(_) => tr!("下载识别模型 / Downloading speech model"),
         Stage::Scenes | Stage::Exports | Stage::Other(_) => return,
     };
     eprintln!("{label}…");
@@ -548,7 +523,7 @@ fn repo_present(repo: &RepoTransfer) -> u64 {
 /// 共享进度条样式：模板均为静态字符串，解析失败是编程错误。
 fn progress_style(template: &str) -> ProgressStyle {
     ProgressStyle::with_template(template)
-        .expect(crate::tr!("静态进度条模板"))
+        .expect(tr!("静态进度条模板"))
         .progress_chars("##-")
 }
 
@@ -624,21 +599,21 @@ impl Bar {
     }
 
     pub fn set_position(&self, pos: u64) {
-        self.bar.set_position(pos);
-        if is_json() {
-            self.current.store(pos, Ordering::Relaxed);
-            self.emit_progress(pos, false);
-        }
+        self.move_to(pos, false);
     }
 
     /// Like [`Self::set_position`] but never throttled, for producers that
     /// already report coarsely: a dropped sample before a quiet spell would
     /// leave the count stale until the next one.
     pub fn report_position(&self, pos: u64) {
+        self.move_to(pos, true);
+    }
+
+    fn move_to(&self, pos: u64, force: bool) {
         self.bar.set_position(pos);
         if is_json() {
             self.current.store(pos, Ordering::Relaxed);
-            self.emit_progress(pos, true);
+            self.emit_progress(pos, force);
         }
     }
 
@@ -698,10 +673,6 @@ impl Bar {
 /// tracing Layer：把日志事件格式化为 `{"type":"log"}` NDJSON 行写 stdout。
 /// 仅在 json 模式注册（main.rs），level 映射 error/warn/info/debug（trace 归 debug）。
 pub struct JsonLogLayer;
-
-pub fn json_log_layer() -> JsonLogLayer {
-    JsonLogLayer
-}
 
 impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for JsonLogLayer {
     fn on_event(

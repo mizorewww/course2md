@@ -1,6 +1,6 @@
+use crate::tr;
 use anyhow::{Context, Result as AnyhowResult};
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 // —— 内置默认值（唯一来源）：options.rs 的合并与 settings.rs 的展示统一引用这里 ——
@@ -29,11 +29,11 @@ pub const DEFAULT_GPU_LAYERS: u32 = 99;
 /// 校验服务地址为完整的 HTTP(S) URL（llm base_url 与 asr_api 共用同一判定）。
 pub fn ensure_http_url(raw: &str) -> AnyhowResult<url::Url> {
     let url = url::Url::parse(raw.trim()).context(
-        crate::tr!("服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid service URL; use a complete HTTP(S) URL."),
+        tr!("服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid service URL; use a complete HTTP(S) URL."),
     )?;
     anyhow::ensure!(
         matches!(url.scheme(), "http" | "https") && url.host_str().is_some(),
-        crate::tr!(
+        tr!(
             "服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid service URL; use a complete HTTP(S) URL."
         )
     );
@@ -71,7 +71,7 @@ pub fn asr_endpoint(api: &crate::settings::AsrApi) -> AnyhowResult<String> {
             suffix,
             &["/audio/transcriptions", "/chat/completions"]
         ),
-        crate::tr!("服务地址与所选服务类型不一致 / Service endpoint and protocol do not match")
+        tr!("服务地址与所选服务类型不一致 / Service endpoint and protocol do not match")
     );
     Ok(append_endpoint_suffix(base, suffix))
 }
@@ -84,8 +84,21 @@ pub fn asr_api_key_from_env() -> Option<String> {
 }
 
 /// ASR 后端。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum AsrProvider {
     Coreml,
     Gpu,
@@ -96,43 +109,22 @@ pub enum AsrProvider {
 
 impl AsrProvider {
     pub fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "coreml" => Some(Self::Coreml),
-            "gpu" => Some(Self::Gpu),
-            "cpu" => Some(Self::Cpu),
-            "npu" => Some(Self::Npu),
-            "api" => Some(Self::Api),
-            _ => None,
-        }
+        id.parse().ok()
     }
 
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Coreml => "coreml",
-            Self::Gpu => "gpu",
-            Self::Cpu => "cpu",
-            Self::Npu => "npu",
-            Self::Api => "api",
-        }
+        self.into()
     }
-}
 
-impl AsrProvider {
     /// 面向用户的识别方式名称（中文 / English）。
     pub fn label(&self) -> (&'static str, &'static str) {
         match self {
-            Self::Coreml => (crate::tr!("Apple 芯片本机识别"), "Apple silicon on-device"),
-            Self::Gpu => (crate::tr!("显卡加速"), "GPU"),
-            Self::Cpu => (crate::tr!("CPU（较慢）"), "CPU (slower)"),
-            Self::Npu => (crate::tr!("Intel NPU 加速"), "Intel NPU"),
-            Self::Api => (crate::tr!("云端语音识别"), "Cloud speech service"),
+            Self::Coreml => (tr!("Apple 芯片本机识别"), "Apple silicon on-device"),
+            Self::Gpu => (tr!("显卡加速"), "GPU"),
+            Self::Cpu => (tr!("CPU（较慢）"), "CPU (slower)"),
+            Self::Npu => (tr!("Intel NPU 加速"), "Intel NPU"),
+            Self::Api => (tr!("云端语音识别"), "Cloud speech service"),
         }
-    }
-}
-
-impl fmt::Display for AsrProvider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
     }
 }
 
@@ -265,15 +257,12 @@ pub fn unsupported_model_error(provider: AsrProvider, raw: &str) -> anyhow::Erro
         .collect::<Vec<_>>()
         .join(", ");
     if provider == AsrProvider::Npu {
-        available.push_str(crate::tr!("，或 Hugging Face 仓库名（如 org/model）"));
+        available.push_str(tr!("，或 Hugging Face 仓库名（如 org/model）"));
     }
     if provider == AsrProvider::Npu && retired_npu_model(raw) {
-        anyhow::anyhow!(crate::tr!(
-            "Intel NPU 不再支持 Qwen3 模型。可用：{}",
-            available
-        ))
+        anyhow::anyhow!(tr!("Intel NPU 不再支持 Qwen3 模型。可用：{}", available))
     } else {
-        anyhow::anyhow!(crate::tr!(
+        anyhow::anyhow!(tr!(
             "识别方式 {} 不支持模型「{}」。可用：{}",
             provider,
             raw.trim(),
@@ -312,7 +301,7 @@ pub fn migrate_retired_npu_model(
 }
 
 pub fn retired_npu_model_notice() -> &'static str {
-    crate::tr!("Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo")
+    tr!("Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo")
 }
 
 /// Prints [`retired_npu_model_notice`] to stderr, once per process however
@@ -340,36 +329,41 @@ pub fn effective_model(provider: AsrProvider, saved: Option<&str>) -> &str {
 }
 
 /// 截图发射模式：first（首个不同帧）| stable（等待画面稳定，适合动画课件）。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    Serialize,
+    Deserialize,
+    strum::Display,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum SlideMode {
     First,
     #[default]
     Stable,
 }
 
-impl fmt::Display for TranscriptSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Auto => "auto",
-            Self::Subtitle => "subtitle",
-            Self::Asr => "asr",
-        })
-    }
-}
-
-impl fmt::Display for SlideMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::First => "first",
-            Self::Stable => "stable",
-        })
-    }
-}
-
 /// 转写来源策略。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    Serialize,
+    Deserialize,
+    strum::Display,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum TranscriptSource {
     /// 优先字幕，无字幕时识别语音 / Prefer subtitles; transcribe speech if unavailable
     #[default]
@@ -381,35 +375,25 @@ pub enum TranscriptSource {
 }
 
 /// 输出格式。非法值在配置解析期即报错，不再拖到渲染阶段。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+/// `Display` and `FromStr` share one spelling: export result keys, config values.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum OutputFormat {
     Md,
     Html,
     Json,
-}
-
-impl fmt::Display for OutputFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Md => "md",
-            Self::Html => "html",
-            Self::Json => "json",
-        })
-    }
-}
-
-impl std::str::FromStr for OutputFormat {
-    type Err = ();
-    /// The spelling `Display` writes (export result keys, config values).
-    fn from_str(value: &str) -> std::result::Result<Self, ()> {
-        match value {
-            "md" => Ok(Self::Md),
-            "html" => Ok(Self::Html),
-            "json" => Ok(Self::Json),
-            _ => Err(()),
-        }
-    }
 }
 
 /// A credential in `Debug` output: shows whether it is set, never its value.
@@ -488,21 +472,6 @@ impl Roi {
         }
         Ok(Self { x1, y1, x2, y2 })
     }
-
-    /// 按帧尺寸换算为像素矩形。
-    pub fn pixels(&self, w: u32, h: u32) -> (u32, u32, u32, u32) {
-        let sx = |v: f64| (v * w as f64).round() as u32;
-        let sy = |v: f64| (v * h as f64).round() as u32;
-        let (x1, x2) = (
-            sx(self.x1).min(w.saturating_sub(1)),
-            sx(self.x2).clamp(1, w),
-        );
-        let (y1, y2) = (
-            sy(self.y1).min(h.saturating_sub(1)),
-            sy(self.y2).clamp(1, h),
-        );
-        (x1, y1, x2.max(x1 + 1), y2.max(y1 + 1))
-    }
 }
 
 fn parse_xy(pair: &str) -> anyhow::Result<(f64, f64)> {
@@ -520,16 +489,9 @@ fn parse_coord(s: &str) -> anyhow::Result<f64> {
     let percent: f64 = p.trim().parse()?;
     anyhow::ensure!(
         (0.0..=100.0).contains(&percent),
-        crate::tr!("ROI 百分比必须在 0–100 / ROI percentages must be between 0 and 100")
+        tr!("ROI 百分比必须在 0–100 / ROI percentages must be between 0 and 100")
     );
-    let v = percent / 100.0;
-    anyhow::ensure!(
-        v.is_finite() && v >= 0.0,
-        crate::tr!(
-            "ROI 坐标必须为非负有限数值 / ROI coordinates must be finite, non-negative numbers"
-        )
-    );
-    Ok(v)
+    Ok(percent / 100.0)
 }
 
 impl PipelineConfig {
@@ -631,18 +593,18 @@ impl PipelineConfig {
             ensure_http_url(&asr_endpoint(&self.asr_api)?)?;
             anyhow::ensure!(
                 !self.asr_api.model.trim().is_empty(),
-                crate::tr!("请输入语音服务提供的模型 ID / Speech model ID is required")
+                tr!("请输入语音服务提供的模型 ID / Speech model ID is required")
             );
             let has_key = !self.asr_api.api_key.trim().is_empty()
                 || (allow_environment && asr_api_key_from_env().is_some());
             if require_key && !has_key {
                 // 桌面任务不读环境变量，只有命令行才提示它
                 anyhow::bail!(if allow_environment {
-                    crate::tr!(
+                    tr!(
                         "云端语音识别需要 API Key：用 --asr-api-key 或环境变量 COURSE2MD_ASR_API_KEY 提供 / Cloud transcription requires an API key: pass --asr-api-key or set COURSE2MD_ASR_API_KEY"
                     )
                 } else {
-                    crate::tr!(
+                    tr!(
                         "云端语音识别需要 API Key，请在服务设置中填写 / Cloud transcription requires an API key; add it in service settings"
                     )
                 });
@@ -879,20 +841,6 @@ pub fn platform_from(source: &str, extractor: &str) -> String {
     }
 }
 
-pub fn infer_slug(source: &str) -> String {
-    let p = Path::new(source);
-    if p.is_file() {
-        return sanitize_component(p.file_stem().and_then(|s| s.to_str()).unwrap_or("local"));
-    }
-    if let Some(id) = bilibili_bvid(source) {
-        return id;
-    }
-    if let Some(id) = youtube_id(source) {
-        return id;
-    }
-    sanitize_component(source)
-}
-
 /// B 站链接 `/video/BVxxxxxxxxxx` 路径段中的 BV 号（"BV" + 10 位）。
 pub fn bilibili_bvid(source: &str) -> Option<String> {
     let url = url::Url::parse(source)
@@ -907,27 +855,6 @@ pub fn bilibili_bvid(source: &str) -> Option<String> {
             && segment.chars().all(|c| c.is_ascii_alphanumeric()))
         .then(|| segment.to_string())
     })
-}
-
-fn youtube_id(s: &str) -> Option<String> {
-    let url = url::Url::parse(s)
-        .or_else(|_| url::Url::parse(&format!("https://{}", s.trim())))
-        .ok()?;
-    if known_video_site(url.as_str()) != Some("youtube") {
-        return None;
-    }
-    let id = if url.host_str()?.eq_ignore_ascii_case("youtu.be") {
-        url.path_segments()?.next()?.to_owned()
-    } else {
-        url.query_pairs()
-            .find(|(key, _)| key == "v")
-            .map(|(_, value)| value.into_owned())?
-    };
-    (id.len() >= 6
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-    .then_some(id)
 }
 
 /// 路径组件的字符数上限（净化后的标题/平台名）：防止超长标题撑出超过
@@ -1075,15 +1002,6 @@ mod tests {
             "https://www.bilibili.com/video/BV1pb8o6yE8f"
         ));
         assert!(looks_like_source("https://youtu.be/dQw4w9WgXcQ"));
-    }
-
-    #[test]
-    fn slug_from_source() {
-        assert_eq!(
-            infer_slug("https://www.bilibili.com/video/BV1pb8o6yE8f/?spm=1"),
-            "BV1pb8o6yE8f"
-        );
-        assert_eq!(infer_slug("https://youtu.be/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
     }
 
     #[test]
@@ -1328,7 +1246,7 @@ mod tests {
     #[test]
     fn roi_parse() {
         let r = Roi::parse("25%,0%-100%,100%").unwrap();
-        assert_eq!(r.pixels(1000, 800), (250, 0, 1000, 800));
+        assert_eq!((r.x1, r.y1, r.x2, r.y2), (0.25, 0.0, 1.0, 1.0));
         assert!(Roi::parse("nonsense").is_err());
     }
 }

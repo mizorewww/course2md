@@ -91,18 +91,12 @@ struct ImageAsset {
     sha256: String,
 }
 
+/// Recognizes screenshots from their leading bytes, whatever decoders are built in.
 fn image_mime(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
-    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        Some(("image/png", "png"))
-    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
-        Some(("image/jpeg", "jpg"))
-    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        Some(("image/gif", "gif"))
-    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        Some(("image/webp", "webp"))
-    } else {
-        None
-    }
+    use image::ImageFormat::{Gif, Jpeg, Png, WebP};
+    let format = image::guess_format(bytes).ok()?;
+    matches!(format, Png | Jpeg | Gif | WebP)
+        .then(|| (format.to_mime_type(), format.extensions_str()[0]))
 }
 
 fn images(root: &Path, document: &Document) -> Result<BTreeMap<String, ImageAsset>> {
@@ -265,6 +259,20 @@ fn local_file_name(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screenshots_are_recognized_from_their_first_bytes() {
+        for (bytes, expected) in [
+            (&b"\x89PNG\r\n\x1a\n"[..], ("image/png", "png")),
+            (&[0xff, 0xd8, 0xff], ("image/jpeg", "jpg")),
+            (b"GIF89a", ("image/gif", "gif")),
+            (b"RIFF\0\0\0\0WEBPVP8 ", ("image/webp", "webp")),
+        ] {
+            assert_eq!(image_mime(bytes), Some(expected));
+        }
+        assert_eq!(image_mime(b"BM\0\0\0\0"), None);
+        assert_eq!(image_mime(b"not an image"), None);
+    }
 
     #[test]
     fn local_file_names_come_from_either_platform() {

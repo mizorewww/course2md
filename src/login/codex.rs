@@ -7,7 +7,7 @@
 //! 协议常量对照 openai/codex 源码（codex-rs/login/src/auth/manager.rs、
 //! codex-rs/model-provider-info/src/lib.rs），见各常量注释。
 
-use std::io::IsTerminal;
+use crate::{println_tr, tr};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -51,15 +51,15 @@ fn fetch_models(tokens: &CodexTokens) -> Result<Vec<(String, String)>> {
             ureq::Error::StatusCode(status) => anyhow::anyhow!("HTTP {status}"),
             other => anyhow::anyhow!("{other}"),
         };
-        cause.context(crate::tr!(
+        cause.context(tr!(
             "无法获取 Codex 模型目录 / Cannot fetch the Codex model catalog"
         ))
     })?;
-    let value: Value = response.body_mut().read_json().context(crate::tr!(
+    let value: Value = response.body_mut().read_json().context(tr!(
         "Codex 模型目录无法解析 / Cannot parse the Codex model catalog"
     ))?;
     let Some(models) = value["models"].as_array() else {
-        bail!(crate::tr!(
+        bail!(tr!(
             "Codex 模型目录缺少 models / Codex model catalog is missing models"
         ));
     };
@@ -75,16 +75,9 @@ fn fetch_models(tokens: &CodexTokens) -> Result<Vec<(String, String)>> {
 
 /// 需要（重新）登录 Codex 的标记错误：桌面端在错误链中识别它并替换为
 /// 界面内的连接引导，CLI 直接展示其双语说明。不含任何凭据内容。
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{}", tr!("Codex 登录缺失或已失效，请重新登录 / Codex login is missing or has expired; log in again"))]
 pub struct CodexLoginRequired;
-
-impl std::fmt::Display for CodexLoginRequired {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(crate::tr!("Codex 登录缺失或已失效，请重新登录 / Codex login is missing or has expired; log in again"))
-    }
-}
-
-impl std::error::Error for CodexLoginRequired {}
 
 /// 桌面端登录动作的模型目录结果。`catalog_is_fallback = true` 表示目录拉取失败、
 /// 已回落默认模型——界面应如实说明，而不是把兜底冒充为账号目录。
@@ -157,12 +150,12 @@ pub fn load_tokens() -> Result<Option<CodexTokens>> {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {
-            return Err(e).context(crate::tr!(
+            return Err(e).context(tr!(
                 "无法读取 Codex 登录状态 / Cannot read Codex login state"
             ));
         }
     };
-    let tokens: CodexTokens = serde_json::from_slice(&bytes).context(crate::tr!(
+    let tokens: CodexTokens = serde_json::from_slice(&bytes).context(tr!(
         "Codex 登录状态损坏，请重新登录 / Codex login state is damaged; log in again"
     ))?;
     Ok(Some(tokens))
@@ -170,7 +163,7 @@ pub fn load_tokens() -> Result<Option<CodexTokens>> {
 
 fn save_tokens(tokens: &CodexTokens) -> Result<()> {
     crate::checkpoint::atomic_write(&credential_path(), &serde_json::to_vec_pretty(tokens)?)
-        .context(crate::tr!(
+        .context(tr!(
             "保存 Codex 登录状态失败 / Failed to save Codex login state"
         ))
 }
@@ -213,10 +206,10 @@ fn refresh(tokens: &CodexTokens) -> Result<CodexTokens> {
                 anyhow::Error::new(CodexLoginRequired)
             }
             _ => anyhow::anyhow!(
-                crate::tr!("无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later")
+                tr!("无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later")
             ),
         })?;
-    let value: Value = response.body_mut().read_json().context(crate::tr!(
+    let value: Value = response.body_mut().read_json().context(tr!(
         "无法解析刷新响应 / Cannot parse the token refresh response"
     ))?;
     let refreshed = CodexTokens {
@@ -284,6 +277,22 @@ pub(crate) fn auth_headers() -> Result<Vec<(String, String)>> {
     Ok(headers)
 }
 
+/// Both tokens from a login response; `None` when either is missing.
+fn new_tokens(source: &Value, account_id: Option<String>) -> Option<CodexTokens> {
+    let token = |key: &str| {
+        source[key]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    Some(CodexTokens {
+        access_token: token("access_token")?,
+        refresh_token: token("refresh_token")?,
+        account_id,
+        obtained_at: now_secs(),
+    })
+}
+
 /// 从 codex CLI 的 auth.json 导入登录态（只读原文件）。
 fn import_from_codex_cli() -> Result<CodexTokens> {
     let path = codex_cli_auth_path();
@@ -294,32 +303,19 @@ fn import_from_codex_cli() -> Result<CodexTokens> {
             path.display()
         )
     })?;
-    let value: Value = serde_json::from_slice(&bytes).context(crate::tr!(
+    let value: Value = serde_json::from_slice(&bytes).context(tr!(
         "codex CLI 登录态无法解析 / Cannot parse the codex CLI login state"
     ))?;
     if value["auth_mode"].as_str() == Some("apikey") {
-        bail!(crate::tr!(
+        bail!(tr!(
             "codex CLI 当前是 API key 模式；请在 codex 中用 ChatGPT 账号登录后重试 / The codex CLI is in API-key mode; log in with a ChatGPT account in codex and retry"
         ));
     }
     let tokens = &value["tokens"];
-    let access = tokens["access_token"].as_str().unwrap_or_default();
-    let refresh = tokens["refresh_token"].as_str().unwrap_or_default();
-    ensure!(
-        !access.is_empty() && !refresh.is_empty(),
-        crate::tr!(
-            "codex CLI 登录态缺少令牌，请在 codex 中重新登录 / The codex CLI login state is missing tokens; log in again in codex"
-        )
-    );
-    Ok(CodexTokens {
-        access_token: access.to_string(),
-        refresh_token: refresh.to_string(),
-        account_id: tokens["account_id"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(str::to_string),
-        obtained_at: now_secs(),
-    })
+    let account_id = tokens["account_id"].as_str().filter(|s| !s.is_empty());
+    new_tokens(tokens, account_id.map(str::to_string)).context(tr!(
+        "codex CLI 登录态缺少令牌，请在 codex 中重新登录 / The codex CLI login state is missing tokens; log in again in codex"
+    ))
 }
 
 // ---------- PKCE 浏览器授权（无 codex CLI 时的兜底；对照 codex-rs/login/src/server.rs） ----------
@@ -342,40 +338,30 @@ fn pkce_challenge(verifier: &str) -> String {
 
 /// The authorization server answered this login with a refusal; waiting longer
 /// cannot change that. Holds what the server said, which may name the cause.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{}", tr!("授权被拒绝：{} / Authorization denied: {}", safe_cause(.0), safe_cause(.0)))]
 struct AuthorizationDenied(String);
 
-impl std::fmt::Display for AuthorizationDenied {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Text from a URL reaches a terminal: no control characters, bounded length.
-        let cause: String = self
-            .0
-            .trim()
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(200)
-            .collect();
-        f.write_str(&crate::tr!(
-            "授权被拒绝：{} / Authorization denied: {}",
-            cause,
-            cause
-        ))
-    }
+/// Text from a URL reaches a terminal: no control characters, bounded length.
+fn safe_cause(cause: &str) -> String {
+    cause
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect()
 }
-
-impl std::error::Error for AuthorizationDenied {}
 
 /// 从回调请求行解析授权码并校验 state（防 CSRF/错会话）。
 fn parse_callback_request(request_line: &str, expected_state: &str) -> Result<String> {
-    let path = request_line.split_whitespace().nth(1).context(crate::tr!(
+    let path = request_line.split_whitespace().nth(1).context(tr!(
         "授权回调请求无效 / Invalid authorization callback request"
     ))?;
-    let url = url::Url::parse(&format!("http://localhost{path}")).context(crate::tr!(
-        "授权回调地址无效 / Invalid authorization callback URL"
-    ))?;
+    let url = url::Url::parse(&format!("http://localhost{path}"))
+        .context(tr!("授权回调地址无效 / Invalid authorization callback URL"))?;
     ensure!(
         url.path() == "/auth/callback",
-        crate::tr!("授权回调路径不受支持 / Unsupported authorization callback path")
+        tr!("授权回调路径不受支持 / Unsupported authorization callback path")
     );
     let param = |name: &str| {
         url.query_pairs()
@@ -385,36 +371,20 @@ fn parse_callback_request(request_line: &str, expected_state: &str) -> Result<St
     // State first: anything without it is not an answer to this login, whatever it says.
     ensure!(
         param("state").as_deref() == Some(expected_state),
-        crate::tr!("授权回调状态不匹配，请重试 / Authorization state mismatch; retry")
+        tr!("授权回调状态不匹配，请重试 / Authorization state mismatch; retry")
     );
     if let Some(error) = param("error") {
         let description = param("error_description").unwrap_or_default();
         return Err(AuthorizationDenied(format!("{error} {description}")).into());
     }
-    param("code")
-        .filter(|code| !code.is_empty())
-        .context(crate::tr!(
-            "授权回调缺少授权码 / Authorization callback is missing the code"
-        ))
+    param("code").filter(|code| !code.is_empty()).context(tr!(
+        "授权回调缺少授权码 / Authorization callback is missing the code"
+    ))
 }
 
 /// 打开系统浏览器；失败时用户可手动复制 URL。
 fn open_browser(url: &str) {
-    #[cfg(target_os = "macos")]
-    let opened = std::process::Command::new("open").arg(url).spawn().is_ok();
-    #[cfg(target_os = "linux")]
-    let opened = std::process::Command::new("xdg-open")
-        .arg(url)
-        .spawn()
-        .is_ok();
-    #[cfg(target_os = "windows")]
-    let opened = std::process::Command::new("rundll32")
-        .args(["url.dll,FileProtocolHandler", url])
-        .spawn()
-        .is_ok();
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    let opened = false;
-    if !opened {
+    if open::that_detached(url).is_err() {
         println!("请手动在浏览器打开 / Open this URL in your browser:\n{url}");
     }
 }
@@ -440,15 +410,10 @@ fn exchange_code(code: &str, verifier: &str, port: u16) -> Result<CodexTokens> {
                 "授权码交换失败，请重试登录{status} / Authorization code exchange failed; retry the login{status}"
             )
         })?;
-    let value: Value = response.body_mut().read_json().context(crate::tr!(
-        "无法解析令牌响应 / Cannot parse the token response"
-    ))?;
-    let access = value["access_token"].as_str().unwrap_or_default();
-    let refresh = value["refresh_token"].as_str().unwrap_or_default();
-    ensure!(
-        !access.is_empty() && !refresh.is_empty(),
-        crate::tr!("令牌响应不完整 / The token response is incomplete")
-    );
+    let value: Value = response
+        .body_mut()
+        .read_json()
+        .context(tr!("无法解析令牌响应 / Cannot parse the token response"))?;
     // account_id 来自 id_token 的 chatgpt_account_id claim（token_data.rs）
     let account_id = value["id_token"]
         .as_str()
@@ -459,12 +424,7 @@ fn exchange_code(code: &str, verifier: &str, port: u16) -> Result<CodexTokens> {
                 .or_else(|| claims["chatgpt_account_id"].as_str())
                 .map(str::to_string)
         });
-    Ok(CodexTokens {
-        access_token: access.to_string(),
-        refresh_token: refresh.to_string(),
-        account_id,
-        obtained_at: now_secs(),
-    })
+    new_tokens(&value, account_id).context(tr!("令牌响应不完整 / The token response is incomplete"))
 }
 
 fn callback_url(port: u16) -> String {
@@ -500,14 +460,14 @@ fn browser_authorization(cancel: Option<&std::sync::atomic::AtomicBool>) -> Resu
     let listener = CALLBACK_PORTS
         .iter()
         .find_map(|port| TcpListener::bind(("127.0.0.1", *port)).ok())
-        .context(crate::tr!("无法启动本地授权回调服务（端口 1455/1457 均被占用）/ Cannot start the local authorization callback (ports 1455/1457 are both in use)"))?;
+        .context(tr!("无法启动本地授权回调服务（端口 1455/1457 均被占用）/ Cannot start the local authorization callback (ports 1455/1457 are both in use)"))?;
     let port = listener.local_addr()?.port();
     listener.set_nonblocking(true)?;
 
     let verifier = crate::random_b64url(64)?;
     let state = crate::random_b64url(32)?;
     let url = authorize_url(port, &pkce_challenge(&verifier), &state);
-    crate::println_tr!(
+    println_tr!(
         "正在打开浏览器完成 ChatGPT 授权（{} 分钟内有效，Ctrl+C 取消）…",
         CALLBACK_TIMEOUT.as_secs() / 60
     );
@@ -516,9 +476,7 @@ fn browser_authorization(cancel: Option<&std::sync::atomic::AtomicBool>) -> Resu
     let deadline = std::time::Instant::now() + CALLBACK_TIMEOUT;
     let code = loop {
         if cancel.is_some_and(|cancel| cancel.load(std::sync::atomic::Ordering::Relaxed)) {
-            bail!(crate::tr!(
-                "已取消浏览器授权 / Browser authorization cancelled"
-            ));
+            bail!(tr!("已取消浏览器授权 / Browser authorization cancelled"));
         }
         match listener.accept() {
             Ok((mut stream, _)) => {
@@ -530,13 +488,11 @@ fn browser_authorization(cancel: Option<&std::sync::atomic::AtomicBool>) -> Resu
                 let line = request.lines().next().unwrap_or_default();
                 let parsed = parse_callback_request(line, &state);
                 let body = if parsed.is_ok() {
-                    crate::tr!(
+                    tr!(
                         "Codex 登录成功，可以关闭此页。/ Login successful; you may close this page."
                     )
                 } else {
-                    crate::tr!(
-                        "登录失败，请回终端重试。/ Login failed; return to the terminal and retry."
-                    )
+                    tr!("登录失败，请回终端重试。/ Login failed; return to the terminal and retry.")
                 };
                 let body = format!(
                     "<html><body style=\"font-family:sans-serif;text-align:center;padding:4em\">{body}</body></html>"
@@ -559,16 +515,12 @@ fn browser_authorization(cancel: Option<&std::sync::atomic::AtomicBool>) -> Resu
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 ensure!(
                     std::time::Instant::now() < deadline,
-                    crate::tr!(
-                        "浏览器授权超时，请重试 / Browser authorization timed out; please retry"
-                    )
+                    tr!("浏览器授权超时，请重试 / Browser authorization timed out; please retry")
                 );
                 std::thread::sleep(Duration::from_millis(200));
             }
             Err(e) => {
-                return Err(e).context(crate::tr!(
-                    "授权回调服务出错 / Authorization callback error"
-                ));
+                return Err(e).context(tr!("授权回调服务出错 / Authorization callback error"));
             }
         }
     };
@@ -608,14 +560,10 @@ pub fn remove_credentials() -> Result<bool> {
     match std::fs::remove_file(credential_path()) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(e).context(crate::tr!(
+        Err(e) => Err(e).context(tr!(
             "清除 Codex 登录状态失败 / Could not remove Codex login"
         )),
     }
-}
-
-fn interactive() -> bool {
-    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
 fn confirm_browser(prompt: &str) -> Result<CodexTokens> {
@@ -625,19 +573,19 @@ fn confirm_browser(prompt: &str) -> Result<CodexTokens> {
         .interact_opt()?
         .unwrap_or(false);
     if !browser {
-        bail!(crate::tr!("已取消登录。/ Login cancelled."));
+        bail!(tr!("已取消登录。/ Login cancelled."));
     }
     browser_authorization(None)
 }
 
 /// `course2md --login codex`：导入 codex CLI 登录态（失败时可改用浏览器授权），选模型并启用 AI 校对。
 pub(super) fn login() -> Result<()> {
-    let interactive = interactive();
+    let interactive = crate::runtime::interactive();
     let mut tokens = match import_from_codex_cli() {
         Ok(tokens) => tokens,
         Err(import_err) if interactive => {
             println!("{import_err:#}");
-            confirm_browser(crate::tr!(
+            confirm_browser(tr!(
                 "改用浏览器授权登录（ChatGPT 账号）？/ Authorize with a ChatGPT account in the browser instead?"
             ))?
         }
@@ -653,7 +601,7 @@ pub(super) fn login() -> Result<()> {
                         .any(|c| c.downcast_ref::<CodexLoginRequired>().is_some()) =>
             {
                 println!("{e:#}");
-                tokens = confirm_browser(crate::tr!(
+                tokens = confirm_browser(tr!(
                     "codex CLI 的登录已失效。改用浏览器授权登录（ChatGPT 账号）？/ The codex CLI login expired. Authorize in the browser instead?"
                 ))?;
             }
@@ -668,7 +616,7 @@ pub(super) fn login() -> Result<()> {
     cfg.llm.api_key.clear();
     let catalog = desktop_catalog(&tokens);
     if catalog.catalog_is_fallback {
-        crate::println_tr!(
+        println_tr!(
             "无法获取账号可用的模型列表，已使用默认模型 {}。",
             DEFAULT_MODEL
         );
@@ -685,16 +633,12 @@ pub(super) fn login() -> Result<()> {
             .map(|(_, label)| label.as_str())
             .collect::<Vec<_>>()
     }) {
-        let pick = dialoguer::Select::new()
-            .with_prompt(crate::tr!("选择 Codex 模型 / Choose a Codex model"))
-            .items(&labels)
-            .default(0)
-            .interact_opt()?
-            .ok_or_else(|| {
-                anyhow::anyhow!(crate::tr!(
-                    "已取消登录，未保存配置。 / Login cancelled; no configuration saved."
-                ))
-            })?;
+        let pick = crate::runtime::choose(
+            tr!("选择 Codex 模型 / Choose a Codex model"),
+            &labels,
+            0,
+            tr!("已取消登录，未保存配置。 / Login cancelled; no configuration saved."),
+        )?;
         catalog[pick].0.clone()
     } else {
         DEFAULT_MODEL.to_string()
@@ -702,12 +646,12 @@ pub(super) fn login() -> Result<()> {
     cfg.llm.enabled = true;
     crate::llm::validate(&cfg.llm)?;
     crate::settings::save(&cfg)?;
-    crate::println_tr!(
+    println_tr!(
         "已导入 Codex 登录态并启用 AI 校对（模型 {}）。",
         cfg.llm.model
     );
     match crate::llm::test_connection(&cfg.llm) {
-        Ok(()) => crate::println_tr!("连接测试通过 / Connection test passed."),
+        Ok(()) => println_tr!("连接测试通过 / Connection test passed."),
         Err(e) => bail!(
             "登录态已保存，但连接测试失败；可用 course2md llm setup 调整模型 / Login saved, but the connection test failed; adjust the model with course2md llm setup: {e:#}"
         ),
@@ -738,15 +682,15 @@ pub fn status() -> Result<LoginStatus> {
 /// `course2md --logout codex`：删除凭据；当前 AI 校对使用 Codex 时一并重置。
 pub(super) fn logout() -> Result<()> {
     if remove_credentials()? {
-        crate::println_tr!("已清除 Codex 登录状态。/ Codex login removed.");
+        println_tr!("已清除 Codex 登录状态。/ Codex login removed.");
     } else {
-        crate::println_tr!("尚未登录 Codex。/ No Codex login saved.");
+        println_tr!("尚未登录 Codex。/ No Codex login saved.");
     }
     let mut cfg = crate::settings::load()?;
     if cfg.llm.provider == LlmProvider::Codex {
         cfg.llm = crate::llm::LlmSettings::default();
         crate::settings::save(&cfg)?;
-        crate::println_tr!(
+        println_tr!(
             "已关闭 AI 校对并重置 LLM 配置。/ AI proofreading disabled and LLM settings reset."
         );
     }

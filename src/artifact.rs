@@ -1,5 +1,6 @@
 //! Published versions are immutable. Work directories and diagnostic logs are not notes.
 
+use crate::tr;
 use crate::{
     checkpoint::{atomic_write, atomic_write_shared},
     dispatch::TaskControl,
@@ -78,14 +79,6 @@ impl Outcome {
             status: Status::Failed,
             message: Some(message.into()),
             kind: Some(FailureKind::Local),
-            ..Self::succeeded()
-        }
-    }
-    pub fn failed_kind(message: impl Into<String>, kind: FailureKind) -> Self {
-        Self {
-            status: Status::Failed,
-            message: Some(message.into()),
-            kind: Some(kind),
             ..Self::succeeded()
         }
     }
@@ -211,10 +204,10 @@ impl Target {
 
 pub fn read_manifest(path: &Path) -> Result<Manifest> {
     let value: Manifest = serde_json::from_slice(&std::fs::read(path)?)
-        .context(crate::tr!("笔记清单损坏 / Invalid note manifest"))?;
+        .context(tr!("笔记清单损坏 / Invalid note manifest"))?;
     anyhow::ensure!(
         value.schema == 1,
-        crate::tr!("此笔记版本需要其他版本的软件 / Unsupported manifest schema")
+        tr!("此笔记版本需要其他版本的软件 / Unsupported manifest schema")
     );
     Ok(value)
 }
@@ -230,7 +223,7 @@ pub fn published(target: &Target) -> Result<Option<Manifest>> {
             && manifest.course_id == target.course_id
             && manifest.source_id == target.source_id
             && manifest.version_id == target.version_id,
-        crate::tr!("此版本位置已有其他笔记，已保留原文件 / Version identity conflict")
+        tr!("此版本位置已有其他笔记，已保留原文件 / Version identity conflict")
     );
     validate_version(&dir, &manifest)?;
     Ok(Some(manifest))
@@ -240,13 +233,13 @@ pub fn safe_asset_path(root: &Path, relative: &str) -> Result<PathBuf> {
     let path = Path::new(relative);
     anyhow::ensure!(
         !relative.is_empty() && path.components().all(|c| matches!(c, Component::Normal(_))),
-        crate::tr!("笔记包含无效资源路径 / Invalid note asset path")
+        tr!("笔记包含无效资源路径 / Invalid note asset path")
     );
     let full = root.join(path);
     let canonical = full.canonicalize()?;
     anyhow::ensure!(
         canonical.starts_with(root.canonicalize()?),
-        crate::tr!("资源位置超出此笔记 / Asset escapes note directory")
+        tr!("资源位置超出此笔记 / Asset escapes note directory")
     );
     Ok(full)
 }
@@ -313,7 +306,7 @@ pub(crate) fn validate_version_in_task(
         serde_json::from_slice(&std::fs::read(safe_asset_path(dir, &manifest.document)?)?)?;
     anyhow::ensure!(
         has_readable_body(&body.sections),
-        crate::tr!("笔记没有可读正文 / Note has no readable body")
+        tr!("笔记没有可读正文 / Note has no readable body")
     );
     for frame in &manifest.frames {
         safe_asset_path(dir, &frame.image)?;
@@ -328,47 +321,7 @@ pub fn has_readable_body(sections: &[Section]) -> bool {
         .any(|e| !e.text.trim().is_empty())
 }
 
-/// Build and fsync all files on the target volume, then publish one directory rename.
-/// The pointer is a separate atomic commit. A restart can finish it without rerunning AI.
-///
-/// 重阻塞 IO（逐图复制、SHA-256、fsync）不占 tokio worker 线程：
-/// 克隆输入后整个发布在 spawn_blocking 中执行。
-#[allow(clippy::too_many_arguments)]
-pub async fn publish(
-    target: &Target,
-    work_dir: &Path,
-    meta: &VideoMeta,
-    sections: &[Section],
-    summary: Option<&Summary>,
-    formats: &[crate::config::OutputFormat],
-    outcomes: Outcomes,
-    control: &TaskControl,
-) -> Result<Manifest> {
-    let target = target.clone();
-    let control = control.clone();
-    let work_dir = work_dir.to_path_buf();
-    let meta = meta.clone();
-    let sections = sections.to_vec();
-    let summary = summary.cloned();
-    let formats = formats.to_vec();
-    let publish = move || {
-        publish_in_task(
-            &target,
-            &work_dir,
-            &meta,
-            &sections,
-            summary.as_ref(),
-            &formats,
-            outcomes,
-            &control,
-        )
-    };
-    tokio::task::spawn_blocking(publish)
-        .await
-        .context(crate::tr!("发布工作进程中断 / Publish worker interrupted"))?
-}
-
-/// publish 的同步实现（见 publish 的 spawn_blocking 纪律说明），用于任务之外。
+/// [`publish`] outside a task.
 pub fn publish_blocking(
     target: &Target,
     work_dir: &Path,
@@ -378,7 +331,7 @@ pub fn publish_blocking(
     formats: &[crate::config::OutputFormat],
     outcomes: Outcomes,
 ) -> Result<Manifest> {
-    publish_in_task(
+    publish(
         target,
         work_dir,
         meta,
@@ -390,8 +343,10 @@ pub fn publish_blocking(
     )
 }
 
+/// Build and fsync all files on the target volume, then publish one directory rename.
+/// The pointer is a separate atomic commit. A restart can finish it without rerunning AI.
 #[allow(clippy::too_many_arguments)]
-fn publish_in_task(
+pub(crate) fn publish(
     target: &Target,
     work_dir: &Path,
     meta: &VideoMeta,
@@ -403,7 +358,7 @@ fn publish_in_task(
 ) -> Result<Manifest> {
     anyhow::ensure!(
         has_readable_body(sections),
-        crate::tr!(
+        tr!(
             "文字未生成，已保留可用素材 / No readable text; available materials are retained in the task"
         )
     );
@@ -502,7 +457,7 @@ fn publish_in_task(
             .write(cfg!(windows))
             .open(&full)?
             .sync_all()
-            .with_context(|| crate::tr!("无法同步笔记文件：{}", path))?;
+            .with_context(|| tr!("无法同步笔记文件：{}", path))?;
         Ok(Asset {
             bytes: std::fs::metadata(&full)?.len(),
             sha256: execution::file_digest(&full)?,
@@ -543,7 +498,7 @@ fn publish_in_task(
         &serde_json::to_vec_pretty(&manifest)?,
     )?;
     sync_dir(staging.path())?;
-    std::fs::rename(staging.path(), target.version_dir()).context(crate::tr!(
+    std::fs::rename(staging.path(), target.version_dir()).context(tr!(
         "无法发布笔记版本；旧笔记已保留 / Could not publish note version"
     ))?;
     sync_dir(&versions)?;
@@ -557,7 +512,7 @@ fn commit_current(target: &Target, manifest: &Manifest) -> Result<()> {
         let current: CurrentVersion = serde_json::from_slice(&std::fs::read(&path)?)?;
         anyhow::ensure!(
             current.course_id == target.course_id,
-            crate::tr!("课程位置已被其他课程使用 / Course identity conflict")
+            tr!("课程位置已被其他课程使用 / Course identity conflict")
         );
         // Recovery of an older completed task must never roll back a later version.
         if current.version_id != target.version_id {
@@ -639,7 +594,6 @@ mod tests {
             Outcomes::default(),
             &TaskControl::default(),
         )
-        .await
         .unwrap();
         let old_export = target.version_dir().join("exports/course.html");
         let edited = b"<p>My manual corrections must survive.</p>";
@@ -660,8 +614,7 @@ mod tests {
             &[],
             Outcomes::default(),
             &TaskControl::default(),
-        )
-        .await;
+        );
         std::fs::set_permissions(&target.course_dir, std::fs::Permissions::from_mode(0o755))
             .unwrap();
         assert!(interrupted.is_err());
@@ -680,7 +633,6 @@ mod tests {
                 Outcomes::default(),
                 &TaskControl::default(),
             )
-            .await
             .unwrap();
             assert_eq!(
                 std::fs::read(target.version_dir().join("manifest.json")).unwrap(),
@@ -704,7 +656,6 @@ mod tests {
             Outcomes::default(),
             &TaskControl::default(),
         )
-        .await
         .unwrap();
         let current: CurrentVersion =
             serde_json::from_slice(&std::fs::read(pointer).unwrap()).unwrap();
@@ -753,7 +704,6 @@ mod tests {
             Outcomes::default(),
             &TaskControl::default(),
         )
-        .await
         .unwrap();
         assert!(first.outputs.is_empty());
         assert!(target.version_dir().join("course.md").is_file());
@@ -773,7 +723,6 @@ mod tests {
                 Outcomes::default(),
                 &TaskControl::default()
             )
-            .await
             .is_err()
         );
         assert_eq!(
@@ -798,7 +747,6 @@ mod tests {
                 Outcomes::default(),
                 &TaskControl::default()
             )
-            .await
             .is_err()
         );
     }

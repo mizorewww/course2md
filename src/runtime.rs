@@ -4,9 +4,12 @@
 //! - `wait_ready`：健康轮询期间监视子进程，秒退立即报错而不是等满超时
 //! - `retry_backoff` / `interruptible_sleep`：可取消的重试退避
 
+use crate::tr;
 use anyhow::{Context, Result};
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(windows)]
+use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -40,7 +43,7 @@ impl ManagedChild {
     pub fn spawn(name: &'static str, cmd: &mut Command) -> Result<Self> {
         let child = cmd
             .spawn()
-            .with_context(|| crate::tr!("无法启动 {} / Could not start {}", name, name))?;
+            .with_context(|| tr!("无法启动 {} / Could not start {}", name, name))?;
         Ok(Self { child, name })
     }
 
@@ -77,14 +80,6 @@ impl ManagedChild {
             );
             std::thread::sleep(WAIT_POLL_INTERVAL);
         }
-    }
-
-    pub fn kill(&mut self) {
-        let _ = self.child.kill();
-    }
-
-    pub fn wait(&mut self) -> std::io::Result<ExitStatus> {
-        self.child.wait()
     }
 }
 
@@ -221,41 +216,32 @@ pub fn run_bounded(
     })?;
     stdout.rewind()?;
     stderr.rewind()?;
-    let mut out = String::new();
-    let mut err = String::new();
-    let mut bytes = Vec::new();
-    stdout.take(64 * 1024 * 1024).read_to_end(&mut bytes)?;
-    out.push_str(&String::from_utf8_lossy(&bytes));
-    bytes.clear();
-    stderr.take(64 * 1024 * 1024).read_to_end(&mut bytes)?;
-    err.push_str(&String::from_utf8_lossy(&bytes));
+    let capture = |file: &std::fs::File| -> Result<String> {
+        let mut bytes = Vec::new();
+        file.take(64 * 1024 * 1024).read_to_end(&mut bytes)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    };
     Ok(BoundedOutput {
         status,
-        stdout: out,
-        stderr: err,
+        stdout: capture(&stdout)?,
+        stderr: capture(&stderr)?,
     })
 }
 
-/// 轮询 `{base}/health` 直到成功；子进程中途退出立即失败（不等满超时）。
-/// `expect_body` 非空时还要求响应体包含该子串——防止端口被无关服务
-/// 抢占（free_port 存在 TOCTOU 窗口）而误判就绪。
-/// `control` 非空时每轮轮询前调用：返回 Err 表示外部要求中止（暂停/取消），
-/// 立即报错返回而不等满超时；子进程由 ManagedChild 的 Drop 兜底 kill。
+/// 轮询 `{base}/health` 直到其 status 为 ok（端口可能被无关服务抢占，free_port 有
+/// TOCTOU 窗口）；子进程中途退出立即失败，不等满超时。`control` 每轮调用一次：
+/// 返回 Err 表示外部要求中止（暂停/取消），原样上抛，由调用方区分于启动失败。
 pub fn wait_ready(
     base: &str,
     timeout: Duration,
     child: &mut ManagedChild,
-    expect_status: Option<&str>,
-    control: Option<&dyn Fn() -> Result<()>>,
+    control: &dyn Fn() -> Result<()>,
 ) -> Result<()> {
     let t0 = Instant::now();
     let url = format!("{base}/health");
     let agent = http_agent(Duration::from_secs(2));
     loop {
-        if let Some(check) = control {
-            // 暂停/取消原样上抛：调用方要据此区分「用户中止」与「启动失败」
-            check()?;
-        }
+        control()?;
         if let Some(st) = child.try_wait() {
             anyhow::bail!(
                 "{} 启动失败（{st}） / {} exited during startup ({st})",
@@ -272,37 +258,25 @@ pub fn wait_ready(
                 timeout.as_secs_f64()
             );
         }
-        if let Ok(mut resp) = agent.get(&url).call() {
-            match expect_status {
-                None => return Ok(()),
-                Some(expected) => {
-                    if resp
-                        .body_mut()
-                        .read_json::<serde_json::Value>()
-                        .is_ok_and(|body| body["status"] == expected)
-                    {
-                        return Ok(());
-                    }
-                    // 端口上跑着别的服务：继续等（真正要起的服务可能还在绑端口）
-                }
-            }
+        if let Ok(mut resp) = agent.get(&url).call()
+            && resp
+                .body_mut()
+                .read_json::<serde_json::Value>()
+                .is_ok_and(|body| body["status"] == "ok")
+        {
+            return Ok(());
         }
         std::thread::sleep(Duration::from_millis(300));
     }
 }
 
-/// 进程级抖动序列：与纳秒异或打散，避免并发请求同步重试（不引入 rand）。
-static JITTER_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// 第 `attempt` 次失败后的退避时长：1s、2s、4s… 指数增长 + 0~500ms 抖动。
+/// 第 `attempt` 次失败后的退避时长：1s、2s、4s… 指数增长 + 0~500ms 抖动，
+/// 避免并发请求同步重试。
 pub fn retry_backoff(attempt: u32) -> Duration {
     let base = 1_u64 << attempt.saturating_sub(1).min(6);
-    let seq = JITTER_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| u64::from(d.subsec_nanos()))
-        .unwrap_or(0);
-    let jitter_ns = (nanos ^ seq.wrapping_mul(0x9E37_79B9_7F4A_7C15)) % 500_000_000;
+    let mut random = [0; 4];
+    let _ = getrandom::fill(&mut random);
+    let jitter_ns = u64::from(u32::from_le_bytes(random)) % 500_000_000;
     Duration::from_nanos(base * 1_000_000_000 + jitter_ns)
 }
 
@@ -366,11 +340,29 @@ pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
 /// [`http_agent`] whose error statuses arrive as responses, so that a caller can
 /// read the body. Whoever uses it checks the status; `dispatch::receive` does.
 pub(crate) fn http_agent_keeping_errors(timeout: Duration) -> ureq::Agent {
-    agent_builder()
-        .timeout_global(Some(timeout))
-        .http_status_as_error(false)
-        .build()
-        .new_agent()
+    let agent = agent_builder().timeout_global(Some(timeout));
+    agent.http_status_as_error(false).build().new_agent()
+}
+
+/// A menu that Esc cancels with `cancelled` as the error, not accepting the default.
+pub(crate) fn choose(
+    prompt: &str,
+    items: &[impl ToString],
+    default: usize,
+    cancelled: &str,
+) -> Result<usize> {
+    dialoguer::Select::new()
+        .with_prompt(prompt)
+        .items(items.iter().map(ToString::to_string))
+        .default(default)
+        .interact_opt()?
+        .ok_or_else(|| anyhow::anyhow!("{cancelled}"))
+}
+
+/// Whether a person is at both ends of this terminal, so a prompt can be answered.
+pub(crate) fn interactive() -> bool {
+    use std::io::IsTerminal as _;
+    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
 /// What every agent starts from: no redirects (see [`http_agent`]), and no proxy from
@@ -428,13 +420,6 @@ pub fn system32_program(name: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
-/// 在 PATH 上查找可执行文件。
-/// 用 `which` crate 而非手写 PATH 遍历：正确处理 Windows PATHEXT
-/// （PATHEXT 含 `.bat`/`.cmd` 等）。
-pub fn which(cmd: &str) -> Option<PathBuf> {
-    which::which(cmd).ok()
-}
-
 /// Own an OS lock separately from the lifetime of duplicated file descriptors.
 pub struct FileLock {
     file: std::fs::File,
@@ -463,7 +448,7 @@ fn open_lock_file(path: &Path) -> Result<std::fs::File> {
 pub fn lock_file(path: &Path) -> Result<FileLock> {
     let file = open_lock_file(path)?;
     file.try_lock().with_context(|| {
-        crate::tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
+        tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
     })?;
     Ok(FileLock { file })
 }
@@ -481,7 +466,7 @@ pub fn lock_file_within(path: &Path, timeout: Duration) -> Result<FileLock> {
             }
             Err(error) => {
                 return Err(error).with_context(|| {
-                    crate::tr!(
+                    tr!(
                         "等待文件锁 {} 超时 / Timed out waiting for the file lock {}",
                         path.display(),
                         path.display()
@@ -501,29 +486,19 @@ pub fn free_port() -> Result<u16> {
 
 /// 临时工作目录（chunk / worker 脚本等中间产物）：创建失败立即报错，
 /// Drop 时尽力清理整个目录。目录名带 tag 与随机后缀，避免并发实例冲突。
-pub struct TempWorkDir {
-    dir: tempfile::TempDir,
-}
-
-impl TempWorkDir {
-    pub fn new(tag: &str) -> Result<Self> {
-        let dir = tempfile::Builder::new()
-            .prefix(&format!("course2md-{tag}-"))
-            .tempdir()
-            .context(crate::tr!(
-                "无法创建临时工作目录 / Could not create a temporary working directory"
-            ))?;
-        Ok(Self { dir })
-    }
-
-    pub fn path(&self) -> &Path {
-        self.dir.path()
-    }
+pub(crate) fn temp_work_dir(tag: &str) -> Result<tempfile::TempDir> {
+    tempfile::Builder::new()
+        .prefix(&format!("course2md-{tag}-"))
+        .tempdir()
+        .context(tr!(
+            "无法创建临时工作目录 / Could not create a temporary working directory"
+        ))
 }
 
 /// Runs `work` for every item on a bounded number of OS threads, preserving
 /// input order. Workers stop taking new items after the first error, but every
-/// started item is joined so confirmed side effects can still be saved.
+/// started item is joined so confirmed side effects can still be saved. A single
+/// worker runs on the calling thread.
 pub fn map_pool<T, R>(
     items: Vec<T>,
     workers: usize,
@@ -539,36 +514,37 @@ where
     let results: std::sync::Mutex<Vec<Option<R>>> =
         std::sync::Mutex::new(std::iter::repeat_with(|| None).take(total).collect());
     let first_error = std::sync::Mutex::new(None::<anyhow::Error>);
-    std::thread::scope(|scope| {
-        for _ in 0..workers.max(1).min(total.max(1)) {
-            scope.spawn(|| {
-                loop {
-                    if let Err(error) = control.check() {
-                        let mut guard = lock_recover(&first_error);
-                        if guard.is_none() {
-                            *guard = Some(error);
-                        }
-                        break;
-                    }
-                    let next = lock_recover(&queue).next();
-                    let Some((index, item)) = next else { break };
-                    if lock_recover(&first_error).is_some() {
-                        break;
-                    }
-                    match work(item) {
-                        Ok(value) => lock_recover(&results)[index] = Some(value),
-                        Err(error) => {
-                            let mut guard = lock_recover(&first_error);
-                            if guard.is_none() {
-                                *guard = Some(error);
-                            }
-                            break;
-                        }
-                    }
+    let keep_first = |error| {
+        lock_recover(&first_error).get_or_insert(error);
+    };
+    let worker = || {
+        loop {
+            if let Err(error) = control.check() {
+                keep_first(error);
+                break;
+            }
+            let next = lock_recover(&queue).next();
+            let Some((index, item)) = next else { break };
+            if lock_recover(&first_error).is_some() {
+                break;
+            }
+            match work(item) {
+                Ok(value) => lock_recover(&results)[index] = Some(value),
+                Err(error) => {
+                    keep_first(error);
+                    break;
                 }
-            });
+            }
         }
-    });
+    };
+    match workers.max(1).min(total.max(1)) {
+        1 => worker(),
+        count => std::thread::scope(|scope| {
+            for _ in 0..count {
+                scope.spawn(worker);
+            }
+        }),
+    }
     if let Some(error) = lock_recover(&first_error).take() {
         return Err(error);
     }
@@ -654,14 +630,13 @@ mod tests {
             "http://127.0.0.1:9",
             Duration::from_secs(60),
             &mut child,
-            None,
-            Some(&|| {
+            &|| {
                 if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1 {
                     anyhow::bail!("测试取消 / test cancellation")
                 } else {
                     Ok(())
                 }
-            }),
+            },
         );
         let err = result.expect_err("control 报错必须中止 wait_ready");
         assert_eq!(

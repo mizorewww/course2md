@@ -61,21 +61,6 @@ pub(crate) fn is_sse(s: &LlmSettings) -> bool {
     s.provider == LlmProvider::Codex
 }
 
-/// Standard OpenAI-compatible chat body. Temperature is fixed at 0 because
-/// proofreading and summaries require deterministic output.
-fn openai_chat_body(model: &str, system: &str, user: impl Into<Value>, max_tokens: u32) -> Value {
-    serde_json::json!({
-        "model": model,
-        "temperature": 0.0,
-        "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user.into()},
-        ]
-    })
-}
-
 /// 构造请求体（结构化输出契约在两种方言中各自表达）。
 pub(crate) fn chat_body(
     s: &LlmSettings,
@@ -96,7 +81,17 @@ pub(crate) fn chat_body(
                 "text": {"format": {"type": "json_object"}},
             })
         }
-        _ => openai_chat_body(&s.model, system, user.into(), max_tokens),
+        // Temperature is fixed at 0: proofreading and summaries require deterministic output.
+        _ => serde_json::json!({
+            "model": s.model,
+            "temperature": 0.0,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user.into()},
+            ]
+        }),
     }
 }
 

@@ -36,26 +36,14 @@ pub fn require_ytdlp() -> Result<()> {
 
 /// The command line or task input was rejected before any work started. It
 /// shows the wrapped error unchanged; the type only names the cause.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{0:#}")]
 pub struct InvalidInput(pub anyhow::Error);
 
 /// The configuration file could not be used as written.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{0:#}")]
 pub struct InvalidConfiguration(pub anyhow::Error);
-
-impl std::fmt::Display for InvalidInput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#}", self.0)
-    }
-}
-impl std::error::Error for InvalidInput {}
-
-impl std::fmt::Display for InvalidConfiguration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#}", self.0)
-    }
-}
-impl std::error::Error for InvalidConfiguration {}
 
 pub fn invalid_input(error: impl Into<anyhow::Error>) -> anyhow::Error {
     anyhow::Error::new(InvalidInput(error.into()))
@@ -66,23 +54,11 @@ pub fn invalid_configuration(error: impl Into<anyhow::Error>) -> anyhow::Error {
 }
 
 /// A required external program is not installed.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("未找到 {tool}，请先安装 / {tool} is not installed. {}", install_hint(.tool))]
 pub struct MissingTool {
     pub tool: String,
 }
-
-impl std::fmt::Display for MissingTool {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let cmd = &self.tool;
-        write!(
-            f,
-            "未找到 {cmd}，请先安装 / {cmd} is not installed. {}",
-            install_hint(cmd)
-        )
-    }
-}
-
-impl std::error::Error for MissingTool {}
 
 fn missing_tool(cmd: &str) -> anyhow::Error {
     anyhow::Error::new(MissingTool {

@@ -6,6 +6,7 @@
 use crate::fetch::VideoMeta;
 use crate::llm::{self, LlmSettings};
 use crate::timeline::TranscriptEvent;
+use crate::tr;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
@@ -53,15 +54,10 @@ fn system_prompt() -> String {
 }
 
 fn build_transcript(events: &[TranscriptEvent]) -> String {
-    let mut out = String::new();
-    for e in events {
-        out.push_str(&format!(
-            "[{}] {}\n",
-            crate::render::fmt_ts(e.start),
-            e.text
-        ));
-    }
-    out
+    events
+        .iter()
+        .map(|e| format!("[{}] {}\n", crate::render::fmt_ts(e.start), e.text))
+        .collect()
 }
 
 fn user_prompt(transcript: &str) -> String {
@@ -87,47 +83,33 @@ fn parse_time(v: Option<&serde_json::Value>) -> f64 {
 
 pub(crate) fn parse_summary(content: &str) -> Option<Summary> {
     let parsed = llm::extract_json_object(content)?;
-    let tldr = parsed
-        .get("tldr")
-        .and_then(|x| x.as_str())
-        .map(llm::restore_latex)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    let mut key_points = vec![];
-    if let Some(arr) = parsed.get("key_points").and_then(|v| v.as_array()) {
-        for v in arr {
-            if let Some(s) = v.as_str() {
-                let s = llm::restore_latex(s.trim());
-                if !s.is_empty() {
-                    key_points.push(s);
-                }
-            }
-        }
-    }
-    let mut outline = vec![];
-    if let Some(arr) = parsed.get("outline").and_then(|v| v.as_array()) {
-        for v in arr {
-            let title = v
-                .get("title")
-                .and_then(|x| x.as_str())
-                .map(llm::restore_latex)
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            let detail = v
-                .get("detail")
-                .and_then(|x| x.as_str())
-                .map(llm::restore_latex)
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            let t = parse_time(v.get("t"));
-            if !title.is_empty() || !detail.is_empty() {
-                outline.push(OutlineItem { t, title, detail });
-            }
-        }
-    }
+    let text = |v: &serde_json::Value, key: &str| {
+        llm::restore_latex(v.get(key).and_then(|x| x.as_str()).unwrap_or_default())
+            .trim()
+            .to_string()
+    };
+    let list = |key: &str| {
+        parsed
+            .get(key)
+            .and_then(|v| v.as_array())
+            .map_or(&[][..], Vec::as_slice)
+    };
+    let tldr = text(&parsed, "tldr");
+    let key_points: Vec<String> = list("key_points")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .map(|s| llm::restore_latex(s.trim()))
+        .filter(|s| !s.is_empty())
+        .collect();
+    let outline: Vec<OutlineItem> = list("outline")
+        .iter()
+        .map(|v| OutlineItem {
+            t: parse_time(v.get("t")),
+            title: text(v, "title"),
+            detail: text(v, "detail"),
+        })
+        .filter(|item| !item.title.is_empty() || !item.detail.is_empty())
+        .collect();
     if tldr.is_empty() && key_points.is_empty() && outline.is_empty() {
         return None;
     }
@@ -138,52 +120,22 @@ pub(crate) fn parse_summary(content: &str) -> Option<Summary> {
     })
 }
 
-fn chat_once(
-    agent: &ureq::Agent,
-    control: &crate::dispatch::TaskControl,
+/// One requested summary scope. A protocol failure is retained, never hidden by another paid request.
+fn request_summary(
+    chat: &llm::Chat<'_>,
     s: &LlmSettings,
-    sys: &str,
     user: &str,
     description: &str,
 ) -> Result<String> {
-    let body = crate::provider::chat_body(s, sys, user, llm::CHAT_MAX_TOKENS);
-    llm::send_chat_described(
-        agent,
-        control,
-        s,
-        &body,
-        llm::Purpose::Summary,
-        description,
-        &|content| {
-            anyhow::ensure!(
-                parse_summary(content).is_some(),
-                crate::tr!("服务返回的摘要结构无效 / Invalid summary structure")
-            );
-            Ok(())
-        },
-    )
-    .context(crate::tr!("生成摘要请求失败 / Summary request failed"))
-}
-
-/// One requested summary scope. A protocol failure is retained, never hidden by another paid request.
-fn summarize_text(
-    agent: &ureq::Agent,
-    control: &crate::dispatch::TaskControl,
-    s: &LlmSettings,
-    transcript: &str,
-    description: &str,
-) -> Result<Summary> {
-    let content = chat_once(
-        agent,
-        control,
-        s,
-        &system_prompt(),
-        &user_prompt(transcript),
-        description,
-    )?;
-    parse_summary(&content).context(crate::tr!(
-        "服务返回的摘要结构无效 / Invalid summary response"
-    ))
+    let body = crate::provider::chat_body(s, &system_prompt(), user, llm::CHAT_MAX_TOKENS);
+    chat.send(&body, description, &|content| {
+        anyhow::ensure!(
+            parse_summary(content).is_some(),
+            tr!("服务返回的摘要结构无效 / Invalid summary structure")
+        );
+        Ok(())
+    })
+    .context(tr!("生成摘要请求失败 / Summary request failed"))
 }
 
 /// Show the actionable cause once. Provider bodies never reach these errors;
@@ -235,40 +187,68 @@ pub async fn summarize(
     meta: &VideoMeta,
     control: &crate::dispatch::TaskControl,
 ) -> Result<Summary> {
-    let total_chars: usize = events
-        .iter()
-        .map(|e| e.text.chars().count() + PER_EVENT_OVERHEAD)
-        .sum();
     // 空转写直接报错：发给模型只会得到编造内容或报错，浪费请求
     if events.is_empty() {
-        bail!(crate::tr!(
+        bail!(tr!(
             "转写为空，无法摘要 / Transcript is empty; cannot summarize"
         ));
     }
     llm::validate(s)?;
-    let ctx = meta_context(meta);
-    let transcript = format!("{ctx}{}", build_transcript(events));
-    let agent = llm::chat_agent(s);
-    if total_chars <= DIRECT_CHAR_LIMIT {
-        let t = transcript;
-        let s2 = s.clone();
-        let description = crate::tr!(
-            "生成整篇摘要（{}–{}） / Generate the full summary ({}–{})",
-            crate::render::fmt_ts(events.first().unwrap().start),
-            crate::render::fmt_ts(events.last().unwrap().end),
-            crate::render::fmt_ts(events.first().unwrap().start),
-            crate::render::fmt_ts(events.last().unwrap().end)
-        );
-        let control = control.clone();
-        return tokio::task::spawn_blocking(move || {
-            summarize_text(&agent, &control, &s2, &t, &description)
-        })
+    let (s, events, ctx, control) = (
+        s.clone(),
+        events.to_vec(),
+        meta_context(meta),
+        control.clone(),
+    );
+    tokio::task::spawn_blocking(move || summarize_blocking(&s, &events, &ctx, &control))
         .await
-        .context(crate::tr!(
+        .context(tr!(
             "生成摘要时意外中断 / Summary generation was interrupted"
-        ))?;
+        ))?
+}
+
+fn summarize_blocking(
+    s: &LlmSettings,
+    events: &[TranscriptEvent],
+    ctx: &str,
+    control: &crate::dispatch::TaskControl,
+) -> Result<Summary> {
+    let chat = llm::Chat::new(s, llm::Purpose::Summary, control);
+    let invalid = || tr!("服务返回的摘要结构无效 / Invalid summary response");
+    let range = |chunk: &[TranscriptEvent]| {
+        let edge = |event: Option<&TranscriptEvent>, at: fn(&TranscriptEvent) -> f64| {
+            event
+                .map(|e| crate::render::fmt_ts(at(e)))
+                .unwrap_or_default()
+        };
+        (
+            edge(chunk.first(), |e| e.start),
+            edge(chunk.last(), |e| e.end),
+        )
+    };
+    let summary_of = |chunk: &[TranscriptEvent], description: &str| -> Result<Summary> {
+        let user = user_prompt(&format!("{ctx}{}", build_transcript(chunk)));
+        let content = request_summary(&chat, s, &user, description)?;
+        parse_summary(&content).context(invalid())
+    };
+    let total_chars: usize = events
+        .iter()
+        .map(|e| e.text.chars().count() + PER_EVENT_OVERHEAD)
+        .sum();
+    if total_chars <= DIRECT_CHAR_LIMIT {
+        let (first, last) = range(events);
+        return summary_of(
+            events,
+            &tr!(
+                "生成整篇摘要（{}–{}） / Generate the full summary ({}–{})",
+                first,
+                last,
+                first,
+                last
+            ),
+        );
     }
-    // ---- map-reduce：分段按 SUMMARIZE_CONCURRENCY 分批并发 ----
+    // ---- map-reduce：分段按 SUMMARIZE_CONCURRENCY 并发 ----
     let chunks = split_chunks(events, CHUNK_CHAR_LIMIT);
     tracing::info!(
         chunks = chunks.len(),
@@ -276,26 +256,15 @@ pub async fn summarize(
         "summary map-reduce"
     );
     let total = chunks.len();
-    let settings = s.clone();
-    let map_agent = agent.clone();
-    let map_ctx = ctx.clone();
-    let map_control = control.clone();
-    let partials = tokio::task::spawn_blocking(move || {
-        crate::runtime::map_pool(
-            chunks.into_iter().enumerate().collect(),
-            SUMMARIZE_CONCURRENCY,
-            &map_control,
-            |(index, chunk)| {
-                let first = chunk
-                    .first()
-                    .map(|event| crate::render::fmt_ts(event.start))
-                    .unwrap_or_default();
-                let last = chunk
-                    .last()
-                    .map(|event| crate::render::fmt_ts(event.end))
-                    .unwrap_or_default();
-                let transcript = format!("{map_ctx}{}", build_transcript(&chunk));
-                let description = crate::tr!(
+    let partials = crate::runtime::map_pool(
+        chunks.into_iter().enumerate().collect(),
+        SUMMARIZE_CONCURRENCY,
+        control,
+        |(index, chunk)| {
+            let (first, last) = range(&chunk);
+            summary_of(
+                &chunk,
+                &tr!(
                     "生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})",
                     index + 1,
                     total,
@@ -305,60 +274,37 @@ pub async fn summarize(
                     total,
                     first,
                     last
-                );
-                summarize_text(
-                    &map_agent,
-                    &map_control,
-                    &settings,
-                    &transcript,
-                    &description,
-                )
-            },
-        )
-    })
-    .await
-    .context(crate::tr!("摘要工作进程中断 / Summary worker interrupted"))??;
+                ),
+            )
+        },
+    )?;
     // 合并分段摘要
-    let mut combiner_input = ctx.clone();
+    let mut input = ctx.to_owned();
     for (idx, sm) in partials.iter().enumerate() {
-        combiner_input.push_str(&format!("== 第 {} 段摘要 ==\n", idx + 1));
+        input.push_str(&format!("== 第 {} 段摘要 ==\n", idx + 1));
         if !sm.tldr.is_empty() {
-            combiner_input.push_str(&format!("概述：{}\n", sm.tldr));
+            input.push_str(&format!("概述：{}\n", sm.tldr));
         }
         for p in &sm.key_points {
-            combiner_input.push_str(&format!("- {p}\n"));
+            input.push_str(&format!("- {p}\n"));
         }
         for o in &sm.outline {
-            combiner_input.push_str(&format!("- [{:.0}s] {}：{}\n", o.t, o.title, o.detail));
+            input.push_str(&format!("- [{:.0}s] {}：{}\n", o.t, o.title, o.detail));
         }
-        combiner_input.push('\n');
+        input.push('\n');
     }
-    let input = combiner_input;
-    let s2 = s.clone();
-    let control = control.clone();
-    let combined = tokio::task::spawn_blocking(move || {
-        chat_once(
-            &agent,
-            &control,
-            &s2,
-            &system_prompt(),
-            &format!(
-                "以下是各分段的摘要（时间已按原视频绝对秒数标注）：\n\n{input}\n\n\
+    let combined = request_summary(
+        &chat,
+        s,
+        &format!(
+            "以下是各分段的摘要（时间已按原视频绝对秒数标注）：\n\n{input}\n\n\
 请合并为整个视频的最终摘要，输出 JSON：{{\"tldr\": \"不超过150字的一句话概述\", \
 \"key_points\": [整个视频的3-8条要点], \
 \"outline\": [{{\"t\":秒,\"title\":\"章节标题\",\"detail\":\"简述\"}}]}}"
-            ),
-            crate::tr!(
-                "将全部分段摘要合并为整篇摘要 / Merge all partial summaries into the full summary"
-            ),
-        )
-    })
-    .await
-    .context(crate::tr!(
-        "生成摘要时意外中断 / Summary generation was interrupted"
-    ))?;
-    let combined = combined?;
-    parse_summary(&combined).context(crate::tr!(
+        ),
+        tr!("将全部分段摘要合并为整篇摘要 / Merge all partial summaries into the full summary"),
+    )?;
+    parse_summary(&combined).context(tr!(
         "摘要合并未完成，已保存各段已确认结果 / Summary merge failed; completed parts retained"
     ))
 }
@@ -366,16 +312,16 @@ pub async fn summarize(
 /// 生成插入 course.md 的摘要区块（markdown，哨兵注释包裹）。
 /// 有意信任 LLM 输出（markdown 语义直通），不做转义。
 pub fn render_md_block(sm: &Summary) -> String {
-    let mut out = format!("\n{SUMMARY_BEGIN}\n\n## 📝 {}\n\n", crate::tr!("视频摘要"));
+    let mut out = format!("\n{SUMMARY_BEGIN}\n\n## 📝 {}\n\n", tr!("视频摘要"));
     out.push_str(&format!("> {}\n", sm.tldr));
     if !sm.key_points.is_empty() {
-        out.push_str(&format!("\n### {}\n\n", crate::tr!("核心要点")));
+        out.push_str(&format!("\n### {}\n\n", tr!("核心要点")));
         for p in &sm.key_points {
             out.push_str(&format!("- {p}\n"));
         }
     }
     if !sm.outline.is_empty() {
-        out.push_str(&format!("\n### {}\n\n", crate::tr!("内容大纲")));
+        out.push_str(&format!("\n### {}\n\n", tr!("内容大纲")));
         for o in &sm.outline {
             out.push_str(&format!(
                 "- **{}** {}：{}\n",
@@ -393,7 +339,7 @@ pub fn render_md_block(sm: &Summary) -> String {
 pub fn render_html_block(sm: &Summary) -> String {
     let mut out = format!(
         "{SUMMARY_BEGIN}<section class=\"summary\"><h2>📝 {}</h2>",
-        crate::render::esc(crate::tr!("视频摘要"))
+        crate::render::esc(tr!("视频摘要"))
     );
     out.push_str(&format!(
         "<p class=\"mute\">{}</p>",
@@ -402,7 +348,7 @@ pub fn render_html_block(sm: &Summary) -> String {
     if !sm.key_points.is_empty() {
         out.push_str(&format!(
             "<h3>{}</h3><ul>",
-            crate::render::esc(crate::tr!("核心要点"))
+            crate::render::esc(tr!("核心要点"))
         ));
         for p in &sm.key_points {
             out.push_str(&format!("<li>{}</li>", crate::render::rich(p)));
@@ -412,10 +358,10 @@ pub fn render_html_block(sm: &Summary) -> String {
     if !sm.outline.is_empty() {
         out.push_str(&format!(
             "<h3>{}</h3><ul>",
-            crate::render::esc(crate::tr!("内容大纲"))
+            crate::render::esc(tr!("内容大纲"))
         ));
         for o in &sm.outline {
-            out.push_str(&crate::tr!(
+            out.push_str(&tr!(
                 "<li><b>{}</b> {}：{}</li>",
                 crate::render::esc(&crate::render::fmt_ts(o.t)),
                 crate::render::rich(&o.title),
@@ -428,64 +374,36 @@ pub fn render_html_block(sm: &Summary) -> String {
     out
 }
 
-/// 把摘要区块插入已渲染的 markdown：已有摘要块时按哨兵原地替换（幂等）；
+/// 把摘要区块插入文档：已有摘要块时按哨兵原地替换（幂等）；缺闭合哨兵时保守不改（告警）；
+/// 否则 `position` 决定首次插入的字节位置，默认文末。
+fn insert_block(doc: &str, block: &str, position: Option<usize>) -> String {
+    if let Some(start) = doc.find(SUMMARY_BEGIN) {
+        let Some(end) = doc[start..].find(SUMMARY_END) else {
+            tracing::warn!(
+                "已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept"
+            );
+            return doc.to_string();
+        };
+        let end = start + end + SUMMARY_END.len();
+        return format!("{}{block}{}", &doc[..start], &doc[end..]);
+    }
+    let mut out = doc.to_string();
+    out.insert_str(position.unwrap_or(doc.len()), block);
+    out
+}
+
 /// 首次插入定位到元信息之后、首个字幕小节（## [mm:ss]）之前。
 pub fn insert_into_md(md: &str, sm: &Summary) -> String {
-    let block = render_md_block(sm);
-    if md.contains(SUMMARY_BEGIN) {
-        return replace_sentinel_block(md, &block);
-    }
-    if let Some(pos) = md.find("\n## [") {
-        let mut out = md.to_string();
-        out.insert_str(pos, &block);
-        return out;
-    }
-    let mut out = md.to_string();
-    out.push_str(&block);
-    out
+    insert_block(md, &render_md_block(sm), md.find("\n## ["))
 }
 
-/// 把摘要区块插入已渲染的 HTML：已有摘要块时按哨兵原地替换（幂等）；
 /// 首次插入定位到 </header> 之后（兜底 </body> 前 / 文末）。
 pub fn insert_into_html(html: &str, sm: &Summary) -> String {
-    let block = render_html_block(sm);
-    if html.contains(SUMMARY_BEGIN) {
-        return replace_sentinel_block(html, &block);
-    }
-    if let Some(pos) = html.find("</header>") {
-        let insert_at = pos + "</header>".len();
-        let mut out = html.to_string();
-        out.insert_str(insert_at, &block);
-        return out;
-    }
-    if let Some(pos) = html.rfind("</body>") {
-        let mut out = html.to_string();
-        out.insert_str(pos, &block);
-        return out;
-    }
-    let mut out = html.to_string();
-    out.push_str(&block);
-    out
-}
-
-/// 哨兵块（含首尾哨兵）的字节范围；起始哨兵存在但缺闭合哨兵时告警并返回 None。
-fn sentinel_range(doc: &str) -> Option<std::ops::Range<usize>> {
-    let start = doc.find(SUMMARY_BEGIN)?;
-    let Some(end_rel) = doc[start..].find(SUMMARY_END) else {
-        tracing::warn!(
-            "已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept"
-        );
-        return None;
-    };
-    Some(start..start + end_rel + SUMMARY_END.len())
-}
-
-/// 原地替换哨兵之间的摘要区块；缺闭合哨兵时保守不改（告警）。
-fn replace_sentinel_block(doc: &str, block: &str) -> String {
-    let Some(range) = sentinel_range(doc) else {
-        return doc.to_string();
-    };
-    format!("{}{block}{}", &doc[..range.start], &doc[range.end..])
+    let position = html
+        .find("</header>")
+        .map(|at| at + "</header>".len())
+        .or_else(|| html.rfind("</body>"));
+    insert_block(html, &render_html_block(sm), position)
 }
 
 /// 生成独立摘要文件（markdown），用于 -o 导出。

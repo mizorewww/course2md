@@ -15,7 +15,15 @@ pub struct Request {
 pub fn serve(responses: Vec<String>) -> (String, std::thread::JoinHandle<Vec<Request>>) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
+    (format!("http://{address}"), serve_on(listener, responses))
+}
+
+/// [`serve`] on a listener the test bound earlier.
+pub fn serve_on(
+    listener: std::net::TcpListener,
+    responses: Vec<String>,
+) -> std::thread::JoinHandle<Vec<Request>> {
+    std::thread::spawn(move || {
         let mut requests = Vec::new();
         for response in responses {
             let (mut stream, _) = listener.accept().unwrap();
@@ -26,8 +34,7 @@ pub fn serve(responses: Vec<String>) -> (String, std::thread::JoinHandle<Vec<Req
             stream.write_all(response.as_bytes()).unwrap();
         }
         requests
-    });
-    (format!("http://{address}"), server)
+    })
 }
 
 /// A complete JSON response.

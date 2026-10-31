@@ -10,6 +10,7 @@
 //! ```
 
 use crate::progress::Stage;
+use crate::{eprintln_tr, println_tr, tr};
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::Read;
@@ -22,14 +23,15 @@ fn unsupported_model(status: &status::LocalModelStatus) -> anyhow::Error {
     crate::config::unsupported_model_error(status.provider, &status.model)
 }
 
-/// 下载缺失的模型文件（不加载）。`verify` 时额外用正式加载器验证 Apple/NPU 模型可离线加载。
+/// What Apple preparation does beyond the shared download: `Cache` only fetches files,
+/// for the later transcription to load; `Prepare` also loads the model.
 enum CoremlMode {
-    /// Download/repair files only; the later transcription loads the model.
     Cache,
-    /// Load the model as the requested preparation step.
     // Only the Apple native backend reads whether files were already cached.
     #[cfg_attr(not(apple_native), allow(dead_code))]
-    Prepare { cached: bool },
+    Prepare {
+        cached: bool,
+    },
 }
 
 async fn fetch_model(
@@ -60,14 +62,12 @@ async fn fetch_model(
                     Ok(())
                 })
                 .await
-                .context(crate::tr!(
-                    "模型准备未完成 / Model preparation did not complete"
-                ))?
+                .context(tr!("模型准备未完成 / Model preparation did not complete"))?
             }
             #[cfg(not(apple_native))]
             {
                 let _ = (model, coreml, control);
-                Err(anyhow::anyhow!(crate::tr!(
+                Err(anyhow::anyhow!(tr!(
                     "此程序未包含 Apple 原生识别运行时 / This build does not include the Apple native transcription runtime"
                 )))
             }
@@ -77,7 +77,7 @@ async fn fetch_model(
             let control = control.clone();
             tokio::task::spawn_blocking(move || crate::npu::prepare_npu_model(&model, &control))
                 .await
-                .context(crate::tr!(
+                .context(tr!(
                     "NPU 模型准备未完成 / NPU model preparation did not complete"
                 ))?
         }
@@ -224,7 +224,7 @@ pub async fn ensure_llama_or_download(
 ) -> Result<LlamaAsr> {
     if !llama_ready(root) {
         if !crate::progress::is_json() && !crate::progress::is_quiet() {
-            crate::eprintln_tr!(
+            eprintln_tr!(
                 "正在下载识别模型（约 2.4GB）/ Downloading speech models (~2.4GB): {}",
                 root.display()
             );
@@ -248,7 +248,7 @@ pub async fn download_models(root: &Path, control: &crate::dispatch::TaskControl
         // The host lookup may wait on the network; keep it off the async workers.
         tokio::task::spawn_blocking(crate::hub::endpoints)
             .await
-            .context(crate::tr!("模型下载任务失败 / Model download task failed"))?;
+            .context(tr!("模型下载任务失败 / Model download task failed"))?;
     }
     let downloader = std::sync::Arc::new(crate::download::Downloader::new());
     let tasks: Vec<_> = missing
@@ -275,14 +275,14 @@ pub async fn download_models(root: &Path, control: &crate::dispatch::TaskControl
         results.push(task.await);
     }
     for result in results {
-        result.context(crate::tr!("模型下载任务失败 / Model download task failed"))?
-            .context(crate::tr!(
+        result.context(tr!("模型下载任务失败 / Model download task failed"))?
+            .context(tr!(
                 "模型下载失败；可设置 HF_ENDPOINT 指定下载地址 / Model download failed; set HF_ENDPOINT to choose a download host"
             ))?;
     }
     anyhow::ensure!(
         llama_ready(root),
-        crate::tr!(
+        tr!(
             "模型文件下载不完整，请重新运行 course2md models download / Model download incomplete; run course2md models download again"
         )
     );
@@ -296,31 +296,21 @@ pub fn list_models(root: &Path) {
         "gpu/cpu 模型目录 / gpu/cpu model directory: {}",
         root.display()
     );
-    println!(
-        "  model  {} {}",
-        if file_complete(&p.model) {
-            crate::tr!("就绪 / Ready")
+    for (name, path) in [("model ", &p.model), ("mmproj", &p.mmproj)] {
+        let state = if file_complete(path) {
+            tr!("就绪 / Ready")
         } else {
-            crate::tr!("缺失或不完整 / Missing or incomplete")
-        },
-        p.model.display()
-    );
-    println!(
-        "  mmproj {} {}",
-        if file_complete(&p.mmproj) {
-            crate::tr!("就绪 / Ready")
-        } else {
-            crate::tr!("缺失或不完整 / Missing or incomplete")
-        },
-        p.mmproj.display()
-    );
+            tr!("缺失或不完整 / Missing or incomplete")
+        };
+        println!("  {name} {state} {}", path.display());
+    }
     if !llama_ready(root) {
         println!(
             "下载或修复 / Download or repair: course2md models download --dir \"{}\"",
             root.display()
         );
     }
-    crate::println_tr!(
+    println_tr!(
         "Apple 和 NPU 模型由各自后端管理 / Apple and NPU models are managed by their backends."
     );
 }

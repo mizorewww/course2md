@@ -1,65 +1,34 @@
 //! yt-dlp 二进制定位：`COURSE2MD_YTDLP` 覆盖 → 可执行文件旁（随包自带）→
 //! PATH → 常见安装目录兜底。CLI（fetch/pipeline/doctor）与桌面端（环境检测、
 //! 在线读取）共用同一份清单，保证「检测到可用」与「实际能启动」不互相矛盾。
-//!
-//! 各档位的来由：
-//! - `COURSE2MD_YTDLP`：显式指向某个二进制（与 COURSE2MD_BIN 同一约定），
-//!   打包测试、临时换版本时用；
-//! - 可执行文件同目录：install.sh 与桌面安装包把 yt-dlp 放在 course2md 旁；
-//!   `.app` 布局额外检查 `../Resources`（codesign 把 Contents/MacOS 当代码区，
-//!   数据文件属于资源区）；Homebrew/pipx 装的 yt-dlp 也常与 course2md 同在 bin/；
-//! - PATH：终端安装的标准位置；桌面端传入 tool_path() 的扩展版本；
-//! - 常见安装目录兜底：Finder/桌面会话启动的进程拿不到登录 shell 的 PATH，
-//!   mise/asdf/conda/Nix/Scoop/Python user-base 等位置只能逐个枚举。
+//! 常见安装目录是因为 Finder/桌面会话启动的进程拿不到登录 shell 的 PATH。
 
+use crate::tools;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 /// 显式指定 yt-dlp 二进制的环境变量；指向不可执行文件时忽略并继续按清单搜索。
 pub const ENV_OVERRIDE: &str = "COURSE2MD_YTDLP";
 
-fn binary_name() -> String {
-    format!("yt-dlp{}", std::env::consts::EXE_SUFFIX)
-}
+const NAME: &str = "yt-dlp";
 
-/// 存在且可执行（Windows 只验证是普通文件）。
-fn is_exec(path: &Path) -> bool {
-    if !path.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        path.metadata()
-            .map(|m| m.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
-}
-
-/// 随包自带/同目录候选：桌面安装包的 `yt-dlp/` 目录（onedir 构建，见
-/// [`crate::tools::bundled_dirs`]）、exe 旁、`.app` 的 Contents/Resources[/bin]。
-fn bundled_candidates() -> Vec<PathBuf> {
-    let mut candidates: Vec<PathBuf> = crate::tools::bundled_dirs()
+/// 随包自带/同目录：桌面安装包的 `yt-dlp/` 目录（onedir 构建，见
+/// [`tools::bundled_dirs`]）、exe 旁、`.app` 的 Contents/Resources[/bin]。
+fn bundled_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = tools::bundled_dirs()
         .into_iter()
-        .filter(|dir| dir.file_name() == Some(OsStr::new(crate::tools::YTDLP_DIR)))
-        .map(|dir| dir.join(binary_name()))
+        .filter(|dir| dir.file_name() == Some(OsStr::new(tools::YTDLP_DIR)))
         .collect();
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
-        for base in [
+        dirs.extend([
             dir.to_path_buf(),
             dir.join("../Resources"),
             dir.join("../Resources/bin"),
-        ] {
-            candidates.push(base.join(binary_name()));
-        }
+        ]);
     }
-    candidates
+    dirs
 }
 
 /// `base` 下形如 `3.x`/`Python3xx` 的解释器目录：macOS `~/Library/Python/3.*/bin`
@@ -77,8 +46,8 @@ fn interpreter_dirs(base: &Path, leaf: &str, prefix: &str) -> Vec<PathBuf> {
 }
 
 /// PATH 之外的常见安装位置：覆盖「终端里有、桌面会话里没有」的安装方式。
-fn fallback_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
+fn fallback_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
     let home = crate::config::home_dir();
     #[cfg(unix)]
     {
@@ -95,11 +64,9 @@ fn fallback_candidates() -> Vec<PathBuf> {
                 "opt/anaconda3/bin",
                 "opt/miniconda3/bin",
             ] {
-                candidates.push(home.join(rel).join(binary_name()));
+                dirs.push(home.join(rel));
             }
-            for dir in interpreter_dirs(&home.join("Library/Python"), "bin", "3.") {
-                candidates.push(dir.join(binary_name()));
-            }
+            dirs.extend(interpreter_dirs(&home.join("Library/Python"), "bin", "3."));
         }
         for abs in [
             "/opt/homebrew/bin",
@@ -109,31 +76,35 @@ fn fallback_candidates() -> Vec<PathBuf> {
             "/opt/miniconda3/bin",
             "/nix/var/nix/profiles/default/bin",
         ] {
-            candidates.push(Path::new(abs).join(binary_name()));
+            dirs.push(PathBuf::from(abs));
         }
     }
     #[cfg(windows)]
     {
-        let name = binary_name();
-        if let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
-            candidates.push(local.join(r"Microsoft\WinGet\Links").join(&name));
-            for dir in interpreter_dirs(&local.join(r"Programs\Python"), "Scripts", "Python3") {
-                candidates.push(dir.join(&name));
-            }
+        let var = |name| std::env::var_os(name).map(PathBuf::from);
+        if let Some(local) = var("LOCALAPPDATA") {
+            dirs.push(local.join(r"Microsoft\WinGet\Links"));
+            dirs.extend(interpreter_dirs(
+                &local.join(r"Programs\Python"),
+                "Scripts",
+                "Python3",
+            ));
         }
         if let Some(home) = &home {
-            candidates.push(home.join(r"scoop\shims").join(&name));
+            dirs.push(home.join(r"scoop\shims"));
         }
-        if let Some(data) = std::env::var_os("ProgramData").map(PathBuf::from) {
-            candidates.push(data.join(r"chocolatey\bin").join(&name));
+        if let Some(data) = var("ProgramData") {
+            dirs.push(data.join(r"chocolatey\bin"));
         }
-        if let Some(roaming) = std::env::var_os("APPDATA").map(PathBuf::from) {
-            for dir in interpreter_dirs(&roaming.join("Python"), "Scripts", "Python3") {
-                candidates.push(dir.join(&name));
-            }
+        if let Some(roaming) = var("APPDATA") {
+            dirs.extend(interpreter_dirs(
+                &roaming.join("Python"),
+                "Scripts",
+                "Python3",
+            ));
         }
     }
-    candidates
+    dirs
 }
 
 /// A candidate that exits successfully for `--version`. A bundled one-file
@@ -162,30 +133,25 @@ fn runs(path: &Path) -> bool {
     ok
 }
 
-fn candidates_in(path: Option<&OsStr>) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(custom) = std::env::var_os(ENV_OVERRIDE).filter(|v| !v.is_empty()) {
-        candidates.push(PathBuf::from(custom));
-    }
-    candidates.extend(bundled_candidates());
-    let name = binary_name();
-    if let Some(path) = path {
-        candidates.extend(std::env::split_paths(path).map(|dir| dir.join(&name)));
-    } else if let Some(path) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&path).map(|dir| dir.join(&name)));
-    }
-    candidates.extend(fallback_candidates());
-    candidates
-}
-
 /// 按优先级返回第一个存在、可执行且能运行 `--version` 的 yt-dlp。
 /// `path` 为 None 时用进程继承的 PATH；桌面端传入 `tool_path()` 的扩展版本。
 pub fn resolve_in(path: Option<&OsStr>) -> Option<PathBuf> {
-    let mut seen = std::collections::BTreeSet::new();
-    candidates_in(path)
+    let found = tools::candidates(
+        NAME,
+        ENV_OVERRIDE,
+        &bundled_dirs(),
+        &tools::search_path(path),
+    );
+    let elsewhere = fallback_dirs()
         .into_iter()
+        .map(|dir| dir.join(tools::file_name(NAME)));
+    let mut seen = std::collections::BTreeSet::new();
+    found
+        .into_iter()
+        .map(|tool| tool.path)
+        .chain(elsewhere.filter(|path| tools::is_executable(path)))
         .filter(|candidate| seen.insert(candidate.clone()))
-        .find(|candidate| is_exec(candidate) && runs(candidate))
+        .find(|candidate| runs(candidate))
 }
 
 /// 继承 PATH 的版本（CLI/终端调用）。
@@ -194,10 +160,9 @@ pub fn resolve() -> Option<PathBuf> {
 }
 
 /// 给 `Command::new` 的程序名：解析成功为绝对路径，否则退回裸名
-///（spawn 错误由调用方现成的「无法启动 yt-dlp」上下文兜底，`require_cmd`
-/// 会在更早处给出安装提示）。
+///（`require_cmd` 会在更早处给出安装提示）。
 pub fn program() -> PathBuf {
-    resolve().unwrap_or_else(|| PathBuf::from(binary_name()))
+    resolve().unwrap_or_else(|| PathBuf::from(tools::file_name(NAME)))
 }
 
 #[cfg(test)]
@@ -222,17 +187,6 @@ mod tests {
         assert_eq!(dirs, vec![root.path().join("3.12/bin")]);
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn is_exec_requires_exec_bit() {
-        let dir = tempfile::tempdir().unwrap();
-        let exec = make_exec(dir.path(), "yt-dlp");
-        assert!(is_exec(&exec));
-        let plain = dir.path().join("plain");
-        std::fs::write(&plain, b"#!/bin/sh\n").unwrap();
-        assert!(!is_exec(&plain));
-        assert!(!is_exec(&dir.path().join("missing")));
-    }
     #[cfg(unix)]
     #[test]
     fn broken_first_path_entry_falls_back_to_a_runnable_one() {
