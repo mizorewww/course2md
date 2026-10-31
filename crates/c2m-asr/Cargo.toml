@@ -1,0 +1,36 @@
+[package]
+name = "c2m-asr"
+version.workspace = true
+edition.workspace = true
+description = "Speech recognition backends, their models and the transcript checkpoint"
+license.workspace = true
+publish = false
+links = "c2m_apple_asr"
+
+[dependencies]
+c2m-config = { path = "../c2m-config" }
+c2m-core = { path = "../c2m-core" }
+c2m-dispatch = { path = "../c2m-dispatch" }
+c2m-i18n = { path = "../c2m-i18n" }
+c2m-process = { path = "../c2m-process" }
+c2m-protocol = { path = "../c2m-protocol" }
+anyhow.workspace = true
+base64.workspace = true
+hound.workspace = true
+model-fetch.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sys-locale.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ureq.workspace = true
+walkdir.workspace = true
+which.workspace = true
+
+[dev-dependencies]
+c2m-test-http = { path = "../c2m-test-http" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(apple_native)'] }

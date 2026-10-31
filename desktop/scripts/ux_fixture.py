@@ -16,8 +16,8 @@ from ux_common import fixture_root
 
 PROJECT = Path(__file__).resolve().parents[2]
 # Request markers and response samples shared with the Rust MockAi
-# (tests/task_execution.rs); change response shapes there, not here.
-FAKE_AI = json.loads((PROJECT / "tests/fixtures/fake_ai.json").read_text())
+# (crates/course2md/tests/task_execution.rs); change response shapes there, not here.
+FAKE_AI = json.loads((PROJECT / "crates/course2md/tests/fixtures/fake_ai.json").read_text())
 
 
 def bundle(root, label, window_size):
@@ -26,8 +26,8 @@ def bundle(root, label, window_size):
     app = root / f"course2md Validation {label}.app"
     binaries = app / "Contents/MacOS"
     binaries.mkdir(parents=True, exist_ok=True)
-    # build.rs copies mlx.metallib beside the CLI executable; see the note there.
-    for source in [project / "target/debug/course2md", project / "desktop/target/debug/course2md-desktop", project / "target/debug/mlx.metallib"]:
+    # c2m-asr's build.rs copies mlx.metallib beside the CLI executable; see the note there.
+    for source in [project / "target/debug/course2md", project / "target/debug/course2md-desktop", project / "target/debug/mlx.metallib"]:
         if source.is_file():
             shutil.copy2(source, binaries / source.name)
         elif source.suffix != ".metallib":

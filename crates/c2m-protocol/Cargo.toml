@@ -1,0 +1,20 @@
+[package]
+name = "c2m-protocol"
+version.workspace = true
+edition.workspace = true
+description = "Progress events on the wire and on the terminal"
+license.workspace = true
+publish = false
+
+[dependencies]
+c2m-config = { path = "../c2m-config" }
+c2m-core = { path = "../c2m-core" }
+c2m-i18n = { path = "../c2m-i18n" }
+c2m-process = { path = "../c2m-process" }
+anyhow.workspace = true
+indicatif.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+strum.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

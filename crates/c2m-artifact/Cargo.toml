@@ -1,0 +1,30 @@
+[package]
+name = "c2m-artifact"
+version.workspace = true
+edition.workspace = true
+description = "Published notes: rendering, manifests and portable exports"
+license.workspace = true
+publish = false
+
+[dependencies]
+c2m-config = { path = "../c2m-config" }
+c2m-core = { path = "../c2m-core" }
+c2m-dispatch = { path = "../c2m-dispatch" }
+c2m-i18n = { path = "../c2m-i18n" }
+c2m-process = { path = "../c2m-process" }
+anyhow.workspace = true
+base64.workspace = true
+image.workspace = true
+ratex-layout.workspace = true
+ratex-parser.workspace = true
+ratex-svg.workspace = true
+ratex-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
+url.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

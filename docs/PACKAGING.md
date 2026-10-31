@@ -21,7 +21,7 @@ Desktop archives are self-contained. Pins and build options live in `desktop/scr
 | ffmpeg, ffprobe | All | LGPL-2.1, built from the pinned release with the system's TLS (on Linux, the user's shared GnuTLS). Windows binaries are cross-compiled with llvm-mingw; in CI the `windows-ffmpeg` job builds them |
 | yt-dlp | All | Official onedir build, not the one-file build, which unpacks itself on every call. On macOS it sits in `Contents/Resources`, thinned to arm64 with each file signed |
 | aria2 | Windows | Upstream publishes no macOS or Linux build; without it models download over one connection |
-| uv | Windows, Linux | Runs the Intel NPU worker, whose packages are pinned in `src/npu.rs`, and fetches OpenVINO on first use |
+| uv | Windows, Linux | Runs the Intel NPU worker, whose packages are pinned in `crates/c2m-asr/src/npu.rs`, and fetches OpenVINO on first use |
 | llama-server | Windows, Linux | Vulkan and CPU backends; CUDA, ROCm and SYCL builds remain a separate install |
 
 System requirements the archives do not carry: on Linux, `libvulkan.so.1`, `libgomp.so.1` and OpenSSL 3 for llama-server, and GnuTLS for ffmpeg; on Windows, the Microsoft Visual C++ runtime, which is redistributable only under the distributor's own Visual Studio licence. **Run checks** and setup detect it and link Microsoft's installer.
@@ -32,11 +32,11 @@ Inside an app package the engine runs a bundled tool before one on PATH. `COURSE
 
 Building the tools needs `meson`, `ninja`, `make`, `nasm` (x86-64) and `pkg-config`, and on Linux `libgnutls28-dev`. Results are cached in `desktop/.cache/tools` and re-verified on reuse. Release builds stop if a tool cannot be bundled or fails its check; `--debug` builds fall back to PATH unless `--require-tools` is given, as CI does.
 
-On macOS arm64 `cargo build --release` stops if the Apple speech module cannot be built, which needs Xcode's Metal compiler. `COURSE2MD_NO_APPLE=1` leaves it out on purpose; a development build warns and continues without it.
+On macOS arm64 `cargo build --release` stops if the Apple speech module (`native/apple-asr`, built by `crates/c2m-asr/build.rs`) cannot be built, which needs Xcode's Metal compiler. `COURSE2MD_NO_APPLE=1` leaves it out on purpose; a development build warns and continues without it.
 
 ## Publishing a version
 
-1. Set the same SemVer version (`2.0.0`, or `2.0.0-rc.N` / `-beta.N` / `-alpha.N`) in `Cargo.toml` and `desktop/Cargo.toml`, update both lock files, and write `docs/releases/v<version>.md`, which becomes the release body.
+1. Set the SemVer version (`2.0.0`, or `2.0.0-rc.N` / `-beta.N` / `-alpha.N`) in `[workspace.package]` of the root `Cargo.toml`, which every crate and the desktop inherit, update `Cargo.lock`, and write `docs/releases/v<version>.md`, which becomes the release body.
 2. Push tag `v<version>`, or run the `release` workflow with that version. `dry_run: true` builds, signs and notarizes every asset on any branch without publishing. The workflow builds every asset first, then publishes the GitHub Release with `SHA256SUMS`. Prereleases do not replace Latest.
 3. `brew-tap` and `aur` run after a successful release. Homebrew updates only the release's channel; AUR skips prereleases and checks the GUI package on Arch before pushing. Secrets: `HOMEBREW_TAP_DEPLOY_KEY` (a deploy key with write access to `mizorewww/homebrew-tap` only) and `AUR_SSH_PRIVATE_KEY`.
 

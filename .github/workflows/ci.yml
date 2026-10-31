@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, split/workspace]
+    branches: [main, split/workspace, split/engine-crates]
     paths-ignore: ['**.md', 'docs/**', '.agents/**', 'desktop/**', 'packaging/**', 'install.sh']
   pull_request:
     paths-ignore: ['**.md', 'docs/**', '.agents/**', 'desktop/**', 'packaging/**', 'install.sh']

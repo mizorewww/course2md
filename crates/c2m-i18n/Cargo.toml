@@ -1,0 +1,11 @@
+[package]
+name = "c2m-i18n"
+version.workspace = true
+edition.workspace = true
+description = "The message catalog, tr! and language names"
+license.workspace = true
+publish = false
+
+[dependencies]
+sys-locale.workspace = true
+whatlang.workspace = true

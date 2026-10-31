@@ -29,10 +29,9 @@ jobs:
         run: |
           python3 - <<'PYCODE'
           import os, pathlib, tomllib
-          root = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']['version']
-          desktop = tomllib.loads(pathlib.Path('desktop/Cargo.toml').read_text())['package']['version']
-          assert root == desktop and os.environ['VERSION'] == 'v' + root, (root, desktop)
-          assert pathlib.Path('docs/releases', 'v' + root + '.md').is_file(), 'missing release notes'
+          version = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['workspace']['package']['version']
+          assert os.environ['VERSION'] == 'v' + version, version
+          assert pathlib.Path('docs/releases', 'v' + version + '.md').is_file(), 'missing release notes'
           PYCODE
       - uses: ./.github/actions/packaging-tests
 
@@ -51,7 +50,7 @@ jobs:
           - os: macos-26
             target: aarch64-apple-darwin
             asset: course2md-macos-arm64
-          # build.rs skips the Apple speech module on x86_64 macOS.
+          # c2m-asr's build.rs skips the Apple speech module on x86_64 macOS.
           - os: macos-26
             target: x86_64-apple-darwin
             asset: course2md-macos-x86_64
@@ -64,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Require the Metal compiler on macOS
-        # Without Xcode's Metal toolchain build.rs skips the Apple speech
+        # Without Xcode's Metal toolchain c2m-asr's build.rs skips the Apple speech
         # module, which would ship a macOS build without CoreML recognition.
         if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
         run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is unavailable on this runner. Point DEVELOPER_DIR (runner .env) or xcode-select at Xcode and run xcodebuild -downloadComponent MetalToolchain."; exit 1; }
@@ -100,7 +99,7 @@ jobs:
           codesign --verify --verbose=2 "${{ matrix.asset }}"
 
       # MLX Metal kernels for Apple speech recognition, installed beside the CLI.
-      # build.rs copies them beside the executable; see the note there.
+      # c2m-asr's build.rs copies them beside the executable; see the note there.
       - name: Collect mlx.metallib
         if: matrix.target == 'aarch64-apple-darwin'
         run: cp target/aarch64-apple-darwin/release/mlx.metallib mlx-macos-arm64.metallib
@@ -155,7 +154,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Require the Metal compiler on macOS
-        # Without Xcode's Metal toolchain build.rs skips the Apple speech
+        # Without Xcode's Metal toolchain c2m-asr's build.rs skips the Apple speech
         # module, which would ship a macOS build without CoreML recognition.
         if: runner.os == 'macOS'
         run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is unavailable on this runner. Point DEVELOPER_DIR (runner .env) or xcode-select at Xcode and run xcodebuild -downloadComponent MetalToolchain."; exit 1; }
@@ -190,9 +189,9 @@ jobs:
         with:
           name: native-${{ runner.os }}
           path: |
-            desktop/target/packages/*.zip
-            desktop/target/packages/*.tar.gz
-            desktop/target/packages/*.dmg
+            target/packages/*.zip
+            target/packages/*.tar.gz
+            target/packages/*.dmg
           if-no-files-found: error
       - name: Remove signing material
         if: always() && runner.os == 'macOS'

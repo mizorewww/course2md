@@ -1,0 +1,22 @@
+[package]
+name = "c2m-config"
+version.workspace = true
+edition.workspace = true
+description = "The configuration file and the settings a task runs with"
+license.workspace = true
+publish = false
+
+[dependencies]
+c2m-core = { path = "../c2m-core" }
+c2m-i18n = { path = "../c2m-i18n" }
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+strum.workspace = true
+toml.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

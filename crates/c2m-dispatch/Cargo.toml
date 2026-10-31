@@ -1,0 +1,23 @@
+[package]
+name = "c2m-dispatch"
+version.workspace = true
+edition.workspace = true
+description = "The paid-request ledger and the task control every long step checks"
+license.workspace = true
+publish = false
+
+[dependencies]
+c2m-core = { path = "../c2m-core" }
+c2m-i18n = { path = "../c2m-i18n" }
+c2m-process = { path = "../c2m-process" }
+c2m-protocol = { path = "../c2m-protocol" }
+anyhow.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

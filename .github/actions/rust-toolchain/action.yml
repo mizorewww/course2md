@@ -1,5 +1,5 @@
 name: Rust toolchain
-description: The toolchain named in desktop/rust-toolchain.toml, as the default for the engine and the desktop.
+description: The toolchain named in rust-toolchain.toml.
 inputs:
   targets:
     description: Additional compilation targets
@@ -9,7 +9,7 @@ runs:
   steps:
     - id: channel
       shell: bash
-      run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' desktop/rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ steps.channel.outputs.channel }}

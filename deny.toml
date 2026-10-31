@@ -1,5 +1,8 @@
 [graph]
 all-features = true
+# The engine and CLI, as before the workspaces merged. The desktop's stack has not been
+# through these rules; its licenses are checked by cargo-about when packaging.
+exclude = ["course2md-desktop"]
 
 [advisories]
 yanked = "deny"

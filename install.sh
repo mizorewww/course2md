@@ -22,7 +22,7 @@ case "$os-$arch" in
   linux-x86_64|linux-amd64) ASSET="course2md-linux-x86_64"; YTDLP="yt-dlp_linux" ;;
   linux-aarch64|linux-arm64) ASSET="course2md-linux-aarch64"; YTDLP="yt-dlp_linux_aarch64" ;;
   *)
-    warn "暂无 $os/$arch 的预编译版本，请从源码安装：cargo install --path . / No prebuilt binary for $os/$arch; build from source with cargo install --path ."
+    warn "暂无 $os/$arch 的预编译版本，请从源码安装：cargo install --path crates/course2md / No prebuilt binary for $os/$arch; build from source with cargo install --path crates/course2md"
     exit 1
     ;;
 esac

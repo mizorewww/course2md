@@ -43,7 +43,7 @@ URL ── yt-dlp ─┐
           course.md / course.html / structured.json
 ```
 
-参数与默认值以 `src/cli.rs`、`src/config.rs` 为准；模块职责见 `src/lib.rs` 与各文件开头的文档注释。下面只记录从代码不易看出的决定。
+参数与默认值以 `crates/c2m-engine/src/options.rs`、`crates/c2m-config/src/config.rs` 为准；模块职责见各 crate 的 `Cargo.toml` 描述与各文件开头的文档注释。下面只记录从代码不易看出的决定。
 
 - **画面检测**是三状态机（last_emitted / candidate / 发射）：采样不休眠，`--cooldown` 只限制发射频率，发射时间戳取候选画面首次出现的时间；`--slide-mode stable` 要求画面稳定后才发射，从而跳过 PPT 动画的中间帧。
 - **语音分段**在能量最低点切断，避免切在词中间；事件时间与切分范围分离（`Seg { start, end, cut_start, cut_end }`），切音频时向静音填充但不进入相邻语音，因此不会产生重复文本。
@@ -55,9 +55,9 @@ URL ── yt-dlp ─┐
 
 语音识别后端（`--provider`）：
 
-1. **CoreML 原生路径**（macOS Apple Silicon）：`build.rs` 把 `native/apple-asr`（封装 speech-swift 的 Swift 静态库）链入，不需要外部运行时。
+1. **CoreML 原生路径**（macOS Apple Silicon）：`crates/c2m-asr/build.rs` 把 `native/apple-asr`（封装 speech-swift 的 Swift 静态库）链入，不需要外部运行时。
 2. **llama.cpp 路径**（`gpu` / `cpu`）：逐段提交给本地 `llama-server` 进程。
-3. **Intel NPU**（`npu`）：由 uv 运行依赖版本固定的 worker（`src/npu.rs`），通过 OpenVINO GenAI 运行 Whisper 导出模型。
+3. **Intel NPU**（`npu`）：由 uv 运行依赖版本固定的 worker（`crates/c2m-asr/src/npu.rs`），通过 OpenVINO GenAI 运行 Whisper 导出模型。
 4. **云端**（`api`）：音频分段上传到 OpenAI 兼容的语音识别接口。
 
 每次生成写入课程目录下的 `versions/<version_id>/`，`current.json` 指向当前版本。除非选择云端识别或 AI 服务，模型与识别数据都保留在本地。

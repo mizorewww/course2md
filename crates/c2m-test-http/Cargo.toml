@@ -1,0 +1,9 @@
+[package]
+name = "c2m-test-http"
+version.workspace = true
+edition.workspace = true
+description = "A loopback HTTP server for the workspace's unit tests"
+license.workspace = true
+publish = false
+
+[dependencies]
