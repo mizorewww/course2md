@@ -34,11 +34,6 @@ pub const DEFAULT_EFFECTS: Spring = Spring {
     damping: 1.,
     stiffness: 1600.,
 };
-/// Whole-window color changes, such as switching palettes.
-pub const SLOW_EFFECTS: Spring = Spring {
-    damping: 1.,
-    stiffness: 800.,
-};
 
 impl Spring {
     fn omega(self) -> f32 {
@@ -653,8 +648,8 @@ mod tests {
 
     #[test]
     fn springs_settle_on_their_target() {
-        use super::{DEFAULT_EFFECTS, DEFAULT_SPATIAL, FAST_SPATIAL, SLOW_EFFECTS};
-        for spring in [FAST_SPATIAL, DEFAULT_SPATIAL, DEFAULT_EFFECTS, SLOW_EFFECTS] {
+        use super::{DEFAULT_EFFECTS, DEFAULT_SPATIAL, FAST_SPATIAL};
+        for spring in [FAST_SPATIAL, DEFAULT_SPATIAL, DEFAULT_EFFECTS] {
             let ease = spring.ease();
             assert_eq!(ease(0.), 0.);
             assert_eq!(ease(1.), 1.);

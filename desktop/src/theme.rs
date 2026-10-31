@@ -1,8 +1,8 @@
 //! Semantic design tokens and animated appearance for all desktop pages.
-use crate::palettes::{PaletteId, ThemePreferences};
+use crate::palettes::ThemePreferences;
 use gpui::{App, Pixels, Rems, Rgba, Window, px, rems, rgb};
 use gpui_kit::component::{Theme, ThemeMode};
-use std::{cell::RefCell, time::Instant};
+use gpui_kit_material::color::{ColorRole, Scheme};
 #[path = "choice_group.rs"]
 mod choice_group;
 pub use choice_group::SingleChoiceGroup;
@@ -11,184 +11,60 @@ mod select_field;
 pub use select_field::{MenuBuilder, SelectField};
 
 macro_rules! tokens {
-    ($($name:ident),+ $(,)?) => {
+    ($($name:ident => $role:ident),+ $(,)?) => {
         #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        #[repr(usize)]
         pub enum ColorToken { $($name),+ }
         $(pub const $name: ColorToken = ColorToken::$name;)+
-        const ALL_TOKENS: &[ColorToken] = &[$(ColorToken::$name),+];
+        impl ColorToken {
+            fn role(self) -> ColorRole {
+                match self { $(Self::$name => ColorRole::$role),+ }
+            }
+        }
     }
 }
+// Each old token is the kit's role of the same color (`Scheme::from_palette`), so
+// pages on either side of the migration paint alike. See docs/split/MIGRATION.md.
 tokens!(
-    CANVAS,
-    SURFACE,
-    SURFACE_HIGH,
-    INSET,
-    INK,
-    GRAY,
-    FAINT,
-    HAIRLINE,
-    CARD_LINE,
-    CONTROL,
-    ACCENT,
-    ON_PRIMARY,
-    SECONDARY_CONTAINER,
-    ON_SECONDARY_CONTAINER,
-    SUCCESS,
-    SUCCESS_BG,
-    WARNING,
-    WARNING_BG,
-    DANGER,
-    DANGER_BG,
-    FIND_HIGHLIGHT,
-    FIND_CURRENT,
-    FIND_CURRENT_LINE,
-    SELECTION,
-    READING_SELECTION,
+    CANVAS => SURFACE_CONTAINER,
+    SURFACE => SURFACE,
+    SURFACE_HIGH => SURFACE_CONTAINER_HIGHEST,
+    INSET => INSET,
+    INK => ON_SURFACE,
+    GRAY => ON_SURFACE_VARIANT,
+    FAINT => FAINT,
+    HAIRLINE => OUTLINE_VARIANT,
+    CARD_LINE => CARD_LINE,
+    CONTROL => OUTLINE,
+    ACCENT => PRIMARY,
+    ON_PRIMARY => ON_PRIMARY,
+    SECONDARY_CONTAINER => SECONDARY_CONTAINER,
+    ON_SECONDARY_CONTAINER => ON_SECONDARY_CONTAINER,
+    SUCCESS => SUCCESS,
+    SUCCESS_BG => SUCCESS_BG,
+    WARNING => WARNING,
+    WARNING_BG => WARNING_BG,
+    DANGER => ERROR,
+    DANGER_BG => ERROR_CONTAINER,
+    FIND_HIGHLIGHT => FIND_HIGHLIGHT,
+    FIND_CURRENT => FIND_CURRENT,
+    FIND_CURRENT_LINE => FIND_CURRENT_LINE,
+    SELECTION => SELECTION,
+    READING_SELECTION => READING_SELECTION,
 );
-const COLOR_COUNT: usize = ALL_TOKENS.len();
 
-pub fn blend(from: Rgba, to: Rgba, t: f32) -> Rgba {
-    let t = t.clamp(0., 1.);
-    Rgba {
-        r: from.r + (to.r - from.r) * t,
-        g: from.g + (to.g - from.g) * t,
-        b: from.b + (to.b - from.b) * t,
-        a: from.a + (to.a - from.a) * t,
-    }
-}
-
-fn palette_colors(id: PaletteId) -> [Rgba; COLOR_COUNT] {
-    let p = id.colors();
-    let tint = |foreground, amount| blend(rgb(p.surface), rgb(foreground), amount);
-    // The window ground is M3's surface container: the palette's canvas with
-    // a trace of its accent, so surface tiles read as a layer above it.
-    let canvas = blend(
-        rgb(p.canvas),
-        rgb(p.accent),
-        if id.is_dark() { 0.03 } else { 0.045 },
-    );
-    std::array::from_fn(|index| match ALL_TOKENS[index] {
-        CANVAS => canvas,
-        // Dark palettes' surfaces sit only a step above their canvas; lift
-        // them as M3 lifts dark surface containers, so tiles and cards read
-        // as layers.
-        SURFACE => {
-            if id.is_dark() {
-                blend(rgb(p.surface), rgb(p.text), 0.045)
-            } else {
-                rgb(p.surface)
-            }
-        }
-        // Surface container highest: unselected segments, filled search bars
-        // and tonal icon buttons.
-        // Dark palettes raise surfaces by lightening them, so their highest
-        // container builds on the surface rather than the darker ground.
-        SURFACE_HIGH => {
-            if id.is_dark() {
-                blend(rgb(p.surface), rgb(p.text), 0.13)
-            } else {
-                blend(canvas, rgb(p.text), 0.06)
-            }
-        }
-        INSET => rgb(p.inset),
-        INK => rgb(p.text),
-        GRAY => rgb(p.muted),
-        FAINT => rgb(p.subtle),
-        HAIRLINE => rgb(p.border),
-        // M3 cards are separated by tone rather than a full-strength outline.
-        CARD_LINE => blend(rgb(p.surface), rgb(p.border), 0.55),
-        CONTROL => rgb(p.control),
-        ACCENT => rgb(p.accent),
-        ON_PRIMARY => rgb(p.on_accent),
-        // M3 container roles derived from each palette's own accent and text, so
-        // every preset keeps its identity (assets/themes/SOURCES.md).
-        SECONDARY_CONTAINER => tint(p.accent, if id.is_dark() { 0.26 } else { 0.24 }),
-        ON_SECONDARY_CONTAINER => blend(
-            rgb(p.text),
-            rgb(p.accent),
-            if id.is_dark() { 0.30 } else { 0.40 },
-        ),
-        SUCCESS => rgb(p.success),
-        SUCCESS_BG => tint(p.success, 0.12),
-        WARNING => rgb(p.warning),
-        WARNING_BG => tint(p.warning, 0.12),
-        DANGER => rgb(p.danger),
-        DANGER_BG => tint(p.danger, 0.12),
-        SELECTION => rgb(p.selection),
-        // Selected note text: the accent laid over whatever surface holds the
-        // text, so it stays visible on tinted panels such as the summary.
-        READING_SELECTION => Rgba {
-            a: if id.is_dark() { 0.42 } else { 0.30 },
-            ..rgb(p.accent)
-        },
-        FIND_HIGHLIGHT => tint(p.warning, 0.16),
-        FIND_CURRENT => tint(p.warning, 0.32),
-        FIND_CURRENT_LINE => rgb(p.warning),
-    })
-}
-
-struct PaintState {
-    target: Option<PaletteId>,
-    from: [Rgba; COLOR_COUNT],
-    current: [Rgba; COLOR_COUNT],
-    started: Instant,
-}
-thread_local! {
-    // GPUI renders application chrome and all overlays on its UI thread.
-    // Thread-local paint values keep helpers context-free without unsafe globals.
-    static PAINT: RefCell<PaintState> = RefCell::new(PaintState {
-        target: None, from: palette_colors(PaletteId::Paper),
-        current: palette_colors(PaletteId::Paper), started: Instant::now(),
-    });
-}
+pub use gpui_kit_material::theme::{blend, system_dark};
 
 pub fn color(token: ColorToken) -> Rgba {
-    PAINT.with(|paint| paint.borrow().current[token as usize])
+    gpui_kit_material::theme::color(token.role())
 }
 
-pub fn system_dark(cx: &App) -> bool {
-    ThemeMode::from(cx.window_appearance()).is_dark()
-}
-
-/// Resolve system changes on each notified frame, and retarget palette changes
-/// from their current paint values. Persisted settings are the sole authority.
+/// Paints `preference`, resolved against the system, through the kit, which retargets
+/// palette changes from their current paint. Persisted settings are the sole authority.
 pub fn apply_preference(preference: &ThemePreferences, window: &mut Window, cx: &mut App) {
-    let id = preference.resolve(system_dark(cx));
-    let target = palette_colors(id);
-    let (changed, running) = PAINT.with(|paint| {
-        let mut paint = paint.borrow_mut();
-        let now = Instant::now();
-        if paint.target.is_none() {
-            paint.target = Some(id);
-            paint.current = target;
-            paint.from = target;
-            return (true, false);
-        }
-        if paint.target != Some(id) {
-            paint.from = paint.current;
-            paint.target = Some(id);
-            paint.started = now;
-        }
-        let t = if cx.reduce_motion() {
-            1.
-        } else {
-            (now.duration_since(paint.started).as_secs_f32()
-                / crate::motion::SLOW_EFFECTS.duration().as_secs_f32())
-            .min(1.)
-        };
-        let eased = crate::motion::SLOW_EFFECTS.ease()(t);
-        let next = std::array::from_fn(|i| blend(paint.from[i], target[i], eased));
-        let changed = next != paint.current;
-        paint.current = next;
-        (changed, t < 1.)
-    });
-    if changed {
-        sync_component_theme(id.is_dark(), cx);
-    }
-    if running {
-        window.request_animation_frame();
+    let scheme = Scheme::from_palette(preference.resolve(system_dark(cx)));
+    if gpui_kit_material::theme::apply_scheme(scheme, window, cx) {
+        sync_component_theme(scheme.is_dark(), cx);
     }
 }
 
