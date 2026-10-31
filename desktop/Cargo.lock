@@ -2391,7 +2391,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.8.1"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2490,7 +2490,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2547,7 +2547,6 @@ dependencies = [
  "taffy",
  "thiserror 2.0.21",
  "ttf-parser",
- "unicode-segmentation",
  "url",
  "usvg 0.46.0",
  "uuid",
@@ -2560,7 +2559,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
 dependencies = [
  "anyhow",
  "async-task",
@@ -2595,7 +2594,6 @@ dependencies = [
  "pathfinder_geometry",
  "smallvec",
  "thiserror 2.0.21",
- "unicode-bidi",
  "zed-font-kit",
 ]
 
@@ -2647,7 +2645,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-macos"
 version = "0.1.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2802,7 +2800,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.8.1"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -2834,7 +2832,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
 dependencies = [
  "chrono",
  "gpui-base",
@@ -2847,7 +2845,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material-color"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
 dependencies = [
  "serde",
 ]
