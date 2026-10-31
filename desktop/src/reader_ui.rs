@@ -4010,7 +4010,7 @@ impl ReaderMetrics {
         let column_left = (window_width - shell) / 2.;
         let frame_left = ((window_width - wanted) / 2.)
             .max(column_left)
-            .max(crate::views::title_bar_leading());
+            .max(crate::views::title_bar_leading(window));
         let reader_width = wanted.min(window_width - column_left - frame_left).max(0.);
         Self {
             reader_width,
@@ -4277,7 +4277,7 @@ impl Desktop {
         let gaps = 8. * tools.len().saturating_sub(1) as f32;
         let window_width = f32::from(window.bounds().size.width);
         let trailing = (window_width - metrics.frame_left - metrics.reader_width)
-            .max(crate::window_controls::title_bar_trailing(window));
+            .max(crate::views::title_bar_trailing(window));
         let room = window_width
             - metrics.frame_left
             - trailing
@@ -4352,7 +4352,7 @@ impl Desktop {
         let reading_note = self.result_tab == 0;
         // The reading tools sit in the title bar: presses on them are theirs,
         // not the start of a window move.
-        let mut toolbar = crate::window_controls::title_bar_control(
+        let mut toolbar = gpui_kit_material::components::title_bar_control(
             h_flex().min_w_0().flex_shrink(1.).gap_2().items_center(),
         );
         let mut compact_search = None;
@@ -4396,7 +4396,7 @@ impl Desktop {
         // gives them the play button's room, so the note title keeps as much
         // as it has where the system draws them; playing moves to the menu.
         let tight = self.reader_bar_tight(metrics, window);
-        let play_in_menu = tight && crate::window_controls::caption_width(window) > 0.;
+        let play_in_menu = tight && crate::views::draws_captions(window);
         if !play_in_menu {
             toolbar = toolbar.children(self.reader_play_button(icon_only, cx));
         }
@@ -7662,7 +7662,7 @@ impl Desktop {
         tools: AnyElement,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> TitleBar {
+    ) -> gpui_kit_material::components::TitleBar {
         let title = self
             .preview
             .as_ref()
@@ -7688,16 +7688,18 @@ impl Desktop {
         let frame = ReaderMetrics::new(window, self.result_tab, !self.reader_ui.outline.is_empty());
         let window_width = f32::from(window.bounds().size.width);
         let trailing = (window_width - frame.frame_left - frame.reader_width)
-            .max(crate::window_controls::title_bar_trailing(window));
+            .max(crate::views::title_bar_trailing(window));
         let tight = self.reader_bar_tight(&frame, window);
-        crate::views::apply_shell_title_bar_chrome(
-            TitleBar::new().h(reader_title_bar_height(window)),
-        )
-        .child(
-            bar.pl(px(frame.frame_left))
-                .pr(px(trailing))
+        // The bar already keeps clear of the platform's buttons.
+        let (bar_leading, bar_trailing) = (
+            crate::views::title_bar_leading(window),
+            crate::views::title_bar_trailing(window),
+        );
+        crate::views::app_bar(reader_title_bar_height(window), window, cx).child(
+            bar.pl(px(frame.frame_left - bar_leading))
+                .pr(px(trailing - bar_trailing))
                 .gap(px(12.))
-                .child(crate::window_controls::title_bar_control(
+                .child(gpui_kit_material::components::title_bar_control(
                     icon_button("reader-back", BUTTON_MEDIUM, true, cx)
                         .icon(icons::arrow_left())
                         .accessibility_label(course2md::tr!("返回「{}」", origin))

@@ -19,6 +19,8 @@ mod credentials;
 mod focus_scroll;
 mod folder_tree;
 mod i18n;
+// Old names, emptied as pages move to the kit in wave 2 and deleted in wave 3.
+#[allow(dead_code)]
 mod icons;
 mod import_ui;
 mod library_ui;
@@ -45,11 +47,15 @@ mod source;
 mod storage;
 mod storage_ui;
 mod store;
+mod symbols;
 mod task_runner;
 mod task_ui;
+#[allow(dead_code)]
 mod theme;
+// Primitives for the page rewrites of wave 2; the attribute goes once they have callers.
+#[allow(dead_code)]
+mod ui;
 mod views;
-mod window_controls;
 mod workspace;
 
 use backend::{Done, EngineEvent, Event, Job};
@@ -554,6 +560,10 @@ impl Desktop {
                 }
             },
         ));
+        // The system's scrollbar preference can change while the window is away.
+        subscriptions.push(cx.observe_window_activation(window, |_, _, cx| {
+            Theme::sync_scrollbar_appearance(cx);
+        }));
         let options = ConversionOptions::from_config(&config);
         let poll = cx.spawn_in(window, async |this, cx| {
             loop {
@@ -712,8 +722,6 @@ impl Desktop {
         this.prepare_workbench_input(window, cx);
         this.restore_storage_state(cx);
         std::thread::spawn(source::prune_cache);
-        // Starts reading the scrollbar preference before the first frame needs it.
-        backend::scrollbars_always_visible();
         cx.set_reduce_motion(this.desktop_settings.reduce_motion);
         this.refresh_account(cx);
         this.refresh_environment(cx);
@@ -802,7 +810,7 @@ impl Desktop {
         }
         cx.on_focus_lost(window, |this, window, cx| {
             let ancestor = window.focus_lost_restore_target(cx);
-            if window.has_active_dialog(cx) {
+            if ui::modal_open(window, cx) {
                 // A dialog can replace its own controls. Restore only inside its
                 // active trap; never send focus back to the obscured main page.
                 if let Some(trap) = gpui_base::active_focus_trap(window, cx) {
@@ -1552,7 +1560,7 @@ fn dispatch_desktop_action(
     // Update it after dispatch completes so the native menu fallback can run too.
     cx.defer(move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
-            if !window.has_active_dialog(cx) {
+            if !ui::modal_open(window, cx) {
                 let _ = view.update(cx, |this, cx| action(this, window, cx));
             }
         });
@@ -1599,7 +1607,7 @@ pub(crate) fn secondary_binding<A: gpui::Action>(
 
 fn main() {
     a11y::init_validation_diagnostics();
-    let app = gpui_kit::application().with_assets(icons::Assets);
+    let app = gpui_kit::application().with_assets(symbols::Assets);
     app.on_reopen(|cx| {
         cx.activate(true);
         for handle in cx.windows() {
@@ -1607,8 +1615,11 @@ fn main() {
         }
     });
     app.run(|cx| {
+        symbols::register_fonts(cx);
         gpui_kit::init(cx);
+        gpui_kit_material::init(cx);
         theme::init(cx);
+        Theme::sync_scrollbar_appearance(cx);
         // Debug validation uses the same native window and render path at an exact size.
         // Release builds always use the ordinary initial window size.
         // Debug validation asks for an exact size, which it keeps even where
@@ -1640,11 +1651,12 @@ fn main() {
             WindowOptions {
                 window_bounds: Some(window_bounds),
                 window_min_size: Some(min_size),
-                titlebar: Some(TitlebarOptions {
-                    traffic_light_position: Some(point(px(16.), px(19.))),
-                    ..TitleBar::title_bar_options()
-                }),
-                ..TitleBar::window_options()
+                ..gpui_kit_material::components::title_bar_window_options(
+                    "course2md",
+                    views::APP_BAR_HEIGHT,
+                    min_size,
+                    cx,
+                )
             },
             cx,
             |window, cx| {

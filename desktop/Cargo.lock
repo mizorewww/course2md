@@ -1391,6 +1391,7 @@ dependencies = [
  "gpui-base",
  "gpui-kit",
  "gpui-kit-material",
+ "gpui-material-symbols",
  "image",
  "keyring",
  "libc",

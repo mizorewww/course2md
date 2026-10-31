@@ -19,3 +19,5 @@ roles. The upstream Day background `#e1e2e7`, blue `#2e7de9` and selection
 Original licenses are in `licenses/` and included in distributed bundles. They
 cover the palette source material; upstream projects do not endorse course2md.
 Brand artwork has separate provenance in `../brands/SOURCES.md`.
+
+The Roboto faces in `../fonts/roboto` (400, 500, 600, Latin) are the ones gpui-kit-material's gallery instantiates from md3.io's variable font; `licenses/Roboto-OFL.txt` covers them.

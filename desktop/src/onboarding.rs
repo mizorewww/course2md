@@ -2236,7 +2236,7 @@ impl Desktop {
         {
             has_phase = true;
             let phase = activity::model_transfer_phase(stage, progress.phase);
-            view = view.child(motion::transfer_status(
+            view = view.child(crate::ui::transfer_status(
                 ("setup-model-progress", index),
                 phase,
                 &progress.transfer_metrics(stage, true),

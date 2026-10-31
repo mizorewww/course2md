@@ -1,158 +1,110 @@
-//! The application's icon set. Each name has exactly one asset: Lucide outline
-//! icons for shared chrome, Material icons where Lucide has no match, the
-//! platform brand marks, and the glyphs of the window caption buttons the app
-//! draws. GPUI Component looks icons up by `icons/<file>.svg`, so a
-//! registered file also replaces the component's own icon of that name.
-use gpui::{AssetSource, SharedString, Styled};
-use std::borrow::Cow;
+//! The names old pages call for icons, each now a Material Symbol. New code calls
+//! `symbols::*` directly (docs/split/MIGRATION.md). Goes with the last old page.
+use crate::symbols;
+use gpui::Styled;
+use gpui_kit::component::Icon;
 
 macro_rules! icons {
-    ($($name:ident => $dir:literal / $file:literal;)+) => {
-        const ICONS: &[(&str, &[u8])] = &[
-            $((
-                concat!("icons/", $file, ".svg"),
-                include_bytes!(concat!("../assets/", $dir, "/", $file, ".svg")),
-            ),)+
-        ];
+    ($($name:ident => $symbol:ident;)+) => {
         $(
-            pub fn $name() -> gpui_kit::component::Icon {
-                gpui_kit::component::Icon::default().path(concat!("icons/", $file, ".svg"))
+            pub fn $name() -> Icon {
+                symbols::$symbol().component()
             }
         )+
     };
 }
 
 icons! {
-    arrow_forward => "outline" / "arrow-forward";
-    arrow_left => "outline" / "arrow-left";
-    article => "outline" / "article";
-    auto_fix => "outline" / "auto-fix";
-    book_open => "outline" / "book-open";
-    braces => "outline" / "braces";
-    check => "outline" / "check";
-    check_circle => "outline" / "circle-check";
-    chevron_down => "outline" / "chevron-down";
-    chevron_left => "outline" / "chevron-left";
-    chevron_right => "outline" / "chevron-right";
-    chevron_up => "outline" / "chevron-up";
-    close => "outline" / "close";
-    cloud => "outline" / "cloud";
-    code => "outline" / "code";
-    computer => "outline" / "computer";
-    content_copy => "outline" / "content-copy";
-    delete => "outline" / "trash";
-    cpu => "outline" / "cpu";
-    download => "outline" / "download";
-    edit => "outline" / "edit";
-    error => "outline" / "circle-x";
-    external_link => "outline" / "external-link";
-    eye => "outline" / "eye";
-    eye_off => "outline" / "eye-off";
-    file_text => "outline" / "file-text";
-    file_upload => "outline" / "file-upload";
-    folder => "outline" / "folder";
-    folder_input => "outline" / "folder-input";
-    folder_open => "outline" / "folder-open";
-    folder_plus => "outline" / "folder-plus";
-    globe => "outline" / "globe";
-    gpu => "outline" / "gpu";
-    grip_vertical => "outline" / "grip-vertical";
-    image => "outline" / "image";
-    inbox => "outline" / "inbox";
-    info => "outline" / "info";
-    layout_grid => "outline" / "layout-grid";
-    library => "outline" / "library";
-    link => "outline" / "link";
-    list => "outline" / "list";
-    list_checks => "outline" / "list-checks";
-    loader_circle => "outline" / "loader-circle";
-    login => "outline" / "login";
-    logout => "outline" / "logout";
-    maximize => "outline" / "maximize-2";
-    message_square => "outline" / "message-square";
-    mic => "outline" / "mic";
-    microchip => "outline" / "microchip";
-    moon => "outline" / "moon";
-    more_vertical => "outline" / "ellipsis-vertical";
-    notebook => "outline" / "notebook";
-    palette => "outline" / "palette";
-    play => "outline" / "play";
-    plus => "outline" / "plus";
-    refresh => "outline" / "refresh";
-    restart => "outline" / "restart";
-    save => "outline" / "save";
-    schedule => "outline" / "schedule";
-    science => "outline" / "science";
-    search => "outline" / "search";
-    server => "outline" / "server";
-    settings => "outline" / "settings";
-    sparkles => "outline" / "sparkles";
-    storage => "outline" / "storage";
-    subtitles => "outline" / "captions";
-    sun => "outline" / "sun";
-    text_lines => "outline" / "text-align-start";
-    tune => "outline" / "tune";
-    tv => "outline" / "tv";
-    warning => "outline" / "triangle-alert";
-
-    arrow_down => "material" / "arrow-down";
-    arrow_up => "material" / "arrow-up";
-    fit_screen => "material" / "fit-screen";
-    history => "material" / "history";
-    movie => "material" / "movie";
-    pause => "material" / "pause";
-    play_arrow => "material" / "play-arrow";
-    summarize => "material" / "summarize";
-    task => "material" / "task";
-    toc => "material" / "format-list-bulleted";
-    zoom_in => "material" / "zoom-in";
-    zoom_out => "material" / "zoom-out";
-
-    bilibili_mark => "brands" / "bilibili";
-
-    caption_close => "window" / "caption-close";
-    caption_maximize => "window" / "caption-maximize";
-    caption_minimize => "window" / "caption-minimize";
-    caption_restore => "window" / "caption-restore";
+    arrow_forward => arrow_forward;
+    arrow_left => arrow_back;
+    article => article;
+    auto_fix => auto_fix_high;
+    book_open => menu_book;
+    braces => data_object;
+    check => check;
+    check_circle => check_circle;
+    chevron_down => keyboard_arrow_down;
+    chevron_left => chevron_left;
+    chevron_right => chevron_right;
+    chevron_up => keyboard_arrow_up;
+    close => close;
+    cloud => cloud;
+    code => code;
+    computer => computer;
+    content_copy => content_copy;
+    delete => delete;
+    cpu => memory;
+    download => download;
+    edit => edit;
+    error => cancel;
+    external_link => open_in_new;
+    eye => visibility;
+    eye_off => visibility_off;
+    file_text => description;
+    file_upload => file_upload;
+    folder => folder;
+    folder_input => drive_file_move;
+    folder_open => folder_open;
+    folder_plus => create_new_folder;
+    globe => language;
+    gpu => developer_board;
+    grip_vertical => drag_indicator;
+    image => image;
+    inbox => inbox;
+    info => info;
+    layout_grid => grid_view;
+    library => library_books;
+    link => link;
+    list => list;
+    list_checks => checklist;
+    loader_circle => progress_activity;
+    login => login;
+    logout => logout;
+    maximize => open_in_full;
+    message_square => chat_bubble;
+    mic => mic;
+    microchip => memory;
+    moon => dark_mode;
+    more_vertical => more_vert;
+    notebook => book;
+    palette => palette;
+    play => play_arrow;
+    plus => add;
+    refresh => refresh;
+    restart => restart_alt;
+    save => save;
+    schedule => schedule;
+    science => science;
+    search => search;
+    server => dns;
+    settings => settings;
+    sparkles => auto_awesome;
+    storage => storage;
+    subtitles => subtitles;
+    sun => light_mode;
+    text_lines => notes;
+    tune => tune;
+    tv => tv;
+    warning => warning;
+    arrow_down => arrow_downward;
+    arrow_up => arrow_upward;
+    fit_screen => fit_screen;
+    history => history;
+    movie => movie;
+    pause => pause;
+    play_arrow => play_arrow;
+    summarize => summarize;
+    task => task;
+    toc => format_list_bulleted;
+    zoom_in => zoom_in;
+    zoom_out => zoom_out;
 }
 
-const APP_ICON: (&str, &[u8]) = (
-    "images/course2md.png",
-    include_bytes!("../assets/128x128@2x.png"),
-);
-
-pub struct Assets;
-
-impl AssetSource for Assets {
-    fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
-        if let Some(formula) = crate::math::asset(path) {
-            return Ok(Some(formula));
-        }
-        if let Some((_, bytes)) = ICONS
-            .iter()
-            .chain([&APP_ICON])
-            .find(|(name, _)| *name == path)
-        {
-            return Ok(Some(Cow::Borrowed(bytes)));
-        }
-        gpui_kit::assets::Assets.load(path)
-    }
-    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        let mut paths = gpui_kit::assets::Assets.list(path)?;
-        paths.extend(
-            ICONS
-                .iter()
-                .chain([&APP_ICON])
-                .filter(|(name, _)| name.starts_with(path))
-                .map(|(name, _)| SharedString::from(*name)),
-        );
-        paths.sort();
-        paths.dedup();
-        Ok(paths)
-    }
+pub fn bilibili_mark() -> Icon {
+    Icon::default().path("icons/bilibili.svg")
 }
 
 /// Brand colors are intrinsic to the platform mark, independent of UI themes.
-pub fn bilibili() -> gpui_kit::component::Icon {
+pub fn bilibili() -> Icon {
     bilibili_mark().text_color(gpui::rgb(0x00a1d6))
 }

@@ -796,9 +796,7 @@ fn probe(bin: &Path, args: &[&str], timeout: Duration) -> Option<String> {
 }
 
 // Render pages still name the scrollbar helpers through this module.
-pub(crate) use crate::scroll::{
-    scrollbars_always_visible, vertical_scrollbar, vertical_scrollbar_for,
-};
+pub(crate) use crate::scroll::{vertical_scrollbar, vertical_scrollbar_for};
 
 #[cfg(test)]
 mod tests {

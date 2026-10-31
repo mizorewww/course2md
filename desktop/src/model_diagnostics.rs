@@ -1115,7 +1115,7 @@ impl Desktop {
                 .enumerate()
             {
                 extras.push(
-                    crate::motion::transfer_status(
+                    crate::ui::transfer_status(
                         ("model-download-progress", index),
                         crate::activity::model_transfer_phase(stage, progress.phase),
                         &progress.transfer_metrics(stage, true),

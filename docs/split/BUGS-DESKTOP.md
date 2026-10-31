@@ -24,7 +24,7 @@ Status of `AUDIT.md` § Bugs → Desktop, the find field keys, and the gaps left
 | D11 lock `.expect` | fixed | 25bc804 | Existing tests; poisoning itself is not tested |
 | D11 unzeroized copies | fixed | 7b0590a | By reading. `serde_json` parsing can still leave transient copies, and escapes beyond the reserved size can reallocate |
 | D11 doc comments | fixed | 70a8cb3 | By reading |
-| D12 | not done | none | Subsumed by P5, as instructed |
+| D12 | fixed | 4a337d2 | No spawned `defaults`: `Theme::sync_scrollbar_appearance` reads the platform, at startup and on window activation, so `Automatic` with a mouse is honored. On macOS the "always" preference shows the bar on hover (Kit maps not-auto-hide to `Hover`), a kit decision. Not exercised with a mouse attached or the preference changed |
 | D13 | fixed | a99b2f6 | Existing test passes on macOS. PATHEXT was not exercised, because that needs Windows. `which` also requires the executable bit on Unix, which the old walk did not |
 | Find field keys | fixed | df84fc7 | Capture feature with simulated keystrokes through `window.dispatch_keystroke`, not hardware keys, on a fixture note. Focus in the field: `cmd-f`, `1` gives 1/6, `cmd-g` 2/6, Escape closes the field and clears the highlights (PNGs viewed). `cmd-shift-g` gives a file the same size as the 1/6 shot; that PNG was not opened. No automated test |
 | Metallib in release | fixed | d2ae9ce | Xcode 27.2 beta, stub `swift` that succeeds, clean worktree: `cargo check --release` exits 101 with the message; `COURSE2MD_NO_APPLE=1` passes; a dev check warns and finishes. Real Swift build: `target/release/mlx.metallib` present |

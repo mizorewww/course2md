@@ -1556,7 +1556,7 @@ impl Desktop {
             SettingsTab::Generation => self.generation_settings_page(window, cx),
             SettingsTab::Services => self.services_settings_page(window, cx),
             SettingsTab::Storage => self.storage_settings_page(cx),
-            SettingsTab::Application => self.application_settings_page(cx),
+            SettingsTab::Application => self.application_settings_page(window, cx),
             SettingsTab::Appearance => self.appearance_page(window, cx),
         };
         let editing_service = self.settings_tab == SettingsTab::Services
@@ -2746,24 +2746,8 @@ impl Desktop {
                 ),
             )
     }
-    fn application_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
-        let project = self.about_link(
-            "about-project",
-            icons::external_link(),
-            course2md::tr!("项目主页"),
-            "https://github.com/mizorewww/course2md",
-            [false; 4],
-            cx,
-        );
-        let feedback = self.about_link(
-            "about-issue",
-            icons::message_square(),
-            course2md::tr!("发送反馈"),
-            "https://github.com/mizorewww/course2md/issues",
-            [false; 4],
-            cx,
-        );
-        let licenses = self.about_licenses([false; 4], cx);
+    fn application_settings_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let licenses = crate::about::licenses([false; 4], window, cx);
         v_flex()
             .w_full()
             .min_w_0()
@@ -2771,8 +2755,27 @@ impl Desktop {
             .child(self.environment_page(cx))
             .child(
                 group("about-heading", course2md::tr!("关于"))
-                    .child(self.about_page())
-                    .pair(move |_| project, move |_| feedback)
+                    .child(crate::about::identity())
+                    .pair(
+                        |outer| {
+                            crate::about::link(
+                                "about-project",
+                                crate::symbols::open_in_new(),
+                                course2md::tr!("项目主页"),
+                                "https://github.com/mizorewww/course2md",
+                                outer,
+                            )
+                        },
+                        |outer| {
+                            crate::about::link(
+                                "about-issue",
+                                crate::symbols::chat_bubble(),
+                                course2md::tr!("发送反馈"),
+                                "https://github.com/mizorewww/course2md/issues",
+                                outer,
+                            )
+                        },
+                    )
                     .tile(move |_| licenses)
                     .child(
                         setting_surface().py(rems(12. / 14.)).child(
@@ -3401,10 +3404,9 @@ impl Desktop {
         &self,
         bar: Div,
         window: &mut Window,
-        _: &mut Context<Self>,
-    ) -> TitleBar {
-        crate::views::apply_shell_title_bar_chrome(TitleBar::new().h(title_bar_height(window)))
-            .child(bar)
+        cx: &mut Context<Self>,
+    ) -> gpui_kit_material::components::TitleBar {
+        crate::views::app_bar(title_bar_height(window), window, cx).child(bar)
     }
 }
 

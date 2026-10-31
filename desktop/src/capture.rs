@@ -25,7 +25,7 @@
 //!
 //! Dialogs open over their page: `service-editor:<ai|speech|dialog|confirm>`
 //! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
-//! `delete` and `image` (the newest note; give it a longer
+//! `delete`, `confirm` (a `ui::Confirm`) and `image` (the newest note; give it a longer
 //! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage` and `login`. Each
 //! capture first closes the dialogs an earlier one opened, so one shot shows
 //! one dialog. Nothing a dialog would change is saved unless its action is
@@ -43,7 +43,7 @@ use std::{cell::Cell, path::PathBuf, time::Duration};
 thread_local! {
     static PALETTE: Cell<Option<PaletteId>> = const { Cell::new(None) };
     static SCALE: Cell<Option<f32>> = const { Cell::new(None) };
-    static CAPTION: Cell<Option<crate::window_controls::Caption>> = const { Cell::new(None) };
+    static CAPTION: Cell<Option<gpui_kit_material::components::Caption>> = const { Cell::new(None) };
     /// The saved library presentation (cards, grouped), restored before each
     /// library shot so one shot's state does not leak into the next.
     static LIBRARY_PRESENTATION: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
@@ -70,7 +70,7 @@ pub fn override_appearance(appearance: &mut crate::palettes::ThemePreferences) {
 }
 
 /// The caption buttons to draw instead of this platform's.
-pub fn caption_override() -> Option<crate::window_controls::Caption> {
+pub fn caption_override() -> Option<gpui_kit_material::components::Caption> {
     CAPTION.with(Cell::get)
 }
 
@@ -95,8 +95,8 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
     }
     if let Ok(chrome) = std::env::var("COURSE2MD_CAPTURE_CHROME") {
         let caption = match chrome.as_str() {
-            "windows" => crate::window_controls::Caption::Windows,
-            "linux" => crate::window_controls::Caption::Linux,
+            "windows" => gpui_kit_material::components::Caption::Windows,
+            "linux" => gpui_kit_material::components::Caption::Linux,
             _ => panic!("unknown capture chrome {chrome}"),
         };
         CAPTION.with(|cell| cell.set(Some(caption)));
@@ -131,6 +131,12 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
                     });
                 }
                 cx.background_executor().timer(delay).await;
+                let _ = cx.update(|window, cx| {
+                    // Draw now: a window hidden behind others gets no frames, and
+                    // the image would show whatever it drew last.
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                });
                 let _ = cx.update(|window, _| match window.render_to_image() {
                     Ok(image) => {
                         if let Err(error) = image.save(&path) {
@@ -395,6 +401,12 @@ impl Desktop {
                         if let Some(course) = newest {
                             this.open_course(course, cx);
                         }
+                    }
+                    "confirm" => {
+                        crate::ui::Confirm::new("Delete note", "Keep note", "Move to Trash")
+                            .danger()
+                            .text("The note moves to the Trash. You can restore it from there.")
+                            .ask(|_, _, _| {}, window, cx)
                     }
                     "folder" => this.begin_folder(None, window, cx),
                     "rename" => {

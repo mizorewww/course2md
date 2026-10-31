@@ -452,7 +452,7 @@ fn stage_progress(
             if rest.is_empty() {
                 live.live_counter()
             } else {
-                format!("{rest}{}{}", activity::SEPARATOR, live.live_counter())
+                format!("{rest} · {}", live.live_counter())
             }
         }
         None => detail,
@@ -616,7 +616,7 @@ impl RenderOnce for TaskStages {
                 StageStatus::Complete if !stage.detail.is_empty() => (stage.detail, color(GRAY)),
                 status if stage.detail.is_empty() => (status.label().to_owned(), status.ink()),
                 status => (
-                    format!("{}{}{}", status.label(), activity::SEPARATOR, stage.detail),
+                    format!("{} · {}", status.label(), stage.detail),
                     status.ink(),
                 ),
             };
@@ -641,11 +641,9 @@ impl RenderOnce for TaskStages {
                         .flex_shrink_0(),
                     )
                     .child(
-                        accessible_text(status_id, status)
+                        crate::ui::status_line(status_id, &status)
                             .flex_1()
-                            .min_w_0()
-                            .text_right()
-                            .whitespace_normal()
+                            .justify_end()
                             .text_size(TEXT_BODY)
                             .text_color(ink),
                     ),
@@ -2865,11 +2863,7 @@ impl Desktop {
     /// stages never looks stalled.
     pub(crate) fn with_job_clock(&self, label: &str) -> String {
         match self.job_started.filter(|_| self.job.is_some()) {
-            Some(started) => format!(
-                "{label}{}{}",
-                activity::SEPARATOR,
-                activity::elapsed_label(started.elapsed())
-            ),
+            Some(started) => format!("{label} · {}", activity::elapsed_label(started.elapsed())),
             None => label.to_owned(),
         }
     }
@@ -2887,12 +2881,7 @@ impl Desktop {
                 let label = if stage.compact_detail.is_empty() {
                     stage.title
                 } else {
-                    format!(
-                        "{}{}{}",
-                        stage.title,
-                        activity::SEPARATOR,
-                        stage.compact_detail
-                    )
+                    format!("{} · {}", stage.title, stage.compact_detail)
                 };
                 (label, stage.fraction)
             })
@@ -3668,7 +3657,7 @@ mod tests {
             activity.finish();
             // The finished stage keeps its clock as the record, still without a fraction.
             let (detail, fraction) = task_stage_progress(name, true, Some(&activity), 1, 1);
-            assert_eq!(crate::activity::plain(&detail), "用时 0 秒");
+            assert_eq!(detail, "用时 0 秒");
             assert!(fraction.is_none());
         }
         // Quantities that measure completed work keep their determinate progress.
@@ -3681,7 +3670,7 @@ mod tests {
             2,
             6,
         );
-        assert!(crate::activity::plain(&detail).contains("2 / 6"));
+        assert!(detail.contains("2 / 6"));
         assert_eq!(fraction, Some(2. / 6.));
     }
 
