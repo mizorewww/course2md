@@ -564,9 +564,13 @@ impl Desktop {
         );
         // Appearance and scale reach the theme before Root renders, not during it: a
         // preference change notifies this view, and the system's appearance tells the window.
-        subscriptions.push(cx.observe_in(&cx.entity(), window, |this: &mut Self, _, window, cx| {
-            this.prepare_theme(window, cx);
-        }));
+        subscriptions.push(cx.observe_in(
+            &cx.entity(),
+            window,
+            |this: &mut Self, _, window, cx| {
+                this.prepare_theme(window, cx);
+            },
+        ));
         subscriptions.push(cx.observe_window_appearance(window, |this, window, cx| {
             this.prepare_theme(window, cx);
         }));
@@ -1151,7 +1155,8 @@ impl Desktop {
         self.library_generation = self.library_generation.wrapping_add(1);
         let generation = self.library_generation;
         self.storage_ui
-            .begin_location_checks(generation, &locations);
+            .location_checks
+            .begin(generation, &locations);
         self.loading = true;
         let task = storage_ui::scan_locations(locations, move |location| {
             let scan = notes::scan_library(&location.root);
@@ -1172,7 +1177,8 @@ impl Desktop {
                     .collect();
                 if !this
                     .storage_ui
-                    .finish_location_checks(generation, &current, checks)
+                    .location_checks
+                    .finish(generation, &current, checks)
                 {
                     this.refresh_library(cx);
                     return;

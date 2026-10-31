@@ -212,6 +212,8 @@ pub(crate) struct Resource {
     pub(crate) busy: bool,
     /// Lines under the name, and whether each is a failure.
     pub(crate) lines: Vec<(String, bool)>,
+    /// What else belongs under the name: a problem and its repairs.
+    pub(crate) below: Vec<AnyElement>,
     pub(crate) actions: Vec<AnyElement>,
 }
 
@@ -244,6 +246,7 @@ impl Resource {
                 scale.support(line_id, line)
             });
         }
+        let text = text.children(self.below);
         h_flex()
             .w_full()
             .min_w_0()
@@ -1060,6 +1063,7 @@ impl Desktop {
             status,
             busy: false,
             lines,
+            below: Vec::new(),
             actions: vec![menu.into_any_element()],
         }
         .row(cx);
