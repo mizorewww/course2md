@@ -45,22 +45,30 @@ fn closes_line(c: char) -> bool {
 fn escape(text: &str, dollars: bool, out: &mut String) {
     let mut lines = text.split('\n').peekable();
     while let Some(line) = lines.next() {
-        let line = line.trim();
-        // What opens a block at a line's start. A numbered list's delimiter is after its digits.
-        let digits = line.bytes().take_while(u8::is_ascii_digit).count();
-        let (number, rest) = line.split_at(digits);
-        out.push_str(number);
-        if rest.starts_with(['#', '>', '=', '|'])
-            || rest.starts_with("- ")
-            || rest.starts_with("+ ")
-            || rest.starts_with("---")
-            || (digits > 0 && rest.starts_with(['.', ')']))
-        {
-            out.push('\\');
+        let more = lines.peek().is_some();
+        // Space beside a formula stays; at a line's ends it means nothing, or a block.
+        let line = if more { line.trim_end() } else { line };
+        if out.is_empty() || out.ends_with('\n') {
+            let line = line.trim_start();
+            // What opens a block at a line's start. A numbered list's delimiter is after
+            // its digits.
+            let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+            let (number, rest) = line.split_at(digits);
+            out.push_str(number);
+            if rest.starts_with(['#', '>', '=', '|'])
+                || rest.starts_with("- ")
+                || rest.starts_with("+ ")
+                || rest.starts_with("---")
+                || (digits > 0 && rest.starts_with(['.', ')']))
+            {
+                out.push('\\');
+            }
+            escape_inline(rest, dollars, out);
+        } else {
+            escape_inline(line, dollars, out);
         }
-        escape_inline(rest, dollars, out);
         // Two spaces hold the source's line break.
-        if lines.peek().is_some() {
+        if more && !out.is_empty() {
             out.push_str("  \n");
         }
     }
@@ -117,9 +125,15 @@ pub fn blocks(text: &str) -> Vec<String> {
     let mut blocks = Vec::new();
     let mut paragraph = String::new();
     let mut pieces = pieces.into_iter().peekable();
+    let mut in_sentence = false;
     while let Some(piece) = pieces.next() {
         match piece {
             Piece::Text(prose) => {
+                let prose = if std::mem::take(&mut in_sentence) {
+                    prose.trim_start()
+                } else {
+                    prose
+                };
                 let mut parts = prose.split("\n\n");
                 if let Some(first) = parts.next() {
                     escape(first, has_formula, &mut paragraph);
@@ -133,10 +147,11 @@ pub fn blocks(text: &str) -> Vec<String> {
                 escape(latex, true, &mut paragraph);
             }
             Piece::Math { latex, display } => {
-                let in_sentence = matches!(
-                    pieces.peek(),
-                    Some(Piece::Text(next)) if next.trim_start().starts_with(closes_line)
-                );
+                in_sentence = display
+                    && matches!(
+                        pieces.peek(),
+                        Some(Piece::Text(next)) if next.trim_start().starts_with(closes_line)
+                    );
                 if display && !in_sentence {
                     flush(&mut paragraph, &mut blocks);
                     blocks.push(format!("$$\n{latex}\n$$"));
@@ -221,13 +236,7 @@ fn formula_image(formula: &Formula, em: Pixels, ink: Hsla, window: &Window) -> A
 
 /// A row as wide as its parent that scrolls a wider formula sideways, its scrollbar
 /// shown so it never looks complete when it is not.
-fn scrolling_row(
-    id: ElementId,
-    image: AnyElement,
-    overflows: bool,
-    window: &mut Window,
-    cx: &mut App,
-) -> Div {
+fn scrolling_row(id: ElementId, image: AnyElement, window: &mut Window, cx: &mut App) -> Div {
     let scroll = window
         .use_keyed_state(
             ElementId::NamedChild(Arc::new(id.clone()), "scroll".into()),
@@ -236,6 +245,7 @@ fn scrolling_row(
         )
         .read(cx)
         .clone();
+    let overflows = scroll.max_offset().x > px(0.);
     div()
         .relative()
         .w_full()
@@ -299,7 +309,7 @@ impl MarkdownPlugin for InlineFormula {
                 "formula-row",
                 node.source_range().map_or(0, |range| range.start),
             );
-            scrolling_row(id.into(), image, true, window, cx)
+            scrolling_row(id.into(), image, window, cx)
                 .w(line)
                 .into_any_element()
         } else {
@@ -353,13 +363,7 @@ impl MarkdownPlugin for DisplayFormula {
         let style = window.text_style();
         let em = style.font_size.to_pixels(window.rem_size());
         let image = formula_image(formula, em, style.color, window);
-        let overflows = window
-            .use_keyed_state(ElementId::from(id), cx, |_, _| ScrollHandle::new())
-            .read(cx)
-            .max_offset()
-            .x
-            > px(0.);
-        scrolling_row(id.into(), image, overflows, window, cx)
+        scrolling_row(id.into(), image, window, cx)
             .py(rems(0.5))
             .into_any_element()
     }
@@ -551,9 +555,11 @@ pub fn piece_sources(text: &str) -> Vec<(Range<usize>, Piece<'_>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        blocks, copied_text, formula_of, inline_markdown, markdown, marked_markdown, piece_sources,
+    };
 
-    fn source_of<'a>(text: &'a str) -> Vec<&'a str> {
+    fn source_of(text: &str) -> Vec<&str> {
         piece_sources(text)
             .iter()
             .map(|(range, _)| &text[range.clone()])
@@ -614,7 +620,7 @@ mod tests {
         // Closing punctuation never starts a line.
         assert_eq!(
             blocks("如下\n$$E$$\n，以及后文"),
-            ["如下  \n$$E$$  \n，以及后文"]
+            ["如下  \n$$E$$，以及后文"]
         );
         // A formula holding a dollar cannot use one as its fence.
         assert_eq!(blocks("设 $a\\$b$ 为"), ["设 $$a\\$b$$ 为"]);

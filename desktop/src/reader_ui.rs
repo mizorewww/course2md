@@ -293,6 +293,24 @@ fn tool(
     MaterialTooltip::plain(id, label).trigger(button)
 }
 
+/// One of the viewer's icons: `tip` also names its key.
+fn viewer_tool(
+    id: &'static str,
+    icon: SymbolIcon,
+    label: &'static str,
+    tip: &'static str,
+    disabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    tool(
+        IconButton::new(id, icon, label)
+            .disabled(disabled)
+            .on_click(on_click),
+        SharedString::from(format!("{id}-tip")),
+        tip,
+    )
+}
+
 pub(crate) struct State {
     pub(crate) images: ReaderImages,
     note: NoteState,
@@ -2240,6 +2258,10 @@ impl Desktop {
                     .h_full()
                     .min_h_0()
                     .w_full()
+                    // A note alone keeps its views at its own measure.
+                    .when(self.result_tab == 0 && !metrics.toc_beside, |page| {
+                        page.max_w(ARTICLE_MAX).mx_auto()
+                    })
                     .pb(rem(16.))
                     .gap(rem(12.))
                     .children(strip)
@@ -2421,6 +2443,7 @@ impl Desktop {
                 .flex_1()
                 .min_h_0()
                 .min_w_0()
+                .w_full()
                 .h_full()
                 .max_w(ARTICLE_MAX)
                 .mx_auto()
@@ -3332,7 +3355,7 @@ impl Desktop {
         ui::menu(
             "export-note-menu",
             trigger,
-            MaterialMenu::new("export-note-items").items(items),
+            MaterialMenu::new("export-note-items").width(360.).items(items),
             window,
             cx,
         )
@@ -3405,7 +3428,7 @@ impl Desktop {
                 "reader-more-tip",
                 label,
             ),
-            MaterialMenu::new("reader-more-items").items(items),
+            MaterialMenu::new("reader-more-items").width(280.).items(items),
             window,
             cx,
         )
@@ -4129,98 +4152,65 @@ impl Desktop {
         let source_link = source
             .as_ref()
             .and_then(|source| nav::seek_url(source, frame.seconds));
-        let icon_tool = |id: &'static str,
-                         icon: SymbolIcon,
-                         label: &'static str,
-                         tip: &'static str,
-                         disabled: bool| {
-            (
-                IconButton::new(id, icon, label).disabled(disabled),
-                SharedString::from(format!("{id}-tip")),
-                tip,
-            )
-        };
         let group = || h_flex().flex_shrink_0().gap(rem(4.)).items_center();
-        let (previous, previous_tip, previous_label) = icon_tool(
-            "image-previous",
-            symbols::chevron_left(),
-            course2md::tr!("上一张"),
-            course2md::tr!("上一张 · ←"),
-            index == 0,
-        );
-        let (next, next_tip, next_label) = icon_tool(
-            "image-next",
-            symbols::chevron_right(),
-            course2md::tr!("下一张"),
-            course2md::tr!("下一张 · →"),
-            index + 1 >= count,
-        );
         let stepping = group()
-            .child(tool(
-                previous.on_click(cx.listener(|this, _, _, cx| this.move_reader_image(-1, cx))),
-                previous_tip,
-                previous_label,
+            .child(viewer_tool(
+                "image-previous",
+                symbols::chevron_left(),
+                course2md::tr!("上一张"),
+                course2md::tr!("上一张 · ←"),
+                index == 0,
+                cx.listener(|this, _, _, cx| this.move_reader_image(-1, cx)),
             ))
             .child(
                 accessible_text("image-number", number)
                     .whitespace_nowrap()
                     .text_size(TEXT_BODY),
             )
-            .child(tool(
-                next.on_click(cx.listener(|this, _, _, cx| this.move_reader_image(1, cx))),
-                next_tip,
-                next_label,
+            .child(viewer_tool(
+                "image-next",
+                symbols::chevron_right(),
+                course2md::tr!("下一张"),
+                course2md::tr!("下一张 · →"),
+                index + 1 >= count,
+                cx.listener(|this, _, _, cx| this.move_reader_image(1, cx)),
             ));
         // An unreadable screenshot has nothing to zoom.
         let zoom = (!text_only && readable).then(|| {
             let percent = (scale > 0.).then(|| format!("{}%", (scale * 100.).round() as u32));
-            let (out, out_tip, out_label) = icon_tool(
-                "image-zoom-out",
-                symbols::zoom_out(),
-                course2md::tr!("缩小"),
-                course2md::tr!("缩小 · −"),
-                zoomed(scale, ZOOM_STEP_OUT) >= scale,
-            );
-            let (larger, in_tip, in_label) = icon_tool(
-                "image-zoom-in",
-                symbols::zoom_in(),
-                course2md::tr!("放大"),
-                course2md::tr!("放大 · +"),
-                zoomed(scale, ZOOM_STEP_IN) <= scale,
-            );
-            let (fit, fit_tip, fit_label) = icon_tool(
-                "image-fit",
-                symbols::fit_screen(),
-                course2md::tr!("适合窗口"),
-                course2md::tr!("适合窗口 · 0"),
-                false,
-            );
             group()
-                .child(tool(
-                    out.on_click(cx.listener(|this, _, window, cx| {
+                .child(viewer_tool(
+                    "image-zoom-out",
+                    symbols::zoom_out(),
+                    course2md::tr!("缩小"),
+                    course2md::tr!("缩小 · −"),
+                    zoomed(scale, ZOOM_STEP_OUT) >= scale,
+                    cx.listener(|this, _, window, cx| {
                         this.zoom_reader_image(Some(ZOOM_STEP_OUT), window, cx)
-                    })),
-                    out_tip,
-                    out_label,
+                    }),
                 ))
                 .child(
                     accessible_text("image-scale", percent.unwrap_or_else(|| "—".into()))
                         .whitespace_nowrap()
                         .text_size(TEXT_BODY),
                 )
-                .child(tool(
-                    larger.on_click(cx.listener(|this, _, window, cx| {
+                .child(viewer_tool(
+                    "image-zoom-in",
+                    symbols::zoom_in(),
+                    course2md::tr!("放大"),
+                    course2md::tr!("放大 · +"),
+                    zoomed(scale, ZOOM_STEP_IN) <= scale,
+                    cx.listener(|this, _, window, cx| {
                         this.zoom_reader_image(Some(ZOOM_STEP_IN), window, cx)
-                    })),
-                    in_tip,
-                    in_label,
+                    }),
                 ))
-                .child(tool(
-                    fit.on_click(
-                        cx.listener(|this, _, window, cx| this.zoom_reader_image(None, window, cx)),
-                    ),
-                    fit_tip,
-                    fit_label,
+                .child(viewer_tool(
+                    "image-fit",
+                    symbols::fit_screen(),
+                    course2md::tr!("适合窗口"),
+                    course2md::tr!("适合窗口 · 0"),
+                    false,
+                    cx.listener(|this, _, window, cx| this.zoom_reader_image(None, window, cx)),
                 ))
         });
         let action = |id: &'static str, icon: SymbolIcon, label: &'static str| -> MaterialButton {
