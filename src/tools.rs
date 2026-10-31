@@ -189,7 +189,8 @@ pub fn program(name: &str) -> PathBuf {
     locate(name).map_or_else(|| PathBuf::from(file_name(name)), |tool| tool.path)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(unix)]
+#[cfg(test)]
 mod tests {
     use super::*;
 

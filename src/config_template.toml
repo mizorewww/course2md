@@ -1,0 +1,79 @@
+# course2md 配置 / Configuration
+# 优先级：命令行 > 本文件 > 内置默认 / Priority: CLI > this file > built-in defaults
+# 取消注释以设置默认值 / Uncomment values to set defaults
+# 查看当前设置：course2md config show / View settings: course2md config show
+
+[defaults]
+# 输出根目录，按平台/标题/ID 分类 / Output root, organized by platform/title/ID
+#out = "{OUT}"
+# 截图相似度 (0,1]，越高截图越多 / Similarity (0,1]; higher captures more slides
+#similarity = {SIMILARITY}
+# 画面采样间隔（秒）/ Frame sampling interval (seconds)
+#sample_interval = {SAMPLE_INTERVAL}
+# 截图最短间隔（秒）/ Minimum interval between slides (seconds)
+#cooldown = {COOLDOWN}
+# 下载视频最大高度 / Maximum downloaded video height
+#max_height = {MAX_HEIGHT}
+# first 立即截图，stable 等动画结束 / first: immediate; stable: wait for animations
+#slide_mode = "{SLIDE_MODE}"
+#stable_secs = {STABLE_SECS}
+# 仅比较指定画面区域 / Compare only this region
+#roi = "40%,0%-100%,100%"
+# 识别线程数 / Speech recognition threads
+#threads = {THREADS}
+# coreml: Apple Silicon 原生构建 / Apple Silicon native build
+# gpu/cpu: 需要 llama-server 和约 2.4GB 模型 / requires llama-server and ~2.4GB model
+# npu: Intel NPU，需要 OpenVINO / Intel NPU, requires OpenVINO
+# api: 云端识别，需要 API 密钥 / cloud transcription, requires an API key
+# 留空自动选择后端；course2md doctor 查看可用性 / Leave unset for automatic selection; check with course2md doctor
+#provider = "{PROVIDER}"
+# GPU 卸载层数（0–99）；核显不稳定时可降低 / GPU offload layers; lower on unstable integrated GPUs
+#gpu_layers = {GPU_LAYERS}
+# 将多模态 projector 放到 GPU；false 留在 CPU / Offload projector to GPU; false keeps it on CPU
+#mmproj_offload = {MMPROJ_OFFLOAD}
+# 识别模型，需与后端兼容 / Speech model; must match the backend
+# gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b, qwen3-0.6b, whisper；npu: whisper 或 Hugging Face 仓库名 / or a Hugging Face repository
+#asr_model = "{ASR_MODEL}"
+# auto 优先字幕，无字幕再识别 / auto: subtitles first, then speech recognition
+# subtitle 仅字幕；asr 仅识别 / subtitle: subtitles only; asr: speech recognition only
+#transcript_source = "{TRANSCRIPT_SOURCE}"
+# 每段语音最长秒数 (1–600) / Maximum speech segment length in seconds (1–600)
+#max_speech = {MAX_SPEECH}
+# 输出格式 / Output formats: md, html, json
+#formats = [{FORMATS}]
+# gpu/cpu 模型目录；默认使用系统缓存 / gpu/cpu model directory; platform cache by default
+#model_dir = {MODEL_DIR}
+# 成功后保留下载的视频 / Keep downloaded video after success
+#keep_video = {KEEP_VIDEO}
+# 继续上次中断的识别 / Continue interrupted transcription
+#resume = {RESUME}
+
+[asr_api]
+# OpenAI 兼容语音服务 / OpenAI-compatible speech service
+# transcriptions: /audio/transcriptions; chat: /chat/completions
+# 请求方式和模型需由服务商支持 / The provider must support the selected mode and model
+#mode = "transcriptions"
+#base_url = "{API_BASE_URL}"
+# 推荐通过 COURSE2MD_ASR_API_KEY 环境变量提供密钥 / Prefer the COURSE2MD_ASR_API_KEY environment variable
+#api_key = ""
+#model = "{API_MODEL}"
+
+[llm]
+# 可选 AI 校对；运行 course2md llm setup 配置 / Optional AI proofreading; configure with course2md llm setup
+enabled = {LLM_ENABLED}
+#base_url = "{LLM_BASE_URL}"
+#api_key = ""
+#model = "{LLM_MODEL}"
+# 自定义校对要求 / Custom proofreading instructions
+#prompt = ""
+# 隐藏完成后的提示 / Hide the completion tip
+#disable_hint = {LLM_DISABLE_HINT}
+# 附截图辅助校对，需要视觉模型 / Attach slides; requires an image-capable model
+#vision = {LLM_VISION}
+# 并发请求数 / Concurrent requests
+#concurrency = {LLM_CONCURRENCY}
+# 在笔记中加入 AI 摘要，需要 enabled = true / Add AI summaries; requires enabled = true
+#summarize = {LLM_SUMMARIZE}
+# 双语笔记的目标语言（zh-Hans、zh-Hant、en、ja、ko、fr、de、es）；已是该语言时不翻译
+# Bilingual notes: target language; skipped when the text is already in it
+#translate = "en"
