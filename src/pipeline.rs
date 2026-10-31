@@ -150,7 +150,7 @@ pub(crate) async fn run_task(
 ) -> Result<()> {
     // The caller (`execution::run`) validates through `Request::resolve`.
     let started = Instant::now();
-    let target = Target::from_request(request);
+    let target = request.target();
     let binding = {
         let (request, cfg) = (request.clone(), cfg.clone());
         blocking(move || request.binding(&cfg)).await?

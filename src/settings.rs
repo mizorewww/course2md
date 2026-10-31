@@ -126,7 +126,7 @@ impl Default for DesktopSettings {
 pub struct ConfigFile {
     pub desktop: DesktopSettings,
     pub defaults: Defaults,
-    pub llm: crate::llm::LlmSettings,
+    pub llm: crate::llm_settings::LlmSettings,
     pub asr_api: AsrApi,
 }
 
@@ -168,13 +168,8 @@ pub fn save(cfg: &ConfigFile) -> Result<PathBuf> {
     write_config(toml::to_string_pretty(cfg)?.as_bytes())
 }
 
-/// Replaces the configuration with the commented template (`config init`).
-pub fn write_template() -> Result<PathBuf> {
-    write_config(template().as_bytes())
-}
-
 /// Writes the configuration atomically, keeping the previous file beside it.
-fn write_config(bytes: &[u8]) -> Result<PathBuf> {
+pub fn write_config(bytes: &[u8]) -> Result<PathBuf> {
     let p = config_path();
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir)?;
@@ -196,115 +191,6 @@ fn write_config(bytes: &[u8]) -> Result<PathBuf> {
     Ok(p)
 }
 
-/// `config init` 写入的带注释模板。`{field}` 占位符由内置默认值渲染（JSON 字面量也是
-/// 合法的 TOML），注释不会与实际默认脱节。
-pub fn template() -> String {
-    let resolved = crate::options::resolve(String::new(), &Default::default(), &Default::default());
-    let mut defaults = resolved
-        .and_then(|cfg| Ok(serde_json::to_value(cfg)?))
-        .unwrap_or_default();
-    let provider = crate::config::default_provider_hint();
-    defaults["asr_model"] = crate::config::default_model(provider).into();
-    let mut text = TEMPLATE.to_string();
-    for (prefix, values) in [
-        ("", &defaults),
-        ("llm.", &defaults["llm"]),
-        ("asr_api.", &defaults["asr_api"]),
-    ] {
-        for (key, value) in values.as_object().into_iter().flatten() {
-            text = text.replace(&format!("{{{prefix}{key}}}"), &value.to_string());
-        }
-    }
-    text
-}
-
-const TEMPLATE: &str = include_str!("config_template.toml");
-
-/// 打印配置文件与内置默认合并后的设置（不含本次命令行与环境变量覆盖）。
-/// 默认值经 [`crate::options::resolve`] 得出，与实际转换使用同一套解析。
-pub fn print_effective(cfg: &ConfigFile) -> Result<()> {
-    let d = &cfg.defaults;
-    let r = crate::options::resolve(String::new(), &crate::cli::RunOpts::default(), cfg)?;
-    println!("配置文件 / Configuration: {}", config_path().display());
-    crate::println_tr!(
-        "文件设置与内置默认值；不含本次命令行或环境变量覆盖 / File settings and built-in defaults, before CLI and environment overrides"
-    );
-    let values = serde_json::to_value(&r)?;
-    let plain = |value: &serde_json::Value| match value {
-        serde_json::Value::Null => "-".to_owned(),
-        serde_json::Value::String(text) => text.clone(),
-        serde_json::Value::Array(items) => {
-            let items: Vec<String> = items
-                .iter()
-                .filter_map(|i| i.as_str())
-                .map(str::to_owned)
-                .collect();
-            items.join(",")
-        }
-        other => other.to_string(),
-    };
-    println!("[defaults]");
-    println!("  {:<17}: {}", "out", r.out_root.display());
-    for key in ["similarity", "sample_interval", "cooldown", "max_height"] {
-        println!("  {key:<17}: {}", plain(&values[key]));
-    }
-    println!("  {:<17}: {}", "roi", d.roi.as_deref().unwrap_or("-"));
-    println!("  {:<17}: {}", "threads", r.threads);
-    match d.provider {
-        Some(provider) => println!("  {:<17}: {provider}", "provider"),
-        None => println!(
-            "  {:<17}: {}",
-            "provider",
-            crate::tr!("{}（自动选择）", r.provider)
-        ),
-    }
-    for key in [
-        "slide_mode",
-        "stable_secs",
-        "asr_model",
-        "transcript_source",
-        "max_speech",
-        "formats",
-        "model_dir",
-        "keep_video",
-        "no_download",
-        "resume",
-        "gpu_layers",
-        "mmproj_offload",
-    ] {
-        println!("  {key:<17}: {}", plain(&values[key]));
-    }
-    let hidden = |key: &str| {
-        if key.is_empty() {
-            "-"
-        } else {
-            crate::tr!("(已设置，隐藏 / set, hidden)")
-        }
-    };
-    println!("[asr_api]");
-    println!("  {:<17}: {}", "base_url", cfg.asr_api.base_url);
-    println!("  {:<17}: {}", "model", cfg.asr_api.model);
-    println!("  {:<17}: {}", "mode", cfg.asr_api.mode);
-    println!("  {:<17}: {}", "api_key", hidden(&cfg.asr_api.api_key));
-    println!("[llm]");
-    println!("  {:<17}: {}", "enabled", cfg.llm.enabled);
-    let model = if cfg.llm.model.is_empty() {
-        "-"
-    } else {
-        &cfg.llm.model
-    };
-    println!("  {:<17}: {model}", "model");
-    println!("  {:<17}: {}", "vision", cfg.llm.vision);
-    println!("  {:<17}: {}", "concurrency", cfg.llm.concurrency);
-    println!("  {:<17}: {}", "summarize", cfg.llm.summarize);
-    println!(
-        "  {:<17}: {}",
-        "translate",
-        cfg.llm.translate.as_deref().unwrap_or("-")
-    );
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -321,41 +207,5 @@ mod tests {
             }
         );
         assert!(!debug.contains("secret-key"), "{debug}");
-    }
-
-    #[test]
-    fn template_paths_are_escaped_toml_strings() {
-        let quoted = toml::Value::String(r"C:\Users\me\models".into()).to_string();
-        let parsed: toml::Table = toml::from_str(&format!("model_dir = {quoted}")).unwrap();
-        assert_eq!(parsed["model_dir"].as_str(), Some(r"C:\Users\me\models"));
-    }
-
-    #[test]
-    fn template_parses_to_built_in_defaults_when_uncommented() {
-        let text: String = super::template()
-            .lines()
-            .map(|line| {
-                line.strip_prefix('#')
-                    .filter(|l| {
-                        l.starts_with(|c: char| c.is_ascii_lowercase()) && l.contains(" = ")
-                    })
-                    .unwrap_or(line)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let file: super::ConfigFile = toml::from_str(&text).unwrap();
-        let from_template =
-            crate::options::resolve(String::new(), &Default::default(), &file).unwrap();
-        let built_in =
-            crate::options::resolve(String::new(), &Default::default(), &Default::default())
-                .unwrap();
-        assert_eq!(from_template.resume, built_in.resume);
-        assert_eq!(from_template.stable_secs, built_in.stable_secs);
-        assert_eq!(from_template.similarity, built_in.similarity);
-        assert_eq!(from_template.cooldown, built_in.cooldown);
-        assert_eq!(from_template.max_speech, built_in.max_speech);
-        assert_eq!(from_template.gpu_layers, built_in.gpu_layers);
-        assert_eq!(from_template.formats, built_in.formats);
-        assert_eq!(file.asr_api, super::AsrApi::default());
     }
 }

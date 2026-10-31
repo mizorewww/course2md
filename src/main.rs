@@ -165,7 +165,7 @@ fn main() -> std::process::ExitCode {
 
 fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
     if let Some(platform) = cli.logout {
-        return course2md::login::logout(platform);
+        return course2md::cli::logout(platform);
     }
     if let Some(platform) = cli.login {
         anyhow::ensure!(
@@ -174,7 +174,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                 "--login 后只能跟视频链接或本地视频路径 / After --login, provide only a video URL or local file path"
             )
         );
-        course2md::login::login(platform)?;
+        course2md::cli::login(platform)?;
         if cli.source.is_none() {
             return Ok(());
         }
@@ -303,14 +303,14 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                             tr!("配置已存在：{}。使用 --force 替换", path.display())
                         );
                     }
-                    let path = settings::write_template()?;
+                    let path = course2md::options::write_template()?;
                     println!(
                         "已生成配置模板 / Configuration template created: {}",
                         path.display()
                     );
                     println!("{}", course2md::auth::BILIBILI_SETUP_TIP);
                 }
-                ConfigCmd::Show => settings::print_effective(&settings::load()?)?,
+                ConfigCmd::Show => course2md::options::print_effective(&settings::load()?)?,
             }
             Ok(())
         }

@@ -151,7 +151,7 @@ enum LocalPick {
 fn pick_local_provider() -> Result<LocalPick> {
     let llama = crate::tools::locate("llama-server").is_some();
     let mut cands: Vec<AsrProvider> = vec![];
-    if cfg!(apple_native) {
+    if crate::asr::apple_native_available() {
         cands.push(AsrProvider::Coreml);
     }
     if llama {
@@ -185,7 +185,7 @@ fn pick_local_provider() -> Result<LocalPick> {
     }
 
     // 推荐项置顶；推荐项不在候选里时（如无 llama-server 却推荐 gpu）退到首个候选
-    let mut rec = crate::config::default_provider_hint();
+    let mut rec = crate::asr::default_provider_hint();
     if !cands.contains(&rec) {
         rec = cands[0];
     }

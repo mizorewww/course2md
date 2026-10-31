@@ -5,7 +5,6 @@ use crate::tr;
 use crate::{
     digest::file_digest,
     dispatch::TaskControl,
-    execution,
     fsio::{atomic_write, atomic_write_shared},
     meta::Summary,
     meta::VideoMeta,
@@ -79,15 +78,6 @@ pub struct Target {
     pub course_dir: PathBuf,
 }
 impl Target {
-    pub fn from_request(request: &execution::Request) -> Self {
-        Self {
-            task_id: request.task_id.clone(),
-            course_id: request.course_id.clone(),
-            source_id: request.source_id.clone(),
-            version_id: request.version_id.clone(),
-            course_dir: request.course_dir.clone(),
-        }
-    }
     pub fn version_dir(&self) -> PathBuf {
         self.course_dir.join("versions").join(&self.version_id)
     }

@@ -64,7 +64,7 @@ pub fn discover_for_desktop() -> Result<(String, Vec<String>)> {
 }
 
 /// `course2md --login ollama`：探测本机服务、选模型并启用 AI 校对。
-pub(super) fn login() -> Result<()> {
+pub fn login() -> Result<()> {
     let host = host();
     let names = models(&host)?;
     ensure!(
@@ -122,7 +122,7 @@ pub(super) fn login() -> Result<()> {
 }
 
 /// `course2md --logout ollama`：当前 AI 校对使用 Ollama 时重置配置。
-pub(super) fn logout() -> Result<()> {
+pub fn logout() -> Result<()> {
     let mut cfg = crate::settings::load()?;
     if cfg.llm.provider != LlmProvider::Ollama {
         println_tr!(

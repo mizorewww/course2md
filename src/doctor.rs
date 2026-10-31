@@ -207,7 +207,7 @@ pub fn run() -> Result<()> {
             let provider = cfg
                 .defaults
                 .provider
-                .unwrap_or_else(crate::config::default_provider_hint);
+                .unwrap_or_else(crate::asr::default_provider_hint);
             let (zh, en) = provider.label();
             out.push(format!(
                 "{}\n{provider}（{zh} / {en}）",

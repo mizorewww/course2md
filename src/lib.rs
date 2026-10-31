@@ -19,6 +19,7 @@ pub mod invalid;
 pub mod job;
 pub mod language;
 pub mod llm;
+pub mod llm_settings;
 pub mod login;
 pub mod math;
 pub mod media;

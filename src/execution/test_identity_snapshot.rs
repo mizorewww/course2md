@@ -56,7 +56,7 @@ fn bindings() -> Vec<(&'static str, serde_json::Value)> {
         let cfg = request.resolve().unwrap();
         request.binding(&cfg).unwrap()
     };
-    let cli = |opts: crate::cli::RunOpts| {
+    let cli = |opts: crate::options::RunOpts| {
         let cfg = crate::options::resolve(
             "https://www.bilibili.com/video/BV1xx".into(),
             &opts,
@@ -71,7 +71,7 @@ fn bindings() -> Vec<(&'static str, serde_json::Value)> {
         ("cli-default", cli(Default::default())),
         (
             "cli-no-resume",
-            cli(crate::cli::RunOpts {
+            cli(crate::options::RunOpts {
                 out: Some("/elsewhere".into()),
                 no_resume: true,
                 asr_api_key: Some("secret-cli".into()),

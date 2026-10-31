@@ -104,6 +104,17 @@ pub struct Request {
 }
 
 impl Request {
+    /// Where this task publishes its note.
+    pub fn target(&self) -> crate::artifact::Target {
+        crate::artifact::Target {
+            task_id: self.task_id.clone(),
+            course_id: self.course_id.clone(),
+            source_id: self.source_id.clone(),
+            version_id: self.version_id.clone(),
+            course_dir: self.course_dir.clone(),
+        }
+    }
+
     pub fn read(reader: impl Read) -> Result<Self> {
         let mut data = Vec::new();
         reader.take(MAX_REQUEST_BYTES + 1).read_to_end(&mut data)?;

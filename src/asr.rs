@@ -1021,6 +1021,24 @@ fn cut_wav(src: &Path, start: f64, end: f64, dest: &Path) -> Result<()> {
     cut().context(tr!("无法切分音频 / Could not split audio"))
 }
 
+/// 平台默认后端提示（doctor 展示与 main 实际选择保持同一逻辑）。
+/// 注意 NPU 只在 llama-server 缺席时兜底：装了 llama-server 的 Intel 机器默认仍走 gpu，
+/// 避免把「能跑 GPU」的机器静默降级到更慢的 NPU 管线。
+pub fn default_provider_hint() -> crate::config::AsrProvider {
+    if cfg!(apple_native) {
+        crate::config::AsrProvider::Coreml
+    } else if crate::tools::locate("llama-server").is_none() && crate::npu::device_present() {
+        crate::config::AsrProvider::Npu
+    } else {
+        crate::config::AsrProvider::Gpu
+    }
+}
+
+/// Whether this build includes the native Apple speech backend.
+pub fn apple_native_available() -> bool {
+    cfg!(apple_native)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

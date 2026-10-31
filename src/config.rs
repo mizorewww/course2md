@@ -1,3 +1,4 @@
+pub use crate::asr::{apple_native_available, default_provider_hint};
 pub use crate::paths::*;
 use crate::tr;
 use anyhow::{Context, Result as AnyhowResult};
@@ -398,7 +399,7 @@ pub enum OutputFormat {
 }
 
 /// A credential in `Debug` output: shows whether it is set, never its value.
-pub(crate) struct Redacted<'a>(pub &'a str);
+pub struct Redacted<'a>(pub &'a str);
 
 impl std::fmt::Debug for Redacted<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -434,7 +435,7 @@ pub struct PipelineConfig {
     /// 断点续跑：命令行任务沿用同一设置下的工作目录；关闭时每次换新的工作目录
     pub resume: bool,
     /// LLM 字幕校对（已合并 CLI 覆盖后的生效配置）
-    pub llm: crate::llm::LlmSettings,
+    pub llm: crate::llm_settings::LlmSettings,
     /// 云端 STT（provider=api；已合并 CLI 覆盖）
     pub asr_api: crate::settings::AsrApi,
     /// 转写来源：字幕优先 / 强制字幕 / 强制 ASR
@@ -628,19 +629,6 @@ pub fn resolve_flag(cli_on: bool, cli_off: bool, file: Option<bool>, default: bo
     }
 }
 
-/// 平台默认后端提示（doctor 展示与 main 实际选择保持同一逻辑）。
-/// 注意 NPU 只在 llama-server 缺席时兜底：装了 llama-server 的 Intel 机器默认仍走 gpu，
-/// 避免把「能跑 GPU」的机器静默降级到更慢的 NPU 管线。
-pub fn default_provider_hint() -> AsrProvider {
-    if cfg!(apple_native) {
-        AsrProvider::Coreml
-    } else if crate::tools::locate("llama-server").is_none() && crate::npu::device_present() {
-        AsrProvider::Npu
-    } else {
-        AsrProvider::Gpu
-    }
-}
-
 /// MLX 为 `exe` 搜索 metallib 的顺序（mlx-swift load_default_library）：
 /// 可执行文件同目录 → exe/Resources → ../Resources → CWD，文件名 mlx.metallib / default.metallib。
 /// `.app` 包里 codesign 把 Contents/MacOS/ 当代码区，metallib 只能放 Contents/Resources/。
@@ -654,11 +642,6 @@ pub fn find_metallib(exe: &Path) -> Option<PathBuf> {
         .into_iter()
         .flat_map(|base| ["mlx.metallib", "default.metallib"].map(|name| base.join(name)))
         .find(|path| path.is_file())
-}
-
-/// Whether this build includes the native Apple speech backend.
-pub fn apple_native_available() -> bool {
-    cfg!(apple_native)
 }
 
 /// 已知视频站点（含子域名与短链），输入可以不带 http(s) 前缀。

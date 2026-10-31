@@ -578,7 +578,7 @@ fn confirm_browser(prompt: &str) -> Result<CodexTokens> {
 }
 
 /// `course2md --login codex`：导入 codex CLI 登录态（失败时可改用浏览器授权），选模型并启用 AI 校对。
-pub(super) fn login() -> Result<()> {
+pub fn login() -> Result<()> {
     let interactive = crate::runtime::interactive();
     let mut tokens = match import_from_codex_cli() {
         Ok(tokens) => tokens,
@@ -679,7 +679,7 @@ pub fn status() -> Result<LoginStatus> {
 }
 
 /// `course2md --logout codex`：删除凭据；当前 AI 校对使用 Codex 时一并重置。
-pub(super) fn logout() -> Result<()> {
+pub fn logout() -> Result<()> {
     if remove_credentials()? {
         println_tr!("已清除 Codex 登录状态。/ Codex login removed.");
     } else {
