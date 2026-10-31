@@ -132,12 +132,20 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
                     });
                 }
                 cx.background_executor().timer(delay).await;
-                let _ = cx.update(|window, cx| {
-                    // Draw now: a window hidden behind others gets no frames, and
-                    // the image would show whatever it drew last.
-                    window.refresh();
-                    window.draw(cx).clear(cx);
-                });
+                // Draw now: a window hidden behind others gets no
+                // frames, and the image would show whatever it drew last. A first draw only
+                // starts an entrance or an exit, so draw again after it has played.
+                for settle in [true, false] {
+                    let _ = cx.update(|window, cx| {
+                        window.refresh();
+                        window.draw(cx).clear(cx);
+                    });
+                    if settle {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(900))
+                            .await;
+                    }
+                }
                 let _ = cx.update(|window, _| match window.render_to_image() {
                     Ok(image) => {
                         if let Err(error) = image.save(&path) {
