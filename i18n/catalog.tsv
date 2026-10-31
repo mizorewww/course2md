@@ -155,13 +155,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{} は保存されていません: {}
 {}未完成	{}未完成	{} is not completed	{}未完成	{} は完了していません
 {}未生成	{}未生成	{} was not generated	{}未生成	{} は生成されませんでした
-{}未通过 · 重试	{}未通过 · 重试	{} failed · Retry	{}未通過 · 重試	{} 失敗 · 再試行
 {}测试通过	{}测试通过	{} test passed	{}測試通過	{} テストに合格しました
 {}的文件夹信息已损坏：{}	{}的文件夹信息已损坏：{}	The folder information of {} is corrupted: {}	{}的資料夾資訊已損壞：{}	{} のフォルダー情報が壊れています: {}
 {}的显示名称尚未读取：{}	{}的显示名称尚未读取：{}	The display name of {} has not been read yet: {}	{}的顯示名稱尚未讀取：{}	{} の表示名はまだ読み込まれていません: {}
-{}结果未确认 · 重试	{}结果未确认 · 重试	{} result not confirmed · Try again	{}結果未確認 · 重試	{} 結果未確認 · 再試行
 {}读取失败：{}	{}读取失败：{}	{} failed to read: {}	{}讀取失敗：{}	{} が読み取れませんでした: {}
-{}通过 · 重测	{}通过 · 重测	{} passed · Retest	{}通過 · 重測	{} 合格 · 再テスト
 {}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{} は有効な非負の数値である必要があります
 {}（具体内容未记录）	{}（具体内容未记录）	{} (specific content not recorded)	{}（具體內容未記錄）	{}（詳細は記録されていません）
 {}（当前）	{}（当前）	{} (current)	{}（目前）	{} (現在)
@@ -185,7 +182,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 《{}》：{}	《{}》：{}	“{}”: {}	《{}》：{}	「{}」：{}
 「{}」会重新发送失败部分，可能计费	「{}」会重新发送失败部分，可能计费	"{}" resends the failed parts; charges may apply.	「{}」會重新傳送失敗部分，可能計費	「{}」は失敗した部分を再送信します。料金が発生する場合があります。
 「未分类」已被使用，请换一个文件夹名称	「未分类」已被使用，请换一个文件夹名称	"Uncategorized" is already in use; choose a different folder name	「未分類」已被使用，請換一個資料夾名稱	「未分類」は既に使用されています。別のフォルダー名にしてください
-一切正常	一切正常	Everything is fine	一切正常	問題ありません
 上一个 Codex 请求尚未完成	上一个 Codex 请求尚未完成	The previous Codex request has not yet completed	上一個 Codex 請求尚未完成	前の Codex リクエストはまだ完了していません
 上一处	上一处	Previous match	上一處	前の一致
 上一张	上一张	Previous	上一張	前へ
@@ -251,7 +247,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 仍有请求结果尚未确认，请先查看请求范围	仍有请求结果尚未确认，请先查看请求范围	Some request results are still unconfirmed. Check the request scope first.	仍有請求結果尚未確認，請先檢視請求範圍	未確認のリクエスト結果があります。先にリクエスト範囲を確認してください。
 仍有请求结果尚未确认，请查看请求范围后选择是否重新发送	仍有请求结果尚未确认，请查看请求范围后选择是否重新发送	There are still request results that have not been confirmed. Please check the request scope and choose whether to resend it.	仍有請求結果尚未確認，請檢視請求範圍後選擇是否重新傳送	未確認のリクエスト結果がまだあります。リクエスト範囲を確認し、再送信するかどうかを選択してください。
 从头重新识别 / Transcribe again from the start	从头重新识别	Transcribe again from the start	從頭重新辨識	最初から音声認識をやり直す
-从服务返回的候选中选择模型	从服务返回的候选中选择模型	Select a model from the candidates returned by the service	從服務傳回的候選中選擇模型	サービスから返された候補の中からモデルを選択します
 从此处观看	从此处观看	Watch from here	從此處觀看	ここから見る
 从此处观看原视频	从此处观看原视频	Watch the original video from here	從此處觀看原影片	ここから元の動画を見る
 令牌响应不完整 / The token response is incomplete	令牌响应不完整	The token response is incomplete	令牌回應不完整	トークン応答が不完全です
@@ -343,7 +338,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保留服务	保留服务	Keep service	保留服務	サービスを残す
 保留的视频已不在	保留的视频已不在	The kept video is no longer there	保留的影片已不在	保持していた動画が見つかりません
 修复 AI 服务并补做	修复 AI 服务并补做	Fix the AI service and fill in missing steps	修復 AI 服務並補做	AI サービスを修正して未完了分を処理
-修复方式	修复方式	How to fix it	修復方式	修正方法
 修复服务并补做	修复服务并补做	Fix the service and fill in missing steps	修復服務並補做	サービスを修正して未完了分を処理
 修改接口不能改变此服务的用途，请添加另一用途的服务	修改接口不能改变此服务的用途，请添加另一用途的服务	Modifying the interface cannot change the purpose of this service. Please add a service with another purpose.	修改介面不能改變此服務的用途，請新增另一用途的服務	インターフェイスを変更しても、このサービスの目的を変更することはできません。別の目的のサービスを追加してください。
 修改暂时无法保存，请重试	修改暂时无法保存，请重试	The modification cannot be saved temporarily, please try again	修改暫時無法儲存，請重試	変更を一時的に保存できません。もう一度お試しください。
@@ -427,7 +421,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 原保存位置	原保存位置	Original save location	原儲存位置	元の保存場所
 原始记录备份未完成，尚未重建	原始记录备份未完成，尚未重建	The original record backup is not completed and has not been rebuilt.	原始記錄備份未完成，尚未重建	元のレコードのバックアップは完了しておらず、再構築されていません。
 原字幕无法重新读取	原字幕无法重新读取	The original subtitles cannot be reread	原字幕無法重新讀取	元の字幕を再度読み取れません
-原文件已保留，这些设置已重置	原文件已保留，这些设置已重置	The original file was kept; these settings were reset.	原檔案已保留，這些設定已重設	元のファイルは保持され、これらの設定はリセットされました
 原文进 raw 溯源	原文进 raw 溯源	Keep the original text in raw for traceability	原文進 raw 溯源	原文を raw に残して追跡可能にする
 原来选择的字幕无法读取，请重新选择文字来源	原来选择的字幕无法读取，请重新选择文字来源	The originally selected subtitles cannot be read, please select a new text source.	原來選擇的字幕無法讀取，請重新選擇文字來源	元々選択されていた字幕は読めません。新しいテキスト ソースを選択してください。
 原生运行于 Apple 芯片	原生运行于 Apple 芯片	Runs natively on Apple silicon	原生執行於 Apple 晶片	Appleシリコン上でネイティブに動作
@@ -582,7 +575,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已下载	已下载	Downloaded	已下載	ダウンロード済み
 已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。	Inputs and tasks have been restored from backup. Unable to confirm the last operation, the unfinished task has been suspended.	已從備份恢復輸入和任務。無法確認最後一次操作，未完成任務已暫停。	入力とタスクはバックアップから復元されました。最後の操作を確認できず、未完了のタスクは中断されました。
 已使用环境变量中的密钥，点击保存后生效	已使用环境变量中的密钥，点击保存后生效	The key in the environment variable has been used and will take effect after clicking Save.	已使用環境變數中的金鑰，點選儲存後生效	環境変数のキーが使用されており、[保存] をクリックすると有効になります。
-已保存	已保存	Saved	已儲存	保存済み
 已保存 {} / {} 张截图	已保存 {} / {} 张截图	Screenshots saved: {} / {}	已儲存 {} / {} 張截圖	{} / {} 枚のスクリーンショットを保存しました
 已保存密钥，留空则保留	已保存密钥，留空则保留	Key saved; leave blank to keep it	已儲存金鑰，留空則保留	キーは保存されました。保持するには空白のままにしておきます
 已保存登录信息	已保存登录信息	Login information saved	已儲存登入資訊	ログイン情報が保存されました
@@ -601,7 +593,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已关闭 AI 校对并重置 LLM 配置。/ AI proofreading disabled and LLM settings reset.	已关闭 AI 校对并重置 LLM 配置。/ AI proofreading disabled and LLM settings reset.	AI proofreading disabled and LLM settings reset.	已關閉 AI 校對並重設 LLM 設定。/ AI proofreading disabled and LLM settings reset.	AI 校正を無効にし、LLM 設定をリセットしました。
 已关闭截图辅助校对（本地模型通常不支持图片输入）。/ Image-assisted proofreading disabled (local models usually do not accept images).	已关闭截图辅助校对（本地模型通常不支持图片输入）。/ Image-assisted proofreading disabled (local models usually do not accept images).	Image-assisted proofreading disabled (local models usually do not accept images).	已關閉截圖輔助校對（本機模型通常不支援圖片輸入）。/ Image-assisted proofreading disabled (local models usually do not accept images).	スクリーンショットによる校正補助を無効にしました（ローカルモデルは通常、画像入力に対応していません）。
 已准备完成	已准备完成	Ready	已準備完成	準備が完了しました
-已删除此服务	已删除此服务	This service has been deleted	已刪除此服務	このサービスは削除されました
 已删除的文件夹	已删除的文件夹	Deleted folder	已刪除的資料夾	削除されたフォルダー
 已发布笔记与任务身份不匹配，原文件已保留	已发布笔记与任务身份不匹配，原文件已保留	The published notes do not match the task identity, and the original file has been retained.	已發布筆記與任務身分不匹配，原檔案已保留	公開されたノートはタスク ID と一致せず、元のファイルは保持されています。
 已取消	已取消	Cancelled	已取消	キャンセルしました
@@ -637,8 +628,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已把 {} 个视频加入队列	已把 {} 个视频加入队列	{} videos have been queued	已把 {} 個影片加入佇列	{} 本の動画をキューに追加しました
 已收到回应，但服务未接受这项测试请求	已收到回应，但服务未接受这项测试请求	Response received, but the test request was not accepted by the service	已收到回應，但服務未接受這項測試請求	応答を受信しましたが、テスト要求はサービスによって受け入れられませんでした
 已暂停	已暂停	Paused	已暫停	一時停止中
-已暂存，点击「应用」后生效	已暂存，点击「应用」后生效	Staged. Applies after you click Apply.	已暫存，點擊「套用」後生效	一時保存しました。「適用」をクリックすると反映されます
-已更新默认服务	已更新默认服务	Default services updated	已更新預設服務	デフォルトのサービスが更新されました
 已有后续处理任务	已有后续处理任务	There are follow-up processing tasks	已有後續處理任務	フォローアップ処理タスクがあります
 已有摘要的格式不完整，保留原文 / Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	Existing summary markup is incomplete; original text kept	已有摘要的格式不完整，保留原文	既存の要約の形式が不完全です。元のテキストを保持します
 已有相同任务，未重复加入	已有相同任务，未重复加入	This task is already in the queue.	已有相同任務，未重複加入	このタスクはすでにキューにあります。
@@ -678,9 +667,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 平台要求登录后读取字幕，请登录对应账号后重试。	平台要求登录后读取字幕，请登录对应账号后重试。	The platform requires logging in to read subtitles. Please log in to the corresponding account and try again.	平台要求登入後讀取字幕，請登入對應帳號後重試。	このプラットフォームでは、字幕を読むためにログインする必要があります。対応するアカウントにログインして、もう一度お試しください。
 应用	应用	Apply	套用	適用
 应用偏好	应用偏好	Application preferences	應用程式偏好設定	アプリケーションの設定
-应用文字大小	应用文字大小	App text size	應用程式文字大小	アプリの文字サイズ
 应用校对规则	应用校对规则	Apply proofreading rules	應用校對規則	校正ルールを適用する
-应用模型选择	应用模型选择	Apply model selection	應用模型選擇	モデル選択を適用する
 开启 / enabled	开启	enabled	開啟	有効
 开启后转录文字会发送到所选 AI 服务	开启后转录文字会发送到所选 AI 服务	When turned on, the transcribed text will be sent to the selected AI service	開啟後轉錄文字會傳送到所選 AI 服務	オンにすると、文字起こしされたテキストが選択した AI サービスに送信されます
 开启校对 / Enable transcript polish: course2md llm setup	开启校对	Enable transcript polish: course2md llm setup	開啟校對	校正をオンにする
@@ -741,7 +728,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 截图无法读取	截图无法读取	Screenshot can't be read	無法讀取截圖	スクリーンショットを読み込めません
 截图时机：first 立即，stable 等画面稳定 / Capture immediately or wait for stable slides	截图时机：first 立即，stable 等画面稳定	Capture immediately or wait for stable slides	截圖時機：first 立即，stable 等畫面穩定	撮影タイミング：first はすぐに、stable は画面が安定してから
 截图最短间隔（秒）/ Minimum seconds between screenshots	截图最短间隔（秒）/ Minimum seconds between screenshots	Minimum seconds between screenshots	截圖最短間隔（秒）/ Minimum seconds between screenshots	スクリーンショットの最小間隔（秒）
-截图校对	截图校对	Screenshot proofreading	截圖校對	スクリーンショットの校正
 截图生成未完成	截图生成未完成	Screenshot generation is not completed	截圖生成未完成	スクリーンショットの生成が完了していません
 截图辅助校对	截图辅助校对	Screenshot-assisted proofreading	截圖輔助校對	スクリーンショット補助校正
 截图进度损坏，原文件已保留 / Screenshot checkpoint is damaged	截图进度损坏，原文件已保留	Screenshot checkpoint is damaged	截圖進度損壞，原檔案已保留	スクリーンショットの進行状況は破損しており、元のファイルは保持されています。
@@ -1064,7 +1050,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid service URL; use a complete HTTP(S) URL.	服务地址无效，请使用完整的 HTTP(S) URL。	Invalid service URL; use a complete HTTP(S) URL.	服務網址無效，請使用完整的 HTTP(S) URL。	サービスURLが無効です。完全な HTTP(S) URL を使用してください。
 服务地址（兼容 OpenAI 接口）/ Service URL (OpenAI-compatible)	服务地址（兼容 OpenAI 接口）/ Service URL (OpenAI-compatible)	Service URL (OpenAI-compatible)	服務網址（相容 OpenAI 介面）	サービスURL（OpenAI 互換）
 服务尚未保存：{}	服务尚未保存：{}	Service not saved yet: {}	服務尚未儲存：{}	サービスはまだ保存されていません: {}
-服务已保存	服务已保存	Service saved	服務已儲存	サービスが保存されました
 服务已保存，补做任务尚未建立：{}	服务已保存，补做任务尚未建立：{}	The service has been saved, but the reprocessing task has not been created yet: {}	服務已儲存，補做任務尚未建立：{}	サービスは保存されましたが、再処理タスクはまだ作成されていません: {}
 服务拒绝了此请求 / Service rejected this request	服务拒绝了此请求	Service rejected this request	服務拒絕了此請求	サービスがリクエストを拒否しました
 服务拒绝了请求参数（HTTP {}），请检查此任务使用的模型与服务设置。 / The service rejected the request parameters (HTTP {}); check the model and service settings for this task.	服务拒绝了请求参数（HTTP {}），请检查此任务使用的模型与服务设置。	The service rejected the request parameters (HTTP {}); check the model and service settings for this task.	服務拒絕了請求參數（HTTP {}），請檢查此任務使用的模型與服務設定。	サービスはリクエスト パラメーター (HTTP {}) を拒否しました。このタスクで使用されるモデルとサービスの設定を確認してください。
@@ -1096,7 +1081,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 服务返回错误，无法确认是否已处理。再次提交可能产生额外费用 / Service processing is uncertain	服务返回错误，无法确认是否已处理。再次提交可能产生额外费用	Service processing is uncertain	服務傳回錯誤，無法確認是否已處理。再次提交可能產生額外費用	サービスがエラーを返したため、処理されたかどうかを確認できません。再送信すると追加料金が発生する場合があります
 服务返回错误，未收到确定结果，测试可能已产生费用	服务返回错误，未收到确定结果，测试可能已产生费用	The service returned an error and no definite result was received. The test may have incurred charges.	服務傳回錯誤，未收到確定結果，測試可能已產生費用	サービスがエラーを返し、確定した結果を受信できませんでした。テストで料金が発生した可能性があります。
 服务选择尚未保存：{}	服务选择尚未保存：{}	Service selection not saved yet: {}	服務選擇尚未儲存：{}	サービスの選択はまだ保存されていません: {}
-服务选择已保存	服务选择已保存	Service selection saved	服務選擇已儲存	サービスの選択が保存されました
 服务配置	服务配置	Service configuration	服務設定	サービス設定
 服务配置已保存，尚未开始补做	服务配置已保存，尚未开始补做	The service configuration has been saved; reprocessing has not started yet.	服務設定已儲存，尚未開始補做	サービス設定は保存されました。再処理はまだ開始していません。
 未下载	未下载	Not downloaded	未下載	未ダウンロード
@@ -1141,7 +1125,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 本地识别方式 / Local transcription engine	本地识别方式	Local transcription engine	本機辨識方式	ローカル音声認識エンジン
 本地识别（首次下载模型） / Local transcription (requires a model download)	本地识别（首次下载模型）	Local transcription (requires a model download)	本機辨識（首次需下載模型）	ローカル音声認識（初回はモデルのダウンロードが必要）
 本地语音识别请求失败 / Local transcription request failed	本地语音识别请求失败	Local transcription request failed	本機語音辨識請求失敗	ローカル音声認識リクエストが失敗しました
-本机	本机	This computer	本機	このコンピューター
 本机 · {}	本机 · {}	This computer · {}	本機 · {}	このコンピューター · {}
 本机引擎	本机引擎	Local engine	本機引擎	ローカルエンジン
 本机识别	本机识别	On this device	本機辨識	このデバイスで認識
@@ -1220,10 +1203,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 检查配置	检查配置	Check configuration	檢查設定	設定を確認
 概述：{}\n	概述：{}\n	Overview: {}\n	概述：{}\n	概要: {}\n
 模型	模型	Model	模型	モデル
-模型 ID	模型 ID	Model ID	模型 ID	モデルID
 模型 ID，或从服务获取列表	模型 ID，或从服务获取列表	Model ID, or fetch the list from the service	模型 ID，或從服務取得清單	モデル ID、またはサービスから一覧を取得
 模型 ID 不能包含换行或控制字符	模型 ID 不能包含换行或控制字符	Model ID cannot contain newlines or control characters	模型 ID 不能包含換行或控制字元	モデル ID には改行や制御文字を含めることはできません
-模型 ID，{}	模型 ID，{}	Model ID, {}	模型 ID，{}	モデルID、{}
 模型 {}% · {}	模型 {}% · {}	Model {}% · {}	模型 {}% · {}	モデル {}% · {}
 模型下载任务失败 / Model download task failed	模型下载任务失败	Model download task failed	模型下載任務失敗	モデルのダウンロード タスクが失敗しました
 模型下载完成或停止后再移动笔记库	模型下载完成或停止后再移动笔记库	Move the note library after the model download is completed or stopped.	模型下載完成或停止後再移動筆記庫	モデルのダウンロードが完了または停止した後で、ノート ライブラリを移動します。
@@ -1575,7 +1556,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 自定义优先级	自定义优先级	Custom priority	自訂優先順序	カスタム優先度
 自定义校对规则	自定义校对规则	Custom proofreading rules	自訂校對規則	カスタム校正ルール
 自定义模型	自定义模型	Custom model	自訂模型	カスタムモデル
-自定义语言优先级	自定义语言优先级	Custom language priority	自訂語言優先順序	カスタム言語の優先順位
 英语	英语	English	英語	英語
 获取二维码失败，请检查网络后重试	获取二维码失败，请检查网络后重试	Failed to get the QR code. Check the network and try again.	取得 QR 碼失敗，請檢查網路後重試	QR コードを取得できませんでした。ネットワークを確認してもう一度お試しください。
 获取模型列表	获取模型列表	Get model list	取得模型列表	モデルリストを取得
@@ -1646,7 +1626,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 该后端支持的模型：{}	该后端支持的模型：{}	Models supported by this backend: {}	此後端支援的模型：{}	このバックエンドが対応するモデル：{}
 语言代码只能包含字母、数字和连字符，请用逗号分隔各语言	语言代码只能包含字母、数字和连字符，请用逗号分隔各语言	Language codes can only contain letters, numbers, and hyphens. Please separate languages with commas.	語言代碼只能包含字母、數字和連字號，請用逗號分隔各語言	言語コードには文字、数字、ハイフンのみを含めることができます。言語はカンマで区切ってください。
 语言优先级	语言优先级	Language priority	語言優先順序	言語の優先順位
-语音	语音	Speech	語音	音声
 语音分段长度需要大于 0	语音分段长度需要大于 0	Speech segment length must be greater than 0	語音分段長度需要大於 0	音声セグメントの長さは 0 より大きくする必要があります
 语音服务	语音服务	Speech service	語音服務	音声サービス
 语音服务没有返回文字 / The speech service returned no text	语音服务没有返回文字	The speech service returned no text	語音服務沒有傳回文字	音声サービスがテキストを返しませんでした
@@ -1926,7 +1905,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 首次识别时会自动下载所选模型	首次识别时会自动下载所选模型	The selected model is automatically downloaded upon first recognition	首次辨識時會自動下載所選模型	選択したモデルは最初の認識時に自動的にダウンロードされます
 首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。 / Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。	Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次辨識時選擇並下載 Apple 模型（約 1–2.3 GB）。	初回認識時に Apple モデル (約 1 ～ 2.3 GB) を選択してダウンロードします。
 验证中	验证中	Verifying	驗證中	検証中
-高级识别设置	高级识别设置	Advanced recognition settings	進階辨識設定	高度な認識設定
 默认 · 更准确，占内存较多	默认 · 更准确，占内存较多	Default · More accurate, takes up more memory	預設 · 更準確，佔記憶體較多	デフォルト · より正確、メモリ使用量が多い
 默认位置尚未更改：{}	默认位置尚未更改：{}	The default location has not been changed: {}	預設位置尚未更改：{}	デフォルトの場所は変更されていません: {}
 默认保存位置	默认保存位置	Default save location	預設儲存位置	デフォルトの保存場所
@@ -1950,9 +1928,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 ，已选择	，已选择	, selected	，已選擇	、選択済み
 ，或 Hugging Face 仓库名（如 org/model）	，或 Hugging Face 仓库名（如 org/model）	, or Hugging Face repository name (such as org/model)	，或 Hugging Face 儲存庫名（如 org/model）	、または Hugging Face リポジトリ名（org/model など）
 ；	；	; 	；	;
-自动（紧凑）	自动	Auto	自動	自動
-仅字幕（紧凑）	仅字幕	Subtitles	僅字幕	字幕のみ
-语音识别（紧凑）	语音识别	Speech	語音辨識	音声認識
 原笔记已关闭；服务正在保存，但未用于其他笔记	原笔记已关闭；服务正在保存，但未用于其他笔记	The original note is closed; the service is still being saved and was not used for other notes	原筆記已關閉；服務正在儲存，但未用於其他筆記	元のノートは閉じられています。サービスは保存中で、他のノートには使用されていません
 服务正在保存，本次选择尚未保存：{}	服务正在保存，本次选择尚未保存：{}	The service is still being saved; this selection was not saved: {}	服務正在儲存，本次選擇尚未儲存：{}	サービスは保存中です。今回の選択は保存されていません: {}
 服务正在保存，补做任务尚未创建。请重试补做。	服务正在保存，补做任务尚未创建。请重试补做。	The service is still being saved; the reprocessing task has not been created. Retry reprocessing.	服務正在儲存，補做任務尚未建立。請重試補做。	サービスは保存中です。再処理タスクはまだ作成されていません。再処理を再試行してください。
@@ -1978,7 +1953,6 @@ Markdown 包…	Markdown 包…	Markdown package…	Markdown 包…	Markdown パ
 测试通过	测试通过	Test passed	測試通過	テスト合格
 添加或管理 AI 服务…	添加或管理 AI 服务…	Add or manage AI services…	新增或管理 AI 服務…	AI サービスを追加・管理…
 添加或管理语音服务…	添加或管理语音服务…	Add or manage speech services…	新增或管理語音服務…	音声サービスを追加・管理…
-用账号登录	用账号登录	Sign in with an account	用帳號登入	アカウントでサインイン
 移动到	移动到	Move to	移動到	移動先
 笔记库操作	笔记库操作	Library actions	筆記庫操作	ノートライブラリの操作
 结构化数据…	结构化数据…	Structured data…	結構化資料…	構造化データ…
@@ -2108,7 +2082,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 设置分类	设置分类	Settings categories	設定分類	設定のカテゴリ
 使用中	使用中	In use	使用中	使用中
 未添加时使用本机识别	未添加时使用本机识别	Without one, speech is recognized on this device	未新增時使用本機辨識	未追加の場合はこのデバイスで認識します
-需要修复	需要修复	Needs repair	需要修復	修正が必要です
 {} 项检查未通过	{} 项检查未通过	Failed checks: {}	{} 項檢查未通過	{} 件のチェックに合格しませんでした
 应用 / Application	应用	Application	應用程式	アプリ
 1 个需要处理	1 个需要处理	1 needs attention	1 個需要處理	対応が必要 1 件
@@ -2122,3 +2095,5 @@ Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 �
 等待文件锁 {} 超时 / Timed out waiting for the file lock {}	等待文件锁 {} 超时	Timed out waiting for the file lock {}	等待檔案鎖 {} 逾時	ファイルロック {} の待機がタイムアウトしました
 授权被拒绝：{} / Authorization denied: {}	授权被拒绝：{}	Authorization denied: {}	授權被拒絕：{}	認可が拒否されました: {}
 识别方式 {} 不支持模型「{}」。可用：{}	识别方式 {} 不支持模型「{}」。可用：{}	The {} backend does not support model "{}". Available: {}	辨識方式 {} 不支援模型「{}」。可用：{}	音声認識方式 {} はモデル「{}」に対応していません。利用可能：{}
+重新测试	重新测试	Test again	重新測試	再テスト
+收起模型列表	收起模型列表	Hide model list	收起模型清單	モデル一覧を閉じる

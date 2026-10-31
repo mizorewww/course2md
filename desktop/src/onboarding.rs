@@ -1052,7 +1052,11 @@ impl Desktop {
         let content = match step {
             Step::Engine => self.setup_engine_content(window, cx),
             Step::Ai => self.setup_service_content(ServicePurpose::Ai, window, cx),
-            Step::Account => setup_tile(true, true).child(self.account_onboarding_page(cx)),
+            Step::Account => setup_tile(true, true).child(self.account_row(
+                course2md::tr!("账号状态"),
+                window,
+                cx,
+            )),
             Step::Model => self.setup_model_content(window, cx),
         };
         let scale = f32::from(window.rem_size()) / 14.;
@@ -1662,18 +1666,15 @@ impl Desktop {
             .min_w_0()
             .gap(rems(20. / 14.))
             .py(rems(8. / 14.))
-            .child(
-                self.setup_reveal(
-                    format!("setup-protocol-reveal-{}", purpose as usize),
-                    self.service_type_field(
-                        owner,
-                        SharedString::from(format!("setup-protocol-{}", purpose as usize)),
-                        busy,
-                        cx,
-                    )
-                    .label(course2md::tr!("服务类型")),
+            .child(self.setup_reveal(
+                format!("setup-protocol-reveal-{}", purpose as usize),
+                self.service_type_field(
+                    owner,
+                    SharedString::from(format!("setup-protocol-{}", purpose as usize)),
+                    busy,
+                    cx,
                 ),
-            );
+            ));
         let codex = draft.protocol == preferences::ServiceProtocol::CodexResponses;
         if !codex {
             form = form.child(self.setup_input_row(

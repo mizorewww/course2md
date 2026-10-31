@@ -1,10 +1,13 @@
 //! Codex (ChatGPT subscription) account connection: import the codex CLI login or authorize with PKCE in the browser.
 //! Credentials live only in the CLI token file ({config_dir}/auth/codex.json); desktop settings, logs and
 //! interface text never touch the token. The settings service editor and first-use AI step share this state.
-use super::*;
 use crate::preferences::{ServiceProtocol, ServicePurpose};
-use crate::theme::*;
+use crate::settings_ui::Resource;
+use crate::{Desktop, symbols};
 use course2md::login::codex::LoginStatus;
+use gpui::{prelude::*, *};
+use gpui_kit::component::input::InputState;
+use gpui_kit_material::prelude::*;
 
 /// Recognize the engine's missing/expired login marker and replace it with in-app connection guidance.
 fn login_required(error: &anyhow::Error) -> bool {
@@ -63,14 +66,14 @@ impl CodexUi {
     }
 
     /// The account's one status badge, shared by every place that shows it.
-    pub(crate) fn badge(&self) -> (BadgeKind, &'static str) {
+    pub(crate) fn badge(&self) -> (StatusKind, &'static str) {
         match (self.working, &self.status) {
-            (Some(CodexWork::Checking), _) => (BadgeKind::Progress, course2md::tr!("正在检查")),
-            (Some(CodexWork::LoggingOut), _) => (BadgeKind::Progress, course2md::tr!("正在退出")),
-            (Some(_), _) => (BadgeKind::Progress, course2md::tr!("正在连接")),
-            (_, Some(LoginStatus::Connected)) => (BadgeKind::Success, course2md::tr!("已连接")),
-            (_, Some(LoginStatus::Expired)) => (BadgeKind::Warning, course2md::tr!("登录已失效")),
-            _ => (BadgeKind::Neutral, course2md::tr!("未连接")),
+            (Some(CodexWork::Checking), _) => (StatusKind::Progress, course2md::tr!("正在检查")),
+            (Some(CodexWork::LoggingOut), _) => (StatusKind::Progress, course2md::tr!("正在退出")),
+            (Some(_), _) => (StatusKind::Progress, course2md::tr!("正在连接")),
+            (_, Some(LoginStatus::Connected)) => (StatusKind::Success, course2md::tr!("已连接")),
+            (_, Some(LoginStatus::Expired)) => (StatusKind::Warning, course2md::tr!("登录已失效")),
+            _ => (StatusKind::Neutral, course2md::tr!("未连接")),
         }
     }
 
@@ -385,32 +388,26 @@ impl Desktop {
             CodexSurface::Editor => "codex-account",
             _ => "setup-codex-account",
         };
+        let child = |name: &str| SharedString::from(format!("{id}-{name}"));
         let working = self.codex.working;
         let busy = working.is_some();
-        let (kind, label) = self.codex.badge();
         let connected = matches!(self.codex.status, Some(LoginStatus::Connected))
             && !matches!(working, Some(CodexWork::LoggingOut));
-        let notice = self.codex.notice_on(surface);
         let authorizing = working == Some(CodexWork::Authorizing);
-        let mut lines = vec![(
-            "policy",
-            course2md::tr!("使用你的 ChatGPT 订阅").to_owned(),
-            false,
-        )];
+        let mut lines = vec![(course2md::tr!("使用你的 ChatGPT 订阅").to_owned(), false)];
         if authorizing {
             lines.push((
-                "authorizing",
                 course2md::tr!("请在浏览器中完成授权（约 3 分钟内）").into(),
                 false,
             ));
         }
-        lines.extend(notice.map(|(message, is_error)| ("notice", message, is_error)));
+        lines.extend(self.codex.notice_on(surface));
         let mut actions = Vec::new();
         if authorizing {
             actions.push(
-                quiet(SharedString::from(format!("{id}-cancel-authorize")))
-                    .icon(icons::close())
-                    .label(course2md::tr!("取消授权"))
+                material_button(child("cancel-authorize"), ButtonVariant::Text)
+                    .icon(symbols::close())
+                    .child(course2md::tr!("取消授权"))
                     .disabled(disabled)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.codex.cancel_authorization();
@@ -421,70 +418,58 @@ impl Desktop {
                     .into_any_element(),
             );
         }
-        crate::settings_ui::AccountCard {
-            id,
-            icon: icons::sparkles(),
-            tint: Tint::Purple,
-            title: course2md::tr!("ChatGPT 账号"),
-            status: (kind, label),
-            detail: None,
+        if connected {
+            // The same order as the Bilibili account: check again first, sign out last.
+            actions.push(
+                material_button(child("recheck"), ButtonVariant::Text)
+                    .icon(symbols::refresh())
+                    .child(course2md::tr!("重新检查"))
+                    .disabled(disabled || busy)
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.codex_refresh_status(surface, cx)),
+                    )
+                    .into_any_element(),
+            );
+            actions.push(
+                material_button(child("logout"), ButtonVariant::Text)
+                    .icon(symbols::logout())
+                    .child(course2md::tr!("退出登录"))
+                    .disabled(disabled || busy)
+                    .on_click(cx.listener(move |this, _, _, cx| this.codex_logout(surface, cx)))
+                    .into_any_element(),
+            );
+        } else {
+            // Importing an existing login is the quiet alternative; signing in through
+            // the browser is the primary way.
+            actions.push(
+                material_button(child("import"), ButtonVariant::Text)
+                    .child(if matches!(self.codex.status, Some(LoginStatus::Expired)) {
+                        course2md::tr!("重新导入 Codex 登录")
+                    } else {
+                        course2md::tr!("导入 Codex 登录")
+                    })
+                    .disabled(disabled || busy)
+                    .on_click(cx.listener(move |this, _, _, cx| this.codex_import(surface, cx)))
+                    .into_any_element(),
+            );
+            actions.push(
+                material_button(child("authorize"), ButtonVariant::Filled)
+                    .icon(symbols::open_in_new())
+                    .child(course2md::tr!("在浏览器中登录"))
+                    .disabled(disabled || busy)
+                    .on_click(cx.listener(move |this, _, _, cx| this.codex_authorize(surface, cx)))
+                    .into_any_element(),
+            );
+        }
+        Resource {
+            id: id.into(),
+            icon: symbols::auto_awesome().into(),
+            title: course2md::tr!("ChatGPT 账号").into(),
+            status: vec![self.codex.badge()],
             busy,
             lines,
-            actions: if !connected {
-                {
-                    let mut buttons = actions;
-                    // As on the canvas: importing an existing login is the quiet
-                    // alternative; signing in through the browser is the primary way.
-                    buttons.push(
-                        quiet(SharedString::from(format!("{id}-import")))
-                            .text_color(color(ACCENT))
-                            .label(if matches!(self.codex.status, Some(LoginStatus::Expired)) {
-                                course2md::tr!("重新导入 Codex 登录")
-                            } else {
-                                course2md::tr!("导入 Codex 登录")
-                            })
-                            .disabled(disabled || busy)
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.codex_import(surface, cx)),
-                            )
-                            .into_any_element(),
-                    );
-                    buttons.push(
-                        primary_pill(SharedString::from(format!("{id}-authorize")))
-                            .icon(icons::external_link())
-                            .label(course2md::tr!("在浏览器中登录"))
-                            .disabled(disabled || busy)
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| {
-                                    this.codex_authorize(surface, cx)
-                                }),
-                            )
-                            .into_any_element(),
-                    );
-                    buttons
-                }
-            } else {
-                // The same order as the Bilibili account: check again first, sign out last.
-                vec![
-                    quiet(SharedString::from(format!("{id}-recheck")))
-                        .icon(icons::refresh())
-                        .label(course2md::tr!("重新检查"))
-                        .disabled(disabled || busy)
-                        .on_click(
-                            cx.listener(move |this, _, _, cx| {
-                                this.codex_refresh_status(surface, cx)
-                            }),
-                        )
-                        .into_any_element(),
-                    quiet(SharedString::from(format!("{id}-logout")))
-                        .icon(icons::logout())
-                        .label(course2md::tr!("退出登录"))
-                        .disabled(disabled || busy)
-                        .on_click(cx.listener(move |this, _, _, cx| this.codex_logout(surface, cx)))
-                        .into_any_element(),
-                ]
-            },
+            actions,
         }
-        .render(cx)
+        .row(cx)
     }
 }

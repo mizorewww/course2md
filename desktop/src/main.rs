@@ -26,12 +26,14 @@ mod import_ui;
 mod library_ui;
 mod math;
 mod model_discovery;
+#[allow(dead_code)] // Wave 3 deletes it.
 mod motion;
 mod note_text;
 mod notes;
 mod ollama_ui;
 mod onboarding;
 mod organize;
+#[allow(unused_imports)] // Wave 3 deletes it.
 mod palettes;
 #[cfg(feature = "performance")]
 mod performance;

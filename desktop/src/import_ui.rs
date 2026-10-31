@@ -2449,7 +2449,7 @@ impl Desktop {
 
     /// AI 处理: one switch tile per step, then the translation target and
     /// the service the text is sent to.
-    fn import_ai_options(&self, cx: &mut Context<Self>) -> TileGroup {
+    fn import_ai_options(&self, window: &mut Window, cx: &mut Context<Self>) -> TileGroup {
         let custom_rule = self.task_options().llm
             && self
                 .import_base_config()
@@ -2491,26 +2491,29 @@ impl Desktop {
             .translate
             .as_deref()
             .and_then(course2md::language::target);
-        let mut translate = self.translation_select(
+        let translate = self.translation_select(
             "import-ai-translate",
             translated,
             |this, code, cx| {
                 this.set_task_option(|o| o.translate = code.map(str::to_owned), cx);
             },
+            window,
             cx,
         );
-        if translated.is_some() {
-            translate = translate.detail(course2md::tr!(
-                "每段文字下方附上译文；已是该语言的视频不翻译"
-            ));
-        }
-        tiles.push(v_flex().p(rems(16. / 14.)).child(translate));
+        tiles.push(v_flex().p(rems(16. / 14.)).gap_2().child(translate).when(
+            translated.is_some(),
+            |tile| {
+                tile.child(aux_text(course2md::tr!(
+                    "每段文字下方附上译文；已是该语言的视频不翻译"
+                )))
+            },
+        ));
         if self.task_uses_ai() {
             let mut service = v_flex()
                 .w_full()
                 .min_w_0()
                 .gap_2()
-                .child(self.task_service_picker(ServicePurpose::Ai, cx));
+                .child(self.task_service_picker(ServicePurpose::Ai, window, cx));
             if let Some(selected) = self.selected_task_service(ServicePurpose::Ai) {
                 service = service.child(aux_text(course2md::tr!(
                     "{}会发送到 {}",
@@ -2612,7 +2615,7 @@ impl Desktop {
         let mut view = v_flex().w_full().min_w_0().gap_2().child(selector);
         if cloud {
             view = view
-                .child(self.task_service_picker(ServicePurpose::Speech, cx))
+                .child(self.task_service_picker(ServicePurpose::Speech, window, cx))
                 .child(aux_text(course2md::tr!("音频会发送到所选语音识别服务")));
         } else {
             let (provider, model, root) = self.import_model_request();
@@ -3225,7 +3228,7 @@ impl Desktop {
                     .child(self.import_text_mode_options(window, cx)),
             )
             .child(div().py(rems(16. / 14.)).child(divider()))
-            .child(self.import_ai_options(cx))
+            .child(self.import_ai_options(window, cx))
             .child(div().py(rems(16. / 14.)).child(divider()))
             .child(self.import_destination(cx))
             .child(

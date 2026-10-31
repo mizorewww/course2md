@@ -363,15 +363,6 @@ impl ServiceProtocol {
         }
     }
 
-    /// How the service is reached, heading its group in the type menu.
-    pub fn choice_group(self) -> &'static str {
-        match self {
-            Self::CodexResponses => course2md::tr!("用账号登录"),
-            Self::OllamaChat => course2md::tr!("本机"),
-            Self::SpeechTranscriptions | Self::SpeechChat | Self::AiChat => "API",
-        }
-    }
-
     /// What choosing this type means for the person setting it up.
     pub fn choice_detail(self) -> &'static str {
         match self {

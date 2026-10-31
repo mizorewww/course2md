@@ -10,7 +10,7 @@ arrow_back
 arrow_downward
 arrow_forward
 arrow_upward
-article
+article fill
 auto_awesome
 auto_fix_high
 book
@@ -22,7 +22,7 @@ checklist
 chevron_left
 chevron_right
 close
-cloud
+cloud fill
 code
 computer
 content_copy
@@ -46,7 +46,7 @@ grid_view
 history
 image
 inbox
-info
+info fill
 keyboard_arrow_down
 keyboard_arrow_up
 language
@@ -64,7 +64,7 @@ movie
 notes
 open_in_full
 open_in_new
-palette
+palette fill
 pause
 play_arrow
 progress_activity
@@ -75,7 +75,7 @@ schedule
 science
 search
 settings
-storage
+storage fill
 subtitles
 summarize
 task
