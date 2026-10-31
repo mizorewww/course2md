@@ -37,7 +37,7 @@ impl Downloader {
             .with_unit(Unit::Bytes)
             .with_template(MODEL_BAR);
         let report = Report { remote, bar: &bar };
-        match downloader.fetch(remote, dest, control, &report) {
+        match downloader.fetch(remote, dest, &Stopped(control), &report) {
             Ok(()) => {
                 bar.finish();
                 progress::done(stage);
@@ -63,9 +63,12 @@ impl Downloader {
     }
 }
 
-impl Cancel for TaskControl {
+/// A paused or cancelled task stops the transfer.
+struct Stopped<'a>(&'a TaskControl);
+
+impl Cancel for Stopped<'_> {
     fn is_cancelled(&self) -> bool {
-        self.check().is_err()
+        self.0.check().is_err()
     }
 }
 

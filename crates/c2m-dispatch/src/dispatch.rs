@@ -671,7 +671,7 @@ fn never_sent(error: &ureq::Error) -> bool {
 /// Drain the HTTP body before recording completion; a body read error is still uncertain.
 /// Cloud callers must disable redirects: a failed connection after a redirect would not
 /// prove that the initial request was never handled.
-pub(crate) fn receive(
+pub fn receive(
     result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
 ) -> std::result::Result<HttpResponse, NetworkFailure> {
     use std::io::Read;

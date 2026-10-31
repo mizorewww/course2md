@@ -904,6 +904,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "c2m-dispatch"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "c2m-core",
+ "c2m-i18n",
+ "c2m-process",
+ "c2m-protocol",
+ "getrandom 0.4.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "ureq 3.5.0",
+]
+
+[[package]]
 name = "c2m-i18n"
 version = "2.0.1"
 dependencies = [
@@ -1431,13 +1449,13 @@ dependencies = [
  "base64 0.23.1",
  "c2m-config",
  "c2m-core",
+ "c2m-dispatch",
  "c2m-i18n",
  "c2m-process",
  "c2m-protocol",
  "c2m-test-http",
  "clap",
  "dialoguer",
- "getrandom 0.4.3",
  "hound",
  "image",
  "indexmap",
