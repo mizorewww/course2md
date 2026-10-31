@@ -37,7 +37,6 @@ package() {
     install -Dm644 course2md.png "${pkgdir}/usr/share/icons/hicolor/512x512/apps/course2md.png"
     install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
     install -Dm644 LICENSE-material-icons "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-material-icons"
-    install -Dm644 LICENSE-lucide-icons "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-lucide-icons"
     install -Dm644 THIRD-PARTY-LICENSES.txt "${pkgdir}/usr/share/licenses/${pkgname}/THIRD-PARTY-LICENSES.txt"
     install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
 }

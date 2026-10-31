@@ -218,7 +218,10 @@ impl Desktop {
             .headline(mode_label(dark))
             .size(DialogSize::Large)
             .content(
+                // The kit's surface lets presses through to its scrim, which would
+                // close the chooser from the gaps between the palettes.
                 v_flex()
+                    .occlude()
                     .w_full()
                     .min_w_0()
                     .max_h(crate::settings_ui::dialog_body_height(window))

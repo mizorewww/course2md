@@ -263,6 +263,7 @@ impl Desktop {
                 .into_iter()
                 .chain([(policy.to_owned(), false)])
                 .collect(),
+            below: Vec::new(),
             actions,
         }
         .row(cx)

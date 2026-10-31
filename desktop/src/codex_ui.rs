@@ -446,6 +446,7 @@ impl Desktop {
             status: vec![self.codex.badge()],
             busy,
             lines,
+            below: Vec::new(),
             actions,
         }
         .row(cx)

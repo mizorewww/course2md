@@ -93,16 +93,6 @@ pub(super) struct State {
     details: BTreeSet<String>,
 }
 
-/// A read-only view for the workbench. Checks and downloads keep their ownership here.
-pub(crate) struct ModelSetupSnapshot {
-    pub(crate) checking: bool,
-    pub(crate) result: Option<Result<LocalModelStatus, String>>,
-    pub(crate) device_issue: Option<DeviceIssue>,
-    pub(crate) preparing: bool,
-    pub(crate) notice: Option<(String, bool)>,
-    pub(crate) cancelled: bool,
-}
-
 /// Local recognition engines in display order.
 pub(crate) const LOCAL_ENGINES: [AsrProvider; 4] = [
     AsrProvider::Coreml,
@@ -287,39 +277,6 @@ pub(crate) fn device_issue(
 }
 
 impl Desktop {
-    pub(crate) fn setup_model_snapshot(
-        &self,
-        provider: AsrProvider,
-        model: Option<&str>,
-        root: &Path,
-    ) -> ModelSetupSnapshot {
-        let request = Request::new(provider, model, root);
-        let entry = self
-            .settings_ui
-            .model_diagnostics
-            .entries
-            .get(&request.key());
-        let outcome = self.model_outcome(&request);
-        ModelSetupSnapshot {
-            checking: entry.is_none_or(|entry| entry.checking),
-            result: entry.and_then(|entry| entry.result.clone()),
-            device_issue: self.engine_issue(provider),
-            preparing: self.is_preparing(&request),
-            notice: outcome.map(|outcome| (outcome.message.clone(), outcome.error)),
-            cancelled: outcome.is_some_and(|outcome| outcome.cancelled),
-        }
-    }
-
-    pub(crate) fn prepare_setup_model(
-        &mut self,
-        provider: AsrProvider,
-        model: Option<&str>,
-        root: &Path,
-        cx: &mut Context<Self>,
-    ) {
-        self.begin_model_preparation(Request::new(provider, model, root), cx);
-    }
-
     /// The request a running model job is preparing.
     fn active_preparation(&self) -> Option<&Request> {
         (self.kind == Kind::Models && self.job.is_some())

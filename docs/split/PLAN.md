@@ -67,6 +67,11 @@ directory when the project is accepted.
     components' built-in motion. `motion.rs` and hand-tuned curves and durations go. An app animation
     the kit can't express and that is worth keeping is backported: generic, one PR to
     `gpui-kit-material`, reviewed, under decision 11(c). Otherwise it is dropped for the kit's.
+16. **A migration keeps the look (owner, 2026-10-31).** Decision 14 picks the component; it doesn't
+    make the page plainer. Distinctive design the app already has, such as coloured tonal icons and
+    the large-radius link field, survives. A look the kit lacks is added to `gpui-kit-material`, and
+    the page uses it; it is neither flattened to the kit default nor hand-painted in the page.
+    `DESIGN-RESTORE.md` lists what wave 2 lost and how each item is restored.
 
 ## Locations
 

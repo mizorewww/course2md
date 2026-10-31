@@ -795,9 +795,6 @@ fn probe(bin: &Path, args: &[&str], timeout: Duration) -> Option<String> {
     Some(text)
 }
 
-// Render pages still name the scrollbar helpers through this module.
-pub(crate) use crate::scroll::vertical_scrollbar;
-
 #[cfg(test)]
 mod tests {
     use super::*;

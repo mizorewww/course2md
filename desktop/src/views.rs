@@ -3,7 +3,7 @@ use super::*;
 use crate::symbols;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{
-    color::ColorRole,
+    color::{ColorRole, Scheme},
     components::{
         ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind, Snackbar,
         SnackbarPosition, TitleBar as AppBar, material_button, notice_banner, spinner,
@@ -12,6 +12,7 @@ use gpui_kit_material::{
     icons::SymbolIcon,
     motion,
     prelude::{ButtonSize, CaptionButtons, accessible_text, color, is_compact, rem},
+    theme::{advance_component_theme, init_component_theme, scheme as current_scheme, system_dark},
 };
 
 const SHELL_GUTTER: f32 = 24.;
@@ -501,26 +502,55 @@ impl Desktop {
     }
 }
 
-impl Render for Desktop {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl Desktop {
+    /// What the window should paint: the saved appearance against the system's, or a capture's.
+    fn theme_target(&self, cx: &App) -> (Scheme, f32) {
+        let application = self.preferences.application();
         #[allow(unused_mut)]
-        let mut appearance = self.preferences.application().appearance.clone();
-        #[allow(unused_mut)]
-        let mut font_scale = self.preferences.application().font_scale;
+        let (mut appearance, mut scale) = (application.appearance.clone(), application.font_scale);
         #[cfg(feature = "capture")]
         {
-            if let Some(palette) = crate::capture::palette_override() {
-                appearance.select(palette);
-                appearance.mode = if palette.is_dark() {
-                    crate::palettes::Appearance::Dark
-                } else {
-                    crate::palettes::Appearance::Light
-                };
-            }
-            font_scale = crate::capture::scale_override().unwrap_or(font_scale);
+            crate::capture::override_appearance(&mut appearance);
+            scale = crate::capture::scale_override().unwrap_or(scale);
         }
-        theme::apply_preference(&appearance, window, cx);
-        theme::apply_scale(font_scale, window, cx);
+        (
+            Scheme::from_palette(appearance.resolve(system_dark(cx))),
+            scale,
+        )
+    }
+
+    /// Starts the theme at its target, with no transition, before Root's first render.
+    pub(crate) fn init_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (scheme, scale) = self.theme_target(cx);
+        init_component_theme(scheme, scale, cx);
+        self.prepare_theme(window, cx);
+    }
+
+    /// Moves the theme toward its target. One next-frame callback carries a running
+    /// transition; the kit refreshes the window for each step.
+    pub(crate) fn prepare_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (scheme, scale) = self.theme_target(cx);
+        let running = advance_component_theme(scheme, scale, window, cx);
+        let painted = (current_scheme(), scale);
+        if self.unprojected_paint != Some(painted) {
+            self.unprojected_paint = Some(painted);
+            theme::sync_unprojected(scale, cx);
+        }
+        if running && !self.theme_frame_pending {
+            self.theme_frame_pending = true;
+            let view = cx.weak_entity();
+            window.on_next_frame(move |window, cx| {
+                let _ = view.update(cx, |this, cx| {
+                    this.theme_frame_pending = false;
+                    this.prepare_theme(window, cx);
+                });
+            });
+        }
+    }
+}
+
+impl Render for Desktop {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.onboarding.active {
             let content = self.onboarding_page(window, cx);
             // The shell's brand, without its destinations: setup is modal, so the
@@ -746,39 +776,5 @@ pub fn video_site_name(url: &str) -> Option<&'static str> {
         Some("bilibili") => Some("Bilibili"),
         Some("youtube") => Some("YouTube"),
         _ => None,
-    }
-}
-
-/// A dialog part drawn from the desktop's state. Dialog contents live in
-/// their own entity, so each one re-enters the desktop to render.
-pub(crate) struct DesktopView<F> {
-    desktop: Entity<Desktop>,
-    render: F,
-    _observation: Subscription,
-}
-
-impl<F> DesktopView<F>
-where
-    F: FnMut(&mut Desktop, &mut Window, &mut Context<Desktop>) -> AnyElement + 'static,
-{
-    /// Repaints whenever the desktop changes.
-    pub(crate) fn observing(desktop: Entity<Desktop>, cx: &mut App, render: F) -> Entity<Self> {
-        cx.new(|cx| Self {
-            _observation: cx.observe(&desktop, |_, _, cx| cx.notify()),
-            desktop,
-            render,
-        })
-    }
-}
-
-impl<F> Render for DesktopView<F>
-where
-    F: FnMut(&mut Desktop, &mut Window, &mut Context<Desktop>) -> AnyElement + 'static,
-{
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Self {
-            desktop, render, ..
-        } = self;
-        desktop.update(cx, |desktop, cx| render(desktop, window, cx))
     }
 }
