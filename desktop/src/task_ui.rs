@@ -73,6 +73,14 @@ impl QueueItem {
     }
 }
 
+/// A settled task that waits for the person.
+fn needs_person(task: &TaskRecord) -> bool {
+    matches!(
+        task.state,
+        TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Paused | TaskState::Partial
+    )
+}
+
 /// Where a task's card stands, which decides what it shows without being asked.
 #[derive(Clone, Copy)]
 pub(crate) enum CardPlace {
@@ -1098,7 +1106,7 @@ impl Desktop {
                     .flex_basis(rem(320.))
                     .min_w_0()
                     .gap(rem(8.))
-                    .child(page_heading("tasks-page-title", course2md::tr!("任务")))
+                    .child(ui::page_title("tasks-page-title", course2md::tr!("任务")))
                     .child(h_flex().gap(rem(8.)).flex_wrap().children(chips)),
             )
             .child(
@@ -1107,6 +1115,7 @@ impl Desktop {
                     .when(pausable > 0, |row| {
                         row.child(
                             material_button("tasks-pause-all", ButtonVariant::Outlined)
+                                .tone(ButtonTone::Accent)
                                 .icon(symbols::pause())
                                 .child(course2md::tr!("全部暂停"))
                                 .on_click(cx.listener(|this, _, _, cx| this.pause_all_tasks(cx))),
@@ -1115,6 +1124,7 @@ impl Desktop {
                     .when(resumable > 0, |row| {
                         row.child(
                             material_button("tasks-resume-all", ButtonVariant::Outlined)
+                                .tone(ButtonTone::Accent)
                                 .icon(symbols::play_arrow())
                                 .child(course2md::tr!("全部继续"))
                                 .on_click(cx.listener(|this, _, _, cx| this.resume_all_tasks(cx))),
@@ -1196,6 +1206,7 @@ impl Desktop {
             )
             .child(
                 material_button("task-records-open-library", ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
                     .icon(symbols::menu_book())
                     .child(course2md::tr!("前往笔记库"))
                     .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Library, cx))),
@@ -1732,6 +1743,11 @@ impl Desktop {
         };
         let body = body.then(|| self.task_body(task, place, window, cx));
         tile(outer)
+            .map(|card| match place {
+                CardPlace::Home => card.rounded_t(RADIUS_HERO),
+                CardPlace::Open { .. } if outer == [true; 4] => card.rounded(RADIUS_HERO),
+                _ => card,
+            })
             .id(SharedString::from(format!("task-menu-{id}")))
             .flex()
             .flex_col()
@@ -1878,13 +1894,34 @@ impl Desktop {
             import_ui::cover_width(window)
         };
         let step = self.task_step_line(task);
+        // A running task's status ends its title; one that waits says so below it.
+        let (title_chip, line_chip) = if home || needs_person(task) {
+            (None, chip)
+        } else {
+            (chip, None)
+        };
         h_flex()
             .w_full()
             .min_w_0()
             .items_start()
             .flex_wrap()
             .gap(rem(16.))
-            .child(video_cover(self.task_cover(task), cover_width))
+            .map(|head| {
+                // A task that needs the person leads with that, not its video.
+                if !home && needs_person(task) {
+                    head.child(tinted_icon(
+                        symbols::warning(),
+                        if task.state == TaskState::Paused {
+                            Tint::Amber
+                        } else {
+                            Tint::Danger
+                        },
+                        ui::RESOURCE_ICON,
+                    ))
+                } else {
+                    head.child(video_cover(self.task_cover(task), cover_width))
+                }
+            })
             .child(
                 v_flex()
                     .flex_1()
@@ -1897,7 +1934,22 @@ impl Desktop {
                             .min_w_0()
                             .items_start()
                             .gap(rem(8.))
-                            .child(video_title(format!("task-title-{id}"), title).flex_1())
+                            .map(|row| {
+                                if !home && needs_person(task) {
+                                    row.child(
+                                        TileScale::Regular
+                                            .label(format!("task-title-{id}"), title.clone())
+                                            .flex_1()
+                                            .whitespace_normal(),
+                                    )
+                                } else {
+                                    row.child(
+                                        video_title(format!("task-title-{id}"), title.clone())
+                                            .flex_1(),
+                                    )
+                                }
+                            })
+                            .children(title_chip)
                             .child(more),
                     )
                     .when_some(step, |column, step| {
@@ -1920,7 +1972,7 @@ impl Desktop {
                             .whitespace_normal(),
                         )
                     })
-                    .child(h_flex().pt(rem(4.)).children(chip)),
+                    .child(h_flex().pt(rem(4.)).children(line_chip)),
             )
     }
 
@@ -2084,17 +2136,15 @@ impl Desktop {
         let running = stages.iter().any(|stage| stage.status.running());
         let progress = self.task_progress(task, &stages);
         // A single reached step is already the step line above.
-        let chips = (running && stages.len() > 1).then(|| {
+        let chips = (running && stages.len() > 1 && surface != TaskSurface::Home).then(|| {
             h_flex()
                 .w_full()
                 .min_w_0()
                 .gap(rem(8.))
                 .flex_wrap()
-                .children(
-                    stages
-                        .iter()
-                        .map(|stage| status_chip(stage.status.chip()).child(stage.title.clone())),
-                )
+                .children(stages.iter().map(|stage| {
+                    status_chip_outlined(stage.status.chip()).child(stage.title.clone())
+                }))
         });
         let buttons = actions.iter().map(|action| {
             let (label, icon, disabled) = action.present(task, self);
@@ -2126,7 +2176,10 @@ impl Desktop {
             .min_w_0()
             .gap(rem(8.))
             .flex_wrap()
-            .justify_end()
+            .when(
+                !needs_person(task) || matches!(place, CardPlace::Home),
+                |row| row.justify_end(),
+            )
             .children(buttons.collect::<Vec<_>>());
         let details = (self.expanded_task.as_ref() == Some(&id)).then(|| {
             let content = v_flex()
@@ -2152,10 +2205,17 @@ impl Desktop {
         let log = task_log_text(task)
             .filter(|_| self.task_logs_open.contains(&id))
             .map(|text| log_box(&id, text));
+        // A task that waits for the person keeps its explanation on the text's ruler too.
+        let ruler = if needs_person(task) && !matches!(place, CardPlace::Home) {
+            rem(ui::RESOURCE_ICON_SIZE + 16.)
+        } else {
+            rem(0.)
+        };
         v_flex()
             .w_full()
             .min_w_0()
             .gap(rem(12.))
+            .pl(ruler)
             .children(
                 task_reasons(task)
                     .into_iter()
