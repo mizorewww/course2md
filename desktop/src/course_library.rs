@@ -9,12 +9,13 @@ use gpui_kit_material::{
     icons::{Icon, SymbolIcon},
     motion,
     prelude::{
-        ButtonIconPosition, ButtonSize, ButtonVariant, CardVariant, ConnectedButtonGroup,
-        FilterChip, ITEM_INSET, IconButton, IconButtonVariant, ListDensity, ListItem, ListLeading,
-        MaterialCard, MaterialSideSheet, MaterialTooltip, NoticeKind, RADIUS_SMALL, SearchField,
-        StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP, TileScale, Tint, TypeRole, accessible_text,
-        color, disclosure_chevron, list_corners, material_button, notice_banner, page_heading,
-        progress, rem, spinner, status_chip, tile, tinted_icon,
+        ButtonIconPosition, ButtonShape, ButtonSize, ButtonTone, ButtonVariant, CardVariant,
+        ConnectedButtonGroup, ITEM_INSET, IconButton, IconButtonVariant, ListDensity, ListItem,
+        ListLeading, MaterialCard, MaterialSideSheet, MaterialTooltip, NoticeKind, RADIUS_LARGE,
+        RADIUS_SMALL, SearchField, SearchFieldStyle, StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP,
+        TILE_RADIUS, TileScale, Tint, TypeRole, accessible_text, color, disclosure_chevron,
+        list_corners, material_button, notice_banner, progress, rem, spinner, status_chip, tile,
+        tile_chevron, tinted_icon,
     },
     tokens::shape::OuterCorners,
 };
@@ -60,6 +61,26 @@ fn row_cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
         .max_w(relative(ROW_COVER_SHARE))
         .flex_shrink_0()
         .rounded(RADIUS_SMALL)
+}
+
+/// One row of a note list: rows share one surface with the page's large corners, and
+/// a hairline inset past the cover column parts them.
+fn list_surface(outer: OuterCorners) -> Div {
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .bg(color(ColorRole::SURFACE))
+        .when(outer[0], |row| row.rounded_t(TILE_RADIUS))
+        .when(outer[2], |row| row.rounded_b(TILE_RADIUS))
+        .when(!outer[0], |row| {
+            row.child(
+                div()
+                    .h(px(1.))
+                    .ml(rem(ROW_COVER + 32.))
+                    .mr(rem(16.))
+                    .bg(color(ColorRole::OUTLINE_VARIANT)),
+            )
+        })
 }
 
 /// A note picked up to file into a folder of the tree.
@@ -391,7 +412,9 @@ impl RenderOnce for CommandsButton {
                     self.subject.unwrap_or(self.label),
                 )
                 .when(self.tonal, |button| {
-                    button.variant(IconButtonVariant::Tonal)
+                    button
+                        .variant(IconButtonVariant::Tonal)
+                        .tone(ButtonTone::Neutral)
                 }),
             ),
             command_menu(items, self.commands),
@@ -950,7 +973,7 @@ impl Desktop {
             .min_h_0()
             .gap(rem(20.))
             .child(self.library_header(count, cx))
-            .children(controls.then(|| self.library_toolbar(sidebar, columns.is_some(), cx)))
+            .children(controls.then(|| self.library_toolbar(sidebar, cx)))
             .child(notes);
         v_flex()
             .size_full()
@@ -1253,7 +1276,7 @@ impl Desktop {
                     .flex_1()
                     .min_w(rem(160.))
                     .gap(rem(2.))
-                    .child(page_heading("page-title", place))
+                    .child(ui::page_title("page-title", place))
                     .children(
                         supporting
                             .map(|text| TileScale::Regular.support("library-place-count", text)),
@@ -1263,6 +1286,8 @@ impl Desktop {
             .when(self.library_controls_visible(cx), |row| {
                 row.child(
                     material_button("library-new-note", ButtonVariant::Tonal)
+                        .button_size(ButtonSize::Medium)
+                        .shape(ButtonShape::Square)
                         .icon(symbols::add())
                         .child(course2md::tr!("导入视频"))
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -1395,12 +1420,11 @@ impl Desktop {
                 collapsed,
             } => {
                 let key = key.clone();
-                ListItem::new(("library-group", index), name.clone())
+                ListItem::new(("library-group", index), format!("{name}  {count}"))
                     .density(ListDensity::Compact)
                     .container(ColorRole::SURFACE_CONTAINER)
                     .segment([true; 4])
                     .leading(ListLeading::Icon(disclosure_chevron(!collapsed)))
-                    .trailing_text(count.to_string())
                     .on_click(cx.listener(move |this, _, _, cx| this.toggle_group(&key, cx)))
                     .into_any_element()
             }
@@ -1430,7 +1454,7 @@ impl Desktop {
         let wrapper = match item {
             _ if last => wrapper,
             LibraryItem::GroupHeader { .. } => wrapper.pb(rem(8.)),
-            LibraryItem::Note { .. } => wrapper.pb(TILE_GAP),
+            LibraryItem::Note { .. } => wrapper,
             LibraryItem::Cards { .. } => wrapper.pb(rem(GRID_GAP)),
             _ => wrapper.pb(rem(24.)),
         };
@@ -1453,6 +1477,7 @@ impl Desktop {
         };
         let action = if !query.is_empty() {
             material_button("clear-search", ButtonVariant::Outlined)
+                .tone(ButtonTone::Accent)
                 .icon(symbols::close())
                 .child(course2md::tr!("清除搜索"))
                 .on_click(cx.listener(|this, _, window, cx| {
@@ -1467,6 +1492,7 @@ impl Desktop {
                 .on_click(cx.listener(|this, _, window, cx| this.begin_add(window, cx)))
         } else {
             material_button("empty-folder-all-notes", ButtonVariant::Outlined)
+                .tone(ButtonTone::Accent)
                 .icon(symbols::book())
                 .child(course2md::tr!("浏览全部笔记"))
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1488,12 +1514,13 @@ impl Desktop {
 
     /// Search, the folders on narrow windows, grouping, the card/list choice
     /// and a manual rescan, above the notes.
-    fn library_toolbar(&self, sidebar: bool, can_view: bool, cx: &mut Context<Self>) -> Div {
+    fn library_toolbar(&self, sidebar: bool, cx: &mut Context<Self>) -> Div {
         let group_on = self.desktop_settings.library_group_folders;
         let can_group = self.folder_filter.is_all() && self.library_error.is_none();
         let desktop = cx.weak_entity();
         let places = self.library_place().0;
         let view = ConnectedButtonGroup::new("library-view", course2md::tr!("显示"))
+            .tone(ButtonTone::Neutral)
             .options([
                 ("cards", course2md::tr!("卡片")),
                 ("list", course2md::tr!("列表")),
@@ -1523,6 +1550,7 @@ impl Desktop {
             .child(
                 div().flex_1().flex_basis(rem(280.)).min_w(rem(200.)).child(
                     SearchField::new(&self.inputs[&Field::Search])
+                        .field_style(SearchFieldStyle::Tonal)
                         .leading(Icon::from(symbols::search()))
                         .when(!self.value(Field::Search, cx).is_empty(), |field| {
                             field.trailing(
@@ -1560,15 +1588,28 @@ impl Desktop {
                         )
                     })
                     .child(
-                        FilterChip::new("library-group-folders", course2md::tr!("按文件夹分组"))
-                            .selected(group_on && can_group)
-                            .disabled(!can_group)
-                            .on_toggle(cx.listener(|this, on: &bool, _, cx| {
-                                this.desktop_settings.library_group_folders = *on;
-                                this.save_library_presentation(cx);
-                            })),
+                        material_button(
+                            "library-group-folders",
+                            if group_on && can_group {
+                                ButtonVariant::Tonal
+                            } else {
+                                ButtonVariant::Outlined
+                            },
+                        )
+                        .tone(ButtonTone::Neutral)
+                        .icon(if group_on && can_group {
+                            symbols::check()
+                        } else {
+                            symbols::folder()
+                        })
+                        .child(course2md::tr!("按文件夹分组"))
+                        .disabled(!can_group)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.desktop_settings.library_group_folders = !group_on;
+                            this.save_library_presentation(cx);
+                        })),
                     )
-                    .when(can_view, |row| row.child(view))
+                    .child(view)
                     .child(
                         MaterialTooltip::plain(
                             "library-rescan-tip",
@@ -1591,6 +1632,15 @@ impl Desktop {
     /// the place does not already say it; source identity helps recognize a note;
     /// routine revision numbers remain in the reader's version history.
     fn note_meta(&self, course: &Course) -> String {
+        self.note_line(course, false)
+    }
+
+    /// A card's shorter line: where the note lives and when it was made.
+    fn note_card_meta(&self, course: &Course) -> String {
+        self.note_line(course, true)
+    }
+
+    fn note_line(&self, course: &Course, card: bool) -> String {
         use chrono::Datelike;
         let ms = course
             .manifest
@@ -1620,7 +1670,7 @@ impl Desktop {
                 _ => {}
             }
         }
-        if let Some(source) = self.note_source(course) {
+        if let Some(source) = self.note_source(course).filter(|_| !card) {
             if !source.author.trim().is_empty() {
                 parts.push(source.author.clone());
             }
@@ -1723,10 +1773,9 @@ impl Desktop {
             ),
             None => {
                 let count = courses.len();
-                rows.gap(TILE_GAP)
-                    .children(courses.iter().enumerate().map(|(position, course)| {
-                        self.note_row(*course, list_corners(position, count), cx)
-                    }))
+                rows.children(courses.iter().enumerate().map(|(position, course)| {
+                    self.note_row(*course, list_corners(position, count), cx)
+                }))
             }
         }
     }
@@ -1777,33 +1826,45 @@ impl Desktop {
         let scale = TileScale::Compact;
         let commands = self.note_commands(course, cx);
         let open = course.clone();
-        let cover = cover(course.thumbnail.clone(), symbols::description()).children(
-            self.note_status(course)
-                .map(|status| div().absolute().left(rem(8.)).top(rem(8.)).child(status)),
-        );
-        let card = MaterialCard::new(("note-card", index), CardVariant::Filled)
+        let cover = cover(course.thumbnail.clone(), symbols::description())
+            .rounded(RADIUS_LARGE)
+            .children(
+                self.note_status(course)
+                    .map(|status| div().absolute().left(rem(8.)).top(rem(8.)).child(status)),
+            );
+        let card = MaterialCard::new(("note-card", index), CardVariant::Surface)
+            .rounded(TILE_RADIUS)
             .accessibility_label(course2md::tr!("阅读 {}", course.title))
             .on_click(cx.listener(move |this, _, _, cx| this.open_course(open.clone(), cx)))
-            .child(cover)
             .child(
                 v_flex()
                     .w_full()
                     .min_w_0()
-                    .gap(rem(4.))
-                    .p(rem(12.))
+                    .p(rem(10.))
+                    .pb(rem(14.))
+                    .gap(rem(12.))
+                    .child(cover)
                     .child(
-                        scale
-                            .label(("note-card-title", index), course.title.clone())
-                            // Room for two lines, so a row's cards end together.
-                            .min_h(rem(44.))
-                            .whitespace_normal()
-                            .line_clamp(2)
-                            .text_ellipsis(),
-                    )
-                    .child(
-                        scale
-                            .support(("note-card-meta", index), self.note_meta(course))
-                            .truncate(),
+                        v_flex()
+                            .w_full()
+                            .min_w_0()
+                            .gap(rem(2.))
+                            // Room beside the text for the commands.
+                            .pl(rem(4.))
+                            .pr(rem(44.))
+                            .child(
+                                scale
+                                    .label(("note-card-title", index), course.title.clone())
+                                    // Room for two lines, so a row's cards end together.
+                                    .whitespace_normal()
+                                    .line_clamp(2)
+                                    .text_ellipsis(),
+                            )
+                            .child(
+                                scale
+                                    .support(("note-card-meta", index), self.note_card_meta(course))
+                                    .truncate(),
+                            ),
                     ),
             );
         v_flex()
@@ -1815,9 +1876,9 @@ impl Desktop {
             .child(
                 div()
                     .absolute()
-                    .top(rem(4.))
-                    .right(rem(4.))
-                    .child(self.note_commands_button(course, index, true, cx)),
+                    .bottom(rem(12.))
+                    .right(rem(8.))
+                    .child(self.note_commands_button(course, index, false, cx)),
             )
             .children(self.course_read_error(course, index, cx))
             .children(self.course_export_feedback(course, cx))
@@ -1834,6 +1895,7 @@ impl Desktop {
             return div().into_any_element();
         };
         let scale = TileScale::Regular;
+        let home = self.page != Page::Library;
         let commands = self.note_commands(course, cx);
         let details: Vec<Div> = self
             .course_read_error(course, index, cx)
@@ -1844,6 +1906,11 @@ impl Desktop {
             )
             .collect();
         let open = course.clone();
+        let duration = self
+            .note_source(course)
+            .and_then(|source| source.duration)
+            .filter(|_| home)
+            .map(course2md::render::fmt_ts);
         let row = scale
             .button(
                 ("note-row", index),
@@ -1858,7 +1925,17 @@ impl Desktop {
             .child(
                 scale
                     .row()
-                    .child(row_cover(course.thumbnail.clone(), symbols::description()))
+                    .child(
+                        row_cover(course.thumbnail.clone(), symbols::description()).children(
+                            duration.map(|duration| {
+                                div()
+                                    .absolute()
+                                    .right(rem(4.))
+                                    .bottom(rem(4.))
+                                    .child(status_chip(StatusKind::Neutral).child(duration))
+                            }),
+                        ),
+                    )
                     .child(
                         v_flex()
                             .flex_1()
@@ -1871,12 +1948,18 @@ impl Desktop {
                                     .line_clamp(2)
                                     .text_ellipsis(),
                             )
-                            .child(scale.support(("note-meta", index), self.note_meta(course)))
-                            .children(self.note_status(course).map(|status| status.self_start())),
+                            .child(scale.support(("note-meta", index), self.note_meta(course))),
                     )
-                    .child(self.note_commands_button(course, index, false, cx)),
+                    .children(self.note_status(course))
+                    .map(|row| {
+                        if home {
+                            row.child(tile_chevron())
+                        } else {
+                            row.child(self.note_commands_button(course, index, false, cx))
+                        }
+                    }),
             );
-        tile(outer)
+        list_surface(outer)
             .id(("note", index))
             .child(row)
             .children(details)
@@ -2160,7 +2243,7 @@ impl Desktop {
         });
         let scale = TileScale::Regular;
         let summary = crate::task_ui::task_attention_summary(&task);
-        tile(outer).child(
+        list_surface(outer).child(
             v_flex()
                 .w_full()
                 .min_w_0()
@@ -2244,7 +2327,7 @@ impl Desktop {
             ));
         }
         let count = attention.len() + notes.len();
-        let mut rows = v_flex().w_full().min_w_0().gap(TILE_GAP);
+        let mut rows = v_flex().w_full().min_w_0();
         let mut position = 0;
         for task in attention {
             rows = rows.child(self.attention_row(task, list_corners(position, count), cx));

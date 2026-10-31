@@ -5,7 +5,7 @@ use gpui_kit_material::{
     icons::Icon,
     prelude::{
         ButtonVariant, ExposedDropdown, ListDensity, ListItem, ListLeading, MaterialDialog,
-        TextField, TextFieldVariant, material_button, rem, segmented_list,
+        TextField, TextFieldShape, TextFieldVariant, material_button, rem, segmented_list,
     },
 };
 use std::{
@@ -664,12 +664,14 @@ impl Desktop {
         let empty = input.read(cx).value().trim().is_empty();
         Some(
             MaterialDialog::new("name-dialog")
+                .container(ColorRole::SURFACE)
                 .headline(headline)
                 .content(
                     div().px(rem(24.)).child(
                         TextField::new("name-field", &input)
                             .label(label)
                             .outlined()
+                            .shape(TextFieldShape::Rounded)
                             .w_full()
                             .error(error.is_some())
                             .when_some(error, |field, error| field.supporting_text(error)),
@@ -770,6 +772,7 @@ impl Desktop {
         });
         Some(
             MaterialDialog::new("move-dialog")
+                .container(ColorRole::SURFACE)
                 .headline(course2md::tr!("移动到"))
                 .content(
                     div()

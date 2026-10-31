@@ -14,6 +14,7 @@ use gpui_kit_material::{
     prelude::{
         AssistChip, ButtonSize, ButtonVariant, IconButton, ListDensity, ListItem, ListLeading,
         ListTrailing, MaterialMenu, MaterialMenuItem, MaterialTooltip, color, material_button, rem,
+        section_title,
     },
     tokens::shape::RADIUS_CARD,
 };
@@ -543,7 +544,6 @@ impl Desktop {
         };
         let item = ListItem::new(SharedString::from(key.clone()), label.clone())
             .leading(ListLeading::Icon(icon.into()))
-            .density(ListDensity::Compact)
             .container(ground)
             .segment([true; 4])
             .selected(self.selected_target() == target)
@@ -739,6 +739,13 @@ impl Desktop {
             let Some(library) = library else {
                 continue;
             };
+            if !several && !library.folders.is_empty() {
+                tree = tree.child(
+                    section_title("folder-tree-folders", course2md::tr!("文件夹"))
+                        .pt(rem(8.))
+                        .pl(rem(16.)),
+                );
+            }
             // A closed folder hides everything deeper than itself.
             let mut hidden_below: Option<usize> = None;
             for (id, depth) in library.tree() {
