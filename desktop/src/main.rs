@@ -113,7 +113,8 @@ enum Kind {
 enum Field {
     Source,
     Title,
-    FolderName,
+    /// The name dialog's field: a folder's or a note's name.
+    Name,
     Search,
 }
 fn providers() -> [(&'static str, &'static str); 6] {
@@ -256,15 +257,14 @@ struct Desktop {
     library_view_cache: course_library::LibraryViewCache,
     library_generation: u64,
     folder_filter: FolderFilter,
-    folder_editor: Option<Option<u64>>,
-    /// The folder a new folder is created inside; `None` is the top level.
-    folder_parent: Option<u64>,
-    folder_origin: Option<library_ui::FolderOrigin>,
+    name_dialog: Option<library_ui::NameDialog>,
+    move_dialog: Option<library_ui::MoveDialog>,
+    folder_picker_open: bool,
+    /// The folder navigation's sheet on narrow windows.
+    places_open: bool,
     /// Tree nodes the person toggled: opened folders, or closed library tops (id 0).
     folder_tree_open: HashSet<(PathBuf, u64)>,
-    /// Focus of each tree row, kept so keyboard focus survives re-renders.
-    tree_focus: std::collections::HashMap<String, FocusHandle>,
-    folder_error: Option<String>,
+    folder_tree_scroll: ScrollHandle,
     /// The window this view lives in; deferred work returns to it.
     window: AnyWindowHandle,
     page: Page,
@@ -355,6 +355,20 @@ fn earliest_deadline(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> 
         (Some(a), None) => Some(a),
         (None, b) => b,
     }
+}
+
+/// Scrollbars fade after scrolling, or stay visible when the system asks for that.
+/// `Theme::sync_scrollbar_appearance` would map the system's choice to hover.
+fn sync_scrollbars(cx: &mut App) {
+    use gpui_kit::component::scroll::ScrollbarMode;
+    Theme::set_scrollbar_mode(
+        if cx.should_auto_hide_scrollbars() {
+            ScrollbarMode::Scrolling
+        } else {
+            ScrollbarMode::Always
+        },
+        cx,
+    );
 }
 
 impl Desktop {
@@ -475,11 +489,7 @@ impl Desktop {
             ),
             (Field::Title, "", String::new()),
             (Field::Search, course2md::tr!("搜索笔记标题"), String::new()),
-            (
-                Field::FolderName,
-                course2md::tr!("文件夹名称"),
-                String::new(),
-            ),
+            (Field::Name, "", String::new()),
         ];
         let inputs: BTreeMap<_, _> = fields
             .into_iter()
@@ -548,21 +558,19 @@ impl Desktop {
                 }
             },
         ));
-        subscriptions.push(cx.subscribe(
-            &inputs[&Field::FolderName],
-            |this: &mut Self, _, event, cx| {
+        subscriptions.push(
+            cx.subscribe(&inputs[&Field::Name], |this: &mut Self, _, event, cx| {
                 if matches!(event, InputEvent::Change) {
-                    this.folder_error = None;
-                    cx.notify();
+                    this.name_edited(cx);
                 }
                 if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.save_folder(cx);
+                    this.save_name(cx);
                 }
-            },
-        ));
+            }),
+        );
         // The system's scrollbar preference can change while the window is away.
         subscriptions.push(cx.observe_window_activation(window, |_, _, cx| {
-            Theme::sync_scrollbar_appearance(cx);
+            sync_scrollbars(cx);
         }));
         let options = ConversionOptions::from_config(&config);
         let poll = cx.spawn_in(window, async |this, cx| {
@@ -653,12 +661,12 @@ impl Desktop {
             library_view_cache: Default::default(),
             library_generation: 0,
             folder_filter: FolderFilter::All,
-            folder_editor: None,
-            folder_parent: None,
-            folder_origin: None,
+            name_dialog: None,
+            move_dialog: None,
+            folder_picker_open: false,
+            places_open: false,
             folder_tree_open: HashSet::new(),
-            tree_focus: std::collections::HashMap::new(),
-            folder_error: None,
+            folder_tree_scroll: ScrollHandle::new(),
             window: window.window_handle(),
             result_origin: Page::Library,
             settings_origin: None,
@@ -1617,7 +1625,7 @@ fn main() {
         gpui_kit::init(cx);
         gpui_kit_material::init(cx);
         theme::init(cx);
-        Theme::sync_scrollbar_appearance(cx);
+        sync_scrollbars(cx);
         // Debug validation uses the same native window and render path at an exact size.
         // Release builds always use the ordinary initial window size.
         // Debug validation asks for an exact size, which it keeps even where

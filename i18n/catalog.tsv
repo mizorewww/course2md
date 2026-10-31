@@ -122,6 +122,7 @@ stderr 管道已配置	stderr 管道已配置	The stderr pipe is configured	stde
 stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdout 管道已配置	stdout パイプが構成されています
 {} / {} 段	{} / {} 段	{} / {} segments	{} / {} 段	{} / {} セグメント
 {} {}，{} 篇笔记	{} {}，{} 篇笔记	{} {}, {} notes	{} {}，{} 篇筆記	{} {}、{} 件のノート
+{} · 待下载	{} · 待下载	{} · Pending download	{} · 待下載	{} · ダウンロード待ち
 {} · 构建 {}	{} · 构建 {}	{} · Build {}	{} · 建置 {}	{} · ビルド {}
 {} 不支持「{}」，已改用 {}。	{} 不支持「{}」，已改用 {}。	{} does not support “{}”; switched to {}.	{} 不支援「{}」，已改用 {}。	{} は「{}」に対応していないため、{} に切り替えました。
 {} 个与进行中的任务相同，未重复加入	{} 个与进行中的任务相同，未重复加入	{} are identical to tasks in progress and were not added again	{} 個與進行中的任務相同，未重複加入	{} 件は進行中のタスクと同じため、追加しませんでした
@@ -862,7 +863,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 文件夹	文件夹	Folders	資料夾	フォルダー
 文件夹信息损坏；原文件已保留，请修复后重试	文件夹信息损坏；原文件已保留，请修复后重试	The folder information is damaged; the original file has been retained, please repair it and try again.	資料夾資訊損壞；原檔案已保留，請修復後重試	フォルダー情報が破損しています。元のファイルは保持されています。修復して再試行してください。
 文件夹信息读取失败	文件夹信息读取失败	Failed to read folder information	資料夾資訊讀取失敗	フォルダー情報の読み込みに失敗しました
-文件夹信息需要恢复	文件夹信息需要恢复	Folder information needs to be restored	資料夾資訊需要恢復	フォルダー情報を復元する必要があります
 文件夹名称	文件夹名称	Folder name	資料夾名稱	フォルダー名
 文件夹名称最多 60 个字符	文件夹名称最多 60 个字符	Folder name can be up to 60 characters	資料夾名稱最多 60 個字元	フォルダー名は最大60文字です
 文件夹尚未恢复：{}	文件夹尚未恢复：{}	Folder has not been restored: {}	資料夾尚未恢復：{}	フォルダーは復元されていません: {}
@@ -1462,7 +1462,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记名称最多 240 个字符	笔记名称最多 240 个字符	Note names can be up to 240 characters	筆記名稱最多 240 個字元	ノート名は最大 240 文字です
 笔记名称记录无法读取，原文件已保留	笔记名称记录无法读取，原文件已保留	The note name record cannot be read; the original file was retained	筆記名稱記錄無法讀取，原檔案已保留	ノート名の記録を読み取れません。元のファイルは保持されています。
 笔记名称记录暂时无法读取	笔记名称记录暂时无法读取	The note name record is temporarily unreadable.	筆記名稱記錄暫時無法讀取	ノート名の記録を一時的に読み取れません。
-笔记名称需要恢复	笔记名称需要恢复	Note name needs to be restored	筆記名稱需要恢復	ノート名を復元する必要があります
 笔记已保存，{}	笔记已保存，{}	Note saved, {}	筆記已儲存，{}	ノートを保存しました、{}
 笔记已保存，部分处理未完成 / Notes saved with unfinished work	笔记已保存，部分处理未完成	Notes saved with unfinished work	筆記已儲存，部分處理未完成	ノートは保存されましたが、一部の処理が完了していません
 笔记已生成	笔记已生成	Note has been generated	筆記已生成	ノートが生成されました
@@ -1940,7 +1939,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 原笔记已关闭；服务正在保存，但未用于其他笔记	原笔记已关闭；服务正在保存，但未用于其他笔记	The original note is closed; the service is still being saved and was not used for other notes	原筆記已關閉；服務正在儲存，但未用於其他筆記	元のノートは閉じられています。サービスは保存中で、他のノートには使用されていません
 服务正在保存，本次选择尚未保存：{}	服务正在保存，本次选择尚未保存：{}	The service is still being saved; this selection was not saved: {}	服務正在儲存，本次選擇尚未儲存：{}	サービスは保存中です。今回の選択は保存されていません: {}
 服务正在保存，补做任务尚未创建。请重试补做。	服务正在保存，补做任务尚未创建。请重试补做。	The service is still being saved; the reprocessing task has not been created. Retry reprocessing.	服務正在儲存，補做任務尚未建立。請重試補做。	サービスは保存中です。再処理タスクはまだ作成されていません。再処理を再試行してください。
-Markdown 包…	Markdown 包…	Markdown package…	Markdown 包…	Markdown パッケージ…
 上传音频，返回转写文字	上传音频，返回转写文字	Uploads audio and returns a transcript	上傳音訊，傳回轉寫文字	音声をアップロードし、文字起こしを返します
 主页	主页	Home	首頁	ホーム
 使用 ChatGPT 订阅，不需要 API Key	使用 ChatGPT 订阅，不需要 API Key	Uses your ChatGPT subscription; no API key needed	使用 ChatGPT 訂閱，不需要 API 金鑰	ChatGPT のサブスクリプションを使用し、API キーは不要です
@@ -1949,7 +1947,6 @@ Markdown 包…	Markdown 包…	Markdown package…	Markdown 包…	Markdown パ
 删除服务…	删除服务…	Delete service…	刪除服務…	サービスを削除…
 填写接口地址和 API Key，适用于大多数云端服务	填写接口地址和 API Key，适用于大多数云端服务	Enter an endpoint and API key; works with most cloud services	填寫介面網址和 API 金鑰，適用於大多數雲端服務	エンドポイントと API キーを入力します。多くのクラウドサービスで使えます
 复制原视频链接	复制原视频链接	Copy video link	複製原影片連結	元の動画リンクをコピー
-导出为	导出为	Export as	匯出為	エクスポート形式
 已在 {} 检测到 {} 个模型	已在 {} 检测到 {} 个模型	{}: found {} models	已在 {} 偵測到 {} 個模型	{} で {} 個のモデルを検出しました
 已是默认保存位置	已是默认保存位置	Already the default location	已是預設儲存位置	既定の保存先です
 已是默认服务	已是默认服务	Already the default service	已是預設服務	既定のサービスです
@@ -1965,9 +1962,7 @@ Markdown 包…	Markdown 包…	Markdown package…	Markdown 包…	Markdown パ
 用账号登录	用账号登录	Sign in with an account	用帳號登入	アカウントでサインイン
 移动到	移动到	Move to	移動到	移動先
 笔记库操作	笔记库操作	Library actions	筆記庫操作	ノートライブラリの操作
-结构化数据…	结构化数据…	Structured data…	結構化資料…	構造化データ…
 编辑…	编辑…	Edit…	編輯…	編集…
-网页文件…	网页文件…	Web page…	網頁檔案…	Web ページ…
 设为默认保存位置	设为默认保存位置	Set as default location	設為預設儲存位置	既定の保存先にする
 设为默认服务…	设为默认服务…	Set as default service…	設為預設服務…	既定のサービスにする…
 退出 ChatGPT 账号	退出 ChatGPT 账号	Sign out of ChatGPT	登出 ChatGPT 帳號	ChatGPT からサインアウト
@@ -2104,3 +2099,7 @@ Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 �
 识别方式 {} 不支持模型「{}」。可用：{}	识别方式 {} 不支持模型「{}」。可用：{}	The {} backend does not support model "{}". Available: {}	辨識方式 {} 不支援模型「{}」。可用：{}	音声認識方式 {} はモデル「{}」に対応していません。利用可能：{}
 字幕未读取成功：{}	字幕未读取成功：{}	Subtitles could not be read: {}	字幕未讀取成功：{}	字幕を読み取れませんでした：{}
 暂不发送	暂不发送	Don’t send now	暫不傳送	今は送信しない
+导出为 Markdown 包…	导出为 Markdown 包…	Export as Markdown package…	匯出為 Markdown 包…	Markdown パッケージとしてエクスポート…
+导出为网页文件…	导出为网页文件…	Export as web page…	匯出為網頁檔案…	Web ページとしてエクスポート…
+导出为结构化数据…	导出为结构化数据…	Export as structured data…	匯出為結構化資料…	構造化データとしてエクスポート…
+移动到…	移动到…	Move to…	移動到…	移動…

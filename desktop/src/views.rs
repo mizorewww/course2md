@@ -1,12 +1,13 @@
 //! Native pages: stable navigation and actions surround independently scrolling content.
 use super::*;
 use crate::symbols;
-use crate::theme::{COLUMN, title_bar_height};
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{
     color::ColorRole,
     components::{
-        ButtonVariant, Caption, CaptionLabels, IconButton, MaterialTooltip, NoticeKind,
-        TitleBar as AppBar, material_button, notice_banner, spinner, title_bar_control,
+        ButtonVariant, Caption, CaptionLabels, IconButton, MaterialTooltip, NoticeKind, Snackbar,
+        SnackbarDuration, SnackbarPosition, TitleBar as AppBar, material_button, notice_banner,
+        spinner, title_bar_control,
     },
     icons::SymbolIcon,
     motion,
@@ -15,6 +16,8 @@ use gpui_kit_material::{
 
 const SHELL_GUTTER: f32 = 24.;
 const SETTINGS_SHELL_WIDTH: f32 = 1108.;
+/// The reading column of a page without a wider one of its own.
+const COLUMN: f32 = 920.;
 
 /// The height the window opens for: the traffic lights sit centred on it.
 pub(crate) const APP_BAR_HEIGHT: Pixels = px(56.);
@@ -130,6 +133,24 @@ fn nav_destination(
     }
 }
 
+/// The width of `text` as the window would shape it.
+fn shaped_width(text: &str, size: f32, weight: FontWeight, window: &Window) -> f32 {
+    let mut style = window.text_style();
+    style.font_weight = weight;
+    let text = SharedString::from(text.to_owned());
+    f32::from(
+        window
+            .text_system()
+            .shape_line(text.clone(), px(size), &[style.to_run(text.len())], None)
+            .width,
+    )
+}
+
+/// The height of the app bar at the current text scale.
+pub(crate) fn title_bar_height(window: &Window) -> Pixels {
+    rem(40.).to_pixels(window.rem_size()) + px(16.)
+}
+
 /// The width of a `nav_destination` showing `shown`, from `ButtonSize::Small`'s
 /// geometry and the shaped text at the current scale.
 fn nav_destination_width(shown: Option<&str>, window: &Window) -> f32 {
@@ -140,7 +161,7 @@ fn nav_destination_width(shown: Option<&str>, window: &Window) -> f32 {
         Some(text) => {
             padding_and_icon
                 + scaled(8.)
-                + crate::theme::shaped_width(text, scaled(14.), FontWeight::MEDIUM, window)
+                + shaped_width(text, scaled(14.), FontWeight::MEDIUM, window)
         }
     }
 }
@@ -157,7 +178,7 @@ fn shell_column_width(page: Page) -> AbsoluteLength {
         Page::New => rems(1200. / 14.).into(),
         // Sections set the screenshot beside the text, as on the canvas.
         Page::Result => rems(1180. / 14.).into(),
-        _ => COLUMN.into(),
+        _ => rem(COLUMN).into(),
     }
 }
 
@@ -207,12 +228,7 @@ fn app_bar_density(tasks: Option<(&str, Option<&str>)>, window: &Window) -> AppB
             AppBarDensity::Mark => scaled(4. + 32. + 4.),
             _ => {
                 scaled(4. + 32. + 10. + 12.)
-                    + crate::theme::shaped_width(
-                        "course2md",
-                        scaled(20.),
-                        FontWeight::MEDIUM,
-                        window,
-                    )
+                    + shaped_width("course2md", scaled(20.), FontWeight::MEDIUM, window)
             }
         };
         let labels = density == AppBarDensity::Labels;
@@ -473,6 +489,27 @@ impl Desktop {
     }
 }
 
+impl Desktop {
+    /// What just happened, told in passing; it goes by itself or with its close button.
+    fn message_snackbar(&self, message: String, cx: &mut Context<Self>) -> impl IntoElement {
+        let desktop = cx.weak_entity();
+        let dismiss = move |_: &mut Window, cx: &mut App| {
+            let _ = desktop.update(cx, |this, cx| {
+                this.message = None;
+                cx.notify();
+            });
+        };
+        let close = dismiss.clone();
+        Snackbar::new(("app-message", notice_key(&message)), message)
+            .position(SnackbarPosition::default())
+            .duration(SnackbarDuration::Long)
+            .close(course2md::tr!("关闭提示"), move |_, window, cx| {
+                close(window, cx)
+            })
+            .on_dismiss(dismiss)
+    }
+}
+
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[allow(unused_mut)]
@@ -530,6 +567,7 @@ impl Render for Desktop {
         // Task and library content virtualize their long lists: the list owns
         // scrolling for the page instead of the shared page-scroll container.
         let self_scrolling = matches!(self.page, Page::Task | Page::Library);
+        let page_scrolls = !matches!(self.page, Page::Result | Page::Settings) && !self_scrolling;
         let content = v_flex()
             .gap_4()
             .when(
@@ -636,61 +674,40 @@ impl Render for Desktop {
                     ),
                 ))
             })
-            .when_some(self.message.clone(), |v, message| {
-                v.child(motion::state_enter(
-                    ("app-message", notice_key(&message)),
-                    shell_column_for(self.page).pb_3().child(
-                        notice_banner("app-message", NoticeKind::Info, message).child(
-                            IconButton::new(
-                                "dismiss-message",
-                                symbols::close(),
-                                course2md::tr!("关闭提示"),
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.message = None;
-                                cx.notify();
-                            })),
-                        ),
-                    ),
-                ))
-            })
             .child(
                 div()
-                    .id(("page-scroll", self.page as usize))
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
                     .w_full()
-                    .when(
-                        !matches!(self.page, Page::Result | Page::Settings) && !self_scrolling,
-                        |view| {
-                            view.overflow_y_scroll()
-                                .track_scroll(&self.scrolls[self.page as usize])
-                        },
-                    )
                     .child(
-                        shell_column_for(self.page)
-                            .when(self.page == Page::Settings, |v| v.max_w_full())
-                            .when(
-                                matches!(self.page, Page::New | Page::Settings)
-                                    && is_compact(window),
-                                |v| v.px(px(16.)),
-                            )
-                            .when(
-                                matches!(self.page, Page::Result | Page::Settings)
-                                    || self_scrolling,
-                                |v| v.h_full().min_h_0(),
-                            )
-                            // Lists that scroll themselves keep their trailing
-                            // space inside the list, so their last surface is
-                            // never cut off above the window edge.
-                            .when(
-                                !matches!(self.page, Page::Result | Page::Settings)
-                                    && !self_scrolling,
-                                |v| v.pb_6(),
-                            )
-                            .child(content),
-                    ),
+                        div()
+                            .id(("page-scroll", self.page as usize))
+                            .size_full()
+                            .when(page_scrolls, |view| {
+                                view.overflow_y_scroll()
+                                    .track_scroll(&self.scrolls[self.page as usize])
+                            })
+                            .child(
+                                shell_column_for(self.page)
+                                    .when(self.page == Page::Settings, |v| v.max_w_full())
+                                    .when(
+                                        matches!(self.page, Page::New | Page::Settings)
+                                            && is_compact(window),
+                                        |v| v.px(px(16.)),
+                                    )
+                                    .when(!page_scrolls, |v| v.h_full().min_h_0())
+                                    // Lists that scroll themselves keep their trailing
+                                    // space inside the list, so their last surface is
+                                    // never cut off above the window edge.
+                                    .when(page_scrolls, |v| v.pb(rem(24.)))
+                                    .child(content),
+                            ),
+                    )
+                    .when(page_scrolls, |view| {
+                        view.child(Scrollbar::vertical(&self.scrolls[self.page as usize]))
+                    }),
             );
         let background = v_flex()
             .size_full()
@@ -730,6 +747,11 @@ impl Render for Desktop {
             .when(self.page == Page::New, |view| {
                 view.child(self.workbench_drop_overlay(cx))
             })
+            .when_some(self.message.clone(), |view, message| {
+                view.child(self.message_snackbar(message, cx))
+            })
+            .children(self.name_dialog_view(window, cx))
+            .children(self.move_dialog_view(cx))
             .children(crate::ui::confirm_host(cx))
             .into_any_element()
     }
