@@ -577,25 +577,33 @@ impl Desktop {
         let actions = repairs(issue)
             .into_iter()
             .map(|(name, icon, label, repair)| {
-                material_button(SharedString::from(format!("{id}-{name}")), ButtonVariant::Text)
-                    .icon(icon)
-                    .child(label)
-                    .on_click(move |_, _, cx| match repair {
-                        Repair::Open(url) => cx.open_url(url),
-                        Repair::Copy(text) => {
-                            cx.write_to_clipboard(ClipboardItem::new_string(text.into()))
-                        }
-                    })
-                    .into_any_element()
+                material_button(
+                    SharedString::from(format!("{id}-{name}")),
+                    ButtonVariant::Text,
+                )
+                .icon(icon)
+                .child(label)
+                .on_click(move |_, _, cx| match repair {
+                    Repair::Open(url) => cx.open_url(url),
+                    Repair::Copy(text) => {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text.into()))
+                    }
+                })
+                .into_any_element()
             })
-            .chain((recheck && issue.installable() && issue != DeviceIssue::AppleRuntime).then(|| {
-                material_button(SharedString::from(format!("{id}-recheck")), ButtonVariant::Text)
+            .chain(
+                (recheck && issue.installable() && issue != DeviceIssue::AppleRuntime).then(|| {
+                    material_button(
+                        SharedString::from(format!("{id}-recheck")),
+                        ButtonVariant::Text,
+                    )
                     .icon(symbols::refresh())
                     .child(course2md::tr!("重新检查"))
                     .disabled(self.environment.is_none())
                     .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx)))
                     .into_any_element()
-            }));
+                }),
+            );
         let actions = h_flex()
             .min_w_0()
             .flex_wrap()
@@ -622,7 +630,9 @@ impl Desktop {
     ) -> Div {
         let request = Request::new(provider, model, root);
         match self.engine_issue(provider) {
-            Some(issue) => self.engine_obstacle(&format!("import-engine-{}", request.key()), issue, cx),
+            Some(issue) => {
+                self.engine_obstacle(&format!("import-engine-{}", request.key()), issue, cx)
+            }
             None => self.model_surface(&request, false, window, cx),
         }
     }
@@ -680,9 +690,7 @@ impl Desktop {
             if status.is_some_and(|status| status.state == CacheState::Unsupported) {
                 lines.push((
                     "unsupported",
-                    AsyncStatus::Warning(
-                        course2md::tr!("请选择这种识别方式支持的模型").into(),
-                    ),
+                    AsyncStatus::Warning(course2md::tr!("请选择这种识别方式支持的模型").into()),
                 ));
             }
             if let Some(error) = status.and_then(|status| status.last_error.as_ref()) {
@@ -694,9 +702,15 @@ impl Desktop {
         }
         if let Some(outcome) = outcome.filter(|_| !preparing) {
             if outcome.error {
-                lines.push(("outcome", AsyncStatus::Failed(outcome.message.clone().into())));
+                lines.push((
+                    "outcome",
+                    AsyncStatus::Failed(outcome.message.clone().into()),
+                ));
             } else if !outcome.cancelled && full {
-                lines.push(("outcome", AsyncStatus::Success(outcome.message.clone().into())));
+                lines.push((
+                    "outcome",
+                    AsyncStatus::Success(outcome.message.clone().into()),
+                ));
             }
         }
         let prepare_allowed = self.environment.is_some()
@@ -752,15 +766,17 @@ impl Desktop {
             );
         }
         let target = request.clone();
-        actions = actions.child(
-            material_button(id("recheck"), ButtonVariant::Text)
-                .icon(symbols::refresh())
-                .child(course2md::tr!("重新检查"))
-                .disabled(checking || preparing)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.check_model_request(target.clone(), true, cx)
-                })),
-        );
+        actions = actions.when(!preparing, |row| {
+            row.child(
+                material_button(id("recheck"), ButtonVariant::Text)
+                    .icon(symbols::refresh())
+                    .child(course2md::tr!("重新检查"))
+                    .disabled(checking)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.check_model_request(target.clone(), true, cx)
+                    })),
+            )
+        });
         let open = state.details.contains(&key);
         if full {
             let toggled = key.clone();
@@ -794,9 +810,11 @@ impl Desktop {
             .when_some(issue.filter(|_| full), |view, issue| {
                 view.child(self.engine_obstacle(&id("obstacle"), issue, cx))
             })
-            .children(lines.into_iter().filter_map(|(name, line)| {
-                ui::async_status(id(name), &line, None, cx)
-            }))
+            .children(
+                lines
+                    .into_iter()
+                    .filter_map(|(name, line)| ui::async_status(id(name), &line, None, cx)),
+            )
             .when(preparing, |view| {
                 view.child(self.model_transfers(window, cx))
             })
@@ -912,7 +930,10 @@ impl Desktop {
         {
             let logs = &self.job_events.logs;
             details = details
-                .child(section_title(id("log-heading".into()), course2md::tr!("准备日志")))
+                .child(section_title(
+                    id("log-heading".into()),
+                    course2md::tr!("准备日志"),
+                ))
                 .child(scale.support(
                     id("log".into()),
                     logs[logs.len().saturating_sub(LOG_TAIL)..].join("\n"),
@@ -964,9 +985,10 @@ impl Desktop {
                         .child(self.model_surface(&active, true, window, cx)),
                 )
             })
-            .children(elsewhere.and_then(|status| {
-                ui::async_status("model-prepare-result", &status, None, cx)
-            }))
+            .children(
+                elsewhere
+                    .and_then(|status| ui::async_status("model-prepare-result", &status, None, cx)),
+            )
     }
 
     /// Device and runtime facts behind local recognition, shown in 诊断详情

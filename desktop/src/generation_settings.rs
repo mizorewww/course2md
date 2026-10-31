@@ -858,38 +858,39 @@ impl Desktop {
                         .map(Some),
                 )
                 .collect();
-            recognition =
-                recognition.detail(crate::motion::disclosure(
-                    "asr-advanced-settings",
-                    true,
-                    settings_stacked_row(
-                        "asr-hardware-heading",
-                        course2md::tr!("本机引擎"),
-                        "",
-                        engines
-                            .iter()
-                            .fold(
-                                self.setting_choices(
-                                    "default-asr-hardware",
-                                    course2md::tr!("本机引擎"),
-                                )
-                                .options(engines.iter().map(|engine| {
-                                    (engine_id(*engine), crate::provider_label(*engine))
-                                })),
-                                |choices, engine| {
-                                    choices.icon(engine_id(*engine), engine_icon(*engine).component())
-                                },
+            recognition = recognition.detail(crate::motion::disclosure(
+                "asr-advanced-settings",
+                true,
+                settings_stacked_row(
+                    "asr-hardware-heading",
+                    course2md::tr!("本机引擎"),
+                    "",
+                    engines
+                        .iter()
+                        .fold(
+                            self.setting_choices(
+                                "default-asr-hardware",
+                                course2md::tr!("本机引擎"),
                             )
-                            .full_width()
-                            .selected(engine_id(selected_provider))
-                            .on_change(cx.listener(|this, id: &SharedString, _, cx| {
-                                let mut next = this.generation_edit_base();
-                                next.select_provider(engine_from_id(id));
-                                this.commit_generation(next, cx);
-                            })),
-                    )
-                    .pt_0(),
-                ));
+                            .options(
+                                engines.iter().map(|engine| {
+                                    (engine_id(*engine), crate::provider_label(*engine))
+                                }),
+                            ),
+                            |choices, engine| {
+                                choices.icon(engine_id(*engine), engine_icon(*engine).component())
+                            },
+                        )
+                        .full_width()
+                        .selected(engine_id(selected_provider))
+                        .on_change(cx.listener(|this, id: &SharedString, _, cx| {
+                            let mut next = this.generation_edit_base();
+                            next.select_provider(engine_from_id(id));
+                            this.commit_generation(next, cx);
+                        })),
+                )
+                .pt_0(),
+            ));
         }
         recognition
     }

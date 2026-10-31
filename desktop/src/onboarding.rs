@@ -3,9 +3,8 @@
 use crate::codex_ui::CodexSurface;
 use crate::credentials::Secret;
 use crate::preferences::{
-    self, BindingScope, GenerationPreferences, PreferenceGroup, ServiceConfiguration,
-    ServiceDraft, ServiceProtocol, ServicePurpose, ServiceTestEvidence, ServiceVersion,
-    TestOutcome,
+    self, BindingScope, GenerationPreferences, PreferenceGroup, ServiceConfiguration, ServiceDraft,
+    ServiceProtocol, ServicePurpose, ServiceTestEvidence, ServiceVersion, TestOutcome,
 };
 use crate::service_test::{self, TestKind};
 use crate::settings_ui::model_diagnostics::{
@@ -29,6 +28,8 @@ use std::sync::{
 /// The guide's content column.
 const COLUMN: Rems = rem(760.);
 const STEPS: usize = 4;
+/// Wide enough for a choice and the line saying what it means.
+const SETUP_MENU_WIDTH: f32 = 320.;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Step {
@@ -976,19 +977,6 @@ impl Desktop {
                         view.child(TileScale::Regular.support("setup-description", description))
                     }),
             );
-        let body = v_flex()
-            .w_full()
-            .min_w_0()
-            .gap(rem(24.))
-            .child(content)
-            .children(self.onboarding.notice.as_ref().and_then(|(message, error)| {
-                let status = if *error {
-                    AsyncStatus::Failed(message.clone().into())
-                } else {
-                    AsyncStatus::Warning(message.clone().into())
-                };
-                ui::async_status("setup-notice", &status, None, cx)
-            }));
         // Natural height keeps the actions next to the step; the body scrolls
         // only when the window is too short, and then a hairline marks where
         // it passes under the actions.
@@ -1017,20 +1005,15 @@ impl Desktop {
                             .track_scroll(&self.onboarding.scroll)
                             // Room for focus rings painted outside a tile.
                             .pb(rem(4.))
-                            .child(motion::state_enter(("setup-step", number), body)),
+                            .child(motion::state_enter(("setup-step", number), content)),
                     )
                     .child(Scrollbar::vertical(&self.onboarding.scroll)),
             )
-            .child(
+            .child(footer.pt(rem(16.)).pb(rem(20.)).when(scrollable, |footer| {
                 footer
-                    .pt(rem(16.))
-                    .pb(rem(20.))
-                    .when(scrollable, |footer| {
-                        footer
-                            .border_t_1()
-                            .border_color(color(ColorRole::OUTLINE_VARIANT))
-                    }),
-            );
+                    .border_t_1()
+                    .border_color(color(ColorRole::OUTLINE_VARIANT))
+            }));
         v_flex()
             .flex_1()
             .w_full()
@@ -1108,7 +1091,10 @@ impl Desktop {
         // An engine's own obstacle that something here can repair is stated below
         // the group, after the shared one; hardware this Mac lacks is only its status.
         let mut issues: Vec<_> = obstacle.into_iter().collect();
-        for issue in engines.iter().filter_map(|engine| self.engine_issue(*engine)) {
+        for issue in engines
+            .iter()
+            .filter_map(|engine| self.engine_issue(*engine))
+        {
             if issue.installable() && !issues.contains(&issue) {
                 issues.push(issue);
             }
@@ -1125,6 +1111,7 @@ impl Desktop {
             }))
         };
         let engine_menu = MaterialMenu::new("setup-engine-items")
+            .width(SETUP_MENU_WIDTH)
             .item(engine_item(None).supporting_text(automatic.clone()))
             .items(engines.iter().map(|engine| {
                 let item = engine_item(Some(*engine));
@@ -1149,25 +1136,27 @@ impl Desktop {
             .map(|choice| choice.label.clone())
             .unwrap_or_else(|| self.onboarding.model.clone());
         let chosen = self.onboarding.model.clone();
-        let model_menu = MaterialMenu::new("setup-model-items").items(models.into_iter().map(
-            |ModelChoice {
-                 id,
-                 label,
-                 description,
-             }| {
-                let selected = id == chosen;
-                let item = MaterialMenuItem::new(label);
-                if description.is_empty() {
-                    item
-                } else {
-                    item.supporting_text(description)
-                }
-                .selected(selected)
+        let model_menu = MaterialMenu::new("setup-model-items")
+            .width(SETUP_MENU_WIDTH)
+            .items(models.into_iter().map(
+                |ModelChoice {
+                     id,
+                     label,
+                     description,
+                 }| {
+                    let selected = id == chosen;
+                    let item = MaterialMenuItem::new(label);
+                    if description.is_empty() {
+                        item
+                    } else {
+                        item.supporting_text(description)
+                    }
+                    .selected(selected)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.select_setup_model(&id, cx);
                     }))
-            },
-        ));
+                },
+            ));
         let (_, model_status) = self.model_reading(&self.setup_model_request());
         let fields = ui::field_table(
             "setup-local-engine",
@@ -1361,11 +1350,7 @@ impl Desktop {
         let service = self.onboarding.service(purpose);
         let suffix = purpose as usize;
         let id = |part: &str| SharedString::from(format!("setup-check-{part}-{suffix}"));
-        let view = v_flex()
-            .w_full()
-            .min_w_0()
-            .gap(rem(8.))
-            .px(ITEM_INSET);
+        let view = v_flex().w_full().min_w_0().gap(rem(8.)).px(ITEM_INSET);
         if let Some(cancel) = &service.running {
             let stopping = cancel.load(Ordering::Acquire);
             let status = AsyncStatus::Busy(
@@ -1376,30 +1361,38 @@ impl Desktop {
                 }
                 .into(),
             );
-            return Some(view.children(ui::async_status(id("running"), &status, None, cx)).child(
-                h_flex().child(
-                    material_button(id("stop"), ButtonVariant::Text)
-                        .icon(symbols::close())
-                        .child(course2md::tr!("停止检查"))
-                        .disabled(stopping)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.onboarding.service(purpose).cancel();
-                            cx.notify();
-                        })),
-                ),
-            ));
+            return Some(
+                view.children(ui::async_status(id("running"), &status, None, cx))
+                    .child(
+                        h_flex().child(
+                            material_button(id("stop"), ButtonVariant::Text)
+                                .icon(symbols::close())
+                                .child(course2md::tr!("停止检查"))
+                                .disabled(stopping)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.onboarding.service(purpose).cancel();
+                                    cx.notify();
+                                })),
+                        ),
+                    ),
+            );
         }
         if service.evidence.is_empty() {
             return None;
         }
-        let results = service.evidence.iter().enumerate().filter_map(|(index, (kind, evidence))| {
-            let status = if evidence.outcome == TestOutcome::Passed {
-                AsyncStatus::Success(course2md::tr!("{}测试通过", kind.label()).into())
-            } else {
-                AsyncStatus::Failed(evidence.message.clone().into())
-            };
-            ui::async_status(id(&format!("result-{index}")), &status, None, cx)
-        });
+        let results =
+            service
+                .evidence
+                .iter()
+                .enumerate()
+                .filter_map(|(index, (kind, evidence))| {
+                    let status = if evidence.outcome == TestOutcome::Passed {
+                        AsyncStatus::Success(course2md::tr!("{}测试通过", kind.label()).into())
+                    } else {
+                        AsyncStatus::Failed(evidence.message.clone().into())
+                    };
+                    ui::async_status(id(&format!("result-{index}")), &status, None, cx)
+                });
         let results: Vec<_> = results.collect();
         let details = service
             .evidence
@@ -1520,7 +1513,20 @@ impl Desktop {
                 .items_center()
                 .flex_wrap()
         };
-        let footer = v_flex().w_full().flex_shrink_0().gap(rem(8.));
+        // A failure stays beside the action that caused it, however far the form scrolls.
+        let footer = v_flex().w_full().flex_shrink_0().gap(rem(8.)).children(
+            self.onboarding
+                .notice
+                .as_ref()
+                .and_then(|(message, error)| {
+                    let status = if *error {
+                        AsyncStatus::Failed(message.clone().into())
+                    } else {
+                        AsyncStatus::Warning(message.clone().into())
+                    };
+                    ui::async_status("setup-notice", &status, None, cx)
+                }),
+        );
         if self.onboarding.finish_failed {
             return footer
                 .child(
@@ -1595,9 +1601,9 @@ impl Desktop {
                         row.child(
                             material_button("setup-later", ButtonVariant::Text)
                                 .child(course2md::tr!("跳过设置"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.skip_setup(window, cx)
-                                })),
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.skip_setup(window, cx)),
+                                ),
                         )
                     })
                     .when(step != Step::Engine && !model_review, |row| {
@@ -1718,9 +1724,9 @@ impl Desktop {
                     } else {
                         course2md::tr!("查看结果")
                     })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_setup_model_status(window, cx)
-                    })),
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_setup_model_status(window, cx)),
+                    ),
             )
             .when(!running, |banner| {
                 banner.child(

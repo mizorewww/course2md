@@ -1,7 +1,8 @@
 //! Controlled library migration and explicit cleanup of verified old-location backups.
 use crate::{
-    Desktop, symbols,
+    Desktop,
     storage::{self, Journal, Phase, Progress},
+    symbols,
     ui::{self, AsyncStatus},
     workspace,
 };
@@ -1103,6 +1104,7 @@ impl Desktop {
             v_flex()
                 .w_full()
                 .min_w_0()
+                .px(rem(24.))
                 .gap(rem(16.))
                 .children(ui::async_status("storage-operation", &status, None, cx))
                 .when_some(fraction, |view, fraction| {
@@ -1188,29 +1190,34 @@ impl Desktop {
             Some(_) => {}
         }
         if let Some(error) = &storage.error {
-            lines.push(("storage-status-error", AsyncStatus::Failed(error.clone().into())));
+            lines.push((
+                "storage-status-error",
+                AsyncStatus::Failed(error.clone().into()),
+            ));
         }
         if !storage.corrupt_records.is_empty() {
+            lines.push((
+                "storage-corrupt-records",
+                AsyncStatus::Failed(
+                    course2md::tr!(
+                        "有 {} 次未完成的移动记录已损坏，相关文件均已保留",
+                        storage.corrupt_records.len()
+                    )
+                    .into(),
+                ),
+            ));
+        }
+        let corrupt = (!storage.corrupt_records.is_empty()).then(|| {
             let paths = storage
                 .corrupt_records
                 .iter()
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
                 .join("\n");
-            lines.push((
-                "storage-corrupt-records",
-                AsyncStatus::Failed(
-                    format!(
-                        "{}\n{paths}",
-                        course2md::tr!(
-                            "有 {} 次未完成的移动记录已损坏，相关文件均已保留",
-                            storage.corrupt_records.len()
-                        )
-                    )
-                    .into(),
-                ),
-            ));
-        }
+            TileScale::Regular
+                .support("storage-corrupt-paths", paths)
+                .pl(ICON_SLOT + ICON_GAP)
+        });
         let pending = (!storage.pending.is_empty()).then(|| {
             storage.pending.iter().enumerate().fold(
                 TileGroup::new("storage-pending", course2md::tr!("未完成的移动")),
@@ -1266,23 +1273,25 @@ impl Desktop {
                 let group = group.unwrap_or_else(|| {
                     TileGroup::new("storage-backups", course2md::tr!("旧位置备份"))
                 });
-                Some(group.child(storage_item(
-                    ("storage-backup-description", index),
-                    backup.path.display().to_string(),
-                    [
-                        material_button(("open-library-backup", index), ButtonVariant::Text)
-                            .icon(symbols::folder_open())
-                            .child(course2md::tr!("打开备份位置"))
-                            .on_click(move |_, _, cx| cx.open_with_system(&path)),
-                        material_button(("cleanup-library-backup", index), ButtonVariant::Text)
-                            .icon(symbols::delete())
-                            .child(course2md::tr!("清理旧位置备份…"))
-                            .disabled(storage.busy)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.begin_backup_cleanup(id.clone(), window, cx)
-                            })),
-                    ],
-                )))
+                Some(
+                    group.child(storage_item(
+                        ("storage-backup-description", index),
+                        backup.path.display().to_string(),
+                        [
+                            material_button(("open-library-backup", index), ButtonVariant::Text)
+                                .icon(symbols::folder_open())
+                                .child(course2md::tr!("打开备份位置"))
+                                .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                            material_button(("cleanup-library-backup", index), ButtonVariant::Text)
+                                .icon(symbols::delete())
+                                .child(course2md::tr!("清理旧位置备份…"))
+                                .disabled(storage.busy)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.begin_backup_cleanup(id.clone(), window, cx)
+                                })),
+                        ],
+                    )),
+                )
             });
         (!lines.is_empty() || pending.is_some() || backups.is_some()).then(|| {
             v_flex()
@@ -1290,9 +1299,12 @@ impl Desktop {
                 .min_w_0()
                 .flex_shrink_0()
                 .gap(rem(16.))
-                .children(lines.into_iter().filter_map(|(id, status)| {
-                    ui::async_status(id, &status, None, cx)
-                }))
+                .children(
+                    lines
+                        .into_iter()
+                        .filter_map(|(id, status)| ui::async_status(id, &status, None, cx)),
+                )
+                .children(corrupt)
                 .children(pending)
                 .children(backups)
         })
@@ -1399,9 +1411,11 @@ impl Desktop {
                         .icon(symbols::storage())
                         .child(course2md::tr!("重新关联…"))
                         .disabled(busy)
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.begin_library_reassociation(reassociate_id.clone(), window, cx)
-                        })),
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.begin_library_reassociation(reassociate_id.clone(), window, cx)
+                            },
+                        )),
                     )
                 })
                 .when(relocate, |row| {
@@ -1417,18 +1431,26 @@ impl Desktop {
                         .icon(symbols::folder_open())
                         .child(course2md::tr!("重新定位…"))
                         .disabled(busy)
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.begin_library_relocation(id.clone(), window, cx)
-                        })),
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.begin_library_relocation(id.clone(), window, cx)
+                            },
+                        )),
                     )
                 })
         });
         let status = |id, status: AsyncStatus, cx: &mut Context<Self>| {
             ui::async_status((id, index), &status, None, cx)
         };
-        let problem = check.and_then(|check| check.problem.clone()).and_then(|problem| {
-            status("storage-location-problem", AsyncStatus::Failed(problem.into()), cx)
-        });
+        let problem = check
+            .and_then(|check| check.problem.clone())
+            .and_then(|problem| {
+                status(
+                    "storage-location-problem",
+                    AsyncStatus::Failed(problem.into()),
+                    cx,
+                )
+            });
         let unconfirmed = reassociate
             .then(|| {
                 status(
@@ -1460,7 +1482,9 @@ impl Desktop {
                             .gap(rem(8.))
                             .items_center()
                             .flex_wrap()
-                            .child(scale.label(("storage-location-name", index), library.name.clone()))
+                            .child(
+                                scale.label(("storage-location-name", index), library.name.clone()),
+                            )
                             .when(default && several, |row| {
                                 row.child(
                                     status_chip(StatusKind::Tonal)
@@ -1474,10 +1498,9 @@ impl Desktop {
                                 )
                             }),
                     )
-                    .child(scale.support(
-                        ("storage-location-path", index),
-                        path.display().to_string(),
-                    ))
+                    .child(
+                        scale.support(("storage-location-path", index), path.display().to_string()),
+                    )
                     .children(problem)
                     .children(unconfirmed)
                     .children(repairs)
@@ -1514,17 +1537,20 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .context_menu(move |menu, _, _| {
-                actions.iter().enumerate().fold(menu, |menu, (index, action)| {
-                    let (run, entity) = (action.run.clone(), entity.clone());
-                    menu.when(index == 1, PopupMenu::separator).item(
-                        PopupMenuItem::new(action.label)
-                            .icon(action.icon.clone().component())
-                            .disabled(!action.enabled)
-                            .on_click(move |_, window, cx| {
-                                let _ = entity.update(cx, |this, cx| run(this, window, cx));
-                            }),
-                    )
-                })
+                actions
+                    .iter()
+                    .enumerate()
+                    .fold(menu, |menu, (index, action)| {
+                        let (run, entity) = (action.run.clone(), entity.clone());
+                        menu.when(index == 1, PopupMenu::separator).item(
+                            PopupMenuItem::new(action.label)
+                                .icon(action.icon.clone().component())
+                                .disabled(!action.enabled)
+                                .on_click(move |_, window, cx| {
+                                    let _ = entity.update(cx, |this, cx| run(this, window, cx));
+                                }),
+                        )
+                    })
             })
             .child(row)
             .into_any_element()
@@ -1544,8 +1570,8 @@ impl Desktop {
             let several = workspace.state.libraries.len() > 1;
             for (index, library) in workspace.state.libraries.iter().enumerate() {
                 let default = workspace.state.default_library == library.id;
-                locations =
-                    locations.child(self.location_row(index, library, several, default, window, cx));
+                locations = locations
+                    .child(self.location_row(index, library, several, default, window, cx));
             }
         }
         let add = cx.listener(|this, _, window, cx| this.register_storage_location(window, cx));
@@ -1557,7 +1583,9 @@ impl Desktop {
                 .child(
                     scale
                         .row()
-                        .child(Icon::from(symbols::add()).color(color(ColorRole::ON_SURFACE_VARIANT)))
+                        .child(
+                            Icon::from(symbols::add()).color(color(ColorRole::ON_SURFACE_VARIANT)),
+                        )
                         .child(scale.label(
                             "register-storage-location-label",
                             course2md::tr!("添加笔记库位置"),
@@ -1713,7 +1741,13 @@ fn storage_item<const N: usize>(
         .px(ITEM_INSET)
         .py(rem(16.))
         .child(TileScale::Regular.support(id, description))
-        .child(h_flex().min_w_0().gap(rem(8.)).flex_wrap().children(actions))
+        .child(
+            h_flex()
+                .min_w_0()
+                .gap(rem(8.))
+                .flex_wrap()
+                .children(actions),
+        )
 }
 
 #[cfg(test)]
