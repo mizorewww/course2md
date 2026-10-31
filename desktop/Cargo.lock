@@ -2404,7 +2404,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.8.1"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2445,7 +2445,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.8.1"
-source = "git+https://github.com/longbridge/gpui-kit?branch=main#bb85882e1faab845d9e7be33b69a152879a90f69"
+source = "git+https://github.com/longbridge/gpui-kit?rev=bb85882e1faab845d9e7be33b69a152879a90f69#bb85882e1faab845d9e7be33b69a152879a90f69"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2492,7 +2492,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.8.1"
-source = "git+https://github.com/longbridge/gpui-kit?branch=main#bb85882e1faab845d9e7be33b69a152879a90f69"
+source = "git+https://github.com/longbridge/gpui-kit?rev=bb85882e1faab845d9e7be33b69a152879a90f69#bb85882e1faab845d9e7be33b69a152879a90f69"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2503,7 +2503,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2572,7 +2572,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
 dependencies = [
  "anyhow",
  "async-task",
@@ -2658,7 +2658,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-macos"
 version = "0.1.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2813,7 +2813,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.8.1"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -2830,7 +2830,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.8.1"
-source = "git+https://github.com/longbridge/gpui-kit?branch=main#bb85882e1faab845d9e7be33b69a152879a90f69"
+source = "git+https://github.com/longbridge/gpui-kit?rev=bb85882e1faab845d9e7be33b69a152879a90f69#bb85882e1faab845d9e7be33b69a152879a90f69"
 dependencies = [
  "anyhow",
  "gpui-fast",
@@ -2845,7 +2845,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
 dependencies = [
  "chrono",
  "gpui-base",
@@ -2858,7 +2858,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material-color"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a22271e75b96133fd323a744e2b43654745a24bb#a22271e75b96133fd323a744e2b43654745a24bb"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
 dependencies = [
  "serde",
 ]
