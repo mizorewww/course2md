@@ -87,7 +87,13 @@ pub fn menu(
     let (open, set_open) = keyed_open(&id, window, cx);
     MenuPopup::new(id, trigger, menu)
         .open(open)
-        .on_open_change(set_open)
+        // The kit's popup takes any press over its trigger, even through a dialog on
+        // top. These menus are on pages, so none opens while a dialog holds the window.
+        .on_open_change(move |next, window, cx| {
+            if !*next || !modal_open(window, cx) {
+                set_open(next, window, cx);
+            }
+        })
 }
 
 /// A menu trigger's click handler: a pointer press already reached the popup, a key
