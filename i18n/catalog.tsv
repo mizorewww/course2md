@@ -658,13 +658,10 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已就绪	已就绪	Ready	已就緒	準備完了
 已就绪 / Ready	已就绪	Ready	已就緒	準備完了
 已恢复最近一次可用的设置，原文件已保留	已恢复最近一次可用的设置，原文件已保留	The last available settings have been restored and the original files have been retained.	已恢復最近一次可用的設定，原檔案已保留	最後に利用可能な設定が復元され、元のファイルが保持されています。
-已恢复未保存的修改	已恢复未保存的修改	Unsaved changes restored	已恢復未儲存的修改	保存されていない変更が復元されました
 已扫码，请在手机上确认登录	已扫码，请在手机上确认登录	The code has been scanned, please confirm login on your mobile phone	已掃碼，請在手機上確認登入	コードがスキャンされました。携帯電話でのログインを確認してください。
 已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	The code has been scanned, please confirm login on your mobile phone. / Code scanned; confirm the login on your phone.	已掃碼，請在手機上確認登入。/ Code scanned; confirm the login on your phone.	コードがスキャンされました。携帯電話でのログインを確認してください。 / コードがスキャンされました。携帯電話でログインを確認します。
 已找到	已找到	Found	已找到	見つかりました
 已找到 {} 张候选截图 / Found {} candidate slides	已找到 {} 张候选截图	Found {} candidate slides	已找到 {} 張候選截圖	{} 枚の候補スクリーンショットが見つかりました
-已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	The application settings that did not take effect last time have been retrieved. You can try saving again; the original valid options are still used.	已找回上次未生效的應用程式設定，可以重試儲存；目前仍使用原來的有效選項	前回有効にならなかったアプリケーション設定が取得されました。もう一度保存してみてください。元の有効なオプションは引き続き使用されます。
-已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	The last setting changes that did not take effect have been retrieved. You can try saving again; the original valid options are still used.	已找回上次未生效的設定變更，可以重試儲存；目前仍使用原來的有效選項	有効にならなかった最後の設定変更が取得されました。もう一度保存してみてください。元の有効なオプションは引き続き使用されます。
 已把 {} 个视频加入队列	已把 {} 个视频加入队列	{} videos have been queued	已把 {} 個影片加入佇列	{} 本の動画をキューに追加しました
 已收到回应，但服务未接受这项测试请求	已收到回应，但服务未接受这项测试请求	Response received, but the test request was not accepted by the service	已收到回應，但服務未接受這項測試請求	応答を受信しましたが、テスト要求はサービスによって受け入れられませんでした
 已暂停	已暂停	Paused	已暫停	一時停止中
@@ -2014,9 +2011,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 自动（紧凑）	自动	Auto	自動	自動
 仅字幕（紧凑）	仅字幕	Subtitles	僅字幕	字幕のみ
 语音识别（紧凑）	语音识别	Speech	語音辨識	音声認識
-正在保存…	正在保存…	Saving…	正在儲存…	保存中…
-设置保存线程已停止	设置保存线程已停止	The settings save thread has stopped	設定儲存執行緒已停止	設定保存スレッドが停止しました
-没有待保存的服务设置	没有待保存的服务设置	There are no service settings waiting to be saved	沒有待儲存的服務設定	保存待ちのサービス設定はありません
 原笔记已关闭；服务正在保存，但未用于其他笔记	原笔记已关闭；服务正在保存，但未用于其他笔记	The original note is closed; the service is still being saved and was not used for other notes	原筆記已關閉；服務正在儲存，但未用於其他筆記	元のノートは閉じられています。サービスは保存中で、他のノートには使用されていません
 服务正在保存，本次选择尚未保存：{}	服务正在保存，本次选择尚未保存：{}	The service is still being saved; this selection was not saved: {}	服務正在儲存，本次選擇尚未儲存：{}	サービスは保存中です。今回の選択は保存されていません: {}
 服务正在保存，补做任务尚未创建。请重试补做。	服务正在保存，补做任务尚未创建。请重试补做。	The service is still being saved; the reprocessing task has not been created. Retry reprocessing.	服務正在儲存，補做任務尚未建立。請重試補做。	サービスは保存中です。再処理タスクはまだ作成されていません。再処理を再試行してください。

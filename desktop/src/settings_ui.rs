@@ -827,7 +827,6 @@ impl Desktop {
             .unsaved_text
             .as_ref()
             .or(self.settings_ui.pending_generation.as_ref())
-            .or_else(|| self.preferences.generation_intent())
             .unwrap_or_else(|| self.preferences.generation())
             .clone()
     }
@@ -835,7 +834,6 @@ impl Desktop {
         self.settings_ui
             .pending_application
             .as_ref()
-            .or_else(|| self.preferences.application_intent())
             .unwrap_or_else(|| self.preferences.application())
             .clone()
     }
@@ -1003,29 +1001,7 @@ impl Desktop {
             return;
         }
         self.settings_ui.initialized = true;
-        let value = self
-            .preferences
-            .generation_intent()
-            .unwrap_or_else(|| self.preferences.generation())
-            .clone();
-        if self.preferences.generation_intent().is_some() {
-            self.settings_ui.pending_generation = Some(value.clone());
-            self.set_settings_feedback(
-                PreferenceGroup::Generation,
-                course2md::tr!("已恢复未保存的修改").into(),
-                true,
-                cx,
-            );
-        }
-        if let Some(intent) = self.preferences.application_intent().cloned() {
-            self.settings_ui.pending_application = Some(intent);
-            self.set_settings_feedback(
-                PreferenceGroup::Application,
-                course2md::tr!("已恢复未保存的修改").into(),
-                true,
-                cx,
-            );
-        }
+        let value = self.preferences.generation().clone();
         let languages = value
             .subtitle_languages_draft
             .unwrap_or_else(|| value.preferred_subtitle_languages.join(", "));
@@ -1052,8 +1028,6 @@ impl Desktop {
         ]
         .into_iter()
         .any(|group| self.preferences.is_blocked(group))
-            || self.preferences.generation_intent().is_some()
-            || self.preferences.application_intent().is_some()
             || self.settings_ui.pending_generation.is_some()
             || self.settings_ui.pending_application.is_some()
             || self.settings_ui.feedback.values().any(|(_, error)| *error)
@@ -2124,8 +2098,7 @@ impl Desktop {
         let previous = self
             .ordinary_preferences_submit_issue()
             .map(|issue| issue.message);
-        let had_pending = self.settings_ui.pending_generation.is_some()
-            || self.preferences.generation_intent().is_some();
+        let had_pending = self.settings_ui.pending_generation.is_some();
         let result = self.preferences.save_generation(next.clone());
         self.settings_ui.pending_generation = pending_after_save(&result, next);
         match result {
@@ -2233,7 +2206,7 @@ impl Desktop {
             cx.notify();
             return false;
         }
-        match self.preferences.save_service_draft(draft, None) {
+        match self.preferences.commit_service_draft(draft, None) {
             Ok(draft) => {
                 if let Some(editor) = &mut self.settings_ui.editor {
                     editor.form.draft = draft;
@@ -2368,39 +2341,6 @@ impl Desktop {
         }
         self.settings_ui.feedback.insert(group, (message, error));
     }
-    pub(crate) fn apply_settings_write_results(
-        &mut self,
-        results: Vec<(PreferenceGroup, Result<(), String>)>,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let mut all_ok = true;
-        for (group, result) in results {
-            match result {
-                Ok(()) => {
-                    self.set_settings_feedback(group, course2md::tr!("已保存").into(), false, cx)
-                }
-                Err(error) => {
-                    all_ok = false;
-                    match group {
-                        PreferenceGroup::Generation => {
-                            if let Some(intent) = self.preferences.generation_intent().cloned() {
-                                self.settings_ui.pending_generation = Some(intent);
-                            }
-                        }
-                        PreferenceGroup::Application => {
-                            if let Some(intent) = self.preferences.application_intent().cloned() {
-                                self.settings_ui.pending_application = Some(intent);
-                            }
-                        }
-                        PreferenceGroup::Services => {}
-                    }
-                    self.set_settings_save_failure(group, &anyhow::anyhow!(error), cx);
-                }
-            }
-        }
-        all_ok
-    }
-
     pub(crate) fn set_settings_save_failure(
         &mut self,
         group: PreferenceGroup,
@@ -2488,7 +2428,7 @@ impl Desktop {
             let has_pending = match group {
                 PreferenceGroup::Generation => self.settings_ui.pending_generation.is_some(),
                 PreferenceGroup::Application => self.settings_ui.pending_application.is_some(),
-                PreferenceGroup::Services => self.preferences.has_pending_services(),
+                PreferenceGroup::Services => false,
             };
             if error && has_pending {
                 let id = ("retry-settings-save", group as usize);
@@ -2874,12 +2814,7 @@ impl Desktop {
                 cx.set_reduce_motion(self.desktop_settings.reduce_motion);
                 self.set_settings_feedback(
                     PreferenceGroup::Application,
-                    if self.preferences.is_pending(PreferenceGroup::Application) {
-                        course2md::tr!("正在保存…")
-                    } else {
-                        course2md::tr!("已保存")
-                    }
-                    .into(),
+                    course2md::tr!("已保存").into(),
                     false,
                     cx,
                 );
@@ -3272,9 +3207,7 @@ impl Desktop {
                 can_retry: false,
             });
         }
-        if self.settings_ui.pending_generation.is_some()
-            || self.preferences.generation_intent().is_some()
-        {
+        if self.settings_ui.pending_generation.is_some() {
             return Some(OrdinaryPreferenceIssue {
                 group,
                 message: self
@@ -3299,44 +3232,20 @@ impl Desktop {
         }
         match group {
             PreferenceGroup::Generation => {
-                if let Some(next) = self
-                    .settings_ui
-                    .pending_generation
-                    .as_ref()
-                    .or_else(|| self.preferences.generation_intent())
-                    .cloned()
-                {
+                if let Some(next) = self.settings_ui.pending_generation.clone() {
                     self.commit_generation(next, cx)
                 } else {
                     true
                 }
             }
             PreferenceGroup::Application => {
-                if let Some(next) = self
-                    .settings_ui
-                    .pending_application
-                    .as_ref()
-                    .or_else(|| self.preferences.application_intent())
-                    .cloned()
-                {
+                if let Some(next) = self.settings_ui.pending_application.clone() {
                     self.commit_application(next, cx)
                 } else {
                     true
                 }
             }
-            PreferenceGroup::Services => {
-                if self.preferences.retry_services().is_ok() {
-                    self.set_settings_feedback(
-                        PreferenceGroup::Services,
-                        course2md::tr!("正在保存…").into(),
-                        false,
-                        cx,
-                    );
-                    true
-                } else {
-                    false
-                }
-            }
+            PreferenceGroup::Services => false,
         }
     }
     /// Only the explicitly named group is reset; the form and its source stay in place.
@@ -3426,7 +3335,6 @@ impl Desktop {
             .ordinary_preferences_submit_issue()
             .map(|issue| issue.message);
         let result = self.preferences.relocate_generation_paths(old, new);
-        self.settings_ui.pending_generation = self.preferences.generation_intent().cloned();
         if let Err(error) = &result {
             self.set_settings_feedback(
                 PreferenceGroup::Generation,
@@ -3462,11 +3370,9 @@ impl Desktop {
         if let Some(next) = self.settings_ui.pending_application.clone() {
             self.commit_application(next, cx);
         }
-        self.preferences.flush();
-        let results = self.preferences.process_writes();
-        let failed = !self.apply_settings_write_results(results, cx);
-        self.preferences.flush();
-        if failed || !self.preferences.unsaved_intents_are_preserved() {
+        if self.settings_ui.pending_generation.is_some()
+            || self.settings_ui.pending_application.is_some()
+        {
             self.message = Some(course2md::tr!("修改暂时无法保存，请重试").into());
             cx.notify();
             return false;

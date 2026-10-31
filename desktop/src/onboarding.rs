@@ -629,7 +629,7 @@ impl Desktop {
             cx.notify();
             return None;
         }
-        let saved = self.preferences.save_service_draft(draft, None);
+        let saved = self.preferences.commit_service_draft(draft, None);
         self.commit_setup_draft(purpose, saved, window, cx)
     }
 

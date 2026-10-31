@@ -43,6 +43,7 @@ mod service_test;
 mod settings_ui;
 mod source;
 mod storage;
+mod store;
 mod storage_ui;
 mod task_runner;
 mod task_ui;
@@ -590,7 +591,6 @@ impl Desktop {
                 ),
             };
         let (event_wake_tx, event_wake_rx) = smol::channel::bounded(1);
-        preferences.set_wake_sender(event_wake_tx.clone());
         if let Some(workspace) = &workspace {
             workspace.set_wake_sender(event_wake_tx.clone());
         }
@@ -1007,8 +1007,6 @@ impl Desktop {
         deadline
     }
     fn poll(&mut self, cx: &mut Context<Self>) {
-        let results = self.preferences.process_writes();
-        self.apply_settings_write_results(results, cx);
         if self
             .transient_task_result
             .as_ref()
