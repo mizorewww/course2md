@@ -120,7 +120,6 @@ pub fn choice_items<T: PartialEq + 'static>(
 type SwitchChange = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 
 enum Control {
-    /// The whole row toggles, as `ListItem` does with a trailing switch.
     Switch(bool, SwitchChange),
     /// A row whose value opens this menu.
     Menu(SharedString, MaterialMenu),
@@ -197,6 +196,25 @@ impl Field {
         self
     }
 
+    /// Text and a control on one line while both fit; flex wrap moves the control below.
+    fn inline_row(outer: OuterCorners, text: Div, control: impl IntoElement) -> AnyElement {
+        let scale = TileScale::Regular;
+        scale
+            .surface(outer)
+            .child(
+                h_flex()
+                    .w_full()
+                    .flex_wrap()
+                    .min_w_0()
+                    .gap(scale.gap())
+                    .px(ITEM_INSET)
+                    .py(rem(12.))
+                    .child(text.flex_basis(rem(200.)).min_h(rem(40.)).justify_center())
+                    .child(div().max_w_full().child(control)),
+            )
+            .into_any_element()
+    }
+
     fn render(self, outer: OuterCorners, window: &mut Window, cx: &mut App) -> AnyElement {
         let scale = TileScale::Regular;
         let Self {
@@ -208,14 +226,14 @@ impl Field {
         } = self;
         let text_id = ElementId::Name(format!("{id}-label").into());
         match control {
-            Control::Switch(on, on_change) => ListItem::new(ElementId::Name(id), label)
-                .when_some(hint, ListItem::supporting)
-                .trailing(ListTrailing::Switch(on))
-                .container(ColorRole::SURFACE)
-                .segment(outer)
-                .disabled(disabled)
-                .on_click(move |_, window, cx| on_change(&!on, window, cx))
-                .into_any_element(),
+            Control::Switch(on, on_change) => Self::inline_row(
+                outer,
+                scale.text(text_id, label.clone(), hint),
+                MaterialSwitch::new(ElementId::Name(id), label)
+                    .checked(on)
+                    .disabled(disabled)
+                    .on_change(move |on, window, cx| on_change(on, window, cx)),
+            ),
             Control::Menu(value, items) => {
                 let value = Some(match hint {
                     Some(hint) => format!("{value} · {hint}").into(),
@@ -236,26 +254,9 @@ impl Field {
                     .anchor(Anchor::TopRight)
                     .into_any_element()
             }
-            Control::Inline(control) => scale
-                .surface(outer)
-                .child(
-                    h_flex()
-                        .w_full()
-                        .flex_wrap()
-                        .min_w_0()
-                        .gap(scale.gap())
-                        .px(ITEM_INSET)
-                        .py(rem(12.))
-                        .child(
-                            scale
-                                .text(text_id, label, hint)
-                                .flex_basis(rem(200.))
-                                .min_h(rem(40.))
-                                .justify_center(),
-                        )
-                        .child(div().max_w_full().child(control)),
-                )
-                .into_any_element(),
+            Control::Inline(control) => {
+                Self::inline_row(outer, scale.text(text_id, label, hint), control)
+            }
             Control::Below(control) => scale
                 .surface(outer)
                 .child(
@@ -347,12 +348,7 @@ pub fn async_status(
     cx: &App,
 ) -> Option<Div> {
     let id = id.into();
-    let icon = |symbol: SymbolIconRole| {
-        let (icon, role) = match symbol {
-            SymbolIconRole::Success => (symbols::check_circle(), ColorRole::SUCCESS),
-            SymbolIconRole::Warning => (symbols::warning(), ColorRole::WARNING),
-            SymbolIconRole::Failed => (symbols::error(), ColorRole::ERROR),
-        };
+    let icon = |icon: gpui_kit_material::icons::SymbolIcon, role| {
         Icon::from(icon)
             .size(ICON_SLOT)
             .color(color(role))
@@ -367,17 +363,17 @@ pub fn async_status(
             None,
         ),
         AsyncStatus::Success(message) => (
-            icon(SymbolIconRole::Success),
+            icon(symbols::check_circle(), ColorRole::SUCCESS),
             accessible_text(text_id, message.clone()).role(Role::Status),
             retry,
         ),
         AsyncStatus::Warning(message) => (
-            icon(SymbolIconRole::Warning),
+            icon(symbols::warning(), ColorRole::WARNING),
             accessible_text(text_id, message.clone()).role(Role::Status),
             retry,
         ),
         AsyncStatus::Failed(message) => (
-            icon(SymbolIconRole::Failed),
+            icon(symbols::error(), ColorRole::ERROR),
             error_text(text_id, message.clone()),
             retry,
         ),
@@ -400,12 +396,6 @@ pub fn async_status(
     )
 }
 
-enum SymbolIconRole {
-    Success,
-    Warning,
-    Failed,
-}
-
 /// A question before a consequential action. Cancel is named too: a verb that says
 /// what stays ("保留笔记") reads better than a generic one.
 pub struct Confirm {
@@ -413,7 +403,7 @@ pub struct Confirm {
     cancel: SharedString,
     confirm: SharedString,
     danger: bool,
-    text: Vec<SharedString>,
+    text: Vec<String>,
 }
 
 impl Confirm {
@@ -438,7 +428,7 @@ impl Confirm {
     }
 
     /// One paragraph of the consequence.
-    pub fn text(mut self, text: impl Into<SharedString>) -> Self {
+    pub fn text(mut self, text: impl Into<String>) -> Self {
         self.text.push(text.into());
         self
     }
@@ -463,12 +453,11 @@ impl Confirm {
     }
 }
 
+type OnConfirm = Rc<dyn Fn(&(), &mut Window, &mut App)>;
+
 /// The question being asked. It outlives the answer, so the dialog can play its exit.
 #[derive(Default)]
-struct ConfirmSlot(
-    Option<(Confirm, Rc<dyn Fn(&(), &mut Window, &mut App)>)>,
-    bool,
-);
+struct ConfirmSlot(Option<(Confirm, OnConfirm)>, bool);
 impl Global for ConfirmSlot {}
 
 fn close_confirm(window: &mut Window, cx: &mut App) {
@@ -501,14 +490,9 @@ pub fn confirm_host(cx: &App) -> Option<AnyElement> {
     Some(
         MaterialDialog::new("confirm")
             .headline(confirm.title.clone())
-            .content(
-                v_flex()
-                    .gap(rem(8.))
-                    .text_color(color(ColorRole::ON_SURFACE_VARIANT))
-                    .children(confirm.text.iter().enumerate().map(|(index, text)| {
-                        accessible_text(("confirm-text", index), text.clone()).whitespace_normal()
-                    })),
-            )
+            .when(!confirm.text.is_empty(), |dialog| {
+                dialog.supporting_text(confirm.text.join("\n"))
+            })
             .action(
                 material_button("confirm-cancel", ButtonVariant::Text)
                     .child(confirm.cancel.clone())
@@ -521,8 +505,8 @@ pub fn confirm_host(cx: &App) -> Option<AnyElement> {
     )
 }
 
-/// A download's quantity, labeled speed and time remaining, on one stable block so
-/// the numbers do not hide behind a single sentence.
+/// A download or preparation: its title, what is known so far as one status line,
+/// and a bar once the total is known. The kit's progress has no such label block.
 pub fn transfer_status(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
@@ -531,161 +515,25 @@ pub fn transfer_status(
     window: &mut Window,
     cx: &mut App,
 ) -> Div {
-    use crate::activity::TransferEta;
     let id = id.into();
-    let line = |name: &'static str, text: SharedString, role, size| {
-        accessible_text(child_id(&id, name), text)
-            .text_size(size)
-            .text_color(color(role))
-    };
-    let meter = |name: &'static str, label: &'static str, value: &str| {
-        v_flex()
-            .min_w(rem(98.))
-            .gap(rem(4.))
-            .child(line(
-                label,
-                label.into(),
-                ColorRole::ON_SURFACE_VARIANT,
-                TEXT_AUX,
-            ))
-            .child(
-                line(
-                    name,
-                    value.to_owned().into(),
-                    ColorRole::ON_SURFACE,
-                    TEXT_BODY,
-                )
-                .font_weight(FontWeight::SEMIBOLD),
-            )
-    };
-    let remaining = match &metrics.eta {
-        Some(TransferEta::Remaining(value)) => Some(value),
-        _ => None,
-    };
-    let eta_note = match &metrics.eta {
-        Some(TransferEta::Note(value)) => Some(value),
-        _ => None,
-    };
-    let notes = [
-        ("eta-note", eta_note),
-        ("note", metrics.note.as_ref()),
-        ("aside", metrics.aside.as_ref()),
-        ("source", metrics.source.as_ref()),
-    ];
     v_flex()
         .w_full()
         .min_w_0()
         .gap(rem(8.))
         .child(
-            line("title", title.into(), ColorRole::ON_SURFACE, TEXT_BODY)
-                .font_weight(FontWeight::SEMIBOLD),
+            accessible_text(child_id(&id, "title"), title)
+                .text_size(TEXT_BODY)
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(color(ColorRole::ON_SURFACE)),
         )
-        .when(!metrics.quantity.is_empty(), |view| {
-            view.child(line(
-                "quantity",
-                metrics.quantity.clone().into(),
-                ColorRole::ON_SURFACE,
-                TEXT_BODY,
-            ))
-        })
-        .when(metrics.speed.is_some() || remaining.is_some(), |view| {
-            view.child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .flex_wrap()
-                    .gap(rem(24.))
-                    .when_some(metrics.speed.as_ref(), |row, speed| {
-                        row.child(meter("speed", course2md::tr!("速度"), speed))
-                    })
-                    .when_some(remaining, |row, value| {
-                        row.child(meter("eta", course2md::tr!("预计剩余"), value))
-                    }),
-            )
-        })
-        .children(notes.into_iter().filter_map(|(name, text)| {
-            let text = text?.clone().into();
-            Some(line(name, text, ColorRole::ON_SURFACE_VARIANT, TEXT_AUX))
-        }))
+        .child(
+            status_line(child_id(&id, "detail"), &metrics.summary())
+                .text_size(TEXT_AUX)
+                .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
+        )
         .when_some(fraction, |view, fraction| {
             view.child(progress(child_id(&id, "bar"), fraction, window, cx))
         })
-}
-
-/// A 16:9 video cover. Without an image the tonal frame stays, so rows keep their
-/// rhythm while covers load; callers place their placeholder icon in it and give it a width.
-pub fn cover(radius: Pixels, image: Option<std::path::PathBuf>) -> Div {
-    div()
-        .aspect_ratio(16. / 9.)
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(radius)
-        .overflow_hidden()
-        .bg(color(ColorRole::SECONDARY_CONTAINER))
-        .when_some(image, |slot, image| {
-            slot.child(
-                img(image)
-                    .size_full()
-                    .rounded(radius)
-                    .object_fit(ObjectFit::Cover),
-            )
-        })
-}
-
-/// What follows the pointer while a note, folder or queued task is dragged.
-pub fn drag_chip(icon: impl Into<Icon>, label: SharedString) -> Div {
-    h_flex()
-        .max_w(rem(336.))
-        .gap(rem(8.))
-        .px(rem(12.))
-        .py(rem(8.))
-        .rounded(RADIUS_SMALL)
-        .bg(color(ColorRole::SURFACE))
-        .shadow(gpui_kit_material::tokens::elevation::level3())
-        .text_size(TEXT_BODY)
-        .font_weight(FontWeight::SEMIBOLD)
-        .child(
-            icon.into()
-                .size(ICON_SLOT)
-                .color(color(ColorRole::ON_SURFACE_VARIANT)),
-        )
-        .child(div().min_w_0().truncate().child(label))
-}
-
-/// A fact beside its label: labels share a bounded column, values a stable start, and
-/// a value that does not fit wraps under its label.
-pub fn detail_row(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    icon: impl IntoElement,
-    value: impl IntoElement,
-) -> Div {
-    div()
-        .flex()
-        .flex_wrap()
-        .w_full()
-        .min_w_0()
-        .min_h(rem(32.))
-        .items_center()
-        .gap_x(rem(12.))
-        .gap_y(rem(2.))
-        .child(
-            semantic_label(id, label, icon)
-                .w(rem(160.))
-                .max_w_full()
-                .flex_shrink_0(),
-        )
-        .child(
-            div()
-                .flex_1()
-                .flex_basis(rem(200.))
-                .min_w_0()
-                .max_w_full()
-                .font_weight(FontWeight::NORMAL)
-                .child(value),
-        )
 }
 
 /// Whether a dialog holds the window, Kit's or the kit's: app-wide shortcuts wait.
@@ -696,20 +544,28 @@ pub fn modal_open(window: &mut Window, cx: &mut App) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::status_line;
-    use gpui::{
-        Context, IntoElement, ParentElement, Pixels, Render, Styled, TestAppContext,
-        VisualTestContext, Window, div, px,
+    use super::{
+        AsyncStatus, Confirm, Field, async_status, confirm_host, field_table, status_line,
     };
+    use gpui::{
+        Context, InteractiveElement, IntoElement, ParentElement, Pixels, Render, Styled,
+        TestAppContext, VisualTestContext, Window, div, px,
+    };
+    use gpui_kit_material::prelude::MaterialMenu;
 
     struct Line(Pixels);
 
     impl Render for Line {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().w(self.0).child(status_line(
-                "line",
-                "360.0 MB / 1.56 GB · 速度 12 MB/s · 预计剩余 1 分 50 秒",
-            ))
+            div().child(
+                div()
+                    .debug_selector(|| "wrapper".into())
+                    .w(self.0)
+                    .child(status_line(
+                        "line",
+                        "360.0 MB / 1.56 GB · 速度 12 MB/s · 预计剩余 1 分 50 秒",
+                    )),
+            )
         }
     }
 
@@ -718,13 +574,9 @@ mod tests {
     fn a_status_line_breaks_between_its_parts(cx: &mut TestAppContext) {
         let (view, cx) = cx.add_window_view(|_, _| Line(px(1000.)));
         let height = |cx: &mut VisualTestContext| {
-            cx.update(|window, cx| window.draw(cx).clear(cx));
-            let child = cx
-                .debug_bounds("status-line")
-                .expect("the line")
-                .size
-                .height;
-            child
+            cx.run_until_parked();
+            let bounds = cx.debug_bounds("wrapper").expect("the line");
+            bounds.size.height
         };
         let wide = height(cx);
         view.update_in(cx, |view, _, cx| {
@@ -733,5 +585,52 @@ mod tests {
         });
         let narrow = height(cx);
         assert!(narrow >= wide * 3., "{wide:?} then {narrow:?}");
+    }
+
+    struct Rows;
+
+    impl Render for Rows {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(600.))
+                .child(field_table(
+                    "section",
+                    "Section",
+                    [
+                        Field::switch("switch", "Switch", true, |_, _, _| {}).hint("Hint"),
+                        Field::menu("menu", "Menu", "Value", MaterialMenu::new("items")),
+                        Field::inline("inline", "Inline", div().child("control")),
+                        Field::below("below", "Below", div().child("control")),
+                    ],
+                ))
+                .children(async_status("idle", &AsyncStatus::Idle, None, cx))
+                .children(async_status(
+                    "failed",
+                    &AsyncStatus::Failed("No".into()),
+                    None,
+                    cx,
+                ))
+                .children(confirm_host(cx))
+        }
+    }
+
+    /// Every primitive draws, and a question shows until it is answered.
+    #[gpui::test]
+    fn the_primitives_draw_and_a_confirmation_appears(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit_material::init(cx);
+        });
+        let (_, cx) = cx.add_window_view(|_, _| Rows);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(confirm_host(cx).is_none());
+            Confirm::new("Delete", "Keep", "Delete")
+                .danger()
+                .text("Consequence")
+                .ask(|_, _, _| {}, window, cx);
+            assert!(confirm_host(cx).is_some());
+            window.draw(cx).clear(cx);
+        });
     }
 }

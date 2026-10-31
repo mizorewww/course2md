@@ -24,18 +24,76 @@ Add the name to `desktop/assets/symbols.txt` ([catalog](https://m3symbols.mizore
 `symbols::<name>()`. A name outside the catalog fails the build. Mark the line ` fill` if you draw
 `.filled(true)`. A debug build prints any `material-symbols/` path it could not load. `symbols.rs` has examples.
 
+## Choose by intent
+
+**A page agent picks the component by what the person is doing, not by which old widget stood there.**
+A one-to-one swap of a wrong control is not acceptable: change the control type or the layout when another
+one means the thing better. Features stay. Old widgets were used for several purposes, so the tables further
+down name a replacement only where an old item has one meaning. Reference: the kit's Gallery
+(`cargo run -p gpui-kit-material --example gallery` in the kit repository) and `components/mod.rs`.
+
+| The person is | Kit choice | Not |
+| --- | --- | --- |
+| Choosing one of 2 to 5 short options, seen together | `ConnectedButtonGroup` | A dropdown hiding so few |
+| Choosing one of many, or options that are only text | `ExposedDropdown` | A row of buttons |
+| Choosing one of many, with icons or supporting text | `ui::Field::menu`, or `ui::menu` with `ui::choice_items` | |
+| Choosing one of a few that each need an explanation | `ChoiceTile`s, or `ListItem` with `ListLeading::Radio` | A button group with a hint elsewhere |
+| Choosing several | `ChipSet` / `FilterChip`, or `ListItem` with a checkbox | Toggled buttons |
+| Turning one thing on or off | `MaterialSwitch`; in settings `ui::Field::switch` | Two-option button group |
+| Narrowing what a list shows | `FilterChip`, `SearchField` | A `ConnectedButtonGroup` unless it is a view of the same items |
+| Switching among peer views of one subject | `MaterialTabs` | |
+| Going to another place in the app | The app bar, or a selected `ListItem` in a pane | Tabs |
+| Going forward: the region's one main action | `MaterialButton` `Filled`, icon and verb | |
+| Taking a weighted secondary action | `Tonal`; same size `Outlined` beside a main action | Another `Filled` |
+| Acting on the thing beside it | `Text`; `IconButton` with `MaterialTooltip` if the icon says it | A full-width button |
+| Several actions on one thing | `MenuPopup` behind an `IconButton`, or `SplitButton` | A row of quiet buttons |
+| Opening a place or detail from a row | `ListItem` with `.on_click` and a trailing arrow | A button in the row |
+| Showing or hiding part of an item in place | `TileScale::button` with `disclosure_chevron` and `motion::disclosure` | A new page |
+| Entering text | `TextField` with a label; `SearchField` to search | A bare input with a separate label |
+| Reading what something is | `status_chip` beside it, `Badge` for a count | Colored text alone |
+| Watching one operation run | `ui::async_status`, `LinearProgress`, `CircularProgress`, `LoadingIndicator` | A chip |
+| Told a consequence or obstacle | `supporting_info` in a boundary, `notice_banner` alone | A dialog |
+| Told something passing | `Snackbar` | A banner that needs dismissing |
+| Deciding something consequential | `ui::Confirm`, `MaterialDialog` | A tooltip, a banner |
+| Browsing independent subjects | `MaterialCard`, `segmented_list` of `ListItem` when they are rows | Cards around every setting |
+
+## Motion
+
+All animation is the kit's: `gpui_kit_material::motion` and what components do on their own. A page writes no
+curve, duration or `Animation::new`. The kit's default scheme is Expressive where `motion.rs` used Standard
+tokens, so springs are a little livelier; do not set a scheme per page.
+
+| Old animation | Kit |
+| --- | --- |
+| `Spring` and its constants | `MotionToken`, `motion::curve`; the palette blend is `theme::apply_scheme` |
+| `motion::enter`, `state_enter`, `page_enter` | Same names: same fade and rise, the kit's scale-aware distance |
+| `motion::value`, `selection_value` (`home-hero-top`, palette cards, `ChoiceTile`) | Same names |
+| `motion::disclosure` | Same name |
+| `spinner`, `icon_spinner` | Same names in components, now with a label. Prefer `MaterialButton::loading` inside a button |
+| `progress`, `linear_progress`, `indeterminate_progress` | Same names in components, or `LinearProgress` |
+| `transfer_status` | `ui::transfer_status` |
+| `choice_group`'s selection fill | `ConnectedButtonGroup`'s own morph; `MaterialTabs`' indicator |
+| `theme::selection_card`, `ChoiceTile`, tile hover and press blends | `MaterialCard`, kit `ChoiceTile`, `RingedButton`, `Ripple` state layers |
+| The scrollbar's fade | Kit's `ScrollbarMotion` |
+
+Everything the app animates has a kit form, so no backport is proposed. Two verdicts:
+
+- `performance::record_motion` traced the old helpers. The kit has no hook, so a performance build lists fewer
+  motion events as pages move, and none from the shell now. Dropped; frame timings stay.
+- Not animation, and they stay: the 800 ms wait in `reader_ui.rs` (restoring a position), `FRESH_FOR` in
+  `reader_images.rs` and `PROGRESS_INTERVAL` in `storage_ui.rs`.
+
 ## `ui.rs`
 
-| Item | Use it for |
+| Item | Why the kit does not cover it |
 | --- | --- |
-| `field_table`, `Field` | A settings section whose rows mix switches, menus and other controls |
+| `field_table`, `Field` | A settings section whose rows mix controls; `ListTrailing` holds no custom element |
 | `AsyncStatus`, `async_status` | One check, probe or load narrating itself. The state machine stays in the page |
-| `menu`, `keyed_open` | `MenuPopup` or `ExposedDropdown` that keeps nothing but its open state |
+| `menu`, `keyed_open` | `MenuPopup` and `ExposedDropdown` are controlled; these sites keep no other state |
 | `choice_items` | Menu items that pick one value |
-| `Confirm`, `modal_open` | A consequential question; whether a dialog holds the window |
-| `status_line` | Text with " · " between its parts, breaking only between parts |
-| `transfer_status` | A download's quantity, speed and time remaining |
-| `cover`, `drag_chip`, `detail_row` | 16:9 cover with its placeholder; what follows the pointer; a fact beside its label |
+| `Confirm`, `modal_open` | `MaterialDialog` is an element in the tree; a question asked from a handler needs its one host |
+| `status_line` | Text with " · " between parts, breaking only between parts |
+| `transfer_status` | A download's title, status line and bar |
 
 `task_actions` is not here: the selection is about tasks, not generic. Keep it in `task_ui.rs` as
 one `fn task_actions(task, surface) -> Vec<TaskAction>` rendered to both buttons and menu items.
@@ -50,6 +108,10 @@ From `REDUCTION.md` § Kit audit. Do not work around these:
 - `ListTrailing` has no custom element. Select rows use `ui::Field::menu` or `list_tile` and `TileScale`.
 - A danger row is a red `.leading` icon plus the existing confirmation; dismiss-tooltip-on-any-key is gone.
 - `use ColorRole::*` is fine in a file that paints a lot.
+
+## Lookup: names with one meaning
+
+A row saying "by intent" means use the table above.
 
 ## `theme.rs`
 
@@ -109,15 +171,11 @@ From `REDUCTION.md` § Kit audit. Do not work around these:
 | Old | Replacement |
 | --- | --- |
 | `ButtonLabelSize::label_text_size`, `SettingsText::settings_text` | `.button_size(…)`; a setting's text comes from its row |
-| `control`, `primary_pill` | `material_button(id, ButtonVariant::Filled)` |
-| `tonal_pill` | `ButtonVariant::Tonal` |
-| `outline_pill` | `ButtonVariant::Outlined` |
-| `text_button`, `quiet` | `ButtonVariant::Text` |
+| `control`, `primary_pill`, `tonal_pill`, `outline_pill`, `text_button`, `quiet` | By intent: `material_button(id, variant)` |
 | `danger_pill` | `ui::Confirm::danger`; an error action outside a dialog is `Text` with `.text_color(color(ERROR))` |
 | `disabled_when` | `.disabled(…)` |
 | `icon_button`, `input_action` | `IconButton::new(id, icon, label)`, with `.variant(IconButtonVariant::Tonal)`, `.button_size(…)`; wrap in `MaterialTooltip::plain(id, label).trigger(…)` |
-| `filter_chip` | `FilterChip` |
-| `chip` | `chip`, or `AssistChip` |
+| `filter_chip`, `chip` | By intent: `FilterChip`, `AssistChip` |
 | `nav_action`, `nav_destination`, `nav_destination_width` | Gone with the shell; `MaterialButton` with `Tonal` when selected, or `MaterialTabs` for peers |
 | `text_input`, `labeled_input`, `outlined_field_label` | `TextField::new(id, &state).label(…).outlined()` |
 | `search_field` | `SearchField::new(&state).leading(…)` |
@@ -131,9 +189,10 @@ From `REDUCTION.md` § Kit audit. Do not work around these:
 | `page_heading`, `section_title`, `section_heading`, `accessible_text`, `error_text`, `semantic_label`, `supporting_info`, `info_callout` | Same names in the kit. `section_heading`'s icon is a kit `Icon` |
 | `notice_banner`, `NoticeKind` | Same names |
 | `badge`, `BadgeKind`, `outlined_badge` | `status_chip`, `StatusKind`, `outlined_status_chip` |
-| `card_surface` | `card(CardVariant::…)`, or `MaterialCard` when it acts |
-| `selection_card` | `MaterialCard::new(id, variant).state(…)` with `.on_click` |
-| `drag_chip`, `cover_frame`, `cover_slot`, `detail_row` | `ui::drag_chip`, `ui::cover`, `ui::detail_row` |
+| `card_surface`, `selection_card` | By intent: `MaterialCard`, `card(CardVariant::…)`, `ListItem` with a radio |
+| `drag_chip` | `AssistChip` with `.elevated(true)` |
+| `cover_frame`, `cover_slot` | `ListLeading::Video` in a row; a local 16:9 `div` with the image in a card |
+| `detail_row` | `ListItem` with `.trailing_text`, or headline and `.supporting` |
 
 ### Tiles and dialogs
 
@@ -146,37 +205,28 @@ From `REDUCTION.md` § Kit audit. Do not work around these:
 | `tile_disclosure` | `TileScale::Regular.button(id, outer)` holding a `disclosure_chevron(open)`, with `motion::disclosure` below |
 | `MaterialDialog` trait, `dialog_title`, `dialog_actions` | `MaterialDialog::new(id).headline(…).content(…).action(…).modal(open).on_dismiss(…)`, an element kept in the tree with `open` in the page's state |
 | `confirm_dialog` | `ui::Confirm` |
-| `SingleChoiceGroup`, `SelectField`, `MenuBuilder` | See below |
 
 ## `motion.rs`
 
-Everything is `gpui_kit_material::motion::*` except the components named here.
-
-| Old | Replacement |
-| --- | --- |
-| `Spring`, `FAST_SPATIAL`, `DEFAULT_SPATIAL`, `DEFAULT_EFFECTS`, `SLOW_EFFECTS`, `Spring::duration`, `::position`, `::ease` | `MotionToken`, `motion::curve(token)`, `motion::token_value` |
-| `enter`, `state_enter`, `page_enter`, `value`, `selection_value`, `disclosure` | Same names |
-| `spinner(id, cx)`, `icon_spinner(id, size, cx)` | `spinner(id, label, cx)`, `icon_spinner(id, label, size, cx)` in components: they now take a label |
-| `indeterminate_progress`, `progress`, `linear_progress` | Same names in components, or `LinearProgress`, `LoadingIndicator` |
-| `transfer_status` | `ui::transfer_status` |
+See [Motion](#motion). Every public item (`Spring`, `FAST_SPATIAL`, `DEFAULT_SPATIAL`, `DEFAULT_EFFECTS`, `Spring::duration`, `::position`, `::ease`, `enter`, `state_enter`, `page_enter`, `spinner`, `icon_spinner`, `indeterminate_progress`, `value`, `selection_value`, `progress`, `linear_progress`, `disclosure`) is covered there.
 
 ## `palettes.rs`
 
 Now a re-export; the persisted form is unchanged. `Appearance`, `PaletteId`, `ThemePreferences`, `Palette` are
 `gpui_kit_material::color::*`, `ALL` is `color::palette::ALL`. Use `Scheme::from_palette(id)` for a preview, not `id.colors()`.
 
-## `choice_group.rs`
+## `choice_group.rs`, `select_field.rs`
 
-| Old | Replacement |
+By intent; these two carried most mismatched uses. A `SingleChoiceGroup` picking among many becomes a
+dropdown; a `SelectField` over two options becomes a button group or a switch.
+
+| Old | When that control is right |
 | --- | --- |
-| `SingleChoiceGroup::new`, `.options`, `.selected`, `.full_width`, `.segmented`, `.height`, `.label_text_size`, `.focus_handles`, `.icon`, `.reveal_in`, `.disabled`, `.on_change` | `ConnectedButtonGroup`, same method names except `.on_change` → `.on_activate`; prefer `.button_size` to `.height` and `.label_text_size` |
+| `SingleChoiceGroup` and its `.options`, `.selected`, `.full_width`, `.segmented`, `.focus_handles`, `.icon`, `.reveal_in`, `.disabled` | `ConnectedButtonGroup`, same method names |
+| `.on_change` | `.on_activate` |
+| `.height`, `.label_text_size` | `.button_size` |
 | `.tabs` | `MaterialTabs` |
-
-## `select_field.rs`
-
-| Old | Replacement |
-| --- | --- |
-| `SelectField` | `ExposedDropdown::new(id, label).options(…).selected(…)`, opened with `ui::keyed_open`; with icons, `ui::menu` |
+| `SelectField` | `ExposedDropdown::new(id, label).options(…).selected(…)`, opened with `ui::keyed_open` |
 | `.detail`, `.trailing`, `.label`, `.icon`, `.disabled` | `.supporting_text`, an option's text, the dropdown's label, `.leading_icon`, `.disabled` |
 | `MenuBuilder` | `MaterialMenu`. A `context_menu(` site keeps Kit's closure and `PopupMenu` |
 
