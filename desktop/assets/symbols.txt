@@ -30,7 +30,7 @@ create_new_folder
 dark_mode
 data_object
 delete
-description
+description fill
 developer_board
 dns
 download
@@ -148,4 +148,4 @@ today
 undo
 unfold_more
 view_carousel
-database
+database fill

@@ -1173,6 +1173,8 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	The model still uses the old location. Save the model location in “Note generation” before cleaning backups.	模型仍在使用舊位置，請先在「產生筆記」中儲存模型位置，再清理備份	モデルはまだ古い場所を使用しています。「ノートを作成」でモデルの場所を保存してからバックアップを整理してください
 模型会继续在后台准备	模型会继续在后台准备	The model will continue to be prepared in the background	模型會繼續在背景準備	モデルはバックグラウンドで引き続き準備されます
 模型位置尚未更新，修改已保留，可重试保存：{}	模型位置尚未更新，修改已保留，可重试保存：{}	The model location has not been updated. Your changes were kept; you can try saving again: {}	模型位置尚未更新，修改已保留，可重試儲存：{}	モデルの場所はまだ更新されていません。変更は保持されています。もう一度保存できます: {}
+一切正常	一切正常	All good	一切正常	すべて正常
+需要修复	需要修复	Needs repair	需要修復	修復が必要
 模型准备	模型准备	Model setup	模型準備	モデル準備
 模型准备完成 / Model preparation finished.	模型准备完成	Model preparation finished.	模型準備完成	モデルの準備ができました
 模型准备已暂停	模型准备已暂停	Model preparation is paused	模型準備已暫停	モデルの準備が一時停止されています
@@ -2034,6 +2036,5 @@ Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 �
 重新测试	重新测试	Test again	重新測試	再テスト
 收起模型列表	收起模型列表	Hide model list	收起模型清單	モデル一覧を閉じる
 AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
-本机引擎和模型	本机引擎和模型	Local engine and model	本機引擎和模型	ローカルエンジンとモデル
 第 {} 步，共 {} 步	第 {} 步，共 {} 步	Step {} of {}	第 {} 步，共 {} 步	ステップ {} / {}
 音频的处理位置	音频的处理位置	Where audio is processed	音訊的處理位置	音声の処理場所

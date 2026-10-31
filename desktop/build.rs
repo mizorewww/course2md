@@ -63,9 +63,14 @@ fn render_symbols() {
         let icon = symbol.icon().style(Style::Rounded).axes(axes);
         // The kit's components ask for their own glyphs at the catalog's default weight.
         let kit = symbol.icon().style(Style::Rounded);
-        for icon in [Some(icon), Some(kit), fill.then(|| icon.filled(true))]
-            .into_iter()
-            .flatten()
+        for icon in [
+            Some(icon),
+            Some(kit),
+            fill.then(|| icon.filled(true)),
+            fill.then(|| kit.filled(true)),
+        ]
+        .into_iter()
+        .flatten()
         {
             let svg = icon
                 .to_svg()

@@ -823,7 +823,7 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let dismissed = self.0.clone();
             MaterialDialog::new("chooser")
-                .container(ColorRole::SURFACE)
+                .container(gpui_kit_material::color::ColorRole::SURFACE)
                 .headline("Chooser")
                 .content(div().occlude().w_full().h(px(200.)))
                 .modal(true)

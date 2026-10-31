@@ -2566,24 +2566,27 @@ impl Desktop {
                     }),
             )
             .gap(TILE_GAP)
-            .children(self.reader_ui.outline.iter().enumerate().map(
-                |(_, (index, label, seconds))| {
-                    let index = *index;
-                    let time = seconds
-                        .filter(|seconds| *label != course2md::render::fmt_ts(*seconds))
-                        .map(course2md::render::fmt_ts);
-                    ListItem::new(("toc-item", index), label.clone())
-                        .density(ListDensity::Compact)
-                        .container(ColorRole::SURFACE_CONTAINER)
-                        .segment([true; 4])
-                        .selected(current == Some(index))
-                        .when_some(time, |item, time| item.trailing_text(time))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.reader_ui.toc_open = false;
-                            this.jump_reader_block(index, cx);
-                        }))
-                },
-            ))
+            .children(
+                self.reader_ui
+                    .outline
+                    .iter()
+                    .map(|(index, label, seconds)| {
+                        let index = *index;
+                        let time = seconds
+                            .filter(|seconds| *label != course2md::render::fmt_ts(*seconds))
+                            .map(course2md::render::fmt_ts);
+                        ListItem::new(("toc-item", index), label.clone())
+                            .density(ListDensity::Compact)
+                            .container(ColorRole::SURFACE_CONTAINER)
+                            .segment([true; 4])
+                            .selected(current == Some(index))
+                            .when_some(time, |item, time| item.trailing_text(time))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.reader_ui.toc_open = false;
+                                this.jump_reader_block(index, cx);
+                            }))
+                    }),
+            )
     }
 
     /// A paragraph of the note that the reader draws itself.
