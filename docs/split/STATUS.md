@@ -2,7 +2,7 @@
 
 Update this file in the same commit as the work it records.
 
-**Current phase:** P1 Patches and deps is finished.
+**Current phase:** P2 Bugs is finished, except `AUDIT.md` T7 (dependency licences, in P7) and D12 (subsumed by P5).
 **Dependency form:** path (flip to git rev before acceptance). CI cannot build the desktop until then.
 
 ## Done
@@ -49,7 +49,7 @@ On kit merge `03b38ec` (which includes `origin/main` at `c6a1476`), Rust 1.99.1,
 
 ## Next action
 
-Finish P2, then P3. Before P5, read the debts below.
+P3. `REDUCTION.md` asks for levers 1 and 3 before it, because they change crate boundaries. Before P5, read the debts below. P2 results are in `BUGS-ENGINE.md` and `BUGS-DESKTOP.md`.
 
 ## Decisions made during the work
 
@@ -83,10 +83,6 @@ Visual only; the behaviours are verified below.
   keep the feature off and add an app-owned `AssetSource` that holds only the symbols the app uses,
   since `Asset::provide` exists for runtime supply and `icons::Assets::with` takes a fallback source.
   Check that this covers Kit's translated default icons before relying on it.
-- **Find field keys (not from this port).** With focus in the reader's find field, `cmd-g` and Escape
-  do nothing: the field renders in the top bar, outside the `CourseReader` key context on `reader-page`.
-  With focus in the reader both work. Found by reading the tree and running it; the old stack was not
-  rerun, but this structure did not change. Belongs in P2 or P5.
 - **Stale worktree records.** `../zed/.git/worktrees` and `../gpui-component/.git/worktrees` still list
   entries for the removed `desktop/.deps` worktrees. Left alone, as they are sibling repositories;
   `git worktree prune` there clears them if the owner wants.
