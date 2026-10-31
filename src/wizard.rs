@@ -4,15 +4,11 @@
 
 use crate::config::AsrProvider;
 use anyhow::Result;
-use std::io::IsTerminal as _;
 
 /// 是否首次运行：用户没显式传 --provider && 交互终端 &&
 ///（配置文件不存在，或配置存在但未设置 provider——例如只运行过 config init）。
 pub fn is_first_run(opts_provider_is_none: bool, file: &crate::settings::ConfigFile) -> bool {
-    opts_provider_is_none
-        && std::io::stdin().is_terminal()
-        && std::io::stderr().is_terminal()
-        && file.defaults.provider.is_none()
+    opts_provider_is_none && crate::runtime::interactive() && file.defaults.provider.is_none()
 }
 
 /// 满足首次运行条件时执行向导并返回写盘后的新配置；否则原样返回。

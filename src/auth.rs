@@ -214,14 +214,6 @@ fn trusted_ticket_url(raw: &str) -> Result<url::Url> {
     Ok(url)
 }
 
-fn finish_login(
-    agent: &ureq::Agent,
-    login: &Value,
-    cookies: &mut Cookies,
-) -> Result<AccountProfile> {
-    finish_with(login, cookies, |url, cookies| request(agent, url, cookies))
-}
-
 fn finish_with(
     login: &Value,
     cookies: &mut Cookies,
@@ -457,7 +449,10 @@ impl QrSession {
             QrState::Confirm => Ok(QrPoll::AwaitingConfirmation),
             QrState::Expired => Ok(QrPoll::Expired),
             QrState::Done => {
-                let profile = finish_login(&self.agent, &login, &mut self.cookies)?;
+                let agent = &self.agent;
+                let profile = finish_with(&login, &mut self.cookies, |url, cookies| {
+                    request(agent, url, cookies)
+                })?;
                 Ok(QrPoll::Authenticated(VerifiedLogin {
                     cookies: std::mem::take(&mut self.cookies),
                     profile,

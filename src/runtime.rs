@@ -221,18 +221,15 @@ pub fn run_bounded(
     })?;
     stdout.rewind()?;
     stderr.rewind()?;
-    let mut out = String::new();
-    let mut err = String::new();
-    let mut bytes = Vec::new();
-    stdout.take(64 * 1024 * 1024).read_to_end(&mut bytes)?;
-    out.push_str(&String::from_utf8_lossy(&bytes));
-    bytes.clear();
-    stderr.take(64 * 1024 * 1024).read_to_end(&mut bytes)?;
-    err.push_str(&String::from_utf8_lossy(&bytes));
+    let capture = |file: &std::fs::File| -> Result<String> {
+        let mut bytes = Vec::new();
+        file.take(64 * 1024 * 1024).read_to_end(&mut bytes)?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    };
     Ok(BoundedOutput {
         status,
-        stdout: out,
-        stderr: err,
+        stdout: capture(&stdout)?,
+        stderr: capture(&stderr)?,
     })
 }
 
@@ -366,11 +363,14 @@ pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
 /// [`http_agent`] whose error statuses arrive as responses, so that a caller can
 /// read the body. Whoever uses it checks the status; `dispatch::receive` does.
 pub(crate) fn http_agent_keeping_errors(timeout: Duration) -> ureq::Agent {
-    agent_builder()
-        .timeout_global(Some(timeout))
-        .http_status_as_error(false)
-        .build()
-        .new_agent()
+    let agent = agent_builder().timeout_global(Some(timeout));
+    agent.http_status_as_error(false).build().new_agent()
+}
+
+/// Whether a person is at both ends of this terminal, so a prompt can be answered.
+pub(crate) fn interactive() -> bool {
+    use std::io::IsTerminal as _;
+    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
 /// What every agent starts from: no redirects (see [`http_agent`]), and no proxy from
@@ -560,7 +560,7 @@ where
                     keep_first(error);
                     break;
                 }
-            });
+            }
         }
     };
     match workers.max(1).min(total.max(1)) {

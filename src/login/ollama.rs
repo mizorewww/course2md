@@ -3,7 +3,6 @@
 //! 见 llm.rs request_chat_once），"登录"实为服务发现 + 配置。
 
 use anyhow::{Context, Result, bail, ensure};
-use std::io::IsTerminal;
 
 use crate::llm::LlmProvider;
 
@@ -73,7 +72,7 @@ pub(super) fn login() -> Result<()> {
             "Ollama 中没有已下载的模型，请先运行 ollama pull <模型名> / No downloaded models found; run ollama pull <model> first"
         )
     );
-    let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    let interactive = crate::runtime::interactive();
     let model = if names.len() == 1 {
         names.into_iter().next().unwrap_or_default()
     } else if interactive {

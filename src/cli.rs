@@ -444,34 +444,21 @@ pub enum ConfigCmd {
 pub fn take_lang_arg(args: &mut Vec<std::ffi::OsString>) -> Option<String> {
     let mut value = None;
     let mut index = 0;
-    let mut literal = false;
     while index < args.len() {
         let arg = args[index].to_string_lossy().into_owned();
-        if literal {
-            index += 1;
-            continue;
-        }
         if arg == "--" {
-            literal = true;
-            index += 1;
-            continue;
+            break;
         }
-        if arg == "--lang" {
-            if index + 1 < args.len() {
-                value = Some(args[index + 1].to_string_lossy().into_owned());
-                args.drain(index..index + 2);
-                continue;
-            }
-            // Leave a value-less flag for clap to report the missing value.
-            index += 1;
-            continue;
-        }
-        if let Some(rest) = arg.strip_prefix("--lang=") {
+        // A value-less flag stays for clap to report the missing value.
+        if arg == "--lang" && index + 1 < args.len() {
+            value = Some(args[index + 1].to_string_lossy().into_owned());
+            args.drain(index..index + 2);
+        } else if let Some(rest) = arg.strip_prefix("--lang=") {
             value = Some(rest.to_owned());
             args.remove(index);
-            continue;
+        } else {
+            index += 1;
         }
-        index += 1;
     }
     value
 }
@@ -537,97 +524,43 @@ pub fn localize_command(command: clap::Command) -> clap::Command {
 
 /// Localizes clap's own section headings in rendered help and error text.
 ///
-/// Clap has no runtime translations for these strings; replacing whole lines
-/// keeps the argument help itself (already localized) untouched.
+/// Clap has no runtime translations for these strings; replacing them keeps the
+/// argument help itself (already localized) untouched.
 pub fn localize_rendered(text: &str) -> String {
-    let lang = crate::i18n::lang();
-    if lang == Lang::En {
+    if crate::i18n::lang() == Lang::En {
         return text.to_owned();
     }
-    let (usage, options, commands, arguments, more) = match lang {
-        Lang::ZhHans => (
-            crate::tr!("用法："),
-            crate::tr!("选项："),
-            crate::tr!("命令："),
-            crate::tr!("参数："),
+    let headings = [
+        ("Usage:", crate::tr!("用法：")),
+        ("Options:", crate::tr!("选项：")),
+        ("Commands:", crate::tr!("命令：")),
+        ("Arguments:", crate::tr!("参数：")),
+        (
+            "For more information, try '--help'.",
             crate::tr!("更多信息请运行 --help。"),
         ),
-        Lang::ZhHant => (
-            crate::tr!("用法："),
-            crate::tr!("選項："),
-            crate::tr!("命令："),
-            crate::tr!("參數："),
-            crate::tr!("更多資訊請執行 --help。"),
+    ];
+    let phrases = [
+        ("Print help", crate::tr!("显示帮助")),
+        ("Print version", crate::tr!("显示版本")),
+        (
+            "Print this message or the help of the given subcommand(s)",
+            crate::tr!("显示此消息或子命令的帮助"),
         ),
-        Lang::Ja => (
-            crate::tr!("使用法："),
-            crate::tr!("オプション："),
-            crate::tr!("コマンド："),
-            crate::tr!("引数："),
-            crate::tr!("詳細は --help を参照してください。"),
-        ),
-        Lang::En => unreachable!(),
-    };
-    let mut out = String::with_capacity(text.len());
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        let localized = if trimmed.starts_with("Usage:") {
-            Some(line.replacen("Usage:", usage, 1))
-        } else if trimmed.starts_with("Options:") {
-            Some(line.replacen("Options:", options, 1))
-        } else if trimmed.starts_with("Commands:") {
-            Some(line.replacen("Commands:", commands, 1))
-        } else if trimmed.starts_with("Arguments:") {
-            Some(line.replacen("Arguments:", arguments, 1))
-        } else if trimmed.starts_with("For more information, try '--help'.") {
-            Some(line.replacen("For more information, try '--help'.", more, 1))
-        } else if line.contains("Print help") {
-            Some(line.replacen("Print help", more_help(lang), 1))
-        } else if line.contains("Print version") {
-            Some(line.replacen("Print version", more_version(lang), 1))
-        } else if line.contains("Print this message or the help of the given subcommand(s)") {
-            Some(line.replacen(
-                "Print this message or the help of the given subcommand(s)",
-                more_help_command(lang),
-                1,
-            ))
-        } else {
-            None
-        };
-        out.push_str(localized.as_deref().unwrap_or(line));
-        out.push('\n');
-    }
-    if !text.ends_with('\n') {
-        out.pop();
-    }
-    out
-}
-
-fn more_help(lang: Lang) -> &'static str {
-    match lang {
-        Lang::ZhHans => crate::tr!("显示帮助"),
-        Lang::ZhHant => crate::tr!("顯示說明"),
-        Lang::Ja => crate::tr!("ヘルプを表示"),
-        Lang::En => "Print help",
-    }
-}
-
-fn more_help_command(lang: Lang) -> &'static str {
-    match lang {
-        Lang::ZhHans => crate::tr!("显示此消息或子命令的帮助"),
-        Lang::ZhHant => crate::tr!("顯示此訊息或子命令的說明"),
-        Lang::Ja => crate::tr!("このメッセージまたはサブコマンドのヘルプを表示"),
-        Lang::En => "Print this message or the help of the given subcommand(s)",
-    }
-}
-
-fn more_version(lang: Lang) -> &'static str {
-    match lang {
-        Lang::ZhHans => crate::tr!("显示版本"),
-        Lang::ZhHant => crate::tr!("顯示版本"),
-        Lang::Ja => crate::tr!("バージョンを表示"),
-        Lang::En => "Print version",
-    }
+    ];
+    text.split_inclusive('\n')
+        .map(|line| {
+            let trimmed = line.trim_start();
+            headings
+                .iter()
+                .find(|(english, _)| trimmed.starts_with(english))
+                .or_else(|| phrases.iter().find(|(english, _)| line.contains(english)))
+                .map_or_else(
+                    || line.to_owned(),
+                    |(english, local)| line.replacen(english, local, 1),
+                )
+        })
+        .collect()
 }
 
 fn parse_translation_target(value: &str) -> Result<String, String> {

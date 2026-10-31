@@ -40,6 +40,36 @@ fn check(line: &mut Vec<String>, ok: bool, name: &str, detail: &str) {
     line.push(format!("{mark} {name}{detail}"));
 }
 
+/// One tool's lines: its version and location, or why it cannot be used. A required
+/// tool's problem must be fixed; the return value says whether there is one.
+fn report_tool(
+    out: &mut Vec<String>,
+    name: &str,
+    tool: Option<crate::tools::Tool>,
+    version_args: &[&str],
+    missing: String,
+    required: bool,
+) -> bool {
+    let problem = match &tool {
+        None => missing,
+        Some(found) => match tool_version(&found.path, version_args) {
+            Some(version) => {
+                check(out, true, name, &format!("  {version}"));
+                out.push(format!("    {}", location(found)));
+                return false;
+            }
+            None => crate::tr!("找到但无法运行：{}", found.path.display()),
+        },
+    };
+    let mark = match (required, tool.is_some()) {
+        (true, _) => "✗",
+        (false, true) => "!",
+        (false, false) => "-",
+    };
+    out.push(format!("{mark} {name}  {problem}"));
+    required
+}
+
 pub fn run() -> Result<()> {
     let mut out = vec![format!(
         "course2md {} ({}/{})",
@@ -50,86 +80,34 @@ pub fn run() -> Result<()> {
     let mut failures = 0;
     out.push(crate::tr!("\n必需工具").into());
     for tool in ["ffmpeg", "ffprobe"] {
-        let located = crate::tools::locate(tool);
-        let version = located
-            .as_ref()
-            .and_then(|found| tool_version(&found.path, &["-version", "-hide_banner"]));
-        match (located, version) {
-            (Some(found), Some(version)) => {
-                check(&mut out, true, tool, &format!("  {version}"));
-                out.push(format!("    {}", location(&found)));
-            }
-            (Some(found), None) => {
-                failures += 1;
-                check(
-                    &mut out,
-                    false,
-                    tool,
-                    &format!(
-                        "  {}",
-                        crate::tr!("找到但无法运行：{}", found.path.display())
-                    ),
-                );
-            }
-            (None, _) => {
-                failures += 1;
-                check(
-                    &mut out,
-                    false,
-                    tool,
-                    &format!(
-                        "  {}",
-                        crate::tr!("缺失：{}", crate::error::install_hint(tool))
-                    ),
-                );
-            }
-        }
+        let missing = crate::tr!("缺失：{}", crate::error::install_hint(tool));
+        let found = crate::tools::locate(tool);
+        failures += report_tool(
+            &mut out,
+            tool,
+            found,
+            &["-version", "-hide_banner"],
+            missing,
+            true,
+        ) as usize;
     }
     out.push(crate::tr!("\n按用途选装").into());
-    match crate::ytdlp::resolve() {
-        Some(path) => match tool_version(&path, &["--version"]) {
-            Some(version) => {
-                check(&mut out, true, "yt-dlp", &format!("  {version}"));
-                out.push(format!(
-                    "    {}",
-                    location(&crate::tools::Tool {
-                        origin: crate::tools::origin_of(&path, crate::ytdlp::ENV_OVERRIDE),
-                        path,
-                    })
-                ));
-            }
-            None => check(
-                &mut out,
-                false,
-                "yt-dlp",
-                &format!("  {}", crate::tr!("找到但无法运行：{}", path.display())),
-            ),
-        },
-        None => out.push(format!(
-            "- yt-dlp  {}；{}",
-            crate::error::install_hint("yt-dlp"),
-            crate::tr!("重跑 install.sh 可安装随包版本")
-        )),
-    }
-    match crate::tools::locate("aria2c") {
-        Some(found) => match tool_version(&found.path, &["--version"]) {
-            Some(version) => {
-                check(&mut out, true, "aria2c", &format!("  {version}"));
-                out.push(format!("    {}", location(&found)));
-            }
-            None => out.push(format!(
-                "! aria2c  {}",
-                crate::tr!("找到但无法运行：{}", found.path.display())
-            )),
-        },
-        None => out.push(format!(
-            "- aria2c  {}",
-            crate::tr!(
-                "未安装；模型改为单连接下载：{}",
-                crate::error::install_hint("aria2")
-            )
-        )),
-    }
+    let ytdlp = crate::ytdlp::resolve().map(|path| crate::tools::Tool {
+        origin: crate::tools::origin_of(&path, crate::ytdlp::ENV_OVERRIDE),
+        path,
+    });
+    let missing = format!(
+        "{}；{}",
+        crate::error::install_hint("yt-dlp"),
+        crate::tr!("重跑 install.sh 可安装随包版本")
+    );
+    report_tool(&mut out, "yt-dlp", ytdlp, &["--version"], missing, false);
+    let missing = crate::tr!(
+        "未安装；模型改为单连接下载：{}",
+        crate::error::install_hint("aria2")
+    );
+    let aria2 = crate::tools::locate("aria2c");
+    report_tool(&mut out, "aria2c", aria2, &["--version"], missing, false);
     #[cfg(apple_native)]
     {
         // 与运行时 ensure_metallib 同一搜索清单（exe 同目录/Resources/上级 Resources/CWD）

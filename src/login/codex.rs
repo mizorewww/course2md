@@ -7,7 +7,6 @@
 //! 协议常量对照 openai/codex 源码（codex-rs/login/src/auth/manager.rs、
 //! codex-rs/model-provider-info/src/lib.rs），见各常量注释。
 
-use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -584,10 +583,6 @@ pub fn remove_credentials() -> Result<bool> {
     }
 }
 
-fn interactive() -> bool {
-    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
-}
-
 fn confirm_browser(prompt: &str) -> Result<CodexTokens> {
     let browser = dialoguer::Confirm::new()
         .with_prompt(prompt)
@@ -602,7 +597,7 @@ fn confirm_browser(prompt: &str) -> Result<CodexTokens> {
 
 /// `course2md --login codex`：导入 codex CLI 登录态（失败时可改用浏览器授权），选模型并启用 AI 校对。
 pub(super) fn login() -> Result<()> {
-    let interactive = interactive();
+    let interactive = crate::runtime::interactive();
     let mut tokens = match import_from_codex_cli() {
         Ok(tokens) => tokens,
         Err(import_err) if interactive => {
