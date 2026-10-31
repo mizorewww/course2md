@@ -1742,12 +1742,7 @@ impl Desktop {
         self.refresh_dispatch_controls(cx);
         self.set_settings_feedback(
             PreferenceGroup::Services,
-            if self.preferences.is_pending(PreferenceGroup::Services) {
-                course2md::tr!("正在保存…")
-            } else {
-                course2md::tr!("服务已保存")
-            }
-            .into(),
+            course2md::tr!("服务已保存").into(),
             false,
             cx,
         );
@@ -1991,12 +1986,7 @@ impl Desktop {
                 self.settings_ui.pending_generation = None;
                 self.set_settings_feedback(
                     PreferenceGroup::Generation,
-                    if self.preferences.is_pending(PreferenceGroup::Generation) {
-                        course2md::tr!("正在保存…")
-                    } else {
-                        course2md::tr!("已保存")
-                    }
-                    .into(),
+                    course2md::tr!("已保存").into(),
                     false,
                     cx,
                 );

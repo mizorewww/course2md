@@ -23,9 +23,9 @@ use std::{
 enum StorageOp {
     #[default]
     Move,
-    /// Pointing a library id at the folder it was moved to outside the app.
-    Relocate(String),
-    Reassociate,
+    /// Pointing a library id at the folder it now lives in: moved outside the
+    /// app, or the same folder after losing its identity.
+    Link(String),
     Cleanup,
 }
 
@@ -68,9 +68,6 @@ struct LocationChecks {
 
 fn backup_list_stale() -> &'static str {
     course2md::tr!("备份已删除，但列表尚未更新，请重启应用后检查")
-}
-fn library_removed() -> &'static str {
-    course2md::tr!("这个笔记库已被移除")
 }
 fn registry_unavailable() -> &'static str {
     course2md::tr!("笔记库列表暂时无法读取，请重启应用后重试")
@@ -177,6 +174,40 @@ fn inspect_location(location: &workspace::LibraryLocation) -> LocationCheck {
     check
 }
 
+/// What a person needs to see before giving a folder a library's identity.
+fn link_confirmation(link: &storage::LibraryLink, found: &storage::NotesFound) -> String {
+    let mut detail = course2md::tr!("保存位置：{}\n\n", link.folder.display());
+    if found.names.is_empty() {
+        detail.push_str(course2md::tr!("未读到笔记。\n"));
+    } else {
+        detail.push_str(&course2md::tr!(
+            "目前可读取 {} 份笔记：\n{}",
+            found.names.len(),
+            found
+                .names
+                .iter()
+                .take(5)
+                .map(|name| format!("• {name}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+        if found.names.len() > 5 {
+            detail.push_str(&course2md::tr!(
+                "\n以及另外 {} 份笔记。",
+                found.names.len() - 5
+            ));
+        }
+        detail.push('\n');
+    }
+    if found.unreadable > 0 {
+        detail.push_str(&course2md::tr!(
+            "另有 {} 份笔记无法读取。\n",
+            found.unreadable
+        ));
+    }
+    detail.trim_end().to_owned()
+}
+
 /// All filesystem probes and the caller's library scan run on the blocking
 /// pool, even when this future is polled by the UI executor.
 pub(super) async fn scan_locations<T, F>(
@@ -233,8 +264,7 @@ impl State {
     fn title(&self) -> &'static str {
         match self.op {
             StorageOp::Move => course2md::tr!("移动笔记库"),
-            StorageOp::Relocate(_) => course2md::tr!("重新定位笔记库"),
-            StorageOp::Reassociate => course2md::tr!("重新关联笔记库"),
+            StorageOp::Link(_) => course2md::tr!("重新定位笔记库"),
             StorageOp::Cleanup => course2md::tr!("清理旧位置备份"),
         }
     }
@@ -242,8 +272,7 @@ impl State {
     fn cancel_label(&self) -> &'static str {
         match self.op {
             StorageOp::Move => course2md::tr!("取消移动"),
-            StorageOp::Relocate(_) => course2md::tr!("取消重新定位"),
-            StorageOp::Reassociate => course2md::tr!("取消重新关联"),
+            StorageOp::Link(_) => course2md::tr!("取消重新定位"),
             StorageOp::Cleanup => course2md::tr!("取消清理"),
         }
     }
@@ -297,255 +326,20 @@ impl Desktop {
     }
 }
 
-fn relocate_source(source: &mut source::Source, old: &Path, new: &Path) {
-    if !source.online {
-        let mut path = PathBuf::from(&source.input);
-        storage::relocate_path(&mut path, old, new);
-        source.input = path.display().to_string();
-    }
-    if let Some(path) = &mut source.cover {
-        storage::relocate_path(path, old, new);
-    }
-    if let Some(subtitle) = &mut source.selected_subtitle {
-        storage::relocate_path(&mut subtitle.path, old, new);
-    }
-    fn track(track: &mut course2md::subtitle::SubtitleTrack, old: &Path, new: &Path) {
-        if let course2md::subtitle::SubtitleOrigin::File { path } = &mut track.origin {
-            storage::relocate_path(path, old, new);
-            // Track identity refers to the original confirmed choice. Its content
-            // is stored in the task; relocating a file does not reselect a track.
-        }
-    }
-    if let course2md::subtitle::SubtitleEvidence::Found { tracks, .. } = &mut source.subtitles {
-        for item in tracks {
-            track(item, old, new);
-        }
-    }
-    if let Some(item) = &mut source.subtitle_request {
-        track(item, old, new);
-    }
-}
-
-fn relocate_config(config: &mut course2md::settings::ConfigFile, old: &Path, new: &Path) {
-    if let Some(path) = &mut config.defaults.out {
-        storage::relocate_path(path, old, new);
-    }
-    if let Some(path) = &mut config.defaults.model_dir {
-        storage::relocate_path(path, old, new);
-    }
-}
-
 fn relocate_preview(preview: &mut crate::notes::Preview, old: &Path, new: &Path) {
-    storage::relocate_path(&mut preview.course.dir, old, new);
+    workspace::relocate_path(&mut preview.course.dir, old, new);
     if let Some(path) = &mut preview.course.thumbnail {
-        storage::relocate_path(path, old, new);
+        workspace::relocate_path(path, old, new);
     }
     for block in &mut preview.blocks {
         if let crate::notes::PreviewBlock::Image(path) = block {
-            storage::relocate_path(path, old, new);
+            workspace::relocate_path(path, old, new);
         }
     }
-}
-
-fn validate_registered_destination(
-    state: &workspace::State,
-    library_id: &str,
-    destination: &Path,
-) -> Result<()> {
-    let destination =
-        std::fs::canonicalize(destination).context(course2md::tr!("目标位置暂时无法访问"))?;
-    ensure!(
-        !state
-            .libraries
-            .iter()
-            .filter(|library| library.id != library_id)
-            .any(|library| {
-                let root =
-                    std::fs::canonicalize(&library.root).unwrap_or_else(|_| library.root.clone());
-                root.starts_with(&destination) || destination.starts_with(root)
-            }),
-        course2md::tr!("目标与另一个笔记库重叠，请选择单独的文件夹")
-    );
-    Ok(())
-}
-
-/// Apply only after the destination copy is verified. Keeping the library ID
-/// makes folder IDs, reading positions and all service bindings stable.
-fn publish_location(
-    state: &mut workspace::State,
-    journal: &Journal,
-    journal_path: &Path,
-) -> Result<()> {
-    ensure!(
-        journal.phase == Phase::Verified,
-        course2md::tr!("目标副本尚未核验，不能切换保存位置")
-    );
-    let location = state
-        .libraries
-        .iter()
-        .find(|library| library.id == journal.library_id)
-        .context(library_removed())?;
-    ensure!(
-        std::fs::canonicalize(&location.root)? == journal.source,
-        course2md::tr!("笔记库的位置在移动期间已经变化，尚未切换")
-    );
-    validate_registered_destination(state, &journal.library_id, &journal.destination)?;
-    let roots = [journal.source.clone(), location.root.clone()];
-    rebind_location(state, &journal.library_id, &roots, &journal.destination)?;
-    state.storage_backups.push(storage::BackupRecord {
-        id: journal.id.clone(),
-        library_id: journal.library_id.clone(),
-        path: journal.source.clone(),
-        current_root: journal.destination.clone(),
-        created: journal.created,
-        verified: true,
-        journal_path: journal_path.to_owned(),
-    });
-    Ok(())
-}
-
-/// A library move and locating an already moved library share the same registry
-/// update. Only a verified copy operation creates a backup record.
-fn rebind_location(
-    state: &mut workspace::State,
-    library_id: &str,
-    roots: &[PathBuf],
-    destination: &Path,
-) -> Result<()> {
-    ensure!(state.library(library_id).is_some(), library_removed());
-    for old in roots {
-        for path in state.reader_sources.values_mut() {
-            storage::relocate_path(path, old, destination);
-        }
-        for draft in &mut state.drafts {
-            if let Some(source) = &mut draft.source {
-                let before = source.input.clone();
-                relocate_source(source, old, destination);
-                if !source.online && before != source.input {
-                    draft.input = source.input.clone();
-                }
-            } else if !draft.online {
-                let mut path = PathBuf::from(&draft.input);
-                storage::relocate_path(&mut path, old, destination);
-                draft.input = path.display().to_string();
-            }
-            if let Some(path) = &mut draft.subtitle {
-                storage::relocate_path(path, old, destination);
-            }
-            if let Some(config) = &mut draft.base_config {
-                relocate_config(config, old, destination);
-            }
-        }
-        for task in &mut state.tasks {
-            storage::relocate_path(&mut task.work_dir, old, destination);
-            if let Some(path) = &mut task.artifact {
-                storage::relocate_path(path, old, destination);
-            }
-            if let Some(path) = &mut task.plan.subtitle {
-                storage::relocate_path(path, old, destination);
-            }
-            relocate_source(&mut task.plan.source, old, destination);
-            relocate_config(&mut task.plan.config, old, destination);
-            if let course2md::execution::Operation::Reprocess {
-                base_version_dir,
-                prior_work_dir,
-                ..
-            } = &mut task.plan.operation
-            {
-                storage::relocate_path(base_version_dir, old, destination);
-                if let Some(path) = prior_work_dir {
-                    storage::relocate_path(path, old, destination);
-                }
-            }
-        }
-    }
-    let location = state
-        .libraries
-        .iter_mut()
-        .find(|library| library.id == library_id)
-        .unwrap();
-    for old in roots {
-        if !location.previous_roots.contains(old) {
-            location.previous_roots.push(old.clone());
-        }
-    }
-    location.root = destination.to_owned();
-    for backup in &mut state.storage_backups {
-        if backup.library_id == library_id {
-            backup.current_root = destination.to_owned();
-        }
-    }
-    Ok(())
-}
-
-struct LocatedLibrary {
-    library_id: String,
-    previous_root: PathBuf,
-    destination: PathBuf,
-    stamp: storage::DirectoryStamp,
-}
-
-/// Read only: finding a moved library never creates or repairs its identity.
-fn inspect_relocation(
-    state: &workspace::State,
-    library_id: &str,
-    destination: &Path,
-) -> Result<LocatedLibrary> {
-    let location = state.library(library_id).context(library_removed())?;
-    let destination = destination
-        .canonicalize()
-        .context(course2md::tr!("所选文件夹暂时无法访问"))?;
-    ensure!(
-        destination
-            != location
-                .root
-                .canonicalize()
-                .unwrap_or_else(|_| location.root.clone()),
-        course2md::tr!("所选仍是当前位置，请选择移动后的笔记库文件夹")
-    );
-    validate_registered_destination(state, library_id, &destination)?;
-    let stamp = storage::directory_stamp(&destination)?;
-    let identity = std::fs::read_to_string(destination.join(storage::LIBRARY_ID_FILE)).context(
-        course2md::tr!("无法确认所选文件夹是这个笔记库，请选择移动后的完整笔记库文件夹"),
-    )?;
-    ensure!(
-        identity.trim() == library_id,
-        course2md::tr!("所选文件夹属于另一个笔记库，请选择这个笔记库移动后的文件夹")
-    );
-    ensure!(
-        storage::directory_stamp(&destination)? == stamp,
-        course2md::tr!("所选文件夹已变化，请重新选择")
-    );
-    Ok(LocatedLibrary {
-        library_id: library_id.to_owned(),
-        previous_root: location.root.clone(),
-        destination,
-        stamp,
-    })
-}
-
-fn publish_relocation(state: &mut workspace::State, located: &LocatedLibrary) -> Result<()> {
-    ensure!(
-        state
-            .library(&located.library_id)
-            .is_some_and(|location| location.root == located.previous_root),
-        course2md::tr!("这个笔记库的位置已变化，请重新选择")
-    );
-    // Recheck the actual directory and identity immediately before publication.
-    let current = inspect_relocation(state, &located.library_id, &located.destination)?;
-    ensure!(
-        current.stamp == located.stamp,
-        course2md::tr!("所选文件夹已被替换，请重新选择")
-    );
-    rebind_location(
-        state,
-        &located.library_id,
-        std::slice::from_ref(&located.previous_root),
-        &located.destination,
-    )
 }
 
 impl Desktop {
+    /// Asks which folder the library now lives in, then links it.
     pub fn begin_library_relocation(
         &mut self,
         library_id: String,
@@ -555,8 +349,70 @@ impl Desktop {
         if self.storage_ui.busy {
             return;
         }
-        self.storage_ui
-            .begin(StorageOp::Relocate(library_id.clone()));
+        self.storage_ui.begin(StorageOp::Link(library_id.clone()));
+        let prompt = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(course2md::tr!("选择这个笔记库移动后的文件夹").into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let answer = prompt.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                match answer {
+                    Ok(Ok(Some(paths))) => {
+                        if let Some(folder) = paths.into_iter().next() {
+                            this.link_library(library_id, folder, window, cx);
+                        }
+                    }
+                    Ok(Ok(None)) => {}
+                    Ok(Err(error)) => {
+                        this.storage_ui.error =
+                            Some(course2md::tr!("无法选择文件夹：{}", format!("{error:#}")));
+                        this.open_storage_dialog(window, cx);
+                    }
+                    Err(error) => {
+                        this.storage_ui.error =
+                            Some(course2md::tr!("无法打开文件选择器：{}", error));
+                        this.open_storage_dialog(window, cx);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The same folder, after it lost its identity.
+    pub fn begin_library_reassociation(
+        &mut self,
+        library_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(root) = self
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.state.library(&library_id))
+            .map(|location| location.root.clone())
+        else {
+            return;
+        };
+        self.link_library(library_id, root, window, cx);
+    }
+
+    /// Points a library at `folder`, asking first if the folder has no identity to prove it.
+    fn link_library(
+        &mut self,
+        library_id: String,
+        folder: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.storage_ui.busy {
+            return;
+        }
+        self.storage_ui.begin(StorageOp::Link(library_id.clone()));
         if self.job.is_some() || self.preview_workers > 0 {
             self.storage_ui.error =
                 Some(course2md::tr!("正在处理内容，结束或停止后再重新定位").into());
@@ -566,286 +422,144 @@ impl Desktop {
         if !self.save_current_draft(cx) {
             return;
         }
-        let Some(state) = self
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.state.clone())
-        else {
+        let Some(state) = self.workspace.as_ref().map(|w| w.state.clone()) else {
             return;
         };
         self.storage_ui.busy = true;
         self.storage_ui.generation = self.storage_ui.generation.wrapping_add(1);
         let generation = self.storage_ui.generation;
-        let prompt = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(course2md::tr!("选择这个笔记库移动后的文件夹").into()),
-        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.storage_ui.cancel = Some(cancel.clone());
+        self.storage_ui.progress.message = course2md::tr!("正在核对所选文件夹…").into();
+        self.open_storage_dialog(window, cx);
         cx.spawn_in(window, async move |this, cx| {
-            let answer = prompt.await;
-            let destination = match answer {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                Ok(Ok(None)) => None,
-                error => {
-                    let message = match error {
-                        Ok(Err(error)) => course2md::tr!("无法选择文件夹：{}", format!("{error:#}")),
-                        Err(error) => course2md::tr!("无法打开文件选择器：{}", error),
-                        _ => unreachable!(),
-                    };
-                    let _ = this.update_in(cx, |this, window, cx| {
-                        this.storage_ui.busy = false;
-                        this.wake_poll();
-                        this.storage_ui.error = Some(message);
-                        this.open_storage_dialog(window, cx);
-                        cx.notify();
+            let worker_cancel = cancel.clone();
+            let inspected = crate::spawn_blocking_io(move || {
+                storage::inspect_link(&state, &library_id, &folder, &worker_cancel)
+            })
+            .recv()
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let link = match inspected {
+                Ok(link) => link,
+                Err(error) => {
+                    let _ = this.update_in(cx, |this, _, cx| {
+                        this.finish_link(generation, Err(error), cx);
                     });
                     return;
                 }
             };
-            let Some(destination) = destination else {
-                let _ = this.update_in(cx, |this, _, cx| {
-                    this.storage_ui.busy = false;
-                    this.wake_poll();
-                    this.start_next_task(cx);
-                    cx.notify();
-                });
-                return;
-            };
-            let cancel = Arc::new(AtomicBool::new(false));
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.storage_ui.cancel = Some(cancel.clone());
-                this.storage_ui.progress.message = course2md::tr!("正在核对所选文件夹…").into();
-                this.open_storage_dialog(window, cx);
-                cx.notify();
-            });
-            let work = crate::spawn_blocking_io(move || {
-                inspect_relocation(&state, &library_id, &destination)
-            });
-            let result = work
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let _ = this.update_in(cx, |this, window, cx| {
-                if this.storage_ui.generation != generation {
-                    return;
-                }
-                let result = result.and_then(|located| {
-                    ensure!(!this.closing && !cancel.load(Ordering::Relaxed), course2md::tr!("已取消重新定位"));
-                    ensure!(this.job.is_none() && this.preview_workers == 0, course2md::tr!("内容仍在处理中，请停止后重新定位"));
-                    this.workspace.as_mut().context(registry_unavailable())?
-                        .transaction(|state| publish_relocation(state, &located))?;
-                    Ok(located)
-                });
-                this.storage_ui.busy = false;
-                this.wake_poll();
-                this.storage_ui.cancel = None;
-                this.storage_ui.progress = Progress::default();
-                match result {
-                    Ok(located) => {
-                        if this.library_root == located.previous_root {
-                            this.library_root = located.destination.clone();
-                        }
-                        this.read_generation = this.read_generation.wrapping_add(1);
-                        this.reading = false;
-                        if let Some(preview) = this.preview.as_mut() {
-                            let was_inside = preview.course.dir.starts_with(&located.previous_root);
-                            relocate_preview(
-                                std::rc::Rc::make_mut(preview),
-                                &located.previous_root,
-                                &located.destination,
-                            );
-                            if was_inside {
-                                this.restore_reading_position(cx);
-                            }
-                        }
-                        let settings = this.relocate_settings_paths(&located.previous_root, &located.destination, cx);
-                        this.storage_ui.error = settings.err().map(|error| course2md::tr!("笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}", format!("{error:#}")));
-                        this.storage_ui.progress = Progress {
-                            message: course2md::tr!("已重新定位到 {}", located.destination.display()),
-                            completed: 1,
-                            total: 1,
-                        };
-                        this.workspace_error = None;
-                        this.restore_draft(window, cx);
-                        this.refresh_library(cx);
-                        if this.storage_ui.error.is_none() {
-                            window.close_dialog(cx);
-                        }
-                    }
-                    Err(error) => {
-                        this.storage_ui.error = Some(course2md::tr!("尚未重新定位：{}", format!("{error:#}")));
-                    }
-                }
-                this.start_next_task(cx);
-                cx.notify();
-            });
-        }).detach();
-        cx.notify();
-    }
-
-    pub fn begin_library_reassociation(
-        &mut self,
-        library_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.storage_ui.busy {
-            return;
-        }
-        let Some(location) = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.library(&library_id))
-            .cloned()
-        else {
-            return;
-        };
-        let courses = self
-            .courses
-            .iter()
-            .filter(|course| {
-                self.course_location(course)
-                    .is_some_and(|library| library.id == library_id)
-            })
-            .map(|course| Course::clone(course))
-            .collect::<Vec<_>>();
-        self.storage_ui.begin(StorageOp::Reassociate);
-        self.storage_ui.busy = true;
-        self.storage_ui.progress = Progress {
-            message: course2md::tr!("正在重新读取这个位置中的笔记…").into(),
-            ..Default::default()
-        };
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.storage_ui.cancel = Some(cancel.clone());
-        self.open_storage_dialog(window, cx);
-        let root = location.root.clone();
-        let worker_cancel = cancel.clone();
-        // Scanning reads every note on disk synchronously; see crate::spawn_blocking_io.
-        let worker = crate::spawn_blocking_io(move || {
-            let stamp = storage::directory_stamp(&root)?;
-            let mut names = Vec::new();
-            let mut unreadable = 0;
-            for course in courses {
-                ensure!(
-                    !worker_cancel.load(Ordering::Relaxed),
-                    course2md::tr!("已取消重新关联")
-                );
-                let title = course.title.clone();
-                if crate::notes::read_preview(course).is_ok() {
-                    names.push(title);
-                } else {
-                    unreadable += 1;
-                }
-            }
-            ensure!(
-                storage::directory_stamp(&root)? == stamp,
-                course2md::tr!("保存位置在读取期间已经变化，请重新检查")
-            );
-            ensure!(
-                !worker_cancel.load(Ordering::Relaxed),
-                course2md::tr!("已取消重新关联")
-            );
-            Ok::<_, anyhow::Error>((stamp, names, unreadable))
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let result = worker
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
-            let Ok((stamp, names, unreadable)) = result else {
-                let message = result.unwrap_err().to_string();
-                let _ = this.update_in(cx, |this, _, cx| {
-                    this.storage_ui.busy = false;
-                    this.wake_poll();
+            if let Some(found) = &link.unmarked {
+                let detail = link_confirmation(&link, found);
+                let answer = this.update_in(cx, |this, window, cx| {
                     this.storage_ui.cancel = None;
-                    this.storage_ui.progress = Progress::default();
-                    this.storage_ui.error = Some(message);
-                    this.start_next_task(cx);
-                    cx.notify();
+                    window.close_dialog(cx);
+                    window.prompt(
+                        PromptLevel::Info,
+                        course2md::tr!("重新关联此保存位置？"),
+                        Some(&detail),
+                        &[course2md::tr!("重新关联"), course2md::tr!("取消")],
+                        cx,
+                    )
                 });
-                return;
-            };
-            let mut detail = course2md::tr!("保存位置：{}\n\n", location.root.display());
-            if names.is_empty() {
-                detail.push_str(course2md::tr!("未读到笔记。\n"));
-            } else {
-                detail.push_str(&course2md::tr!(
-                    "目前可读取 {} 份笔记：\n{}",
-                    names.len(),
-                    names
-                        .iter()
-                        .take(5)
-                        .map(|name| format!("• {name}"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                ));
-                if names.len() > 5 {
-                    detail.push_str(&course2md::tr!("\n以及另外 {} 份笔记。", names.len() - 5));
-                }
-                detail.push('\n');
-            }
-            if unreadable > 0 {
-                detail.push_str(&course2md::tr!("另有 {} 份笔记无法读取。\n", unreadable));
-            }
-            let detail = detail.trim_end().to_owned();
-            let answer = this.update_in(cx, |this, window, cx| {
-                this.storage_ui.cancel = None;
-                window.close_dialog(cx);
-                window.prompt(
-                    PromptLevel::Info,
-                    course2md::tr!("重新关联此保存位置？"),
-                    Some(&detail),
-                    &[course2md::tr!("重新关联"), course2md::tr!("取消")],
-                    cx,
-                )
-            });
-            let Ok(answer) = answer else {
-                return;
-            };
-            let accepted = answer.await.ok() == Some(0);
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.storage_ui.busy = false;
-                this.wake_poll();
-                this.storage_ui.progress = Progress::default();
-                this.storage_ui.cancel = None;
+                let accepted = match answer {
+                    Ok(answer) => answer.await.ok() == Some(0),
+                    Err(_) => return,
+                };
                 if !accepted {
-                    this.start_next_task(cx);
-                    cx.notify();
+                    let _ = this.update_in(cx, |this, _, cx| {
+                        this.storage_ui.busy = false;
+                        this.wake_poll();
+                        this.storage_ui.progress = Progress::default();
+                        this.start_next_task(cx);
+                        cx.notify();
+                    });
                     return;
                 }
-                let result = (|| -> Result<()> {
-                    let workspace = this.workspace.as_mut().context(registry_unavailable())?;
-                    let current = workspace
-                        .state
-                        .library(&library_id)
-                        .context(library_removed())?;
+            }
+            let (link, finished) = crate::spawn_blocking_io(move || {
+                let tasks = storage::finish_link(&link);
+                (link, tasks)
+            })
+            .recv()
+            .await
+            .unwrap_or_else(|_| unreachable!("the blocking pool outlives this task"));
+            let _ = this.update_in(cx, |this, window, cx| {
+                let result = finished.and_then(|tasks| {
                     ensure!(
-                        current.root == location.root
-                            && storage::directory_stamp(&current.root)? == stamp,
-                        course2md::tr!(
-                            "保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。"
-                        )
+                        !this.closing && !cancel.load(Ordering::Relaxed),
+                        course2md::tr!("已取消重新定位")
                     );
-                    workspace.reassociate_library(&library_id)
-                })();
-                match result {
-                    Ok(()) => {
-                        this.storage_ui.error = None;
-                        this.message = Some(course2md::tr!("已重新关联「{}」", location.name));
-                    }
-                    Err(error) => {
-                        this.storage_ui.error =
-                            Some(course2md::tr!("尚未重新关联：{}", format!("{error:#}")));
-                        this.open_storage_dialog(window, cx);
-                    }
+                    ensure!(
+                        this.job.is_none() && this.preview_workers == 0,
+                        course2md::tr!("内容仍在处理中，请停止后重新定位")
+                    );
+                    let workspace = this.workspace.as_mut().context(registry_unavailable())?;
+                    workspace.transaction(|state| storage::publish_link(state, &link, tasks))?;
+                    Ok(link)
+                });
+                let linked = result.is_ok();
+                if let Ok(link) = &result {
+                    this.apply_link(link, window, cx);
                 }
-                this.refresh_library(cx);
-                this.start_next_task(cx);
-                cx.notify();
+                this.finish_link(generation, result.map(|_| ()), cx);
+                if linked && this.storage_ui.error.is_none() {
+                    window.close_dialog(cx);
+                }
             });
         })
         .detach();
+        cx.notify();
+    }
+
+    /// What follows a library to its new folder outside the record.
+    fn apply_link(
+        &mut self,
+        link: &storage::LibraryLink,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.library_root == link.previous_root {
+            self.library_root = link.folder.clone();
+        }
+        self.read_generation = self.read_generation.wrapping_add(1);
+        self.reading = false;
+        if let Some(preview) = self.preview.as_mut() {
+            let was_inside = preview.course.dir.starts_with(&link.previous_root);
+            relocate_preview(
+                std::rc::Rc::make_mut(preview),
+                &link.previous_root,
+                &link.folder,
+            );
+            if was_inside {
+                self.restore_reading_position(cx);
+            }
+        }
+        let settings = self.relocate_settings_paths(&link.previous_root, &link.folder, cx);
+        self.storage_ui.error = settings.err().map(|error| {
+            course2md::tr!(
+                "笔记库已重新定位，模型位置尚未保存。请在生成笔记设置中重试保存：{}",
+                format!("{error:#}")
+            )
+        });
+        self.workspace_error = None;
+        self.restore_draft(window, cx);
+        self.message = Some(course2md::tr!("已重新定位到 {}", link.folder.display()));
+    }
+
+    fn finish_link(&mut self, generation: u64, result: Result<()>, cx: &mut Context<Self>) {
+        if self.storage_ui.generation != generation {
+            return;
+        }
+        self.storage_ui.busy = false;
+        self.wake_poll();
+        self.storage_ui.cancel = None;
+        self.storage_ui.progress = Progress::default();
+        if let Err(error) = result {
+            self.storage_ui.error = Some(course2md::tr!("尚未重新定位：{}", format!("{error:#}")));
+        }
+        self.refresh_library(cx);
+        self.start_next_task(cx);
         cx.notify();
     }
 
@@ -886,33 +600,24 @@ impl Desktop {
     }
 
     fn apply_storage_records(&mut self, records: storage::Records, cx: &mut Context<Self>) {
-        self.storage_ui.pending = records.pending;
-        self.storage_ui.corrupt_records = records.corrupt;
-        let (unsettled, stale_markers) = (records.unsettled, records.stale_markers);
-        let mut relocated = Vec::new();
-        for (path, mut journal) in records.settings_pending {
-            match self.relocate_settings_paths(&journal.source, &journal.destination, cx) {
-                Ok(()) => {
-                    journal.settings_relocated = true;
-                    relocated.push((path, journal));
-                }
-                Err(error) => {
-                    self.storage_ui.error = Some(course2md::tr!(
-                        "笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}",
-                        format!("{error:#}")
-                    ))
-                }
+        self.storage_ui.pending = records.pending.clone();
+        self.storage_ui.corrupt_records = records.corrupt.clone();
+        // Model paths follow a moved library. Repeating this after a crash is harmless,
+        // and once they follow there is nothing left to do.
+        let moved: Vec<_> = self
+            .workspace
+            .iter()
+            .flat_map(|workspace| workspace.state.storage_backups.iter())
+            .filter(|backup| self.preferences.references_storage_path(&backup.path))
+            .map(|backup| (backup.path.clone(), backup.current_root.clone()))
+            .collect();
+        for (old, new) in moved {
+            if let Err(error) = self.relocate_settings_paths(&old, &new, cx) {
+                self.storage_ui.error = Some(course2md::tr!(
+                    "笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}",
+                    format!("{error:#}")
+                ))
             }
-        }
-        if !(relocated.is_empty() && unsettled.is_empty() && stale_markers.is_empty()) {
-            // Updating model paths again is harmless, so a lost flag only
-            // repeats it at the next start.
-            crate::spawn_blocking_io(move || {
-                storage::settle_records(&unsettled, &stale_markers);
-                for (path, journal) in relocated {
-                    let _ = storage::save_journal(&path, &journal);
-                }
-            });
         }
         if !records.cleaned.is_empty()
             && let Some(workspace) = &mut self.workspace
@@ -927,6 +632,7 @@ impl Desktop {
         {
             self.storage_ui.error = Some(backup_list_stale().into());
         }
+        crate::spawn_blocking_io(move || storage::settle_records(&records));
         cx.notify();
     }
 
@@ -955,7 +661,7 @@ impl Desktop {
             .and_then(|workspace| workspace.state.library(&id))
             .map(|library| library.root.clone())
         else {
-            self.workspace_error = Some(library_removed().into());
+            self.workspace_error = Some(course2md::tr!("这个笔记库已被移除").into());
             cx.notify();
             return;
         };
@@ -1172,7 +878,7 @@ impl Desktop {
                         let _ = report.try_send(value);
                     }
                 };
-                validate_registered_destination(&state, &library_id, &destination)?;
+                storage::check_overlap(&state, &library_id, &destination)?;
                 match resume {
                     Some(path) => storage::resume_move(&path, &worker_cancel, &report),
                     None => storage::prepare_move(
@@ -1218,9 +924,8 @@ impl Desktop {
                             .as_mut()
                             .context(registry_unavailable())
                             .and_then(|workspace| {
-                                workspace.transaction(|state| {
-                                    publish_location(state, &prepared.journal, &prepared.path)
-                                })
+                                workspace
+                                    .transaction(|state| storage::publish_move(state, &prepared))
                             });
                         if let Err(error) = committed {
                             this.finish_storage_error(
@@ -1237,18 +942,15 @@ impl Desktop {
                         }
                         prepared.journal.phase = Phase::Committed;
                         this.storage_ui.error = None;
-                        match this.relocate_settings_paths(
+                        if let Err(error) = this.relocate_settings_paths(
                             &prepared.journal.source,
                             &prepared.journal.destination,
                             cx,
                         ) {
-                            Ok(()) => prepared.journal.settings_relocated = true,
-                            Err(error) => {
-                                this.storage_ui.error = Some(course2md::tr!(
-                                    "笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}",
-                                    format!("{error:#}")
-                                ))
-                            }
+                            this.storage_ui.error = Some(course2md::tr!(
+                                "笔记库已移动，模型位置尚未保存。旧位置备份已保留：{}",
+                                format!("{error:#}")
+                            ))
                         }
                         // A record left behind is marked committed at the next start.
                         let _ = storage::save_journal(&prepared.path, &prepared.journal);
@@ -1407,7 +1109,7 @@ impl Desktop {
                     .label(course2md::tr!("关闭"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             );
-            if let StorageOp::Relocate(id) = &self.storage_ui.op
+            if let StorageOp::Link(id) = &self.storage_ui.op
                 && self.storage_ui.error.is_some()
                 && self.storage_ui.progress.completed == 0
             {
@@ -1429,7 +1131,7 @@ impl Desktop {
     pub fn storage_status_panel(&self, cx: &mut Context<Self>) -> Div {
         let mut view = v_flex().w_full().min_w_0().flex_shrink_0().gap_3();
         let mut has_content = false;
-        if matches!(self.storage_ui.op, StorageOp::Relocate(_))
+        if matches!(self.storage_ui.op, StorageOp::Link(_))
             && !self.storage_ui.busy
             && self.storage_ui.error.is_none()
             && self.storage_ui.progress.completed > 0
@@ -2070,12 +1772,26 @@ fn location_status(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        LocationChecks, inspect_location, inspect_relocation, publish_location, publish_relocation,
-        relocate_preview, scan_locations, validate_registered_destination,
-    };
+    use super::{LocationChecks, inspect_location, relocate_preview, scan_locations};
     use crate::{ConversionOptions, source, storage, workspace};
     use std::{path::PathBuf, sync::atomic::AtomicBool};
+
+    fn inspect_relocation(
+        state: &workspace::State,
+        id: &str,
+        folder: &std::path::Path,
+    ) -> anyhow::Result<storage::LibraryLink> {
+        storage::inspect_link(state, id, folder, &AtomicBool::new(false))
+    }
+
+    /// The disk half and the record half of a link, in one step.
+    fn publish_relocation(
+        state: &mut workspace::State,
+        link: &storage::LibraryLink,
+    ) -> anyhow::Result<()> {
+        let tasks = storage::finish_link(link)?;
+        storage::publish_link(state, link, tasks)
+    }
 
     fn test_location(root: PathBuf) -> workspace::LibraryLocation {
         workspace::LibraryLocation {
@@ -2190,6 +1906,7 @@ mod tests {
         workspace.state.task_mut(&task_id).unwrap().artifact = Some(preview.course.dir.clone());
         workspace.transaction(|_| Ok(())).unwrap();
         let binding = br#"{"task_id":"kept","source_id":"kept"}"#;
+        std::fs::create_dir_all(&work).unwrap();
         std::fs::write(work.join("task-identity.json"), binding).unwrap();
         std::fs::write(
             work.join("control.json"),
@@ -2278,7 +1995,13 @@ mod tests {
         workspace.save().unwrap();
         let id = workspace.state.default_library.clone();
         let before = std::fs::read(workspace.storage_path()).unwrap();
-        assert!(inspect_relocation(&workspace.state, &id, &target).is_err());
+        // A folder with no identity needs a person's confirmation, and is not touched yet.
+        assert!(
+            inspect_relocation(&workspace.state, &id, &target)
+                .unwrap()
+                .unmarked
+                .is_some_and(|found| found.names.is_empty())
+        );
         assert!(!target.join(".course2md-library-id").exists());
         std::fs::write(target.join(".course2md-library-id"), "another-library").unwrap();
         assert!(inspect_relocation(&workspace.state, &id, &target).is_err());
@@ -2584,7 +2307,7 @@ mod tests {
         let mut external_input_state = workspace.state.clone();
         external_input_state.current_draft = outside_draft.id.clone();
         external_input_state.drafts = vec![outside_draft];
-        publish_location(&mut external_input_state, &prepared.journal, &prepared.path).unwrap();
+        storage::publish_move(&mut external_input_state, &prepared).unwrap();
         assert_eq!(external_input_state.draft().unwrap().input, outside_input);
         #[cfg(unix)]
         {
@@ -2592,8 +2315,7 @@ mod tests {
             let permissions = std::fs::metadata(directory.path()).unwrap().permissions();
             std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o555))
                 .unwrap();
-            let failed = workspace
-                .transaction(|state| publish_location(state, &prepared.journal, &prepared.path));
+            let failed = workspace.transaction(|state| storage::publish_move(state, &prepared));
             std::fs::set_permissions(directory.path(), permissions).unwrap();
             assert!(failed.is_err());
             assert_eq!(workspace.state.library(&library_id).unwrap().root, old);
@@ -2610,7 +2332,7 @@ mod tests {
             old_task_work
         );
         workspace
-            .transaction(|state| publish_location(state, &prepared.journal, &prepared.path))
+            .transaction(|state| storage::publish_move(state, &prepared))
             .unwrap();
         let mut reopened = workspace::Workspace::open_at_inline(
             record_path,
@@ -2684,7 +2406,7 @@ mod tests {
         )
         .unwrap();
         reopened
-            .transaction(|state| publish_location(state, &second_move.journal, &second_move.path))
+            .transaction(|state| storage::publish_move(state, &second_move))
             .unwrap();
         let location = reopened.state.library(&library_id).unwrap();
         assert!(location.previous_roots.contains(&old) && location.previous_roots.contains(&new));
@@ -2721,12 +2443,8 @@ mod tests {
             previous_roots: Vec::new(),
         });
         assert!(
-            validate_registered_destination(
-                &workspace.state,
-                &workspace.state.default_library,
-                &second
-            )
-            .is_err()
+            storage::check_overlap(&workspace.state, &workspace.state.default_library, &second)
+                .is_err()
         );
         assert!(std::fs::read_dir(second).unwrap().next().is_none());
     }

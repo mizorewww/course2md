@@ -28,6 +28,8 @@ tempfile = "3"
 url = "2"
 ureq = { version = "2", features = ["json"] }
 uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+same-file = "1.0.6"
 which = "8.0.6"
 zeroize = "1"
 base64 = "0.22"
@@ -42,9 +44,6 @@ libc = "0.2"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 keyring = "4"
-
-[target.'cfg(windows)'.dependencies]
-same-file = "1.0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.7"

@@ -443,7 +443,8 @@ impl Desktop {
             course2md::tr!(
                 "{} 的准备未完成：{}",
                 name,
-                self.task_error
+                self.job_events
+                    .error
                     .as_deref()
                     .unwrap_or(course2md::tr!("准备失败"))
             )
@@ -1105,7 +1106,8 @@ impl Desktop {
                     .into_any_element(),
             );
             for (index, (stage, progress)) in self
-                .progress
+                .job_events
+                .stages
                 .iter()
                 .filter(|(stage, progress)| {
                     stage.is_model_transfer() && progress.has_samples() && !progress.done
@@ -1228,7 +1230,7 @@ impl Desktop {
         }
         // Logs belong to the last model job: shown while it runs and after it ends.
         if self.kind == Kind::Models
-            && !self.logs.is_empty()
+            && !self.job_events.logs.is_empty()
             && (self.job.is_some() || outcome.is_some())
         {
             view = view.child(
@@ -1257,10 +1259,8 @@ impl Desktop {
                     )
                     .child(
                         settings_value("model-preparation-log", {
-                            let tail = self.logs.len().saturating_sub(LOG_TAIL);
-                            let lines: Vec<&str> =
-                                self.logs.range(tail..).map(String::as_str).collect();
-                            lines.join("\n")
+                            let logs = &self.job_events.logs;
+                            logs[logs.len().saturating_sub(LOG_TAIL)..].join("\n")
                         })
                         .text_size(TEXT_SETTINGS_AUX),
                     ),

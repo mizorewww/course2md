@@ -4186,7 +4186,7 @@ mod tests {
         tasks[0].state = workspace::TaskState::Complete;
         tasks[0].artifact = Some("versions/previous".into());
         tasks[0].handled_by = None;
-        tasks[0].error = None;
+        tasks[0].events.error = None;
         tasks[1].id = "new-version".into();
         tasks[1].parent = None;
         tasks[1].plan.operation = Default::default();
@@ -4581,13 +4581,12 @@ mod tests {
             parent: None,
             handled_by: None,
             work_dir: "work/original".into(),
-            stages: Default::default(),
-            error: Some("原摘要请求结果未确认".into()),
+            events: crate::activity::JobEvents {
+                error: Some("原摘要请求结果未确认".into()),
+                ..Default::default()
+            },
             artifact: Some("versions/original".into()),
-            outcomes: None,
             unread: false,
-            logs: Vec::new(),
-            blocked: Vec::new(),
             resend: Vec::new(),
         };
         let mut recovery = original.clone();
@@ -4595,7 +4594,7 @@ mod tests {
         recovery.parent = Some(original.id.clone());
         recovery.state = workspace::TaskState::Queued;
         recovery.intent = workspace::Intent::Run;
-        recovery.error = None;
+        recovery.events.error = None;
         recovery.artifact = None;
         recovery.work_dir = "work/recovery".into();
         recovery.plan.operation = course2md::execution::Operation::Reprocess {
@@ -4652,7 +4651,7 @@ mod tests {
         assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
         draft = unchanged;
         assert!(super::retired_input_task(&draft, &tasks, "新视频").is_none());
-        tasks[1].blocked.push(workspace::BlockedRequest {
+        tasks[1].events.blocked.push(workspace::BlockedRequest {
             reason: course2md::progress::BlockReason::Uncertain,
             request_id: Some("pending-summary".into()),
             purpose: Some("summary".into()),
@@ -4661,7 +4660,7 @@ mod tests {
             message: "结果未知".into(),
         });
         assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[1].blocked.clear();
+        tasks[1].events.blocked.clear();
         tasks[1].artifact = None;
         assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
     }

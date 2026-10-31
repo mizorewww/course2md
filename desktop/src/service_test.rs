@@ -7,7 +7,7 @@
 use crate::credentials::{CredentialVault, Secret};
 use crate::preferences::{
     Authentication, ServiceConfiguration, ServiceProtocol, ServiceTestEvidence, TestOutcome,
-    normalize_endpoint, now_seconds,
+    normalize_endpoint,
 };
 use base64::Engine as _;
 use serde_json::{Value, json};
@@ -157,7 +157,7 @@ fn new_evidence(
     let mut evidence = ServiceTestEvidence {
         fingerprint: config.fingerprint(kind.contract()),
         contract: kind.contract().into(),
-        tested_at: now_seconds(),
+        tested_at: crate::store::now(),
         outcome: TestOutcome::NotSent,
         message: String::new(),
         details: vec![

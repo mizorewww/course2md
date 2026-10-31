@@ -41,19 +41,6 @@ pub fn relative_key(root: &Path, course: &Path) -> Result<PathBuf> {
     Ok(key.to_path_buf())
 }
 
-fn save_with_backup(path: &Path, bytes: &[u8]) -> Result<()> {
-    let previous = std::fs::read(path);
-    let backup = path.with_extension("json.bak");
-    match previous {
-        Ok(previous) => course2md::checkpoint::atomic_write(&backup, &previous)?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            course2md::checkpoint::atomic_write(&backup, bytes)?
-        }
-        Err(error) => return Err(error).context(course2md::tr!("无法保留原记录")),
-    }
-    course2md::checkpoint::atomic_write(path, bytes)
-}
-
 /// Inspect only. A damaged folder record is never replaced during a read.
 pub fn recovery(root: &Path) -> Result<Option<Recovery>> {
     metadata_recovery::<Library>(root, FILE)
@@ -118,7 +105,7 @@ fn recover_metadata<T: serde::de::DeserializeOwned + Serialize + Default>(
     let preserved = root.join(format!(
         "{}-damaged-{}.json",
         filename.trim_end_matches(".json"),
-        crate::workspace::new_id("record")
+        crate::store::new_id("record")
     ));
     course2md::checkpoint::atomic_write(&preserved, &original)?;
     course2md::checkpoint::atomic_write(&path, &serde_json::to_vec_pretty(&library)?)?;
@@ -171,7 +158,7 @@ pub fn rename_course(root: &Path, course: &Path, name: &str) -> Result<()> {
     let _lock = course2md::runtime::lock_file(&root.join(".course2md-titles.lock"))?;
     let mut names = title_aliases(root)?;
     names.insert(key, name.to_owned());
-    save_with_backup(
+    crate::store::save(
         &root.join(TITLES),
         &serde_json::to_vec_pretty(&Titles { names })?,
     )
@@ -230,7 +217,7 @@ fn delete_course_with(
     let _lock = course2md::runtime::lock_file(&root.join(".course2md-titles.lock"))?;
     let mut names = title_aliases(root)?;
     if names.remove(&key).is_some() {
-        save_with_backup(
+        crate::store::save(
             &root.join(TITLES),
             &serde_json::to_vec_pretty(&Titles { names })?,
         )?;
@@ -277,12 +264,12 @@ impl Library {
         let mut library = Self::load(root)?;
         let parents = library.parents.clone();
         change(&mut library)?;
-        save_with_backup(&root.join(FILE), &serde_json::to_vec_pretty(&library)?)?;
+        crate::store::save(&root.join(FILE), &serde_json::to_vec_pretty(&library)?)?;
         if library.parents != parents {
             library.parents.retain(|id, parent| {
                 library.folders.contains_key(id) && library.folders.contains_key(parent)
             });
-            save_with_backup(
+            crate::store::save(
                 &root.join(TREE),
                 &serde_json::to_vec_pretty(&library.parents)?,
             )?;

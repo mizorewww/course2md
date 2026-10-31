@@ -4,6 +4,7 @@
 //! Calling `apply_defaults` or submitting a task cannot publish a service editor draft.
 
 use crate::credentials::{CredentialRef, CredentialVault, Secret};
+use crate::store::{new_id, now};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use course2md::config::{AsrProvider, TranscriptSource};
 use course2md::settings::{AsrApiMode, ConfigFile, Defaults, DesktopSettings};
@@ -12,17 +13,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type ServiceId = String;
 pub type ServiceVersionId = String;
 pub type ServiceDraftId = String;
 
 const SCHEMA: u32 = 1;
-
-fn new_id(prefix: &str) -> String {
-    format!("{prefix}-{}", uuid::Uuid::new_v4())
-}
 
 fn valid_id(value: &str, prefix: &str) -> bool {
     value
@@ -59,13 +55,6 @@ fn relative_path_inside(path: &Path, root: &Path) -> Option<PathBuf> {
                 .ok()
                 .map(Path::to_path_buf)
         })
-}
-
-pub fn now_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -704,7 +693,7 @@ pub struct ServiceTestEvidence {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 struct ServicesState {
     drafts: BTreeMap<ServiceDraftId, ServiceDraft>,
     versions: BTreeMap<ServiceVersionId, ServiceVersion>,
@@ -713,7 +702,23 @@ struct ServicesState {
     /// an older services.json backup is restored.
     stopped: BTreeMap<ServiceId, u64>,
     tests: BTreeMap<String, ServiceTestEvidence>,
-    discarded_drafts: BTreeSet<ServiceDraftId>,
+}
+
+impl ServicesState {
+    fn forget_services(&mut self, services: &BTreeSet<ServiceId>) {
+        self.versions
+            .retain(|_, version| !services.contains(&version.service_id));
+        self.drafts
+            .retain(|_, draft| !services.contains(&draft.service_id));
+        for default in [&mut self.defaults.asr, &mut self.defaults.llm] {
+            if default
+                .as_ref()
+                .is_some_and(|id| !self.versions.contains_key(id))
+            {
+                *default = None;
+            }
+        }
+    }
 }
 
 /// Runtime-only configuration. Deliberately neither Debug nor Serialize. Consume immediately
@@ -833,192 +838,6 @@ impl Validate for ServicesState {
     }
 }
 
-pub(crate) struct PreferenceWriteResult {
-    group: PreferenceGroup,
-    revision: u64,
-    result: Result<(), String>,
-}
-
-pub(crate) enum PreferenceSignal {
-    Write {
-        path: PathBuf,
-        bytes: Vec<u8>,
-        group: PreferenceGroup,
-        revision: u64,
-    },
-    Recovery {
-        path: PathBuf,
-        bytes: Vec<u8>,
-    },
-    Remove {
-        path: PathBuf,
-    },
-    Flush(std::sync::mpsc::Sender<()>),
-}
-
-/// Where preference files are written. The store hands every write to its
-/// writer and learns the outcome only through `try_result`, so the UI never
-/// waits on the disk. Production uses [`ThreadWriter`]; tests inject
-/// [`InlineWriter`], which performs the same work as soon as it is sent.
-pub(crate) trait Writer: Send {
-    fn send(&self, signal: PreferenceSignal) -> Result<()>;
-    fn try_result(&self) -> Option<PreferenceWriteResult>;
-    fn set_wake(&self, wake: smol::channel::Sender<()>);
-    /// Waits until every signal sent so far has been performed.
-    fn flush(&self) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        if self.send(PreferenceSignal::Flush(tx)).is_ok() {
-            let _ = rx.recv();
-        }
-    }
-}
-
-/// Performs signals and reports their results; shared by every writer.
-struct WriterSink {
-    root: PathBuf,
-    results: std::sync::mpsc::Sender<PreferenceWriteResult>,
-    wake: std::sync::Mutex<Option<smol::channel::Sender<()>>>,
-}
-
-impl WriterSink {
-    fn new(root: PathBuf) -> (Self, std::sync::mpsc::Receiver<PreferenceWriteResult>) {
-        let (results, receiver) = std::sync::mpsc::channel();
-        (
-            Self {
-                root,
-                results,
-                wake: Default::default(),
-            },
-            receiver,
-        )
-    }
-
-    fn perform(&self, signal: PreferenceSignal) {
-        match signal {
-            PreferenceSignal::Flush(ack) => {
-                let _ = ack.send(());
-            }
-            PreferenceSignal::Recovery { path, bytes } => {
-                let _ = atomic_write_with_retry(&path, &bytes);
-            }
-            PreferenceSignal::Remove { path } => {
-                let _ = std::fs::remove_file(path);
-            }
-            PreferenceSignal::Write {
-                path,
-                bytes,
-                group,
-                revision,
-            } => {
-                let result = write_preference_file(&self.root, &path, &bytes)
-                    .map_err(|error| format!("{error:#}"));
-                let _ = self.results.send(PreferenceWriteResult {
-                    group,
-                    revision,
-                    result,
-                });
-            }
-        }
-        if let Some(wake) = course2md::runtime::lock_recover(&self.wake).as_ref() {
-            let _ = wake.try_send(());
-        }
-    }
-}
-
-fn writer_stopped() -> anyhow::Error {
-    anyhow!(course2md::tr!("设置保存线程已停止"))
-}
-
-/// Writes on one background thread, in the order signals were sent.
-pub(crate) struct ThreadWriter {
-    signals: std::sync::mpsc::Sender<PreferenceSignal>,
-    results: std::sync::mpsc::Receiver<PreferenceWriteResult>,
-    sink: Arc<WriterSink>,
-}
-
-impl ThreadWriter {
-    pub(crate) fn new(root: PathBuf) -> Self {
-        let (sink, results) = WriterSink::new(root);
-        let sink = Arc::new(sink);
-        let (signals, receiver) = std::sync::mpsc::channel();
-        let thread_sink = Arc::clone(&sink);
-        std::thread::Builder::new()
-            .name("course2md-preferences-writer".into())
-            .spawn(move || {
-                while let Ok(signal) = receiver.recv() {
-                    thread_sink.perform(signal);
-                }
-            })
-            .expect("preferences writer thread");
-        Self {
-            signals,
-            results,
-            sink,
-        }
-    }
-}
-
-impl Writer for ThreadWriter {
-    fn send(&self, signal: PreferenceSignal) -> Result<()> {
-        self.signals.send(signal).map_err(|_| writer_stopped())
-    }
-    fn try_result(&self) -> Option<PreferenceWriteResult> {
-        self.results.try_recv().ok()
-    }
-    fn set_wake(&self, wake: smol::channel::Sender<()>) {
-        *course2md::runtime::lock_recover(&self.sink.wake) = Some(wake);
-    }
-}
-
-/// Performs each signal before `send` returns. Results are still collected
-/// through `try_result`, exactly as from the background writer.
-#[cfg(test)]
-pub(crate) struct InlineWriter {
-    sink: WriterSink,
-    results: std::sync::Mutex<std::sync::mpsc::Receiver<PreferenceWriteResult>>,
-}
-
-#[cfg(test)]
-impl InlineWriter {
-    pub(crate) fn new(root: PathBuf) -> Self {
-        let (sink, results) = WriterSink::new(root);
-        Self {
-            sink,
-            results: std::sync::Mutex::new(results),
-        }
-    }
-}
-
-#[cfg(test)]
-impl Writer for InlineWriter {
-    fn send(&self, signal: PreferenceSignal) -> Result<()> {
-        self.sink.perform(signal);
-        Ok(())
-    }
-    fn try_result(&self) -> Option<PreferenceWriteResult> {
-        course2md::runtime::lock_recover(&self.results)
-            .try_recv()
-            .ok()
-    }
-    fn set_wake(&self, wake: smol::channel::Sender<()>) {
-        *course2md::runtime::lock_recover(&self.sink.wake) = Some(wake);
-    }
-}
-
-fn write_preference_file(root: &Path, path: &Path, bytes: &[u8]) -> Result<()> {
-    if let Ok(previous) = std::fs::read(path) {
-        if serde_json::from_slice::<serde_json::Value>(&previous).is_ok() {
-            atomic_write_with_retry(&path.with_extension("json.bak"), &previous)
-                .context(course2md::tr!("无法保存此组设置的恢复副本"))?;
-        } else {
-            // Never replace the last good backup with a corrupt primary file.
-            preserve_original(root, path)?;
-        }
-    }
-    atomic_write_with_retry(path, bytes).context(course2md::tr!("无法保存此组设置"))?;
-    Ok(())
-}
-
 /// A credential that a blocking step confirmed is present in the vault.
 /// Only [`Store::verify_credential`] creates one.
 pub struct VerifiedCredential(Option<CredentialRef>);
@@ -1032,31 +851,11 @@ pub struct Store {
     revisions: BTreeMap<PreferenceGroup, u64>,
     blocked: BTreeSet<PreferenceGroup>,
     issues: Vec<SettingsIssue>,
-    generation_intent: Option<GenerationPreferences>,
-    /// The generation value still on disk while a newer one is unconfirmed.
-    durable_generation: Option<GenerationPreferences>,
-    application_intent: Option<ApplicationPreferences>,
-    recovery_drafts: BTreeSet<ServiceDraftId>,
-    writer: Box<dyn Writer>,
-    pending_writes: BTreeMap<PreferenceGroup, u64>,
-    services_intent: Option<ServicesState>,
-    pending_service_recovery: BTreeSet<String>,
 }
 
 impl Store {
     /// Loading a broken group never makes reading notes or unrelated settings unavailable.
     pub fn open(root: impl Into<PathBuf>, vault: Arc<dyn CredentialVault>) -> Self {
-        let root = root.into();
-        let writer = ThreadWriter::new(root.clone());
-        Self::open_with(root, vault, writer)
-    }
-
-    /// `open` with an explicit writer; tests inject [`InlineWriter`].
-    pub(crate) fn open_with(
-        root: impl Into<PathBuf>,
-        vault: Arc<dyn CredentialVault>,
-        writer: impl Writer + 'static,
-    ) -> Self {
         let mut store = Self {
             root: root.into(),
             vault,
@@ -1066,19 +865,10 @@ impl Store {
             revisions: BTreeMap::new(),
             blocked: BTreeSet::new(),
             issues: Vec::new(),
-            generation_intent: None,
-            durable_generation: None,
-            application_intent: None,
-            recovery_drafts: BTreeSet::new(),
-            writer: Box::new(writer),
-            pending_writes: BTreeMap::new(),
-            services_intent: None,
-            pending_service_recovery: BTreeSet::new(),
         };
         store.generation = store.load_group(PreferenceGroup::Generation);
         store.application = store.load_group(PreferenceGroup::Application);
         store.services = store.load_group(PreferenceGroup::Services);
-        store.load_recovery_intents();
         store.forget_retired_service_records();
         store.migrate_retired_npu_model();
         store
@@ -1112,78 +902,6 @@ impl Store {
     pub fn root(&self) -> &Path {
         &self.root
     }
-    pub fn set_wake_sender(&self, sender: smol::channel::Sender<()>) {
-        self.writer.set_wake(sender);
-    }
-    pub fn flush(&self) {
-        self.writer.flush();
-    }
-    pub fn is_pending(&self, group: PreferenceGroup) -> bool {
-        self.pending_writes.contains_key(&group)
-    }
-    pub fn has_pending_services(&self) -> bool {
-        self.services_intent.is_some()
-    }
-    pub fn retry_services(&mut self) -> Result<()> {
-        let next = self
-            .services_intent
-            .clone()
-            .ok_or_else(|| anyhow!(course2md::tr!("没有待保存的服务设置")))?;
-        self.persist(PreferenceGroup::Services, &next)
-    }
-    /// Drain writer completions. The UI calls this from its event poll.
-    pub fn process_writes(&mut self) -> Vec<(PreferenceGroup, Result<(), String>)> {
-        let mut completed = Vec::new();
-        while let Some(result) = self.writer.try_result() {
-            let latest = self.pending_writes.get(&result.group) == Some(&result.revision);
-            if latest {
-                self.pending_writes.remove(&result.group);
-            }
-            if result.result.is_ok() {
-                if latest {
-                    self.clear_intent(result.group);
-                    self.issues.retain(|issue| {
-                        issue.group != result.group || issue.kind != SettingsIssueKind::SaveFailed
-                    });
-                }
-            } else if let Err(error) = &result.result {
-                self.issues.push(SettingsIssue {
-                    group: result.group,
-                    kind: SettingsIssueKind::SaveFailed,
-                    message: save_failure_message(result.group, &anyhow!(error.clone())),
-                    detail: Some(error.clone()),
-                });
-            }
-            completed.push((result.group, result.result));
-        }
-        completed
-    }
-    fn clear_intent(&mut self, group: PreferenceGroup) {
-        let file = match group {
-            PreferenceGroup::Generation => {
-                self.generation_intent = None;
-                self.durable_generation = None;
-                "generation-intent.json"
-            }
-            PreferenceGroup::Application => {
-                self.application_intent = None;
-                "application-intent.json"
-            }
-            PreferenceGroup::Services => {
-                self.services_intent = None;
-                for id in std::mem::take(&mut self.pending_service_recovery) {
-                    self.recovery_drafts.remove(&id);
-                    let _ = self.writer.send(PreferenceSignal::Remove {
-                        path: self.recovery_root().join(format!("{id}.json")),
-                    });
-                }
-                return;
-            }
-        };
-        let _ = self.writer.send(PreferenceSignal::Remove {
-            path: self.recovery_root().join(file),
-        });
-    }
     pub fn vault(&self) -> Arc<dyn CredentialVault> {
         Arc::clone(&self.vault)
     }
@@ -1203,14 +921,11 @@ impl Store {
             })
             .collect()
     }
-    // Vault access. The vault may wait on a system authorization dialog
-    // (macOS Keychain), so every operation that touches it is split in two:
-    // a blocking step (`insert_credential`, `verify_credential`,
-    // `remove_credentials`) that only talks to the vault and runs through
-    // `crate::spawn_blocking_io`, and an in-memory commit on the store. The
-    // one-call forms (`save_service_draft` with a key, `publish_service`,
-    // `delete_service`, `capture_environment_credential`) do both on the
-    // calling thread and must only be used from a blocking context.
+    // Vault access. The vault may wait on a system authorization dialog (macOS
+    // Keychain), so every operation that touches it is split in two: a blocking
+    // step (`insert_credential`, `verify_credential`, `remove_credentials`) that
+    // only talks to the vault and runs through `crate::spawn_blocking_io`, and a
+    // commit on the store.
 
     /// Blocking step: stores a secret under a new vault identity.
     pub fn insert_credential(vault: &dyn CredentialVault, secret: Secret) -> Result<CredentialRef> {
@@ -1266,37 +981,6 @@ impl Store {
     pub fn generation(&self) -> &GenerationPreferences {
         &self.generation
     }
-    pub fn generation_intent(&self) -> Option<&GenerationPreferences> {
-        self.generation_intent.as_ref()
-    }
-    pub fn application_intent(&self) -> Option<&ApplicationPreferences> {
-        self.application_intent.as_ref()
-    }
-    /// An unsuccessful preference commit may still be preserved as a non-active recovery
-    /// record. This allows an ordinary exit without either losing the edit or activating it.
-    pub fn unsaved_intents_are_preserved(&self) -> bool {
-        let generation = self.generation_intent.as_ref().is_none_or(|intent| {
-            read_envelope::<GenerationPreferences>(
-                &self.recovery_root().join("generation-intent.json"),
-            )
-            .ok()
-            .flatten()
-            .is_some_and(|saved| saved.value == *intent)
-        });
-        let application = self.application_intent.as_ref().is_none_or(|intent| {
-            read_envelope::<ApplicationPreferences>(
-                &self.recovery_root().join("application-intent.json"),
-            )
-            .ok()
-            .flatten()
-            .is_some_and(|saved| saved.value == *intent)
-        });
-        generation && application
-    }
-    #[cfg(test)]
-    fn is_recovery_draft(&self, id: &str) -> bool {
-        self.recovery_drafts.contains(id)
-    }
     pub fn revision(&self, group: PreferenceGroup) -> u64 {
         self.revisions.get(&group).copied().unwrap_or(0)
     }
@@ -1311,10 +995,6 @@ impl Store {
     }
     pub fn default_refs(&self) -> ServiceRefs {
         self.services.defaults.clone()
-    }
-    #[cfg(test)]
-    fn service_drafts(&self) -> impl Iterator<Item = &ServiceDraft> {
-        self.services.drafts.values()
     }
     pub fn draft(&self, id: &str) -> Option<&ServiceDraft> {
         self.services.drafts.get(id)
@@ -1353,75 +1033,34 @@ impl Store {
     fn write_retire_marker(&self, service_id: &str) -> Result<()> {
         course2md::checkpoint::atomic_write(&self.retired_marker(service_id), b"deleted\n")
     }
+    /// Services deleted earlier stay deleted even if an older services.json comes back.
     fn forget_retired_service_records(&mut self) {
         if self.is_blocked(PreferenceGroup::Services) {
             return;
         }
+        let markers = std::fs::read_dir(self.root.join("stopped-services"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+            .filter(|name| !name.starts_with('.'));
         let retired: BTreeSet<_> = self
             .services
             .stopped
             .keys()
             .cloned()
-            .chain(
-                std::fs::read_dir(self.root.join("stopped-services"))
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .filter_map(|entry| {
-                        entry
-                            .file_name()
-                            .to_str()
-                            .map(str::to_owned)
-                            .filter(|name| !name.starts_with('.'))
-                    }),
-            )
+            .chain(markers)
             .collect();
-        if retired.is_empty() {
-            return;
-        }
-        let leftover: Vec<_> = self
-            .services
-            .versions
-            .values()
-            .filter(|version| retired.contains(&version.service_id))
-            .cloned()
-            .collect();
-        let leftover_drafts = self
-            .services
-            .drafts
-            .values()
-            .any(|draft| retired.contains(&draft.service_id));
-        if leftover.is_empty() && !leftover_drafts {
+        let mut next = self.services.clone();
+        next.forget_services(&retired);
+        if next == self.services {
             return;
         }
         for service_id in &retired {
-            // Legacy tombstones lived only in services.json; ensure the
-            // independent marker exists so a restored backup cannot revive
-            // dispatch for this service.
+            // Older tombstones lived only in services.json.
             if !self.retired_marker(service_id).exists() {
                 let _ = self.write_retire_marker(service_id);
             }
-        }
-        let mut next = self.services.clone();
-        next.versions
-            .retain(|_, version| !retired.contains(&version.service_id));
-        next.drafts
-            .retain(|_, draft| !retired.contains(&draft.service_id));
-        if next
-            .defaults
-            .asr
-            .as_ref()
-            .is_some_and(|id| !next.versions.contains_key(id))
-        {
-            next.defaults.asr = None;
-        }
-        if next
-            .defaults
-            .llm
-            .as_ref()
-            .is_some_and(|id| !next.versions.contains_key(id))
-        {
-            next.defaults.llm = None;
         }
         if self.persist(PreferenceGroup::Services, &next).is_ok() {
             self.services = next;
@@ -1446,14 +1085,9 @@ impl Store {
         config
     }
 
-    /// A library move changes only paths physically inside that library. Keep a pending
-    /// ordinary edit intact, and let the existing recovery journal retain a failed commit.
+    /// A library move changes only paths physically inside that library.
     pub fn relocate_generation_paths(&mut self, old: &Path, new: &Path) -> Result<()> {
-        let mut next = self
-            .generation_intent
-            .as_ref()
-            .unwrap_or(&self.generation)
-            .clone();
+        let mut next = self.generation.clone();
         let Some(path) = &mut next.options.model_dir else {
             return Ok(());
         };
@@ -1464,91 +1098,30 @@ impl Store {
         self.save_generation(next)
     }
 
-    /// Backup cleanup must retain the old path while any effective or pending preference
-    /// still names a model directory there. Merely copying the library does not release it.
+    /// Backup cleanup must retain the old path while the saved preferences still name a
+    /// model directory there. Merely copying the library does not release it.
     pub fn references_storage_path(&self, root: &Path) -> bool {
-        std::iter::once(&self.generation)
-            .chain(self.generation_intent.iter())
-            .chain(self.durable_generation.iter())
-            .filter_map(|value| value.options.model_dir.as_ref())
-            .any(|path| relative_path_inside(path, root).is_some())
+        self.generation
+            .options
+            .model_dir
+            .as_ref()
+            .is_some_and(|path| relative_path_inside(path, root).is_some())
     }
 
+    /// Commits the group, then makes it active: a failed save changes nothing.
     pub fn save_generation(&mut self, mut value: GenerationPreferences) -> Result<()> {
         value.options.out = None;
         value.options.resume = Some(true);
-        let previous = self.generation.clone();
-        self.save_with_intent(
-            PreferenceGroup::Generation,
-            "generation-intent.json",
-            value,
-            |store| &mut store.generation,
-            |store| &mut store.generation_intent,
-        )?;
-        // The new value is active at once, but until the writer confirms it the
-        // file still holds the previous one, which may still name a library.
-        self.durable_generation.get_or_insert(previous);
+        self.persist(PreferenceGroup::Generation, &value)?;
+        self.generation = value;
         Ok(())
     }
 
     pub fn save_application(&mut self, mut value: ApplicationPreferences) -> Result<()> {
         value.desktop.system_titlebar = true;
-        self.save_with_intent(
-            PreferenceGroup::Application,
-            "application-intent.json",
-            value,
-            |store| &mut store.application,
-            |store| &mut store.application_intent,
-        )
-    }
-
-    /// Persist one preference group. The value stays a recovery intent until the
-    /// writer confirms the group file, so an interrupted save can be retried after
-    /// relaunch. The closures split the borrow between the committed slot and its
-    /// intent slot.
-    fn save_with_intent<T>(
-        &mut self,
-        group: PreferenceGroup,
-        file: &str,
-        value: T,
-        slot: impl for<'a> FnOnce(&'a mut Self) -> &'a mut T,
-        intent_slot: impl for<'a> FnOnce(&'a mut Self) -> &'a mut Option<T>,
-    ) -> Result<()>
-    where
-        T: Serialize + DeserializeOwned + Validate + Clone + 'static,
-    {
-        let revision = self.revisions.get(&group).copied().unwrap_or(0) + 1;
-        let bytes = serde_json::to_vec_pretty(&Envelope {
-            schema: SCHEMA,
-            revision,
-            value: &value,
-        })?;
-        self.writer.send(PreferenceSignal::Recovery {
-            path: self.recovery_root().join(file),
-            bytes,
-        })?;
-        if let Err(error) = self.persist(group, &value) {
-            *intent_slot(self) = Some(value);
-            return Err(error);
-        }
-        *slot(self) = value.clone();
-        *intent_slot(self) = Some(value);
+        self.persist(PreferenceGroup::Application, &value)?;
+        self.application = value;
         Ok(())
-    }
-
-    /// Queues a recovery copy of `draft`; returns whether the writer accepted it.
-    fn queue_service_recovery(&mut self, draft: &ServiceDraft) -> bool {
-        let Ok(bytes) = serde_json::to_vec_pretty(draft) else {
-            return false;
-        };
-        let path = self.recovery_root().join(format!("{}.json", draft.id));
-        let queued = self
-            .writer
-            .send(PreferenceSignal::Recovery { path, bytes })
-            .is_ok();
-        self.pending_service_recovery.insert(draft.id.clone());
-        self.recovery_drafts.insert(draft.id.clone());
-        queued
     }
 
     fn check_draft_edit(&self, draft: &ServiceDraft) -> Result<()> {
@@ -1568,30 +1141,10 @@ impl Store {
         Ok(())
     }
 
-    /// Incomplete text is a valid draft. Replacing a key allocates a new vault identity before
-    /// the secret-free draft is committed. A stale editor cannot overwrite a newer revision.
-    ///
-    /// With `new_key` this blocks on the vault: call it only from a blocking
-    /// context. UI code uses `insert_credential` (blocking) and then
-    /// `commit_service_draft`.
-    pub fn save_service_draft(
-        &mut self,
-        draft: ServiceDraft,
-        new_key: Option<Secret>,
-    ) -> Result<ServiceDraft> {
-        self.check_draft_edit(&draft)?;
-        let created = new_key
-            .map(|secret| Self::insert_credential(self.vault.as_ref(), secret))
-            .transpose()?;
-        self.commit_service_draft(draft, created.clone())
-            .inspect_err(|_| {
-                Self::remove_credentials(self.vault.as_ref(), created.as_slice());
-            })
-    }
-
-    /// Commit step of a draft save; touches no vault. `new_credential` is a key
-    /// the caller already stored with `insert_credential`; when this returns an
-    /// error the caller removes it again with `remove_credentials`.
+    /// Incomplete text is a valid draft, and a stale editor cannot overwrite a newer
+    /// revision. Touches no vault: `new_credential` is a key the caller already stored
+    /// with `insert_credential`; when this returns an error the caller removes it again
+    /// with `remove_credentials`.
     pub fn commit_service_draft(
         &mut self,
         mut draft: ServiceDraft,
@@ -1605,30 +1158,19 @@ impl Store {
         draft.revision += 1;
         let mut next = self.services.clone();
         next.drafts.insert(draft.id.clone(), draft.clone());
-        let recovered = self.queue_service_recovery(&draft);
-        if let Err(error) = self.persist(PreferenceGroup::Services, &next) {
-            // The queued recovery copy keeps the edit while the group cannot be saved.
-            if recovered {
-                self.services.drafts.insert(draft.id.clone(), draft.clone());
-                return Ok(draft);
-            }
-            return Err(error);
-        }
+        self.persist(PreferenceGroup::Services, &next)?;
         self.services = next;
         Ok(draft)
     }
 
     pub fn discard_service_draft(&mut self, id: &str) -> Result<()> {
-        if !self.services.drafts.contains_key(id) && !self.recovery_drafts.contains(id) {
+        if !self.services.drafts.contains_key(id) {
             return Ok(());
         }
         let mut next = self.services.clone();
         next.drafts.remove(id);
-        next.discarded_drafts.insert(id.to_owned());
         self.persist(PreferenceGroup::Services, &next)?;
         self.services = next;
-        // The recovery copy is removed once the writer confirms the group.
-        self.pending_service_recovery.insert(id.to_owned());
         Ok(())
     }
 
@@ -1660,21 +1202,6 @@ impl Store {
         Ok(self.publication(draft_id)?.1.credential)
     }
 
-    /// Blocks on the vault: call only from a blocking context. UI code uses
-    /// `publication_credential` → `verify_credential` (blocking) →
-    /// `commit_publication`.
-    #[cfg(test)]
-    pub fn publish_service(
-        &mut self,
-        draft_id: &str,
-        scope: BindingScope,
-    ) -> Result<ServiceVersion> {
-        let reference = self.publication_credential(draft_id)?;
-        // Local credential availability is part of static validation, not a paid test.
-        let verified = Self::verify_credential(self.vault.as_ref(), reference)?;
-        self.commit_publication(draft_id, scope, verified)
-    }
-
     /// Commit step of a publication; touches no vault. The draft must still
     /// carry the credential that was verified.
     pub fn commit_publication(
@@ -1700,7 +1227,7 @@ impl Store {
                 .max()
                 .unwrap_or(0)
                 + 1,
-            saved_at: now_seconds(),
+            saved_at: now(),
             published_from: Some(draft.id.clone()),
             config,
         };
@@ -1713,7 +1240,6 @@ impl Store {
                 ServicePurpose::Ai => next.defaults.llm = Some(version.id.clone()),
             }
         }
-        self.queue_service_recovery(&draft);
         self.persist(PreferenceGroup::Services, &next)?;
         self.services = next;
         Ok(version)
@@ -1740,20 +1266,9 @@ impl Store {
         Ok(())
     }
 
-    /// Delete the service configuration. Already dispatched requests are still
-    /// received and saved. A marker keeps later restores from sending new ones.
-    ///
-    /// Blocks on the vault: call only from a blocking context. UI code uses
-    /// `retire_service` and then `remove_credentials` (blocking).
-    #[cfg(test)]
-    pub fn delete_service(&mut self, service_id: &str) -> Result<()> {
-        let credentials = self.retire_service(service_id)?;
-        Self::remove_credentials(self.vault.as_ref(), &credentials);
-        Ok(())
-    }
-
-    /// Commit step of a deletion; touches no vault. Returns the credentials
-    /// the service no longer needs, for `remove_credentials`.
+    /// Delete the service configuration; touches no vault. Already dispatched requests
+    /// are still received and saved, and a marker keeps later restores from sending new
+    /// ones. Returns the credentials the service no longer needs, for `remove_credentials`.
     pub fn retire_service(&mut self, service_id: &str) -> Result<Vec<CredentialRef>> {
         let versions: Vec<_> = self
             .services
@@ -1773,27 +1288,8 @@ impl Store {
         let mut next = self.services.clone();
         next.stopped
             .entry(service_id.to_owned())
-            .or_insert_with(now_seconds);
-        next.versions
-            .retain(|_, version| version.service_id != service_id);
-        next.drafts
-            .retain(|_, draft| draft.service_id != service_id);
-        if next
-            .defaults
-            .asr
-            .as_ref()
-            .is_some_and(|id| !next.versions.contains_key(id))
-        {
-            next.defaults.asr = None;
-        }
-        if next
-            .defaults
-            .llm
-            .as_ref()
-            .is_some_and(|id| !next.versions.contains_key(id))
-        {
-            next.defaults.llm = None;
-        }
+            .or_insert_with(now);
+        next.forget_services(&BTreeSet::from([service_id.to_owned()]));
         self.persist(PreferenceGroup::Services, &next)?;
         self.services = next;
         Ok(credentials)
@@ -2006,25 +1502,17 @@ impl Store {
             Err(_) => match read_envelope::<T>(&path.with_extension("json.bak")) {
                 Ok(Some(envelope)) => {
                     let restored = preserve_original(&self.root, &path).and_then(|_| {
-                        let bytes = serde_json::to_vec_pretty(&envelope)?;
-                        course2md::checkpoint::atomic_write(&path, &bytes)
+                        course2md::checkpoint::atomic_write(
+                            &path,
+                            &serde_json::to_vec_pretty(&envelope)?,
+                        )
                     });
                     self.revisions.insert(group, envelope.revision);
+                    // Whether or not the repair could be written, the next save will.
                     self.issues.push(SettingsIssue {
                         group,
-                        kind: if restored.is_ok() {
-                            SettingsIssueKind::Recovered
-                        } else {
-                            SettingsIssueKind::SaveFailed
-                        },
-                        message: if restored.is_ok() {
-                            course2md::tr!("已恢复最近一次可用的设置，原文件已保留").into()
-                        } else {
-                            course2md::tr!(
-                                "正在使用最近一次可用的设置，但恢复文件尚未保存；原文件已保留"
-                            )
-                            .into()
-                        },
+                        kind: SettingsIssueKind::Recovered,
+                        message: course2md::tr!("已恢复最近一次可用的设置，原文件已保留").into(),
                         detail: restored.err().map(|error| {
                             course2md::tr!(
                                 "设置目录：{}\n{}",
@@ -2052,122 +1540,33 @@ impl Store {
         }
     }
 
-    fn recovery_root(&self) -> PathBuf {
-        self.root.with_extension("recovery")
-    }
-
-    /// Restore one recovery intent saved by `save_with_intent`, when its
-    /// revision is not older than the committed value.
-    fn load_recovery_intent<T>(
-        &mut self,
-        group: PreferenceGroup,
-        file: &str,
-        message: &'static str,
-        intent_slot: impl for<'a> FnOnce(&'a mut Self) -> &'a mut Option<T>,
-    ) where
-        T: Serialize + DeserializeOwned + Validate,
-    {
-        if let Ok(Some(intent)) = read_envelope::<T>(&self.recovery_root().join(file))
-            && self.revisions.get(&group).copied().unwrap_or(0) <= intent.revision
-        {
-            *intent_slot(self) = Some(intent.value);
-            self.issues.push(SettingsIssue {
-                group,
-                kind: SettingsIssueKind::SaveFailed,
-                message: message.into(),
-                detail: None,
-            });
-        }
-    }
-
-    fn load_recovery_intents(&mut self) {
-        self.load_recovery_intent::<GenerationPreferences>(
-            PreferenceGroup::Generation,
-            "generation-intent.json",
-            course2md::tr!("已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项"),
-            |store| &mut store.generation_intent,
-        );
-        self.load_recovery_intent::<ApplicationPreferences>(
-            PreferenceGroup::Application,
-            "application-intent.json",
-            course2md::tr!("已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项"),
-            |store| &mut store.application_intent,
-        );
-        let Ok(entries) = std::fs::read_dir(self.recovery_root()) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            if !name.starts_with("service-draft-") || !name.ends_with(".json") {
-                continue;
-            }
-            let Ok(bytes) = std::fs::read(entry.path()) else {
-                continue;
-            };
-            let Ok(draft) = serde_json::from_slice::<ServiceDraft>(&bytes) else {
-                continue;
-            };
-            if !valid_id(&draft.id, "service-draft-") || !valid_id(&draft.service_id, "service-") {
-                continue;
-            }
-            if self
-                .services
-                .versions
-                .values()
-                .any(|version| version.published_from.as_deref() == Some(&draft.id))
-                || self.services.discarded_drafts.contains(&draft.id)
-            {
-                continue;
-            }
-            if self
-                .services
-                .drafts
-                .get(&draft.id)
-                .is_none_or(|current| current.revision < draft.revision)
-            {
-                self.recovery_drafts.insert(draft.id.clone());
-                self.services.drafts.insert(draft.id.clone(), draft);
-            }
-        }
-    }
-
-    fn persist<T: Serialize + DeserializeOwned + Validate + 'static>(
+    fn persist<T: Serialize + Validate>(
         &mut self,
         group: PreferenceGroup,
         value: &T,
     ) -> Result<()> {
+        let revision = self.revisions.get(&group).copied().unwrap_or(0) + 1;
         let result = (|| {
-            if self.blocked.contains(&group) {
-                bail!(course2md::tr!("此组设置需要先保留原文件并重置"));
-            }
+            ensure!(
+                !self.blocked.contains(&group),
+                course2md::tr!("此组设置需要先保留原文件并重置")
+            );
             value.validate_value()?;
-            let path = self.root.join(group.filename());
-            let revision = self.revisions.get(&group).copied().unwrap_or(0) + 1;
             let bytes = serde_json::to_vec_pretty(&Envelope {
                 schema: SCHEMA,
                 revision,
                 value,
             })?;
-            if let Some(services) = (value as &dyn std::any::Any).downcast_ref::<ServicesState>() {
-                self.services_intent = Some(services.clone());
-            }
-            self.writer.send(PreferenceSignal::Write {
-                path,
-                bytes,
-                group,
-                revision,
-            })?;
-            self.revisions.insert(group, revision);
-            self.pending_writes.insert(group, revision);
-            Ok(())
+            crate::store::save(&self.root.join(group.filename()), &bytes)
+                .context(course2md::tr!("无法保存此组设置"))
         })();
         self.issues
             .retain(|issue| issue.group != group || issue.kind == SettingsIssueKind::Recovered);
-        if let Err(error) = &result {
-            self.issues.push(SettingsIssue {
+        match &result {
+            Ok(()) => {
+                self.revisions.insert(group, revision);
+            }
+            Err(error) => self.issues.push(SettingsIssue {
                 group,
                 kind: SettingsIssueKind::SaveFailed,
                 message: save_failure_message(group, error),
@@ -2176,7 +1575,7 @@ impl Store {
                     self.root.display(),
                     format!("{error:#}")
                 )),
-            });
+            }),
         }
         result
     }
@@ -2197,23 +1596,6 @@ fn read_envelope<T: DeserializeOwned + Validate>(path: &Path) -> Result<Option<E
     Ok(Some(envelope))
 }
 
-/// Retries a transiently failing local write. It sleeps between attempts, so
-/// only the preferences writer thread may call it; the UI thread writes once.
-fn atomic_write_with_retry(path: &Path, bytes: &[u8]) -> Result<()> {
-    // Only idempotent local persistence is retried. Network tests never use this helper.
-    let mut last_error = None;
-    for _ in 0..3 {
-        match course2md::checkpoint::atomic_write(path, bytes) {
-            Ok(()) => return Ok(()),
-            Err(error) => {
-                last_error = Some(error);
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-        }
-    }
-    Err(last_error.expect("write was attempted"))
-}
-
 fn preserve_original(root: &Path, source: &Path) -> Result<()> {
     let bytes = match std::fs::read(source) {
         Ok(bytes) => bytes,
@@ -2224,7 +1606,6 @@ fn preserve_original(root: &Path, source: &Path) -> Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("settings");
-    // Also runs on the UI thread (open, reset), so it writes once without sleeping.
     course2md::checkpoint::atomic_write(
         &root
             .with_extension("recovery")
@@ -2298,6 +1679,42 @@ pub fn normalize_endpoint(address: &str, protocol: ServiceProtocol) -> Result<St
 mod tests {
     use super::*;
 
+    /// The blocking steps and the commit in one call, which only a test can afford.
+    impl Store {
+        fn save_service_draft(
+            &mut self,
+            draft: ServiceDraft,
+            new_key: Option<Secret>,
+        ) -> Result<ServiceDraft> {
+            self.check_draft_edit(&draft)?;
+            let created = new_key
+                .map(|secret| Self::insert_credential(self.vault.as_ref(), secret))
+                .transpose()?;
+            self.commit_service_draft(draft, created.clone())
+                .inspect_err(|_| Self::remove_credentials(self.vault.as_ref(), created.as_slice()))
+        }
+
+        fn publish_service(
+            &mut self,
+            draft_id: &str,
+            scope: BindingScope,
+        ) -> Result<ServiceVersion> {
+            let reference = self.publication_credential(draft_id)?;
+            let verified = Self::verify_credential(self.vault.as_ref(), reference)?;
+            self.commit_publication(draft_id, scope, verified)
+        }
+
+        fn delete_service(&mut self, service_id: &str) -> Result<()> {
+            let credentials = self.retire_service(service_id)?;
+            Self::remove_credentials(self.vault.as_ref(), &credentials);
+            Ok(())
+        }
+
+        fn service_drafts(&self) -> impl Iterator<Item = &ServiceDraft> {
+            self.services.drafts.values()
+        }
+    }
+
     #[test]
     fn generation_files_written_before_the_nested_ai_settings_still_load() {
         let legacy = serde_json::json!({
@@ -2343,22 +1760,8 @@ mod tests {
     }
     use crate::credentials::MemoryCredentialVault;
 
-    /// Waits for the writer and applies its results, as the UI's poll does.
-    fn settle(store: &mut Store) -> Vec<(PreferenceGroup, Result<(), String>)> {
-        store.flush();
-        store.process_writes()
-    }
-    fn failed(results: &[(PreferenceGroup, Result<(), String>)], group: PreferenceGroup) -> bool {
-        results
-            .iter()
-            .any(|(g, result)| *g == group && result.is_err())
-    }
-
-    /// The production store with a writer that finishes each write before
-    /// returning; results still arrive through `process_writes`.
     fn open(root: impl Into<PathBuf>, vault: Arc<dyn CredentialVault>) -> Store {
-        let root = root.into();
-        Store::open_with(root.clone(), vault, InlineWriter::new(root))
+        Store::open(root, vault)
     }
 
     fn isolated() -> (tempfile::TempDir, Store) {
@@ -2440,8 +1843,7 @@ mod tests {
         generation.select_provider(Some(AsrProvider::Npu));
         generation.options.asr_model = Some("qwen3-1.7b".into());
         store.save_generation(generation).unwrap();
-        let _ = store.process_writes();
-        let mut reopened = open(directory.path(), store.vault());
+        let reopened = open(directory.path(), store.vault());
         assert_eq!(
             reopened.generation().options.provider,
             Some(AsrProvider::Npu)
@@ -2451,10 +1853,6 @@ mod tests {
             issue.kind == SettingsIssueKind::Recovered
                 && issue.message == course2md::config::retired_npu_model_notice()
         }));
-        assert!(!failed(
-            &reopened.process_writes(),
-            PreferenceGroup::Generation
-        ));
         let again = open(directory.path(), store.vault());
         assert_eq!(again.generation().options.asr_model, None);
         assert!(again.issues().is_empty());
@@ -2571,7 +1969,6 @@ mod tests {
         let edit = ServiceDraft::new(ServicePurpose::Ai);
         store.discard_service_draft(&edit.id).unwrap();
         assert!(!directory.path().join("services.json").exists());
-        assert!(store.services.discarded_drafts.is_empty());
     }
 
     #[test]
@@ -2605,7 +2002,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_group_commit_does_not_publish_intent_or_change_other_groups() {
+    fn failed_group_commit_stays_inactive_and_leaves_other_groups_saving() {
         let (directory, mut store) = isolated();
         store.save_generation(store.generation().clone()).unwrap();
         // A directory in place of the target makes writes fail even when tests run as root.
@@ -2613,24 +2010,27 @@ mod tests {
         std::fs::create_dir(directory.path().join("generation.json")).unwrap();
         let mut next = store.generation().clone();
         next.ai.summarize = true;
-        store.save_generation(next).unwrap();
-        assert!(failed(&settle(&mut store), PreferenceGroup::Generation));
-        assert!(
-            store
-                .generation_intent()
-                .is_some_and(|intent| intent.ai.summarize)
-        );
+        assert!(store.save_generation(next.clone()).is_err());
+        assert!(!store.generation().ai.summarize);
         store.save_application(store.application().clone()).unwrap();
-        assert!(!failed(&settle(&mut store), PreferenceGroup::Application));
         assert!(
             store
                 .issues()
                 .iter()
                 .any(|issue| issue.group == PreferenceGroup::Generation)
         );
-        // The unwritten edit is never what a relaunch applies.
+        // The unwritten edit is never what a relaunch applies, and a retry succeeds.
         let reopened = open(directory.path(), store.vault());
         assert!(!reopened.generation().ai.summarize);
+        std::fs::remove_dir(directory.path().join("generation.json")).unwrap();
+        store.save_generation(next).unwrap();
+        assert!(store.generation().ai.summarize);
+        assert!(
+            open(directory.path(), store.vault())
+                .generation()
+                .ai
+                .summarize
+        );
     }
 
     #[test]
@@ -2912,68 +2312,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_ordinary_edits_are_recovered_without_becoming_active() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("preferences");
-        let mut store = open(&root, Arc::new(MemoryCredentialVault::new()));
-        std::fs::create_dir_all(root.join("generation.json")).unwrap();
-        std::fs::create_dir_all(root.join("application.json")).unwrap();
-        let mut generation = store.generation().clone();
-        generation.prompt_draft = Some("Keep the technical terms.".into());
-        generation.ai.summarize = true;
-        let mut application = store.application().clone();
-        application.font_scale = 2.0;
-        store.save_generation(generation.clone()).unwrap();
-        store.save_application(application.clone()).unwrap();
-        let results = settle(&mut store);
-        assert!(failed(&results, PreferenceGroup::Generation));
-        assert!(failed(&results, PreferenceGroup::Application));
-        assert!(store.unsaved_intents_are_preserved());
-        let mut reopened = open(&root, store.vault());
-        assert!(!reopened.generation().ai.summarize);
-        assert_eq!(reopened.application().font_scale, 1.0);
-        assert_eq!(reopened.generation_intent(), Some(&generation));
-        assert_eq!(reopened.application_intent(), Some(&application));
-        std::fs::remove_dir(root.join("generation.json")).unwrap();
-        std::fs::remove_dir(root.join("application.json")).unwrap();
-        reopened.blocked.clear();
-        reopened.save_generation(generation).unwrap();
-        reopened.save_application(application).unwrap();
-        assert!(
-            settle(&mut reopened)
-                .iter()
-                .all(|(_, result)| result.is_ok())
-        );
-        assert!(reopened.generation_intent().is_none());
-        assert!(reopened.application_intent().is_none());
-        let saved = open(&root, reopened.vault());
-        assert!(saved.generation().ai.summarize);
-        assert_eq!(saved.application().font_scale, 2.0);
-    }
-
-    #[test]
-    fn recovery_failure_is_distinct_from_a_durable_unapplied_edit() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("preferences");
-        let mut store = open(&root, Arc::new(MemoryCredentialVault::new()));
-        std::fs::create_dir_all(root.join("generation.json")).unwrap();
-        std::fs::write(
-            root.with_extension("recovery"),
-            b"blocked recovery location",
-        )
-        .unwrap();
-        let mut edit = store.generation().clone();
-        edit.ai.summarize = true;
-        store.save_generation(edit).unwrap();
-        assert!(failed(&settle(&mut store), PreferenceGroup::Generation));
-        assert!(!store.unsaved_intents_are_preserved());
-        let reopened = open(&root, store.vault());
-        assert!(!reopened.generation().ai.summarize);
-        assert!(reopened.generation_intent().is_none());
-    }
-
-    #[test]
-    fn service_recovery_retains_drafts_but_never_replaces_the_active_version() {
+    fn a_failed_service_save_keeps_the_active_version_and_can_be_repeated() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("preferences");
         let mut store = open(&root, Arc::new(MemoryCredentialVault::new()));
@@ -2981,36 +2320,38 @@ mod tests {
         let version = store
             .publish_service(&draft.id, BindingScope::Defaults)
             .unwrap();
-        // The verified backup represents the current committed version before the failure.
-        std::fs::copy(root.join("services.json"), root.join("services.json.bak")).unwrap();
         std::fs::remove_file(root.join("services.json")).unwrap();
         std::fs::create_dir(root.join("services.json")).unwrap();
         let mut edit = ServiceDraft::from_version(&version);
         edit.model = "unapplied-model".into();
-        let saved = store
-            .save_service_draft(edit, Some(Secret::new("isolated-new-key")))
-            .unwrap();
-        assert!(store.is_recovery_draft(&saved.id));
-        let mut reopened = open(&root, store.vault());
+        assert!(store.save_service_draft(edit.clone(), None).is_err());
+        assert!(store.draft(&edit.id).is_none());
         assert_eq!(
-            reopened.default_refs().llm.as_deref(),
+            store.default_refs().llm.as_deref(),
             Some(version.id.as_str())
         );
-        assert_eq!(reopened.draft(&saved.id).unwrap().model, "unapplied-model");
-        let recovery = std::fs::read_to_string(
-            root.with_extension("recovery")
-                .join(format!("{}.json", saved.id)),
-        )
-        .unwrap();
-        assert!(!recovery.contains("isolated-new-key"));
         std::fs::remove_dir(root.join("services.json")).unwrap();
-        let published = reopened
+        let saved = store.save_service_draft(edit, None).unwrap();
+        let published = store
             .publish_service(&saved.id, BindingScope::CurrentTask)
             .unwrap();
-        let again = open(&root, reopened.vault());
+        let again = open(&root, store.vault());
         assert!(again.draft(&saved.id).is_none());
         assert!(again.version(&published.id).is_some());
         assert_eq!(again.default_refs().llm, Some(version.id));
+    }
+
+    #[test]
+    fn files_written_with_discarded_draft_lists_and_recovery_directories_still_load() {
+        let (directory, _store) = isolated();
+        std::fs::write(
+            directory.path().join("services.json"),
+            r#"{"schema":1,"revision":7,"value":{"discarded_drafts":["service-draft-x"]}}"#,
+        )
+        .unwrap();
+        let reopened = open(directory.path(), Arc::new(MemoryCredentialVault::new()));
+        assert!(!reopened.is_blocked(PreferenceGroup::Services));
+        assert_eq!(reopened.revision(PreferenceGroup::Services), 7);
     }
 
     #[test]
@@ -3108,7 +2449,6 @@ mod tests {
         app.font_scale = f32::NAN;
         assert!(store.save_application(app).is_err());
         assert_eq!(store.application().font_scale, 1.0);
-        assert!(!store.unsaved_intents_are_preserved());
     }
 
     #[test]
@@ -3135,7 +2475,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_theme_save_preserves_active_palette_and_recovers_the_unapplied_choice() {
+    fn failed_theme_save_preserves_active_palette() {
         use crate::palettes::PaletteId;
         let (directory, mut store) = isolated();
         store.save_application(store.application().clone()).unwrap();
@@ -3144,12 +2484,10 @@ mod tests {
         let active = store.application().clone();
         let mut edit = active.clone();
         edit.appearance.select(PaletteId::Nord);
-        store.save_application(edit.clone()).unwrap();
-        assert!(failed(&settle(&mut store), PreferenceGroup::Application));
-        assert_eq!(store.application_intent(), Some(&edit));
+        assert!(store.save_application(edit).is_err());
+        assert_eq!(store.application(), &active);
         let reopened = open(directory.path(), store.vault());
         assert_eq!(reopened.application().appearance, active.appearance);
-        assert_eq!(reopened.application_intent(), Some(&edit));
     }
 
     #[test]
@@ -3178,7 +2516,6 @@ mod tests {
         let mut config = store.generation().clone();
         config.options.model_dir = Some(outside.clone());
         store.save_generation(config).unwrap();
-        settle(&mut store);
         store.relocate_generation_paths(&old, &new).unwrap();
         assert_eq!(
             store.generation().options.model_dir.as_ref(),
@@ -3187,21 +2524,12 @@ mod tests {
         let mut config = store.generation().clone();
         config.options.model_dir = Some(old.join("models"));
         store.save_generation(config).unwrap();
-        settle(&mut store);
         std::fs::remove_file(root.join("generation.json")).unwrap();
         std::fs::create_dir(root.join("generation.json")).unwrap();
-        store.relocate_generation_paths(&old, &new).unwrap();
-        // Until the writer confirms, the file on disk still names the old library.
+        assert!(store.relocate_generation_paths(&old, &new).is_err());
         assert!(store.references_storage_path(&old));
-        assert!(failed(&settle(&mut store), PreferenceGroup::Generation));
-        assert!(store.references_storage_path(&old));
-        assert!(store.references_storage_path(&new));
-        assert!(store.unsaved_intents_are_preserved());
         std::fs::remove_dir(root.join("generation.json")).unwrap();
-        store
-            .save_generation(store.generation_intent().unwrap().clone())
-            .unwrap();
-        settle(&mut store);
+        store.relocate_generation_paths(&old, &new).unwrap();
         assert!(!store.references_storage_path(&old));
         assert!(store.references_storage_path(&new));
     }
@@ -3248,126 +2576,5 @@ mod tests {
         assert_eq!(released, vec![key.clone()]);
         Store::remove_credentials(&vault, &released);
         assert!(vault.resolve(&key).is_err());
-    }
-
-    #[test]
-    fn background_preferences_writer_serializes_and_flushes() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("generation.json");
-        let writer = ThreadWriter::new(root.path().to_path_buf());
-        writer
-            .send(PreferenceSignal::Write {
-                path: path.clone(),
-                bytes: b"{\"ok\":true}".to_vec(),
-                group: PreferenceGroup::Generation,
-                revision: 1,
-            })
-            .unwrap();
-        writer.flush();
-        assert_eq!(std::fs::read(&path).unwrap(), b"{\"ok\":true}");
-        assert!(
-            writer
-                .try_result()
-                .is_some_and(|result| result.result.is_ok())
-        );
-    }
-    /// The production background writer.
-    fn store_with_async_writer(root: &std::path::Path) -> Store {
-        Store::open(
-            root.to_path_buf(),
-            Arc::new(crate::credentials::MemoryCredentialVault::new()),
-        )
-    }
-
-    #[test]
-    fn async_generation_save_reports_pending_until_written() {
-        let root = tempfile::tempdir().unwrap();
-        let mut store = store_with_async_writer(root.path());
-        let value = store.generation().clone();
-        store.save_generation(value).unwrap();
-        assert!(store.is_pending(PreferenceGroup::Generation));
-        assert!(store.generation_intent().is_some());
-        store.flush();
-        let completed = store.process_writes();
-        assert_eq!(completed.len(), 1);
-        assert!(completed[0].1.is_ok());
-        assert!(!store.is_pending(PreferenceGroup::Generation));
-        assert!(store.generation_intent().is_none());
-        store.flush();
-        assert!(root.path().join("generation.json").is_file());
-        assert!(!root.path().join("generation-intent.json").exists());
-    }
-
-    #[test]
-    fn failed_async_save_keeps_the_recovery_intent() {
-        let root = tempfile::tempdir().unwrap();
-        let mut store = store_with_async_writer(root.path());
-        std::fs::create_dir(root.path().join("generation.json")).unwrap();
-        let value = store.generation().clone();
-        store.save_generation(value).unwrap();
-        store.flush();
-        let completed = store.process_writes();
-        assert_eq!(completed.len(), 1);
-        assert!(completed[0].1.is_err());
-        assert!(!store.is_pending(PreferenceGroup::Generation));
-        assert!(store.generation_intent().is_some());
-        assert!(store.unsaved_intents_are_preserved());
-    }
-    #[test]
-    fn async_service_publish_keeps_recovery_until_written() {
-        let root = tempfile::tempdir().unwrap();
-        let mut store = store_with_async_writer(root.path());
-        let draft = complete_draft(&mut store, "test-model");
-        let version = store
-            .publish_service(&draft.id, BindingScope::Defaults)
-            .unwrap();
-        assert!(store.is_pending(PreferenceGroup::Services));
-        assert!(store.has_pending_services());
-        store.flush();
-        let completed = store.process_writes();
-        assert!(completed.iter().all(|(_, result)| result.is_ok()));
-        assert!(!store.is_pending(PreferenceGroup::Services));
-        assert!(!store.has_pending_services());
-        store.flush();
-        assert!(!root.path().join(format!("{}.json", draft.id)).exists());
-        assert!(store.services.versions.contains_key(&version.id));
-    }
-    #[test]
-    fn failed_service_publish_keeps_intent_and_can_retry() {
-        let root = tempfile::tempdir().unwrap();
-        let mut store = store_with_async_writer(root.path());
-        let draft = complete_draft(&mut store, "retry-model");
-        store.flush();
-        let _ = store.process_writes();
-        let services = root.path().join(PreferenceGroup::Services.filename());
-        std::fs::remove_file(&services).unwrap();
-        std::fs::create_dir(&services).unwrap();
-        let version = store
-            .publish_service(&draft.id, BindingScope::Defaults)
-            .unwrap();
-        store.flush();
-        let completed = store.process_writes();
-        assert!(completed.iter().any(|(_, result)| result.is_err()));
-        assert!(store.has_pending_services());
-        assert!(
-            store
-                .recovery_root()
-                .join(format!("{}.json", draft.id))
-                .exists()
-        );
-        std::fs::remove_dir(&services).unwrap();
-        store.retry_services().unwrap();
-        store.flush();
-        let completed = store.process_writes();
-        assert!(completed.iter().all(|(_, result)| result.is_ok()));
-        assert!(!store.has_pending_services());
-        store.flush();
-        assert!(store.services.versions.contains_key(&version.id));
-        assert!(
-            !store
-                .recovery_root()
-                .join(format!("{}.json", draft.id))
-                .exists()
-        );
     }
 }

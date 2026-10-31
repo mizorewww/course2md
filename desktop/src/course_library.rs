@@ -2938,7 +2938,11 @@ impl Desktop {
         for task in attention {
             let id = task.id.clone();
             let uncertain = task.state == crate::workspace::TaskState::Uncertain
-                || task.blocked.iter().any(|request| request.is_uncertain());
+                || task
+                    .events
+                    .blocked
+                    .iter()
+                    .any(|request| request.is_uncertain());
             let requires_repair = !uncertain && crate::task_ui::task_requires_service_repair(&task);
             let partial_components = if task.state == crate::workspace::TaskState::Partial {
                 task.artifact
@@ -3234,13 +3238,12 @@ mod tests {
             parent: None,
             handled_by: None,
             work_dir: "/tmp/work".into(),
-            stages: Default::default(),
-            error: None,
+            events: crate::activity::JobEvents {
+                error: None,
+                ..Default::default()
+            },
             artifact: None,
-            outcomes: None,
             unread: false,
-            logs: vec![],
-            blocked: vec![],
             resend: vec![],
         };
         let busy = super::note_has_unfinished_task;
