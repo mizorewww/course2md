@@ -11,7 +11,6 @@ use crate::progress::Stage;
 use crate::timeline::{Section, TranscriptEvent};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::io::IsTerminal;
 use std::path::Path;
 use std::time::Duration;
 
@@ -58,6 +57,7 @@ const BATCH: usize = 20;
     strum::IntoStaticStr,
 )]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 pub enum LlmProvider {
     /// OpenAI 兼容 /chat/completions 端点
     #[default]
@@ -137,7 +137,8 @@ impl Default for LlmSettings {
 }
 
 /// 请求用途：请求账本分类与 token 用量归属。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 pub(crate) enum Purpose {
     Proofreading,
     Summary,
@@ -145,13 +146,6 @@ pub(crate) enum Purpose {
 }
 
 impl Purpose {
-    fn ledger_name(self) -> &'static str {
-        match self {
-            Self::Proofreading => "proofreading",
-            Self::Summary => "summary",
-            Self::Translation => "translation",
-        }
-    }
     fn usage_stage(self) -> Stage {
         match self {
             Self::Proofreading => Stage::Llm,
@@ -191,11 +185,6 @@ const MAX_CONCURRENCY: usize = 16;
 /// LLM 请求最大尝试次数（1 次原始 + 重试）。
 const MAX_ATTEMPTS: u32 = 3;
 
-/// 校对/摘要共享的 HTTP agent：整个任务复用同一连接池（clone 共享底层池）。
-pub(crate) fn chat_agent(s: &LlmSettings) -> ureq::Agent {
-    stall_limited_agent(crate::provider::is_sse(s), STALL_TIMEOUT)
-}
-
 /// A response that stops arriving for `stall` is abandoned then, instead of holding
 /// the task for the whole request budget. The two shapes stall differently:
 ///
@@ -233,27 +222,114 @@ pub struct PolishReport {
     pub note: Option<String>,
 }
 
-/// Runs the AI batches on the shared worker pool. A batch counts toward
-/// progress once taken, even if it is skipped; `work` returns how many items
-/// it improved (0 for a skipped or failed batch, which keeps the original).
-/// Err = the task was stopped.
-fn run_pool<T: Send>(
-    chunks: Vec<T>,
-    workers: usize,
-    pb: &crate::progress::Bar,
+/// A transcript batch: at most [`BATCH`] events, and the slide image sent with them.
+type Chunk<'a> = (Option<std::path::PathBuf>, Vec<&'a mut TranscriptEvent>);
+
+fn into_chunks<'a>(
+    image: Option<std::path::PathBuf>,
+    events: impl Iterator<Item = &'a mut TranscriptEvent>,
+    chunks: &mut Vec<Chunk<'a>>,
+) {
+    let mut refs: Vec<_> = events.collect();
+    while !refs.is_empty() {
+        let rest = refs.split_off(refs.len().min(BATCH));
+        chunks.push((image.clone(), std::mem::replace(&mut refs, rest)));
+    }
+}
+
+/// One AI step over transcript batches, on the shared worker pool. A batch counts
+/// toward progress once taken. A failed batch keeps its text and records the first
+/// cause, and never stops the note; Err = the task was stopped.
+fn run_batches(
+    s: &LlmSettings,
+    purpose: Purpose,
+    chunks: Vec<Chunk<'_>>,
+    attempted: usize,
     control: &crate::dispatch::TaskControl,
-    work: &(dyn Fn(T) -> usize + Sync),
-) -> Result<usize> {
-    let counts = crate::runtime::map_pool(chunks, workers, control, |item| {
-        pb.inc(1);
-        Ok(work(item))
-    })?;
-    Ok(counts.into_iter().sum())
+    body_for: impl Fn(&[&str], Option<&str>) -> Result<serde_json::Value> + Sync,
+    apply: impl Fn(&mut [&mut TranscriptEvent], &[(usize, String)]) + Sync,
+) -> Result<PolishReport> {
+    let label = if purpose == Purpose::Proofreading {
+        "llm"
+    } else {
+        "translate"
+    };
+    let pb = crate::progress::Bar::new(purpose.usage_stage(), chunks.len() as u64).with_template(
+        &format!("{{spinner:.green}} {label} {{pos}}/{{len}} [{{bar:32.cyan/blue}}] {{msg}}"),
+    );
+    let chat = Chat::new(s, purpose, control);
+    let warned = std::sync::atomic::AtomicBool::new(false);
+    let first_error = std::sync::Mutex::new(None::<String>);
+    let batch = |(image_path, mut chunk): Chunk<'_>| -> Result<usize> {
+        let (first, last) = (
+            chunk.first().context("empty batch")?,
+            chunk.last().context("empty batch")?,
+        );
+        let (start, end) = (
+            crate::render::fmt_ts(first.start),
+            crate::render::fmt_ts(last.end),
+        );
+        let description = if purpose == Purpose::Proofreading {
+            crate::tr!(
+                "校对 {}–{} 的文字 / Proofread transcript {}–{}",
+                start,
+                end,
+                start,
+                end
+            )
+        } else {
+            crate::tr!(
+                "翻译 {}–{} 的文字 / Translate transcript {}–{}",
+                start,
+                end,
+                start,
+                end
+            )
+        };
+        let items: Vec<&str> = chunk.iter().map(|e| e.text.as_str()).collect();
+        let image = image_path
+            .as_deref()
+            .and_then(|path| section_image_b64(path, &warned));
+        let body = body_for(&items, image.as_deref())?;
+        let segments = chat.segments(&body, &description, items.len())?;
+        apply(&mut chunk, &segments);
+        Ok(chunk.len())
+    };
+    let counts = crate::runtime::map_pool(
+        chunks,
+        s.concurrency.clamp(1, MAX_CONCURRENCY),
+        control,
+        |chunk| {
+            pb.inc(1);
+            Ok(batch(chunk).unwrap_or_else(|error| {
+                let cause = format!("{error:#}");
+                warn_once(
+                    &warned,
+                    &if purpose == Purpose::Proofreading {
+                        crate::tr!("校对未完成，已保留原文：{}", cause)
+                    } else {
+                        crate::tr!("翻译未完成：{}", cause)
+                    },
+                );
+                let mut first = crate::runtime::lock_recover(&first_error);
+                first.get_or_insert_with(|| brief(&cause));
+                0
+            }))
+        },
+    )?;
+    pb.finish();
+    let succeeded = counts.into_iter().sum();
+    Ok(PolishReport {
+        attempted,
+        succeeded,
+        failed: attempted.saturating_sub(succeeded),
+        note: crate::runtime::lock_recover(&first_error).take(),
+    })
 }
 
 /// 对已合并的 Section 做校对（在 merge 之后调用；配置已由调用方校验）。
 /// - 失败批次保留原文（校对失败不阻断转换），不拆分、不改发另一种请求
-/// - vision=true 时附对应截图（每节只读盘 + base64 一次）；截图不可用的节保留原文
+/// - vision=true 时附对应截图（每批只读盘 + base64 一次）
 /// - 模型对纯语气词条目返回空 text → 该条被删除
 /// - 队列单元为 chunk：纯文本跨 Section 展平后每 BATCH 条一批；vision 按节分批
 ///   （同一请求只能附一张截图）。worker 池抢占式取活，已确认响应由请求账本复用。
@@ -267,72 +343,37 @@ pub fn polish_sections_report(
     if attempted == 0 {
         return Ok(PolishReport::default());
     }
-    let warned = std::sync::atomic::AtomicBool::new(false);
-    // Paths only: the image is read and encoded once per request batch, not all up front.
-    let mut image_paths: Vec<Option<std::path::PathBuf>> = Vec::with_capacity(sections.len());
-    for sec in sections.iter() {
-        image_paths
-            .push((s.vision && !sec.speech.is_empty()).then(|| frames_root.join(&sec.image)));
-    }
-    let mut chunks: Vec<(Option<std::path::PathBuf>, Vec<&mut TranscriptEvent>)> = Vec::new();
+    let mut chunks = Vec::new();
     if s.vision {
-        for (sec, image) in sections.iter_mut().zip(&image_paths) {
-            let Some(image) = image else { continue };
-            let mut refs: Vec<_> = sec.speech.iter_mut().collect();
-            while !refs.is_empty() {
-                let rest = refs.split_off(refs.len().min(BATCH));
-                chunks.push((Some(image.clone()), std::mem::replace(&mut refs, rest)));
-            }
+        for section in sections
+            .iter_mut()
+            .filter(|section| !section.speech.is_empty())
+        {
+            let image = Some(frames_root.join(&section.image));
+            into_chunks(image, section.speech.iter_mut(), &mut chunks);
         }
     } else {
-        let mut refs: Vec<_> = sections
+        let events = sections
             .iter_mut()
-            .flat_map(|sec| sec.speech.iter_mut())
-            .collect();
-        while !refs.is_empty() {
-            let rest = refs.split_off(refs.len().min(BATCH));
-            chunks.push((None, std::mem::replace(&mut refs, rest)));
-        }
+            .flat_map(|section| section.speech.iter_mut());
+        into_chunks(None, events, &mut chunks);
     }
-    let pb = crate::progress::Bar::new(Stage::Llm, chunks.len() as u64)
-        .with_template("{spinner:.green} llm {pos}/{len} [{bar:32.cyan/blue}] {msg}");
-    let agent = chat_agent(s);
-    let first_error = std::sync::Mutex::new(None::<String>);
-    let succeeded = run_pool(
+    let report = run_batches(
+        s,
+        Purpose::Proofreading,
         chunks,
-        s.concurrency.clamp(1, MAX_CONCURRENCY),
-        &pb,
-        control,
-        &|(image_path, mut chunk)| {
-            let image = image_path
-                .as_deref()
-                .and_then(|path| section_image_b64(path, &warned));
-            polish_chunk(
-                &agent,
-                control,
-                s,
-                &mut chunk,
-                image.as_deref(),
-                &warned,
-                &first_error,
-            )
-        },
-    )?;
-    pb.finish();
-    // A formula spoken across a subtitle boundary comes back in two pieces.
-    for sec in sections.iter_mut() {
-        join_split_formulas(&mut sec.speech);
-    }
-    // 删除「成功校对为空串」的纯语气词条目（全部 chunk 完成后统一过滤）
-    for sec in sections.iter_mut() {
-        sec.speech.retain(|e| !e.text.trim().is_empty());
-    }
-    Ok(PolishReport {
         attempted,
-        succeeded,
-        failed: attempted.saturating_sub(succeeded),
-        note: crate::runtime::lock_recover(&first_error).take(),
-    })
+        control,
+        |items, image| build_chat_body(s, items, image),
+        apply_polish,
+    )?;
+    for section in sections.iter_mut() {
+        // A formula spoken across a subtitle boundary comes back in two pieces.
+        join_split_formulas(&mut section.speech);
+        // 删除「成功校对为空串」的纯语气词条目（全部 chunk 完成后统一过滤）
+        section.speech.retain(|e| !e.text.trim().is_empty());
+    }
+    Ok(report)
 }
 
 impl LlmSettings {
@@ -355,121 +396,50 @@ pub fn translate_sections_report(
     target: &str,
     control: &crate::dispatch::TaskControl,
 ) -> Result<PolishReport> {
-    let mut chunks: Vec<Vec<&mut TranscriptEvent>> = Vec::new();
-    let mut refs: Vec<_> = sections
+    let is_text = |event: &&mut TranscriptEvent| !event.text.trim().is_empty();
+    let attempted = sections
         .iter_mut()
         .flat_map(|section| section.speech.iter_mut())
-        .filter(|event| !event.text.trim().is_empty())
-        .collect();
-    let attempted = refs.len();
+        .filter(is_text)
+        .count();
     if attempted == 0 {
         return Ok(PolishReport::default());
     }
-    while !refs.is_empty() {
-        let rest = refs.split_off(refs.len().min(BATCH));
-        chunks.push(std::mem::replace(&mut refs, rest));
-    }
-    let pb = crate::progress::Bar::new(Stage::Translate, chunks.len() as u64)
-        .with_template("{spinner:.green} translate {pos}/{len} [{bar:32.cyan/blue}] {msg}");
-    let agent = chat_agent(s);
-    let warned = std::sync::atomic::AtomicBool::new(false);
-    let first_error = std::sync::Mutex::new(None::<String>);
-    let succeeded = run_pool(
+    let mut chunks = Vec::new();
+    let events = sections
+        .iter_mut()
+        .flat_map(|section| section.speech.iter_mut())
+        .filter(is_text);
+    into_chunks(None, events, &mut chunks);
+    run_batches(
+        s,
+        Purpose::Translation,
         chunks,
-        s.concurrency.clamp(1, MAX_CONCURRENCY),
-        &pb,
-        control,
-        &|mut chunk| {
-            translate_chunk(
-                &agent,
-                control,
-                s,
-                target,
-                &mut chunk,
-                &warned,
-                &first_error,
-            )
-        },
-    )?;
-    pb.finish();
-    Ok(PolishReport {
         attempted,
-        succeeded,
-        failed: attempted.saturating_sub(succeeded),
-        note: crate::runtime::lock_recover(&first_error).take(),
-    })
-}
-
-fn translate_chunk(
-    agent: &ureq::Agent,
-    control: &crate::dispatch::TaskControl,
-    s: &LlmSettings,
-    target: &str,
-    chunk: &mut [&mut TranscriptEvent],
-    warned: &std::sync::atomic::AtomicBool,
-    first_error: &std::sync::Mutex<Option<String>>,
-) -> usize {
-    let (Some(first), Some(last)) = (chunk.first(), chunk.last()) else {
-        return 0;
-    };
-    let description = crate::tr!(
-        "翻译 {}–{} 的文字 / Translate transcript {}–{}",
-        crate::render::fmt_ts(first.start),
-        crate::render::fmt_ts(last.end),
-        crate::render::fmt_ts(first.start),
-        crate::render::fmt_ts(last.end)
-    );
-    let items: Vec<&str> = chunk.iter().map(|e| e.text.as_str()).collect();
-    let result = translation_body(s, target, &items).and_then(|body| {
-        let expected = items.len();
-        let content = send_chat_described(
-            agent,
-            control,
-            s,
-            &body,
-            Purpose::Translation,
-            &description,
-            &|content| {
-                let parsed = parse_segments(content).context(crate::tr!(
-                    "服务返回的翻译结构无效 / Invalid translation structure"
-                ))?;
-                anyhow::ensure!(
-                    segment_ids_match(&parsed, expected),
-                    crate::tr!(
-                        "翻译结果与原文段落不对应 / Translated segments do not match the input"
-                    )
-                );
-                Ok(())
-            },
-        )?;
-        parse_segments(&content).context(crate::tr!(
-            "服务返回的翻译结构无效 / Invalid translation structure"
-        ))
-    });
-    match result {
-        Ok(translated) => {
+        control,
+        |items, _| translation_body(s, target, items),
+        |chunk, translated| {
             for (id, text) in translated {
-                if let Some(event) = chunk.get_mut(id) {
+                if let Some(event) = chunk.get_mut(*id) {
                     let text = text.trim();
                     event.translation = (!text.is_empty()).then(|| text.to_owned());
                 }
             }
-            chunk.len()
-        }
-        Err(error) => {
-            warn_once(warned, &crate::tr!("翻译未完成：{}", format!("{error:#}")));
-            record_first_error(first_error, format!("{error:#}"));
-            0
-        }
-    }
+        },
+    )
 }
 
-fn translation_body(s: &LlmSettings, target: &str, items: &[&str]) -> Result<serde_json::Value> {
+/// The batch as the JSON the service gets.
+fn batch_payload(items: &[&str]) -> Result<String> {
     let payload: Vec<serde_json::Value> = items
         .iter()
         .enumerate()
         .map(|(i, t)| serde_json::json!({"id": i, "text": t}))
         .collect();
+    Ok(serde_json::to_string(&payload)?)
+}
+
+fn translation_body(s: &LlmSettings, target: &str, items: &[&str]) -> Result<serde_json::Value> {
     // The instruction stays in English: it names the target for any service.
     let system = format!(
         "You translate lecture transcripts. Translate each item into {}. Keep the meaning, \
@@ -481,7 +451,7 @@ fn translation_body(s: &LlmSettings, target: &str, items: &[&str]) -> Result<ser
     Ok(crate::provider::chat_body(
         s,
         &system,
-        serde_json::Value::String(serde_json::to_string(&payload)?),
+        serde_json::Value::String(batch_payload(items)?),
         CHAT_MAX_TOKENS,
     ))
 }
@@ -545,51 +515,6 @@ fn section_image_b64(path: &Path, warned: &std::sync::atomic::AtomicBool) -> Opt
     }
 }
 
-/// 校对一个分块；返回成功条数（失败保留原文并记录首个错误）。
-fn polish_chunk(
-    agent: &ureq::Agent,
-    control: &crate::dispatch::TaskControl,
-    s: &LlmSettings,
-    chunk: &mut [&mut TranscriptEvent],
-    image_b64: Option<&str>,
-    warned: &std::sync::atomic::AtomicBool,
-    first_error: &std::sync::Mutex<Option<String>>,
-) -> usize {
-    let (Some(first), Some(last)) = (chunk.first(), chunk.last()) else {
-        return 0;
-    };
-    let description = crate::tr!(
-        "校对 {}–{} 的文字 / Proofread transcript {}–{}",
-        crate::render::fmt_ts(first.start),
-        crate::render::fmt_ts(last.end),
-        crate::render::fmt_ts(first.start),
-        crate::render::fmt_ts(last.end)
-    );
-    let items: Vec<&str> = chunk.iter().map(|e| e.text.as_str()).collect();
-    match chat(agent, control, s, &items, image_b64, &description) {
-        Ok(polished) => {
-            apply_polish(chunk, &polished);
-            chunk.len()
-        }
-        Err(error) => {
-            warn_once(
-                warned,
-                &crate::tr!("校对未完成，已保留原文：{}", format!("{error:#}")),
-            );
-            record_first_error(first_error, format!("{error:#}"));
-            0
-        }
-    }
-}
-
-/// 记录首个失败原因（后续失败不覆盖），截断避免超长错误刷屏。
-fn record_first_error(slot: &std::sync::Mutex<Option<String>>, msg: String) {
-    let mut guard = crate::runtime::lock_recover(slot);
-    if guard.is_none() {
-        *guard = Some(brief(&msg));
-    }
-}
-
 fn brief(msg: &str) -> String {
     const MAX: usize = 160;
     let mut s: String = msg.chars().take(MAX).collect();
@@ -628,55 +553,12 @@ fn warn_once(warned: &std::sync::atomic::AtomicBool, msg: &str) {
     }
 }
 
-/// 发一批（id, 文本）给 LLM，返回校对后的 (id, 文本) 列表。
-/// `image_b64` 提供时在用户消息中附上该幻灯片截图（OpenAI 兼容 image_url 协议）。
-/// 失败由持久请求账本记录；此层保留完整原文。
-fn chat(
-    agent: &ureq::Agent,
-    control: &crate::dispatch::TaskControl,
-    s: &LlmSettings,
-    items: &[&str],
-    image_b64: Option<&str>,
-    description: &str,
-) -> Result<Vec<(usize, String)>> {
-    let body = build_chat_body(s, items, image_b64)?;
-    let expected = items.len();
-    let content = send_chat_described(
-        agent,
-        control,
-        s,
-        &body,
-        Purpose::Proofreading,
-        description,
-        &|content| {
-            let parsed = parse_segments(content).context(crate::tr!(
-                "服务返回的校对结构无效 / Invalid proofreading structure"
-            ))?;
-            anyhow::ensure!(
-                segment_ids_match(&parsed, expected),
-                crate::tr!(
-                    "校对结果与原文段落不对应，已保留原文 / Proofread segments do not match the input"
-                )
-            );
-            Ok(())
-        },
-    )?;
-    parse_segments(&content).context(crate::tr!(
-        "服务返回的校对结构无效 / Invalid proofreading structure"
-    ))
-}
-
 /// 构造 /chat/completions 请求体（独立出来便于单测覆盖视觉路径）。
 fn build_chat_body(
     s: &LlmSettings,
     items: &[&str],
     image_b64: Option<&str>,
 ) -> Result<serde_json::Value> {
-    let payload: Vec<serde_json::Value> = items
-        .iter()
-        .enumerate()
-        .map(|(i, t)| serde_json::json!({"id": i, "text": t}))
-        .collect();
     let vision_note = if image_b64.is_some() { VISION_NOTE } else { "" };
     let system = format!(
         "{} 输出为 JSON 对象 {{\"segments\":[{{\"id\":序号,\"text\":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{vision_note} {MATH_RULE}",
@@ -684,7 +566,7 @@ fn build_chat_body(
     );
     let mut content = vec![serde_json::json!({
         "type": "text",
-        "text": serde_json::to_string(&payload)?,
+        "text": batch_payload(items)?,
     })];
     if let Some(b64) = image_b64 {
         content.push(serde_json::json!({
@@ -704,62 +586,34 @@ fn build_chat_body(
 /// （与 response_format=json_object 一致）；兼容模型无视指令仍返回
 /// 顶层数组的情况。两者都容忍代码围栏、前后杂文与尾逗号。
 pub fn parse_segments(content: &str) -> Option<Vec<(usize, String)>> {
-    // 1) 契约路径：{"segments":[...]}
-    if let Some(obj) = extract_json_object(content)
-        && let Some(arr) = obj.get("segments").and_then(|v| v.as_array())
-        && let Some(items) = parse_items(arr)
-    {
-        return Some(items);
-    }
-    // 2) 兼容路径：顶层数组（含个别坏项的宽容扫描）
-    parse_id_text_pairs(content)
+    extract_json_object(content)
+        .and_then(|object| parse_items(object.get("segments")?.as_array()?))
+        .or_else(|| parse_id_text_pairs(content))
+}
+
+/// 首个 `open` 到末个 `close` 之间（含两端）的文本。
+fn between(content: &str, open: char, close: char) -> Option<&str> {
+    let (start, end) = (content.find(open)?, content.rfind(close)?);
+    (end > start).then(|| &content[start..=end])
+}
+
+fn tolerant_json(slice: &str) -> Option<serde_json::Value> {
+    serde_json::from_str(slice)
+        .or_else(|_| serde_json::from_str(&clean_trailing_commas(slice)))
+        .ok()
 }
 
 /// 截取首个 { 到末个 } 解析为 JSON 对象；容忍尾逗号。
 pub fn extract_json_object(content: &str) -> Option<serde_json::Value> {
-    let start = content.find('{')?;
-    let end = content.rfind('}')?;
-    if end <= start {
-        return None;
-    }
-    let slice = &content[start..=end];
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(slice) {
-        return Some(v);
-    }
-    let cleaned = clean_trailing_commas(slice);
-    if cleaned != slice
-        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&cleaned)
-    {
-        return Some(v);
-    }
-    None
+    tolerant_json(between(content, '{', '}')?)
 }
 
 /// 从模型输出提取 [{"id":n,"text":"..."}]（容忍代码围栏、前后杂文、尾逗号与个别坏项）。
-pub fn parse_id_text_pairs(content: &str) -> Option<Vec<(usize, String)>> {
-    let start = content.find('[')?;
-    let end = content.rfind(']')?;
-    if end <= start {
-        return None;
-    }
-    let slice = &content[start..=end];
-    // 1) 严格解析；个别项 id/text 类型不对时 parse_items 返回 None，
-    //    必须继续降级而不是整批丢弃（落入第 2/3 级）
-    if let Ok(v) = serde_json::from_str::<Vec<serde_json::Value>>(slice)
-        && let Some(items) = parse_items(&v)
-    {
-        return Some(items);
-    }
-    // 2) 清除尾逗号后重试
-    let cleaned = clean_trailing_commas(slice);
-    if cleaned != slice
-        && let Ok(v) = serde_json::from_str::<Vec<serde_json::Value>>(&cleaned)
-        && let Some(items) = parse_items(&v)
-    {
-        return Some(items);
-    }
-    // 3) 宽容扫描：跳过坏项，收集合法 {"id":..,"text":".."}
-    lenient_scan(slice)
+fn parse_id_text_pairs(content: &str) -> Option<Vec<(usize, String)>> {
+    let slice = between(content, '[', ']')?;
+    tolerant_json(slice)
+        .and_then(|items| parse_items(items.as_array()?))
+        .or_else(|| lenient_scan(slice))
 }
 
 /// A model that writes `\frac` or `\times` unescaped in JSON gets a form feed
@@ -800,17 +654,20 @@ pub(crate) fn restore_latex(text: &str) -> String {
     out
 }
 
-fn parse_items(v: &[serde_json::Value]) -> Option<Vec<(usize, String)>> {
-    let mut out = vec![];
-    for item in v {
-        let id = item.get("id")?.as_u64()? as usize;
-        let text = restore_latex(item.get("text")?.as_str()?);
-        out.push((id, text));
-    }
-    if out.is_empty() { None } else { Some(out) }
+fn segment(item: &serde_json::Value) -> Option<(usize, String)> {
+    let id = item.get("id")?.as_u64()? as usize;
+    Some((id, restore_latex(item.get("text")?.as_str()?)))
 }
 
-pub(crate) fn clean_trailing_commas(s: &str) -> String {
+fn parse_items(items: &[serde_json::Value]) -> Option<Vec<(usize, String)>> {
+    items
+        .iter()
+        .map(segment)
+        .collect::<Option<Vec<_>>>()
+        .filter(|items| !items.is_empty())
+}
+
+fn clean_trailing_commas(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_string = false;
     let mut escaped = false;
@@ -838,187 +695,194 @@ pub(crate) fn clean_trailing_commas(s: &str) -> String {
     out
 }
 
-/// 逐个扫描顶层 {...} 对象，坏项跳过；能取到至少一项即返回。
+/// 逐个扫描 {...} 对象，坏项跳过；能取到至少一项即返回。
 fn lenient_scan(s: &str) -> Option<Vec<(usize, String)>> {
-    let bytes = s.as_bytes();
-    let mut out: Vec<(usize, String)> = vec![];
-    let mut i = 0usize;
-    while i < s.len() {
-        let Some(rel) = s[i..].find('{') else { break };
-        let obj_start = i + rel;
-        // 找配对的 }（跳过字符串字面量内的花括号）
-        let mut depth = 0usize;
-        let mut in_str = false;
-        let mut esc = false;
-        let mut end = None;
-        for (k, &b) in bytes[obj_start..].iter().enumerate() {
-            if in_str {
-                if esc {
-                    esc = false;
-                } else if b == b'\\' {
-                    esc = true;
-                } else if b == b'"' {
-                    in_str = false;
-                }
-                continue;
+    let mut out = vec![];
+    let mut at = 0;
+    while let Some(start) = s[at..].find('{').map(|offset| at + offset) {
+        let mut values =
+            serde_json::Deserializer::from_str(&s[start..]).into_iter::<serde_json::Value>();
+        at = match values.next() {
+            Some(Ok(value)) => {
+                out.extend(segment(&value));
+                start + values.byte_offset()
             }
-            match b {
-                b'"' => in_str = true,
-                b'{' => depth += 1,
-                b'}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = Some(obj_start + k + 1);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        let Some(end) = end else { break };
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s[obj_start..end])
-            && let (Some(id), Some(text)) = (
-                v.get("id").and_then(|x| x.as_u64()).map(|x| x as usize),
-                v.get("text").and_then(|x| x.as_str()).map(restore_latex),
-            )
-        {
-            out.push((id, text));
-        }
-        i = end;
+            _ => start + 1,
+        };
     }
-    if out.is_empty() { None } else { Some(out) }
+    (!out.is_empty()).then_some(out)
 }
 
-/// 发 chat/completions 请求并返回 message.content（校对与摘要共用）。
-/// `validate` 校验正文结构，在请求账本里执行：无效响应记为失败，不会被当成已完成复用。
-///
-/// 兼容性降级：部分 OpenAI 兼容端点不支持 `response_format: json_object`，
-/// 仅当服务明确拒绝这个字段（400/422）时去掉该字段重试一次。
-pub(crate) fn send_chat_described(
-    agent: &ureq::Agent,
-    control: &crate::dispatch::TaskControl,
-    s: &LlmSettings,
-    body: &serde_json::Value,
+/// One AI step's requests: the service, its connection pool and the ledger.
+pub(crate) struct Chat<'a> {
+    agent: ureq::Agent,
+    settings: &'a LlmSettings,
     purpose: Purpose,
-    description: &str,
-    validate: &dyn Fn(&str) -> Result<()>,
-) -> Result<String> {
-    let reply = match request_chat(agent, control, s, body, purpose, description, validate) {
-        Ok(r) => r,
-    #[error("HTTP {0}")]
-        Err(first) => {
-            let degradable = first
-                .downcast_ref::<crate::dispatch::Failure>()
-                .is_some_and(|failure| failure.unsupported_response_format);
-            if !(degradable && crate::provider::has_structured_format(s, body)) {
-                return Err(first);
-            }
-            let mut relaxed = body.clone();
-            crate::provider::strip_structured_format(s, &mut relaxed);
-            // 降级请求只试一次：原请求已按 MAX_ATTEMPTS 重试过，这里只验证兼容性
-            let reply =
-                request_chat_once(agent, control, s, &relaxed, purpose, description, validate)?;
-            tracing::debug!("端点不支持 response_format，降级重试成功");
-            reply
-        }
-    };
-    let resp = reply.value;
-    // token 用量实时反馈：GUI 阶段行据此跳动（上传=prompt，下载=completion）。
-    // Codex SSE 已在 provider::sse_to_chat_json 归一成 chat/completions 同一形状。
-    let usage = &resp["usage"];
-    if !reply.replayed {
-        crate::progress::note_tokens(
-            purpose.usage_stage(),
-            usage["prompt_tokens"].as_u64().unwrap_or(0),
-            usage["completion_tokens"].as_u64().unwrap_or(0),
-        );
-    }
-    // 账本已校验正文存在且结构有效
-    Ok(resp["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string())
+    control: &'a crate::dispatch::TaskControl,
 }
 
-/// One attempt; validation errors omit provider response bodies which may echo credentials.
-fn request_chat_once(
-    agent: &ureq::Agent,
-    control: &crate::dispatch::TaskControl,
-    s: &LlmSettings,
-    body: &serde_json::Value,
-    purpose: Purpose,
-    description: &str,
-    validate: &dyn Fn(&str) -> Result<()>,
-) -> std::result::Result<crate::dispatch::Reply, crate::dispatch::Failure> {
-    let url = crate::provider::endpoint(s);
-    let headers = crate::provider::auth_headers(s).map_err(crate::dispatch::Failure::local)?;
-    let sse = crate::provider::is_sse(s);
-    control.request(
-        &crate::dispatch::RequestSpec {
-            service: "llm",
-            purpose: purpose.ledger_name(),
-            description,
-            endpoint: &url,
-            identity: body,
-            resend: if crate::provider::free_to_resend(s) {
-                crate::dispatch::Resend::Free
-            } else {
-                crate::dispatch::Resend::AskUser
-            },
-        },
-        || {
-            let mut request = agent.post(&url).header("Content-Type", "application/json");
-            for (name, value) in &headers {
-                request = request.header(name, value);
+impl<'a> Chat<'a> {
+    pub(crate) fn new(
+        settings: &'a LlmSettings,
+        purpose: Purpose,
+        control: &'a crate::dispatch::TaskControl,
+    ) -> Self {
+        Self {
+            agent: stall_limited_agent(crate::provider::is_sse(settings), STALL_TIMEOUT),
+            settings,
+            purpose,
+            control,
+        }
+    }
+
+    /// 发 chat/completions 请求并返回 message.content。`validate` 校验正文结构，在请求
+    /// 账本里执行：无效响应记为失败，不会被当成已完成复用。
+    ///
+    /// 兼容性降级：部分 OpenAI 兼容端点不支持 `response_format: json_object`，
+    /// 仅当服务明确拒绝这个字段（400/422）时去掉该字段重试一次。
+    pub(crate) fn send(
+        &self,
+        body: &serde_json::Value,
+        description: &str,
+        validate: &dyn Fn(&str) -> Result<()>,
+    ) -> Result<String> {
+        let s = self.settings;
+        let attempt = || self.once(body, description, validate);
+        let reply = match crate::runtime::retry(self.control, MAX_ATTEMPTS, attempt) {
+            Ok(reply) => reply,
+            Err(first) => {
+                let degradable = first
+                    .downcast_ref::<crate::dispatch::Failure>()
+                    .is_some_and(|failure| failure.unsupported_response_format);
+                if !(degradable && crate::provider::has_structured_format(s, body)) {
+                    return Err(first);
+                }
+                let mut relaxed = body.clone();
+                crate::provider::strip_structured_format(s, &mut relaxed);
+                // 原请求已按 MAX_ATTEMPTS 重试过，这里只验证兼容性：只试一次
+                let reply = self.once(&relaxed, description, validate)?;
+                tracing::debug!("端点不支持 response_format，降级重试成功");
+                reply
             }
-            let response = crate::dispatch::receive(request.send_json(body))?;
-            // Codex Responses API 只提供 SSE 流：聚合为 chat/completions 形状，
-            // 下游校验与解析不变；非 2xx 原样上交（重试/降级逻辑要看状态码）
-            if sse && (200..300).contains(&response.status) {
-                let canonical = crate::provider::sse_to_chat_json(&response.body).map_err(|e| {
-                    crate::dispatch::NetworkFailure {
-                        message: format!("{e:#}"),
-                        definitely_unsent: false,
-                    }
-                })?;
-                return Ok(crate::dispatch::HttpResponse {
-                    status: response.status,
-                    body: serde_json::to_vec(&canonical).unwrap_or_default(),
-                });
-            }
-            Ok(response)
-        },
-        |value| {
-            // A gateway may return HTTP 200 with an error object. Missing content is a
-            // protocol failure, never an empty success.
-            anyhow::ensure!(
-                value.get("error").is_none_or(serde_json::Value::is_null),
-                crate::tr!("AI 服务返回了错误 / The AI service returned an error")
+        };
+        let resp = reply.value;
+        // token 用量实时反馈：GUI 阶段行据此跳动（上传=prompt，下载=completion）。
+        // Codex SSE 已在 provider::sse_to_chat_json 归一成 chat/completions 同一形状。
+        let usage = &resp["usage"];
+        if !reply.replayed {
+            crate::progress::note_tokens(
+                self.purpose.usage_stage(),
+                usage["prompt_tokens"].as_u64().unwrap_or(0),
+                usage["completion_tokens"].as_u64().unwrap_or(0),
             );
-            let content = value["choices"][0]["message"]["content"]
-                .as_str()
-                .filter(|s| !s.trim().is_empty())
-                .context(crate::tr!(
-                    "AI 服务没有返回内容 / The AI service returned no content"
-                ))?;
-            validate(content)
-        },
-    )
-}
+        }
+        // 账本已校验正文存在且结构有效
+        Ok(resp["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
+    }
 
-/// 发请求：可重试错误按退避重试（退避期间可取消），总共最多 [`MAX_ATTEMPTS`] 次。
-fn request_chat(
-    agent: &ureq::Agent,
-    control: &crate::dispatch::TaskControl,
-    s: &LlmSettings,
-    body: &serde_json::Value,
-    purpose: Purpose,
-    description: &str,
-    validate: &dyn Fn(&str) -> Result<()>,
-) -> Result<crate::dispatch::Reply> {
-    crate::runtime::retry(control, MAX_ATTEMPTS, || {
-        request_chat_once(agent, control, s, body, purpose, description, validate)
-    })
+    /// One attempt; validation errors omit provider response bodies which may echo credentials.
+    fn once(
+        &self,
+        body: &serde_json::Value,
+        description: &str,
+        validate: &dyn Fn(&str) -> Result<()>,
+    ) -> std::result::Result<crate::dispatch::Reply, crate::dispatch::Failure> {
+        let s = self.settings;
+        let url = crate::provider::endpoint(s);
+        let headers = crate::provider::auth_headers(s).map_err(crate::dispatch::Failure::local)?;
+        let sse = crate::provider::is_sse(s);
+        self.control.request(
+            &crate::dispatch::RequestSpec {
+                service: "llm",
+                purpose: self.purpose.into(),
+                description,
+                endpoint: &url,
+                identity: body,
+                resend: if crate::provider::free_to_resend(s) {
+                    crate::dispatch::Resend::Free
+                } else {
+                    crate::dispatch::Resend::AskUser
+                },
+            },
+            || {
+                let mut request = self
+                    .agent
+                    .post(&url)
+                    .header("Content-Type", "application/json");
+                for (name, value) in &headers {
+                    request = request.header(name, value);
+                }
+                let response = crate::dispatch::receive(request.send_json(body))?;
+                // Codex Responses API 只提供 SSE 流：聚合为 chat/completions 形状，
+                // 下游校验与解析不变；非 2xx 原样上交（重试/降级逻辑要看状态码）
+                if sse && (200..300).contains(&response.status) {
+                    let canonical =
+                        crate::provider::sse_to_chat_json(&response.body).map_err(|e| {
+                            crate::dispatch::NetworkFailure {
+                                message: format!("{e:#}"),
+                                definitely_unsent: false,
+                            }
+                        })?;
+                    return Ok(crate::dispatch::HttpResponse {
+                        status: response.status,
+                        body: serde_json::to_vec(&canonical).unwrap_or_default(),
+                    });
+                }
+                Ok(response)
+            },
+            |value| {
+                // A gateway may return HTTP 200 with an error object. Missing content is a
+                // protocol failure, never an empty success.
+                anyhow::ensure!(
+                    value.get("error").is_none_or(serde_json::Value::is_null),
+                    crate::tr!("AI 服务返回了错误 / The AI service returned an error")
+                );
+                let content = value["choices"][0]["message"]["content"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .context(crate::tr!(
+                        "AI 服务没有返回内容 / The AI service returned no content"
+                    ))?;
+                validate(content)
+            },
+        )
+    }
+
+    /// A batch's reply as (id, text), one entry per input item.
+    fn segments(
+        &self,
+        body: &serde_json::Value,
+        description: &str,
+        expected: usize,
+    ) -> Result<Vec<(usize, String)>> {
+        let proofreading = self.purpose == Purpose::Proofreading;
+        let parsed = |content: &str| {
+            parse_segments(content).context(if proofreading {
+                crate::tr!("服务返回的校对结构无效 / Invalid proofreading structure")
+            } else {
+                crate::tr!("服务返回的翻译结构无效 / Invalid translation structure")
+            })
+        };
+        let content = self.send(body, description, &|content| {
+            anyhow::ensure!(
+                segment_ids_match(&parsed(content)?, expected),
+                if proofreading {
+                    crate::tr!(
+                        "校对结果与原文段落不对应，已保留原文 / Proofread segments do not match the input"
+                    )
+                } else {
+                    crate::tr!(
+                        "翻译结果与原文段落不对应 / Translated segments do not match the input"
+                    )
+                }
+            );
+            Ok(())
+        })?;
+        parsed(&content)
+    }
 }
 
 /// 用户自定义校对指令；空白视为未设置，回落到内置提示词。
@@ -1039,8 +903,10 @@ const TEST_PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlE
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RequestError {
     /// The service answered with this HTTP error status.
+    #[error("HTTP {0}")]
     Status(u16),
     /// No answer arrived; the text says why.
+    #[error("{0}")]
     Transport(String),
 }
 
@@ -1134,25 +1000,26 @@ pub fn setup_interactive(
     model: Option<String>,
     disable_hint: bool,
 ) -> Result<crate::settings::ConfigFile> {
-    let interactive = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
-    let cur_or = |v: String, cur: &str| {
-        if v.trim().is_empty() {
-            cur.to_string()
-        } else {
-            v.trim().to_string()
+    let interactive = crate::runtime::interactive();
+    // 空输入保留当前值
+    let ask = |prompt: &str, current: &mut String| -> Result<()> {
+        let value: String = dialoguer::Input::new()
+            .with_prompt(prompt)
+            .with_initial_text(current.as_str())
+            .allow_empty(true)
+            .interact_text()?;
+        if !value.trim().is_empty() {
+            *current = value.trim().to_string();
         }
+        Ok(())
     };
     if let Some(v) = base_url {
         cfg.llm.base_url = v.trim().to_string();
     } else if interactive {
-        let v: String = dialoguer::Input::new()
-            .with_prompt(crate::tr!(
-                "服务地址 / Base URL (OpenAI-compatible, e.g. https://api.deepseek.com/v1)"
-            ))
-            .with_initial_text(&cfg.llm.base_url)
-            .allow_empty(true)
-            .interact_text()?;
-        cfg.llm.base_url = cur_or(v, &cfg.llm.base_url);
+        ask(
+            crate::tr!("服务地址 / Base URL (OpenAI-compatible, e.g. https://api.deepseek.com/v1)"),
+            &mut cfg.llm.base_url,
+        )?;
     }
     if let Some(v) = api_key {
         cfg.llm.api_key = v;
@@ -1170,17 +1037,17 @@ pub fn setup_interactive(
             .with_prompt(format!("API Key{keep_hint}"))
             .allow_empty_password(true)
             .interact()?;
-        cfg.llm.api_key = cur_or(v, &cfg.llm.api_key);
+        if !v.trim().is_empty() {
+            cfg.llm.api_key = v.trim().to_string();
+        }
     }
     if let Some(v) = model {
         cfg.llm.model = v.trim().to_string();
     } else if interactive {
-        let v: String = dialoguer::Input::new()
-            .with_prompt(crate::tr!("模型名 / Model name (e.g. deepseek-chat)"))
-            .with_initial_text(&cfg.llm.model)
-            .allow_empty(true)
-            .interact_text()?;
-        cfg.llm.model = cur_or(v, &cfg.llm.model);
+        ask(
+            crate::tr!("模型名 / Model name (e.g. deepseek-chat)"),
+            &mut cfg.llm.model,
+        )?;
     }
     anyhow::ensure!(
         !cfg.llm.base_url.trim().is_empty() && !cfg.llm.model.trim().is_empty(),
@@ -1221,32 +1088,27 @@ pub fn print_status(cfg: &crate::settings::ConfigFile) {
             crate::tr!("关闭 / disabled")
         }
     };
+    let or_dash = |value: &'_ str| {
+        if value.is_empty() {
+            "—".to_owned()
+        } else {
+            value.to_owned()
+        }
+    };
+    let key = if s.api_key.is_empty() {
+        crate::tr!("未设置 / not set")
+    } else {
+        crate::tr!("已设置（隐藏） / set (hidden)")
+    };
     println!(
         "配置文件 / Configuration: {}",
         crate::settings::config_path().display()
     );
     println!("  LLM 校对 / Transcript polish: {}", state(s.enabled));
     println!("  服务类型 / Provider: {}", s.provider);
-    println!(
-        "  服务地址 / Base URL: {}",
-        if s.base_url.is_empty() {
-            "—"
-        } else {
-            &s.base_url
-        }
-    );
-    println!(
-        "  API key: {}",
-        if s.api_key.is_empty() {
-            crate::tr!("未设置 / not set")
-        } else {
-            crate::tr!("已设置（隐藏） / set (hidden)")
-        }
-    );
-    println!(
-        "  模型 / Model: {}",
-        if s.model.is_empty() { "—" } else { &s.model }
-    );
+    println!("  服务地址 / Base URL: {}", or_dash(&s.base_url));
+    println!("  API key: {key}");
+    println!("  模型 / Model: {}", or_dash(&s.model));
     println!(
         "  截图辅助校对 / Slide-assisted polish: {}",
         state(s.vision)
