@@ -295,7 +295,6 @@ dependencies = [
  "dialoguer",
  "getrandom 0.4.3",
  "image",
- "image-compare",
  "indicatif",
  "libc",
  "qrcode",
@@ -306,6 +305,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "slide-detect",
  "subtitle-parse",
  "sys-locale",
  "tempfile",
@@ -1505,6 +1505,15 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "slide-detect"
+version = "0.1.0"
+source = "git+https://github.com/mizorewww/slide-detect?rev=87f8b78a8a70d8330a4bf1cb09924fe845c6c4ab#87f8b78a8a70d8330a4bf1cb09924fe845c6c4ab"
+dependencies = [
+ "image",
+ "image-compare",
+]
 
 [[package]]
 name = "slotmap"
