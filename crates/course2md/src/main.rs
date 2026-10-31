@@ -513,11 +513,11 @@ fn summarize_note(
     settings.api_key.clear();
     let mut task_id = format!(
         "summary-{}",
-        &execution::digest(&serde_json::to_vec(&serde_json::json!({
+        &course2md::digest::json_digest(&serde_json::json!({
             "operation": "reprocess-summary",
             "base_version": base.version_id,
             "settings": settings,
-        }))?)[..32]
+        }))?[..32]
     );
     if force {
         task_id.push_str(&format!(

@@ -96,7 +96,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
     let course_id = execution::digest(source_id.as_bytes());
     let course_dir = cfg.out_root.join(&platform).join(&course_id);
     let binding = cli_binding(&source_id, cfg, &meta.title);
-    let mut task_id = execution::digest(&serde_json::to_vec(&binding)?);
+    let mut task_id = crate::digest::json_digest(&binding)?;
     if !cfg.resume {
         task_id = format!(
             "{}-{}",

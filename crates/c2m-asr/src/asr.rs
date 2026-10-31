@@ -1383,7 +1383,9 @@ mod cloud_tests {
         let digest = crate::digest::digest;
         let payload = json!({"model":"test-asr","mode":api.mode,"audio_sha256":digest(&std::fs::read(&chunk).unwrap()),"segment_start":seg.start,"segment_end":seg.end,"cut_start":seg.cut_start,"cut_end":seg.cut_end});
         let service_version = format!("{SNAPSHOT_PREFIX}{}", digest(endpoint.as_bytes()));
-        let stable_id = digest(&serde_json::to_vec(&json!({"service_version":service_version,"purpose":"transcription","endpoint":endpoint,"payload":payload})).unwrap());
+        let mut identity = json!({"service_version":service_version,"purpose":"transcription","endpoint":endpoint,"payload":payload});
+        identity.sort_all_objects();
+        let stable_id = digest(&serde_json::to_vec(&identity).unwrap());
         let requests = dir.path().join("requests");
         std::fs::create_dir_all(&requests).unwrap();
         let receipt_path = requests.join(format!("{stable_id}.json"));

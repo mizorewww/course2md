@@ -9,6 +9,16 @@ pub fn digest(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 
+/// The digest of a JSON value in its canonical form, keys sorted at every level. An
+/// identity must not depend on how serde_json was built: the desktop's stack turns on
+/// `preserve_order`, which reaches this crate in any build that includes the desktop, and
+/// a different digest would make a resumed task send its finished requests again.
+pub fn json_digest(value: &serde_json::Value) -> serde_json::Result<String> {
+    let mut sorted = value.clone();
+    sorted.sort_all_objects();
+    Ok(digest(&serde_json::to_vec(&sorted)?))
+}
+
 /// Lowercase hexadecimal, the form digests take in receipts and manifests.
 pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -46,4 +56,18 @@ pub fn file_digest_cancellable(
         hash.update(&buffer[..n]);
     }
     Ok(hex(&hash.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_json_digest_depends_on_content_not_key_order() {
+        let value = serde_json::json!({"b": 1, "a": {"d": [{"f": 1, "e": 2}], "c": 2}});
+        assert_eq!(
+            json_digest(&value).unwrap(),
+            digest(br#"{"a":{"c":2,"d":[{"e":2,"f":1}]},"b":1}"#)
+        );
+    }
 }

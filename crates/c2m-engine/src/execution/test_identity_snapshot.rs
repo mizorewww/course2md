@@ -89,7 +89,9 @@ fn fixture(name: &str) -> PathBuf {
 
 #[test]
 fn task_identity_bindings_match_saved_snapshots() {
-    for (name, binding) in bindings() {
+    for (name, mut binding) in bindings() {
+        // The form that identities hash; see `digest::json_digest`.
+        binding.sort_all_objects();
         let text = String::from_utf8(serde_json::to_vec_pretty(&binding).unwrap()).unwrap();
         assert!(!text.contains("secret"), "{name} carries a credential");
         if std::env::var_os("COURSE2MD_WRITE_IDENTITY_FIXTURES").is_some() {

@@ -3,7 +3,7 @@
 pub use crate::outcome::Failure;
 use crate::outcome::FailureKind;
 use crate::{
-    digest::digest,
+    digest::{digest, json_digest},
     fsio::atomic_write,
     progress::{BlockReason, Event},
 };
@@ -467,7 +467,7 @@ impl Ledger {
             .get(service)
             .cloned()
             .unwrap_or_else(|| snapshot_id(&digest(endpoint.as_bytes())));
-        let stable_id = digest(&serde_json::to_vec(&serde_json::json!({"service_version":service_version,"purpose":purpose,"endpoint":endpoint,"payload":identity})).map_err(Failure::local)?);
+        let stable_id = json_digest(&serde_json::json!({"service_version":service_version,"purpose":purpose,"endpoint":endpoint,"payload":identity})).map_err(Failure::local)?;
         let lock = self
             .locks
             .lock()

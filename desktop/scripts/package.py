@@ -286,7 +286,7 @@ def main():
     if system == "Windows":
         verify_windows_icon(binaries / "course2md-desktop.exe")
     # The desktop's dependency graph includes the engine's. The Swift module is
-    # part of arm64 macOS builds only (build.rs).
+    # part of arm64 macOS builds only (c2m-asr's build.rs).
     swift = system == "Darwin" and platform.machine() == "arm64" and not args.no_apple
     if notices := third_party_notices(base.parent, swift, required=tools_required):
         tool_licenses = [*tool_licenses, notices]
