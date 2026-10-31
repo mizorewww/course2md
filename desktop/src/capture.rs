@@ -25,7 +25,7 @@
 //!
 //! Dialogs open over their page: `service-editor:<ai|speech|dialog|confirm>`
 //! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
-//! `delete` and `image` (the newest note; give it a longer
+//! `delete`, `confirm` (a `ui::Confirm`) and `image` (the newest note; give it a longer
 //! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage` and `login`. Each
 //! capture first closes the dialogs an earlier one opened, so one shot shows
 //! one dialog. Nothing a dialog would change is saved unless its action is
@@ -396,6 +396,10 @@ impl Desktop {
                             this.open_course(course, cx);
                         }
                     }
+                    "confirm" => crate::ui::Confirm::new("删除笔记", "保留笔记", "移到废纸篓")
+                        .danger()
+                        .text("这份笔记将移到废纸篓，可以从那里恢复。")
+                        .ask(|_, _, _| {}, window, cx),
                     "folder" => this.begin_folder(None, window, cx),
                     "rename" => {
                         if let Some(course) = newest {
