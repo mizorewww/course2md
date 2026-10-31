@@ -2226,7 +2226,8 @@ impl Desktop {
         let mut view = v_flex().w_full().min_w_0().min_h(rems(80. / 14.)).gap_3();
         let mut has_phase = false;
         for (index, (stage, progress)) in self
-            .progress
+            .job_events
+            .stages
             .iter()
             .filter(|(stage, progress)| {
                 stage.is_model_transfer() && progress.has_samples() && !progress.done
@@ -2475,7 +2476,8 @@ impl Desktop {
             if self.cancelling {
                 course2md::tr!("正在暂停").to_owned()
             } else {
-                self.progress
+                self.job_events
+                    .stages
                     .iter()
                     .find(|(stage, progress)| {
                         stage.is_model_transfer() && progress.has_samples() && !progress.done

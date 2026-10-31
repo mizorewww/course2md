@@ -272,14 +272,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务 · {}	任务 · {}	Tasks · {}	任務 · {}	タスク · {}
 任务不存在	任务不存在	Task not found	找不到任務	タスクが見つかりません
 任务与笔记位置必须是绝对路径 / Task paths must be absolute	任务与笔记位置必须是绝对路径	Task paths must be absolute	任務與筆記位置必須是絕對路徑	タスクとノートの場所は絶対パスである必要があります
-任务位置与笔记库记录不匹配，请先恢复存储位置	任务位置与笔记库记录不匹配，请先恢复存储位置	The task location does not match the note library record. Please restore the storage location first.	任務位置與筆記庫記錄不匹配，請先恢復儲存位置	タスクの場所がノート ライブラリのレコードと一致しません。まず保存場所を復元してください。
 任务保存位置尚未恢复	任务保存位置尚未恢复	The task save location has not been restored	任務儲存位置尚未恢復	タスクの保存場所が復元されていません
 任务保存位置暂时不可用	任务保存位置暂时不可用	The task save location is temporarily unavailable	任務儲存位置暫時不可用	タスクの保存場所が一時的に利用できなくなりました
 任务保存位置记录缺失	任务保存位置记录缺失	The task save location record is missing	任務儲存位置記錄缺失	タスクの保存場所レコードがありません
 任务参数过大（上限 {} MiB） / Task input exceeds {} MiB	任务参数过大（上限 {} MiB）	Task input exceeds {} MiB	任務參數過大（上限 {} MiB）	タスク入力が {} MiB を超えています
 任务只能指定一种已选字幕内容 / Specify subtitle file or parsed events, not both	任务只能指定一种已选字幕内容	Specify subtitle file or parsed events, not both	任務只能指定一種已選字幕內容	タスクでは選択した字幕コンテンツを 1 つだけ指定できます
 任务尚未加入队列：{}	任务尚未加入队列：{}	Task has not been queued yet: {}	任務尚未加入佇列：{}	タスクはまだキューに登録されていません: {}
-任务工作目录与保存位置不匹配	任务工作目录与保存位置不匹配	Task working directory does not match save location	任務工作目錄與儲存位置不匹配	タスクの作業ディレクトリが保存場所と一致しません
 任务工作目录与记录的笔记库不匹配	任务工作目录与记录的笔记库不匹配	The task working directory does not match the recorded note library	任務工作目錄與記錄的筆記庫不匹配	タスクの作業ディレクトリが記録されたノート ライブラリと一致しません
 任务工作目录被其他文件或链接占用，原内容已保留	任务工作目录被其他文件或链接占用，原内容已保留	The task working directory is occupied by other files or links, and the original content has been retained.	任務工作目錄被其他檔案或連結佔用，原內容已保留	タスクの作業ディレクトリは他のファイルまたはリンクによって占有されており、元のコンテンツは保持されています。
 任务已取消	任务已取消	Task cancelled	任務已取消	タスクがキャンセルされました
@@ -287,7 +285,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务恢复副本未能保存，原任务记录仍保留	任务恢复副本未能保存，原任务记录仍保留	The task recovery copy failed to be saved, and the original task records are still retained.	任務恢復副本未能儲存，原任務記錄仍保留	タスク回復コピーの保存に失敗しました。元のタスク レコードはまだ保持されています。
 任务指令尚未保存：{}	任务指令尚未保存：{}	Task instructions have not been saved: {}	任務指令尚未儲存：{}	タスクの指示が保存されていません: {}
 任务控制文件必须位于工作目录 / Invalid control file location	任务控制文件必须位于工作目录	Invalid control file location	任務控制檔案必須位於工作目錄	タスク制御ファイルは作業ディレクトリに配置する必要があります
-任务材料位置越出笔记库，原记录已保留	任务材料位置越出笔记库，原记录已保留	The location of the task materials is outside the note library, and the original records have been retained.	任務材料位置越出筆記庫，原記錄已保留	タスク資料の場所はノート ライブラリの外にあり、元の記録は保持されています。
 任务来源或参数与已保存进度不一致，原进度已保留 / Task inputs changed; create a new task instead of reusing this work directory	任务来源或参数与已保存进度不一致，原进度已保留	Task inputs changed; create a new task instead of reusing this work directory	任務來源或參數與已儲存進度不一致，原進度已保留	タスクのソースまたはパラメータは保存された進行状況と矛盾しており、元の進行状況が保持されています。
 任务来源身份或名称记录缺失	任务来源身份或名称记录缺失	The task source identity or name record is missing	任務來源身份或名稱記錄缺失	タスク ソース ID または名前レコードがありません
 任务状态尚未保存：{}	任务状态尚未保存：{}	Task status has not been saved: {}	任務狀態尚未儲存：{}	タスクのステータスが保存されていません: {}
@@ -305,7 +302,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 任务记录版本不受支持，请使用创建这些任务的应用版本	任务记录版本不受支持，请使用创建这些任务的应用版本	Task record version is not supported, please use the app version that created these tasks	任務記錄版本不受支援，請使用建立這些任務的應用版本	タスク レコードのバージョンはサポートされていません。これらのタスクを作成したアプリのバージョンを使用してください
 任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。	任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。	The task record was created by a newer version, please use the corresponding version to open it. The original records and backups are retained, and the task has not been started yet.	任務記錄由較新版本建立，請使用對應版本開啟。原記錄和備份均保留，尚未啟動任務。	タスク レコードは新しいバージョンで作成されました。対応するバージョンを使用して開いてください。元のレコードとバックアップは保持されますが、タスクはまだ開始されていません。
 任务记录缺少保存目录	任务记录缺少保存目录	Task record lacks save directory	任務記錄缺少儲存目錄	タスクレコードに保存ディレクトリがありません
-任务记录被链接替代，原文件已保留	任务记录被链接替代，原文件已保留	The task record is replaced by a link and the original file is retained.	任務記錄被連結替代，原檔案已保留	タスク レコードはリンクに置き換えられ、元のファイルは保持されます。
 任务记录读取失败：{}	任务记录读取失败：{}	Task record reading failed: {}	任務記錄讀取失敗：{}	タスク レコードの読み取りに失敗しました: {}
 任务记录超过可读取范围，原文件已保留	任务记录超过可读取范围，原文件已保留	The task record exceeds the readable range and the original file has been retained.	任務記錄超過可讀取範圍，原檔案已保留	タスクレコードが読み取り可能な範囲を超えており、元のファイルが保持されています。
 任务身份无效	任务身份无效	Invalid task identity	任務身份無效	無効なタスク ID
@@ -332,18 +328,14 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保存位置不可访问，请连接对应磁盘	保存位置不可访问，请连接对应磁盘	The save location is inaccessible, please connect the corresponding disk.	儲存位置無法存取，請連接對應磁碟	保存場所にアクセスできません。対応するディスクを接続してください。
 保存位置不可访问，请连接磁盘或选择其他位置	保存位置不可访问，请连接磁盘或选择其他位置	Save location unavailable. Connect the disk or choose another location.	儲存位置無法存取，請連接磁碟或選擇其他位置	保存先にアクセスできません。ディスクを接続するか、別の場所を選択してください
 保存位置不是文件夹	保存位置不是文件夹	The save location is not a folder	儲存位置不是資料夾	保存場所がフォルダーではありません
-保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	保存位置在确认期间已经变化，尚未重新关联。请重新检查这个位置。	The save location changed during confirmation and has not been reconnected. Check this location again.	儲存位置在確認期間已經變化，尚未重新關聯。請重新檢查這個位置。	保存場所は確認中に変更されたため、まだ再接続されていません。この場所をもう一度確認してください。
-保存位置在读取期间已经变化，请重新检查	保存位置在读取期间已经变化，请重新检查	The save location has changed during reading, please check again	儲存位置在讀取期間已經變化，請重新檢查	読み込み中に保存場所が変更されました。もう一度確認してください。
 保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记	The save location corresponds to other note libraries. Please restore the original location or re-register in the storage settings.	儲存位置對應其他筆記庫，請恢復原位置或在儲存設定中重新登記	保存場所は他のノートライブラリに対応します。元の場所に戻すか、ストレージ設定で再登録してください。
 保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。	The save location is not ready yet: {}. You can choose a different location in the settings' storage.	儲存位置尚未準備好：{}。可以在設定的儲存中選擇其他位置。	保存場所はまだ準備ができていません: {}。設定のストレージ内の別の場所を選択できます。
 保存位置尚未更新：{}	保存位置尚未更新：{}	The save location has not been updated yet: {}	儲存位置尚未更新：{}	保存場所はまだ更新されていません: {}
 保存位置已不在笔记库中，请选择保存位置	保存位置已不在笔记库中，请选择保存位置	The save location is no longer in the note library, please select a save location.	儲存位置已不在筆記庫中，請選擇儲存位置	保存場所はノート ライブラリにありません。保存場所を選択してください。
 保存位置暂时不可用	保存位置暂时不可用	The save location is temporarily unavailable	儲存位置暫時不可用	保存場所は一時的に利用できません
 保存位置暂时不可访问	保存位置暂时不可访问	The save location is temporarily inaccessible	儲存位置暫時無法存取	保存場所に一時的にアクセスできません
-保存位置暂时不可访问，请先连接对应磁盘	保存位置暂时不可访问，请先连接对应磁盘	The save location is temporarily inaccessible. Please connect the corresponding disk first.	儲存位置暫時無法存取，請先連接對應磁碟	保存場所に一時的にアクセスできなくなりました。まず対応するディスクを接続してください。
 保存位置暂时无法访问	保存位置暂时无法访问	The save location is temporarily inaccessible	儲存位置暫時無法存取	保存場所に一時的にアクセスできません
 保存位置暂时无法访问，未能搜索	保存位置暂时无法访问，未能搜索	The save location is temporarily inaccessible and cannot be searched.	儲存位置暫時無法存取，未能搜尋	保存場所に一時的にアクセスできないため、検索できません。
-保存位置未登记	保存位置未登记	The save location is not registered	儲存位置未登記	保存先が登録されていません
 保存位置由存储设置管理	保存位置由存储设置管理	Save location is managed by storage settings	儲存位置由儲存設定管理	保存場所はストレージ設定によって管理されます
 保存位置需要重新关联	保存位置需要重新关联	Save location needs to be reconnected	儲存位置需要重新關聯	保存場所を再接続する必要があります
 保存位置：{}\n\n	保存位置：{}\n\n	Save location: {}\n\n	儲存位置：{}\n\n	保存先：{}\n\n
@@ -451,7 +443,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 原文进 raw 溯源	原文进 raw 溯源	Keep the original text in raw for traceability	原文進 raw 溯源	原文を raw に残して追跡可能にする
 原来选择的字幕无法读取，请重新选择文字来源	原来选择的字幕无法读取，请重新选择文字来源	The originally selected subtitles cannot be read, please select a new text source.	原來選擇的字幕無法讀取，請重新選擇文字來源	元々選択されていた字幕は読めません。新しいテキスト ソースを選択してください。
 原生运行于 Apple 芯片	原生运行于 Apple 芯片	Runs natively on Apple silicon	原生執行於 Apple 晶片	Appleシリコン上でネイティブに動作
-原笔记库在上次移动后发生变化，尚未切换位置。请保留这份副本，并重新选择空文件夹移动。	原笔记库在上次移动后发生变化，尚未切换位置。请保留这份副本，并重新选择空文件夹移动。	The original note library has changed since the last move and has not yet switched locations. Please keep this copy and select an empty folder again to move.	原筆記庫在上次移動後發生變化，尚未切換位置。請保留這份副本，並重新選擇空資料夾移動。	元のノート ライブラリは最後の移動以降に変更されており、まだ場所は切り替わっていません。このコピーを保管し、空のフォルダーを再度選択して移動してください。
 原笔记库在复制期间发生变化，尚未切换保存位置	原笔记库在复制期间发生变化，尚未切换保存位置	The original note library changed during copying, and the save location has not been switched yet.	原筆記庫在複製期間發生變化，尚未切換儲存位置	コピー中に元のノートライブラリが変更され、保存場所はまだ切り替えられていません。
 原笔记库无法访问，请重新连接这个保存位置	原笔记库无法访问，请重新连接这个保存位置	The original note library cannot be accessed, please reconnect to this save location.	原筆記庫無法存取，請重新連接這個儲存位置	元のノート ライブラリにアクセスできません。この保存場所に再接続してください。
 原笔记版本需要绝对路径 / Base version requires an absolute path	原笔记版本需要绝对路径	Base version requires an absolute path	原筆記版本需要絕對路徑	元のノートのバージョンには絶対パスが必要です
@@ -477,7 +468,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 取消读取字幕	取消读取字幕	Cancel reading subtitles	取消讀取字幕	字幕の読み取りをキャンセル
 取消读取视频	取消读取视频	Cancel reading video	取消讀取影片	動画の読み取りをキャンセルします
 取消转换	取消转换	Cancel conversion	取消轉換	変換をキャンセルする
-取消重新关联	取消重新关联	Cancel reconnecting	取消重新關聯	再接続をキャンセル
 取消重新定位	取消重新定位	Cancel relocation	取消重新定位	場所の再指定をキャンセル
 另存一份摘要（Markdown）到此目录 / Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目录	Also save each summary as Markdown in this directory	另存一份摘要（Markdown）到此目錄	各要約を Markdown としてこのディレクトリにも保存
 另有 {} 个位置未纳入搜索	另有 {} 个位置未纳入搜索	{} more locations were not included in the search	另有 {} 個位置未納入搜尋	ほかに {} か所が検索の対象外です
@@ -525,7 +515,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 备份已删除，但列表尚未更新，请重启应用后检查	备份已删除，但列表尚未更新，请重启应用后检查	The backup has been deleted, but the list has not been updated, please restart the application and check	備份已刪除，但清單尚未更新，請重新啟動應用程式後檢查	バックアップは削除されましたが、リストは更新されていません。アプリケーションを再起動して確認してください。
 备份并重建任务记录	备份并重建任务记录	Back up and rebuild task records	備份並重建任務記錄	バックアップしてタスク記録を再構築
 复制与导出	复制与导出	Copy and export	複製與匯出	コピーとエクスポート
-复制内容未通过校验，尚未切换笔记库：{}	复制内容未通过校验，尚未切换笔记库：{}	The copied content failed the verification and the note library has not been switched yet: {}	複製內容未通過校驗，尚未切換筆記庫：{}	コピーされたコンテンツは検証に失敗し、ノート ライブラリはまだ切り替えられていません: {}
 复制安装命令	复制安装命令	Copy install command	複製安裝指令	インストールコマンドをコピー
 复制 Homebrew 安装命令	复制 Homebrew 安装命令	Copy Homebrew install command	複製 Homebrew 安裝指令	Homebrew のインストールコマンドをコピー
 复制或导出整份笔记	复制或导出整份笔记	Copy or export an entire note	複製或匯出整份筆記	ノート全体をコピーまたはエクスポートする
@@ -597,7 +586,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 尚未登录 Codex。/ No Codex login saved.	尚未登录 Codex。/ No Codex login saved.	No Codex login saved.	尚未登入 Codex。/ No Codex login saved.	Codex にまだログインしていません。
 尚未设置	尚未设置	Not set yet	尚未設定	まだ設定されていません
 尚未选择文字来源	尚未选择文字来源	No text source selected yet	尚未選擇文字來源	テキストソースがまだ選択されていません
-尚未重新关联：{}	尚未重新关联：{}	Not reconnected yet: {}	尚未重新關聯：{}	まだ再接続されていません: {}
 尚未重新定位：{}	尚未重新定位：{}	Not relocated yet: {}	尚未重新定位：{}	まだ場所を再指定していません: {}
 尚未验证	尚未验证	Not verified yet	尚未驗證	まだ検証されていません
 就绪 / Ready	就绪	Ready	就緒	準備完了
@@ -620,7 +608,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已保存的服务请求记录已损坏；为避免重复扣费，没有重新发送 / A saved service request record is damaged; nothing was resent to avoid duplicate charges	已保存的服务请求记录已损坏；为避免重复扣费，没有重新发送	A saved service request record is damaged; nothing was resent to avoid duplicate charges	已儲存的服務請求記錄已損壞；為避免重複扣費，沒有重新傳送	保存されたサービスリクエストの記録が破損しています。重複課金を避けるため、再送信していません。
 已保存的视频无法校验；需要重新下载才能继续 / Cached video cannot be verified; downloading is required	已保存的视频无法校验；需要重新下载才能继续	Cached video cannot be verified; downloading is required	已儲存的影片無法校驗；需要重新下載才能繼續	保存された動画は検証できません。続行するには、再度ダウンロードする必要があります。
 已保存进度，等待下次继续 / Progress saved; waiting to continue	已保存进度，等待下次继续	Progress saved; waiting to continue	已儲存進度，等待下次繼續	進行状況が保存されました。次回の続行を待っています
-已保留材料，结果记录尚未确认：{}	已保留材料，结果记录尚未确认：{}	Materials kept; result record not yet confirmed: {}	已保留材料，結果記錄尚未確認：{}	素材は保持されています。結果の記録はまだ確認されていません: {}
 已保留正文	已保留正文	Text has been retained	已保留正文	テキストは保持されています
 已修改：{}	已修改：{}	Modified: {}	已修改：{}	変更: {}
 已停止	已停止	Stopped	已停止	停止しました
@@ -645,7 +632,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已取消读取	已取消读取	Read cancelled	已取消讀取	読み取りがキャンセルされました
 已取消读取字幕 / Subtitle reading cancelled	已取消读取字幕	Subtitle reading cancelled	已取消讀取字幕	字幕の読み取りがキャンセルされました
 已取消读取文件 / File reading cancelled	已取消读取文件	File reading cancelled	已取消讀取檔案	ファイルの読み込みがキャンセルされました
-已取消重新关联	已取消重新关联	Reconnecting cancelled	已取消重新關聯	再接続をキャンセルしました
 已取消重新定位	已取消重新定位	Relocation cancelled	已取消重新定位	場所の再指定をキャンセルしました
 已复制 Markdown 文本	已复制 Markdown 文本	Markdown text copied	已複製 Markdown 文字	Markdown テキストをコピーしました
 已复制纯文本	已复制纯文本	Plain text copied	已複製純文字	プレーンテキストがコピーされました
@@ -696,7 +682,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已退出首次使用向导 / Exited the first-run wizard	已退出首次使用向导	Exited the first-run wizard	已退出首次使用嚮導	初回ウィザードを終了しました
 已选的 Apple 识别方式未完成；任务参数和进度已保留 / Selected Apple transcription failed; task settings retained	已选的 Apple 识别方式未完成；任务参数和进度已保留	Selected Apple transcription failed; task settings retained	已選的 Apple 辨識方式未完成；任務參數和進度已保留	選択した Apple の認識方法が完了しませんでした。タスクの設定と進行状況は保持されています
 已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}	已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}	{} task records have been rebuilt and processing has not been started. Original records are kept at {}. {}	已重建 {} 項任務記錄，未啟動處理。原始記錄儲存在 {}。{}	{} 件のタスク記録を再構築しました。処理は開始していません。元の記録は {} に保存されています。{}
-已重新关联「{}」	已重新关联「{}」	"{}" has been reconnected	已重新關聯「{}」	「{}」を再接続しました
 已重新定位到 {}	已重新定位到 {}	Relocated to {}	已重新定位到 {}	場所を {} に再指定しました
 已重新开始整理文件夹，原损坏文件已另存	已重新开始整理文件夹，原损坏文件已另存	Folder organization restarted; the original damaged file was saved separately.	已重新開始整理資料夾，原損壞檔案已另存	フォルダーの整理を再開しました。元の破損ファイルは別に保存されています。
 带图时系统提示说明截图用途	带图时系统提示说明截图用途	With images, the system prompt explains what the screenshots are for	帶圖時系統提示說明截圖用途	画像付きの場合、システムプロンプトでスクリーンショットの用途を説明
@@ -970,7 +955,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法找到这个视频，请检查链接或确认视频仍可访问。	无法找到这个视频，请检查链接或确认视频仍可访问。	This video cannot be found, please check the link or make sure the video is still accessible.	無法找到這個影片，請檢查連結或確認影片仍可存取。	この動画は見つかりません。リンクをチェックするか、動画にまだアクセスできることを確認してください。
 无法探测本地视频时长 / Could not probe the local video duration	无法探测本地视频时长	Could not probe the local video duration	無法偵測本機影片時長	ローカル動画の長さを検出できません
 无法提取截图	无法提取截图	Unable to extract screenshot	無法提取截圖	スクリーンショットを抽出できません
-无法校验 {}	无法校验 {}	Unable to verify {}	無法校驗 {}	{} を確認できません
 无法检查（缺少 llama-server）	无法检查（缺少 llama-server）	Unable to check (missing llama-server)	無法檢查（缺少 llama-server）	確認できません (llama-server がありません)
 无法检测显卡：{}	无法检测显卡：{}	Unable to detect graphics card: {}	無法偵測顯示卡：{}	グラフィックス カードを検出できません: {}
 无法生成安全随机数 / Cannot generate secure random bytes	无法生成安全随机数	Cannot generate secure random bytes	無法生成安全隨機數	安全な乱数を生成できません
@@ -1333,7 +1317,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在检查保存位置…	正在检查保存位置…	Checking save location...	正在檢查儲存位置…	保存場所を確認しています...
 正在检查保存位置，请稍候	正在检查保存位置，请稍候	Checking the save location, please wait.	正在檢查儲存位置，請稍候	保存場所を確認中です。しばらくお待ちください。
 正在检查原笔记库…	正在检查原笔记库…	Checking the original note library...	正在檢查原筆記庫…	元のノート ライブラリを確認しています...
-正在检查备份…	正在检查备份…	Checking backup...	正在檢查備份…	バックアップを確認しています...
 正在检查所需组件…	正在检查所需组件…	Checking required components...	正在檢查所需元件…	必要なコンポーネントを確認しています...
 正在检查本机能力…	正在检查本机能力…	Checking this computer's capabilities...	正在檢查本機能力…	このコンピューターの機能を確認しています...
 正在检查模型	正在检查模型	Checking model	正在檢查模型	モデルを確認中
@@ -1362,7 +1345,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在读取视频信息…	正在读取视频信息…	Reading video information...	正在讀取影片資訊…	動画情報を読み取っています...
 正在连接	正在连接	Connecting	正在連線	接続中
 正在退出	正在退出	Exiting	正在結束	終了しています
-正在重新读取这个位置中的笔记…	正在重新读取这个位置中的笔记…	Rereading notes at this location...	正在重新讀取這個位置中的筆記…	この場所のノートを再読み込みしています...
 正在验证登录状态…	正在验证登录状态…	Verifying login status...	正在驗證登入狀態…	ログインステータスを確認しています...
 正文	正文	Text	正文	テキスト
 正文已保存	正文已保存	Text has been saved	正文已儲存	テキストが保存されました
@@ -1485,15 +1467,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 目标不能是原笔记库、它的父文件夹或子文件夹	目标不能是原笔记库、它的父文件夹或子文件夹	The target cannot be the original note library, its parent folder, or a subfolder	目標不能是原筆記庫、它的父資料夾或子資料夾	元のノート ライブラリ、その親フォルダー、またはサブフォルダーをターゲットにすることはできません
 目标与另一个笔记库重叠，请选择单独的文件夹	目标与另一个笔记库重叠，请选择单独的文件夹	The destination overlaps with another note library, please select a separate folder	目標與另一個筆記庫重疊，請選擇單獨的資料夾	保存先が他のノートライブラリと重複しているため、別のフォルダーを選択してください
 目标位置暂时无法访问	目标位置暂时无法访问	The destination is temporarily inaccessible	目標位置暫時無法存取	移動先に一時的にアクセスできません
-目标出现非预期文件，原文件已保留：{}	目标出现非预期文件，原文件已保留：{}	An unexpected file appeared in the destination; the original file was retained: {}	目標出現非預期檔案，原檔案已保留：{}	移動先に予期しないファイルが見つかりました。元のファイルは保持されています: {}
 目标副本出现了非预期内容，未覆盖任何文件	目标副本出现了非预期内容，未覆盖任何文件	The destination copy has unexpected content and no files were overwritten.	目標副本出現了非預期內容，未覆蓋任何檔案	コピー先に予期しない内容が含まれているため、ファイルは上書きされませんでした。
 目标副本包含非预期内容，尚未切换保存位置	目标副本包含非预期内容，尚未切换保存位置	The destination copy contains unexpected content; the save location was not switched.	目標副本包含非預期內容，尚未切換儲存位置	コピー先に予期しない内容が含まれているため、保存場所は切り替えられていません。
 目标副本尚未核验，不能切换保存位置	目标副本尚未核验，不能切换保存位置	The destination copy has not been verified, so the save location cannot be switched.	目標副本尚未核驗，不能切換儲存位置	コピー先が検証されていないため、保存場所を切り替えられません。
-目标副本已被修改，未覆盖：{}	目标副本已被修改，未覆盖：{}	The destination copy has been modified and was not overwritten: {}	目標副本已被修改，未覆蓋：{}	コピー先が変更されているため、上書きしませんでした: {}
 目标副本未通过校验，尚未切换保存位置：{}	目标副本未通过校验，尚未切换保存位置：{}	The destination copy failed verification; the save location was not switched: {}	目標副本未通過校驗，尚未切換儲存位置：{}	コピー先の検証に失敗したため、保存場所は切り替えられていません: {}
 目标已被其他操作使用，原笔记库尚未改变	目标已被其他操作使用，原笔记库尚未改变	The destination is in use by another operation; the original note library has not changed.	目標已被其他操作使用，原筆記庫尚未改變	移動先は他の操作で使用中です。元のノートライブラリは変更されていません。
 目标文件夹不是空的，请选择空文件夹	目标文件夹不是空的，请选择空文件夹	The destination folder is not empty, please select an empty folder	目標資料夾不是空的，請選擇空資料夾	宛先フォルダーが空ではありません。空のフォルダーを選択してください
-目标文件夹在准备期间出现了内容，请选择另一个空文件夹	目标文件夹在准备期间出现了内容，请选择另一个空文件夹	Contents appeared in the destination folder during preparation, please select another empty folder	目標資料夾在準備期間出現了內容，請選擇另一個空資料夾	準備中に宛先フォルダーにコンテンツが表示されました。別の空のフォルダーを選択してください
 目标文件夹无法访问，请选择已有的空文件夹	目标文件夹无法访问，请选择已有的空文件夹	The destination folder cannot be accessed. Select an existing empty folder.	目標資料夾無法存取，請選擇已有的空資料夾	宛先フォルダーにアクセスできません。既存の空のフォルダーを選択してください。
 目标文件缺少目录	目标文件缺少目录	Target file is missing directory	目標檔案缺少目錄	ターゲットファイルのディレクトリがありません
 目标缺少这次移动的识别记录，未修改目标内容	目标缺少这次移动的识别记录，未修改目标内容	The destination is missing the identification record for this move; its contents were not modified.	目標缺少這次移動的識別記錄，未修改目標內容	移動先にこの移動の識別記録がないため、内容は変更されていません。
@@ -1503,9 +1482,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 移动位置已经变化，原数据和副本已保留	移动位置已经变化，原数据和副本已保留	The move location has changed; the original data and the copy were retained.	移動位置已經變化，原資料和副本已保留	移動先が変わりました。元のデータとコピーは保持されています。
 移动笔记库	移动笔记库	Move note library	移動筆記庫	ノートライブラリを移動
 移动笔记库…	移动笔记库…	Move note library…	移動筆記庫…	ノートライブラリを移動…
-移动记录包含无效文件位置，未修改任何内容	移动记录包含无效文件位置，未修改任何内容	Move record contains invalid file location, nothing was modified	移動記錄包含無效檔案位置，未修改任何內容	移動レコードに無効なファイルの場所が含まれています。何も変更されていません
 移动记录无法读取	移动记录无法读取	The move record cannot be read	移動記錄無法讀取	移動記録を読み取れません
-移动记录缺少保存目录	移动记录缺少保存目录	Move record is missing save directory	移動記錄缺少儲存目錄	移動レコードに保存ディレクトリがありません
 移除预览	移除预览	Remove preview	移除預覽	プレビューを削除
 稍后下载模型，再重新运行视频命令： / Download the model, then rerun your video command: course2md models download	稍后下载模型，再重新运行视频命令：	Download the model, then rerun your video command: course2md models download	稍後下載模型，再重新執行影片命令：	後でモデルをダウンロードしてから、動画コマンドを再実行してください:
 稍后准备	稍后准备	Prepare later	稍後準備	後で準備する
@@ -1903,7 +1880,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 重新关联…	重新关联…	Reconnect…	重新關聯…	再接続…
 重新关联此保存位置	重新关联此保存位置	Reconnect this save location	重新關聯此儲存位置	この保存場所を再接続します
 重新关联此保存位置？	重新关联此保存位置？	Reconnect this save location?	重新關聯此儲存位置？	この保存場所を再接続しますか?
-重新关联笔记库	重新关联笔记库	Reconnect the note library	重新關聯筆記庫	ノートライブラリを再接続する
 重新发送以上内容	重新发送以上内容	Resend the above	重新傳送以上內容	上記を再送します
 重新发送的选择尚未保存：{}	重新发送的选择尚未保存：{}	Resend selection not saved: {}	重新傳送的選擇尚未儲存：{}	再送信選択が保存されていません: {}
 重新定位…	重新定位…	Relocate…	重新定位…	再配置…

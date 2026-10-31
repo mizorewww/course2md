@@ -2,44 +2,28 @@
 use crate::conversion::ConversionOptions;
 use anyhow::{Context, Result, bail, ensure};
 use course2md::execution::Component;
-use course2md::progress::{BlockReason, Stage, StageStatus};
+use course2md::progress::BlockReason;
 use course2md::settings::ConfigFile;
 use serde::{Deserialize, Serialize};
 use std::{
-    cell::Cell,
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    sync::{Arc, Mutex},
 };
 
-const SCHEMA: u32 = 1;
-/// Minimum spacing between throttled progress saves while a task streams events.
-const PROGRESS_SAVE_INTERVAL: Duration = Duration::from_secs(2);
+pub use crate::activity::{BlockedRequest, JobEvents};
+pub use crate::store::{new_id, now};
+
+const SCHEMA: u32 = 2;
 /// Parsed subtitle text of a submitted task, kept in its work directory so the
 /// workspace record stays small. Older records carry the events inline.
 const TASK_SUBTITLE_FILE: &str = "subtitle-events.json";
+/// What a running task said, one engine event per line.
+pub const TASK_EVENTS_FILE: &str = "events.jsonl";
 /// Log lines kept once a task has finished.
 const FINISHED_TASK_LOG_LINES: usize = 50;
 /// Cancelled attempts without a note kept in the task list.
 const KEPT_CANCELLED_TASKS: usize = 30;
-static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-pub fn new_id(prefix: &str) -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}-{nanos:x}-{:x}-{sequence:x}", std::process::id())
-}
-
-pub fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
 
 /// 课程目录名：`course-{source_id 摘要前 32 字符}`——32 是与引擎 artifact 布局对齐的固定截断。
 pub fn course_dir_name(source_id: &str) -> String {
@@ -226,6 +210,72 @@ impl Draft {
     }
 }
 
+impl Draft {
+    fn relocate(&mut self, old: &Path, new: &Path) {
+        if let Some(source) = &mut self.source {
+            let before = source.input.clone();
+            source.relocate(old, new);
+            if !source.online && before != source.input {
+                self.input = source.input.clone();
+            }
+        } else if !self.online {
+            let mut path = PathBuf::from(&self.input);
+            relocate_path(&mut path, old, new);
+            self.input = path.display().to_string();
+        }
+        if let Some(path) = &mut self.subtitle {
+            relocate_path(path, old, new);
+        }
+        if let Some(config) = &mut self.base_config {
+            relocate_config(config, old, new);
+        }
+    }
+}
+
+impl crate::source::Source {
+    fn relocate(&mut self, old: &Path, new: &Path) {
+        if !self.online {
+            let mut path = PathBuf::from(&self.input);
+            relocate_path(&mut path, old, new);
+            self.input = path.display().to_string();
+        }
+        if let Some(path) = &mut self.cover {
+            relocate_path(path, old, new);
+        }
+        if let Some(subtitle) = &mut self.selected_subtitle {
+            relocate_path(&mut subtitle.path, old, new);
+        }
+        // Track identity refers to the original confirmed choice. Its content is stored
+        // in the task; relocating a file does not reselect a track.
+        let tracks = match &mut self.subtitles {
+            course2md::subtitle::SubtitleEvidence::Found { tracks, .. } => tracks.iter_mut(),
+            _ => [].iter_mut(),
+        };
+        for track in tracks.chain(&mut self.subtitle_request) {
+            if let course2md::subtitle::SubtitleOrigin::File { path } = &mut track.origin {
+                relocate_path(path, old, new);
+            }
+        }
+    }
+}
+
+pub fn relocate_path(path: &mut PathBuf, old: &Path, new: &Path) {
+    if path.is_absolute()
+        && let Ok(relative) = path.strip_prefix(old)
+    {
+        *path = new.join(relative);
+    }
+}
+
+fn relocate_config(config: &mut ConfigFile, old: &Path, new: &Path) {
+    for path in [&mut config.defaults.out, &mut config.defaults.model_dir]
+        .into_iter()
+        .flatten()
+    {
+        relocate_path(path, old, new);
+    }
+}
+
 /// Extra defense at the persistence boundary: even a caller-provided resolved
 /// config cannot put its API keys in a task file or its backup.
 fn serialize_public_config<S: serde::Serializer>(
@@ -349,32 +399,6 @@ impl TaskState {
     }
 }
 
-/// What a task record keeps of one pipeline stage.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct StageRecord {
-    pub status: StageStatus,
-    pub current: u64,
-    pub total: u64,
-    pub detail: Option<String>,
-}
-
-impl Default for StageRecord {
-    fn default() -> Self {
-        Self {
-            status: StageStatus::Start,
-            current: 0,
-            total: 0,
-            detail: None,
-        }
-    }
-}
-
-impl StageRecord {
-    pub fn begin(&mut self) {
-        *self = Self::default();
-    }
-}
-
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct TaskRecord {
     pub id: String,
@@ -385,27 +409,43 @@ pub struct TaskRecord {
     pub updated: u64,
     pub parent: Option<String>,
     #[serde(default)]
-    pub handled_by: Option<String>,
-    pub work_dir: PathBuf,
-    #[serde(default)]
-    pub stages: BTreeMap<Stage, StageRecord>,
-    #[serde(default)]
-    pub error: Option<String>,
-    #[serde(default)]
     pub artifact: Option<PathBuf>,
-    #[serde(default)]
-    pub outcomes: Option<course2md::artifact::Outcomes>,
     #[serde(default)]
     pub unread: bool,
     #[serde(default)]
-    pub logs: Vec<String>,
-    #[serde(default)]
-    pub blocked: Vec<BlockedRequest>,
-    #[serde(default)]
     pub resend: Vec<String>,
+    /// The later attempt that replaced this one: the task whose `parent` this is.
+    #[serde(skip)]
+    pub handled_by: Option<String>,
+    /// Always `<library>/.course2md/work/<id>`.
+    #[serde(skip)]
+    pub work_dir: PathBuf,
+    #[serde(flatten)]
+    pub events: JobEvents,
 }
 
 impl TaskRecord {
+    /// One engine event from the running job.
+    pub fn apply_event(&mut self, event: &course2md::progress::Event) -> bool {
+        use course2md::progress::Event;
+        if matches!(
+            event,
+            Event::Stage { .. } | Event::Error { .. } | Event::Blocked { .. }
+        ) {
+            self.updated = now();
+        }
+        if matches!(
+            event,
+            Event::Blocked {
+                reason: BlockReason::Uncertain,
+                ..
+            }
+        ) {
+            self.state = TaskState::Uncertain;
+        }
+        self.events.apply(event)
+    }
+
     /// The state label, telling a cancel apart from a pause while the worker stops.
     pub fn status_label(&self) -> &'static str {
         if self.state == TaskState::Pausing && self.intent == Intent::Cancel {
@@ -424,7 +464,42 @@ impl TaskRecord {
 
     /// 是否有结果尚未确认的请求（BlockedRequest::is_uncertain 的任务级汇总）。
     pub fn has_uncertain(&self) -> bool {
-        self.blocked.iter().any(BlockedRequest::is_uncertain)
+        self.events.blocked.iter().any(BlockedRequest::is_uncertain)
+    }
+
+    fn relocate(&mut self, old: &Path, new: &Path) {
+        relocate_path(&mut self.work_dir, old, new);
+        if let Some(path) = &mut self.artifact {
+            relocate_path(path, old, new);
+        }
+        if let Some(path) = &mut self.plan.subtitle {
+            relocate_path(path, old, new);
+        }
+        self.plan.source.relocate(old, new);
+        relocate_config(&mut self.plan.config, old, new);
+        if let course2md::execution::Operation::Reprocess {
+            base_version_dir,
+            prior_work_dir,
+            ..
+        } = &mut self.plan.operation
+        {
+            relocate_path(base_version_dir, old, new);
+            if let Some(path) = prior_work_dir {
+                relocate_path(path, old, new);
+            }
+        }
+    }
+
+    /// A task read back from outside the record loses any evidence of the last
+    /// intent, so nothing about it may send or run until someone says so.
+    fn pause_as_restored(&mut self) {
+        self.resend.clear();
+        if !self.state.finished() {
+            self.intent = Intent::Pause;
+            self.state = TaskState::Paused;
+            self.events.error = Some(course2md::tr!("任务记录已重建").into());
+            self.unread = true;
+        }
     }
 
     pub fn exports_only(&self) -> bool {
@@ -476,7 +551,7 @@ pub(crate) fn task_export_files(task: &TaskRecord, location: &LibraryLocation) -
     {
         return Vec::new();
     }
-    let Some(outcomes) = task.outcomes.as_ref() else {
+    let Some(outcomes) = task.events.outcomes.as_ref() else {
         return Vec::new();
     };
     let Some(directory) = task_export_directory(task, location) else {
@@ -505,24 +580,6 @@ pub(crate) fn available_task_export(
         .context(course2md::tr!(
             "导出文件已移动或无法读取，可打开笔记后从「导出」菜单重新保存。"
         ))
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct BlockedRequest {
-    pub reason: BlockReason,
-    pub request_id: Option<String>,
-    pub purpose: Option<String>,
-    #[serde(default)]
-    pub description: String,
-    #[serde(default)]
-    pub kind: Option<course2md::artifact::FailureKind>,
-    pub message: String,
-}
-
-impl BlockedRequest {
-    pub fn is_uncertain(&self) -> bool {
-        self.reason == BlockReason::Uncertain
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -581,6 +638,19 @@ impl State {
             storage_backups: Vec::new(),
             reconciling: false,
         }
+    }
+
+    /// A new record over a folder that is already a library takes on its identity.
+    fn adopt_marker(&mut self, root: &Path) -> bool {
+        let Ok(marker) = std::fs::read_to_string(root.join(".course2md-library-id")) else {
+            return false;
+        };
+        if course2md::execution::valid_id(marker.trim()) {
+            self.default_library = marker.trim().into();
+            self.libraries[0].id = self.default_library.clone();
+            self.drafts[0].library_id = self.default_library.clone();
+        }
+        true
     }
 
     pub fn draft(&self) -> Option<&Draft> {
@@ -797,14 +867,14 @@ impl State {
             parent: parent.clone(),
             handled_by: None,
             work_dir,
-            stages: BTreeMap::new(),
-            error: None,
             artifact: None,
-            outcomes: None,
             unread: false,
-            logs: Vec::new(),
-            blocked: Vec::new(),
             resend: Vec::new(),
+            // A new task has said nothing yet.
+            events: JobEvents {
+                loaded: true,
+                ..Default::default()
+            },
         });
         if let Some(parent) = parent.and_then(|id| self.task_mut(&id)) {
             parent.handled_by = Some(id.clone());
@@ -813,11 +883,20 @@ impl State {
         Ok((id, true))
     }
 
-    /// Reconcile only process-owned states. Confirmed user stops survive restarts.
-    /// The engine still checks its durable remote-request ledger before any send.
-    pub fn recover(&mut self) {
-        // Older records had a child.parent link but no reverse link. Reconstruct it
-        // before deciding which task may run so an obsolete parent cannot resume.
+    /// Fills in what a task record derives from the rest of the state: the work
+    /// directory from its library, the reverse link from its follow-up's `parent`.
+    fn link_tasks(&mut self) {
+        let roots: BTreeMap<_, _> = self
+            .libraries
+            .iter()
+            .map(|library| (library.id.clone(), library.root.clone()))
+            .collect();
+        for task in &mut self.tasks {
+            task.handled_by = None;
+            if let Some(root) = roots.get(&task.plan.library_id) {
+                task.work_dir = root.join(".course2md/work").join(&task.id);
+            }
+        }
         let mut followups = self
             .tasks
             .iter()
@@ -835,6 +914,12 @@ impl State {
                 task.handled_by = Some(child);
             }
         }
+    }
+
+    /// Reconcile only process-owned states. Confirmed user stops survive restarts.
+    /// The engine still checks its durable remote-request ledger before any send.
+    pub fn recover(&mut self) {
+        self.link_tasks();
         for task in &mut self.tasks {
             if task.handled_by.is_some() && !task.state.finished() {
                 task.intent = Intent::Pause;
@@ -958,6 +1043,7 @@ impl State {
         );
         reconcile_receipts(task)?;
         let current: BTreeSet<_> = task
+            .events
             .blocked
             .iter()
             .filter(|request| request.is_uncertain())
@@ -975,7 +1061,7 @@ impl State {
         task.resend.extend(requests.iter().cloned());
         task.intent = Intent::Run;
         task.state = TaskState::Queued;
-        task.error = None;
+        task.events.error = None;
         task.updated = now();
         Ok(())
     }
@@ -1022,7 +1108,7 @@ impl State {
             manifest.source_id == original.plan.source_id,
             course2md::tr!("笔记来源与任务不匹配")
         );
-        let outcomes = original.outcomes.clone();
+        let outcomes = original.events.outcomes.clone();
         components.sort();
         components.dedup();
         ensure!(
@@ -1044,6 +1130,7 @@ impl State {
         if !resend.is_empty() {
             reconcile_receipts(&mut original)?;
             let unknown: BTreeSet<_> = original
+                .events
                 .blocked
                 .iter()
                 .filter(|request| request.is_uncertain())
@@ -1064,7 +1151,7 @@ impl State {
                 && outcomes
                     .as_ref()
                     .is_some_and(|outcomes| failed_outcome(&outcomes.summary))
-                && original.blocked.iter().any(|request| {
+                && original.events.blocked.iter().any(|request| {
                     request.is_uncertain()
                         && request.purpose.as_deref() == Some(Component::Proofreading.as_str())
                 })
@@ -1129,6 +1216,63 @@ impl State {
         Ok(next)
     }
 
+    /// Points a library at a new folder and rewrites every saved path inside the old
+    /// ones. Moving, locating and restoring a library all come through here; keeping
+    /// its id keeps folder ids, reading positions and service bindings stable.
+    pub fn rebind_library(
+        &mut self,
+        library_id: &str,
+        old_roots: &[PathBuf],
+        destination: &Path,
+    ) -> Result<()> {
+        ensure!(
+            self.library(library_id).is_some(),
+            course2md::tr!("这个笔记库已被移除")
+        );
+        for old in old_roots {
+            for path in self.reader_sources.values_mut() {
+                relocate_path(path, old, destination);
+            }
+            for draft in &mut self.drafts {
+                draft.relocate(old, destination);
+            }
+            for task in &mut self.tasks {
+                task.relocate(old, destination);
+            }
+        }
+        for backup in &mut self.storage_backups {
+            if backup.library_id == library_id {
+                backup.current_root = destination.to_owned();
+            }
+        }
+        let location = self
+            .libraries
+            .iter_mut()
+            .find(|library| library.id == library_id)
+            .context(course2md::tr!("这个笔记库已被移除"))?;
+        for old in old_roots {
+            if !location.previous_roots.contains(old) {
+                location.previous_roots.push(old.clone());
+            }
+        }
+        location.root = destination.to_owned();
+        self.link_tasks();
+        Ok(())
+    }
+
+    /// Adds tasks a library carries that this record has not seen. They are evidence of
+    /// earlier work, never permission to run it.
+    pub(crate) fn adopt_tasks(&mut self, tasks: Vec<TaskRecord>) {
+        for mut task in tasks {
+            if self.task(&task.id).is_none() {
+                task.pause_as_restored();
+                self.tasks.push(task);
+            }
+        }
+        self.tasks.sort_by_key(|task| task.created);
+        self.link_tasks();
+    }
+
     pub fn stop_session(&mut self) {
         let ids: Vec<_> = self
             .tasks
@@ -1148,253 +1292,118 @@ pub struct PreparedLibrary {
     pub id: String,
     pub duplicate: bool,
     pub make_default: bool,
+    /// Tasks the folder already carries.
+    tasks: Vec<TaskRecord>,
 }
 
 pub struct Workspace {
-    pub state: SharedState,
+    pub state: State,
     pub recovery: Option<String>,
     path: PathBuf,
-    /// Last mirror attempt per task and registered location. A normal input
-    /// save must not probe the disks holding every historical task.
-    mirror_snapshots: MirrorSnapshots,
-    /// Last progress save; high-frequency saves skip the writer until this
-    /// ages past their interval.
-    last_write: Cell<Option<Instant>>,
-    writer: Box<dyn Writer>,
+    library_writes: LibraryWrites,
     /// Identifies this opened record, so findings for a record that was
     /// replaced meanwhile are not applied to its successor.
     identity: u64,
 }
 
-/// The current state, shared with the record writer without copying. Reads go
-/// through `Deref`; a direct edit copies the state only while the writer still
-/// holds that snapshot.
-pub struct SharedState(std::sync::Arc<State>);
-
-impl std::ops::Deref for SharedState {
-    type Target = State;
-    fn deref(&self) -> &State {
-        &self.0
-    }
-}
-impl std::ops::DerefMut for SharedState {
-    fn deref_mut(&mut self) -> &mut State {
-        std::sync::Arc::make_mut(&mut self.0)
-    }
-}
-impl Serialize for SharedState {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
-}
-impl PartialEq<State> for SharedState {
-    fn eq(&self, other: &State) -> bool {
-        *self.0 == *other
-    }
-}
-
-type MirrorSnapshots =
-    std::sync::Arc<std::sync::Mutex<BTreeMap<String, (TaskRecord, LibraryLocation)>>>;
-
-struct WriterCache {
-    /// Record bytes this process last wrote, so the backup copy needs no
-    /// re-read of the file it replaces.
-    last_record: Option<Vec<u8>>,
-    /// Draft subtitle this process last wrote beside the record.
-    last_draft_subtitle: Option<course2md::subtitle::CachedSubtitle>,
-}
-
-/// Where a writer puts the record, and what it remembers between writes.
-pub(crate) struct WriterTarget {
-    path: PathBuf,
-    mirrors: MirrorSnapshots,
-    cache: std::sync::Mutex<WriterCache>,
-    error: std::sync::Mutex<Option<String>>,
-    wake: std::sync::Mutex<Option<smol::channel::Sender<()>>>,
-}
-
-impl WriterTarget {
-    fn new(path: PathBuf, mirrors: MirrorSnapshots) -> Self {
-        Self {
-            path,
-            mirrors,
-            cache: std::sync::Mutex::new(WriterCache {
-                last_record: None,
-                last_draft_subtitle: None,
-            }),
-            error: Default::default(),
-            wake: Default::default(),
-        }
-    }
-
-    /// Writes one state; a failure is kept for `take_error` and wakes the UI.
-    fn write(&self, state: &State) -> Result<()> {
-        let mut cache = course2md::runtime::lock_recover(&self.cache);
-        let result = Workspace::write_state(&self.path, state, &self.mirrors, &mut cache);
-        if let Err(error) = &result {
-            *course2md::runtime::lock_recover(&self.error) = Some(format!("{error:#}"));
-            if let Some(wake) = course2md::runtime::lock_recover(&self.wake).as_ref() {
-                let _ = wake.try_send(());
-            }
-        }
-        result
-    }
-
-    fn take_error(&self) -> Option<String> {
-        course2md::runtime::lock_recover(&self.error).take()
-    }
-}
-
-/// Persists workspace states. Production uses [`ThreadWriter`]; tests inject
-/// [`InlineWriter`] through `Workspace::open_with`.
-pub(crate) trait Writer: Send {
-    fn start(target: WriterTarget) -> Self
-    where
-        Self: Sized;
-    /// Queues `state`; a newer state replaces one not yet written.
-    fn enqueue(&self, state: std::sync::Arc<State>);
-    /// Writes anything queued and waits for it.
-    fn flush(&self) -> Result<()>;
-    /// The last write failure not yet reported.
-    fn take_error(&self) -> Option<String>;
-    fn set_wake(&self, wake: smol::channel::Sender<()>);
-}
-
-enum WriterSignal {
-    Wake,
-    Flush(std::sync::mpsc::Sender<Result<()>>),
-    Stop,
-}
-
-/// Writes on one background thread and coalesces states queued meanwhile.
-pub(crate) struct ThreadWriter {
-    target: std::sync::Arc<WriterTarget>,
-    pending: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<State>>>>,
-    signals: std::sync::mpsc::Sender<WriterSignal>,
-}
-
-impl Writer for ThreadWriter {
-    fn start(target: WriterTarget) -> Self {
-        let target = std::sync::Arc::new(target);
-        let pending: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<State>>>> =
-            Default::default();
-        let (signals, rx) = std::sync::mpsc::channel();
-        let thread_target = std::sync::Arc::clone(&target);
-        let thread_pending = std::sync::Arc::clone(&pending);
-        std::thread::Builder::new()
-            .name("course2md-workspace-writer".into())
-            .spawn(move || {
-                let write_pending = || {
-                    course2md::runtime::lock_recover(&thread_pending)
-                        .take()
-                        .map_or(Ok(()), |state| thread_target.write(&state))
-                };
-                while let Ok(signal) = rx.recv() {
-                    match signal {
-                        WriterSignal::Stop => {
-                            let _ = write_pending();
-                            break;
-                        }
-                        WriterSignal::Wake => {
-                            let _ = write_pending();
-                        }
-                        WriterSignal::Flush(ack) => {
-                            let _ = ack.send(write_pending());
-                        }
-                    }
-                }
-            })
-            .expect("workspace writer thread");
-        Self {
-            target,
-            pending,
-            signals,
-        }
-    }
-
-    fn enqueue(&self, state: std::sync::Arc<State>) {
-        *course2md::runtime::lock_recover(&self.pending) = Some(state);
-        let _ = self.signals.send(WriterSignal::Wake);
-    }
-
-    fn flush(&self) -> Result<()> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        if self.signals.send(WriterSignal::Flush(tx)).is_ok()
-            && let Ok(result) = rx.recv()
-        {
-            return result;
-        }
-        Ok(())
-    }
-
-    fn take_error(&self) -> Option<String> {
-        self.target.take_error()
-    }
-
-    fn set_wake(&self, wake: smol::channel::Sender<()>) {
-        *course2md::runtime::lock_recover(&self.target.wake) = Some(wake);
-    }
-}
-
-impl Drop for ThreadWriter {
-    fn drop(&mut self) {
-        let _ = self.signals.send(WriterSignal::Stop);
-    }
-}
-
-/// Writes each state before `enqueue` returns.
-#[cfg(test)]
-pub(crate) struct InlineWriter(WriterTarget);
-
-#[cfg(test)]
-impl Writer for InlineWriter {
-    fn start(target: WriterTarget) -> Self {
-        Self(target)
-    }
-    fn enqueue(&self, state: std::sync::Arc<State>) {
-        let _ = self.0.write(&state);
-    }
-    fn flush(&self) -> Result<()> {
-        match self.0.take_error() {
-            Some(error) => Err(anyhow::anyhow!(error)),
-            None => Ok(()),
-        }
-    }
-    fn take_error(&self) -> Option<String> {
-        self.0.take_error()
-    }
-    fn set_wake(&self, wake: smol::channel::Sender<()>) {
-        *course2md::runtime::lock_recover(&self.0.wake) = Some(wake);
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 struct TaskMirror {
     schema: u32,
+    /// The library root when this was written, so paths can follow a moved library.
+    #[serde(default)]
+    root: Option<PathBuf>,
     task: TaskRecord,
 }
 
-fn read_record_bytes(path: &Path) -> Result<Vec<u8>> {
-    use std::io::Read;
-    ensure!(
-        !std::fs::symlink_metadata(path)?.file_type().is_symlink(),
-        course2md::tr!("任务记录被链接替代，原文件已保留")
-    );
-    let mut file = std::fs::File::open(path)?;
-    let metadata = file.metadata()?;
-    ensure!(metadata.is_file(), course2md::tr!("任务记录不是普通文件"));
-    const LIMIT: u64 = 32 * 1024 * 1024;
-    ensure!(
-        metadata.len() <= LIMIT,
-        course2md::tr!("任务记录超过可读取范围，原文件已保留")
-    );
-    let mut bytes = Vec::new();
-    file.by_ref().take(LIMIT + 1).read_to_end(&mut bytes)?;
-    ensure!(
-        bytes.len() as u64 <= LIMIT,
-        course2md::tr!("任务记录超过可读取范围，原文件已保留")
-    );
-    Ok(bytes)
+/// Files that live in a library, which can be a slow or disconnected disk, so they
+/// never block the interface: the record itself is what a commit waits for. Writes
+/// run in order on the blocking pool, and a newer write of a file replaces one still
+/// waiting. A mirror is recovery evidence and reading the library rewrites it; a failed
+/// control write stops the job, which then sends nothing new.
+#[derive(Clone, Default)]
+pub(crate) struct LibraryWrites {
+    /// Each file with its bytes, and for a mirror the library it belongs to.
+    pending: Arc<Mutex<BTreeMap<PathBuf, (Vec<u8>, Option<LibraryLocation>)>>>,
+    writing: Arc<Mutex<()>>,
+    failure: Arc<Mutex<Option<WriteFailure>>>,
+    wake: Arc<Mutex<Option<smol::channel::Sender<()>>>>,
+}
+
+#[derive(Debug)]
+pub struct WriteFailure {
+    pub message: String,
+    /// The running job did not get its latest instruction.
+    pub control: bool,
+}
+
+impl LibraryWrites {
+    fn queue(&self, path: PathBuf, bytes: Vec<u8>, mirror_of: Option<LibraryLocation>) {
+        course2md::runtime::lock_recover(&self.pending).insert(path, (bytes, mirror_of));
+        let this = self.clone();
+        crate::spawn_blocking_io(move || this.drain());
+    }
+
+    /// Performs everything queued so far, waiting for any write already running.
+    pub(crate) fn drain(&self) {
+        let _writing = course2md::runtime::lock_recover(&self.writing);
+        let writes = std::mem::take(&mut *course2md::runtime::lock_recover(&self.pending));
+        for (path, (bytes, mirror_of)) in writes {
+            let control = mirror_of.is_none();
+            let result = match mirror_of {
+                Some(location) => write_mirror(&path, &bytes, &location),
+                None => write_control(&path, &bytes),
+            };
+            if let Err(error) = result {
+                *course2md::runtime::lock_recover(&self.failure) = Some(WriteFailure {
+                    message: format!("{error:#}"),
+                    control,
+                });
+                if let Some(wake) = course2md::runtime::lock_recover(&self.wake).as_ref() {
+                    let _ = wake.try_send(());
+                }
+            }
+        }
+    }
+
+    /// Writes a task's control file now, for a job about to start.
+    pub(crate) fn write_control_now(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        let _writing = course2md::runtime::lock_recover(&self.writing);
+        write_control(path, bytes)
+    }
+}
+
+fn write_control(path: &Path, bytes: &[u8]) -> Result<()> {
+    std::fs::create_dir_all(
+        path.parent()
+            .context(course2md::tr!("任务记录缺少保存目录"))?,
+    )?;
+    course2md::checkpoint::atomic_write(path, bytes)
+}
+
+/// A task record as its library keeps it.
+fn mirror_bytes(task: &TaskRecord, location: &LibraryLocation) -> Result<Vec<u8>> {
+    let mut task = task.clone();
+    forget_task_subtitles(&mut task);
+    Ok(serde_json::to_vec(&TaskMirror {
+        schema: SCHEMA,
+        root: Some(location.root.clone()),
+        task,
+    })?)
+}
+
+/// A disconnected library catches up when it is read again.
+fn write_mirror(path: &Path, bytes: &[u8], location: &LibraryLocation) -> Result<()> {
+    if check_library(location).is_err() {
+        return Ok(());
+    }
+    if let Some(directory) = path.parent() {
+        ensure_work_directory(directory, location)?;
+    }
+    if std::fs::read(path).ok().as_deref() != Some(bytes) {
+        course2md::checkpoint::atomic_write(path, bytes)
+            .context(course2md::tr!("任务恢复副本未能保存，原任务记录仍保留"))?;
+    }
+    Ok(())
 }
 
 fn validate_record_location(task: &TaskRecord, libraries: &[LibraryLocation]) -> Result<()> {
@@ -1407,8 +1416,7 @@ fn validate_record_location(task: &TaskRecord, libraries: &[LibraryLocation]) ->
         .find(|library| library.id == task.plan.library_id)
         .context(course2md::tr!("任务保存位置记录缺失"))?;
     ensure!(
-        library.root.is_absolute()
-            && task.work_dir == library.root.join(".course2md/work").join(&task.id),
+        library.root.is_absolute(),
         course2md::tr!("任务工作目录与记录的笔记库不匹配")
     );
     ensure!(
@@ -1418,10 +1426,12 @@ fn validate_record_location(task: &TaskRecord, libraries: &[LibraryLocation]) ->
     Ok(())
 }
 
-fn ensure_work_directory(task: &TaskRecord, library: &LibraryLocation) -> Result<()> {
+/// Creates a task's work directory under its library, refusing anything that has taken
+/// its place on the way there.
+fn ensure_work_directory(directory: &Path, library: &LibraryLocation) -> Result<()> {
     check_library(library)?;
     let mut current = library.root.clone();
-    for component in [".course2md", "work", &task.id] {
+    for component in directory.strip_prefix(&library.root)? {
         current.push(component);
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) => ensure!(
@@ -1429,7 +1439,12 @@ fn ensure_work_directory(task: &TaskRecord, library: &LibraryLocation) -> Result
                 course2md::tr!("任务工作目录被其他文件或链接占用，原内容已保留")
             ),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                std::fs::create_dir(&current)?
+                // A starting job may be creating the same directories.
+                if let Err(error) = std::fs::create_dir(&current)
+                    && error.kind() != std::io::ErrorKind::AlreadyExists
+                {
+                    return Err(error.into());
+                }
             }
             Err(error) => return Err(error.into()),
         }
@@ -1443,7 +1458,7 @@ fn pause_recovered_control(task: &TaskRecord) -> Result<()> {
     }
     let path = task.work_dir.join("control.json");
     let mut control = if path.is_file() {
-        let bytes = read_record_bytes(&path)?;
+        let bytes = crate::store::read(&path)?;
         course2md::checkpoint::atomic_write(
             &task
                 .work_dir
@@ -1495,7 +1510,7 @@ pub fn check_library(location: &LibraryLocation) -> Result<()> {
     Ok(())
 }
 
-fn create_library_marker(location: &LibraryLocation) -> Result<()> {
+pub(crate) fn create_library_marker(location: &LibraryLocation) -> Result<()> {
     use std::io::Write;
     ensure!(
         location.root.is_dir(),
@@ -1609,13 +1624,13 @@ fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
             partial,
         } => {
             task.artifact = Some(version);
-            task.outcomes = Some(*outcomes);
+            task.events.outcomes = Some(*outcomes);
             task.state = if partial {
                 TaskState::Partial
             } else {
                 TaskState::Complete
             };
-            task.error = None;
+            task.events.error = None;
             task.unread = true;
         }
         ArtifactFact::Exports { base, outcomes } => {
@@ -1624,23 +1639,15 @@ fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
             } else {
                 TaskState::Complete
             };
-            let previous = task.outcomes.clone();
             let previous_artifact = task.artifact.replace(base);
-            task.outcomes
+            task.events
+                .outcomes
                 .get_or_insert_with(course2md::artifact::Outcomes::default)
                 .exports = outcomes;
-            task.unread |= previous_artifact != task.artifact
-                || task.outcomes != previous
-                || task.state != next_state;
+            task.unread |= previous_artifact != task.artifact || task.state != next_state;
             task.state = next_state;
         }
     }
-}
-
-fn reconcile_artifact(task: &mut TaskRecord, location: &LibraryLocation) -> Result<()> {
-    let fact = probe_artifact(task, location)?;
-    apply_artifact(task, fact);
-    Ok(())
 }
 
 /// The output format a saved export outcome is keyed by.
@@ -1683,9 +1690,11 @@ fn uncertain_requests(task: &TaskRecord) -> Result<Vec<BlockedRequest>> {
 }
 
 fn apply_receipts(task: &mut TaskRecord, uncertain: Vec<BlockedRequest>) {
-    task.blocked.retain(|request| !request.is_uncertain());
-    task.blocked.extend(uncertain);
-    if !task.blocked.is_empty() && task.has_uncertain() && task.intent == Intent::Run {
+    task.events
+        .blocked
+        .retain(|request| !request.is_uncertain());
+    task.events.blocked.extend(uncertain);
+    if task.has_uncertain() && task.intent == Intent::Run {
         task.state = TaskState::Uncertain;
         task.unread = true;
     }
@@ -1697,22 +1706,84 @@ pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
     Ok(())
 }
 
-/// What startup found on disk for one task.
-struct TaskFacts {
-    task_id: String,
-    found: Result<(ArtifactFact, Vec<BlockedRequest>), String>,
+/// What a task said before streams were saved, kept in the mirror of that time.
+const OLD_MIRROR_FILE: &str = "task-record-v1.json";
+
+/// The events a task saved, read back: what an older mirror held, then its stream.
+fn read_task_events(task: &TaskRecord) -> Result<JobEvents> {
+    let old_mirror: Option<TaskMirror> = crate::store::read(&task.work_dir.join(OLD_MIRROR_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let mut events = old_mirror.map_or_else(JobEvents::default, |mirror| mirror.task.events);
+    match crate::store::read(&task.work_dir.join(TASK_EVENTS_FILE)) {
+        Ok(bytes) => events.replay(&bytes),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) => {}
+        Err(error) => return Err(error),
+    }
+    // Whether an error still stands is the record's to say: the task may have moved on.
+    events.error = task.events.error.clone();
+    if task.state.finished() && events.logs.len() > FINISHED_TASK_LOG_LINES {
+        events
+            .logs
+            .drain(..events.logs.len() - FINISHED_TASK_LOG_LINES);
+    }
+    events.loaded = true;
+    Ok(events)
+}
+
+/// A mirror written before streams were saved is the only place left for what the task
+/// said, once the record has been rewritten: it moves aside rather than be overwritten.
+fn keep_old_mirror(directory: &Path) -> Result<()> {
+    let path = directory.join("task-record.json");
+    let Ok(bytes) = crate::store::read(&path) else {
+        return Ok(());
+    };
+    #[derive(Deserialize)]
+    struct Schema {
+        schema: u32,
+    }
+    if serde_json::from_slice::<Schema>(&bytes).is_ok_and(|mirror| mirror.schema == 1) {
+        std::fs::rename(&path, directory.join(OLD_MIRROR_FILE))?;
+    }
+    Ok(())
+}
+
+/// What the startup check found on disk for one task.
+enum TaskFacts {
+    /// The library is not reachable; the task keeps what it has.
+    Unavailable,
+    Found {
+        artifact: ArtifactFact,
+        uncertain: Vec<BlockedRequest>,
+        events: JobEvents,
+        outcomes: Option<course2md::artifact::Outcomes>,
+    },
+    Unreadable(String),
 }
 
 impl TaskFacts {
     fn apply(self, task: &mut TaskRecord) {
-        match self.found {
-            Ok((artifact, uncertain)) => {
+        match self {
+            Self::Unavailable => {}
+            Self::Found {
+                artifact,
+                uncertain,
+                events,
+                outcomes,
+            } => {
+                forget_task_subtitles(task);
+                task.events = events;
+                task.events.outcomes = task.events.outcomes.take().or(outcomes);
                 apply_artifact(task, artifact);
                 apply_receipts(task, uncertain);
             }
-            Err(error) => {
+            Self::Unreadable(error) => {
+                task.events.loaded = true;
                 task.state = TaskState::NeedsAttention;
-                task.error = Some(course2md::tr!(
+                task.events.error = Some(course2md::tr!(
                     "请求记录暂时无法读取，尚未发送新请求：{}",
                     error
                 ));
@@ -1721,10 +1792,10 @@ impl TaskFacts {
     }
 }
 
-/// Startup checks of published results and request receipts. They read and
-/// hash every published asset, so they run on a blocking thread after the
-/// window opens; meanwhile the UI shows the last persisted state and no task
-/// is dispatched (`State::next_task` waits for them).
+/// Checks of published results and request receipts, and reading back what each task
+/// said. They read every task's files in its library, so they run on a blocking thread
+/// after the window opens; meanwhile the UI shows the last saved state and no task is
+/// dispatched (`State::next_task` waits for them).
 pub struct Reconciliation {
     workspace: u64,
     tasks: Vec<(TaskRecord, Option<LibraryLocation>)>,
@@ -1733,7 +1804,34 @@ pub struct Reconciliation {
 /// The findings of a [`Reconciliation`], applied by `Workspace::apply_reconciliation`.
 pub struct Reconciled {
     workspace: u64,
-    facts: Vec<TaskFacts>,
+    facts: Vec<(String, TaskFacts)>,
+}
+
+fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskFacts> {
+    keep_old_mirror(&task.work_dir)?;
+    let artifact = probe_artifact(task, location)?;
+    let uncertain = uncertain_requests(task)?;
+    let events = read_task_events(task)?;
+    store_task_subtitles(task)?;
+    // A task that stopped before reporting its result still has the published note's.
+    let outcomes = task
+        .artifact
+        .as_ref()
+        .filter(|_| events.outcomes.is_none() && !task.exports_only())
+        .and_then(|version| course2md::artifact::read_manifest(&version.join("manifest.json")).ok())
+        .map(|manifest| manifest.outcomes);
+    // Catches up on writes made while disconnected.
+    write_mirror(
+        &task.work_dir.join("task-record.json"),
+        &mirror_bytes(task, location)?,
+        location,
+    )?;
+    Ok(TaskFacts::Found {
+        artifact,
+        uncertain,
+        events,
+        outcomes,
+    })
 }
 
 impl Reconciliation {
@@ -1745,67 +1843,90 @@ impl Reconciliation {
                 .tasks
                 .into_iter()
                 .map(|(task, location)| {
-                    let found = location
-                        .map_or(Ok(ArtifactFact::Nothing), |location| {
-                            probe_artifact(&task, &location)
-                        })
-                        .and_then(|artifact| Ok((artifact, uncertain_requests(&task)?)))
-                        .map_err(|error| format!("{error:#}"));
-                    TaskFacts {
-                        task_id: task.id,
-                        found,
-                    }
+                    let facts = match location.filter(|location| check_library(location).is_ok()) {
+                        Some(location) => reconcile_task(&task, &location)
+                            .unwrap_or_else(|error| TaskFacts::Unreadable(format!("{error:#}"))),
+                        None => TaskFacts::Unavailable,
+                    };
+                    (task.id, facts)
                 })
                 .collect(),
         }
     }
 }
 
-/// Move inline subtitle events of submitted tasks into their work directories.
-/// A task whose library is offline or unwritable keeps its events inline until
-/// a later save.
-fn store_task_subtitles(state: &mut State) {
-    for task in &mut state.tasks {
-        let Some(events) = task
-            .plan
-            .source
-            .selected_subtitle
-            .as_ref()
-            .map(|subtitle| &subtitle.events)
-            .filter(|events| !events.is_empty())
-        else {
+/// Saves the parsed subtitle a queued task carries inline beside its materials, so
+/// the record need not keep it once the task starts. Blocking.
+pub fn store_task_subtitles(task: &TaskRecord) -> Result<()> {
+    if let Some(subtitle) = &task.plan.source.selected_subtitle
+        && !subtitle.events.is_empty()
+    {
+        course2md::checkpoint::atomic_write(
+            &task.work_dir.join(TASK_SUBTITLE_FILE),
+            &serde_json::to_vec(&subtitle.events)?,
+        )?;
+    }
+    Ok(())
+}
+
+/// The record stops carrying subtitle text once `store_task_subtitles` has saved it.
+pub fn forget_task_subtitles(task: &mut TaskRecord) {
+    if let Some(subtitle) = &mut task.plan.source.selected_subtitle {
+        subtitle.events = Vec::new();
+    }
+}
+
+/// Task records a library's folder carries, with their paths moved to where the folder
+/// is now. Unreadable ones are named in the second list; their materials stay. Blocking.
+pub(crate) fn read_library_tasks(location: &LibraryLocation) -> (Vec<TaskRecord>, Vec<String>) {
+    let mut tasks = Vec::new();
+    let mut issues = Vec::new();
+    let Ok(entries) = std::fs::read_dir(location.root.join(".course2md/work")) else {
+        return (tasks, issues);
+    };
+    for entry in entries.flatten() {
+        let snapshot = entry.path().join("task-record.json");
+        if entry.file_type().is_ok_and(|kind| kind.is_symlink()) || !snapshot.is_file() {
             continue;
-        };
-        let Some(library) = state
-            .libraries
-            .iter()
-            .find(|library| library.id == task.plan.library_id)
-            .filter(|library| check_library(library).is_ok())
-        else {
-            continue;
-        };
-        let stored = ensure_work_directory(task, library).and_then(|_| {
-            course2md::checkpoint::atomic_write(
-                &task.work_dir.join(TASK_SUBTITLE_FILE),
-                &serde_json::to_vec(events)?,
-            )
+        }
+        let restored = crate::store::read(&snapshot).and_then(|bytes| {
+            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let mirror: TaskMirror = serde_json::from_value(value.clone())?;
+            ensure!(
+                mirror.schema <= SCHEMA
+                    && course2md::execution::valid_id(&mirror.task.id)
+                    && entry.file_name().to_str() == Some(mirror.task.id.as_str()),
+                course2md::tr!("任务镜像身份不匹配")
+            );
+            let mut task = mirror.task;
+            // A mirror older than `root` names its folder in its own work directory.
+            let root = mirror.root.or_else(|| {
+                Path::new(value["task"]["work_dir"].as_str()?)
+                    .ancestors()
+                    .nth(3)
+                    .map(Path::to_path_buf)
+            });
+            if let Some(root) = root {
+                task.relocate(&root, &location.root);
+            }
+            task.plan.library_id = location.id.clone();
+            task.work_dir = entry.path();
+            Ok(task)
         });
-        if stored.is_ok()
-            && let Some(subtitle) = &mut task.plan.source.selected_subtitle
-        {
-            subtitle.events = Vec::new();
+        match restored {
+            Ok(task) => tasks.push(task),
+            Err(_) => issues.push(course2md::tr!(
+                "{} 的任务参数仍无法读取，材料已保留",
+                entry.file_name().to_string_lossy()
+            )),
         }
     }
+    (tasks, issues)
 }
 
 /// Finished tasks keep a short log tail, and only recent cancelled attempts
 /// without a note remain listed.
 fn compact_history(state: &mut State) {
-    for task in state.tasks.iter_mut().filter(|task| task.state.finished()) {
-        if task.logs.len() > FINISHED_TASK_LOG_LINES {
-            task.logs.drain(..task.logs.len() - FINISHED_TASK_LOG_LINES);
-        }
-    }
     let referenced: BTreeSet<String> = state
         .tasks
         .iter()
@@ -1855,7 +1976,7 @@ pub fn task_subtitle_events(
     }
     let path = task.work_dir.join(TASK_SUBTITLE_FILE);
     if path.is_file() {
-        return Ok(Some(serde_json::from_slice(&read_record_bytes(&path)?)?));
+        return Ok(Some(serde_json::from_slice(&crate::store::read(&path)?)?));
     }
     ensure!(
         matches!(
@@ -1874,7 +1995,7 @@ fn draft_subtitle_path(record: &Path) -> PathBuf {
 /// Restore the draft's subtitle events from the file beside the record. A
 /// missing or mismatched file leaves the subtitle to be read again.
 fn hydrate_draft_subtitles(state: &mut State, record: &Path) {
-    let stored = read_record_bytes(&draft_subtitle_path(record))
+    let stored = crate::store::read(&draft_subtitle_path(record))
         .ok()
         .and_then(|bytes| {
             serde_json::from_slice::<course2md::subtitle::CachedSubtitle>(&bytes).ok()
@@ -1901,25 +2022,38 @@ fn hydrate_draft_subtitles(state: &mut State, record: &Path) {
     }
 }
 
-impl Workspace {
-    /// The UI explains the registered path and obtains an explicit association choice.
-    pub fn reassociate_library(&mut self, id: &str) -> Result<()> {
-        let library = self
-            .state
-            .library(id)
-            .context(course2md::tr!("保存位置未登记"))?
-            .clone();
-        ensure!(
-            library.root.is_dir(),
-            course2md::tr!("保存位置暂时不可访问，请先连接对应磁盘")
-        );
-        create_library_marker(&library)?;
-        course2md::runtime::lock_recover(&self.mirror_snapshots)
-            .retain(|_, (_, location)| location.id != id);
-        Ok(())
+/// Writes the record; the draft's subtitle goes first, because the record refers to it.
+fn write_record(path: &Path, previous: &State, next: &State) -> Result<()> {
+    let subtitle = |state: &State| {
+        state
+            .draft()
+            .and_then(|draft| draft.source.as_ref())
+            .and_then(|source| source.selected_subtitle.clone())
+    };
+    if let Some(selected) = subtitle(next).filter(|selected| !selected.events.is_empty())
+        && (subtitle(previous).as_ref() != Some(&selected) || !draft_subtitle_path(path).exists())
+    {
+        course2md::checkpoint::atomic_write(
+            &draft_subtitle_path(path),
+            &serde_json::to_vec(&selected)?,
+        )?;
     }
+    crate::store::save(path, &serde_json::to_vec(next)?)
+}
 
-    /// Explicit repair. Originals are archived first; no recovered task may dispatch work.
+/// A list salvaged from a record that no longer reads as a whole.
+fn salvage<T: serde::de::DeserializeOwned>(records: &[serde_json::Value], key: &str) -> Vec<T> {
+    records
+        .iter()
+        .filter_map(|record| record.get(key)?.as_array())
+        .flatten()
+        .filter_map(|item| serde_json::from_value(item.clone()).ok())
+        .collect()
+}
+
+impl Workspace {
+    /// Explicit repair: originals are archived, then the state comes back from the last
+    /// record that reads, plus what each library carries. No restored task may dispatch work.
     pub fn rebuild(root: PathBuf, options: ConversionOptions) -> Result<Self> {
         Self::rebuild_at(
             course2md::config::config_dir().join("desktop-workspace.json"),
@@ -1929,35 +2063,26 @@ impl Workspace {
     }
 
     pub fn rebuild_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
-        Self::rebuild_with::<ThreadWriter>(path, root, options)
-    }
-
-    pub(crate) fn rebuild_with<W: Writer + 'static>(
-        path: PathBuf,
-        root: PathBuf,
-        options: ConversionOptions,
-    ) -> Result<Self> {
         let parent = path
             .parent()
             .context(course2md::tr!("任务记录缺少保存目录"))?;
         std::fs::create_dir_all(parent)?;
-        let _lock = course2md::runtime::lock_file(&path.with_extension("lock"))?;
         let backup = path.with_extension("json.bak");
         let originals: Vec<_> = [&path, &backup]
             .into_iter()
             .filter(|p| p.exists())
-            .map(|p| Ok((p.clone(), read_record_bytes(p)?)))
+            .map(|p| Ok((p.clone(), crate::store::read(p)?)))
             .collect::<Result<_>>()?;
         ensure!(
             !originals.is_empty(),
             course2md::tr!("原任务记录不存在，请重新打开应用建立新记录")
         );
-        let values: Vec<serde_json::Value> = originals
+        let records: Vec<serde_json::Value> = originals
             .iter()
             .filter_map(|(_, bytes)| serde_json::from_slice(bytes).ok())
             .collect();
         ensure!(
-            !values.iter().any(|v| v
+            !records.iter().any(|v| v
                 .get("schema")
                 .and_then(|v| v.as_u64())
                 .is_some_and(|schema| schema > SCHEMA as u64)),
@@ -1972,183 +2097,65 @@ impl Workspace {
             course2md::checkpoint::atomic_write(&archive.join(name), bytes)
                 .context(course2md::tr!("原始记录备份未完成，尚未重建"))?;
         }
-        let mut state = State::initial(root.clone(), options);
-        if let Ok(marker) = std::fs::read_to_string(root.join(".course2md-library-id"))
-            && course2md::execution::valid_id(marker.trim())
-        {
-            state.default_library = marker.trim().into();
-            state.libraries[0].id = state.default_library.clone();
-            state.drafts[0].library_id = state.default_library.clone();
-        }
-        // Libraries and tasks are independently recoverable even when another field is damaged.
-        let mut locations = Vec::<LibraryLocation>::new();
-        let mut records = BTreeMap::<String, TaskRecord>::new();
-        let mut drafts = Vec::<Draft>::new();
-        for value in &values {
-            if let Some(items) = value.get("libraries").and_then(|v| v.as_array()) {
-                for item in items {
-                    if let Ok(location) = serde_json::from_value::<LibraryLocation>(item.clone())
-                        && course2md::execution::valid_id(&location.id)
-                        && location.root.is_absolute()
-                        && !locations
-                            .iter()
-                            .any(|l| l.id == location.id || l.root == location.root)
-                    {
-                        locations.push(location);
-                    }
-                }
-            }
-            if let Some(items) = value.get("tasks").and_then(|v| v.as_array()) {
-                for item in items {
-                    if let Ok(task) = serde_json::from_value::<TaskRecord>(item.clone()) {
-                        records.entry(task.id.clone()).or_insert(task);
-                    }
-                }
-            }
-            if let Some(items) = value.get("drafts").and_then(|v| v.as_array()) {
-                for item in items {
-                    if let Ok(draft) = serde_json::from_value::<Draft>(item.clone())
-                        && !drafts.iter().any(|d| d.id == draft.id)
-                    {
-                        drafts.push(draft);
-                    }
-                }
+        let mut initial = State::initial(root.clone(), options);
+        initial.adopt_marker(&root);
+        let mut state = Self::read(&path)
+            .or_else(|_| Self::read(&backup))
+            .unwrap_or_else(|_| initial.clone());
+        // A record that no longer reads as a whole can still name what it knew.
+        for location in salvage::<LibraryLocation>(&records, "libraries") {
+            if course2md::execution::valid_id(&location.id)
+                && location.root.is_absolute()
+                && !state
+                    .libraries
+                    .iter()
+                    .any(|l| l.id == location.id || l.root == location.root)
+            {
+                state.libraries.push(location);
             }
         }
-        if !locations.iter().any(|l| l.root == root) {
-            locations.push(state.libraries[0].clone());
-        }
-        state.libraries = locations;
-        state.default_library = values
+        if !state
+            .libraries
             .iter()
-            .filter_map(|v| v.get("default_library").and_then(|v| v.as_str()))
-            .find(|id| state.library(id).is_some())
-            .map(str::to_owned)
-            .unwrap_or_else(|| state.libraries[0].id.clone());
-        if drafts.is_empty() {
-            state.drafts[0].library_id = state.default_library.clone();
-        } else {
-            state.drafts = drafts;
-            state.current_draft = values
-                .iter()
-                .filter_map(|v| v.get("current_draft").and_then(|v| v.as_str()))
-                .find(|id| state.drafts.iter().any(|draft| &draft.id == id))
-                .map(str::to_owned)
-                .unwrap_or_else(|| state.drafts[0].id.clone());
+            .any(|l| l.root == root || l.id == initial.default_library)
+        {
+            state.libraries.append(&mut initial.libraries);
         }
         let mut issues = Vec::new();
-        for library in &state.libraries {
-            if check_library(library).is_err() {
-                continue;
-            }
-            let work_root = library.root.join(".course2md/work");
-            if !work_root.is_dir() {
-                continue;
-            }
-            let root_path = library.root.canonicalize()?;
-            ensure!(
-                work_root.canonicalize()?.starts_with(&root_path),
-                course2md::tr!("任务材料位置越出笔记库，原记录已保留")
-            );
-            for entry in std::fs::read_dir(&work_root)? {
-                let entry = entry?;
-                if !entry.file_type()?.is_dir() || entry.file_type()?.is_symlink() {
-                    continue;
-                }
-                let snapshot = entry.path().join("task-record.json");
-                if !snapshot.is_file() {
-                    continue;
-                }
-                let restored = read_record_bytes(&snapshot).and_then(|bytes| {
-                    let mirror: TaskMirror = serde_json::from_slice(&bytes)?;
-                    ensure!(
-                        mirror.schema == SCHEMA && mirror.task.work_dir == entry.path(),
-                        course2md::tr!("任务镜像身份不匹配")
-                    );
-                    validate_record_location(&mirror.task, &state.libraries)?;
-                    Ok(mirror.task)
-                });
-                match restored {
-                    Ok(task) => {
-                        records.entry(task.id.clone()).or_insert(task);
-                    }
-                    Err(_) => issues.push(course2md::tr!(
-                        "{} 的任务参数仍无法读取，材料已保留",
-                        entry.file_name().to_string_lossy()
-                    )),
-                }
+        state.adopt_tasks(salvage(&records, "tasks"));
+        for library in state.libraries.clone() {
+            if check_library(&library).is_ok() {
+                let (tasks, unreadable) = read_library_tasks(&library);
+                issues.extend(unreadable);
+                state.adopt_tasks(tasks);
             }
         }
-        for (_, mut task) in records {
-            if validate_record_location(&task, &state.libraries).is_err() {
+        let libraries = state.libraries.clone();
+        state.tasks.retain(|task| {
+            let kept = validate_record_location(task, &libraries).is_ok();
+            if !kept {
                 issues.push(course2md::tr!(
                     "《{}》的位置或身份记录不完整，原记录已保留",
                     task.plan.title
                 ));
-                continue;
             }
-            // Repair loses evidence of the last user intent; never infer permission to send.
-            task.resend.clear();
-            if !task.state.finished() {
-                task.intent = Intent::Pause;
-                task.state = TaskState::Paused;
-                task.error = Some(course2md::tr!("任务记录已重建").into());
-                task.unread = true;
-            }
-            if let Some(library) = state.library(&task.plan.library_id)
-                && check_library(library).is_ok()
+            kept
+        });
+        for task in &mut state.tasks {
+            task.pause_as_restored();
+            if libraries
+                .iter()
+                .any(|l| l.id == task.plan.library_id && check_library(l).is_ok())
             {
-                if let Err(error) = reconcile_artifact(&mut task, library)
-                    .and_then(|_| reconcile_receipts(&mut task))
-                {
-                    task.state = TaskState::NeedsAttention;
-                    task.error = Some(course2md::tr!(
-                        "已保留材料，结果记录尚未确认：{}",
-                        format!("{error:#}")
-                    ));
-                }
-                pause_recovered_control(&task).context(course2md::tr!(
+                pause_recovered_control(task).context(course2md::tr!(
                     "无法保存恢复后的暂停指令，尚未替换原任务记录"
                 ))?;
-            }
-            state.tasks.push(task);
-        }
-        state.tasks.sort_by_key(|task| task.created);
-        let existing: BTreeSet<_> = state.tasks.iter().map(|task| task.id.clone()).collect();
-        for task in &mut state.tasks {
-            if task
-                .handled_by
-                .as_ref()
-                .is_some_and(|id| !existing.contains(id))
-            {
-                task.handled_by = None;
-            }
-        }
-        // Preserve reader mappings and migration backups only when their own records decode.
-        for value in &values {
-            if state.positions.is_empty() {
-                state.positions = value
-                    .get("positions")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-                    .unwrap_or_default();
-            }
-            if state.reader_sources.is_empty() {
-                state.reader_sources = value
-                    .get("reader_sources")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-                    .unwrap_or_default();
-            }
-            if state.storage_backups.is_empty() {
-                state.storage_backups = value
-                    .get("storage_backups")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-                    .unwrap_or_default();
             }
         }
         state.retain_current_input();
         state.recover();
         hydrate_draft_subtitles(&mut state, &path);
-        store_task_subtitles(&mut state);
+        state.reconciling = !state.tasks.is_empty();
         course2md::checkpoint::atomic_write(&path, &serde_json::to_vec(&state)?)?;
         let recovery = course2md::tr!(
             "已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}",
@@ -2160,30 +2167,17 @@ impl Workspace {
                 issues.join(course2md::tr!("；"))
             }
         );
-        Ok(Self::assemble::<W>(state, Some(recovery), path))
+        Ok(Self::assemble(state, Some(recovery), path))
     }
 
-    fn assemble<W: Writer + 'static>(
-        state: State,
-        recovery: Option<String>,
-        path: PathBuf,
-    ) -> Self {
-        let mirror_snapshots: MirrorSnapshots = Default::default();
-        let writer = W::start(WriterTarget::new(
-            path.clone(),
-            std::sync::Arc::clone(&mirror_snapshots),
-        ));
+    fn assemble(state: State, recovery: Option<String>, path: PathBuf) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Self {
-            state: SharedState(std::sync::Arc::new(state)),
+            state,
             recovery,
             path,
-            mirror_snapshots,
-            last_write: Cell::new(None),
-            writer: Box::new(writer),
-            identity: {
-                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            },
+            library_writes: LibraryWrites::default(),
+            identity: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -2197,17 +2191,9 @@ impl Workspace {
     /// Opens the record without reconciling it with the libraries; call
     /// `reconciliation` and `apply_reconciliation` before work is dispatched.
     pub fn open_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
-        Self::open_with::<ThreadWriter>(path, root, options)
-    }
-
-    pub(crate) fn open_with<W: Writer + 'static>(
-        path: PathBuf,
-        root: PathBuf,
-        options: ConversionOptions,
-    ) -> Result<Self> {
         let mut recovery = None;
         if path.is_file()
-            && let Ok(bytes) = read_record_bytes(&path)
+            && let Ok(bytes) = crate::store::read(&path)
             && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
             && value
                 .get("schema")
@@ -2224,7 +2210,7 @@ impl Workspace {
                 Err(error) => {
                     let backup = path.with_extension("json.bak");
                     match Self::read(&backup) {
-                        Ok(state) => {
+                        Ok(mut state) => {
                             let saved =
                                 path.with_extension(format!("{}.damaged", new_id("backup")));
                             std::fs::copy(&path, &saved)
@@ -2233,7 +2219,6 @@ impl Workspace {
                                 course2md::tr!("已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。")
                                     .into(),
                             );
-                            let mut state = state;
                             for task in &mut state.tasks {
                                 if !task.state.finished() {
                                     task.intent = Intent::Pause;
@@ -2254,18 +2239,12 @@ impl Workspace {
             let mut initial = State::initial(root.clone(), options.clone());
             match std::fs::create_dir_all(&root) {
                 Ok(()) => {
-                    let marker = root.join(".course2md-library-id");
-                    if let Ok(saved) = std::fs::read_to_string(&marker) {
-                        if !saved.trim().is_empty() {
-                            let id = saved.trim().to_owned();
-                            initial.libraries[0].id = id.clone();
-                            initial.default_library = id.clone();
-                            initial.drafts[0].library_id = id;
-                        }
-                    } else if let Err(error) = course2md::checkpoint::atomic_write(
-                        &marker,
-                        initial.default_library.as_bytes(),
-                    ) {
+                    if !initial.adopt_marker(&root)
+                        && let Err(error) = course2md::checkpoint::atomic_write(
+                            &root.join(".course2md-library-id"),
+                            initial.default_library.as_bytes(),
+                        )
+                    {
                         recovery = Some(course2md::tr!(
                             "保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。",
                             format!("{error:#}")
@@ -2291,12 +2270,12 @@ impl Workspace {
             }
         }
         hydrate_draft_subtitles(&mut state, &path);
-        store_task_subtitles(&mut state);
         state.reconciling = !state.tasks.is_empty();
-        Ok(Self::assemble::<W>(state, recovery, path))
+        Ok(Self::assemble(state, recovery, path))
     }
 
-    /// The startup checks still owed, to run on a blocking thread.
+    /// The checks still owed, to run on a blocking thread. A running task is telling
+    /// the app what it is doing, and has nothing to read back.
     pub fn reconciliation(&self) -> Option<Reconciliation> {
         self.state.reconciling.then(|| Reconciliation {
             workspace: self.identity,
@@ -2304,6 +2283,10 @@ impl Workspace {
                 .state
                 .tasks
                 .iter()
+                .filter(|task| {
+                    !task.events.loaded
+                        && !matches!(task.state, TaskState::Running | TaskState::Pausing)
+                })
                 .map(|task| {
                     (
                         task.clone(),
@@ -2314,17 +2297,27 @@ impl Workspace {
         })
     }
 
-    /// Applies startup findings to the current records (which may have
-    /// changed meanwhile) and allows dispatch again. When the record cannot be
-    /// saved the findings still apply in memory, so the error is reported
-    /// without holding every task back.
+    /// Tasks of a library that has come back still have to read their events.
+    pub fn recheck_library(&mut self, library_id: &str) {
+        self.state.reconciling |= self
+            .state
+            .tasks
+            .iter()
+            .any(|task| !task.events.loaded && task.plan.library_id == library_id);
+    }
+
+    /// Applies the findings to the current records (which may have changed meanwhile)
+    /// and allows dispatch again. When the record cannot be saved the findings still
+    /// apply in memory, so the error is reported without holding every task back.
     pub fn apply_reconciliation(&mut self, reconciled: Reconciled) -> Result<()> {
         if reconciled.workspace != self.identity {
             return Ok(());
         }
-        fn apply(state: &mut State, facts: Vec<TaskFacts>) {
-            for facts in facts {
-                if let Some(task) = state.task_mut(&facts.task_id) {
+        fn apply(state: &mut State, facts: Vec<(String, TaskFacts)>) {
+            for (id, facts) in facts {
+                if let Some(task) = state.task_mut(&id)
+                    && !matches!(task.state, TaskState::Running | TaskState::Pausing)
+                {
                     facts.apply(task);
                 }
             }
@@ -2341,15 +2334,14 @@ impl Workspace {
         result
     }
 
-    /// `open_at` for tests: writes finish before each call returns and the
-    /// startup reconciliation has been applied.
+    /// `open_at` for tests, with the startup checks applied.
     #[cfg(test)]
     pub(crate) fn open_at_inline(
         path: PathBuf,
         root: PathBuf,
         options: ConversionOptions,
     ) -> Result<Self> {
-        let mut workspace = Self::open_with::<InlineWriter>(path, root, options)?;
+        let mut workspace = Self::open_at(path, root, options)?;
         workspace.reconcile_now();
         Ok(workspace)
     }
@@ -2362,13 +2354,14 @@ impl Workspace {
     }
 
     fn read(path: &Path) -> Result<State> {
-        let state: State = serde_json::from_slice(
-            &read_record_bytes(path).with_context(|| course2md::tr!("读取 {}", path.display()))?,
+        let mut state: State = serde_json::from_slice(
+            &crate::store::read(path).with_context(|| course2md::tr!("读取 {}", path.display()))?,
         )?;
         ensure!(
-            state.schema == SCHEMA,
+            state.schema <= SCHEMA,
             course2md::tr!("任务记录版本不受支持，请使用创建这些任务的应用版本")
         );
+        state.schema = SCHEMA;
         ensure!(
             state.library(&state.default_library).is_some(),
             course2md::tr!("默认保存位置记录缺失")
@@ -2384,137 +2377,76 @@ impl Workspace {
         }
         Ok(state)
     }
-    /// Edits a copy of the state and commits it once the writer has it. The
-    /// copy is the only deep clone: the writer shares the committed snapshot.
+    /// Edits a copy of the state and commits it: when this returns the record is on
+    /// disk, or nothing changed. Library copies follow off the UI thread.
     pub fn transaction<T>(&mut self, edit: impl FnOnce(&mut State) -> Result<T>) -> Result<T> {
-        let mut next = State::clone(&self.state);
+        let mut next = self.state.clone();
         let result = edit(&mut next)?;
-        store_task_subtitles(&mut next);
         compact_history(&mut next);
         next.revision = next.revision.wrapping_add(1);
-        let next = std::sync::Arc::new(next);
-        self.writer.enqueue(std::sync::Arc::clone(&next));
-        if let Some(error) = self.writer.take_error() {
-            return Err(anyhow::anyhow!(error));
-        }
-        self.state = SharedState(next);
+        write_record(&self.path, &self.state, &next)?;
+        let previous = std::mem::replace(&mut self.state, next);
+        self.queue_mirrors(self.state.tasks.iter().filter(|task| {
+            previous.task(&task.id) != Some(task)
+                || previous.library(&task.plan.library_id)
+                    != self.state.library(&task.plan.library_id)
+        }));
         Ok(result)
     }
-    /// Durable save: enqueue the current state and wait for the writer. Only
-    /// for leaving the app or an explicit retry; the event loop uses `save_soon`.
-    pub fn save(&self) -> Result<()> {
-        self.writer.enqueue(std::sync::Arc::clone(&self.state.0));
-        self.writer.flush()?;
-        match self.writer.take_error() {
-            Some(error) => Err(anyhow::anyhow!(error)),
-            None => Ok(()),
-        }
-    }
-    /// Queues the current state without waiting. Reports a failure of an
-    /// earlier write; a failure of this one arrives through `take_write_error`.
-    pub fn save_soon(&self) -> Result<()> {
-        self.last_write.set(Some(Instant::now()));
-        self.writer.enqueue(std::sync::Arc::clone(&self.state.0));
-        match self.writer.take_error() {
-            Some(error) => Err(anyhow::anyhow!(error)),
-            None => Ok(()),
-        }
-    }
-    /// Throttled progress save for the task event stream. Stage transitions,
-    /// completion and exit go through `save_soon`; steady progress reaches the
-    /// writer at most once per interval. Returns true when this call queued.
-    pub fn save_progress(&self) -> Result<bool> {
-        if self
-            .last_write
-            .get()
-            .is_some_and(|last| last.elapsed() < PROGRESS_SAVE_INTERVAL)
-        {
-            return Ok(false);
-        }
-        self.save_soon().map(|()| true)
-    }
-    /// A write failure that no call has reported yet. The writer wakes the
-    /// event loop (see `set_wake_sender`) when one occurs.
-    pub fn take_write_error(&self) -> Option<String> {
-        self.writer.take_error()
-    }
-    pub fn set_wake_sender(&self, wake: smol::channel::Sender<()>) {
-        self.writer.set_wake(wake);
-    }
 
-    fn write_state(
-        path: &Path,
-        state: &State,
-        mirror_snapshots: &MirrorSnapshots,
-        cache: &mut WriterCache,
-    ) -> Result<()> {
-        let parent = path
-            .parent()
-            .context(course2md::tr!("任务记录缺少保存目录"))?;
-        std::fs::create_dir_all(parent)?;
-        let _lock = course2md::runtime::lock_file(&path.with_extension("lock"))?;
-        // A mirror is recovery evidence, never authority to resume. The main record
-        // remains unchanged if a required mirror write fails.
-        for task in &state.tasks {
-            let Some(library) = state.library(&task.plan.library_id) else {
-                continue;
-            };
-            if course2md::runtime::lock_recover(mirror_snapshots)
-                .get(&task.id)
-                .is_some_and(|(previous, location)| previous == task && location == library)
-            {
-                continue;
-            }
-            if check_library(library).is_err() {
-                // Retry an unavailable location when the task/location changes,
-                // it is explicitly reassociated, or the application restarts.
-                course2md::runtime::lock_recover(mirror_snapshots)
-                    .insert(task.id.clone(), (task.clone(), library.clone()));
-                continue;
-            }
-            validate_record_location(task, &state.libraries)?;
-            ensure_work_directory(task, library)?;
-            let mirror = task.work_dir.join("task-record.json");
-            let bytes = serde_json::to_vec(&TaskMirror {
-                schema: SCHEMA,
-                task: task.clone(),
-            })?;
-            if std::fs::read(&mirror).ok().as_deref() != Some(&bytes) {
-                course2md::checkpoint::atomic_write(&mirror, &bytes)
-                    .context(course2md::tr!("任务恢复副本未能保存，原任务记录仍保留"))?;
-            }
-            course2md::runtime::lock_recover(mirror_snapshots)
-                .insert(task.id.clone(), (task.clone(), library.clone()));
-        }
-        // The record refers to the draft subtitle by identity, so its events
-        // must be on disk first.
-        if let Some(subtitle) = state
-            .draft()
-            .and_then(|draft| draft.source.as_ref())
-            .and_then(|source| source.selected_subtitle.as_ref())
-            .filter(|subtitle| !subtitle.events.is_empty())
-            && cache.last_draft_subtitle.as_ref() != Some(subtitle)
-        {
-            course2md::checkpoint::atomic_write(
-                &draft_subtitle_path(path),
-                &serde_json::to_vec(subtitle)?,
-            )?;
-            cache.last_draft_subtitle = Some(subtitle.clone());
-        }
-        let backup = path.with_extension("json.bak");
-        let cached = &cache.last_record;
-        if let Some(bytes) = cached.as_deref() {
-            course2md::checkpoint::atomic_write(&backup, bytes)?;
-        } else if path.is_file() && Workspace::read(path).is_ok() {
-            let bytes = std::fs::read(path)?;
-            course2md::checkpoint::atomic_write(&backup, &bytes)?;
-        }
-
-        let bytes = serde_json::to_vec(state)?;
-        course2md::checkpoint::atomic_write(path, &bytes)?;
-        cache.last_record = Some(bytes);
+    /// Saves the state as it stands, for direct edits such as a job's own events.
+    pub fn commit(&self) -> Result<()> {
+        crate::store::save(&self.path, &serde_json::to_vec(&self.state)?)?;
+        self.queue_mirrors(self.state.tasks.iter());
         Ok(())
     }
+
+    /// Commits and waits for the library copies, when the app is about to close or
+    /// someone asked to save again.
+    pub fn save(&self) -> Result<()> {
+        self.commit()?;
+        self.library_writes.drain();
+        match self.take_write_error() {
+            Some(error) => Err(anyhow::anyhow!(error.message)),
+            None => Ok(()),
+        }
+    }
+
+    /// A task that has not read its events back may still have an old mirror to read
+    /// them from, so its mirror waits for that.
+    fn queue_mirrors<'a>(&self, tasks: impl Iterator<Item = &'a TaskRecord>) {
+        for task in tasks.filter(|task| task.events.loaded) {
+            if let Some(location) = self.state.library(&task.plan.library_id)
+                && let Ok(bytes) = mirror_bytes(task, location)
+            {
+                self.library_writes.queue(
+                    task.work_dir.join("task-record.json"),
+                    bytes,
+                    Some(location.clone()),
+                );
+            }
+        }
+    }
+
+    /// Queues a task's control file; failures come back through `take_write_error`.
+    pub fn write_control(&self, task: &TaskRecord, bytes: Vec<u8>) {
+        self.library_writes
+            .queue(task.work_dir.join("control.json"), bytes, None);
+    }
+
+    pub(crate) fn library_writes(&self) -> LibraryWrites {
+        self.library_writes.clone()
+    }
+
+    /// A library write that failed since the last call. The queue wakes the event loop
+    /// (see `set_wake_sender`) when one occurs.
+    pub fn take_write_error(&self) -> Option<WriteFailure> {
+        course2md::runtime::lock_recover(&self.library_writes.failure).take()
+    }
+    pub fn set_wake_sender(&self, wake: smol::channel::Sender<()>) {
+        *course2md::runtime::lock_recover(&self.library_writes.wake) = Some(wake);
+    }
+
     pub fn storage_path(&self) -> &Path {
         &self.path
     }
@@ -2542,6 +2474,7 @@ impl Workspace {
                     id: String::new(),
                     duplicate: true,
                     make_default,
+                    tasks: Vec::new(),
                 });
             }
         }
@@ -2565,12 +2498,22 @@ impl Workspace {
             course2md::checkpoint::atomic_write(&identity, id.as_bytes())?;
             id
         };
+        // Tasks travel with their library. A task the folder cannot show is named where
+        // the record is rebuilt; adding a library does not fail over it.
+        let location = LibraryLocation {
+            id: id.clone(),
+            name: name.clone(),
+            root: canonical.clone(),
+            previous_roots: Vec::new(),
+        };
+        let (tasks, _) = read_library_tasks(&location);
         Ok(PreparedLibrary {
             root: canonical,
             name,
             id,
             duplicate: false,
             make_default,
+            tasks,
         })
     }
 
@@ -2597,6 +2540,7 @@ impl Workspace {
         let name = prepared.name.clone();
         let root = prepared.root.clone();
         let make_default = prepared.make_default;
+        let tasks = prepared.tasks.clone();
         self.transaction(|state| {
             state.libraries.push(LibraryLocation {
                 id: id.clone(),
@@ -2607,6 +2551,8 @@ impl Workspace {
             if make_default {
                 state.default_library = id.clone();
             }
+            state.adopt_tasks(tasks);
+            state.reconciling |= state.tasks.iter().any(|task| !task.events.loaded);
             Ok(id)
         })
     }
@@ -2652,6 +2598,7 @@ pub(crate) fn accept_source(
 mod tests {
     use super::*;
     use course2md::execution::Component;
+    use course2md::progress::Stage;
     fn source(input: &str, title: &str) -> crate::source::Source {
         serde_json::from_value(serde_json::json!({"input":input,"title":title,"author":"","duration":60.0,"cover":null,"cover_error":null})).unwrap()
     }
@@ -2764,11 +2711,12 @@ mod tests {
     }
 
     #[test]
-    fn input_only_save_does_not_probe_an_unchanged_task_mirror() {
+    fn input_only_save_does_not_touch_an_unchanged_task_mirror() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
         let task = plan(&ws.state.default_library);
         let id = ws.transaction(|state| state.enqueue(task, None)).unwrap().0;
+        ws.library_writes.drain();
         let mirror = ws
             .state
             .task(&id)
@@ -2785,37 +2733,284 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert!(mirror.is_dir());
-        let before = std::fs::read(ws.storage_path()).unwrap();
-        assert!(
-            ws.transaction(|state| state.set_intent(&id, Intent::Pause))
-                .is_err()
-        );
-        assert_eq!(std::fs::read(ws.storage_path()).unwrap(), before);
-        assert_eq!(ws.state.task(&id).unwrap().intent, Intent::Run);
+        ws.library_writes.drain();
+        assert!(ws.take_write_error().is_none());
     }
 
     #[test]
-    fn save_updates_in_place_task_events_and_initially_missing_mirrors() {
+    fn a_failed_mirror_keeps_the_commit_and_is_reported() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let task = plan(&ws.state.default_library);
-        let id = ws.transaction(|state| state.enqueue(task, None)).unwrap().0;
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        ws.save().unwrap();
         let mirror = ws
             .state
             .task(&id)
             .unwrap()
             .work_dir
             .join("task-record.json");
-        ws.state.task_mut(&id).unwrap().logs.push("实际进度".into());
-        ws.save().unwrap();
-        let saved: TaskMirror = serde_json::from_slice(&std::fs::read(&mirror).unwrap()).unwrap();
-        assert_eq!(saved.task.logs, ["实际进度"]);
         std::fs::remove_file(&mirror).unwrap();
-        let restored = test_workspace(dir.path());
-        restored.save().unwrap();
-        let repaired: TaskMirror = serde_json::from_slice(&std::fs::read(mirror).unwrap()).unwrap();
-        assert_eq!(repaired.task.logs, ["实际进度"]);
+        std::fs::create_dir(&mirror).unwrap();
+        let (wake, woken) = smol::channel::bounded(1);
+        ws.set_wake_sender(wake);
+        ws.transaction(|state| state.set_intent(&id, Intent::Pause))
+            .unwrap();
+        ws.library_writes.drain();
+        assert!(woken.try_recv().is_ok(), "a failure wakes the event loop");
+        let failure = ws.take_write_error().unwrap();
+        assert!(!failure.control);
+        assert!(ws.take_write_error().is_none());
+        let reopened = test_workspace(dir.path());
+        assert_eq!(reopened.state.task(&id).unwrap().intent, Intent::Pause);
+    }
+
+    /// A library on a stuck disk must not reach the interface: a commit returns while
+    /// the mirror behind it cannot be written.
+    #[test]
+    fn a_commit_does_not_wait_for_a_stuck_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let writes = ws.library_writes();
+        let stuck = writes.writing.lock().unwrap();
+        let task = plan(&ws.state.default_library);
+        let id = ws.transaction(|state| state.enqueue(task, None)).unwrap().0;
+        ws.transaction(|state| state.set_intent(&id, Intent::Pause))
+            .unwrap();
+        let mirror = ws
+            .state
+            .task(&id)
+            .unwrap()
+            .work_dir
+            .join("task-record.json");
+        assert!(!mirror.exists());
+        let record = std::fs::read_to_string(ws.storage_path()).unwrap();
+        assert!(record.contains(&id));
+        drop(stuck);
+        ws.library_writes.drain();
+        let saved: TaskMirror = serde_json::from_slice(&std::fs::read(&mirror).unwrap()).unwrap();
+        assert_eq!(saved.task.intent, Intent::Pause);
+    }
+
+    /// `cargo test commit_timing -- --ignored --nocapture` reports what a commit costs
+    /// the interface with a large record.
+    #[test]
+    #[ignore]
+    fn commit_timing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        for index in 0..500 {
+            let mut task = plan(&library);
+            task.source_id = format!("video-{index}");
+            ws.state.enqueue(task, None).unwrap();
+        }
+        ws.save().unwrap();
+        let mut times: Vec<_> = (0..50)
+            .map(|index| {
+                let start = std::time::Instant::now();
+                ws.transaction(|state| {
+                    state.draft_mut().unwrap().scroll = index as f32;
+                    Ok(())
+                })
+                .unwrap();
+                start.elapsed()
+            })
+            .collect();
+        times.sort();
+        println!(
+            "record {} KB, commit median {:?}, worst {:?}",
+            std::fs::metadata(ws.storage_path()).unwrap().len() / 1024,
+            times[25],
+            times[49]
+        );
+    }
+
+    #[test]
+    fn a_failed_control_write_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        ws.save().unwrap();
+        let task = ws.state.task(&id).unwrap().clone();
+        std::fs::create_dir(task.work_dir.join("control.json")).unwrap();
+        ws.write_control(&task, b"{}".to_vec());
+        ws.library_writes.drain();
+        assert!(ws.take_write_error().unwrap().control);
+    }
+
+    #[test]
+    fn a_commit_holds_only_what_the_record_owns_and_events_come_back_from_the_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let task = plan(&ws.state.default_library);
+        let id = ws.transaction(|state| state.enqueue(task, None)).unwrap().0;
+        let work = ws.state.task(&id).unwrap().work_dir.clone();
+        std::fs::create_dir_all(&work).unwrap();
+        let event = course2md::progress::Event::Log {
+            level: course2md::progress::LogLevel::Info,
+            message: "实际进度".into(),
+        };
+        std::fs::write(
+            work.join(TASK_EVENTS_FILE),
+            format!("{}\n", serde_json::to_string(&event).unwrap()),
+        )
+        .unwrap();
+        ws.state.task_mut(&id).unwrap().apply_event(&event);
+        ws.save().unwrap();
+        let record = std::fs::read_to_string(ws.storage_path()).unwrap();
+        assert!(!record.contains("实际进度"));
+        let mirror = work.join("task-record.json");
+        assert!(
+            !std::fs::read_to_string(&mirror)
+                .unwrap()
+                .contains("实际进度")
+        );
+        std::fs::remove_file(&mirror).unwrap();
+        let reopened = test_workspace(dir.path());
+        assert_eq!(reopened.state.task(&id).unwrap().events.logs, ["实际进度"]);
+        // Reading a library back also repairs a missing mirror.
+        assert!(mirror.is_file());
+    }
+
+    #[test]
+    fn records_and_mirrors_from_before_event_streams_keep_everything_they_said() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        ws.state.task_mut(&id).unwrap().state = TaskState::NeedsAttention;
+        let root = ws.state.libraries[0].root.clone();
+        let work = root.join(".course2md/work").join(&id);
+        std::fs::create_dir_all(&work).unwrap();
+        // The shape the previous version wrote, derived fields and all.
+        let mut old = serde_json::to_value(&ws.state).unwrap();
+        old["schema"] = serde_json::json!(1);
+        let task = old["tasks"][0].as_object_mut().unwrap();
+        task.insert("work_dir".into(), serde_json::json!(work));
+        task.insert("handled_by".into(), serde_json::Value::Null);
+        task.insert("error".into(), serde_json::json!("服务拒绝凭据"));
+        task.insert("logs".into(), serde_json::json!(["一行日志"]));
+        task.insert(
+            "stages".into(),
+            serde_json::json!({"transcribe":
+                {"status": "done", "current": 7, "total": 7, "detail": null}}),
+        );
+        task.insert(
+            "blocked".into(),
+            serde_json::json!([{"reason": "paused", "request_id": null,
+                "purpose": null, "message": "已暂停"}]),
+        );
+        let mirror = serde_json::json!({"schema": 1, "task": old["tasks"][0]});
+        let path = ws.storage_path().to_owned();
+        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        // A library that is offline when the old record is first rewritten keeps
+        // its tasks' details in the mirror beside their materials.
+        let parked = dir.path().join("offline");
+        std::fs::write(work.join("task-record.json"), mirror.to_string()).unwrap();
+        std::fs::rename(&root, &parked).unwrap();
+        let options = ConversionOptions::default();
+        let mut opened =
+            Workspace::open_at_inline(path.clone(), root.clone(), options.clone()).unwrap();
+        assert!(
+            !root.exists(),
+            "reading must not recreate an offline library"
+        );
+        let task = opened.state.task(&id).unwrap();
+        assert_eq!(task.events.logs, ["一行日志"]);
+        assert!(!task.events.loaded);
+        opened.transaction(|_| Ok(())).unwrap();
+        let rewritten = std::fs::read_to_string(&path).unwrap();
+        assert!(!rewritten.contains("一行日志") && rewritten.contains("服务拒绝凭据"));
+        assert!(serde_json::from_str::<serde_json::Value>(&rewritten).unwrap()["schema"] == SCHEMA);
+
+        // Back online: the stream is written from the mirror, and nothing was lost.
+        std::fs::rename(&parked, &root).unwrap();
+        let reopened = Workspace::open_at_inline(path, root.clone(), options).unwrap();
+        let task = reopened.state.task(&id).unwrap();
+        assert!(task.events.loaded);
+        assert_eq!(task.events.logs, ["一行日志"]);
+        assert_eq!(task.events.error.as_deref(), Some("服务拒绝凭据"));
+        assert_eq!(task.events.blocked[0].message, "已暂停");
+        assert!(task.events.stages[&Stage::Transcribe].done);
+        assert_eq!(task.work_dir, work);
+        let upgraded = std::fs::read_to_string(work.join("task-record.json")).unwrap();
+        assert!(!upgraded.contains("一行日志"));
+        assert!(work.join(OLD_MIRROR_FILE).is_file());
+        // What it says from now on follows what it said then.
+        std::fs::write(
+            work.join(TASK_EVENTS_FILE),
+            "{\"type\":\"log\",\"level\":\"info\",\"message\":\"下一行\"}\n",
+        )
+        .unwrap();
+        let again =
+            Workspace::open_at_inline(reopened.path.clone(), root, Default::default()).unwrap();
+        assert_eq!(
+            again.state.task(&id).unwrap().events.logs,
+            ["一行日志", "下一行"]
+        );
+    }
+
+    #[test]
+    fn tasks_and_folders_travel_with_a_library_to_another_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let root = ws.state.libraries[0].root.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let paused = {
+            let mut other = plan(&library);
+            other.source_id = "video-b".into();
+            ws.state.enqueue(other, None).unwrap().0
+        };
+        ws.state.task_mut(&paused).unwrap().resend = vec!["attempt.1".into()];
+        let version = publish_note(&ws.state, &id, false);
+        let task = ws.state.task_mut(&id).unwrap();
+        task.artifact = Some(version.clone());
+        task.state = TaskState::Complete;
+        let folder =
+            crate::organize::Library::edit(&root, |library| library.create(None, "课程").map(drop))
+                .unwrap()
+                .tree()[0]
+                .0;
+        crate::organize::Library::edit(&root, |library| {
+            library.assign(&root, &version, Some(folder))
+        })
+        .unwrap();
+        ws.save().unwrap();
+
+        // Another machine: same folder, somewhere else, and a record of its own.
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        let moved = elsewhere.join("carried").clone();
+        std::fs::rename(&root, &moved).unwrap();
+        let moved = moved.canonicalize().unwrap();
+        let mut other = Workspace::open_at_inline(
+            elsewhere.join("workspace.json"),
+            elsewhere.join("own-library"),
+            Default::default(),
+        )
+        .unwrap();
+        other
+            .register_library(moved.clone(), "Carried".into(), false)
+            .unwrap();
+        other.reconcile_now();
+        assert_eq!(other.state.library(&library).unwrap().root, moved);
+        let finished = other.state.task(&id).unwrap();
+        assert_eq!(finished.state, TaskState::Complete);
+        assert_eq!(finished.work_dir, moved.join(".course2md/work").join(&id));
+        let carried = finished.artifact.clone().unwrap();
+        assert!(carried.starts_with(&moved) && carried.join("manifest.json").is_file());
+        assert!(finished.events.outcomes.is_some());
+        // Unfinished work comes along stopped, with no permission to send anything.
+        let waiting = other.state.task(&paused).unwrap();
+        assert_eq!(waiting.state, TaskState::Paused);
+        assert!(waiting.resend.is_empty());
+        assert!(other.state.next_task().is_none());
+        let folders = crate::organize::Library::load(&moved).unwrap();
+        assert_eq!(folders.folders[&folder], "课程");
+        assert_eq!(folders.folder(&moved, &carried), Some(folder));
     }
 
     #[test]
@@ -2842,7 +3037,6 @@ mod tests {
         ws.state.enqueue(task.clone(), None).unwrap();
         ws.state.draft_mut().unwrap().source = Some(task.source.clone());
         let id = ws.state.tasks[0].id.clone();
-        ws.state.tasks[0].logs = (0..200).map(|n| n.to_string()).collect();
         ws.state.tasks[0].state = TaskState::Complete;
         let mut legacy = serde_json::to_value(&ws.state).unwrap();
         legacy["drafts"][0]["source"]["selected_subtitle"]["events"] =
@@ -2859,10 +3053,6 @@ mod tests {
         reopened.transaction(|_| Ok(())).unwrap();
         let saved = std::fs::read_to_string(reopened.storage_path()).unwrap();
         assert!(!saved.contains("字幕正文"));
-        assert_eq!(
-            reopened.state.task(&id).unwrap().logs.len(),
-            FINISHED_TASK_LOG_LINES
-        );
 
         let again = test_workspace(dir.path());
         let draft_subtitle = again
@@ -3359,7 +3549,7 @@ mod tests {
             }
             if index == 5 {
                 task.state = TaskState::NeedsAttention;
-                task.error = Some("保留这次失败原因".into());
+                task.events.error = Some("保留这次失败原因".into());
                 task.unread = true;
             }
             ids.push(id);
@@ -3391,7 +3581,7 @@ mod tests {
         }
         assert_eq!(reopened.state.next_task().unwrap().id, ids[0]);
         let unknown = reopened.state.task(&ids[4]).unwrap();
-        assert_eq!(unknown.blocked.len(), 1);
+        assert_eq!(unknown.events.blocked.len(), 1);
         assert!(unknown.unread && unknown.resend.is_empty());
         reopened
             .transaction(|state| {
@@ -3409,7 +3599,7 @@ mod tests {
         let failed = stopped.state.task(&ids[5]).unwrap();
         assert_eq!(failed.state, TaskState::NeedsAttention);
         assert_eq!(failed.intent, Intent::Quit);
-        assert_eq!(failed.error.as_deref(), Some("保留这次失败原因"));
+        assert_eq!(failed.events.error.as_deref(), Some("保留这次失败原因"));
         assert!(failed.unread);
     }
 
@@ -3568,7 +3758,7 @@ mod tests {
         let task = ws.state.task_mut(&id).unwrap();
         task.state = TaskState::Uncertain;
         task.artifact = Some(version);
-        task.outcomes = Some(outcomes.clone());
+        task.events.outcomes = Some(outcomes.clone());
         let request = write_unknown(task, 1);
         (id, request)
     }
@@ -3740,7 +3930,7 @@ mod tests {
         ws.state.authorize_uncertain(&id, &[second]).unwrap();
         assert_eq!(ws.state.task(&id).unwrap().resend.len(), 2);
         assert!(
-            ws.state.task(&id).unwrap().blocked[0]
+            ws.state.task(&id).unwrap().events.blocked[0]
                 .message
                 .contains("00:00–00:20")
         );
@@ -3786,7 +3976,7 @@ mod tests {
         ws.save().unwrap();
         let version = publish_note(&ws.state, &published, false);
         let open = || {
-            Workspace::open_with::<InlineWriter>(
+            Workspace::open_at(
                 dir.path().join("workspace.json"),
                 dir.path().join("library"),
                 Default::default(),
@@ -3813,29 +4003,6 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_background_write_is_reported_without_waiting() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("workspace.json");
-        let ws = Workspace::open_at(path.clone(), dir.path().join("library"), Default::default())
-            .unwrap();
-        let (wake, woken) = smol::channel::bounded(1);
-        ws.set_wake_sender(wake);
-        // A directory in place of the record makes the write fail even as root.
-        std::fs::create_dir(&path).unwrap();
-        ws.save_soon().unwrap();
-        let woke = smol::block_on(smol::future::or(
-            async { woken.recv().await.is_ok() },
-            async {
-                smol::Timer::after(Duration::from_secs(10)).await;
-                false
-            },
-        ));
-        assert!(woke, "the writer wakes the event loop on failure");
-        assert!(ws.take_write_error().is_some());
-        assert!(ws.take_write_error().is_none());
-    }
-
-    #[test]
     fn partial_followup_is_single_and_does_not_rewrite_another_draft_or_successful_stage() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
@@ -3848,7 +4015,7 @@ mod tests {
         let original = ws.state.task_mut(&id).unwrap();
         original.state = TaskState::Partial;
         original.artifact = Some(version);
-        original.outcomes = Some(outcomes.clone());
+        original.events.outcomes = Some(outcomes.clone());
         ws.state
             .draft_mut()
             .unwrap()
@@ -3897,7 +4064,7 @@ mod tests {
         let original = ws.state.task_mut(&id).unwrap();
         original.state = TaskState::Partial;
         original.artifact = Some(version.clone());
-        original.outcomes = Some(outcomes.clone());
+        original.events.outcomes = Some(outcomes.clone());
         ws.state
             .draft_mut()
             .unwrap()
@@ -3992,7 +4159,7 @@ mod tests {
             )
             .is_err()
         );
-        let rebuilt = Workspace::rebuild_with::<InlineWriter>(
+        let rebuilt = Workspace::rebuild_at(
             ws.path.clone(),
             dir.path().join("library"),
             Default::default(),
@@ -4040,30 +4207,18 @@ mod tests {
     }
 
     #[test]
-    fn mirror_failure_keeps_primary_record_and_offline_location_is_not_recreated() {
+    fn an_offline_location_is_not_recreated() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
         let library = ws.state.default_library.clone();
         let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.save().unwrap();
-        let bytes = std::fs::read(ws.storage_path()).unwrap();
-        let mirror = ws
-            .state
-            .task(&id)
-            .unwrap()
-            .work_dir
-            .join("task-record.json");
-        std::fs::remove_file(&mirror).unwrap();
-        std::fs::create_dir(&mirror).unwrap();
-        assert!(
-            ws.transaction(|state| state.set_intent(&id, Intent::Pause))
-                .is_err()
-        );
-        assert_eq!(std::fs::read(ws.storage_path()).unwrap(), bytes);
         let root = ws.state.libraries[0].root.clone();
         std::fs::rename(&root, dir.path().join("disconnected-library")).unwrap();
         ws.transaction(|state| state.set_intent(&id, Intent::Pause))
             .unwrap();
+        ws.library_writes.drain();
+        assert!(ws.take_write_error().is_none());
         let reopened = test_workspace(dir.path());
         assert!(!root.exists());
         assert_eq!(reopened.state.task(&id).unwrap().state, TaskState::Paused);
@@ -4118,7 +4273,7 @@ mod tests {
         original.plan.config.llm.enabled = true;
         original.plan.config.llm.summarize = true;
         original.plan.config.defaults.formats = Some(vec![OutputFormat::Md, OutputFormat::Html]);
-        original.outcomes = Some(course2md::artifact::Outcomes {
+        original.events.outcomes = Some(course2md::artifact::Outcomes {
             exports: BTreeMap::from([
                 ("md".into(), course2md::artifact::Outcome::succeeded()),
                 (
@@ -4212,7 +4367,7 @@ mod tests {
         let original = ws.state.task_mut(&id).unwrap();
         original.state = TaskState::Partial;
         original.artifact = Some(base.clone());
-        original.outcomes = Some(manifest.outcomes.clone());
+        original.events.outcomes = Some(manifest.outcomes.clone());
         let original_plan = original.plan.clone();
         let old_markdown = base
             .join("exports")
@@ -4301,10 +4456,16 @@ mod tests {
         let marker = ws.state.libraries[0].root.join(".course2md-library-id");
         let id = ws.state.default_library.clone();
         std::fs::remove_file(&marker).unwrap();
-        ws.reassociate_library(&id).unwrap();
+        let root = ws.state.libraries[0].root.clone();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let link = crate::storage::inspect_link(&ws.state, &id, &root, &cancel).unwrap();
+        assert!(link.unmarked.is_some() && !marker.exists());
+        let tasks = crate::storage::finish_link(&link).unwrap();
+        ws.transaction(|state| crate::storage::publish_link(state, &link, tasks))
+            .unwrap();
         assert_eq!(std::fs::read_to_string(&marker).unwrap(), id);
         std::fs::write(&marker, "a-different-library").unwrap();
-        assert!(ws.reassociate_library(&id).is_err());
+        assert!(crate::storage::inspect_link(&ws.state, &id, &root, &cancel).is_err());
         assert_eq!(
             std::fs::read_to_string(marker).unwrap(),
             "a-different-library"
@@ -4330,7 +4491,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            Workspace::rebuild_with::<InlineWriter>(
+            Workspace::rebuild_at(
                 ws.path.clone(),
                 dir.path().join("library"),
                 Default::default()
