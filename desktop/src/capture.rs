@@ -32,9 +32,9 @@
 //! taken.
 //!
 //! `dialog:storage` opens the operation dialog without starting a move, so it
-//! shows the idle result state ("操作已完成"). Its progress, cancelling and
-//! failure states only exist while a real move, relocation or cleanup runs
-//! (from Settings › 存储 against a fixture library); the harness does not fake them.
+//! shows the idle result state ("操作已完成"). `dialog:storage~move:<folder>` runs a
+//! real move of the first library, and `dialog:storage~link` a real reassociation,
+//! so use them only on a fixture; the harness fakes none of their states.
 use crate::{Desktop, Page, palettes::PaletteId, settings_ui::SettingsTab};
 use gpui::{App, AsyncWindowContext, WeakEntity, Window};
 use gpui_kit::component::WindowExt as _;
@@ -303,6 +303,7 @@ impl Desktop {
         self.move_dialog = None;
         self.close_reader_image(cx);
         self.close_settings_dialogs(cx);
+        self.close_storage_dialog();
         // First use is reviewed on its own; captured pages show the app behind it.
         if page != "onboarding" {
             self.onboarding.active = false;
@@ -392,6 +393,8 @@ impl Desktop {
     /// Opens one dialog over the page it belongs to, once the page has
     /// loaded what the dialog acts on (the notes and their folders).
     fn capture_dialog(&mut self, name: &str, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        let (name, detail) = name.split_once('~').unwrap_or((name, ""));
+        let detail = detail.to_owned();
         match name {
             "palette" | "storage" => {
                 self.open_settings(window, cx);
@@ -415,7 +418,7 @@ impl Desktop {
                 let newest = this.courses.first().map(|course| (**course).clone());
                 match name.as_str() {
                     "palette" => this.open_palette_picker(false, cx),
-                    "storage" => this.open_storage_dialog(window, cx),
+                    "storage" => this.capture_storage_operation(&detail, window, cx),
                     "login" => this.open_account_dialog(window, cx),
                     "image" => {
                         if let Some(course) = newest {

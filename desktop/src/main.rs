@@ -54,7 +54,7 @@ mod store;
 mod symbols;
 mod task_runner;
 mod task_ui;
-#[allow(dead_code)]
+#[allow(dead_code, unused_imports)]
 mod theme;
 // Primitives for the page rewrites of wave 2; the attribute goes once they have callers.
 #[allow(dead_code)]

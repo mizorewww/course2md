@@ -347,7 +347,7 @@ impl Desktop {
             }),
         )
         .zip(engines.iter())
-        .map(|(item, engine)| item.leading(engine_icon(*engine)));
+        .map(|(item, engine)| item.leading(Icon::from(engine_icon(*engine))));
         fields.push(ui::Field::menu(
             "default-asr-hardware",
             course2md::tr!("本机引擎"),

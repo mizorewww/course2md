@@ -1,38 +1,34 @@
 //! Model evidence is loaded in the background; preparation uses the existing model job.
-use super::{
-    DetailGroup, settings_detail_group, settings_detail_row, settings_status_row, settings_value,
+//! One surface reports a model everywhere: setup, settings and the workbench.
+use crate::{
+    Desktop, Kind, activity, provider_label, symbols,
+    ui::{self, AsyncStatus},
 };
-use crate::theme::*;
-use crate::*;
 use course2md::{
     config::{AsrProvider, canonical_model, model_dir_from, model_label},
     models::status::{CacheState, LocalModelStatus},
 };
-use gpui_kit::component::button::*;
-use std::path::Path;
+use gpui::{prelude::*, *};
+use gpui_base::{h_flex, v_flex};
+use gpui_kit_material::{
+    icons::{Icon, SymbolIcon},
+    motion,
+    prelude::*,
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::{Path, PathBuf},
+};
 
 /// One vocabulary for cache states across settings, setup and diagnostics.
-pub(crate) fn cache_state_label(state: CacheState) -> (BadgeKind, &'static str) {
+pub(crate) fn cache_state_label(state: CacheState) -> (StatusKind, &'static str) {
     match state {
-        CacheState::Loaded => (BadgeKind::Success, course2md::tr!("已就绪")),
-        CacheState::Cached => (BadgeKind::Success, course2md::tr!("已下载")),
-        CacheState::Partial => (BadgeKind::Warning, course2md::tr!("未下载完整")),
-        CacheState::Missing => (BadgeKind::Neutral, course2md::tr!("未下载")),
-        CacheState::Unsupported => (BadgeKind::Warning, course2md::tr!("不支持")),
+        CacheState::Loaded => (StatusKind::Success, course2md::tr!("已就绪")),
+        CacheState::Cached => (StatusKind::Success, course2md::tr!("已下载")),
+        CacheState::Partial => (StatusKind::Warning, course2md::tr!("未下载完整")),
+        CacheState::Missing => (StatusKind::Neutral, course2md::tr!("未下载")),
+        CacheState::Unsupported => (StatusKind::Warning, course2md::tr!("不支持")),
     }
-}
-
-fn model_status_row(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    value: impl IntoElement,
-    divider: bool,
-) -> Div {
-    settings_status_row(id, label, value)
-        .min_h(px(56.))
-        .when(divider, |row| {
-            row.border_b_1().border_color(color(HAIRLINE))
-        })
 }
 
 /// Shown wherever a model cannot be prepared while another job runs.
@@ -73,22 +69,19 @@ struct Entry {
     generation: u64,
     checking: bool,
     result: Option<Result<LocalModelStatus, String>>,
-    cache_directories: std::collections::BTreeSet<PathBuf>,
+    cache_directories: BTreeSet<PathBuf>,
 }
 impl Entry {
-    fn result(&self) -> Option<&Result<LocalModelStatus, String>> {
-        self.result.as_ref()
-    }
-    fn checking(&self) -> bool {
-        self.checking
+    fn status(&self) -> Option<&LocalModelStatus> {
+        self.result.as_ref().and_then(|result| result.as_ref().ok())
     }
 }
 /// How the last preparation ended, kept with the request it belongs to.
-struct Outcome {
+pub(crate) struct Outcome {
     key: String,
-    message: String,
-    error: bool,
-    cancelled: bool,
+    pub(crate) message: String,
+    pub(crate) error: bool,
+    pub(crate) cancelled: bool,
 }
 #[derive(Default)]
 pub(super) struct State {
@@ -96,15 +89,15 @@ pub(super) struct State {
     /// The request the running model job is preparing; taken when it exits.
     preparing: Option<Request>,
     outcome: Option<Outcome>,
-    details: bool,
-    cache_details: std::collections::BTreeSet<String>,
+    /// The models whose files and preparation log are expanded.
+    details: BTreeSet<String>,
 }
 
-/// A read-only view for setup. Checks and downloads keep the same ownership as Settings.
+/// A read-only view for the workbench. Checks and downloads keep their ownership here.
 pub(crate) struct ModelSetupSnapshot {
     pub(crate) checking: bool,
     pub(crate) result: Option<Result<LocalModelStatus, String>>,
-    pub(crate) device_issue: Option<String>,
+    pub(crate) device_issue: Option<DeviceIssue>,
     pub(crate) preparing: bool,
     pub(crate) notice: Option<(String, bool)>,
     pub(crate) cancelled: bool,
@@ -118,14 +111,13 @@ pub(crate) const LOCAL_ENGINES: [AsrProvider; 4] = [
     AsrProvider::Npu,
 ];
 
-pub(crate) fn engine_icon(provider: Option<AsrProvider>) -> Icon {
+pub(crate) fn engine_icon(provider: Option<AsrProvider>) -> SymbolIcon {
     match provider {
-        None => icons::auto_fix(),
-        Some(AsrProvider::Coreml) => icons::microchip(),
-        Some(AsrProvider::Gpu) => icons::gpu(),
-        Some(AsrProvider::Cpu) => icons::cpu(),
-        Some(AsrProvider::Npu) => icons::sparkles(),
-        Some(AsrProvider::Api) => icons::cloud(),
+        None => symbols::auto_fix_high(),
+        Some(AsrProvider::Coreml | AsrProvider::Cpu) => symbols::memory(),
+        Some(AsrProvider::Gpu) => symbols::developer_board(),
+        Some(AsrProvider::Npu) => symbols::auto_awesome(),
+        Some(AsrProvider::Api) => symbols::cloud(),
     }
 }
 /// Hardware this platform cannot have is not offered: Apple silicon engines only on
@@ -147,10 +139,7 @@ pub(crate) fn unsupported_model() -> &'static str {
 }
 
 /// 模型准备按钮文案的唯一权威来源（设置页与引导页共用）。
-pub(crate) fn model_action_label(
-    provider: AsrProvider,
-    state: Option<&CacheState>,
-) -> &'static str {
+fn model_action_label(provider: AsrProvider, state: Option<&CacheState>) -> &'static str {
     match state {
         Some(CacheState::Missing) => course2md::tr!("下载并准备模型"),
         Some(CacheState::Partial) => course2md::tr!("继续准备模型"),
@@ -165,6 +154,9 @@ pub(crate) fn model_action_label(
 /// Microsoft's permanent link to the latest supported Visual C++ runtime
 /// installer for x64 (2015-2022), which llama.cpp's Windows build needs.
 const VC_RUNTIME_URL: &str = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
+const RELEASES_URL: &str = "https://github.com/mizorewww/course2md/releases";
+const LLAMA_GUIDE_URL: &str = "https://github.com/ggml-org/llama.cpp#quick-start";
+const UV_GUIDE_URL: &str = "https://docs.astral.sh/uv/getting-started/installation/";
 
 /// The one classification of why a local engine cannot run here. Messages,
 /// repair actions and engine choices all derive from it.
@@ -211,7 +203,65 @@ impl DeviceIssue {
             Self::NpuRuntime => course2md::tr!("安装 uv 后才能用 Intel NPU 识别"),
         }
     }
+    /// Whether installing something on this machine can clear the issue.
+    pub(crate) fn installable(self) -> bool {
+        matches!(
+            self,
+            Self::LlamaMissing | Self::VcRuntime | Self::NpuRuntime | Self::AppleRuntime
+        )
+    }
 }
+
+/// One repair an engine obstacle offers.
+enum Repair {
+    Open(&'static str),
+    Copy(&'static str),
+}
+
+fn repairs(issue: DeviceIssue) -> Vec<(&'static str, SymbolIcon, &'static str, Repair)> {
+    let guide = |id, label, url| (id, symbols::open_in_new(), label, Repair::Open(url));
+    match issue {
+        DeviceIssue::Engine | DeviceIssue::AppleRuntime => vec![(
+            "reinstall",
+            symbols::download(),
+            course2md::tr!("下载完整应用"),
+            Repair::Open(RELEASES_URL),
+        )],
+        DeviceIssue::LlamaMissing => {
+            let help = guide(
+                "llama-help",
+                course2md::tr!("查看 llama.cpp 安装说明"),
+                LLAMA_GUIDE_URL,
+            );
+            if cfg!(target_os = "macos") {
+                vec![
+                    (
+                        "copy-llama",
+                        symbols::content_copy(),
+                        course2md::tr!("复制 Homebrew 安装命令"),
+                        Repair::Copy("brew install llama.cpp"),
+                    ),
+                    help,
+                ]
+            } else {
+                vec![help]
+            }
+        }
+        DeviceIssue::VcRuntime => vec![(
+            "vc-runtime",
+            symbols::download(),
+            course2md::tr!("下载 Microsoft Visual C++ 运行库"),
+            Repair::Open(VC_RUNTIME_URL),
+        )],
+        DeviceIssue::NpuRuntime => vec![guide(
+            "uv-help",
+            course2md::tr!("查看 uv 安装说明"),
+            UV_GUIDE_URL,
+        )],
+        DeviceIssue::AppleHardware | DeviceIssue::GpuAbsent | DeviceIssue::NpuDevice => Vec::new(),
+    }
+}
+
 pub(crate) fn device_issue(
     provider: AsrProvider,
     environment: &crate::backend::Environment,
@@ -235,6 +285,7 @@ pub(crate) fn device_issue(
         _ => None,
     }
 }
+
 impl Desktop {
     pub(crate) fn setup_model_snapshot(
         &self,
@@ -242,29 +293,21 @@ impl Desktop {
         model: Option<&str>,
         root: &Path,
     ) -> ModelSetupSnapshot {
-        let key = Request::new(provider, model, root).key();
-        let state = &self.settings_ui.model_diagnostics;
-        let entry = state.entries.get(&key);
-        let outcome = state.outcome.as_ref().filter(|outcome| outcome.key == key);
+        let request = Request::new(provider, model, root);
+        let entry = self
+            .settings_ui
+            .model_diagnostics
+            .entries
+            .get(&request.key());
+        let outcome = self.model_outcome(&request);
         ModelSetupSnapshot {
-            checking: entry.is_none_or(Entry::checking),
+            checking: entry.is_none_or(|entry| entry.checking),
             result: entry.and_then(|entry| entry.result.clone()),
-            device_issue: self.model_device_issue(provider),
-            preparing: self.is_preparing(&key),
+            device_issue: self.engine_issue(provider),
+            preparing: self.is_preparing(&request),
             notice: outcome.map(|outcome| (outcome.message.clone(), outcome.error)),
             cancelled: outcome.is_some_and(|outcome| outcome.cancelled),
         }
-    }
-
-    /// The request a running model job is preparing.
-    fn active_preparation(&self) -> Option<&Request> {
-        (self.kind == Kind::Models && self.job.is_some())
-            .then_some(self.settings_ui.model_diagnostics.preparing.as_ref())
-            .flatten()
-    }
-    fn is_preparing(&self, key: &str) -> bool {
-        self.active_preparation()
-            .is_some_and(|active| active.key() == key)
     }
 
     pub(crate) fn prepare_setup_model(
@@ -275,6 +318,67 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         self.begin_model_preparation(Request::new(provider, model, root), cx);
+    }
+
+    /// The request a running model job is preparing.
+    fn active_preparation(&self) -> Option<&Request> {
+        (self.kind == Kind::Models && self.job.is_some())
+            .then_some(self.settings_ui.model_diagnostics.preparing.as_ref())
+            .flatten()
+    }
+    pub(crate) fn is_preparing(&self, request: &Request) -> bool {
+        self.active_preparation() == Some(request)
+    }
+    /// How the last preparation of this model ended, if it was the last one.
+    pub(crate) fn model_outcome(&self, request: &Request) -> Option<&Outcome> {
+        let key = request.key();
+        let outcome = self.settings_ui.model_diagnostics.outcome.as_ref()?;
+        (outcome.key == key).then_some(outcome)
+    }
+    /// The checked file state; `None` while checking or after a failed check.
+    pub(crate) fn model_cache_state(&self, request: &Request) -> Option<CacheState> {
+        self.settings_ui
+            .model_diagnostics
+            .entries
+            .get(&request.key())
+            .filter(|entry| !entry.checking)
+            .and_then(Entry::status)
+            .map(|status| status.state)
+    }
+    /// Whether the guide's forward action should wait behind a prepare action.
+    pub(crate) fn model_awaits_download(&self, request: &Request) -> bool {
+        self.job.is_none()
+            && self.environment.is_some()
+            && self.engine_issue(request.provider).is_none()
+            && matches!(
+                self.model_cache_state(request),
+                Some(CacheState::Missing | CacheState::Partial)
+            )
+    }
+
+    /// What a surface says this model is doing, in one short phrase.
+    pub(crate) fn model_reading(&self, request: &Request) -> (StatusKind, &'static str) {
+        if self.is_preparing(request) {
+            return (StatusKind::Progress, course2md::tr!("正在准备模型"));
+        }
+        if self.model_outcome(request).is_some_and(|o| o.cancelled) {
+            return (StatusKind::Neutral, course2md::tr!("模型准备已暂停"));
+        }
+        let entry = self
+            .settings_ui
+            .model_diagnostics
+            .entries
+            .get(&request.key());
+        if self.environment.is_none() || entry.is_none_or(|entry| entry.checking) {
+            return (StatusKind::Progress, course2md::tr!("正在检查模型"));
+        }
+        if let Some(issue) = self.engine_issue(request.provider) {
+            return (StatusKind::Warning, issue.short());
+        }
+        match entry.and_then(|entry| entry.result.as_ref()) {
+            Some(Ok(status)) => cache_state_label(status.state),
+            _ => (StatusKind::Warning, course2md::tr!("检查未完成")),
+        }
     }
 
     fn default_model_request(&self) -> Request {
@@ -294,19 +398,7 @@ impl Desktop {
         root: &Path,
         cx: &mut Context<Self>,
     ) {
-        let request = Request::new(provider, model, root);
-        if request.provider == AsrProvider::Api {
-            return;
-        }
-        if self
-            .settings_ui
-            .model_diagnostics
-            .entries
-            .contains_key(&request.key())
-        {
-            return;
-        }
-        self.check_model_request(request, false, cx);
+        self.check_model_request(Request::new(provider, model, root), false, cx);
     }
     fn check_model_request(&mut self, request: Request, force: bool, cx: &mut Context<Self>) {
         if request.provider == AsrProvider::Api {
@@ -409,10 +501,10 @@ impl Desktop {
             cx.notify();
             return;
         }
+        self.follow_setup_model(&request);
         let state = &mut self.settings_ui.model_diagnostics;
         state.preparing = Some(request);
         state.outcome = None;
-        state.details = false;
         self.start_model_preparation(cx);
     }
     pub fn model_preparation_finished(
@@ -427,7 +519,7 @@ impl Desktop {
             .preparing
             .take()
             .unwrap_or_else(|| self.default_model_request());
-        let name = course2md::config::model_label(&request.model);
+        let name = model_label(&request.model);
         let message = if success {
             course2md::tr!("{} 已准备完成", name)
         } else if cancelled {
@@ -442,18 +534,11 @@ impl Desktop {
                     .unwrap_or(course2md::tr!("准备失败"))
             )
         };
-        let error = !success && !cancelled;
-        let cancelled = cancelled && !success;
-        self.onboarding.apply_model_preparation_result(
-            &request.key(),
-            (message.clone(), error),
-            cancelled,
-        );
         self.settings_ui.model_diagnostics.outcome = Some(Outcome {
             key: request.key(),
             message,
-            error,
-            cancelled,
+            error: !success && !cancelled,
+            cancelled: cancelled && !success,
         });
         self.refresh_model_diagnostics(cx);
         cx.notify();
@@ -461,188 +546,6 @@ impl Desktop {
     /// Why the engine cannot run here; `None` while detection is pending.
     pub(crate) fn engine_issue(&self, provider: AsrProvider) -> Option<DeviceIssue> {
         device_issue(provider, self.environment.as_ref()?)
-    }
-    fn model_device_issue(&self, provider: AsrProvider) -> Option<String> {
-        self.engine_issue(provider)
-            .map(|issue| issue.message().to_owned())
-    }
-    fn model_runtime_repair(&self, provider: AsrProvider, key: &str) -> Div {
-        let mut view = v_flex().w_full().min_w_0().gap_2();
-        let issue = self.engine_issue(provider);
-        if matches!(issue, Some(DeviceIssue::Engine | DeviceIssue::AppleRuntime)) {
-            return view.child(
-                control(SharedString::from(format!("model-reinstall-{key}")))
-                    .settings_text()
-                    .icon(icons::download())
-                    .label(course2md::tr!("下载完整应用"))
-                    .self_start()
-                    .on_click(|_, _, cx| {
-                        cx.open_url("https://github.com/mizorewww/course2md/releases")
-                    }),
-            );
-        }
-        if issue == Some(DeviceIssue::LlamaMissing) {
-            view = view.child(
-                control(SharedString::from(format!(
-                    "model-llama-install-help-{key}"
-                )))
-                .settings_text()
-                .icon(icons::external_link())
-                .label(course2md::tr!("查看 llama.cpp 安装说明"))
-                .self_start()
-                .on_click(|_, _, cx| {
-                    cx.open_url("https://github.com/ggml-org/llama.cpp#quick-start")
-                }),
-            );
-            if cfg!(target_os = "macos") {
-                view = view
-                    .child(
-                        settings_value(
-                            SharedString::from(format!("model-llama-install-command-{key}")),
-                            course2md::tr!("需要 Homebrew；安装后重新打开应用"),
-                        )
-                        .text_sm(),
-                    )
-                    .child(
-                        control(SharedString::from(format!(
-                            "model-copy-llama-install-{key}"
-                        )))
-                        .settings_text()
-                        .icon(icons::content_copy())
-                        .label(course2md::tr!("复制安装命令"))
-                        .self_start()
-                        .on_click(|_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(
-                                "brew install llama.cpp".into(),
-                            ))
-                        }),
-                    );
-            } else {
-                view = view.child(
-                    settings_value(
-                        SharedString::from(format!("model-llama-path-help-{key}")),
-                        course2md::tr!(
-                            "安装 llama.cpp，确保可在终端直接运行 llama-server，然后重新打开应用"
-                        ),
-                    )
-                    .text_sm(),
-                );
-            }
-        }
-        if issue == Some(DeviceIssue::VcRuntime) {
-            view = view.child(
-                control(SharedString::from(format!("model-vc-runtime-{key}")))
-                    .settings_text()
-                    .icon(icons::download())
-                    .label(course2md::tr!("下载 Microsoft Visual C++ 运行库"))
-                    .self_start()
-                    .on_click(|_, _, cx| cx.open_url(VC_RUNTIME_URL)),
-            );
-        }
-        if issue == Some(DeviceIssue::NpuRuntime) {
-            view = view.child(
-                control(SharedString::from(format!(
-                    "model-python-install-help-{key}"
-                )))
-                .settings_text()
-                .icon(icons::external_link())
-                .label(course2md::tr!("查看 uv 安装说明"))
-                .self_start()
-                .on_click(|_, _, cx| {
-                    cx.open_url("https://docs.astral.sh/uv/getting-started/installation/")
-                }),
-            );
-        }
-        view
-    }
-    /// The repair an engine obstacle already has: the release download, the
-    /// install guide or command, and an environment recheck where installing
-    /// something here can clear it. Shared by setup and the workbench.
-    fn engine_repair_actions(
-        &self,
-        id: &str,
-        issue: DeviceIssue,
-        recheck: bool,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let mut actions = h_flex()
-            .w_full()
-            .min_w_0()
-            .flex_wrap()
-            .items_center()
-            .gap_x(rems(4. / 14.))
-            // Text buttons carry their own inset; their labels start on the
-            // hint's text ruler.
-            .pl(rems((20. + 8. - 12.) / 14.));
-        match issue {
-            DeviceIssue::Engine | DeviceIssue::AppleRuntime => {
-                actions = actions.child(
-                    text_button(SharedString::from(format!("{id}-reinstall")), cx)
-                        .icon(icons::download())
-                        .label(course2md::tr!("下载完整应用"))
-                        .on_click(|_, _, cx| {
-                            cx.open_url("https://github.com/mizorewww/course2md/releases")
-                        }),
-                );
-            }
-            DeviceIssue::LlamaMissing => {
-                if cfg!(target_os = "macos") {
-                    actions = actions.child(
-                        text_button(SharedString::from(format!("{id}-copy-llama")), cx)
-                            .icon(icons::content_copy())
-                            .label(course2md::tr!("复制 Homebrew 安装命令"))
-                            .on_click(|_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                    "brew install llama.cpp".into(),
-                                ))
-                            }),
-                    );
-                } else {
-                    actions = actions.child(
-                        text_button(SharedString::from(format!("{id}-llama-help")), cx)
-                            .icon(icons::external_link())
-                            .label(course2md::tr!("查看 llama.cpp 安装说明"))
-                            .on_click(|_, _, cx| {
-                                cx.open_url("https://github.com/ggml-org/llama.cpp#quick-start")
-                            }),
-                    );
-                }
-            }
-            DeviceIssue::VcRuntime => {
-                actions = actions.child(
-                    text_button(SharedString::from(format!("{id}-vc-runtime")), cx)
-                        .icon(icons::download())
-                        .label(course2md::tr!("下载 Microsoft Visual C++ 运行库"))
-                        .on_click(|_, _, cx| cx.open_url(VC_RUNTIME_URL)),
-                );
-            }
-            DeviceIssue::NpuRuntime => {
-                actions = actions.child(
-                    text_button(SharedString::from(format!("{id}-uv-help")), cx)
-                        .icon(icons::external_link())
-                        .label(course2md::tr!("查看 uv 安装说明"))
-                        .on_click(|_, _, cx| {
-                            cx.open_url("https://docs.astral.sh/uv/getting-started/installation/")
-                        }),
-                );
-            }
-            DeviceIssue::AppleHardware | DeviceIssue::GpuAbsent | DeviceIssue::NpuDevice => {}
-        }
-        if recheck
-            && matches!(
-                issue,
-                DeviceIssue::LlamaMissing | DeviceIssue::VcRuntime | DeviceIssue::NpuRuntime
-            )
-        {
-            actions = actions.child(
-                text_button(SharedString::from(format!("{id}-recheck")), cx)
-                    .icon(icons::refresh())
-                    .label(course2md::tr!("重新检查"))
-                    .disabled(self.environment.is_none())
-                    .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx))),
-            );
-        }
-        actions
     }
 
     /// Why no engine can run, in one quiet line, followed by its repair.
@@ -664,21 +567,52 @@ impl Desktop {
         recheck: bool,
         cx: &mut Context<Self>,
     ) -> Div {
-        v_flex()
-            .w_full()
+        let actions = repairs(issue)
+            .into_iter()
+            .map(|(name, icon, label, repair)| {
+                material_button(
+                    SharedString::from(format!("{id}-{name}")),
+                    ButtonVariant::Text,
+                )
+                .icon(icon)
+                .child(label)
+                .on_click(move |_, _, cx| match repair {
+                    Repair::Open(url) => cx.open_url(url),
+                    Repair::Copy(text) => {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text.into()))
+                    }
+                })
+                .into_any_element()
+            })
+            .chain(
+                (recheck && issue.installable() && issue != DeviceIssue::AppleRuntime).then(|| {
+                    material_button(
+                        SharedString::from(format!("{id}-recheck")),
+                        ButtonVariant::Text,
+                    )
+                    .icon(symbols::refresh())
+                    .child(course2md::tr!("重新检查"))
+                    .disabled(self.environment.is_none())
+                    .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx)))
+                    .into_any_element()
+                }),
+            );
+        let actions = h_flex()
             .min_w_0()
-            .gap(rems(4. / 14.))
-            .child(hint_line(
-                SharedString::from(format!("{id}-message")),
-                icons::warning(),
-                WARNING,
-                issue.message(),
-            ))
-            .child(self.engine_repair_actions(id, issue, recheck, cx))
+            .flex_wrap()
+            .items_center()
+            .children(actions)
+            .into_any_element();
+        ui::async_status(
+            SharedString::from(id.to_owned()),
+            &AsyncStatus::Warning(issue.message().into()),
+            Some(actions),
+            cx,
+        )
+        .unwrap_or_else(div)
     }
 
-    /// The workbench's model status: one quiet line under the engine field
-    /// and the action that moves it on. Settings keeps the full table.
+    /// The workbench's model status: one chip and the action that moves it on.
     pub(crate) fn model_status_line(
         &self,
         provider: AsrProvider,
@@ -688,442 +622,103 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Div {
         let request = Request::new(provider, model, root);
-        let key = request.key();
-        if let Some(issue) = self.engine_issue(provider) {
-            return self.engine_obstacle(&format!("import-engine-{key}"), issue, cx);
+        match self.engine_issue(provider) {
+            Some(issue) => {
+                self.engine_obstacle(&format!("import-engine-{}", request.key()), issue, cx)
+            }
+            None => self.model_surface(&request, false, window, cx),
         }
-        let entry = self.settings_ui.model_diagnostics.entries.get(&key);
-        let checking = self.environment.is_none() || entry.is_none_or(Entry::checking);
-        let result = entry.and_then(Entry::result);
-        let status = result.and_then(|result| result.as_ref().ok());
-        let active = self.is_preparing(&key);
-        let (actions, extras) = self.model_prepare_actions(&request, checking, status, window, cx);
-        let mut view = v_flex().w_full().min_w_0().gap(rems(8. / 14.));
-        // Preparation reports itself, with its transfers, in the extras.
-        if !active {
-            let line = if checking {
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(ICON_GAP)
-                    .items_center()
-                    .child(
-                        h_flex()
-                            .w(ICON_SLOT)
-                            .flex_shrink_0()
-                            .justify_center()
-                            .child(crate::motion::spinner(
-                                SharedString::from(format!("import-model-spinner-{key}")),
-                                cx,
-                            )),
-                    )
-                    .child(
-                        accessible_text(
-                            SharedString::from(format!("import-model-checking-{key}")),
-                            course2md::tr!("正在检查模型…"),
-                        )
-                        .role(Role::Status)
-                        .text_size(TEXT_AUX)
-                        .text_color(color(GRAY)),
-                    )
-            } else {
-                match (result, status) {
-                    (Some(Err(error)), _) => hint_line(
-                        SharedString::from(format!("import-model-error-{key}")),
-                        icons::warning(),
-                        DANGER,
-                        course2md::tr!("检查失败：{}", error),
-                    ),
-                    (_, Some(status)) => {
-                        let (_, label) = cache_state_label(status.state);
-                        let mut text = label.to_owned();
-                        if status.state == CacheState::Unsupported {
-                            text = format!(
-                                "{text} · {}",
-                                course2md::tr!("请选择这种识别方式支持的模型")
-                            );
-                        }
-                        if let Some(error) = &status.last_error {
-                            text = format!("{text} · {}", course2md::tr!("未完成：{}", error));
-                        }
-                        let problem =
-                            status.state == CacheState::Unsupported || status.last_error.is_some();
-                        hint_line(
-                            SharedString::from(format!("import-model-state-{key}")),
-                            if problem {
-                                icons::warning()
-                            } else {
-                                icons::info()
-                            },
-                            if problem { WARNING } else { GRAY },
-                            text,
-                        )
-                    }
-                    _ => hint_line(
-                        SharedString::from(format!("import-model-unchecked-{key}")),
-                        icons::info(),
-                        GRAY,
-                        course2md::tr!("检查未完成"),
-                    ),
-                }
-            };
-            view = view.child(line);
-        }
-        for extra in extras {
-            view = view.child(extra);
-        }
-        view.child(actions.w_auto())
     }
 
-    pub fn model_readiness_panel(
+    /// The one report of a model. `full` adds its name, engine and details, for a
+    /// surface where the model is the subject; the workbench shows the rest.
+    pub(crate) fn model_surface(
         &self,
-        provider: AsrProvider,
-        model: Option<&str>,
-        root: &Path,
+        request: &Request,
+        full: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let request = Request::new(provider, model, root);
         let key = request.key();
-        let entry = self.settings_ui.model_diagnostics.entries.get(&key);
-        let checking = entry.is_none_or(Entry::checking);
-        let status = entry
-            .and_then(Entry::result)
-            .and_then(|result| result.as_ref().ok());
-        let (mut view, cache_action, cache_details) =
-            self.model_status_section(provider, &request, cx);
-        let (actions, extras) = self.model_prepare_actions(&request, checking, status, window, cx);
-        for extra in extras {
-            view = view.child(extra);
-        }
-        view.child(
-            h_flex()
-                .w_full()
-                .min_w_0()
-                .gap_2()
-                .items_center()
-                .flex_wrap()
-                .child(actions.w_auto())
-                .children(cache_action),
-        )
-        .when_some(cache_details, |view, details| view.child(details))
-    }
+        let id = |part: &str| SharedString::from(format!("model-{part}-{key}"));
+        let state = &self.settings_ui.model_diagnostics;
+        let entry = state.entries.get(&key);
+        let preparing = self.is_preparing(request);
+        let checking = self.environment.is_none() || entry.is_none_or(|entry| entry.checking);
+        let status = entry.and_then(Entry::status);
+        let issue = self.engine_issue(request.provider);
+        let outcome = self.model_outcome(request);
+        let scale = TileScale::Regular;
 
-    /// Status rows: engine, model name, device issue with repair guidance,
-    /// check progress, cache state summary and expandable cache details.
-    fn model_status_section(
-        &self,
-        provider: AsrProvider,
-        request: &Request,
-        cx: &mut Context<Self>,
-    ) -> (Div, Option<Div>, Option<AnyElement>) {
-        let key = request.key();
-        let entry = self.settings_ui.model_diagnostics.entries.get(&key);
-        let device_issue = self.model_device_issue(provider);
-        let mut cache_details = None;
-        let mut cache_action = None;
-        let mut view = v_flex().w_full().min_w_0().child(model_status_row(
-            SharedString::from(format!("model-provider-label-{key}")),
-            course2md::tr!("本机引擎"),
-            settings_value(
-                SharedString::from(format!("model-provider-{key}")),
-                crate::provider_label(Some(provider)),
-            )
-            .w_auto(),
-            true,
-        ));
-        view = view.child(model_status_row(
-            SharedString::from(format!("model-name-label-{key}")),
-            course2md::tr!("模型"),
-            settings_value(
-                SharedString::from(format!("model-name-{key}")),
-                model_label(&request.model),
-            )
-            .w_auto(),
-            true,
-        ));
-        if let Some(issue) = &device_issue {
-            view = view
-                .child(settings_detail_row(
-                    SharedString::from(format!("model-device-label-{key}")),
-                    course2md::tr!("设备状态"),
-                    settings_value(
-                        SharedString::from(format!("model-device-problem-{key}")),
-                        issue.clone(),
-                    )
-                    .text_color(color(DANGER)),
+        let (kind, reading) = self.model_reading(request);
+        let chip = h_flex()
+            .gap(ICON_GAP)
+            .items_center()
+            .child(status_chip(kind).child(reading))
+            .when(preparing || checking, |row| {
+                row.child(spinner(id("spinner"), reading, cx))
+            });
+        let header = if full {
+            scale
+                .row()
+                .flex_wrap()
+                .child(scale.text(
+                    id("name"),
+                    model_label(&request.model),
+                    Some(provider_label(Some(request.provider)).into()),
                 ))
-                .child(self.model_runtime_repair(provider, &key));
-        }
-        let checking = entry.is_none_or(Entry::checking);
-        let status = entry
-            .and_then(Entry::result)
-            .and_then(|result| result.as_ref().ok());
-        if checking {
-            view = view.child(model_status_row(
-                SharedString::from(format!("model-checking-label-{key}")),
-                course2md::tr!("模型状态"),
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(crate::motion::spinner(
-                        SharedString::from(format!("model-check-spinner-{key}")),
-                        cx,
-                    ))
-                    .child(
-                        settings_value(
-                            SharedString::from(format!("model-checking-{key}")),
-                            course2md::tr!("正在检查模型…"),
-                        )
-                        .w_auto()
-                        .role(Role::Status),
-                    ),
-                false,
-            ));
-        }
-        if let Some(Err(error)) = entry.and_then(Entry::result) {
-            view = view.child(settings_detail_row(
-                SharedString::from(format!("model-check-error-label-{key}")),
-                course2md::tr!("检查结果"),
-                settings_value(
-                    SharedString::from(format!("model-check-error-{key}")),
-                    course2md::tr!("检查失败：{}", error),
-                )
-                .text_color(color(DANGER)),
-            ));
-        }
-        if let Some(status) = status {
-            let (kind, label, description) = if self.is_preparing(&key) {
-                (BadgeKind::Progress, course2md::tr!("准备中"), None)
-            } else {
-                let (kind, label) = cache_state_label(status.state);
-                let description = (status.state == CacheState::Unsupported)
-                    .then(|| course2md::tr!("请选择这种识别方式支持的模型"));
-                (kind, label, description)
-            };
-            view = view.child(model_status_row(
-                SharedString::from(format!("model-state-label-{key}")),
-                course2md::tr!("模型状态"),
-                badge(kind).text_size(TEXT_SETTINGS_AUX).child(label),
-                false,
-            ));
-            if let Some(description) = description {
-                view = view.child(
-                    theme::supporting_info(
-                        SharedString::from(format!("model-state-{key}")),
-                        description,
-                    )
-                    .text_size(TEXT_SETTINGS_AUX),
-                );
+                .child(chip)
+        } else {
+            h_flex().child(chip)
+        };
+
+        let mut lines: Vec<(&str, AsyncStatus)> = Vec::new();
+        if !preparing && !checking {
+            if let Some(Err(error)) = entry.and_then(|entry| entry.result.as_ref()) {
+                lines.push((
+                    "check-error",
+                    AsyncStatus::Failed(course2md::tr!("检查失败：{}", error).into()),
+                ));
             }
-            let detail_key = key.clone();
-            let cache_open = self
-                .settings_ui
-                .model_diagnostics
-                .cache_details
-                .contains(&key);
-            let mut cache = v_flex().w_full().min_w_0().gap_3();
-            for (index, part) in status.parts.iter().enumerate() {
-                let path = part.path.clone();
-                let mut part_details = v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap_2()
-                    .child(
-                        settings_value(
-                            SharedString::from(format!("model-cache-path-{key}-{index}")),
-                            part.path.display().to_string(),
-                        )
-                        .text_size(TEXT_SETTINGS_AUX)
-                        .text_color(color(GRAY)),
-                    )
-                    .when(
-                        entry.is_some_and(|entry| entry.cache_directories.contains(&path)),
-                        |view| {
-                            view.child(
-                                quiet(SharedString::from(format!(
-                                    "open-model-cache-{key}-{index}"
-                                )))
-                                .settings_text()
-                                .icon(icons::folder_open())
-                                .label(course2md::tr!("打开模型文件夹"))
-                                .accessibility_label(course2md::tr!(
-                                    "打开 {} 的模型文件夹：{}",
-                                    part.name,
-                                    part.path.display()
-                                ))
-                                .self_end()
-                                .on_click(move |_, _, cx| cx.open_with_system(&path)),
-                            )
-                        },
-                    );
-                if !part.missing.is_empty() {
-                    part_details = part_details.child(settings_value(
-                        SharedString::from(format!("model-missing-files-{key}-{index}")),
-                        course2md::tr!(
-                            "缺少或尚未验证：{}",
-                            part.missing.join(course2md::tr!("、"))
-                        ),
-                    ));
-                }
-                cache = cache.child(
-                    v_flex()
-                        .w_full()
-                        .min_w_0()
-                        .gap_2()
-                        .p_4()
-                        .bg(color(SURFACE))
-                        .border_1()
-                        .border_color(color(CARD_LINE))
-                        .rounded(RADIUS_CARD)
-                        .child(
-                            semantic_label(
-                                SharedString::from(format!("model-cache-part-label-{key}-{index}")),
-                                part.name.clone(),
-                                icons::storage(),
-                            )
-                            .w_full()
-                            .min_w_0(),
-                        )
-                        .child(part_details),
-                );
+            if status.is_some_and(|status| status.state == CacheState::Unsupported) {
+                lines.push((
+                    "unsupported",
+                    AsyncStatus::Warning(course2md::tr!("请选择这种识别方式支持的模型").into()),
+                ));
             }
-            // One unit in the action row, which does the wrapping.
-            cache_action = Some(
-                h_flex()
-                    .flex_shrink_0()
-                    .items_center()
-                    .gap_3()
-                    .child(
-                        quiet(SharedString::from(format!("model-cache-details-{key}")))
-                            .settings_text()
-                            .ml(-crate::theme::QUIET_INSET)
-                            .icon(icons::folder_open())
-                            .label(if cache_open {
-                                course2md::tr!("收起模型文件")
-                            } else {
-                                course2md::tr!("查看模型文件")
-                            })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if !this
-                                    .settings_ui
-                                    .model_diagnostics
-                                    .cache_details
-                                    .remove(&detail_key)
-                                {
-                                    this.settings_ui
-                                        .model_diagnostics
-                                        .cache_details
-                                        .insert(detail_key.clone());
-                                }
-                                cx.notify();
-                            })),
-                    )
-                    .when(status.bytes > 0, |row| {
-                        row.child(
-                            settings_value(
-                                SharedString::from(format!("model-cached-size-{key}")),
-                                course2md::tr!("占用空间 {}", crate::activity::bytes(status.bytes)),
-                            )
-                            // Sized by its text, not the row it wraps in.
-                            .w_auto()
-                            .whitespace_nowrap()
-                            .text_size(TEXT_SETTINGS_AUX)
-                            .text_color(color(GRAY)),
-                        )
-                    }),
-            );
-            cache_details = Some(crate::motion::disclosure(
-                SharedString::from(format!("model-cache-content-{key}")),
-                cache_open,
-                cache,
-            ));
-            if let Some(error) = &status.last_error {
-                view = view.child(settings_detail_row(
-                    SharedString::from(format!("model-last-error-label-{key}")),
-                    course2md::tr!("上次准备"),
-                    settings_value(
-                        SharedString::from(format!("model-last-error-{key}")),
-                        course2md::tr!("未完成：{}", error),
-                    )
-                    .text_color(color(DANGER)),
+            if let Some(error) = status.and_then(|status| status.last_error.as_ref()) {
+                lines.push((
+                    "last-error",
+                    AsyncStatus::Warning(course2md::tr!("未完成：{}", error).into()),
                 ));
             }
         }
-        (view, cache_action, cache_details)
-    }
-
-    /// Action row (recheck / pause / prepare) and the transient rows it owns:
-    /// prepare progress, download transfers, and queue/network-scope notes.
-    fn model_prepare_actions(
-        &self,
-        request: &Request,
-        checking: bool,
-        status: Option<&LocalModelStatus>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> (Div, Vec<AnyElement>) {
-        let mut extras: Vec<AnyElement> = Vec::new();
-        let request = request.clone();
-        let provider = request.provider;
-        let key = &request.key();
-        let device_issue = self.engine_issue(provider);
-        let active = self.is_preparing(key);
-        let request_for_check = request.clone();
-        let recheck = outline_pill(SharedString::from(format!("recheck-model-{key}")), cx)
-            .settings_text()
-            .icon(icons::refresh())
-            .label(course2md::tr!("重新检查模型"))
-            .disabled(checking || active)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.check_model_request(request_for_check.clone(), true, cx)
-            }));
-        let mut actions = h_flex().w_full().min_w_0().gap_2().flex_wrap();
-
-        let prepare_allowed = self.environment.is_some()
-            && device_issue.is_none()
-            && status.is_some_and(|status| status.can_prepare);
-        if active {
-            extras.push(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(crate::motion::spinner("model-prepare-spinner", cx))
-                    .child(
-                        settings_value(
-                            "active-model-prepare",
-                            course2md::tr!("正在准备 {}", model_label(&request.model)),
-                        )
-                        .role(Role::Status),
-                    )
-                    .into_any_element(),
-            );
-            for (index, (stage, progress)) in self
-                .job_events
-                .stages
-                .iter()
-                .filter(|(stage, progress)| {
-                    stage.is_model_transfer() && progress.has_samples() && !progress.done
-                })
-                .enumerate()
-            {
-                extras.push(
-                    crate::ui::transfer_status(
-                        ("model-download-progress", index),
-                        crate::activity::model_transfer_phase(stage, progress.phase),
-                        &progress.transfer_metrics(stage, true),
-                        progress.fraction(),
-                        window,
-                        cx,
-                    )
-                    .into_any_element(),
-                );
+        if let Some(outcome) = outcome.filter(|_| !preparing) {
+            if outcome.error {
+                lines.push((
+                    "outcome",
+                    AsyncStatus::Failed(outcome.message.clone().into()),
+                ));
+            } else if !outcome.cancelled && full {
+                lines.push((
+                    "outcome",
+                    AsyncStatus::Success(outcome.message.clone().into()),
+                ));
             }
+        }
+        let prepare_allowed = self.environment.is_some()
+            && issue.is_none()
+            && status.is_some_and(|status| status.can_prepare);
+        if self.job.is_some() && !preparing && prepare_allowed {
+            lines.push(("job-busy", AsyncStatus::Warning(job_busy().into())));
+        }
+
+        let mut actions = h_flex().min_w_0().gap(rem(8.)).items_center().flex_wrap();
+        if preparing {
             actions = actions.child(
-                control("stop-model-preparation")
-                    .settings_text()
-                    .icon(icons::pause())
-                    .label(if self.cancelling {
+                material_button(id("pause"), ButtonVariant::Outlined)
+                    .icon(symbols::pause())
+                    .child(if self.cancelling {
                         course2md::tr!("正在暂停…")
                     } else {
                         course2md::tr!("暂停准备")
@@ -1138,130 +733,257 @@ impl Desktop {
                     })),
             );
         } else if prepare_allowed {
-            let loaded = status.is_some_and(|status| status.state == CacheState::Loaded);
-            let label = model_action_label(provider, status.map(|status| &status.state));
+            let state = status.map(|status| status.state);
+            let (variant, icon) = match state {
+                Some(CacheState::Loaded) => (ButtonVariant::Text, symbols::refresh()),
+                // The workbench's main action is 开始转换, not this one.
+                Some(CacheState::Missing | CacheState::Partial) if full => {
+                    (ButtonVariant::Filled, symbols::download())
+                }
+                _ => (ButtonVariant::Tonal, symbols::download()),
+            };
+            let label = if outcome.is_some_and(|outcome| outcome.cancelled) {
+                course2md::tr!("继续准备")
+            } else {
+                model_action_label(request.provider, state.as_ref())
+            };
+            let target = request.clone();
             actions = actions.child(
-                control(SharedString::from(format!("prepare-model-{key}")))
-                    .settings_text()
-                    .icon(if loaded {
-                        icons::refresh()
-                    } else {
-                        icons::download()
-                    })
-                    .when(loaded, |button| button.ghost())
-                    .when(!loaded, |button| button.primary())
-                    .label(label)
-                    .accessibility_label(course2md::tr!(
-                        "{}：{} · {}",
-                        label,
-                        crate::provider_label(Some(provider)),
-                        model_label(&request.model)
-                    ))
-                    .disabled(self.job.is_some())
+                material_button(id("prepare"), variant)
+                    .icon(icon)
+                    .child(label)
+                    .disabled(self.job.is_some() || checking)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.begin_model_preparation(request.clone(), cx)
+                        this.begin_model_preparation(target.clone(), cx)
                     })),
             );
-            if self.job.is_some() && !loaded {
-                extras.push(
-                    settings_value(
-                        SharedString::from(format!("model-waits-for-job-{key}")),
-                        job_busy(),
+        }
+        let target = request.clone();
+        actions = actions.when(!preparing, |row| {
+            row.child(
+                material_button(id("recheck"), ButtonVariant::Text)
+                    .icon(symbols::refresh())
+                    .child(course2md::tr!("重新检查"))
+                    .disabled(checking)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.check_model_request(target.clone(), true, cx)
+                    })),
+            )
+        });
+        let open = state.details.contains(&key);
+        if full {
+            let toggled = key.clone();
+            actions = actions.child(
+                material_button(id("details"), ButtonVariant::Text)
+                    .icon(if open {
+                        symbols::keyboard_arrow_up()
+                    } else {
+                        symbols::info()
+                    })
+                    .child(if open {
+                        course2md::tr!("收起详情")
+                    } else {
+                        course2md::tr!("模型详情")
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let details = &mut this.settings_ui.model_diagnostics.details;
+                        if !details.remove(&toggled) {
+                            details.insert(toggled.clone());
+                        }
+                        cx.notify();
+                    })),
+            );
+        }
+
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(12.))
+            .child(header)
+            .when_some(issue.filter(|_| full), |view, issue| {
+                view.child(self.engine_obstacle(&id("obstacle"), issue, cx))
+            })
+            .children(
+                lines
+                    .into_iter()
+                    .filter_map(|(name, line)| ui::async_status(id(name), &line, None, cx)),
+            )
+            .when(preparing, |view| {
+                view.child(self.model_transfers(window, cx))
+            })
+            .child(actions)
+            .when(full, |view| {
+                view.child(motion::disclosure(
+                    id("details-content"),
+                    open,
+                    self.model_details(request, entry),
+                ))
+            })
+    }
+
+    /// The running job's transfers. The region keeps its height before the first
+    /// sample, so incoming progress does not move the actions.
+    fn model_transfers(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let transfers: Vec<_> = self
+            .job_events
+            .stages
+            .iter()
+            .filter(|(stage, progress)| {
+                stage.is_model_transfer() && progress.has_samples() && !progress.done
+            })
+            .collect();
+        let view = v_flex().w_full().min_w_0().min_h(rem(80.)).gap(rem(12.));
+        if transfers.is_empty() {
+            return view.child(semantic_label(
+                "model-awaiting-progress",
+                course2md::tr!("等待准备进度"),
+                Icon::from(symbols::download()),
+            ));
+        }
+        view.children(
+            transfers
+                .into_iter()
+                .enumerate()
+                .map(|(index, (stage, progress))| {
+                    ui::transfer_status(
+                        ("model-download-progress", index),
+                        activity::model_transfer_phase(stage, progress.phase),
+                        &progress.transfer_metrics(stage, true),
+                        progress.fraction(),
+                        window,
+                        cx,
                     )
-                    .text_sm()
-                    .into_any_element(),
+                }),
+        )
+    }
+
+    /// Size, files and the last preparation's log.
+    fn model_details(&self, request: &Request, entry: Option<&Entry>) -> Div {
+        let key = request.key();
+        let id = |part: String| SharedString::from(format!("model-{part}-{key}"));
+        let scale = TileScale::Regular;
+        let mut details = v_flex().w_full().min_w_0().gap(rem(12.));
+        let Some(entry) = entry else {
+            return details;
+        };
+        if let Some(status) = entry.status() {
+            if status.bytes > 0 {
+                details = details.child(scale.support(
+                    id("size".into()),
+                    course2md::tr!("占用空间 {}", activity::bytes(status.bytes)),
+                ));
+            }
+            for (index, part) in status.parts.iter().enumerate() {
+                let path = part.path.clone();
+                let open = course2md::tr!("打开 {} 的模型文件夹：{}", part.name, path.display());
+                details = details.child(
+                    scale
+                        .row()
+                        .items_start()
+                        .child(
+                            scale
+                                .text(
+                                    id(format!("part-{index}")),
+                                    part.name.clone(),
+                                    Some(path.display().to_string().into()),
+                                )
+                                .when(!part.missing.is_empty(), |text| {
+                                    text.child(scale.support(
+                                        id(format!("missing-{index}")),
+                                        course2md::tr!(
+                                            "缺少或尚未验证：{}",
+                                            part.missing.join(course2md::tr!("、"))
+                                        ),
+                                    ))
+                                }),
+                        )
+                        .when(entry.cache_directories.contains(&path), |row| {
+                            row.child(
+                                MaterialTooltip::plain(
+                                    id(format!("open-tip-{index}")),
+                                    course2md::tr!("打开模型文件夹"),
+                                )
+                                .trigger(
+                                    IconButton::new(
+                                        id(format!("open-{index}")),
+                                        symbols::folder_open(),
+                                        open,
+                                    )
+                                    .on_click(move |_, _, cx| cx.open_with_system(&path)),
+                                ),
+                            )
+                        }),
                 );
             }
         }
-        (actions.child(recheck), extras)
+        // Logs belong to the last model job: shown while it runs and after it ends.
+        if self.kind == Kind::Models
+            && !self.job_events.logs.is_empty()
+            && (self.is_preparing(request) || self.model_outcome(request).is_some())
+        {
+            let logs = &self.job_events.logs;
+            details = details
+                .child(section_title(
+                    id("log-heading".into()),
+                    course2md::tr!("准备日志"),
+                ))
+                .child(scale.support(
+                    id("log".into()),
+                    logs[logs.len().saturating_sub(LOG_TAIL)..].join("\n"),
+                ));
+        }
+        details
     }
 
     /// 模型管理 under the default recognition model: its readiness, another
-    /// model being prepared, the last preparation's result and its log.
+    /// model being prepared and the last preparation's result.
     pub(super) fn model_management_panel(
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let request = self.default_model_request();
-        let mut view = v_flex()
+        let other = self
+            .active_preparation()
+            .filter(|active| **active != request)
+            .cloned();
+        let elsewhere = self
+            .settings_ui
+            .model_diagnostics
+            .outcome
+            .as_ref()
+            .filter(|outcome| outcome.key != request.key() && other.is_none())
+            .map(|outcome| {
+                if outcome.error {
+                    AsyncStatus::Failed(outcome.message.clone().into())
+                } else {
+                    AsyncStatus::Success(outcome.message.clone().into())
+                }
+            });
+        v_flex()
             .w_full()
             .min_w_0()
-            .gap_6()
-            .child(self.model_readiness_panel(
-                request.provider,
-                Some(&request.model),
-                &request.root,
-                window,
-                cx,
-            ));
-        if let Some(active) = self.active_preparation()
-            && active.key() != request.key()
-        {
-            view = view.child(
-                settings_detail_group(
-                    "other-active-model",
-                    icons::storage(),
-                    course2md::tr!("正在准备的模型"),
+            .gap(rem(24.))
+            .child(self.model_surface(&request, true, window, cx))
+            .when_some(other, |view, active| {
+                view.child(
+                    v_flex()
+                        .w_full()
+                        .min_w_0()
+                        .gap(SECTION_TITLE_GAP)
+                        .child(section_title(
+                            "other-active-model",
+                            course2md::tr!("正在准备的模型"),
+                        ))
+                        .child(self.model_surface(&active, true, window, cx)),
                 )
-                .after(self.model_readiness_panel(
-                    active.provider,
-                    Some(&active.model),
-                    &active.root,
-                    window,
-                    cx,
-                )),
-            );
-        }
-        let outcome = self.settings_ui.model_diagnostics.outcome.as_ref();
-        if let Some(outcome) = outcome {
-            view = view.child(
-                settings_value("model-prepare-result", outcome.message.clone())
-                    .role(Role::Status)
-                    .text_color(color(if outcome.error { DANGER } else { INK })),
-            );
-        }
-        // Logs belong to the last model job: shown while it runs and after it ends.
-        if self.kind == Kind::Models
-            && !self.job_events.logs.is_empty()
-            && (self.job.is_some() || outcome.is_some())
-        {
-            view = view.child(
-                control("model-preparation-details")
-                    .settings_text()
-                    .icon(icons::info())
-                    .ghost()
-                    .label(if self.settings_ui.model_diagnostics.details {
-                        course2md::tr!("收起准备详情")
-                    } else {
-                        course2md::tr!("查看准备详情")
-                    })
-                    .self_start()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.settings_ui.model_diagnostics.details =
-                            !this.settings_ui.model_diagnostics.details;
-                        cx.notify();
-                    })),
-            );
-            if self.settings_ui.model_diagnostics.details {
-                view = view.child(
-                    settings_detail_group(
-                        "model-preparation-log-heading",
-                        icons::task(),
-                        course2md::tr!("准备日志"),
-                    )
-                    .child(
-                        settings_value("model-preparation-log", {
-                            let logs = &self.job_events.logs;
-                            logs[logs.len().saturating_sub(LOG_TAIL)..].join("\n")
-                        })
-                        .text_size(TEXT_SETTINGS_AUX),
-                    ),
-                );
-            }
-        }
-        view
+            })
+            .children(
+                elsewhere
+                    .and_then(|status| ui::async_status("model-prepare-result", &status, None, cx)),
+            )
     }
+
     /// Device and runtime facts behind local recognition, shown in 诊断详情
     /// and copied with it.
     pub(super) fn hardware_facts(&self) -> Vec<(&'static str, &'static str, String)> {
@@ -1339,7 +1061,7 @@ impl Desktop {
         let available = LOCAL_ENGINES
             .into_iter()
             .filter(|provider| device_issue(*provider, environment).is_none())
-            .map(|provider| crate::provider_label(Some(provider)))
+            .map(|provider| provider_label(Some(provider)))
             .collect::<Vec<_>>();
         if !available.is_empty() {
             facts.push((
@@ -1351,73 +1073,66 @@ impl Desktop {
         facts
     }
 
-    pub(super) fn model_hardware_details(&self, cx: &mut Context<Self>) -> Option<DetailGroup> {
+    pub(super) fn model_hardware_details(&self, cx: &mut Context<Self>) -> Option<Div> {
         let request = self.default_model_request();
         let environment = self.environment.as_ref()?;
-        let hardware = self.hardware_facts().into_iter().fold(
-            settings_detail_group(
-                "model-hardware-heading",
-                icons::computer(),
-                course2md::tr!("设备与运行时"),
-            ),
-            |group, (id, label, value)| {
-                group.row(
-                    SharedString::from(format!("{id}-label")),
-                    label,
-                    accessible_text(id, value),
-                )
-            },
-        );
-        if self.model_device_issue(request.provider).is_none() {
-            return Some(hardware);
-        }
-        let alternatives = LOCAL_ENGINES.into_iter().filter(|provider| {
-            *provider != request.provider && device_issue(*provider, environment).is_none()
+        let facts = self.hardware_facts().into_iter().map(|(id, label, value)| {
+            ListItem::new(id, label)
+                .trailing_text(value)
+                .density(ListDensity::Compact)
         });
+        let alternatives = LOCAL_ENGINES
+            .into_iter()
+            .filter(|provider| {
+                self.engine_issue(request.provider).is_some()
+                    && *provider != request.provider
+                    && device_issue(*provider, environment).is_none()
+            })
+            .map(|provider| {
+                material_button(
+                    SharedString::from(format!("choose-available-model-{}", provider.as_str())),
+                    ButtonVariant::Outlined,
+                )
+                .icon(symbols::mic())
+                .child(course2md::tr!(
+                    "默认改用 {}",
+                    provider_label(Some(provider))
+                ))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let mut value = this.generation_edit_base();
+                    value.select_provider(Some(provider));
+                    value.options.asr_model =
+                        Some(course2md::config::default_model(provider).into());
+                    if this.commit_generation(value, cx) {
+                        this.refresh_model_diagnostics(cx);
+                    }
+                }))
+            });
         Some(
-            hardware.after(
-                h_flex()
-                    .gap_2()
-                    .flex_wrap()
-                    .children(alternatives.map(|provider| {
-                        control(SharedString::from(format!(
-                            "choose-available-model-{}",
-                            provider.as_str()
-                        )))
-                        .settings_text()
-                        .icon(icons::mic())
-                        .label(course2md::tr!(
-                            "默认改用 {}",
-                            crate::provider_label(Some(provider))
-                        ))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let mut value = this.generation_edit_base();
-                            value.select_provider(Some(provider));
-                            value.options.asr_model =
-                                Some(course2md::config::default_model(provider).into());
-                            if this.commit_generation(value, cx) {
-                                this.refresh_model_diagnostics(cx);
-                            }
-                        }))
-                    })),
-            ),
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(SECTION_TITLE_GAP)
+                .child(section_title(
+                    "model-hardware-heading",
+                    course2md::tr!("设备与运行时"),
+                ))
+                .child(segmented_list(facts))
+                .child(h_flex().gap(rem(8.)).flex_wrap().children(alternatives)),
         )
     }
     /// The checked cache state of the default model, when a check finished
     /// and the recognition method can run.
     pub(super) fn default_model_state(&self) -> Option<CacheState> {
         let request = self.default_model_request();
-        if request.provider == AsrProvider::Api
-            || self.model_device_issue(request.provider).is_some()
-        {
+        if request.provider == AsrProvider::Api || self.engine_issue(request.provider).is_some() {
             return None;
         }
         self.settings_ui
             .model_diagnostics
             .entries
             .get(&request.key())
-            .and_then(Entry::result)
-            .and_then(|result| result.as_ref().ok())
+            .and_then(Entry::status)
             .map(|status| status.state)
     }
     /// One-line readiness conclusion for the generation group main flow; the full
@@ -1427,7 +1142,7 @@ impl Desktop {
         if request.provider == AsrProvider::Api {
             return (true, course2md::tr!("使用语音服务识别").into());
         }
-        if self.model_device_issue(request.provider).is_some() {
+        if self.engine_issue(request.provider).is_some() {
             return (
                 false,
                 course2md::tr!("所选识别方式暂不可用，可在模型管理中查看原因").into(),
@@ -1438,65 +1153,27 @@ impl Desktop {
             .model_diagnostics
             .entries
             .get(&request.key());
-        if entry.is_none_or(Entry::checking) {
+        if entry.is_none_or(|entry| entry.checking) {
             return (true, course2md::tr!("正在检查识别模型…").into());
         }
-        if entry.and_then(Entry::result).is_some_and(Result::is_err) {
-            return (
+        match entry.and_then(|entry| entry.result.as_ref()) {
+            Some(Err(_)) => (
                 false,
                 course2md::tr!("模型检查未完成，可在模型管理中查看原因并重试").into(),
-            );
-        }
-        match entry
-            .and_then(Entry::result)
-            .and_then(|result| result.as_ref().ok())
-            .map(|status| &status.state)
-        {
-            Some(state @ (CacheState::Loaded | CacheState::Cached)) => {
-                (true, cache_state_label(*state).1.into())
-            }
-            Some(CacheState::Missing | CacheState::Partial) => {
-                (true, course2md::tr!("首次识别时会自动下载所选模型").into())
-            }
-            Some(CacheState::Unsupported) => (
-                false,
-                course2md::tr!("当前识别方式不支持所选模型，请选择其他模型").into(),
             ),
+            Some(Ok(status)) => match status.state {
+                state @ (CacheState::Loaded | CacheState::Cached) => {
+                    (true, cache_state_label(state).1.into())
+                }
+                CacheState::Missing | CacheState::Partial => {
+                    (true, course2md::tr!("首次识别时会自动下载所选模型").into())
+                }
+                CacheState::Unsupported => (
+                    false,
+                    course2md::tr!("当前识别方式不支持所选模型，请选择其他模型").into(),
+                ),
+            },
             None => (true, course2md::tr!("尚未检查识别模型").into()),
         }
     }
-}
-
-/// A quiet status line in the canvas's hint role: a 16px icon in the label
-/// slot and 13px supporting text, so it starts on the same ruler as hints.
-fn hint_line(
-    id: impl Into<ElementId>,
-    icon: Icon,
-    icon_color: ColorToken,
-    text: impl Into<SharedString>,
-) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .items_start()
-        .gap(ICON_GAP)
-        .child(
-            h_flex()
-                .w(ICON_SLOT)
-                .h(rems(18. / 14.))
-                .flex_shrink_0()
-                .justify_center()
-                .items_center()
-                .child(icon.size(rems(16. / 14.)).text_color(color(icon_color))),
-        )
-        .child(
-            accessible_text(id, text)
-                .role(Role::Status)
-                .flex_1()
-                .min_w_0()
-                .whitespace_normal()
-                .text_size(TEXT_AUX)
-                .line_height(rems(18. / 14.))
-                .text_color(color(GRAY)),
-        )
 }

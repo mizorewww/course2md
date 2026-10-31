@@ -734,6 +734,7 @@ impl Render for Desktop {
             .children(self.move_dialog_view(cx))
             .children(self.settings_dialogs(window, cx))
             .children(crate::ui::confirm_host(cx))
+            .child(self.storage_dialog(window, cx))
             .into_any_element()
     }
 }
