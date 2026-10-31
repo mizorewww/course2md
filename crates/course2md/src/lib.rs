@@ -1,3 +1,4 @@
+pub use c2m_ai::{llm, login, provider, summarize};
 pub use c2m_config::{llm_settings, settings};
 pub use c2m_dispatch::{dispatch, job, pool};
 pub use c2m_protocol::{model_state, progress};
@@ -22,18 +23,14 @@ pub mod doctor;
 pub mod download;
 pub mod execution;
 pub mod hub;
-pub mod llm;
-pub mod login;
 pub mod math;
 pub mod models;
 pub mod npu;
 pub mod options;
 pub mod pipeline;
 pub mod portable;
-pub mod provider;
 pub mod render;
 pub mod scene;
-pub mod summarize;
 pub mod summary_doc;
 #[cfg(test)]
 use c2m_test_http as test_http;

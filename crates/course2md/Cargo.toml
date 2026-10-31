@@ -6,6 +6,7 @@ description = "Turn online course videos (YouTube/Bilibili) into image+transcrip
 license.workspace = true
 
 [dependencies]
+c2m-ai = { path = "../c2m-ai" }
 c2m-config = { path = "../c2m-config" }
 c2m-core = { path = "../c2m-core" }
 c2m-dispatch = { path = "../c2m-dispatch" }
@@ -20,7 +21,6 @@ dialoguer.workspace = true
 hound.workspace = true
 image.workspace = true
 model-fetch.workspace = true
-open.workspace = true
 ratex-layout.workspace = true
 ratex-parser.workspace = true
 ratex-svg.workspace = true
@@ -30,7 +30,6 @@ serde_json.workspace = true
 sha2.workspace = true
 slide-detect.workspace = true
 strum.workspace = true
-subtitle-parse.workspace = true
 sys-locale.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true

@@ -874,6 +874,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "c2m-ai"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "c2m-config",
+ "c2m-core",
+ "c2m-dispatch",
+ "c2m-i18n",
+ "c2m-process",
+ "c2m-protocol",
+ "c2m-test-http",
+ "dialoguer",
+ "open",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "strum 0.27.2",
+ "subtitle-parse",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "ureq 3.5.0",
+ "url",
+]
+
+[[package]]
 name = "c2m-config"
 version = "2.0.1"
 dependencies = [
@@ -1471,6 +1498,7 @@ version = "2.0.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
+ "c2m-ai",
  "c2m-config",
  "c2m-core",
  "c2m-dispatch",
@@ -1484,7 +1512,6 @@ dependencies = [
  "hound",
  "image",
  "model-fetch",
- "open",
  "ratex-layout",
  "ratex-parser",
  "ratex-svg",
@@ -1494,7 +1521,6 @@ dependencies = [
  "sha2 0.11.1",
  "slide-detect",
  "strum 0.27.2",
- "subtitle-parse",
  "sys-locale",
  "tempfile",
  "thiserror 2.0.21",
