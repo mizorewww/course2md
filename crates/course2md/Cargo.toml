@@ -12,16 +12,15 @@ c2m-dispatch = { path = "../c2m-dispatch" }
 c2m-i18n = { path = "../c2m-i18n" }
 c2m-process = { path = "../c2m-process" }
 c2m-protocol = { path = "../c2m-protocol" }
+c2m-source = { path = "../c2m-source" }
 anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
 dialoguer.workspace = true
 hound.workspace = true
 image.workspace = true
-indexmap.workspace = true
 model-fetch.workspace = true
 open.workspace = true
-qrcode.workspace = true
 ratex-layout.workspace = true
 ratex-parser.workspace = true
 ratex-svg.workspace = true

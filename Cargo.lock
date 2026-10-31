@@ -967,6 +967,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "c2m-source"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "c2m-config",
+ "c2m-core",
+ "c2m-dispatch",
+ "c2m-i18n",
+ "c2m-process",
+ "c2m-protocol",
+ "indexmap",
+ "qrcode",
+ "serde",
+ "serde_json",
+ "subtitle-parse",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "ureq 3.5.0",
+ "url",
+]
+
+[[package]]
 name = "c2m-test-http"
 version = "2.0.1"
 
@@ -1453,15 +1477,14 @@ dependencies = [
  "c2m-i18n",
  "c2m-process",
  "c2m-protocol",
+ "c2m-source",
  "c2m-test-http",
  "clap",
  "dialoguer",
  "hound",
  "image",
- "indexmap",
  "model-fetch",
  "open",
- "qrcode",
  "ratex-layout",
  "ratex-parser",
  "ratex-svg",

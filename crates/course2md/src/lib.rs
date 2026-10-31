@@ -1,6 +1,7 @@
 pub use c2m_config::{llm_settings, settings};
 pub use c2m_dispatch::{dispatch, job, pool};
 pub use c2m_protocol::{model_state, progress};
+pub use c2m_source::{auth, fetch, subtitle};
 
 /// The settings types, and the provider this machine defaults to.
 pub mod config {
@@ -15,13 +16,11 @@ pub use c2m_process::{error, media, runtime, tools, ytdlp};
 pub mod apple;
 pub mod artifact;
 pub mod asr;
-pub mod auth;
 pub mod checkpoint;
 pub mod cli;
 pub mod doctor;
 pub mod download;
 pub mod execution;
-pub mod fetch;
 pub mod hub;
 pub mod llm;
 pub mod login;
@@ -34,7 +33,6 @@ pub mod portable;
 pub mod provider;
 pub mod render;
 pub mod scene;
-pub mod subtitle;
 pub mod summarize;
 pub mod summary_doc;
 #[cfg(test)]

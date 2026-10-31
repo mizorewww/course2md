@@ -1,0 +1,27 @@
+[package]
+name = "c2m-source"
+version.workspace = true
+edition.workspace = true
+description = "Video sources: metadata, downloads, subtitles and Bilibili login"
+license.workspace = true
+publish = false
+
+[dependencies]
+c2m-config = { path = "../c2m-config" }
+c2m-core = { path = "../c2m-core" }
+c2m-dispatch = { path = "../c2m-dispatch" }
+c2m-i18n = { path = "../c2m-i18n" }
+c2m-process = { path = "../c2m-process" }
+c2m-protocol = { path = "../c2m-protocol" }
+anyhow.workspace = true
+indexmap.workspace = true
+qrcode.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+subtitle-parse.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ureq.workspace = true
+url.workspace = true
