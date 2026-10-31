@@ -147,7 +147,6 @@ pub fn hero_top(quiet: bool, compact: bool) -> f32 {
     }
 }
 
-/// The image viewer keeps this margin to each window edge up to its maximum
 
 /* ---------- Type scale (rems; 14px is 1rem) ---------- */
 pub const TEXT_AUX: Rems = rems(0.857);
@@ -924,7 +923,6 @@ pub fn accessible_text(
         .child(value)
 }
 
-/// Failure feedback uses one accessible alert form everywhere. Callers
 
 /// M3 search bar: a filled, borderless pill with a leading search icon. The
 /// field's own frame is off, so the bar draws the focus outline itself.

@@ -1359,7 +1359,7 @@ impl Desktop {
         let items = actions.iter().map(|action| {
             let (run, entity) = (action.run.clone(), entity.clone());
             MaterialMenuItem::new(action.label)
-                .leading(Icon::from(action.icon.clone()))
+                .leading(Icon::from(action.icon))
                 .disabled(!action.enabled)
                 .on_click(move |_, window, cx| {
                     let _ = entity.update(cx, |this, cx| run(this, window, cx));
@@ -1500,7 +1500,7 @@ impl Desktop {
                         let (run, entity) = (action.run.clone(), entity.clone());
                         menu.when(index == 1, PopupMenu::separator).item(
                             PopupMenuItem::new(action.label)
-                                .icon(action.icon.clone().component())
+                                .icon(action.icon.component())
                                 .disabled(!action.enabled)
                                 .on_click(move |_, window, cx| {
                                     let _ = entity.update(cx, |this, cx| run(this, window, cx));
