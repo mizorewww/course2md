@@ -132,11 +132,13 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
                     });
                 }
                 cx.background_executor().timer(delay).await;
-                // Draw now: a window hidden behind others gets no
-                // frames, and the image would show whatever it drew last. A first draw only
-                // starts an entrance or an exit, so draw again after it has played.
+                // Draw now: a window hidden behind others gets no frames, and the image would
+                // show whatever it drew last. A first draw only starts an entrance or an exit,
+                // so draw again after it has played. Without frames the theme's next-frame
+                // callback does not run either, so move the theme here.
                 for settle in [true, false] {
                     let _ = cx.update(|window, cx| {
+                        let _ = view.update(cx, |this, cx| this.prepare_theme(window, cx));
                         window.refresh();
                         window.draw(cx).clear(cx);
                     });

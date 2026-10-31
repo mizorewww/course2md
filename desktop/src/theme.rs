@@ -147,7 +147,6 @@ pub fn hero_top(quiet: bool, compact: bool) -> f32 {
     }
 }
 
-
 /* ---------- Type scale (rems; 14px is 1rem) ---------- */
 pub const TEXT_AUX: Rems = rems(0.857);
 pub const TEXT_BODY: Rems = rems(1.);
@@ -922,7 +921,6 @@ pub fn accessible_text(
         .aria_label(value.clone())
         .child(value)
 }
-
 
 /// M3 search bar: a filled, borderless pill with a leading search icon. The
 /// field's own frame is off, so the bar draws the focus outline itself.
