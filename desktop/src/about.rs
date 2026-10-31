@@ -65,16 +65,51 @@ pub fn fields(last: ui::Field) -> Vec<ui::Field> {
     });
     vec![
         ui::Field::content("about-identity", identity()),
-        ui::Field::link(
-            "about-project",
-            course2md::tr!("项目主页"),
-            |_, _, cx| cx.open_url("https://github.com/mizorewww/course2md"),
-        )
-        .icon(symbols::open_in_new()),
-        ui::Field::link("about-issue", course2md::tr!("发送反馈"), |_, _, cx| {
-            cx.open_url("https://github.com/mizorewww/course2md/issues")
-        })
-        .icon(symbols::chat_bubble()),
+        ui::Field::tile("about-links", |outer| {
+            let scale = TileScale::Regular;
+            let link = |id: &'static str,
+                        label: &'static str,
+                        icon: gpui_kit_material::icons::SymbolIcon,
+                        corners,
+                        url: &'static str| {
+                scale
+                    .button(id, corners)
+                    .flex_1()
+                    .min_w(rem(160.))
+                    .accessibility_label(label)
+                    .on_click(move |_, _, cx| cx.open_url(url))
+                    .child(
+                        scale
+                            .row()
+                            .child(
+                                Icon::from(icon)
+                                    .size(rem(24.))
+                                    .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                            )
+                            .child(scale.label(SharedString::from(format!("{id}-label")), label)),
+                    )
+            };
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .flex_wrap()
+                .gap(TILE_GAP)
+                .child(link(
+                    "about-project",
+                    course2md::tr!("项目主页"),
+                    symbols::open_in_new(),
+                    [outer[0], false, false, outer[3]],
+                    "https://github.com/mizorewww/course2md",
+                ))
+                .child(link(
+                    "about-issue",
+                    course2md::tr!("发送反馈"),
+                    symbols::chat_bubble(),
+                    [false, outer[1], outer[2], false],
+                    "https://github.com/mizorewww/course2md/issues",
+                ))
+                .into_any_element()
+        }),
         ui::Field::menu(
             "about-license",
             course2md::tr!("开源许可"),

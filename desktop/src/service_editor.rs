@@ -174,6 +174,7 @@ impl Desktop {
                 format!("default-service-{index}"),
                 label,
                 material_button(("configure-service", index), ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
                     .icon(symbols::add())
                     .child(add_service_label(purpose))
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -250,6 +251,7 @@ impl Desktop {
         } else {
             view = view.child(
                 material_button(("configure-task-service", index), ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
                     .icon(symbols::add())
                     .child(add_service_label(purpose))
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -585,6 +587,7 @@ impl Desktop {
             })
             .on_click(cx.listener(|this, _, _, cx| this.close_service_editor(cx)));
         let test = material_button("run-service-test", ButtonVariant::Outlined)
+            .tone(ButtonTone::Accent)
             .icon(symbols::science())
             .loading(busy, course2md::tr!("正在测试服务…"))
             .disabled(busy || awaiting_binding)
@@ -622,6 +625,7 @@ impl Desktop {
                 cx.listener(|this, _, window, cx| this.publish_service_editor(true, window, cx)),
             );
         MaterialDialog::new("service-editor-dialog")
+            .container(ColorRole::SURFACE)
             .headline(title)
             .size(DialogSize::Medium)
             .content(self.service_editor_content(
@@ -763,6 +767,7 @@ impl Desktop {
                 ListItem::new("service-also-default", course2md::tr!("设为默认服务"))
                     .supporting(course2md::tr!("新笔记默认使用这个服务"))
                     .trailing(ListTrailing::Switch(editor.also_default))
+                    .switch_icons(SwitchIcons::Both)
                     .segment([true; 4])
                     .disabled(awaiting_binding)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -892,6 +897,7 @@ impl Desktop {
         let kinds = [TestKind::Proofread, TestKind::Summary, TestKind::Vision];
         let picker = ai.then(|| {
             ConnectedButtonGroup::new("service-test-purpose", course2md::tr!("要测试的服务能力"))
+                .tone(ButtonTone::Neutral)
                 .segmented()
                 .button_size(ButtonSize::Small)
                 .options(kinds.map(|kind| (kind.contract(), kind.label())))

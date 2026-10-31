@@ -442,6 +442,8 @@ impl Desktop {
         Resource {
             id: id.into(),
             icon: symbols::auto_awesome().into(),
+            tint: Tint::Purple,
+            mono: false,
             title: course2md::tr!("ChatGPT 账号").into(),
             status: vec![self.codex.badge()],
             busy,

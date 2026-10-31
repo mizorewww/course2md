@@ -58,6 +58,7 @@ impl Desktop {
         let value = self.preferences.generation();
         let source = value.options.transcript_source;
         let group = ConnectedButtonGroup::new("default-text-source", course2md::tr!("文字来源"))
+            .tone(ButtonTone::Neutral)
             .segmented()
             .button_size(ButtonSize::Small)
             .options([
@@ -139,10 +140,13 @@ impl Desktop {
                 Self::field_with_apply(
                     TextField::new("subtitle-languages", &self.settings_ui.languages)
                         .outlined()
+                        .shape(TextFieldShape::Rounded)
                         .w_full()
                         .label(course2md::tr!("语言优先级"))
+                        .float_label(true)
                         .placeholder(course2md::tr!("按优先顺序填写语言代码，如 zh-Hans, en")),
                     material_button("apply-languages", ButtonVariant::Outlined)
+                        .tone(ButtonTone::Accent)
                         .icon(symbols::check_circle())
                         .child(course2md::tr!("应用"))
                         .on_click(
@@ -192,6 +196,7 @@ impl Desktop {
         let selected_provider = preferences.options.provider;
         let online = selected_provider == Some(AsrProvider::Api);
         let group = ConnectedButtonGroup::new("default-asr-device", course2md::tr!("识别方式"))
+            .tone(ButtonTone::Neutral)
             .segmented()
             .button_size(ButtonSize::Small)
             .options([
@@ -299,11 +304,13 @@ impl Desktop {
                 Self::field_with_apply(
                     TextField::new("custom-npu-model-input", &self.settings_ui.local_model)
                         .outlined()
+                        .shape(TextFieldShape::Rounded)
                         .w_full()
                         .label(course2md::tr!(
                             "模型名称或 Hugging Face 仓库（如 org/model）"
                         )),
                     material_button("apply-custom-npu-model", ButtonVariant::Outlined)
+                        .tone(ButtonTone::Accent)
                         .icon(symbols::check_circle())
                         .child(course2md::tr!("应用"))
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -440,6 +447,7 @@ impl Desktop {
             .child(
                 TextField::multi_line("proofread-rules", &self.settings_ui.prompt)
                     .outlined()
+                    .shape(TextFieldShape::Rounded)
                     .label(course2md::tr!("自定义校对规则"))
                     .w_full(),
             )
@@ -449,6 +457,7 @@ impl Desktop {
                     .flex_wrap()
                     .child(
                         material_button("apply-proofread-rules", ButtonVariant::Outlined)
+                            .tone(ButtonTone::Accent)
                             .icon(symbols::save())
                             .child(course2md::tr!("应用校对规则"))
                             .on_click(cx.listener(|this, _, _, cx| {

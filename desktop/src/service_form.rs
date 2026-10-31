@@ -407,8 +407,10 @@ impl Desktop {
         Some(
             TextField::new(id, form.input(field))
                 .outlined()
+                .shape(TextFieldShape::Rounded)
                 .w_full()
                 .label(label)
+                .float_label(true)
                 .placeholder(placeholder)
                 .read_only(read_only)
                 .error(error.is_some())

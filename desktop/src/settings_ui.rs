@@ -20,6 +20,7 @@ use course2md::execution::Component;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit::component::{
+    ActiveTheme as _,
     input::{InputEvent, InputState, TextareaState},
     menu::{ContextMenuExt, PopupMenuItem},
     scroll::Scrollbar,
@@ -207,11 +208,14 @@ pub(crate) fn dialog_body_height(window: &Window) -> Pixels {
 pub(crate) struct Resource {
     pub(crate) id: SharedString,
     pub(crate) icon: Icon,
+    pub(crate) tint: Tint,
     pub(crate) title: SharedString,
     pub(crate) status: Vec<(StatusKind, &'static str)>,
     pub(crate) busy: bool,
     /// Lines under the name, and whether each is a failure.
     pub(crate) lines: Vec<(String, bool)>,
+    /// The lines are data such as a path, set in the monospaced face.
+    pub(crate) mono: bool,
     /// What else belongs under the name: a problem and its repairs.
     pub(crate) below: Vec<AnyElement>,
     pub(crate) actions: Vec<AnyElement>,
@@ -243,7 +247,9 @@ impl Resource {
             text = text.child(if failed {
                 error_text(line_id, line).min_w_0().whitespace_normal()
             } else {
-                scale.support(line_id, line)
+                scale.support(line_id, line).when(self.mono, |line| {
+                    line.font_family(cx.theme().mono_font_family.clone())
+                })
             });
         }
         let text = text.children(self.below);
@@ -260,11 +266,7 @@ impl Resource {
                     .min_w_0()
                     .gap(rem(16.))
                     .items_center()
-                    .child(
-                        self.icon
-                            .size(rem(24.))
-                            .color(color(ColorRole::ON_SURFACE_VARIANT)),
-                    )
+                    .child(tinted_icon(self.icon, self.tint, ui::RESOURCE_ICON))
                     .child(text),
             )
             .when(!self.actions.is_empty(), |row| {
@@ -327,9 +329,9 @@ impl SettingsTab {
     fn icon(self) -> SymbolIcon {
         match self {
             Self::Appearance => symbols::palette(),
-            Self::Generation => symbols::article(),
+            Self::Generation => symbols::description(),
             Self::Services => symbols::cloud(),
-            Self::Storage => symbols::storage(),
+            Self::Storage => symbols::database(),
             Self::Application => symbols::info(),
         }
     }
@@ -344,6 +346,15 @@ impl SettingsTab {
         }
     }
     /// The labels of the settings a category contains, for settings search.
+    fn tint(self) -> Tint {
+        match self {
+            Self::Appearance => Tint::Orange,
+            Self::Generation => Tint::Blue,
+            Self::Services => Tint::Teal,
+            Self::Storage => Tint::Amber,
+            Self::Application => Tint::Green,
+        }
+    }
     fn keywords(self) -> Vec<&'static str> {
         match self {
             Self::Appearance => vec![
@@ -646,6 +657,7 @@ impl Desktop {
         MaterialTooltip::plain("settings-back-tip", label.clone()).trigger(
             IconButton::new("settings-back", symbols::arrow_back(), label)
                 .variant(IconButtonVariant::Tonal)
+                .tone(ButtonTone::Neutral)
                 .on_click(cx.listener(|this, _, window, cx| this.leave_settings(window, cx))),
         )
     }
@@ -666,7 +678,7 @@ impl Desktop {
                 .map(|&tab| {
                     ListItem::new(("settings-tab", tab.index()), tab.label())
                         .supporting(tab.subtitle())
-                        .leading(ListLeading::Icon(tab.icon().into()))
+                        .leading(ListLeading::Tinted(tab.icon().into(), tab.tint(), 40.))
                         .selected(self.settings_tab == tab)
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.select_settings_tab(tab, window, cx)
@@ -724,11 +736,15 @@ impl Desktop {
                             .items_center()
                             .gap(rem(16.))
                             .child(self.settings_back_button(cx))
-                            .child(page_heading("settings-page-title", course2md::tr!("设置"))),
+                            .child(ui::page_title(
+                                "settings-page-title",
+                                course2md::tr!("设置"),
+                            )),
                     )
                     .child(
                         SearchField::new(&self.settings_ui.search)
                             .id("settings-search")
+                            .field_style(SearchFieldStyle::Surface)
                             .leading(
                                 Icon::from(symbols::search())
                                     .size(rem(24.))
@@ -826,7 +842,7 @@ impl Desktop {
             .w_full()
             .min_w_0()
             .gap(rem(6.))
-            .child(h_flex().min_h(rem(56.)).child(page_heading(
+            .child(h_flex().min_h(rem(56.)).child(ui::page_title(
                 "settings-category-heading",
                 self.settings_tab.label(),
             )))
@@ -837,6 +853,7 @@ impl Desktop {
                 ))
             });
         let scroll = &self.scrolls[Page::Settings as usize];
+        let notices: Vec<_> = self.settings_notices(cx).into_iter().collect();
         let panel = v_flex()
             .relative()
             .id("settings-panel")
@@ -846,15 +863,17 @@ impl Desktop {
             .min_h_0()
             .h_full()
             .gap(rem(16.))
-            .child(
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .flex_shrink_0()
-                    .pr(rem(12.))
-                    .gap(rem(8.))
-                    .children(self.settings_notices(cx)),
-            )
+            .when(!notices.is_empty(), |panel| {
+                panel.child(
+                    v_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_shrink_0()
+                        .pr(rem(12.))
+                        .gap(rem(8.))
+                        .children(notices),
+                )
+            })
             .child(
                 div()
                     .id("settings-content-scroll")
@@ -944,14 +963,13 @@ impl Desktop {
                 .map(|version| self.service_row(version, window, cx))
                 .collect();
             fields.push(
-                ui::Field::link(
+                ui::Field::add(
                     format!("add-service-{}", purpose as usize),
                     add_label,
                     cx.listener(move |this, _, window, cx| {
                         this.open_settings_service_editor(purpose, None, window, cx);
                     }),
                 )
-                .icon(symbols::add())
                 .hint(hint),
             );
             view = view.child(self.settings_fields(heading_id, heading, fields));
@@ -1059,10 +1077,16 @@ impl Desktop {
         let row = Resource {
             id: SharedString::from(format!("saved-service-{id}")),
             icon: service_form::protocol_icon(protocol).into(),
+            tint: if purpose == ServicePurpose::Ai {
+                Tint::Purple
+            } else {
+                Tint::Teal
+            },
             title: version.config.name.clone().into(),
             status,
             busy: false,
             lines,
+            mono: false,
             below: Vec::new(),
             actions: vec![menu.into_any_element()],
         }
@@ -1632,6 +1656,7 @@ impl Desktop {
                         "restart-onboarding-row",
                         course2md::tr!("首次设置"),
                         material_button("restart-onboarding", ButtonVariant::Outlined)
+                            .tone(ButtonTone::Accent)
                             .icon(symbols::restart_alt())
                             .child(course2md::tr!("重新运行"))
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -1743,39 +1768,72 @@ impl Desktop {
             .icon(symbols::refresh())
             .child(course2md::tr!("重新检查"))
             .on_click(cx.listener(|this, _, _, cx| this.refresh_environment(cx)));
-        let conclusion = ui::async_status(
-            "diagnostic-summary",
-            &if failed == 0 {
-                ui::AsyncStatus::Success(course2md::tr!("{} 项检查全部通过", checked).into())
-            } else {
-                ui::AsyncStatus::Warning(course2md::tr!("{} 项检查未通过", failed).into())
-            },
-            Some(recheck.into_any_element()),
-            cx,
-        );
-        let mut fields = vec![ui::Field::content(
-            "diagnostic-conclusion",
-            div().children(conclusion),
-        )];
-        fields.extend(
-            capabilities
-                .iter()
-                .enumerate()
-                .map(|(index, (label, ready, unused))| {
-                    let (kind, state) = if *unused {
-                        (StatusKind::Neutral, course2md::tr!("当前未使用"))
-                    } else if *ready {
-                        (StatusKind::Success, course2md::tr!("可用"))
-                    } else {
-                        (StatusKind::Warning, course2md::tr!("待修复"))
-                    };
-                    ui::Field::inline(
-                        format!("diagnostic-capability-{index}"),
-                        *label,
-                        status_chip(kind).child(state),
+        let (summary_icon, summary_tint, summary_title, summary_detail) = if failed == 0 {
+            (
+                symbols::check_circle(),
+                Tint::Green,
+                course2md::tr!("一切正常"),
+                course2md::tr!("{} 项检查全部通过", checked),
+            )
+        } else {
+            (
+                symbols::warning(),
+                Tint::Amber,
+                course2md::tr!("需要修复"),
+                course2md::tr!("{} 项检查未通过", failed),
+            )
+        };
+        // The capabilities sit on the summary's text ruler.
+        let chips = capabilities
+            .iter()
+            .enumerate()
+            .map(|(index, (label, ready, unused))| {
+                let (kind, state) = if *unused {
+                    (StatusKind::Neutral, course2md::tr!("当前未使用"))
+                } else if *ready {
+                    (StatusKind::Success, course2md::tr!("可用"))
+                } else {
+                    (StatusKind::Warning, course2md::tr!("待修复"))
+                };
+                status_chip_outlined(kind)
+                    .id(("diagnostic-capability", index))
+                    .role(Role::Label)
+                    .aria_label(course2md::tr!("{}：{}", *label, state))
+                    .child(*label)
+            });
+        let summary = v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(16.))
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .items_center()
+                    .flex_wrap()
+                    .gap(rem(16.))
+                    .child(tinted_icon(summary_icon, summary_tint, ui::RESOURCE_ICON))
+                    .child(
+                        TileScale::Regular
+                            .text(
+                                "diagnostic-summary",
+                                summary_title,
+                                Some(summary_detail.into()),
+                            )
+                            .flex_basis(rem(200.)),
                     )
-                }),
-        );
+                    .child(recheck),
+            )
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .pl(rem(ui::RESOURCE_ICON_SIZE + 16.))
+                    .gap(rem(8.))
+                    .flex_wrap()
+                    .children(chips),
+            );
+        let mut fields = vec![ui::Field::content("diagnostic-conclusion", summary)];
         if !speech_service
             && !local_ready
             && let Some(issue) = self
@@ -1792,6 +1850,7 @@ impl Desktop {
                 "repair-bundled-engine",
                 course2md::tr!("转换程序无法运行，重新安装应用后笔记仍会保留"),
                 material_button("download-repair-app", ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
                     .icon(symbols::download())
                     .child(course2md::tr!("下载安装包"))
                     .on_click(|_, _, cx| {

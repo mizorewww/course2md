@@ -1029,6 +1029,7 @@ impl Desktop {
             .as_ref()
             .is_some_and(|cancel| cancel.load(Ordering::Relaxed));
         let dialog = MaterialDialog::new("storage-dialog")
+            .container(ColorRole::SURFACE)
             .headline(storage.title())
             .width(if is_compact(window) { 320. } else { 560. })
             .dismiss_on_scrim(false)
@@ -1449,19 +1450,11 @@ impl Desktop {
             .chain(unconfirmed)
             .filter_map(|(id, status)| ui::async_status((id, index), &status, None, cx));
         let open_root = library.root.clone();
-        let open = MaterialTooltip::plain(
-            ("open-storage-location-tip", index),
-            course2md::tr!("打开位置"),
-        )
-        .trigger(
-            IconButton::new(
-                ("open-storage-location", index),
-                symbols::folder_open(),
-                course2md::tr!("打开位置"),
-            )
+        let open = material_button(("open-storage-location", index), ButtonVariant::Tonal)
+            .icon(symbols::folder_open())
+            .child(course2md::tr!("打开位置"))
             .disabled(offline)
-            .on_click(move |_, _, cx| open_location(&open_root, cx)),
-        );
+            .on_click(move |_, _, cx| open_location(&open_root, cx));
         let status = [
             (default && several).then_some((StatusKind::Tonal, course2md::tr!("默认保存位置"))),
             offline.then_some((StatusKind::Warning, course2md::tr!("暂时不可访问"))),
@@ -1480,6 +1473,8 @@ impl Desktop {
         let row = Resource {
             id: format!("storage-location-row-{index}").into(),
             icon: symbols::folder().into(),
+            tint: Tint::Amber,
+            mono: true,
             title: library.name.clone().into(),
             status: status.into_iter().flatten().collect(),
             busy: false,
@@ -1534,23 +1529,14 @@ impl Desktop {
         }
         let add = cx.listener(|this, _, window, cx| this.register_storage_location(window, cx));
         let locations = locations.tile(move |outer| {
-            let scale = TileScale::Regular;
-            scale
-                .button("register-storage-location", outer)
-                .accessibility_label(course2md::tr!("添加笔记库位置"))
-                .child(
-                    scale
-                        .row()
-                        .child(
-                            Icon::from(symbols::add()).color(color(ColorRole::ON_SURFACE_VARIANT)),
-                        )
-                        .child(scale.label(
-                            "register-storage-location-label",
-                            course2md::tr!("添加笔记库位置"),
-                        )),
-                )
-                .on_click(add)
-                .into_any_element()
+            ui::add_row(
+                "register-storage-location",
+                course2md::tr!("添加笔记库位置"),
+                None,
+                false,
+                outer,
+                add,
+            )
         });
         v_flex()
             .w_full()

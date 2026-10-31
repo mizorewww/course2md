@@ -211,7 +211,8 @@ impl Desktop {
         if let Some(login) = self.account.login_action() {
             actions.push(
                 material_button("account-login", ButtonVariant::Outlined)
-                    .icon(symbols::login())
+                    .tone(ButtonTone::Accent)
+                    .icon(Icon::new("icons/bilibili.svg").color(rgb(0x00a1d6)))
                     .child(login)
                     .on_click(
                         cx.listener(|this, _, window, cx| this.open_account_dialog(window, cx)),
@@ -254,6 +255,7 @@ impl Desktop {
         Resource {
             id: "bilibili-account".into(),
             icon: symbols::tv().into(),
+            tint: Tint::Pink,
             title: title.into(),
             status: vec![status],
             busy: self.account.checking,
@@ -263,6 +265,7 @@ impl Desktop {
                 .into_iter()
                 .chain([(policy.to_owned(), false)])
                 .collect(),
+            mono: false,
             below: Vec::new(),
             actions,
         }
@@ -588,6 +591,7 @@ impl Desktop {
         })
         .on_click(close);
         MaterialDialog::new("bilibili-dialog")
+            .container(ColorRole::SURFACE)
             .headline(course2md::tr!("登录 Bilibili"))
             .width(DIALOG_LOGIN_WIDTH)
             .content(self.account_dialog_content(state, window, cx))

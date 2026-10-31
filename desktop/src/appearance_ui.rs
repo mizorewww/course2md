@@ -14,7 +14,7 @@ use gpui_kit_material::{
 
 /// Between palette cards, and the narrowest a card gets, in design px.
 const CARD_GAP: f32 = 16.;
-const CARD_MIN_WIDTH: f32 = 168.;
+const CARD_MIN_WIDTH: f32 = 150.;
 
 /// As many columns as `width` holds, each following the text size so a longer name
 /// or larger text reduces the columns before the names collide.
@@ -123,58 +123,54 @@ impl Desktop {
             cx,
         );
         let dark = palette.is_dark();
-        MaterialCard::new(
-            ("palette", palette as usize),
-            if selected {
-                CardVariant::Filled
-            } else {
-                CardVariant::Outlined
-            },
-        )
-        .w_full()
-        .overflow_hidden()
-        .accessibility_label(course2md::tr!(
-            "{}，{}{}",
-            palette.name(),
-            mode_label(dark),
-            if selected {
-                course2md::tr!("，已选择")
-            } else {
-                ""
-            }
-        ))
-        .on_click(cx.listener(move |this, _, _, cx| {
-            let saved = &this.preferences.application().appearance;
-            if (if dark { saved.dark } else { saved.light }) == palette {
-                return;
-            }
-            let mut next = this.application_edit_base();
-            next.appearance.select(palette);
-            this.commit_application(next, cx);
-        }))
-        .child(sample(palette, rem(120.)).rounded_t(RADIUS_CARD))
-        .child(
-            h_flex()
-                .w_full()
-                .min_h(rem(48.))
-                .gap(rem(8.))
-                .p(rem(12.))
-                .items_center()
-                .child(
-                    TileScale::Regular
-                        .label(("palette-name", palette as usize), palette.name())
-                        .flex_1()
-                        .min_w_0()
-                        .whitespace_normal(),
-                )
-                .child(
-                    div().flex_shrink_0().opacity(amount).child(
-                        Icon::from(symbols::check_circle())
-                            .size(rem(18.))
-                            .color(color(ColorRole::PRIMARY)),
+        MaterialCard::new(("palette", palette as usize), CardVariant::Outlined)
+            .w_full()
+            .overflow_hidden()
+            .accessibility_label(course2md::tr!(
+                "{}，{}{}",
+                palette.name(),
+                mode_label(dark),
+                if selected {
+                    course2md::tr!("，已选择")
+                } else {
+                    ""
+                }
+            ))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let saved = &this.preferences.application().appearance;
+                if (if dark { saved.dark } else { saved.light }) == palette {
+                    return;
+                }
+                let mut next = this.application_edit_base();
+                next.appearance.select(palette);
+                this.commit_application(next, cx);
+            }))
+            .child(sample(palette, rem(120.)).rounded_t(RADIUS_CARD))
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_h(rem(48.))
+                    .gap(rem(8.))
+                    .p(rem(12.))
+                    .items_center()
+                    .when(selected, |caption| {
+                        caption.bg(color(ColorRole::SECONDARY_CONTAINER))
+                    })
+                    .child(
+                        TileScale::Regular
+                            .label(("palette-name", palette as usize), palette.name())
+                            .flex_1()
+                            .min_w_0()
+                            .whitespace_normal(),
+                    )
+                    .child(
+                        div().flex_shrink_0().opacity(amount).child(
+                            Icon::from(symbols::check_circle())
+                                .size(rem(18.))
+                                .color(color(ColorRole::PRIMARY)),
+                        ),
                     ),
-                ),
-        )
+            )
     }
 
     /// The palette chooser: every palette of one mode as a real preview. A choice
@@ -215,6 +211,7 @@ impl Desktop {
             );
         let close = cx.listener(|this, _: &ClickEvent, _, cx| this.close_palette_picker(cx));
         MaterialDialog::new("palette-dialog")
+            .container(ColorRole::SURFACE)
             .headline(mode_label(dark))
             .size(DialogSize::Large)
             .content(
@@ -311,11 +308,19 @@ impl Desktop {
                     .child(
                         scale
                             .row()
-                            .child(scale.text(
-                                ("palette-preset-label", usize::from(dark)),
-                                mode_label(dark),
-                                Some(palette.name().into()),
-                            ))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(scale.support(
+                                        ("palette-preset-mode", usize::from(dark)),
+                                        mode_label(dark),
+                                    ))
+                                    .child(scale.label(
+                                        ("palette-preset-name", usize::from(dark)),
+                                        palette.name(),
+                                    )),
+                            )
                             .when(is_dark() == dark, |row| {
                                 row.child(
                                     status_chip(StatusKind::Tonal).child(course2md::tr!("使用中")),
@@ -372,6 +377,7 @@ impl Desktop {
     ) -> AnyElement {
         let appearance = self.displayed_appearance();
         let modes = ConnectedButtonGroup::new("appearance-mode", course2md::tr!("外观模式"))
+            .tone(ButtonTone::Neutral)
             .segmented()
             .button_size(ButtonSize::Small)
             .options([
@@ -410,6 +416,7 @@ impl Desktop {
         let scales = crate::preferences::FONT_SCALES;
         let font_scale =
             ConnectedButtonGroup::new("app-font-scale", course2md::tr!("界面文字大小"))
+                .tone(ButtonTone::Neutral)
                 .segmented()
                 .button_size(ButtonSize::Small)
                 .options(scales.into_iter().map(|scale| {

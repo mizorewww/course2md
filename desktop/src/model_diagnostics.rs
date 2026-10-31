@@ -674,6 +674,7 @@ impl Desktop {
         if preparing {
             actions = actions.child(
                 material_button(id("pause"), ButtonVariant::Outlined)
+                    .tone(ButtonTone::Accent)
                     .icon(symbols::pause())
                     .child(if self.cancelling {
                         course2md::tr!("正在暂停…")
@@ -1050,6 +1051,7 @@ impl Desktop {
                     SharedString::from(format!("choose-available-model-{}", provider.as_str())),
                     ButtonVariant::Outlined,
                 )
+                .tone(ButtonTone::Accent)
                 .icon(symbols::mic())
                 .child(course2md::tr!(
                     "默认改用 {}",

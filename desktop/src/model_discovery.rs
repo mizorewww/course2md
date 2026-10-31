@@ -454,8 +454,10 @@ pub fn model_field(
     };
     let field = TextField::new(child("input"), input)
         .outlined()
+        .shape(TextFieldShape::Rounded)
         .w_full()
         .label(course2md::tr!("模型"))
+        .float_label(true)
         .placeholder(course2md::tr!("模型 ID，或从服务获取列表"))
         .disabled(disabled)
         .trailing_icon(trailing)

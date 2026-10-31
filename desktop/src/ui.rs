@@ -154,8 +154,10 @@ enum Control {
     Inline(AnyElement),
     /// A wide control under the label: a button group, a text field.
     Below(AnyElement),
-    /// A row that goes somewhere or adds something.
+    /// A row that goes somewhere.
     Link(RowClick),
+    /// A row that adds to the list above it: a plus in the rows' icon column.
+    Add(RowClick),
     /// A row that shows or hides its detail in place.
     Disclosure(bool, RowClick, Box<Div>),
     /// Content with the row's inset and no label of its own.
@@ -164,12 +166,25 @@ enum Control {
     Tile(Box<dyn FnOnce(OuterCorners) -> AnyElement>),
 }
 
+/// A page's title: the kit's page heading one step up the type scale, so a page opens with
+/// more presence than its section headings. It leaves the kit's role and color alone.
+pub fn page_title(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Div {
+    let role = TypeRole::HeadlineMedium.scale();
+    page_heading(id, text)
+        .text_size(role.font_size)
+        .line_height(role.line_height)
+}
+
+/// The tinted circle of a resource row: an account, a service, a library location. The
+/// add row's plus and later lines of a resource keep to this column.
+pub const RESOURCE_ICON: Rems = rem(RESOURCE_ICON_SIZE);
+pub const RESOURCE_ICON_SIZE: f32 = 48.;
+
 /// One row of a [`field_table`].
 pub struct Field {
     id: SharedString,
     label: SharedString,
     hint: Option<SharedString>,
-    icon: Option<Icon>,
     disabled: bool,
     control: Control,
 }
@@ -180,7 +195,6 @@ impl Field {
             id: id.into(),
             label: label.into(),
             hint: None,
-            icon: None,
             disabled: false,
             control,
         }
@@ -228,6 +242,15 @@ impl Field {
         Self::new(id, label, Control::Link(Box::new(on_click)))
     }
 
+    /// A row that adds to the resources above it, its plus in their icon column.
+    pub fn add(
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        Self::new(id, label, Control::Add(Box::new(on_click)))
+    }
+
     /// `detail` stays in the tree while closed, so closing can play.
     pub fn disclosure(
         id: impl Into<SharedString>,
@@ -252,12 +275,6 @@ impl Field {
         build: impl FnOnce(OuterCorners) -> AnyElement + 'static,
     ) -> Self {
         Self::new(id, "", Control::Tile(Box::new(build)))
-    }
-
-    /// A leading icon for a menu or link row.
-    pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
-        self.icon = Some(icon.into());
-        self
     }
 
     /// Supporting text under the label; empty means none.
@@ -298,7 +315,6 @@ impl Field {
             id,
             label,
             hint,
-            icon,
             disabled,
             control,
         } = self;
@@ -309,6 +325,7 @@ impl Field {
                 scale.text(text_id, label.clone(), hint),
                 MaterialSwitch::new(ElementId::Name(id), label)
                     .checked(on)
+                    .icons(SwitchIcons::Both)
                     .disabled(disabled)
                     .on_change(move |on, window, cx| on_change(on, window, cx)),
             ),
@@ -326,7 +343,6 @@ impl Field {
                     .child(
                         scale
                             .row()
-                            .children(icon)
                             .child(scale.text(text_id, label, value))
                             .child(tile_chevron()),
                     );
@@ -358,11 +374,11 @@ impl Field {
                 .child(
                     scale
                         .row()
-                        .children(icon)
                         .child(scale.text(text_id, label, hint))
                         .child(tile_chevron()),
                 )
                 .into_any_element(),
+            Control::Add(on_click) => add_row(id, label, hint, disabled, outer, on_click),
             Control::Disclosure(open, on_toggle, detail) => {
                 let detail_id = ElementId::Name(format!("{id}-detail").into());
                 let button_corners = [outer[0], outer[1], outer[2] && !open, outer[3] && !open];
@@ -401,6 +417,43 @@ impl Field {
             Control::Tile(build) => build(outer),
         }
     }
+}
+
+/// A row that adds to the resources above it. Their icon column holds its plus.
+pub fn add_row(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    hint: Option<SharedString>,
+    disabled: bool,
+    outer: OuterCorners,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let scale = TileScale::Regular;
+    let (id, label) = (id.into(), label.into());
+    let text_id = ElementId::Name(format!("{id}-label").into());
+    scale
+        .button(ElementId::Name(id), outer)
+        .accessibility_label(label.clone())
+        .disabled(disabled)
+        .on_click(on_click)
+        .child(
+            scale
+                .row()
+                .gap(rem(16.))
+                .child(
+                    h_flex()
+                        .size(RESOURCE_ICON)
+                        .flex_shrink_0()
+                        .justify_center()
+                        .child(
+                            Icon::from(symbols::add())
+                                .size(rem(24.))
+                                .color(color(ColorRole::ON_SURFACE)),
+                        ),
+                )
+                .child(scale.text(text_id, label, hint)),
+        )
+        .into_any_element()
 }
 
 /// A section of settings rows: its title and one connected tile per [`Field`]. Rows
@@ -633,6 +686,7 @@ pub fn confirm_host(cx: &App) -> Option<AnyElement> {
         });
     Some(
         MaterialDialog::new("confirm")
+            .container(ColorRole::SURFACE)
             .headline(confirm.title.clone())
             .when(!confirm.text.is_empty(), |dialog| {
                 dialog.supporting_text(confirm.text.join("\n"))
@@ -765,6 +819,7 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let dismissed = self.0.clone();
             MaterialDialog::new("chooser")
+                .container(ColorRole::SURFACE)
                 .headline("Chooser")
                 .content(div().occlude().w_full().h(px(200.)))
                 .modal(true)
