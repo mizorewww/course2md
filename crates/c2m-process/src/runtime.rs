@@ -277,7 +277,7 @@ pub fn wait_ready(
 /// 必须禁止跟随重定向。这里在构造处统一内置，不靠每个调用点自觉。
 /// 需要 connect/read 细分超时的场景（fetch.rs 元数据、download.rs 大文件下载）
 /// 从 [`agent_builder`] 自行配置。
-pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
+pub fn http_agent(timeout: Duration) -> ureq::Agent {
     agent_builder()
         .timeout_global(Some(timeout))
         .build()
@@ -286,13 +286,13 @@ pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
 
 /// [`http_agent`] whose error statuses arrive as responses, so that a caller can
 /// read the body. Whoever uses it checks the status; `dispatch::receive` does.
-pub(crate) fn http_agent_keeping_errors(timeout: Duration) -> ureq::Agent {
+pub fn http_agent_keeping_errors(timeout: Duration) -> ureq::Agent {
     let agent = agent_builder().timeout_global(Some(timeout));
     agent.http_status_as_error(false).build().new_agent()
 }
 
 /// A menu that Esc cancels with `cancelled` as the error, not accepting the default.
-pub(crate) fn choose(
+pub fn choose(
     prompt: &str,
     items: &[impl ToString],
     default: usize,
@@ -307,14 +307,14 @@ pub(crate) fn choose(
 }
 
 /// Whether a person is at both ends of this terminal, so a prompt can be answered.
-pub(crate) fn interactive() -> bool {
+pub fn interactive() -> bool {
     use std::io::IsTerminal as _;
     std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
 /// What every agent starts from: no redirects (see [`http_agent`]), and no proxy from
 /// the environment, which would otherwise also catch local services on loopback.
-pub(crate) fn agent_builder() -> ureq::config::ConfigBuilder<ureq::typestate::AgentScope> {
+pub fn agent_builder() -> ureq::config::ConfigBuilder<ureq::typestate::AgentScope> {
     ureq::Agent::config_builder().proxy(None).max_redirects(0)
 }
 
@@ -433,7 +433,7 @@ pub fn free_port() -> Result<u16> {
 
 /// 临时工作目录（chunk / worker 脚本等中间产物）：创建失败立即报错，
 /// Drop 时尽力清理整个目录。目录名带 tag 与随机后缀，避免并发实例冲突。
-pub(crate) fn temp_work_dir(tag: &str) -> Result<tempfile::TempDir> {
+pub fn temp_work_dir(tag: &str) -> Result<tempfile::TempDir> {
     tempfile::Builder::new()
         .prefix(&format!("course2md-{tag}-"))
         .tempdir()

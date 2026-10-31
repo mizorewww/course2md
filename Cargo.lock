@@ -895,6 +895,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "c2m-process"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "c2m-core",
+ "c2m-i18n",
+ "dialoguer",
+ "getrandom 0.4.3",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "ureq 3.5.0",
+ "which",
+]
+
+[[package]]
 name = "c2m-test-http"
 version = "2.0.1"
 
@@ -1377,6 +1397,7 @@ dependencies = [
  "base64 0.23.1",
  "c2m-core",
  "c2m-i18n",
+ "c2m-process",
  "c2m-test-http",
  "clap",
  "dialoguer",
@@ -1385,7 +1406,6 @@ dependencies = [
  "image",
  "indexmap",
  "indicatif",
- "libc",
  "model-fetch",
  "open",
  "qrcode",
