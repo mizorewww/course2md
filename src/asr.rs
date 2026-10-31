@@ -39,6 +39,8 @@ const API_HTTP_TIMEOUT: Duration = Duration::from_secs(120);
 const LLAMA_HTTP_TIMEOUT: Duration = Duration::from_secs(180);
 /// ffmpeg silencedetect 上限：整段音频 VAD 只做一次，但不得无限挂死
 const VAD_TIMEOUT: Duration = Duration::from_secs(900);
+/// ffmpeg 单段切音频上限（chunk 最长 max_speech 秒，处理应远快于此）
+const CUT_TIMEOUT: Duration = Duration::from_secs(120);
 /// 云端 STT 并发 worker 数：网络往返是主要瓶颈
 const WORKERS: usize = 4;
 /// 空结果熔断：VAD 已判定这些分片含语音，端点却在没有任何成功的情况下
@@ -48,6 +50,10 @@ const EMPTY_RESULT_TRIPWIRE: usize = 10;
 
 /// A loaded speech engine. Dropping it stops whatever it started.
 pub(crate) trait Transcribe: Sync {
+    /// Writes one chunk of the task's audio for [`Self::transcribe`].
+    fn cut(&self, wav: &Path, seg: Seg, chunk: &Path) -> Result<()> {
+        cut_wav(wav, seg.cut_start, seg.cut_end, chunk)
+    }
     /// The text of one 16 kHz mono WAV chunk; empty when it holds no speech.
     fn transcribe(&self, chunk: &Path, seg: Seg) -> Result<String>;
     /// How many chunks may run at once.
@@ -208,7 +214,8 @@ fn transcribe_all(
     let state = std::sync::Mutex::new((&mut *cp, EmptyResults::default()));
     let result = crate::runtime::map_pool(pending, engine.workers(), control, |(index, seg)| {
         let chunk = tmp.path().join(format!("c{index:04}.wav"));
-        let text = cut_wav(wav, seg.cut_start, seg.cut_end, &chunk)
+        let text = engine
+            .cut(wav, seg, &chunk)
             .and_then(|()| engine.transcribe(&chunk, seg));
         let _ = std::fs::remove_file(&chunk);
         let text = text?;
@@ -542,6 +549,35 @@ impl CloudSpeech {
 }
 
 impl Transcribe for CloudSpeech {
+    /// A paid request's ledger identity hashes these bytes, so they must not change: a
+    /// request sent but unconfirmed by an earlier version is found again by this identity
+    /// and is never resent without authorization. Hence ffmpeg, with exactly these
+    /// arguments, and not the in-process cut.
+    fn cut(&self, wav: &Path, seg: Seg, chunk: &Path) -> Result<()> {
+        let mut cmd = Command::new(crate::tools::program("ffmpeg"));
+        cmd.args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-ss",
+        ])
+        .arg(format!("{:.3}", seg.cut_start))
+        .arg("-t")
+        .arg(format!("{:.3}", (seg.cut_end - seg.cut_start).max(0.05)))
+        .arg("-i")
+        .arg(wav)
+        .args(["-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"])
+        .arg(chunk);
+        let out = crate::runtime::run_bounded("ffmpeg", &mut cmd, CUT_TIMEOUT)?;
+        anyhow::ensure!(
+            out.status.success(),
+            crate::tr!("无法切分音频 / Could not split audio")
+        );
+        Ok(())
+    }
+
     fn transcribe(&self, chunk: &Path, seg: Seg) -> Result<String> {
         use base64::Engine as _;
         let bytes = std::fs::read(chunk).with_context(|| {
@@ -967,7 +1003,7 @@ fn invert_silence(dur: f64, sil: &[(f64, f64)]) -> Vec<(f64, f64)> {
 }
 
 /// One chunk of the task's audio as its own file, cut in process: the audio is
-/// `extract_audio`'s PCM WAV, so this needs no ffmpeg start per chunk.
+/// `extract_audio`'s PCM WAV, so a local backend needs no ffmpeg start per chunk.
 fn cut_wav(src: &Path, start: f64, end: f64, dest: &Path) -> Result<()> {
     let cut = || -> Result<()> {
         let mut reader = open_wav(src)?;
@@ -1268,6 +1304,139 @@ mod tests {
 #[cfg(test)]
 mod cloud_tests {
     use super::*;
+
+    /// A receipt as the version before the in-process cut wrote it: its identity hashes
+    /// a chunk from this exact ffmpeg command. The task must find that receipt, stop
+    /// without sending, and resend only under the receipt's own authorization.
+    #[test]
+    fn a_request_left_unconfirmed_by_an_earlier_version_waits_for_authorization() {
+        use crate::dispatch::{ControlSource, Receipt, SNAPSHOT_PREFIX, State};
+        if which::which("ffmpeg").is_err() {
+            assert!(std::env::var_os("CI").is_none(), "ffmpeg is required in CI");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("speech.wav");
+        let chunk = dir.path().join("old-chunk.wav");
+        let ffmpeg = |args: Vec<String>| {
+            let status = Command::new("ffmpeg").args(&args).status().unwrap();
+            assert!(status.success(), "{args:?}");
+        };
+        let text = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();
+        let tone = "aevalsrc=sin(440*2*PI*t):d=3:s=16000";
+        let (quiet, input) = (
+            ["-hide_banner", "-loglevel", "error"],
+            ["-f", "lavfi", "-i"],
+        );
+        let mut args = text(&quiet);
+        args.extend(text(&input));
+        args.extend(text(&[
+            tone,
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            wav.to_str().unwrap(),
+        ]));
+        ffmpeg(args);
+        let segs = ffmpeg_vad(&wav, 30.).unwrap();
+        assert_eq!(segs.len(), 1, "{segs:?}");
+        let seg = segs[0];
+        let start = format!("{:.3}", seg.cut_start);
+        let length = format!("{:.3}", (seg.cut_end - seg.cut_start).max(0.05));
+        let mut args = text(&quiet);
+        args.extend(text(&[
+            "-nostdin", "-y", "-ss", &start, "-t", &length, "-i",
+        ]));
+        args.extend(text(&[wav.to_str().unwrap(), "-ac", "1", "-ar", "16000"]));
+        args.extend(text(&["-c:a", "pcm_s16le", chunk.to_str().unwrap()]));
+        ffmpeg(args);
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let api = AsrApi {
+            base_url: base,
+            api_key: "key".into(),
+            model: "test-asr".into(),
+            mode: AsrApiMode::Transcriptions,
+        };
+        let endpoint = crate::config::asr_endpoint(&api).unwrap();
+        // The formulas here are the old version's, written out on purpose.
+        let digest = crate::execution::digest;
+        let payload = json!({"model":"test-asr","mode":api.mode,"audio_sha256":digest(&std::fs::read(&chunk).unwrap()),"segment_start":seg.start,"segment_end":seg.end,"cut_start":seg.cut_start,"cut_end":seg.cut_end});
+        let service_version = format!("{SNAPSHOT_PREFIX}{}", digest(endpoint.as_bytes()));
+        let stable_id = digest(&serde_json::to_vec(&json!({"service_version":service_version,"purpose":"transcription","endpoint":endpoint,"payload":payload})).unwrap());
+        let requests = dir.path().join("requests");
+        std::fs::create_dir_all(&requests).unwrap();
+        let receipt_path = requests.join(format!("{stable_id}.json"));
+        let receipt = Receipt {
+            schema: 1,
+            stable_id: stable_id.clone(),
+            request_id: format!("{stable_id}.1"),
+            purpose: "transcription".into(),
+            description: String::new(),
+            service_version,
+            attempt: 1,
+            state: State::Sending,
+            http_status: None,
+            response: None,
+            message: None,
+            unsupported_response_format: false,
+            retry_authorized: None,
+        };
+        std::fs::write(&receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+        let control_path = dir.path().join("control.json");
+        let open_control = || {
+            crate::dispatch::TaskControl::open(
+                dir.path(),
+                ControlSource {
+                    control_path: Some(control_path.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let identity = AsrIdentity::new("api", "test-asr", 30.);
+        let run = |control: &TaskControl| {
+            let mut cp = Checkpoint::open(dir.path(), true, &identity).unwrap();
+            transcribe_all(Backend::Api(api.clone()), &wav, 30., &mut cp, control)
+        };
+        let saved = || -> Receipt {
+            serde_json::from_slice(&std::fs::read(&receipt_path).unwrap()).unwrap()
+        };
+
+        // Without authorization: blocked on this receipt, and nothing reached the service.
+        listener.set_nonblocking(true).unwrap();
+        let error = run(&open_control()).unwrap_err();
+        let failure = error.downcast_ref::<crate::dispatch::Failure>();
+        assert!(failure.is_some_and(|f| f.uncertain()), "{error:#}");
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "the request was sent again"
+        );
+        // Matched by identity: this exact receipt moved on, and no other was started.
+        assert_eq!(saved().state, State::Uncertain);
+        assert_eq!(saved().attempt, 1);
+        assert_eq!(std::fs::read_dir(&requests).unwrap().count(), 1);
+
+        // Authorizing that attempt sends it once more, under the same identity.
+        std::fs::write(
+            &control_path,
+            serde_json::to_vec(&json!({"resend":[format!("{stable_id}.1")]})).unwrap(),
+        )
+        .unwrap();
+        listener.set_nonblocking(false).unwrap();
+        let server = crate::test_http::serve_on(
+            listener,
+            vec![crate::test_http::json_response(r#"{"text":"spoken"}"#)],
+        );
+        let events = run(&open_control()).unwrap();
+        assert_eq!(server.join().unwrap().len(), 1);
+        assert_eq!(events[0].text, "spoken");
+        assert_eq!(saved().state, State::Completed);
+        assert_eq!(saved().attempt, 2);
+    }
 
     /// Cloud transcription runs its chunks on the shared worker pool and
     /// records every result into the checkpoint, so a resumed task sends
