@@ -1,5 +1,6 @@
 //! Read-only cache evidence. Finding files is deliberately distinct from loading a model.
 use crate::config::AsrProvider;
+use crate::execution::hex;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -51,28 +52,20 @@ struct Receipt {
 
 pub fn inspect(provider: AsrProvider, model: &str, root: &Path) -> Result<LocalModelStatus> {
     let home = crate::config::home_dir().unwrap_or_else(crate::config::cache_dir);
-    let apple_base = ["QWEN3_CACHE_DIR", "QWEN3_ASR_CACHE_DIR"]
-        .into_iter()
-        .find_map(|key| {
-            std::env::var_os(key)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-        })
+    let var = |keys: [&str; 2]| {
+        keys.into_iter()
+            .find_map(|key| std::env::var_os(key).filter(|value| !value.is_empty()))
+            .map(PathBuf::from)
+    };
+    let apple_base = var(["QWEN3_CACHE_DIR", "QWEN3_ASR_CACHE_DIR"])
         .unwrap_or_else(|| home.join("Library/Caches"))
         .join("qwen3-speech");
-    let hf_base = ["HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"]
-        .into_iter()
-        .find_map(|key| {
-            std::env::var_os(key)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-        })
-        .unwrap_or_else(|| {
-            std::env::var_os("HF_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".cache").join("huggingface"))
-                .join("hub")
-        });
+    let hf_base = var(["HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"]).unwrap_or_else(|| {
+        std::env::var_os("HF_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".cache").join("huggingface"))
+            .join("hub")
+    });
     Ok(with_receipt(inspect_at(
         provider,
         model,
@@ -468,36 +461,35 @@ fn safe_tensor(path: &Path) -> bool {
     };
     checked().unwrap_or(false)
 }
+/// Every file below `root`, following links, sorted: fingerprints depend on the order.
 fn files_under(root: &Path) -> Result<Vec<PathBuf>> {
     if !root.exists() {
         return Ok(Vec::new());
     }
-    let mut queue = vec![root.to_path_buf()];
-    let mut seen = BTreeSet::new();
     let mut result = Vec::new();
-    while let Some(path) = queue.pop() {
-        let canonical = path.canonicalize().with_context(|| {
-            format!(
-                "无法读取模型缓存 / Cannot read the model cache: {}",
-                path.display()
-            )
-        })?;
-        if !seen.insert(canonical) {
-            continue;
-        }
-        if path.is_dir() {
-            for child in fs::read_dir(&path)? {
-                queue.push(child?.path());
+    let walk = walkdir::WalkDir::new(root).follow_links(true);
+    for (count, entry) in walk.into_iter().enumerate() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if error.loop_ancestor().is_some() => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "无法读取模型缓存 / Cannot read the model cache: {}",
+                        root.display()
+                    )
+                });
             }
-        } else if path.is_file() {
-            result.push(path);
-        }
+        };
         ensure!(
-            seen.len() < 20_000,
+            count < 20_000,
             crate::tr!(
                 "模型缓存包含过多文件，检查未完成 / Model cache contains too many files; check incomplete"
             )
         );
+        if entry.file_type().is_file() {
+            result.push(entry.into_path());
+        }
     }
     result.sort();
     Ok(result)
@@ -517,9 +509,6 @@ fn receipt_path(status: &LocalModelStatus) -> PathBuf {
     crate::config::cache_dir()
         .join("model-checks")
         .join(format!("{}.json", hex(&Sha256::digest(key))))
-}
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 pub fn record_result(status: &LocalModelStatus, loaded: bool, error: Option<String>) -> Result<()> {

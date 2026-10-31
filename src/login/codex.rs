@@ -384,21 +384,7 @@ fn parse_callback_request(request_line: &str, expected_state: &str) -> Result<St
 
 /// 打开系统浏览器；失败时用户可手动复制 URL。
 fn open_browser(url: &str) {
-    #[cfg(target_os = "macos")]
-    let opened = std::process::Command::new("open").arg(url).spawn().is_ok();
-    #[cfg(target_os = "linux")]
-    let opened = std::process::Command::new("xdg-open")
-        .arg(url)
-        .spawn()
-        .is_ok();
-    #[cfg(target_os = "windows")]
-    let opened = std::process::Command::new("rundll32")
-        .args(["url.dll,FileProtocolHandler", url])
-        .spawn()
-        .is_ok();
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    let opened = false;
-    if !opened {
+    if open::that_detached(url).is_err() {
         println!("请手动在浏览器打开 / Open this URL in your browser:\n{url}");
     }
 }

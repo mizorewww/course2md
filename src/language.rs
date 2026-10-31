@@ -2,8 +2,8 @@
 //!
 //! The guess only decides whether a bilingual note needs translating at all,
 //! so it compares language families: Simplified and Traditional Chinese count
-//! as the same language, and a transcript too short or mixed to judge is
-//! translated rather than skipped.
+//! as the same language, and a transcript too short or mixed to judge, or in
+//! another language, is translated rather than skipped.
 
 /// Target languages offered for bilingual notes: stable code and the name
 /// the AI service is asked to write in.
@@ -67,91 +67,23 @@ const MIN_LETTERS: usize = 40;
 /// Language family of `text` (`zh`, `ja`, `ko`, `en`, `fr`, `de`, `es`), or
 /// `None` when the sample is too small or no language clearly dominates.
 pub fn detect(text: &str) -> Option<&'static str> {
-    let (mut han, mut kana, mut hangul, mut latin) = (0usize, 0usize, 0usize, 0usize);
-    for c in text.chars() {
-        match c as u32 {
-            0x3040..=0x30FF | 0x31F0..=0x31FF => kana += 1,
-            0xAC00..=0xD7AF | 0x1100..=0x11FF | 0x3130..=0x318F => hangul += 1,
-            0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0xF900..=0xFAFF => han += 1,
-            _ if c.is_alphabetic() => latin += 1,
-            _ => {}
-        }
-    }
-    let letters = han + kana + hangul + latin;
-    if letters < MIN_LETTERS {
+    use whatlang::{Lang, Script};
+    if text.chars().filter(|c| c.is_alphabetic()).count() < MIN_LETTERS {
         return None;
     }
-    // Japanese mixes kanji with kana; a modest share of kana decides it.
-    if kana * 10 >= letters {
-        return Some("ja");
-    }
-    if hangul * 2 >= letters {
-        return Some("ko");
-    }
-    if han * 2 >= letters {
-        return Some("zh");
-    }
-    if latin * 10 >= letters * 8 {
-        return latin_language(text);
-    }
-    None
-}
-
-/// Frequent short words that tell the Latin-script targets apart.
-const STOPWORDS: [(&str, &[&str]); 4] = [
-    (
-        "en",
-        &[
-            "the", "and", "is", "of", "to", "in", "that", "it", "you", "this", "we", "for", "are",
-            "with", "what", "so",
-        ],
-    ),
-    (
-        "fr",
-        &[
-            "le", "la", "les", "et", "est", "des", "une", "un", "que", "qui", "dans", "pour",
-            "pas", "nous", "vous", "ce",
-        ],
-    ),
-    (
-        "de",
-        &[
-            "der", "die", "das", "und", "ist", "nicht", "ein", "eine", "ich", "wir", "zu", "mit",
-            "den", "auf", "sie", "es",
-        ],
-    ),
-    (
-        "es",
-        &[
-            "el", "la", "los", "las", "y", "es", "que", "de", "en", "un", "una", "por", "para",
-            "con", "no", "se",
-        ],
-    ),
-];
-
-fn latin_language(text: &str) -> Option<&'static str> {
-    let words: Vec<String> = text
-        .split(|c: char| !c.is_alphabetic() && c != '\'')
-        .filter(|word| !word.is_empty())
-        .map(str::to_lowercase)
-        .collect();
-    let mut scores: Vec<(&'static str, usize)> = STOPWORDS
-        .iter()
-        .map(|(code, list)| {
-            (
-                *code,
-                words
-                    .iter()
-                    .filter(|word| list.contains(&word.as_str()))
-                    .count(),
-            )
-        })
-        .collect();
-    scores.sort_by_key(|score| std::cmp::Reverse(score.1));
-    let (best, top) = scores[0];
-    let second = scores[1].1;
-    // A clear winner among enough function words; otherwise do not guess.
-    (top >= 5 && top * 2 > second * 3).then_some(best)
+    // Kanji-heavy Japanese is told from Chinese with low confidence, but correctly.
+    let info = whatlang::detect(text)
+        .filter(|info| info.is_reliable() || info.script() == Script::Mandarin)?;
+    Some(match info.lang() {
+        Lang::Cmn => "zh",
+        Lang::Jpn => "ja",
+        Lang::Kor => "ko",
+        Lang::Eng => "en",
+        Lang::Fra => "fr",
+        Lang::Deu => "de",
+        Lang::Spa => "es",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -164,6 +96,10 @@ mod tests {
         assert_eq!(detect(&chinese.repeat(2)), Some("zh"));
         let japanese = "今日は線形代数の中で最も重要な概念、つまり行列の固有値と固有ベクトルについて説明します。";
         assert_eq!(detect(&japanese.repeat(2)), Some("ja"));
+        // Mostly kanji with only a little kana is still Japanese.
+        let kanji_heavy = "線形代数学基礎講義第三回固有値問題解法概要説明行列対角化応用事例紹介以上。\
+                           今回の講義内容は期末試験範囲です。";
+        assert_eq!(detect(&kanji_heavy.repeat(2)), Some("ja"));
         let korean = "오늘은 선형대수에서 가장 중요한 개념인 행렬의 고유값과 고유벡터에 대해 설명하겠습니다.";
         assert_eq!(detect(&korean.repeat(2)), Some("ko"));
         let english = "So today we are going to talk about the most important idea in linear algebra, \

@@ -330,7 +330,7 @@ pub fn digest(bytes: &[u8]) -> String {
 }
 
 /// Lowercase hexadecimal, the form digests take in receipts and manifests.
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
@@ -479,28 +479,18 @@ pub fn relocate_work_bindings(root_old: &Path, root_new: &Path) -> Result<usize>
         root_old.is_absolute() && root_new.is_absolute() && root_old != root_new,
         crate::tr!("笔记库迁移位置无效 / Invalid relocation roots")
     );
-    fn visit(root: &Path, current: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
-        for entry in std::fs::read_dir(current)? {
-            let entry = entry?;
-            if entry.file_type()?.is_symlink() {
-                continue;
-            }
-            let path = entry.path();
-            if path.strip_prefix(root)?.components().count() > 64 {
-                anyhow::bail!(crate::tr!(
-                    "笔记库目录层级过深 / Library directory depth exceeds the safe limit"
-                ));
-            }
-            if entry.file_type()?.is_dir() {
-                visit(root, &path, paths)?;
-            } else if entry.file_name() == "task-identity.json" {
-                paths.push(path);
-            }
-        }
-        Ok(())
-    }
     let mut paths = Vec::new();
-    visit(root_new, root_new, &mut paths)?;
+    for entry in walkdir::WalkDir::new(root_new).min_depth(1) {
+        let entry = entry?;
+        anyhow::ensure!(
+            entry.depth() <= 64,
+            crate::tr!("笔记库目录层级过深 / Library directory depth exceeds the safe limit")
+        );
+        // Symbolic links are neither followed nor rewritten.
+        if entry.file_type().is_file() && entry.file_name() == "task-identity.json" {
+            paths.push(entry.into_path());
+        }
+    }
     let mut changes = Vec::new();
     for path in paths {
         let old_path = root_old.join(path.strip_prefix(root_new)?);
