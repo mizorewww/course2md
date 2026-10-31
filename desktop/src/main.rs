@@ -44,6 +44,7 @@ mod settings_ui;
 mod source;
 mod storage;
 mod storage_ui;
+mod symbols;
 mod task_runner;
 mod task_ui;
 mod theme;
@@ -1659,7 +1660,7 @@ pub(crate) fn secondary_binding<A: gpui::Action>(
 
 fn main() {
     a11y::init_validation_diagnostics();
-    let app = gpui_kit::application().with_assets(icons::Assets);
+    let app = gpui_kit::application().with_assets(symbols::Assets);
     app.on_reopen(|cx| {
         cx.activate(true);
         for handle in cx.windows() {
@@ -1667,7 +1668,9 @@ fn main() {
         }
     });
     app.run(|cx| {
+        symbols::register_fonts(cx);
         gpui_kit::init(cx);
+        gpui_kit_material::init(cx);
         theme::init(cx);
         // Debug validation uses the same native window and render path at an exact size.
         // Release builds always use the ordinary initial window size.

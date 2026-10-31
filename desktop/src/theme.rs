@@ -3,6 +3,7 @@ use crate::palettes::ThemePreferences;
 use gpui::{App, Pixels, Rems, Rgba, Window, px, rems, rgb};
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit_material::color::{ColorRole, Scheme};
+use gpui_kit_material::tokens::typography::TypeRole;
 #[path = "choice_group.rs"]
 mod choice_group;
 pub use choice_group::SingleChoiceGroup;
@@ -1280,7 +1281,10 @@ pub fn detail_row(
 pub fn init(cx: &mut App) {
     choice_group::init(cx);
     Theme::change(ThemeMode::Light, None, cx);
-    Theme::global_mut(cx).font_size = px(14.);
+    let theme = Theme::global_mut(cx);
+    theme.font_size = px(14.);
+    // The kit's type scale; CJK text falls back to the system's fonts.
+    theme.font_family = TypeRole::BodyMedium.scale().font_family.into();
     sync_component_theme(false, cx);
 }
 
