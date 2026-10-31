@@ -50,25 +50,28 @@ Merge wave 1 branches as they report, then start wave 2.
   the kit's rule. Port it only if a frozen window is ever observed.
 - **`gpui-kit-material` is on with `default-features = false`** (`serde`, `gpui-fast`) until P5 uses it.
 
+## Foundation
+
+Shell, theme, symbols and `ui.rs` are on the kit; pages move in wave 2 by `MIGRATION.md`. Worked example: `about.rs`.
+
+- One paint: old tokens read the kit's roles. Kit's `Theme` is still written by `theme.rs`, through the kit's
+  Base-only `apply_scheme`, because the bridge's `advance_component_theme` would fight it every frame. Wave 3
+  switches to `init_component_theme`/`advance_component_theme` when `theme.rs` goes.
+- Symbols: `build.rs` renders `desktop/assets/symbols.txt`; `embedded-symbols` stays off.
+- Lucide SVGs are gone. `assets/outline/LICENSE` and `assets/material/LICENSE` stay until `package.py` stops copying them (`split/tooling`).
+
 ## Debts for the Material work
 
-Visual only; the behaviours are verified below.
+Visual only unless noted.
 
-- Button labels asking for 15-16 px render at Kit's 1rem (14 px) through `theme::ButtonLabelSize`, and
-  that takes Kit's `Large` size, so a button that sets no padding of its own gets `Large` padding.
-  13 px labels render at Kit's 12.25 px. Kit's `Button` has no label size override.
-- Menus use Kit's default look: no 48 px rows, tonal checked rows, 16 px container or entrance.
-- Danger menu rows are `theme::danger_menu_item`, an element row with no menu-item label of its own.
-- Switches are Kit's default size with no thumb icons.
+- Old pages still have button labels at Kit's sizes through `theme::ButtonLabelSize`, Kit's default menus, and Kit's default switches, until they move.
 - `NoteText` ignores `TextSelectionEvent::TouchSelectionChanged`, so it draws no touch handles.
+- Modal dialogs no longer mark the page behind them hidden to assistive technology (`ModalBackground` went, per the audit; GPUI has no attribute for it on a div). Keyboard focus stays trapped.
+- The macOS "always show scrollbars" preference shows the bar on hover: Kit maps not-auto-hide to `ScrollbarMode::Hover`.
+- `COURSE2MD_CAPTURE_CHROME` draws the other platform's captions, but content that measures the bar (the reader) still reserves this platform's width: `CaptionButtons::trailing_for_style` is not public.
 
 ## Open problems
 
-- **Binary size.** `gpui-kit-material`'s default `embedded-symbols` embeds about 52 MB (three
-  variable fonts and the SVG pack in `gpui-material-symbols`). It has no subset feature. Recommendation:
-  keep the feature off and add an app-owned `AssetSource` that holds only the symbols the app uses,
-  since `Asset::provide` exists for runtime supply and `icons::Assets::with` takes a fallback source.
-  Check that this covers Kit's translated default icons before relying on it.
 - **Stale worktree records.** `../zed/.git/worktrees` and `../gpui-component/.git/worktrees` still list
   entries for the removed `desktop/.deps` worktrees. Left alone, as they are sibling repositories;
   `git worktree prune` there clears them if the owner wants.
