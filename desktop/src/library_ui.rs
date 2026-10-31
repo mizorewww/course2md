@@ -664,6 +664,7 @@ impl Desktop {
         let empty = input.read(cx).value().trim().is_empty();
         Some(
             MaterialDialog::new("name-dialog")
+                .width(crate::ui::DIALOG_WIDTH_ROOMY)
                 .container(ColorRole::SURFACE)
                 .headline(headline)
                 .content(
@@ -772,6 +773,7 @@ impl Desktop {
         });
         Some(
             MaterialDialog::new("move-dialog")
+                .width(crate::ui::DIALOG_WIDTH_ROOMY)
                 .container(ColorRole::SURFACE)
                 .headline(course2md::tr!("移动到"))
                 .content(

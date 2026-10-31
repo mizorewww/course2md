@@ -2404,7 +2404,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.8.1"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=401bb4727125eaae094745d8fc331632ad4924d7#401bb4727125eaae094745d8fc331632ad4924d7"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2503,7 +2503,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=401bb4727125eaae094745d8fc331632ad4924d7#401bb4727125eaae094745d8fc331632ad4924d7"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2572,7 +2572,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=401bb4727125eaae094745d8fc331632ad4924d7#401bb4727125eaae094745d8fc331632ad4924d7"
 dependencies = [
  "anyhow",
  "async-task",
@@ -2658,7 +2658,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-macos"
 version = "0.1.12"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=401bb4727125eaae094745d8fc331632ad4924d7#401bb4727125eaae094745d8fc331632ad4924d7"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2813,7 +2813,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.8.1"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=401bb4727125eaae094745d8fc331632ad4924d7#401bb4727125eaae094745d8fc331632ad4924d7"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -2845,7 +2845,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=401bb4727125eaae094745d8fc331632ad4924d7#401bb4727125eaae094745d8fc331632ad4924d7"
 dependencies = [
  "chrono",
  "gpui-base",
@@ -2858,7 +2858,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material-color"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/gpui-kit-material?rev=6e112cd23d6199bbfd4137092bc7477cf40a02ec#6e112cd23d6199bbfd4137092bc7477cf40a02ec"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=401bb4727125eaae094745d8fc331632ad4924d7#401bb4727125eaae094745d8fc331632ad4924d7"
 dependencies = [
  "serde",
 ]

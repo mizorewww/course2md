@@ -175,6 +175,9 @@ pub fn page_title(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Di
         .line_height(role.line_height)
 }
 
+/// A question or a short form: roomier than the kit's default for a sentence in Chinese.
+pub const DIALOG_WIDTH_ROOMY: f32 = 448.;
+
 /// The tinted circle of a resource row: an account, a service, a library location. The
 /// add row's plus and later lines of a resource keep to this column.
 pub const RESOURCE_ICON: Rems = rem(RESOURCE_ICON_SIZE);
@@ -686,6 +689,7 @@ pub fn confirm_host(cx: &App) -> Option<AnyElement> {
         });
     Some(
         MaterialDialog::new("confirm")
+            .width(DIALOG_WIDTH_ROOMY)
             .container(ColorRole::SURFACE)
             .headline(confirm.title.clone())
             .when(!confirm.text.is_empty(), |dialog| {

@@ -3060,6 +3060,7 @@ impl Desktop {
             }
             actions = actions.child(
                 material_button("reader-view-incomplete-task", ButtonVariant::Text)
+                    .tone(ButtonTone::Neutral)
                     .icon(symbols::task())
                     .child(course2md::tr!("查看任务"))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -3100,6 +3101,7 @@ impl Desktop {
         if !details.is_empty() {
             actions = actions.child(
                 material_button("reader-processing-details", ButtonVariant::Text)
+                    .tone(ButtonTone::Neutral)
                     .icon(symbols::info())
                     .child(if open {
                         course2md::tr!("收起处理详情")

@@ -2162,6 +2162,13 @@ impl Desktop {
                 }
             };
             material_button(SharedString::from(format!("task-{label}-{id}")), variant)
+                .when(variant == ButtonVariant::Outlined, |b| {
+                    b.tone(ButtonTone::Accent)
+                })
+                .when(
+                    surface == TaskSurface::Home && *action == TaskAction::Cancel,
+                    |b| b.tone(ButtonTone::Neutral),
+                )
                 .icon(icon)
                 .child(label)
                 .disabled(disabled)

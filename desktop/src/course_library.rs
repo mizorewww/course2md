@@ -2203,6 +2203,7 @@ impl Desktop {
         let task_id = id.clone();
         actions = actions.child(if requires_repair {
             action("repair", ButtonVariant::Text)
+                .tone(ButtonTone::Neutral)
                 .icon(symbols::settings())
                 .child(course2md::tr!("修复 AI 服务并补做"))
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -2214,6 +2215,7 @@ impl Desktop {
                 .map(|component| component.as_str().to_owned())
                 .collect::<Vec<_>>();
             action("retry", ButtonVariant::Text)
+                .tone(ButtonTone::Neutral)
                 .icon(symbols::refresh())
                 .child(crate::task_ui::retry_components_label(&labels))
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -2226,6 +2228,7 @@ impl Desktop {
                 }))
         } else if !uncertain && task.state == TaskState::Paused {
             action("resume", ButtonVariant::Text)
+                .tone(ButtonTone::Neutral)
                 .icon(symbols::play_arrow())
                 .child(course2md::tr!("继续生成"))
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -2233,6 +2236,7 @@ impl Desktop {
                 }))
         } else {
             action("task", ButtonVariant::Text)
+                .tone(ButtonTone::Neutral)
                 .icon(symbols::task())
                 .child(course2md::tr!("查看任务"))
                 .on_click(cx.listener(move |this, _, _, cx| {
