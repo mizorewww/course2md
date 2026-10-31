@@ -1360,7 +1360,7 @@ impl Desktop {
         if previous.as_deref() != Some(id)
             && let Some(previous) = previous
         {
-            self.clear_task_card_motion(&previous);
+            self.close_task_details(&previous);
         }
         self.transact(course2md::tr!("任务选择尚未保存：{}"), |state| {
             state.selected_task = Some(id.to_owned());

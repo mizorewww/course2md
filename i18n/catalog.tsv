@@ -122,7 +122,6 @@ stderr 管道已配置	stderr 管道已配置	The stderr pipe is configured	stde
 stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdout 管道已配置	stdout パイプが構成されています
 {} / {} 段	{} / {} 段	{} / {} segments	{} / {} 段	{} / {} セグメント
 {} {}，{} 篇笔记	{} {}，{} 篇笔记	{} {}, {} notes	{} {}，{} 篇筆記	{} {}、{} 件のノート
-{} · 待下载	{} · 待下载	{} · Pending download	{} · 待下載	{} · ダウンロード待ち
 {} · 构建 {}	{} · 构建 {}	{} · Build {}	{} · 建置 {}	{} · ビルド {}
 {} 不支持「{}」，已改用 {}。	{} 不支持「{}」，已改用 {}。	{} does not support “{}”; switched to {}.	{} 不支援「{}」，已改用 {}。	{} は「{}」に対応していないため、{} に切り替えました。
 {} 个与进行中的任务相同，未重复加入	{} 个与进行中的任务相同，未重复加入	{} are identical to tasks in progress and were not added again	{} 個與進行中的任務相同，未重複加入	{} 件は進行中のタスクと同じため、追加しませんでした
@@ -150,7 +149,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{} は {} に送信されます
 {}发送到「{}」	{}发送到「{}」	{} is sent to "{}"	{}傳送到「{}」	{} は「{}」に送信されます
 {}尚未完成	{}尚未完成	{} has not been completed yet	{}尚未完成	{}はまだ完了していません
-{}尚未完成。{}	{}尚未完成。{}	{} is not completed yet. {}	{}尚未完成。{}	{} はまだ完了していません。 {}
 {}无法读取	{}无法读取	{} cannot be read	{}無法讀取	{} を読み取れません
 {}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{} は保存されていません: {}
 {}未完成	{}未完成	{} is not completed	{}未完成	{} は完了していません
@@ -168,7 +166,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}（自动选择）	{}（自动选择）	{} (automatic)	{}（自動選擇）	{}（自動）
 {}，{}	{}，{}	{}, {}	{}，{}	{}、{}
 {}，{}{}	{}，{}{}	{}, {}{}	{}，{}{}	{}、{}{}
-{}，{}，{}	{}，{}，{}	{}, {}, {}	{}，{}，{}	{}、{}、{}
 {}：{}	{}：{}	{}: {}	{}：{}	{}:{}
 {}：{} · {}	{}：{} · {}	{}: {} · {}	{}：{} · {}	{}: {} · {}
 {}：{}{}	{}：{}{}	{}: {}{}	{}：{}{}	{}：{}{}
@@ -204,7 +201,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 下载完整应用	下载完整应用	Download the full app	下載完整應用程式	完全版アプリをダウンロード
 下载并准备模型	下载并准备模型	Download and prepare the model	下載並準備模型	モデルをダウンロードして準備する
 下载并验证模型 / Download and verify a model	下载并验证模型	Download and verify a model	下載並驗證模型	モデルをダウンロードして検証する
-下载模型	下载模型	Download model	下載模型	モデルをダウンロード
 下载视频	下载视频	Download video	下載影片	動画をダウンロードする
 下载视频 / Downloading video	下载视频	Downloading video	下載影片	動画をダウンロード中
 下载识别模型	下载识别模型	Downloading speech model	下載語音辨識模型	音声認識モデルをダウンロード
@@ -516,7 +512,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 字幕文件超过 32 MB，请选择较小的 SRT 或 VTT 文件 / Subtitle file exceeds 32 MB; choose a smaller SRT or VTT file	字幕文件超过 32 MB，请选择较小的 SRT 或 VTT 文件	Subtitle file exceeds 32 MB; choose a smaller SRT or VTT file	字幕檔案超過 32 MB，請選擇較小的 SRT 或 VTT 檔案	字幕ファイルが 32 MB を超えています。より小さい SRT または VTT ファイルを選択してください
 字幕时间区间无效，已跳过 / Skipped subtitle with invalid timestamps	字幕时间区间无效，已跳过	Skipped subtitle with invalid timestamps	字幕時間區間無效，已跳過	字幕の時間範囲が無効なため、スキップしました
 字幕时间无效 / Invalid subtitle timestamps	字幕时间无效	Invalid subtitle timestamps	字幕時間無效	字幕時間が無効です
-字幕未读取成功	字幕未读取成功	Subtitles could not be read	字幕未讀取成功	字幕を読み取れませんでした
 字幕缓存路径无法编码	字幕缓存路径无法编码	Subtitle cache path cannot be encoded	字幕快取路徑無法編碼	字幕キャッシュパスをエンコードできません
 字幕语言	字幕语言	Subtitle language	字幕語言	字幕言語
 字幕读取意外中断	字幕读取意外中断	Subtitle reading unexpectedly interrupted	字幕讀取意外中斷	字幕の読み取りが予期せず中断されました
@@ -694,7 +689,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 当前 llama.cpp 版本过旧，无法只用 CPU 识别，请升级后重试 / This llama.cpp is too old to transcribe on CPU only; upgrade and retry	当前 llama.cpp 版本过旧，无法只用 CPU 识别，请升级后重试	This llama.cpp is too old to transcribe on CPU only; upgrade and retry	目前 llama.cpp 版本過舊，無法只用 CPU 辨識，請升級後重試	llama.cpp の現在のバージョンは古すぎるため、CPU だけでは認識できません。アップグレードしてもう一度お試しください。
 当前任务仍在保存进度，停止后再移动笔记库	当前任务仍在保存进度，停止后再移动笔记库	The current task is still saving progress. Move the note library after it stops.	目前任務仍在儲存進度，停止後再移動筆記庫	現在のタスクは進行状況を保存中です。停止してからノートライブラリを移動してください。
 当前任务仍在处理，请先等候当前步骤结束	当前任务仍在处理，请先等候当前步骤结束	The current task is still processing. Please wait for the current step to finish.	目前任務仍在處理，請先等候目前步驟結束	現在のタスクはまだ処理中です。現在のステップが終了するまでお待ちください。
-当前任务完成后才能下载模型	当前任务完成后才能下载模型	The model can only be downloaded after the current task is completed	目前任務完成後才能下載模型	モデルは、現在のタスクが完了した後にのみダウンロードできます
 当前任务完成后才能准备模型	当前任务完成后才能准备模型	The model cannot be prepared until the current task is completed	目前任務完成後才能準備模型	現在のタスクが完了するまでモデルを準備できません
 当前任务还在处理，请先暂停并等候当前步骤结束	当前任务还在处理，请先暂停并等候当前步骤结束	The current task is still processing. Please pause it and wait for the current step to finish.	目前任務還在處理，請先暫停並等候目前步驟結束	現在のタスクはまだ処理中です。一時停止して、現在のステップが終了するまでお待ちください。
 当前任务还在处理，请先暂停并等候当前步骤结束。	当前任务还在处理，请先暂停并等候当前步骤结束。	The current task is still processing. Please pause it and wait for the current step to finish.	目前任務還在處理，請先暫停並等候目前步驟結束。	現在のタスクはまだ処理中です。一時停止して、現在のステップが終了するまでお待ちください。
@@ -894,7 +888,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 文字及对应截图会发送到所选服务	文字及对应截图会发送到所选服务	The text and corresponding screenshots will be sent to the selected service	文字及對應截圖會傳送到所選服務	テキストと対応するスクリーンショットが選択したサービスに送信されます
 文字未生成，已保留可用素材 / No readable text; available materials are retained in the task	文字未生成，已保留可用素材	No readable text; available materials are retained in the task	文字未生成，已保留可用素材	テキストは生成されませんでした。利用可能な素材は保持されています
 文字来源	文字来源	Transcript source	文字來源	文字起こしのソース
-文字来源待确认	文字来源待确认	Text source to be confirmed	文字來源待確認	テキストソースは確認待ち
 文字来源方式	文字来源方式	Text source method	文字來源方式	テキストソース方式
 文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别 / Transcript source: auto, subtitle, asr	文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别	Transcript source: auto, subtitle, asr	文字來源：auto 優先字幕，subtitle 僅字幕，asr 語音辨識	テキストソース：auto は字幕を優先、subtitle は字幕のみ、asr は音声認識
 文字笔记	文字笔记	Text notes	文字筆記	テキストノート
@@ -1031,7 +1024,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 更多信息请运行 --help。	更多信息请运行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を実行してください。
 更多笔记操作	更多笔记操作	More note actions	更多筆記操作	その他のノート操作
 更快，占内存较少	更快，占内存较少	Faster, takes up less memory	更快，佔記憶體較少	より高速で、メモリ使用量が少ない
-更换	更换	Replace	更換	交換する
 更换模型	更换模型	Change model	更換模型	モデルを変更
 更换视频	更换视频	Change video	更換影片	動画を変更する
 更改默认位置只影响后续生成的笔记	更改默认位置只影响后续生成的笔记	Changing the default location only affects subsequently generated notes	更改預設位置只影響後續生成的筆記	デフォルトの場所を変更すると、それ以降に生成されるノートにのみ影響します。
@@ -1046,7 +1038,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 有 {} 次未完成的移动记录已损坏，相关文件均已保留	有 {} 次未完成的移动记录已损坏，相关文件均已保留	{} unfinished move records are corrupted and related files have been retained	有 {} 次未完成的移動記錄已損壞，相關檔案均已保留	{} 件の未完了の移動記録が破損しています。関連ファイルはすべて保持されています
 有一个旧版本无法读取	有一个旧版本无法读取	There is an older version that cannot be read	有一個舊版本無法讀取	読み込めない古いバージョンがあります
 有字幕时直接用字幕，没有字幕时使用语音识别	有字幕时直接用字幕，没有字幕时使用语音识别	Use subtitles when available; otherwise use speech recognition	有字幕時直接使用字幕，沒有字幕時使用語音辨識	字幕があれば字幕を使用し、なければ音声認識を使用します
-有字幕，将直接使用	有字幕，将直接使用	Subtitles found; they will be used directly	有字幕，將直接使用	字幕があるため、そのまま使用します
 有效服务版本记录不完整	有效服务版本记录不完整	The effective service version record is incomplete	有效服務版本記錄不完整	有効なサービス バージョン レコードが不完全です
 有效的模型分片索引 / a valid model shard index	有效的模型分片索引	a valid model shard index	有效的模型分片索引	有効なモデルシャードインデックス
 服务	服务	Services	服務	サービス
@@ -1171,7 +1162,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 查看 uv 安装说明	查看 uv 安装说明	View uv installation instructions	檢視 uv 安裝說明	uv のインストール手順を表示する
 查看{}	查看{}	View {}	檢視{}	{} を表示
 查看任务	查看任务	View task	檢視任務	タスクを表示
-查看任务详情	查看任务详情	View task details	檢視任務詳情	タスクの詳細を表示する
 查看准备详情	查看准备详情	View preparation details	檢視準備詳情	準備の詳細を表示する
 查看后续处理任务	查看后续处理任务	View follow-up tasks	檢視後續處理任務	フォローアップタスクを表示する
 查看处理详情	查看处理详情	View processing details	檢視處理詳情	処理の詳細を表示する
@@ -1238,11 +1228,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型名 / Model name (e.g. deepseek-chat)	模型名	Model name (e.g. deepseek-chat)	模型名	モデル名
 模型名称或 Hugging Face 仓库（如 org/model）	模型名称或 Hugging Face 仓库（如 org/model）	Model name or Hugging Face repository (e.g. org/model)	模型名稱或 Hugging Face 儲存庫（如 org/model）	モデル名または Hugging Face リポジトリ（例: org/model）
 模型已下载	模型已下载	Model downloaded	模型已下載	モデルをダウンロードしました
-模型已下载 · {}	模型已下载 · {}	Model has been downloaded · {}	模型已下載 · {}	モデルはダウンロードされました · {}
 模型已就绪	模型已就绪	Model ready	模型已就緒	モデルの準備が完了
 模型文件下载不完整，请重新运行 course2md models download / Model download incomplete; run course2md models download again	模型文件下载不完整，请重新运行 course2md models download	Model download incomplete; run course2md models download again	模型檔案下載不完整，請重新執行 course2md models download	モデルファイルのダウンロードが不完全です。course2md models download を再実行してください。
 模型文件不完整，正在重新下载 / Model file incomplete; downloading again	模型文件不完整，正在重新下载	Model file incomplete; downloading again	模型檔案不完整，正在重新下載	モデル ファイルが不完全なため、再度ダウンロード中です。
-模型检查与设置	模型检查与设置	Model checking and setup	模型檢查與設定	モデルの確認とセットアップ
 模型检查未完成	模型检查未完成	Model check not completed	模型檢查未完成	モデルチェックが完了していません
 模型检查未完成，可在模型管理中查看原因并重试	模型检查未完成，可在模型管理中查看原因并重试	The model check is not completed. You can check the reason in model management and try again.	模型檢查未完成，可在模型管理中檢視原因並重試	モデルのチェックが完了していません。モデル管理で理由を確認し、再試行できます。
 模型状态	模型状态	Model status	模型狀態	モデルステータス
@@ -1378,7 +1366,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 清理旧位置备份	清理旧位置备份	Clean up old location backups	清理舊位置備份	古い場所のバックアップを整理
 清理旧位置备份…	清理旧位置备份…	Clean up old location backups…	清理舊位置備份…	古い場所のバックアップを整理…
 清理旧位置备份？	清理旧位置备份？	Clean up old location backups?	清理舊位置備份？	古い場所のバックアップを整理しますか？
-清空链接，选项恢复为默认设置	清空链接，选项恢复为默认设置	Clears the link and returns the options to your defaults	清空連結，選項恢復為預設設定	リンクを消去し、オプションを既定の設定に戻します
 清除 AI 校对的地址、密钥、模型和 Codex 登录 / Clear the AI proofreading endpoint, key, model and Codex login	清除 AI 校对的地址、密钥、模型和 Codex 登录 / Clear the AI proofreading endpoint, key, model and Codex login	Clear the AI proofreading endpoint, key, model and Codex login	清除 AI 校對的網址、金鑰、模型與 Codex 登入	AI 校正のURL・キー・モデル・Codex ログインを消去
 清除 Bilibili 登录状态失败 / Could not remove Bilibili login	清除 Bilibili 登录状态失败	Could not remove Bilibili login	清除 Bilibili 登入狀態失敗	Bilibiliのログインステータスをクリアできませんでした
 清除 Codex 登录状态失败 / Could not remove Codex login	清除 Codex 登录状态失败	Could not remove Codex login	清除 Codex 登入狀態失敗	Codex ログイン ステータスのクリアに失敗しました
@@ -1507,7 +1494,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记清单损坏 / Invalid note manifest	笔记清单损坏	Invalid note manifest	筆記清單損壞	ノートマニフェストが破損しています
 笔记版本位置无效 / Invalid note version location	笔记版本位置无效	Invalid note version location	筆記版本位置無效	ノートのバージョンの場所が無効です
 笔记版本信息已损坏	笔记版本信息已损坏	Note version information is corrupted	筆記版本資訊已損壞	ノートのバージョン情報が破損しています
-笔记的文字来源	笔记的文字来源	The text source of the note	筆記的文字來源	ノートのテキストソース
 笔记目录，或存放多份笔记的上级目录 / A note directory or a folder of notes	笔记目录，或存放多份笔记的上级目录	A note directory or a folder of notes	筆記目錄，或存放多份筆記的上級目錄	ノート ディレクトリ、または複数のノートが保存される親ディレクトリ
 笔记详情	笔记详情	Note details	筆記詳情	ノートの詳細
 第 {} 版	第 {} 版	Version {}	第 {} 版	バージョン {}
@@ -1524,7 +1510,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 管理模型与下载	管理模型与下载	Manage models and downloads	管理模型與下載	モデルとダウンロードを管理する
 管理配置文件 / Manage the configuration file	管理配置文件 / Manage the configuration file	Manage the configuration file	管理設定檔案	設定ファイルを管理
 粘贴 YouTube 或 Bilibili 视频链接	粘贴 YouTube 或 Bilibili 视频链接	Paste YouTube or Bilibili video link	貼上 YouTube 或 Bilibili 影片連結	YouTube または Bilibili 動画のリンクを貼り付けます
-粘贴视频链接	粘贴视频链接	Paste video link	貼上影片連結	動画リンクを貼り付け
 粘贴链接或拖入视频	粘贴链接或拖入视频	Paste a link or drag in a video	貼上連結或拖入影片	リンクを貼り付けるか動画をドラッグ
 系统凭据库当前不可用，此服务的凭据可能保存在其中。请确认系统凭据服务已启动，或重新保存 API Key	系统凭据库当前不可用，此服务的凭据可能保存在其中。请确认系统凭据服务已启动，或重新保存 API Key	The system credential store is unavailable, and this service's credential may be saved there. Make sure the credential service is running, or save the API key again.	系統憑據庫目前無法使用，此服務的憑據可能儲存在其中。請確認系統憑據服務已啟動，或重新儲存 API Key	システムの資格情報ストアを利用できません。このサービスの資格情報はそこに保存されている可能性があります。資格情報サービスが起動していることを確認するか、API キーを保存し直してください。
 系统凭据库中找不到此服务的凭据，请重新保存 API Key	系统凭据库中找不到此服务的凭据，请重新保存 API Key	Credentials for this service were not found in the system credential store. Save the API key again.	系統憑證庫中找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報がシステム認証情報ストアに見つかりませんでした。API キーを再度保存してください。
@@ -1808,7 +1793,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 选中的视频无法识别，请单独打开后转换	选中的视频无法识别，请单独打开后转换	The selected video cannot be recognized, please open it separately and convert it.	選中的影片無法辨識，請單獨開啟後轉換	選択した動画は認識できません。別途開いて変換してください。
 选择 Codex 模型 / Choose a Codex model	选择 Codex 模型	Choose a Codex model	選擇 Codex 模型	Codexモデルの選択
 选择 SRT 或 VTT 字幕	选择 SRT 或 VTT 字幕	Choose SRT or VTT subtitles	選擇 SRT 或 VTT 字幕	SRT または VTT 字幕を選択します
-选择 {}	选择 {}	Select {}	選擇 {}	{} を選択
 选择保存位置	选择保存位置	Select save location	選擇儲存位置	保存場所を選択
 选择原视频	选择原视频	Select original video	選擇原影片	元の動画を選択してください
 选择字幕文件	选择字幕文件	Select subtitle file	選擇字幕檔案	字幕ファイルを選択
@@ -2055,7 +2039,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 拖动可以调整顺序	拖动可以调整顺序	Drag to reorder	拖曳可以調整順序	ドラッグして並べ替え
 显示另外 {} 个	显示另外 {} 个	Show {} more	顯示另外 {} 個	さらに {} 件を表示
 复制视频链接	复制视频链接	Copy video link	複製影片連結	動画のリンクをコピー
-展开详情	展开详情	Show details	展開詳情	詳細を表示
 查看日志	查看日志	View log	查看日誌	ログを表示
 收起日志	收起日志	Hide log	收合日誌	ログを隠す
 移到最前	移到最前	Move to top	移到最前	先頭へ移動
@@ -2111,9 +2094,6 @@ AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 需要修复	需要修复	Needs repair	需要修復	修正が必要です
 {} 项检查未通过	{} 项检查未通过	Failed checks: {}	{} 項檢查未通過	{} 件のチェックに合格しませんでした
 应用 / Application	应用	Application	應用程式	アプリ
-1 个需要处理	1 个需要处理	1 needs attention	1 個需要處理	対応が必要 1 件
-收起已完成的步骤	收起已完成的步骤	Hide completed steps	收起已完成的步驟	完了したステップを折りたたむ
-查看已完成的步骤	查看已完成的步骤	Show completed steps	檢視已完成的步驟	完了したステップを表示する
 找到 1 篇笔记	找到 1 篇笔记	Found 1 note	找到 1 篇筆記	1 件のノートが見つかりました
 1 篇笔记	1 篇笔记	1 note	1 篇筆記	1 件のノート
 {} 篇笔记	{} 篇笔记	{} notes	{} 篇筆記	{} 件のノート
@@ -2122,3 +2102,5 @@ Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 �
 等待文件锁 {} 超时 / Timed out waiting for the file lock {}	等待文件锁 {} 超时	Timed out waiting for the file lock {}	等待檔案鎖 {} 逾時	ファイルロック {} の待機がタイムアウトしました
 授权被拒绝：{} / Authorization denied: {}	授权被拒绝：{}	Authorization denied: {}	授權被拒絕：{}	認可が拒否されました: {}
 识别方式 {} 不支持模型「{}」。可用：{}	识别方式 {} 不支持模型「{}」。可用：{}	The {} backend does not support model "{}". Available: {}	辨識方式 {} 不支援模型「{}」。可用：{}	音声認識方式 {} はモデル「{}」に対応していません。利用可能：{}
+字幕未读取成功：{}	字幕未读取成功：{}	Subtitles could not be read: {}	字幕未讀取成功：{}	字幕を読み取れませんでした：{}
+暂不发送	暂不发送	Don’t send now	暫不傳送	今は送信しない

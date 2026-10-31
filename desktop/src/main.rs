@@ -16,6 +16,7 @@ mod codex_ui;
 mod conversion;
 mod course_library;
 mod credentials;
+#[allow(dead_code)]
 mod focus_scroll;
 mod folder_tree;
 mod i18n;
@@ -26,6 +27,7 @@ mod import_ui;
 mod library_ui;
 mod math;
 mod model_discovery;
+#[allow(dead_code)]
 mod motion;
 mod note_text;
 mod notes;
@@ -201,7 +203,6 @@ type PreviewPlan = Result<workspace::TaskPlan, (String, bool)>;
 struct Desktop {
     /// The window size and text scale the link placeholder was last fitted
     /// in; a change asks for one more frame so the fit reads fresh bounds.
-    source_placeholder_fit: std::cell::Cell<(gpui::Size<Pixels>, Pixels)>,
     preferences: preferences::Store,
     settings_ui: settings_ui::State,
     onboarding: onboarding::State,
@@ -274,7 +275,6 @@ struct Desktop {
     settings_tab: settings_ui::SettingsTab,
     source_editor_open: bool,
     validation_attempt: usize,
-    show_options: bool,
     environment: Option<backend::Environment>,
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
@@ -329,7 +329,7 @@ struct Desktop {
     // virtualized list may unmount and remount while scrolling.
     entered: HashSet<String>,
     // Disclosure open state that outlives a virtualized row's unmount.
-    task_panels_open: HashSet<(task_ui::TaskPanel, String)>,
+    task_logs_open: HashSet<String>,
     /// The task row showing its details on the task page.
     expanded_task: Option<String>,
     event_repaint_pending: bool,
@@ -604,7 +604,6 @@ impl Desktop {
         let onboarding = onboarding::State::new(window, cx);
         let reader_ui = reader_ui::State::new(window, cx);
         let mut this = Self {
-            source_placeholder_fit: Default::default(),
             preferences,
             settings_ui,
             onboarding,
@@ -667,7 +666,6 @@ impl Desktop {
             settings_tab: settings_ui::SettingsTab::Appearance,
             source_editor_open: false,
             validation_attempt: 0,
-            show_options: false,
             environment: None,
             scrolls: std::array::from_fn(|_| ScrollHandle::new()),
             inputs,
@@ -708,7 +706,7 @@ impl Desktop {
             library_focus: Vec::new(),
             library_rem: f32::NAN,
             entered: HashSet::new(),
-            task_panels_open: HashSet::new(),
+            task_logs_open: HashSet::new(),
             expanded_task: None,
             event_repaint_pending: false,
             message,

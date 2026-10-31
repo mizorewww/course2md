@@ -51,24 +51,6 @@ impl Desktop {
         }
     }
 
-    /// The bilingual target select of the per-task options.
-    pub(crate) fn translation_select(
-        &self,
-        id: &'static str,
-        current: Option<&'static str>,
-        pick: impl Fn(&mut Self, Option<&'static str>, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> SelectField {
-        SelectField::new(
-            id,
-            current
-                .map(course2md::language::native_name)
-                .unwrap_or(course2md::tr!("不翻译")),
-            self.translation_menu(current, pick, cx),
-        )
-        .label(course2md::tr!("双语翻译"))
-    }
-
     /// Bilingual notes: the language each paragraph is also translated into.
     fn translation_setting(
         &self,
