@@ -2,7 +2,7 @@ name: native desktop
 
 on:
   push:
-    branches: [main, split/workspace]
+    branches: [main, split/workspace, split/engine-crates]
     paths:
       - 'desktop/**'
       - 'src/**'
