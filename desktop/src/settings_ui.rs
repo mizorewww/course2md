@@ -194,15 +194,6 @@ impl State {
     }
 }
 
-pub(super) fn field_label(
-    id: impl Into<ElementId>,
-    value: impl Into<SharedString>,
-) -> Stateful<Div> {
-    accessible_text(id, value)
-        .text_size(TEXT_SETTINGS_BODY)
-        .font_weight(FontWeight::SEMIBOLD)
-}
-
 fn setting_label(id: impl Into<ElementId>, value: impl Into<SharedString>) -> Div {
     div().child(tile_label(id, value))
 }
@@ -301,29 +292,6 @@ pub(super) fn settings_switch_row(label: &'static str, hint: &'static str, contr
         )
 }
 
-/// Status rows inside an existing card: label on the shared axis, value trailing.
-/// Do not wrap these in `settings_row`; that would give each item its own surface.
-pub(super) fn settings_status_row(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    value: impl IntoElement,
-) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .min_h(CONTROL_HEIGHT)
-        .items_center()
-        .gap_4()
-        .child(field_label(id, label).flex_1().min_w_0().max_w_full())
-        .child(
-            h_flex()
-                .flex_shrink_0()
-                .items_center()
-                .justify_end()
-                .child(value),
-        )
-}
-
 /// One setting's content box inside a settings card; the card owns the surface.
 pub(super) fn setting_surface() -> Div {
     v_flex()
@@ -394,11 +362,6 @@ impl DetailGroup {
                 )
                 .into_any_element(),
         );
-        self
-    }
-
-    pub(crate) fn after(mut self, element: impl IntoElement) -> Self {
-        self.after.push(element.into_any_element());
         self
     }
 }
@@ -583,38 +546,6 @@ pub(crate) fn resource_menu(
     icon_button(id, CONTROL_HEIGHT, false, cx)
         .mr(rems(-RESOURCE_MENU_OUTSET))
         .icon(icons::more_vertical())
-}
-
-/// Diagnostic values begin on a common reading axis. They can wrap and grow
-/// vertically without moving short values to the far edge of the window.
-pub(super) fn settings_detail_row(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    value: impl IntoElement,
-) -> Div {
-    h_flex()
-        .w_full()
-        .min_w_0()
-        .min_h(rems(28. / 14.))
-        .items_start()
-        .flex_wrap()
-        .gap_x_4()
-        .gap_y_1()
-        .child(
-            field_label(id, label)
-                .min_w(rems(96. / 14.))
-                .max_w_full()
-                .flex_shrink_0()
-                .whitespace_normal(),
-        )
-        .child(
-            v_flex()
-                .flex_1()
-                .flex_basis(rems(240. / 14.))
-                .min_w_0()
-                .items_start()
-                .child(value),
-        )
 }
 
 pub(super) fn settings_value(

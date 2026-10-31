@@ -16,6 +16,8 @@ mod codex_ui;
 mod conversion;
 mod course_library;
 mod credentials;
+// Old widgets, emptied as pages move to the kit in wave 2 and deleted in wave 3.
+#[allow(dead_code)]
 mod focus_scroll;
 mod folder_tree;
 mod i18n;
@@ -50,7 +52,7 @@ mod store;
 mod symbols;
 mod task_runner;
 mod task_ui;
-#[allow(dead_code)]
+#[allow(dead_code, unused_imports)]
 mod theme;
 // Primitives for the page rewrites of wave 2; the attribute goes once they have callers.
 #[allow(dead_code)]

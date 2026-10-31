@@ -681,7 +681,7 @@ impl Desktop {
         );
         let status_badge = state.map(|state| {
             let (kind, label) = super::model_diagnostics::cache_state_label(state);
-            badge(kind).child(label)
+            gpui_kit_material::prelude::status_chip(kind).child(label)
         });
         let model_text = tile_text(
             "local-model-heading",
@@ -877,7 +877,7 @@ impl Desktop {
                                     (engine_id(*engine), crate::provider_label(*engine))
                                 })),
                                 |choices, engine| {
-                                    choices.icon(engine_id(*engine), engine_icon(*engine))
+                                    choices.icon(engine_id(*engine), engine_icon(*engine).component())
                                 },
                             )
                             .full_width()

@@ -170,7 +170,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}，{}{}	{}，{}{}	{}, {}{}	{}，{}{}	{}、{}{}
 {}，{}，{}	{}，{}，{}	{}, {}, {}	{}，{}，{}	{}、{}、{}
 {}：{}	{}：{}	{}: {}	{}：{}	{}:{}
-{}：{} · {}	{}：{} · {}	{}: {} · {}	{}：{} · {}	{}: {} · {}
 {}：{}{}	{}：{}{}	{}: {}{}	{}：{}{}	{}：{}{}
 {}；尚未发送请求	{}；尚未发送请求	{}; request not sent yet	{}；尚未傳送請求	{};リクエストはまだ送信されていません
 {}；首个错误：{}	{}；首个错误：{}	{}; first error: {}	{}；首個錯誤：{}	{};最初のエラー: {}
@@ -191,8 +190,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 上一张	上一张	Previous	上一張	前へ
 上一张 · ←	上一张 · ←	Previous · ←	上一張 · ←	前へ · ←
 上一步	上一步	Previous step	上一步	前のステップ
-上次准备	上次准备	Last preparation	上次準備	前回の準備
-上次准备记录：{}	上次准备记录：{}	Last preparation record: {}	上次準備記錄：{}	前回の準備記録：{}
 上次结果未确认；重测会再次发送，可能计费	上次结果未确认；重测会再次发送，可能计费	Previous result unconfirmed; retesting sends the request again and may incur charges	上次結果未確認；重測會再次傳送，可能計費	前回の結果は未確認です。再テストするとリクエストが再送信され、料金が発生する場合があります
 上次结果未确认；重测或「{}」都会再次发送请求，可能计费	上次结果未确认；重测或「{}」都会再次发送请求，可能计费	Previous result unconfirmed; retesting or "{}" sends the request again and may incur charges.	上次結果未確認；重測或「{}」都會再次傳送請求，可能計費	前回の結果は未確認です。再テストまたは「{}」でリクエストが再送信され、料金が発生する場合があります。
 下一处	下一处	Next match	下一處	次の一致
@@ -380,13 +377,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 写 checkpoint {} / Failed to write checkpoint {}	写 checkpoint {}	Failed to write checkpoint {}	寫 checkpoint {}	checkpoint {} の書き込みに失敗しました
 写 {} / Failed to write {}	写 {}	Failed to write {}	寫 {}	{} の書き込みに失敗しました
 准备 Apple 识别模型	准备 Apple 识别模型	Prepare Apple speech model	準備 Apple 辨識模型	Apple 音声認識モデルを準備
-准备中	准备中	In preparation	準備中	準備中
 准备失败	准备失败	Preparation failed	準備失敗	準備に失敗しました
 准备就绪	准备就绪	Ready	準備就緒	準備完了
 准备已暂停	准备已暂停	Preparation is paused	準備已暫停	準備は一時停止中です
 准备日志	准备日志	Preparation log	準備日誌	準備ログ
 准备未完成	准备未完成	Preparation not completed	準備未完成	準備が完了していません
-准备未完成，原因见模型详情	准备未完成，原因见模型详情	Preparation is not complete. Please see the model details for the reason.	準備未完成，原因見模型詳情	準備が完了していません。その理由はモデル詳細をご覧ください。
 准备识别模型	准备识别模型	Prepare speech model	準備辨識模型	音声認識モデルを準備
 减少动态效果	减少动态效果	Reduce motion	減少動態效果	動きを減らす
 凭据	凭据	Credentials	憑證	資格情報
@@ -415,7 +410,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 加载识别模型	加载识别模型	Loading speech model	載入語音辨識模型	音声認識モデルを読み込み中
 加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)	加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)	Loading speech model (first use may download files)	載入辨識模型（首次可能需要下載）/ Loading speech model (first use may download files)	音声認識モデルを読み込み中（初回はファイルのダウンロードが必要な場合があります）
 匹配截图 {} / {}	匹配截图 {} / {}	Matching screenshots {} / {}	匹配截圖 {} / {}	一致するスクリーンショット {} / {}
-占用空间	占用空间	Disk usage	佔用空間	使用容量
 占用空间 {}	占用空间 {}	Uses {}	佔用空間 {}	使用容量 {}
 卡片	卡片	Cards	卡片	カード
 原任务仍在处理，请先暂停并等候当前步骤结束	原任务仍在处理，请先暂停并等候当前步骤结束	The original task is still being processed, please pause and wait for the current step to end.	原任務仍在處理，請先暫停並等候目前步驟結束	元のタスクはまだ処理中です。一時停止して、現在のステップが終了するまでお待ちください。
@@ -464,8 +458,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 可用	可用	Available	可用	利用可能
 可用识别方式	可用识别方式	Available recognition methods	可用辨識方式	利用可能な認識方式
 可离线播放，会占用更多磁盘空间	可离线播放，会占用更多磁盘空间	Plays offline; uses more disk space	可離線播放，會佔用更多磁碟空間	オフラインで再生できますが、より多くのディスク容量を消費します
-可返回第一步更换引擎	可返回第一步更换引擎	You can go back to the first step to change the engine.	可返回第一步更換引擎	最初のステップに戻ってエンジンを変更できます。
-可返回第一步更换模型	可返回第一步更换模型	You can return to the first step to change the model	可返回第一步更換模型	最初のステップに戻ってモデルを変更できます
 可选配置：course2md config init	可选配置：course2md config init	Optional setup: course2md config init	可選設定：course2md config init	任意の設定：course2md config init
 同时导出	同时导出	Also export	同時匯出	同時に書き出す
 同时清除云端语音识别密钥 / Also clear the cloud speech API key	同时清除云端语音识别密钥	Also clear the cloud speech API key	同時清除雲端語音辨識金鑰	クラウド音声認識キーもクリア
@@ -527,7 +519,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 字幕链接暂时无法访问，请重新读取字幕，或选择其他文字来源。	字幕链接暂时无法访问，请重新读取字幕，或选择其他文字来源。	The subtitle link is temporarily inaccessible. Please read the subtitles again or choose another text source.	字幕連結暫時無法存取，請重新讀取字幕，或選擇其他文字來源。	字幕リンクに一時的にアクセスできません。字幕をもう一度読み込むか、別のテキストソースを選択してください。
 字幕需要登录，或改用语音识别	字幕需要登录，或改用语音识别	Subtitles require sign-in, or use speech recognition instead	字幕需要登入，或改用語音辨識	字幕にはログインが必要です。または音声認識を使用してください
 存储	存储	Storage	儲存	ストレージ
-安装 llama.cpp，确保可在终端直接运行 llama-server，然后重新打开应用	安装 llama.cpp，确保可在终端直接运行 llama-server，然后重新打开应用	Install llama.cpp, make sure you can run llama-server directly in the terminal, and then reopen the application	安裝 llama.cpp，確保可在終端直接執行 llama-server，然後重新開啟應用	llama.cpp をインストールし、ターミナルで llama-server を直接実行できることを確認してから、アプリを再度開いてください
 完成	完成	Done	完成	完了
 完成状态尚未保存：{}。已发布的笔记仍保留。	完成状态尚未保存：{}。已发布的笔记仍保留。	Completion status has not been saved: {}. Published notes remain.	完成狀態尚未儲存：{}。已發布的筆記仍保留。	完了ステータスは保存されていません: {}。公開されたノートは残ります。
 完整的 safetensors 权重文件 / a complete safetensors weight file	完整的 safetensors 权重文件	a complete safetensors weight file	完整的 safetensors 權重檔案	完全な safetensors 重みファイル
@@ -837,18 +828,14 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 摘要结果未确认	摘要结果未确认	Summary result not confirmed	摘要結果未確認	要約結果は未確認
 操作已完成	操作已完成	Operation completed	操作已完成	操作が完了しました
 操作意外中断，请重试	操作意外中断，请重试	The operation was unexpectedly interrupted, please try again	操作意外中斷，請重試	操作が予期せず中断されました。もう一度お試しください。
-操作未完成	操作未完成	Operation not completed	操作未完成	操作が完了していません
 收尾中…	收尾中…	Wrapping up…	收尾中…	仕上げ中…
 收起	收起	Collapse	收合	折りたたむ
-收起准备详情	收起准备详情	Collapse preparation details	收起準備詳情	準備の詳細を折りたたむ
 收起处理详情	收起处理详情	Collapse processing details	收起處理詳情	処理の詳細を折りたたむ
 收起处理选项	收起处理选项	Collapse processing options	收起處理選項	処理オプションを折りたたむ
 收起已完成的处理	收起已完成的处理	Hide finished tasks	收起已完成的處理	完了した処理を折りたたむ
 收起技术详情	收起技术详情	Hide technical details	收合技術詳情	技術的な詳細を隠す
 收起文字	收起文字	Collapse text	收起文字	テキストを折りたたむ
 收起检查详情	收起检查详情	Collapse inspection details	收起檢查詳情	チェックの詳細を折りたたむ
-收起模型	收起模型	Collapse model	收起模型	モデルを折りたたむ
-收起模型文件	收起模型文件	Collapse model file	收起模型檔案	モデルファイルを折りたたむ
 收起测试详情	收起测试详情	Collapse test details	收起測試詳情	テストの詳細を折りたたむ
 收起目录	收起目录	Collapse table of contents	收起目錄	目次を折りたたむ
 收起笔记详情	收起笔记详情	Hide note details	收起筆記詳情	ノートの詳細を非表示にする
@@ -979,7 +966,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法读取音频时长 / Could not read the audio duration	无法读取音频时长	Could not read the audio duration	無法讀取音訊時長	音声の長さを読み取れません
 无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later	无法连接 OpenAI 认证服务，稍后重试	Cannot reach the OpenAI auth service; retry later	無法連線 OpenAI 認證服務，稍後重試	OpenAI 認証サービスに接続できません。後でもう一度試してください。
 无法连接服务，尚未提交内容 / Could not connect; request content was not submitted	无法连接服务，尚未提交内容	Could not connect; request content was not submitted	無法連線服務，尚未提交內容	サービスに接続できません。コンテンツはまだ送信されていません
-无法选择保存位置：{}	无法选择保存位置：{}	Unable to select save location: {}	無法選擇儲存位置：{}	保存場所を選択できません: {}
 无法选择文件夹：{}	无法选择文件夹：{}	Unable to select folder: {}	無法選擇資料夾：{}	フォルダーを選択できません: {}
 无法验证账号状态，请稍后重试 / Cannot verify account status; retry later	无法验证账号状态，请稍后重试	Cannot verify account status; retry later	無法驗證帳號狀態，請稍後重試	アカウントのステータスを確認できません。後でもう一度お試しください。
 日本語	日本語	Japanese	日本語	日本語
@@ -1032,7 +1018,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 更多笔记操作	更多笔记操作	More note actions	更多筆記操作	その他のノート操作
 更快，占内存较少	更快，占内存较少	Faster, takes up less memory	更快，佔記憶體較少	より高速で、メモリ使用量が少ない
 更换	更换	Replace	更換	交換する
-更换模型	更换模型	Change model	更換模型	モデルを変更
 更换视频	更换视频	Change video	更換影片	動画を変更する
 更改默认位置只影响后续生成的笔记	更改默认位置只影响后续生成的笔记	Changing the default location only affects subsequently generated notes	更改預設位置只影響後續生成的筆記	デフォルトの場所を変更すると、それ以降に生成されるノートにのみ影響します。
 更新为：{} · v{} · {}	更新为：{} · v{} · {}	Updated to: {} · v{} · {}	更新為：{} · v{} · {}	更新先: {} · v{} · {}
@@ -1172,7 +1157,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 查看{}	查看{}	View {}	檢視{}	{} を表示
 查看任务	查看任务	View task	檢視任務	タスクを表示
 查看任务详情	查看任务详情	View task details	檢視任務詳情	タスクの詳細を表示する
-查看准备详情	查看准备详情	View preparation details	檢視準備詳情	準備の詳細を表示する
 查看后续处理任务	查看后续处理任务	View follow-up tasks	檢視後續處理任務	フォローアップタスクを表示する
 查看处理详情	查看处理详情	View processing details	檢視處理詳情	処理の詳細を表示する
 查看已完成的处理	查看已完成的处理	Show finished tasks	檢視已完成的處理	完了した処理を表示する
@@ -1180,7 +1164,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 查看文字	查看文字	View text	檢視文字	テキストを表示する
 查看新版	查看新版	View new version	檢視新版	新しいバージョンを表示
 查看未完成部分	查看未完成部分	View unfinished parts	檢視未完成部分	未完了の部分を表示する
-查看模型文件	查看模型文件	View model files	檢視模型檔案	モデルファイルを表示する
 查看测试详情	查看测试详情	View test details	檢視測試詳情	テストの詳細を表示する
 查看笔记库	查看笔记库	View note library	檢視筆記庫	ノートライブラリを表示する
 查看结果	查看结果	View results	檢視結果	結果を見る
@@ -1212,7 +1195,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 检查模型文件	检查模型文件	Check model file	檢查模型檔案	モデルファイルを確認
 检查模型是否可用	检查模型是否可用	Check if the model is available	檢查模型是否可用	モデルが利用可能かどうかを確認する
 检查模型是否已下载 / Check whether a model is downloaded	检查模型是否已下载	Check whether a model is downloaded	檢查模型是否已下載	モデルがダウンロードされているかどうかを確認する
-检查结果	检查结果	Check results	檢查結果	チェック結果
 检查结果尚未保存	检查结果尚未保存	Check results have not been saved yet	檢查結果尚未儲存	チェック結果はまだ保存されていません
 检查视频时意外中断，请重试	检查视频时意外中断，请重试	Unexpected interruption while checking video, please try again	檢查影片時意外中斷，請重試	動画の確認中に予期せぬ中断が発生しました。もう一度お試しください。
 检查识别模型 / Checking speech model	检查识别模型	Checking speech model	檢查辨識模型	音声認識モデルを確認しています
@@ -1230,7 +1212,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	模型仍在使用旧位置，请先在「生成笔记」中保存模型位置，再清理备份	The model still uses the old location. Save the model location in “Note generation” before cleaning backups.	模型仍在使用舊位置，請先在「產生筆記」中儲存模型位置，再清理備份	モデルはまだ古い場所を使用しています。「ノートを作成」でモデルの場所を保存してからバックアップを整理してください
 模型会继续在后台准备	模型会继续在后台准备	The model will continue to be prepared in the background	模型會繼續在背景準備	モデルはバックグラウンドで引き続き準備されます
 模型位置尚未更新，修改已保留，可重试保存：{}	模型位置尚未更新，修改已保留，可重试保存：{}	The model location has not been updated. Your changes were kept; you can try saving again: {}	模型位置尚未更新，修改已保留，可重試儲存：{}	モデルの場所はまだ更新されていません。変更は保持されています。もう一度保存できます: {}
-模型准备	模型准备	Model preparation	模型準備	モデルの準備
 模型准备完成 / Model preparation finished.	模型准备完成	Model preparation finished.	模型準備完成	モデルの準備ができました
 模型准备已暂停	模型准备已暂停	Model preparation is paused	模型準備已暫停	モデルの準備が一時停止されています
 模型准备未完成 / Model preparation did not complete	模型准备未完成	Model preparation did not complete	模型準備未完成	モデルの準備が完了していません
@@ -1243,9 +1224,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 模型文件下载不完整，请重新运行 course2md models download / Model download incomplete; run course2md models download again	模型文件下载不完整，请重新运行 course2md models download	Model download incomplete; run course2md models download again	模型檔案下載不完整，請重新執行 course2md models download	モデルファイルのダウンロードが不完全です。course2md models download を再実行してください。
 模型文件不完整，正在重新下载 / Model file incomplete; downloading again	模型文件不完整，正在重新下载	Model file incomplete; downloading again	模型檔案不完整，正在重新下載	モデル ファイルが不完全なため、再度ダウンロード中です。
 模型检查与设置	模型检查与设置	Model checking and setup	模型檢查與設定	モデルの確認とセットアップ
-模型检查未完成	模型检查未完成	Model check not completed	模型檢查未完成	モデルチェックが完了していません
 模型检查未完成，可在模型管理中查看原因并重试	模型检查未完成，可在模型管理中查看原因并重试	The model check is not completed. You can check the reason in model management and try again.	模型檢查未完成，可在模型管理中檢視原因並重試	モデルのチェックが完了していません。モデル管理で理由を確認し、再試行できます。
-模型状态	模型状态	Model status	模型狀態	モデルステータス
 模型目录 / Model directory	模型目录	Model directory	模型目錄	モデルディレクトリ
 模型目录暂不可用，已使用默认模型	模型目录暂不可用，已使用默认模型	The model directory is temporarily unavailable, the default model has been used	模型目錄暫不可用，已使用預設模型	モデル ディレクトリは一時的に使用できません。デフォルトのモデルが使用されています
 模型缓存包含过多文件，检查未完成 / Model cache contains too many files; check incomplete	模型缓存包含过多文件，检查未完成	Model cache contains too many files; check incomplete	模型快取包含過多檔案，檢查未完成	モデル キャッシュに含まれるファイルが多すぎるため、チェックが完了していません
@@ -1264,7 +1243,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在保存进度并退出…	正在保存进度并退出…	Saving progress and quitting…	正在儲存進度並結束…	進行状況を保存して終了しています…
 正在停止检查	正在停止检查	Stopping check	正在停止檢查	チェックを停止しています
 正在准备	正在准备	Preparing	正在準備	準備中
-正在准备 {}	正在准备 {}	Preparing {}	正在準備 {}	{}を準備しています
 正在准备…	正在准备…	Preparing…	正在準備…	準備中…
 正在准备模型	正在准备模型	Preparing model	正在準備模型	モデルの準備中
 正在准备的模型	正在准备的模型	Model being prepared	正在準備的模型	準備中のモデル
@@ -1297,7 +1275,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在检查所需组件…	正在检查所需组件…	Checking required components...	正在檢查所需元件…	必要なコンポーネントを確認しています...
 正在检查本机能力…	正在检查本机能力…	Checking this computer's capabilities...	正在檢查本機能力…	このコンピューターの機能を確認しています...
 正在检查模型	正在检查模型	Checking model	正在檢查模型	モデルを確認中
-正在检查模型…	正在检查模型…	Checking model…	正在檢查模型…	モデルを確認中…
 正在检查识别模型…	正在检查识别模型…	Checking speech model...	正在檢查辨識模型…	音声認識モデルを確認しています...
 正在检查配置	正在检查配置	Checking configuration	正在檢查設定	設定を確認中
 正在检测	正在检测	Detecting	正在偵測	検出中
@@ -1563,7 +1540,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 缺少视频信息，请重新读取 / Missing video info; please probe again	缺少视频信息，请重新读取	Missing video info; please probe again	缺少影片資訊，請重新讀取	動画情報がありません。もう一度読み込んでください。
 缺少视频处理组件，请在设置中查看	缺少视频处理组件，请在设置中查看	The video processing component is missing. Check Settings.	缺少影片處理元件，請在設定中檢視	動画処理コンポーネントがありません。設定を確認してください。
 缺少视频来源。示例：course2md ./lecture.mp4	缺少视频来源。示例：course2md ./lecture.mp4	Missing video source. Example: course2md ./lecture.mp4	缺少影片來源。範例：course2md ./lecture.mp4	動画ソースがありません。例: course2md ./lecture.mp4
-缺少识别组件	缺少识别组件	Missing transcription component	缺少辨識元件	音声認識コンポーネントがありません
 缺少读取视频所需的组件，请在设置中检查运行环境	缺少读取视频所需的组件，请在设置中检查运行环境	The components required to read the video are missing. Check the runtime environment in Settings.	缺少讀取影片所需的元件，請在設定中檢查執行環境	動画を読み取るために必要なコンポーネントがありません。設定で実行環境を確認してください。
 缺少这份备份的核验记录，未清理任何文件	缺少这份备份的核验记录，未清理任何文件	This backup has no verification record; no files were cleaned up.	缺少這份備份的核驗記錄，未清理任何檔案	このバックアップには検証記録がないため、ファイルは整理されていません。
 网页	网页	Web page	網頁	ウェブページ
@@ -1619,7 +1595,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 记录尚未重建，原件仍保留：{}	记录尚未重建，原件仍保留：{}	The record has not been reconstructed and the original remains: {}	記錄尚未重建，原件仍保留：{}	レコードは再構築されておらず、オリジナルのままです: {}
 记录已恢复，请重新扫描笔记库	记录已恢复，请重新扫描笔记库	The record has been restored. Please rescan the note library.	記錄已恢復，請重新掃描筆記庫	記録が復元されました。ノートライブラリをもう一度スキャンしてください
 设备与运行时	设备与运行时	Devices and runtime	裝置與執行環境	デバイスとランタイム
-设备状态	设备状态	Device status	裝置狀態	デバイスのステータス
 设置	设置	Settings	設定	設定
 设置 AI 服务	设置 AI 服务	Set up AI service	設定 AI 服務	AI サービスを設定
 设置…	设置…	Settings…	設定…	設定…
@@ -1901,7 +1876,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 隐藏完成后的 AI 校对提示 / Hide the optional AI proofreading tip	隐藏完成后的 AI 校对提示	Hide the optional AI proofreading tip	隱藏完成後的 AI 校對提示	完了後の AI 校正のヒントを非表示にする
 隐藏密钥	隐藏密钥	Hide key	隱藏金鑰	キーを隠す
 需要 Apple 芯片的 Mac	需要 Apple 芯片的 Mac	Requires a Mac with Apple silicon	需要 Apple 晶片的 Mac	Apple シリコン搭載の Mac が必要です
-需要 Homebrew；安装后重新打开应用	需要 Homebrew；安装后重新打开应用	Requires Homebrew; reopen the app after installation	需要 Homebrew；安裝後重新開啟應用程式	Homebrew が必要です。インストール後にアプリを再度開いてください
 需要 segments 列表，每项有 id 与 text	需要 segments 列表，每项有 id 与 text	A segments list is required; each item needs an id and text	需要 segments 列表，每項有 id 與 text	segments リストが必要です。各項目に id と text が必要です
 需要填写服务地址和模型名。在终端运行 course2md llm setup，或传入 --base-url 和 --model / A base URL and model are required. Run course2md llm setup in a terminal, or pass --base-url and --model.	需要填写服务地址和模型名。在终端运行 course2md llm setup，或传入 --base-url 和 --model	A base URL and model are required. Run course2md llm setup in a terminal, or pass --base-url and --model.	需要填寫服務網址和模型名稱。在終端機執行 course2md llm setup，或傳入 --base-url 和 --model	サービスURLとモデル名を入力する必要があります。ターミナルで course2md llm setup を実行するか、--base-url と --model を指定してください
 需要处理	需要处理	Needs attention	需要處理	対応が必要
@@ -2122,3 +2096,7 @@ Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 �
 等待文件锁 {} 超时 / Timed out waiting for the file lock {}	等待文件锁 {} 超时	Timed out waiting for the file lock {}	等待檔案鎖 {} 逾時	ファイルロック {} の待機がタイムアウトしました
 授权被拒绝：{} / Authorization denied: {}	授权被拒绝：{}	Authorization denied: {}	授權被拒絕：{}	認可が拒否されました: {}
 识别方式 {} 不支持模型「{}」。可用：{}	识别方式 {} 不支持模型「{}」。可用：{}	The {} backend does not support model "{}". Available: {}	辨識方式 {} 不支援模型「{}」。可用：{}	音声認識方式 {} はモデル「{}」に対応していません。利用可能：{}
+AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
+本机引擎和模型	本机引擎和模型	Local engine and model	本機引擎和模型	ローカルエンジンとモデル
+第 {} 步，共 {} 步	第 {} 步，共 {} 步	Step {} of {}	第 {} 步，共 {} 步	ステップ {} / {}
+音频的处理位置	音频的处理位置	Where audio is processed	音訊的處理位置	音声の処理場所
