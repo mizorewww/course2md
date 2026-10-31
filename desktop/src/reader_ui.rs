@@ -1598,14 +1598,9 @@ impl Desktop {
                 return;
             };
             let cancel = Arc::new(AtomicBool::new(false));
-            let stored = cancel.clone();
             let probing = cancel.clone();
             let _ = this.update(cx, |this, cx| {
-                // Cancel a previous probe that is still running before starting another.
-                if let Some(previous) = this.reader_ui.source_probe_cancel.take() {
-                    previous.store(true, Ordering::Relaxed);
-                }
-                this.reader_ui.source_probe_cancel = Some(stored);
+                this.reader_ui.source_probe_cancel = Some(cancel);
                 this.reader_ui.source_loading = true;
                 cx.notify();
             });
@@ -1629,15 +1624,7 @@ impl Desktop {
             });
             let _ = this.update(cx, |this, cx| {
                 this.reader_ui.source_loading = false;
-                // Clear only this probe's flag: a later probe holds a different Arc.
-                if this
-                    .reader_ui
-                    .source_probe_cancel
-                    .as_ref()
-                    .is_some_and(|current| Arc::ptr_eq(current, &cancel))
-                {
-                    this.reader_ui.source_probe_cancel = None;
-                }
+                this.reader_ui.source_probe_cancel = None;
                 let result = checked.and_then(|_| {
                     this.workspace
                         .as_mut()
@@ -2509,6 +2496,7 @@ impl Desktop {
                         div()
                             .absolute()
                             .inset_0()
+                            .p(rem(12.))
                             .rounded(RADIUS_HERO)
                             .bg(color(SURFACE))
                             .child(self.reader_toc(current, false, cx)),
@@ -2550,7 +2538,7 @@ impl Desktop {
             .role(Role::Navigation)
             .aria_label(course2md::tr!("阅读目录"))
             .when(beside, |toc| toc.w(TOC_WIDTH).flex_shrink_0())
-            .when(!beside, |toc| toc.w_full().p(rem(12.)))
+            .when(!beside, |toc| toc.w_full())
             .h_full()
             .min_h_0()
             .overflow_y_scroll()
@@ -3181,9 +3169,14 @@ impl Desktop {
                 format!("{find_label} {shortcut}"),
             )
         });
-        let play = self.reader_play_button(icon_only, cx);
+        // So short a window gives the video's place to its views; it moves to the menu.
+        let play = if metrics.short {
+            None
+        } else {
+            self.reader_play_button(icon_only, cx)
+        };
         let export = self.reader_export_menu(preview, icon_only, window, cx);
-        let more = self.reader_more_menu(preview, window, cx);
+        let more = self.reader_more_menu(preview, metrics.short, window, cx);
         title_bar_control(
             h_flex()
                 .flex_shrink_0()
@@ -3199,28 +3192,34 @@ impl Desktop {
         .into_any_element()
     }
 
-    /// The way to watch the video: the kept offline copy first, then the source page or
-    /// the local file when it is still there.
-    fn reader_play_button(&self, icon_only: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let label = course2md::tr!("播放原视频");
-        let offline = matches!(self.reader_ui.offline_video, OfflineVideo::Available(_));
-        let opening = self.reader_ui.offline_opening;
-        let can_play = offline
+    /// Whether there is a video to watch: the kept offline copy, the source page, or the
+    /// local file while it is still there.
+    fn reader_can_play(&self) -> bool {
+        matches!(self.reader_ui.offline_video, OfflineVideo::Available(_))
             || match &self.reader_ui.source {
                 Some(nav::SourceTarget::Web(_)) => true,
                 Some(nav::SourceTarget::Local(_)) => self.reader_ui.source_available,
                 None => false,
-            };
-        if !can_play {
+            }
+    }
+
+    /// Watches the video, the kept offline copy first.
+    fn play_reader_video(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.reader_ui.offline_video, OfflineVideo::Available(_)) {
+            self.play_reader_offline_video(cx);
+        } else {
+            self.open_reader_source(cx);
+        }
+    }
+
+    /// The way to watch the video.
+    fn reader_play_button(&self, icon_only: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let label = course2md::tr!("播放原视频");
+        let opening = self.reader_ui.offline_opening;
+        if !self.reader_can_play() {
             return None;
         }
-        let play = cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
-            if offline {
-                this.play_reader_offline_video(cx);
-            } else {
-                this.open_reader_source(cx);
-            }
-        });
+        let play = cx.listener(|this: &mut Self, _: &ClickEvent, _, cx| this.play_reader_video(cx));
         Some(if icon_only {
             tool(
                 IconButton::new("reader-play", symbols::play_arrow(), label)
@@ -3355,7 +3354,9 @@ impl Desktop {
         ui::menu(
             "export-note-menu",
             trigger,
-            MaterialMenu::new("export-note-items").width(360.).items(items),
+            MaterialMenu::new("export-note-items")
+                .width(360.)
+                .items(items),
             window,
             cx,
         )
@@ -3367,6 +3368,7 @@ impl Desktop {
     fn reader_more_menu(
         &self,
         preview: &Rc<notes::Preview>,
+        with_play: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -3382,7 +3384,15 @@ impl Desktop {
             },
             _ => course2md::tr!("打开原视频").to_owned(),
         };
-        let mut items = vec![
+        let mut items = Vec::new();
+        if with_play && self.reader_can_play() {
+            items.push(
+                MaterialMenuItem::new(course2md::tr!("播放原视频"))
+                    .leading(Icon::from(symbols::play_arrow()))
+                    .on_click(cx.listener(|this, _, _, cx| this.play_reader_video(cx))),
+            );
+        }
+        items.push(
             MaterialMenuItem::new(course2md::tr!("笔记详情"))
                 .leading(Icon::from(symbols::info()))
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -3393,7 +3403,7 @@ impl Desktop {
                     }
                     cx.notify();
                 })),
-        ];
+        );
         if source.is_some() {
             items.push(
                 MaterialMenuItem::new(source_label)
@@ -3428,7 +3438,9 @@ impl Desktop {
                 "reader-more-tip",
                 label,
             ),
-            MaterialMenu::new("reader-more-items").width(280.).items(items),
+            MaterialMenu::new("reader-more-items")
+                .width(280.)
+                .items(items),
             window,
             cx,
         )

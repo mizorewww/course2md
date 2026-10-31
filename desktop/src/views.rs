@@ -5,8 +5,8 @@ use crate::theme::{COLUMN, title_bar_height};
 use gpui_kit_material::{
     color::ColorRole,
     components::{
-        ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind,
-        TitleBar as AppBar, material_button, notice_banner, spinner, title_bar_control,
+        ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind, TitleBar as AppBar,
+        material_button, notice_banner, spinner, title_bar_control,
     },
     icons::SymbolIcon,
     motion,
