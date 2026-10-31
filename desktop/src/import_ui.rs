@@ -2254,7 +2254,12 @@ impl Desktop {
                 .map(|subtitle| subtitle.track_id.clone());
             let mut choices: Vec<_> = tracks
                 .iter()
-                .map(|track| (format!("track:{}", track.id), track.label()))
+                .map(|track| {
+                    (
+                        format!("track:{}", track.id),
+                        course2md::subtitle::track_label(track),
+                    )
+                })
                 .collect();
             if let Some(cached) = &source.selected_subtitle
                 && !tracks.iter().any(|track| track.id == cached.track_id)

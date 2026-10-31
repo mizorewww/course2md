@@ -1051,7 +1051,7 @@ pub fn read_subtitle(
         Ok(CachedSubtitle {
             source_identity: source.identity.clone(),
             track_id: track.id.clone(),
-            label: track.label(),
+            label: course2md::subtitle::track_label(track),
             path: {
                 file.persist(&target)?;
                 target
@@ -1217,7 +1217,10 @@ mod tests {
         let metadata = serde_json::json!({"streams":[{"index":3,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"fra"}}]});
         let evidence = local_subtitle_evidence(&video, &metadata, "fixture");
         assert_eq!(evidence.tracks().len(), 1);
-        assert_eq!(evidence.tracks()[0].label(), "法语");
+        assert_eq!(
+            course2md::subtitle::track_label(&evidence.tracks()[0]),
+            "法语"
+        );
         assert!(matches!(
             evidence.tracks()[0].origin,
             course2md::subtitle::SubtitleOrigin::Embedded {

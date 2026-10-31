@@ -1365,6 +1365,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "subtitle-parse",
  "sys-locale",
  "tempfile",
  "tokio",
@@ -7138,6 +7139,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "subtitle-parse"
+version = "0.1.0"
+source = "git+https://github.com/mizorewww/subtitle-parse?rev=53e0ab4aaf02ca2600e05f9b13085f97228c65ad#53e0ab4aaf02ca2600e05f9b13085f97228c65ad"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
