@@ -21,8 +21,8 @@ and then its look stays.
 
 | Verdict | Items |
 | --- | --- |
-| `restore` | 70 |
-| `keep new` | 18 |
+| `restore` | 68 |
+| `keep new` | 20 |
 | Total | 88 |
 
 Grep of the baseline for the same things, which cross-checked the rows rather than counted them: `tinted_icon`/`Tint::` 24 uses outside `theme.rs`, `RADIUS_*`,
@@ -57,7 +57,7 @@ accent tint. A straight swap would have painted the settings navigation one colo
 | G14 | Typeface | System UI | Roboto with CJK fallback | keep new | Decision 1; the kit's type |
 | G15 | Dialog placement | Near the top | Centered | keep new | The kit places dialogs; plainly consistent with Material |
 | G16 | Motion | `motion.rs` | The kit's | keep new | Decision 15 |
-| G17 | Page titles | 30/36. `theme.rs:427`, `library` | 24/32 | restore | Hierarchy; a larger `TypeRole` or a role option on `page_heading` |
+| G17 | Page titles | 30/36. `theme.rs:427`, `library` | 24/32 | restore | `HeadlineMedium` 28/36 through `ui::page_title`, the nearest role |
 | G18 | Corner scale | Cards 16, panels 28, settings tiles 24. `theme.rs:273` | Cards 12, tiles 24, panels 24 | restore | Roomy corners are the old character; kit radius tokens stay, pages pick the larger token through card options |
 | G19 | Scrim | 28% light, 58% dark. `theme.rs` | Flat 32% | keep new | Material's value; compared by eye in both modes |
 | G20 | Dialog width | 448 default | 312 default | restore | `.width(px)` or `DialogSize` at call sites |
@@ -67,7 +67,7 @@ accent tint. A straight swap would have painted the settings navigation one colo
 
 | # | Element | Baseline | Current | Verdict | Reason and kit need |
 | --- | --- | --- | --- | --- | --- |
-| H0 | Hero title | 40/48. `import_ui.rs`, `home` | 36/44 | restore | App-side role |
+| H0 | Hero title | 40/48. `import_ui.rs`, `home` | 36/44 | keep new | `DisplaySmall`; the next role is 45, and by eye 36 holds the page |
 | H1 | Link field | 72 tall pill on `SURFACE`, 2px ring primary when focused or filled, error ring on failure, no resting outline, no floating label. `import_ui.rs:1125`, `home-empty-noopts` | 56 tall outlined rectangle with a notched label. `import_ui.rs:1026` today | restore | The page's signature. Hero `TextField` (kit) |
 | H2 | Preview action | Tonal pill with icon and 「预览视频」 inside the field. `home-preview` | Icon-only circle with a tooltip | restore | Trailing slot must hold a labeled button (kit) |
 | H3 | Drop hint | Upload icon with the sentence, plain link 「选择文件」 | Icon moved onto the link | restore | App-side |
@@ -96,7 +96,7 @@ accent tint. A straight swap would have painted the settings navigation one colo
 | L6 | Folder grouping toggle | Outlined with folder icon; tonal with check when on | Faint outline, no icon | restore | G3 plus icon |
 | L7 | Import action | Tonal, medium, radius 16 | Tonal pill | restore | `ButtonSize::Medium` with `ButtonShape::Square` |
 | L8 | Group header | Plain: chevron, name, count beside it. `library-group` | Hover bar, count at the far edge | restore | App-side |
-| L9 | Card metadata | Folder and date | Adds uploader and duration | keep new | Useful and fits; no look lost |
+| L9 | Card metadata | Folder and date | Adds uploader and duration, truncated | restore | It no longer fit a card; lists keep the longer line |
 
 ## Tasks
 
@@ -113,18 +113,18 @@ accent tint. A straight swap would have painted the settings navigation one colo
 
 | # | Element | Baseline | Current | Verdict | Reason and kit need |
 | --- | --- | --- | --- | --- | --- |
-| R1 | Note attention | Warning tone, radius 28, page level above the view switch. `reader_ui.rs:4881`, `reader` | Error tone inside the note | restore | A partial note isn't an error; app-side `notice_banner` kind |
+| R1 | Note attention | Warning tone, radius 28, page level above the view switch. `reader_ui.rs:4881`, `reader` | Error tone inside the note | restore | A partial note isn't an error; the tone is restored with `NoticeKind::Warning` (kit #5), the place stays in the scrolling head |
 | R2 | View switch | Connected pills, left, primary fill. `reader_ui.rs:1699`, `reader` | Full-width underlined tabs on a white band | restore | The band read as a second title bar. `ConnectedButtonGroup` is allowed for views of the same item |
 | R3 | Note metadata | Tonal chips with icon | Plain line | restore | App-side, the kit's neutral status chip |
 | R4 | Timestamp | Tonal pill 「▶ 00:00 从此处观看」. `reader_ui.rs:5661` | Small text and glyph | restore | Depends on `TextView`'s block support, see the report |
-| R5 | Note card height | Hugs the note | Stretches to the window | restore | App-side |
+| R5 | Note card height | Hugs the note | Stretches to the window | keep new | `TextView` scrolls as one document inside the card |
 | R6 | Reader bar | 56 tall, breadcrumb and title centered. `reader_ui.rs:4321` | Crowded to the top | restore | App-side |
-| R8 | Summary | Tinted panel with sparkle icon and title. `reader-rich` | Plain headings in the note | restore | The first thing to read; needs a block style from `TextView` |
+| R8 | Summary | Tinted panel with sparkle icon and title. `reader-rich` | Plain headings in the note | restore (open) | The first thing to read. `TextView` paints no block background, so this is not restored yet; it needs block styling in `TextView` |
 | R9 | Contents | Flat pills, no surface. `reader_ui.rs:1590`, `reader-rich` | Segmented white list | restore | App-side |
 | R10 | Section cards | A card per section. `reader_ui.rs:1374` | One surface | keep new | `TextView` as one document gives selection and find across sections |
 | R11 | Body and figures | 17, figures radius 20. `reader-rich` | 16, radius 12 | restore | Reading comfort; `TextView` style options |
 | R12 | Screenshot gallery | Surface card, inset cover, actions over the image. `reader_ui.rs:5308`, `reader-rich-shots` | Filled gray card, cover to the edge | restore | Same as L3 |
-| R13 | Image viewer | Rounded modal on scrim, outlined tools. `reader-rich-viewer` | Whole window, quiet text buttons | restore | App-side; `MaterialDialog` wide |
+| R13 | Image viewer | Rounded modal on scrim, outlined tools. `reader-rich-viewer` | Whole window, quiet text buttons | keep new | More of the image in the same window; plainly better for looking at a slide |
 | R7 | Empty screenshots | Card, icon, title, action | Same | keep new | Equivalent |
 
 ## Settings

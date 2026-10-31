@@ -8,19 +8,23 @@ Choose the content pane and its title, icon, text and control rulers before sele
 
 | Role | Composition | Kit |
 | --- | --- | --- |
-| Main action | Icon + short verb; one per active region | `MaterialButton`, `Filled` |
+| Main action | Icon + short verb; one per active region; `Medium` where it finishes a card | `MaterialButton`, `Filled` |
 | Weighted secondary action | | `MaterialButton`, `Tonal` |
-| Secondary action | Same size as the main action beside it | `MaterialButton`, `Outlined` |
-| Inline action | Beside the information it acts on | `MaterialButton`, `Text` |
-| Icon action | Tooltip names it | `IconButton`, `MaterialTooltip` |
-| Peer selection | Short related options; independent commands are not single-choice | `ConnectedButtonGroup` |
+| Secondary action | A visible edge and a primary label | `MaterialButton`, `Outlined`, `ButtonTone::Accent` |
+| Inline action | Beside the information it acts on; ink when it is quieter than a link beside it | `MaterialButton`, `Text`, `ButtonTone::Neutral` |
+| Icon action | Tooltip names it; a back button is a neutral circle | `IconButton`, `Tonal` and `ButtonTone::Neutral`, `MaterialTooltip` |
+| Peer selection | Short related options, the selected one alone in color; views of one thing too | `ConnectedButtonGroup`, `ButtonTone::Neutral` |
+| Category or resource icon | Hue circle: a family per category, by its place | `tinted_icon`, `ListLeading::Tinted` |
 | Grouped items | Section title above, one item per thing | `section_title`, `segmented_list` of `ListItem` |
 | Preference | Label on the left, control on the right; the control moves below when it does not fit | `ListItem` trailing `Switch`, or a control beneath it |
 | Peer navigation | | `MaterialTabs` |
 | App navigation | App bar, or a pane where settings owns the page | `TopAppBar`, `PaneScaffold`, selected `ListItem` |
-| Independent subject | One topic and its actions | `MaterialCard` |
-| Data entry | Visible label, errors below | `TextField`, `ExposedDropdown`, `SearchField` |
+| Independent subject | One topic and its actions, on the surface, roomy corners | `MaterialCard`, `CardVariant::Surface` |
+| Data entry | Visible label, errors below; rounded with its form | `TextField`, `TextFieldShape::Rounded`, `ExposedDropdown`, `SearchField` |
+| The page's one main input | A surface pill with its action inside | `TextField::hero` |
 | Status | Icon and short text, adjacent to the thing described | `status_chip`, `Badge` |
+| Facts in a row | Quiet; only what needs attention is filled | `status_chip_outlined` |
+| Progress through a guide | Numbered steps with their names | `Stepper` |
 | Progress | See [states and motion](states-and-motion.md#conversion-states-and-result-access) | `LinearProgress`, `CircularProgress`, `LoadingIndicator` |
 | Explanation | Short regular-weight prose, natural height | `supporting_info` inside a boundary, `info_callout` or `notice_banner` alone |
 | Interruption | One consequential decision | `MaterialDialog` |

@@ -56,7 +56,7 @@ Character count × font size is not a valid width for shaped mixed-script labels
 
 ### Icons
 
-All interface icons are Material Symbols through the kit's `icons`: `IconName` for its aliases, `SymbolIcon` for the rest of the catalog. Do not add icon files, another icon family or a local renderer. Choose icons recognizable beside their label; compare a narrow icon, a circle and a wide icon beside the same label in the native app. Their slots agree; their ink need not occupy identical shapes.
+All interface icons are Material Symbols through the kit's `icons`: `IconName` for its aliases, `SymbolIcon` for the rest of the catalog, Rounded at weight 300 as `symbols.rs` renders them: a fine, round-ended line is the app's icon character. Do not add icon files, another icon family or a local renderer. Choose icons recognizable beside their label; compare a narrow icon, a circle and a wide icon beside the same label in the native app. Their slots agree; their ink need not occupy identical shapes.
 
 ## Explanation and reading
 

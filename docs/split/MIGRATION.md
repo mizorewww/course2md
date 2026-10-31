@@ -4,7 +4,7 @@ For page agents in wave 2. Design authority: `.agents/skills/course2md-design/SK
 `gpui_kit_material::prelude::*`. **Worked example: `desktop/src/about.rs`** (with its rows in
 `settings_ui.rs::application_settings_page`); it imports nothing from `theme::*`.
 
-Order of preference for anything not in these tables: drop the need; compose kit components; only
+A move keeps the look: see `PLAN.md` decision 16 and the skill's [design language](../../.agents/skills/course2md-design/references/design-language.md). Order of preference for anything not in these tables: drop the need; compose kit components; only
 then `desktop/src/ui.rs`. Do not add to `theme.rs`. Text comes from `i18n/catalog.tsv` in four
 languages, through `course2md::tr!`.
 
