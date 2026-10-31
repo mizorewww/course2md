@@ -67,26 +67,6 @@ pub struct VideoInfo {
     pub duration: f64,
 }
 
-/// ffprobe `-of json` 输出中我们关心的字段子集。
-#[derive(serde::Deserialize)]
-struct ProbeJson {
-    #[serde(default)]
-    streams: Vec<ProbeStream>,
-    format: Option<ProbeFormat>,
-}
-
-#[derive(serde::Deserialize)]
-struct ProbeStream {
-    width: Option<u32>,
-    height: Option<u32>,
-}
-
-#[derive(serde::Deserialize)]
-struct ProbeFormat {
-    /// ffprobe 的 duration 是字符串（如 "95.040000"）
-    duration: Option<String>,
-}
-
 /// 视频宽高与时长。用 `-of json` 结构化输出，取代按逗号/空白切分的文本解析。
 pub async fn probe_video(media: &Path) -> Option<VideoInfo> {
     let out = probe_output(
@@ -107,61 +87,33 @@ pub async fn probe_video(media: &Path) -> Option<VideoInfo> {
     if !out.status.success() {
         return None;
     }
-    let probe: ProbeJson = serde_json::from_slice(&out.stdout).ok()?;
-    let stream = probe.streams.first()?;
-    let duration = probe
-        .format
-        .and_then(|f| f.duration)
-        .and_then(|d| d.parse::<f64>().ok())?;
+    // ffprobe 的 duration 是字符串（如 "95.040000"）
+    let probe: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let stream = &probe["streams"][0];
     Some(VideoInfo {
-        width: stream.width?,
-        height: stream.height?,
-        duration,
+        width: stream["width"].as_u64()? as u32,
+        height: stream["height"].as_u64()? as u32,
+        duration: probe["format"]["duration"].as_str()?.parse().ok()?,
     })
-}
-
-/// `probe_duration` 两个入口共享的 ffprobe 参数（只输出时长数字）。
-fn duration_args() -> [&'static str; 6] {
-    [
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-    ]
-}
-
-/// 从 ffprobe 输出解析时长（秒）；进程失败或输出非法均为 None（非致命）。
-fn parse_duration_text(text: &str) -> Option<f64> {
-    text.trim().parse::<f64>().ok()
-}
-
-fn parse_duration(out: &std::process::Output) -> Option<f64> {
-    out.status
-        .success()
-        .then(|| parse_duration_text(&String::from_utf8_lossy(&out.stdout)))
-        .flatten()
 }
 
 /// 用 ffprobe 拿时长（秒）。失败时返回 None（非致命）。
 pub async fn probe_duration(media: &Path) -> Option<f64> {
     let out = probe_output(
         Command::new(crate::tools::program("ffprobe"))
-            .args(duration_args())
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+            ])
             .arg(media),
     )
     .await?;
-    parse_duration(&out)
-}
-
-/// [`probe_duration`] 的同步版（供阻塞线程使用）。
-pub fn probe_duration_blocking(media: &Path) -> Option<f64> {
-    let mut cmd = std::process::Command::new(crate::tools::program("ffprobe"));
-    cmd.args(duration_args()).arg(media);
-    let out = crate::runtime::run_bounded("ffprobe", &mut cmd, PROBE_TIMEOUT).ok()?;
     out.status
         .success()
-        .then(|| parse_duration_text(&out.stdout))
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().parse().ok())
         .flatten()
 }

@@ -6,11 +6,9 @@
 
 use crate::config::{AsrProvider, DEFAULT_ASR_MODEL, canonical_model};
 use crate::progress::Stage;
-use crate::timeline::TranscriptEvent;
 use anyhow::{Context, Result};
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 mod ffi {
     use std::os::raw::{c_char, c_double, c_int};
@@ -208,14 +206,6 @@ fn ensure_metallib() -> Result<()> {
     ))
 }
 
-fn interactive() -> bool {
-    use std::io::IsTerminal as _;
-    !crate::progress::is_json()
-        && !crate::progress::is_quiet()
-        && std::io::stdin().is_terminal()
-        && std::io::stderr().is_terminal()
-}
-
 /// 解析 coreml 后端用的模型：显式值（CLI 或 config.toml defaults.asr_model）规范化后返回；
 /// 未设置时交互终端询问一次并写入 config.toml，非交互环境用默认模型。
 /// CLI 在准备模型缓存之前调用，确保下载的正是转写时加载的模型。
@@ -223,7 +213,7 @@ pub fn resolve_model(explicit: Option<&str>) -> Result<String> {
     if let Some(model) = explicit.filter(|m| !m.trim().is_empty()) {
         return canonical_model(AsrProvider::Coreml, model);
     }
-    if !interactive() {
+    if crate::progress::is_json() || crate::progress::is_quiet() || !crate::runtime::interactive() {
         tracing::info!(
             "非交互环境，使用默认模型 {DEFAULT_ASR_MODEL}（可用 --asr-model 切换） / Non-interactive; using {DEFAULT_ASR_MODEL} (change with --asr-model)"
         );
@@ -280,8 +270,20 @@ impl CoremlAsr {
         Ok(Self { handle })
     }
 
+    /// Checks the runtime, then loads the prepared model for a task.
+    pub(crate) fn load_for_task(model: &str) -> Result<Self> {
+        ensure_metallib()?;
+        tracing::info!(model, "loading cached Apple native ASR");
+        crate::progress::start(Stage::ModelApple);
+        let asr = Self::load(model).context(crate::tr!(
+            "CoreML 模型加载失败 / CoreML model loading failed"
+        ))?;
+        crate::progress::done(Stage::ModelApple);
+        Ok(asr)
+    }
+
     /// 转写 16k 单声道 wav。Ok(None) = 无语音内容。
-    pub fn transcribe(&self, wav: &Path) -> Result<Option<String>> {
+    fn transcribe_wav(&self, wav: &Path) -> Result<Option<String>> {
         let path = CString::new(wav.to_string_lossy().as_bytes())?;
         let mut out = vec![0u8; 16 * 1024];
         let rc = unsafe {
@@ -440,58 +442,30 @@ impl Drop for CoremlAsr {
     }
 }
 
-/// CoreML 全流程：Silero VAD 分段 → 逐段转写。
-pub fn run_coreml(
-    wav: &Path,
-    max_speech: f64,
-    model: &str,
-    tmp_dir: &Path,
-    cp: &mut crate::checkpoint::Checkpoint,
-    control: &crate::dispatch::TaskControl,
-) -> Result<Vec<TranscriptEvent>> {
-    let t0 = Instant::now();
+/// Silero VAD 分段。
+pub(crate) fn segments(wav: &Path, max_speech: f64) -> Result<Vec<crate::asr::Seg>> {
     let raw = vad(wav, 0.25, 0.35)?;
-    // 时长缺失时不能按 0 处理：末段语音会被当成静音丢掉
-    let dur = crate::media::probe_duration_blocking(wav)
-        .filter(|d| d.is_finite() && *d > 0.0)
-        .context(crate::tr!(
-            "无法读取音频时长 / Could not read the audio duration"
-        ))?;
-    let segs = crate::asr::normalize_segments(raw, max_speech, wav, dur)?;
-    tracing::info!(segs = segs.len(), engine = "silero-coreml", "vad");
-    if segs.is_empty() {
-        return Ok(crate::asr::no_speech_events());
+    crate::asr::normalize_segments(raw, max_speech, wav, crate::asr::wav_duration(wav)?)
+}
+
+/// The shim's handle is used by one thread at a time: one worker, which `map_pool`
+/// runs on the thread that loaded it, as its thread-local last error requires.
+unsafe impl Sync for CoremlAsr {}
+unsafe impl Send for CoremlAsr {}
+
+impl crate::asr::Transcribe for CoremlAsr {
+    fn transcribe(&self, chunk: &Path, _seg: crate::asr::Seg) -> Result<String> {
+        Ok(self
+            .transcribe_wav(chunk)?
+            .map(|text| crate::asr::sanitize_qwen_text(&text))
+            .unwrap_or_default())
     }
-
-    ensure_metallib()?;
-    tracing::info!(model, "loading cached Apple native ASR");
-    crate::progress::start(Stage::ModelApple);
-    let asr = CoremlAsr::load(model).context(crate::tr!(
-        "CoreML 模型加载失败 / CoreML model loading failed"
-    ))?;
-    crate::progress::done(Stage::ModelApple);
-    tracing::info!(
-        secs = format_args!("{:.1}", t0.elapsed().as_secs_f64()),
-        "coreml ready"
-    );
-
-    let r = crate::asr::run_chunks(wav, &segs, cp, tmp_dir, "asr", control, |chunk| {
-        asr.transcribe(chunk).map(|t| {
-            let t = t.map(|s| crate::asr::sanitize_qwen_text(&s));
-            t.filter(|s| !s.is_empty())
-        })
-    })?;
-    tracing::info!(
-        n = r.len(),
-        secs = format_args!("{:.1}", t0.elapsed().as_secs_f64()),
-        "asr done"
-    );
-    Ok(r)
 }
 
 #[cfg(test)]
 mod helper_tests {
     use super::*;
+    use std::time::Instant;
 
     /// Network test: run with `QWEN3_CACHE_DIR=<scratch dir outside /private>
     /// cargo test --lib -- --ignored mirror_attempt` after `cargo build`.

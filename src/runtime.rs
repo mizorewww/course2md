@@ -523,7 +523,8 @@ impl TempWorkDir {
 
 /// Runs `work` for every item on a bounded number of OS threads, preserving
 /// input order. Workers stop taking new items after the first error, but every
-/// started item is joined so confirmed side effects can still be saved.
+/// started item is joined so confirmed side effects can still be saved. A single
+/// worker runs on the calling thread.
 pub fn map_pool<T, R>(
     items: Vec<T>,
     workers: usize,
@@ -539,36 +540,37 @@ where
     let results: std::sync::Mutex<Vec<Option<R>>> =
         std::sync::Mutex::new(std::iter::repeat_with(|| None).take(total).collect());
     let first_error = std::sync::Mutex::new(None::<anyhow::Error>);
-    std::thread::scope(|scope| {
-        for _ in 0..workers.max(1).min(total.max(1)) {
-            scope.spawn(|| {
-                loop {
-                    if let Err(error) = control.check() {
-                        let mut guard = lock_recover(&first_error);
-                        if guard.is_none() {
-                            *guard = Some(error);
-                        }
-                        break;
-                    }
-                    let next = lock_recover(&queue).next();
-                    let Some((index, item)) = next else { break };
-                    if lock_recover(&first_error).is_some() {
-                        break;
-                    }
-                    match work(item) {
-                        Ok(value) => lock_recover(&results)[index] = Some(value),
-                        Err(error) => {
-                            let mut guard = lock_recover(&first_error);
-                            if guard.is_none() {
-                                *guard = Some(error);
-                            }
-                            break;
-                        }
-                    }
+    let keep_first = |error| {
+        lock_recover(&first_error).get_or_insert(error);
+    };
+    let worker = || {
+        loop {
+            if let Err(error) = control.check() {
+                keep_first(error);
+                break;
+            }
+            let next = lock_recover(&queue).next();
+            let Some((index, item)) = next else { break };
+            if lock_recover(&first_error).is_some() {
+                break;
+            }
+            match work(item) {
+                Ok(value) => lock_recover(&results)[index] = Some(value),
+                Err(error) => {
+                    keep_first(error);
+                    break;
                 }
             });
         }
-    });
+    };
+    match workers.max(1).min(total.max(1)) {
+        1 => worker(),
+        count => std::thread::scope(|scope| {
+            for _ in 0..count {
+                scope.spawn(worker);
+            }
+        }),
+    }
     if let Some(error) = lock_recover(&first_error).take() {
         return Err(error);
     }

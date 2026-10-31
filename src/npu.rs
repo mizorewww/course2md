@@ -5,9 +5,7 @@
 //! 通过轻量 Python 伴随进程常驻 127.0.0.1:{port}，
 //! course2md 逐 chunk 提交并保存 checkpoint。
 
-use crate::checkpoint::Checkpoint;
 use crate::progress::Stage;
-use crate::timeline::TranscriptEvent;
 use anyhow::Result;
 
 use std::ffi::OsStr;
@@ -360,81 +358,43 @@ pub fn resolve_npu_model(raw: Option<&str>) -> String {
     }
 }
 
-/// `model_id` 由调用方经 [`resolve_npu_model`] 解析后传入（checkpoint 身份与
-/// worker 加载必须是同一个模型，避免解析两次）。
-pub fn run_npu(
-    model_id: &str,
-    wav: &Path,
-    max_speech: f64,
-    cp: &mut Checkpoint,
-    control: &crate::dispatch::TaskControl,
-) -> Result<Vec<TranscriptEvent>> {
-    let t0 = Instant::now();
-    let segs = crate::asr::ffmpeg_vad(wav, max_speech as f32)?;
-    tracing::info!(segs = segs.len(), "npu vad");
-    if segs.is_empty() {
-        return Ok(crate::asr::no_speech_events());
-    }
-
-    let mut worker = NpuWorker::start(model_id, control)?;
-    let (base, token) = (worker.base.clone(), worker.token.clone());
-    let client = crate::runtime::http_agent(NPU_HTTP_TIMEOUT);
-
-    let r = crate::asr::run_chunks(
-        wav,
-        &segs,
-        cp,
-        worker.tmp.path(),
-        "npu asr",
-        control,
-        |chunk| {
-            let req_body = serde_json::json!({
-                "path": chunk.to_string_lossy(),
-            });
-            let mut resp = client
-                .post(&format!("{base}/audio/transcriptions"))
-                .header("X-Auth-Token", &token)
-                .send_json(req_body)
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "Intel NPU 识别进程无响应 / Intel NPU worker did not respond: {e}"
-                    )
-                })?;
-            let v: serde_json::Value = resp.body_mut().read_json().map_err(|e| {
-                anyhow::anyhow!("NPU 无法解析服务响应 / Could not parse the service response: {e}")
-            })?;
-            if let Some(e) = v.get("error").and_then(|e| e.as_str()) {
-                anyhow::bail!("NPU 识别失败 / NPU transcription failed: {e}");
-            }
-            let text = v["text"].as_str().unwrap_or("").trim().to_string();
-            let sanitized = crate::asr::sanitize_qwen_text(&text);
-            Ok((!sanitized.is_empty()).then_some(sanitized))
-        },
-    );
-
-    worker.stop();
-
-    let events = r.map_err(|e| {
-        worker.stderr.attach(
-            e,
-            crate::tr!("NPU 识别错误详情 / NPU transcription error details"),
-        )
-    })?;
-    tracing::info!(
-        n = events.len(),
-        secs = format_args!("{:.1}", t0.elapsed().as_secs_f64()),
-        "npu asr done"
-    );
-    Ok(events)
-}
-
-/// 运行中的 NPU 伴随进程；Drop 时由 ManagedChild 兜底终止。
-struct NpuWorker {
-    tmp: crate::runtime::TempWorkDir,
+/// 运行中的 NPU 伴随进程；Drop 时优雅关闭，失败才终止进程树。
+pub(crate) struct NpuWorker {
+    _tmp: crate::runtime::TempWorkDir,
     child: crate::runtime::ManagedChild,
     stderr: crate::runtime::StderrTail,
     base: String,
     token: String,
+    client: ureq::Agent,
+}
+
+impl crate::asr::Transcribe for NpuWorker {
+    fn transcribe(&self, chunk: &Path, _seg: crate::asr::Seg) -> Result<String> {
+        let mut resp = self
+            .client
+            .post(&format!("{}/audio/transcriptions", self.base))
+            .header("X-Auth-Token", &self.token)
+            .send_json(serde_json::json!({"path": chunk.to_string_lossy()}))
+            .map_err(|e| {
+                anyhow::anyhow!("Intel NPU 识别进程无响应 / Intel NPU worker did not respond: {e}")
+            })?;
+        let v: serde_json::Value = resp.body_mut().read_json().map_err(|e| {
+            anyhow::anyhow!("NPU 无法解析服务响应 / Could not parse the service response: {e}")
+        })?;
+        if let Some(e) = v.get("error").and_then(|e| e.as_str()) {
+            anyhow::bail!("NPU 识别失败 / NPU transcription failed: {e}");
+        }
+        Ok(crate::asr::sanitize_qwen_text(
+            v["text"].as_str().unwrap_or(""),
+        ))
+    }
+
+    fn explain(&self, error: anyhow::Error) -> anyhow::Error {
+        self.stderr.attach(
+            error,
+            crate::tr!("NPU 识别错误详情 / NPU transcription error details"),
+        )
+    }
 }
 
 fn npu_kind(model_id: &str) -> &'static str {
@@ -446,7 +406,8 @@ fn npu_kind(model_id: &str) -> &'static str {
 }
 
 impl NpuWorker {
-    fn start(model_id: &str, control: &crate::dispatch::TaskControl) -> Result<Self> {
+    /// `model_id` 须经 [`resolve_npu_model`] 解析：checkpoint 身份与 worker 加载是同一个模型。
+    pub(crate) fn start(model_id: &str, control: &crate::dispatch::TaskControl) -> Result<Self> {
         let t0 = Instant::now();
         let tmp = crate::runtime::TempWorkDir::new("npu")?;
         let script_path = tmp.path().join("npu_worker.py");
@@ -495,17 +456,20 @@ impl NpuWorker {
         );
         crate::progress::done(Stage::ModelLoad);
         Ok(Self {
-            tmp,
+            _tmp: tmp,
             child,
             stderr,
             base,
             token,
+            client: crate::runtime::http_agent(NPU_HTTP_TIMEOUT),
         })
     }
+}
 
-    /// 优雅关闭：POST /shutdown → 等待 → 终止进程树（避免 uv 衍生的孙子进程残留）
-    /// → 短等 → 仍未退由 ManagedChild Drop 兜底。
-    fn stop(&mut self) {
+impl Drop for NpuWorker {
+    /// 优雅关闭：POST /shutdown → 等待 → 终止进程树（uv 启动的 Python 是孙子进程，
+    /// 占着端口与 chunk 文件）→ 短等 → 仍未退由 ManagedChild Drop 兜底。
+    fn drop(&mut self) {
         let client = crate::runtime::http_agent(SHUTDOWN_TIMEOUT);
         let _ = client
             .post(&format!("{}/shutdown", self.base))
@@ -518,18 +482,9 @@ impl NpuWorker {
     }
 }
 
-impl Drop for NpuWorker {
-    /// An error or cancellation between start and stop still ends the
-    /// launcher's Python grandchild, which holds the port and the chunk files.
-    fn drop(&mut self) {
-        crate::runtime::terminate_tree(&mut self.child);
-    }
-}
-
 /// Prepare the exact NPU model through the normal worker; no media is sent.
 pub fn prepare_npu_model(model_id: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
-    NpuWorker::start(model_id, control)?.stop();
-    Ok(())
+    NpuWorker::start(model_id, control).map(drop)
 }
 
 fn spawn_npu_worker(

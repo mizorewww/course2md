@@ -30,6 +30,7 @@ toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 indicatif = "0.18"
+hound = "3.5"
 image-compare = "0.5.0"
 indexmap = { version = "2", features = ["serde"] }
 libc = "0.2"
