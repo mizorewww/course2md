@@ -163,3 +163,22 @@ accent tint. A straight swap would have painted the settings navigation one colo
 | --- | --- | --- | --- | --- | --- |
 | D1 | Rename | Label above, radius 12 field. `dlg-rename` | Notched label, radius 4 | restore | G8 |
 | D2 | Confirm, login, storage | White, radius 28 | Gray, same form | restore | G9 |
+
+## Not finished
+
+A `restore` verdict states the intent. These are not there yet:
+
+| # | What remains |
+| --- | --- |
+| R8 | Open: the summary panel needs block styling from `TextView` |
+| G11 | Row and card titles are still Medium, as the kit's `TileScale::label` paints them, and read heavier in Roboto than they did |
+| G12 | Partly: storage and generation changed; the library's and all-notes' icons did not find a closer symbol |
+| G18 | Partly: note cards, tiles, home panels and task cards are back; other surfaces keep the kit's card radius |
+| H11 | Partly: step chips and the bar's place are off home, but the status chip and extra lines stay |
+| H12 | The action 「设置下一个视频」 stays in the task card, not in the panel; rows keep their icons |
+| T3 | The active step has no spinner |
+| T4 | The running title is the note's title with the chip at its end, without 「正在生成《…》」 |
+| R1 | The tone is back; the notice stays in the scrolling head, not above the view switch |
+| R3 | The chips carry no platform icon |
+| D1 | Corners are back; the label stays notched rather than above the field |
+| O4 | Switches have their icons; the rows' leading icons are not back |
