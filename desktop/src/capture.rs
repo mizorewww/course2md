@@ -25,7 +25,7 @@
 //!
 //! Dialogs open over their page: `service-editor:<ai|speech|dialog|confirm>`
 //! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
-//! `delete`, `confirm` (a `ui::Confirm`) and `image` (the newest note; give it a longer
+//! `delete`, `move`, `confirm` (a `ui::Confirm`) and `image` (the newest note; give it a longer
 //! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage` and `login`. Each
 //! capture first closes the dialogs an earlier one opened, so one shot shows
 //! one dialog. Nothing a dialog would change is saved unless its action is
@@ -152,7 +152,7 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
 }
 
 /// One simulated input step, `kind~args` with `~`-separated arguments in
-/// window pixels: `move~x~y`, `click~x~y[~count]`, `drag~x1~y1~x2~y2`, `wheel~x~y~dy[~dx]` (positive scrolls
+/// window pixels: `move~x~y`, `click~x~y[~count]`, `rclick~x~y`, `drag~x1~y1~x2~y2`, `wheel~x~y~dy[~dx]` (positive scrolls
 /// the content up or left, as a downward or rightward wheel turn), `key~<keystroke>` (GPUI
 /// syntax, e.g. `escape`, `right`, `cmd-f`; `equal` and `plus` name the
 /// keys the spec reserves) and `wait~ms`. Each platform
@@ -197,6 +197,22 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
             }
             events
         }
+        ("rclick", Some(position)) => vec![
+            moved(position),
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            }),
+        ],
         ("drag", Some(from)) if numbers.len() >= 4 => {
             let to = point(px(numbers[2]), px(numbers[3]));
             let mut events = vec![
@@ -411,6 +427,16 @@ impl Desktop {
                             .ask(|_, _, _| {}, window, cx)
                     }
                     "folder" => this.begin_folder(None, window, cx),
+                    "move" => {
+                        if let Some(course) = newest {
+                            let root = this.folder_context(Some(course.dir.clone())).root;
+                            this.begin_move(
+                                root,
+                                crate::library_ui::Moving::Note(course.storage_dir()),
+                                cx,
+                            );
+                        }
+                    }
                     "rename" => {
                         if let Some(course) = newest {
                             this.begin_course_rename(course, window, cx);
