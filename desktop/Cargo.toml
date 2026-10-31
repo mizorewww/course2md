@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Native course2md desktop application"
+publish = false
 
 [features]
 # Explicitly opt in when investigating native frame pacing. Ordinary builds

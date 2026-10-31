@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "Turn online course videos (YouTube/Bilibili) into image+transcript markdown notes"
 license.workspace = true
+publish = false
 
 [dependencies]
 c2m-ai = { path = "../c2m-ai" }
