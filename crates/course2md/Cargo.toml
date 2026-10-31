@@ -6,42 +6,45 @@ description = "Turn online course videos (YouTube/Bilibili) into image+transcrip
 license.workspace = true
 
 [dependencies]
+c2m-i18n = { path = "../c2m-i18n" }
+anyhow.workspace = true
+base64.workspace = true
+clap.workspace = true
+dialoguer.workspace = true
+getrandom.workspace = true
+hound.workspace = true
+image.workspace = true
+indexmap.workspace = true
+indicatif.workspace = true
+libc.workspace = true
+model-fetch.workspace = true
+open.workspace = true
+qrcode.workspace = true
 ratex-layout.workspace = true
 ratex-parser.workspace = true
 ratex-svg.workspace = true
 ratex-types.workspace = true
-qrcode.workspace = true
-anyhow.workspace = true
-tempfile.workspace = true
-url.workspace = true
-tokio.workspace = true
-clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-zip.workspace = true
-image.workspace = true
-ureq.workspace = true
-base64.workspace = true
-getrandom.workspace = true
+slide-detect.workspace = true
 strum.workspace = true
+subtitle-parse.workspace = true
+sys-locale.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
-open.workspace = true
+tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-indicatif.workspace = true
-hound.workspace = true
-indexmap.workspace = true
-libc.workspace = true
-dialoguer.workspace = true
+ureq.workspace = true
+url.workspace = true
 walkdir.workspace = true
-whatlang.workspace = true
 which.workspace = true
-sys-locale.workspace = true
-model-fetch.workspace = true
-slide-detect.workspace = true
-subtitle-parse.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+c2m-test-http = { path = "../c2m-test-http" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(apple_native)'] }

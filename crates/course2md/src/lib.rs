@@ -1,3 +1,5 @@
+pub use c2m_i18n::{eprint_tr, eprintln_tr, print_tr, println_tr, tr};
+pub use c2m_i18n::{i18n, language};
 pub mod apple;
 pub mod artifact;
 pub mod asr;
@@ -14,10 +16,8 @@ pub mod execution;
 pub mod fetch;
 pub mod fsio;
 pub mod hub;
-pub mod i18n;
 pub mod invalid;
 pub mod job;
-pub mod language;
 pub mod llm;
 pub mod llm_settings;
 pub mod login;
@@ -43,7 +43,7 @@ pub mod subtitle;
 pub mod summarize;
 pub mod summary_doc;
 #[cfg(test)]
-mod test_http;
+use c2m_test_http as test_http;
 pub mod timeline;
 pub mod tools;
 pub mod wizard;
