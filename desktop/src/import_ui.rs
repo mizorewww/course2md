@@ -50,7 +50,7 @@ fn hero_top(quiet: bool, compact: bool) -> f32 {
 
 /// The mark on a cover slot whose video has no cover image.
 pub(crate) fn cover_placeholder(size: Rems) -> Icon {
-    Icon::from(symbols::movie())
+    Icon::from(symbols::movie().filled(true))
         .size(size)
         .color(color(ColorRole::ON_SECONDARY_CONTAINER))
 }
@@ -1023,7 +1023,7 @@ impl Desktop {
     }
 
     /// The link and what can be done with it, or the local file in its place.
-    fn source_input(&self, cx: &mut Context<Self>) -> Div {
+    fn source_input(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let local = (!self.online()).then(|| self.local_source_input(cx));
         if let Some(local) = local {
             return v_flex()
@@ -1033,6 +1033,7 @@ impl Desktop {
                 .child(
                     h_flex().w_full().justify_center().child(
                         ConnectedButtonGroup::new("source-kind", course2md::tr!("视频来源"))
+                            .tone(ButtonTone::Neutral)
                             .options([
                                 ("online", course2md::tr!("视频链接")),
                                 ("local", course2md::tr!("本地文件")),
@@ -1056,17 +1057,36 @@ impl Desktop {
         // The start action owns the submit focus once it is on screen.
         let start_shown = self.source_preview.is_some() && self.can_start_input(cx);
         let preview_label = course2md::tr!("预览视频");
-        let mut preview = IconButton::new("preview-source", symbols::visibility(), preview_label)
-            .variant(IconButtonVariant::Tonal)
-            .disabled(
-                self.preview_cancel.is_some()
-                    || self.value(Field::Source, cx).is_empty()
-                    || self.owning_task(cx).is_some(),
-            )
-            .on_click(cx.listener(|this, _, window, cx| this.inspect_source(window, cx)));
-        if !start_shown {
-            preview = preview.track_focus(&self.import_submit_focus);
-        }
+        let preview_disabled = self.preview_cancel.is_some()
+            || self.value(Field::Source, cx).is_empty()
+            || self.owning_task(cx).is_some();
+        let preview_click = cx.listener(|this, _, window, cx| this.inspect_source(window, cx));
+        // A narrow window keeps the field's text: the action folds to its icon.
+        let preview = if is_compact(window) {
+            let mut button =
+                IconButton::new("preview-source", symbols::visibility(), preview_label)
+                    .variant(IconButtonVariant::Tonal)
+                    .button_size(ButtonSize::Medium)
+                    .disabled(preview_disabled)
+                    .on_click(preview_click);
+            if !start_shown {
+                button = button.track_focus(&self.import_submit_focus);
+            }
+            MaterialTooltip::plain("preview-source-tooltip", preview_label)
+                .trigger(button)
+                .into_any_element()
+        } else {
+            let mut button = material_button("preview-source", ButtonVariant::Tonal)
+                .button_size(ButtonSize::Medium)
+                .icon(symbols::visibility())
+                .child(preview_label)
+                .disabled(preview_disabled)
+                .on_click(preview_click);
+            if !start_shown {
+                button = button.track_focus(&self.import_submit_focus);
+            }
+            button.into_any_element()
+        };
         v_flex()
             .w_full()
             .min_w_0()
@@ -1074,14 +1094,10 @@ impl Desktop {
             .child(
                 TextField::new("source-link", &self.inputs[&Field::Source])
                     .w_full()
-                    .outlined()
+                    .hero()
                     .label(course2md::tr!("视频链接"))
-                    .float_label(true)
                     .leading_icon(Icon::from(symbols::link()))
-                    .trailing_icon(
-                        MaterialTooltip::plain("preview-source-tooltip", preview_label)
-                            .trigger(preview),
-                    )
+                    .trailing_icon(preview)
                     .error(failed)
                     .when_some(validation, |field, message| field.supporting_text(message)),
             )
@@ -1092,13 +1108,17 @@ impl Desktop {
                     .items_center()
                     .flex_wrap()
                     .gap(rem(8.))
+                    .child(
+                        Icon::from(symbols::file_upload())
+                            .size(rem(20.))
+                            .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                    )
                     .child(supporting(
                         "import-drop-hint",
                         course2md::tr!("或把本地视频拖进窗口"),
                     ))
                     .child(
                         material_button("choose-local-video", ButtonVariant::Text)
-                            .icon(symbols::file_upload())
                             .child(course2md::tr!("选择文件"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.switch_source_kind(false, window, cx);
@@ -1202,11 +1222,19 @@ impl Desktop {
     }
 
     /// While the video is read, a card in the shape its result will take.
-    fn source_reading(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn source_reading(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let label = course2md::tr!("取消读取视频");
+        let bar = |width: f32| {
+            div()
+                .w(relative(width))
+                .h(rem(16.))
+                .rounded_full()
+                .bg(color(ColorRole::SURFACE_CONTAINER_HIGHEST))
+        };
         motion::state_enter(
             "source-reading-enter",
             tile([true; 4])
+                .rounded(RADIUS_HERO)
                 .flex()
                 .flex_col()
                 .p(rem(16.))
@@ -1215,29 +1243,52 @@ impl Desktop {
                     h_flex()
                         .w_full()
                         .min_w_0()
-                        .items_center()
-                        .gap(rem(8.))
+                        .flex_wrap()
+                        .gap(rem(20.))
                         .child(
-                            accessible_text(
-                                "import-reading-state",
-                                course2md::tr!("正在读取视频信息…"),
-                            )
-                            .role(Role::Status)
-                            .flex_1()
-                            .min_w_0()
-                            .whitespace_normal(),
+                            div()
+                                .w(cover_width(window))
+                                .max_w_full()
+                                .flex_shrink_0()
+                                .aspect_ratio(16. / 9.)
+                                .rounded(RADIUS_LARGE)
+                                .bg(color(ColorRole::SECONDARY_CONTAINER)),
                         )
-                        .child(tip_button(
-                            "cancel-source-read",
-                            symbols::close(),
-                            label,
-                            |button| {
-                                button.on_click(cx.listener(|this, _, _, cx| {
-                                    this.invalidate_source();
-                                    cx.notify();
-                                }))
-                            },
-                        )),
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w(rem(240.))
+                                .gap(rem(12.))
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .items_center()
+                                        .gap(rem(8.))
+                                        .child(
+                                            accessible_text(
+                                                "import-reading-state",
+                                                course2md::tr!("正在读取视频信息…"),
+                                            )
+                                            .role(Role::Status)
+                                            .flex_1()
+                                            .min_w_0()
+                                            .whitespace_normal(),
+                                        )
+                                        .child(tip_button(
+                                            "cancel-source-read",
+                                            symbols::close(),
+                                            label,
+                                            |button| {
+                                                button.on_click(cx.listener(|this, _, _, cx| {
+                                                    this.invalidate_source();
+                                                    cx.notify();
+                                                }))
+                                            },
+                                        )),
+                                )
+                                .child(bar(0.7))
+                                .child(bar(0.45)),
+                        ),
                 )
                 .child(LinearProgress::new(
                     "source-reading-progress",
@@ -1455,6 +1506,7 @@ impl Desktop {
                             .flex_wrap()
                             .child(
                                 material_button("retry-source", ButtonVariant::Outlined)
+                                    .tone(ButtonTone::Accent)
                                     .icon(symbols::refresh())
                                     .child(course2md::tr!("重试预览"))
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -1473,6 +1525,7 @@ impl Desktop {
                                             "source-login-repair",
                                             ButtonVariant::Outlined,
                                         )
+                                        .tone(ButtonTone::Accent)
                                         .icon(bilibili_mark())
                                         .child(course2md::tr!("登录 Bilibili"))
                                         .on_click(
@@ -1566,6 +1619,7 @@ impl Desktop {
                     .items_center()
                     .child(
                         material_button("replace-source", ButtonVariant::Outlined)
+                            .tone(ButtonTone::Accent)
                             .child(course2md::tr!("更换视频"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.online() {
@@ -1580,6 +1634,7 @@ impl Desktop {
                     .when(self.can_start_input(cx), |row| {
                         row.child(
                             material_button("start-conversion", ButtonVariant::Filled)
+                                .button_size(ButtonSize::Medium)
                                 .icon(symbols::play_arrow())
                                 .child(course2md::tr!("开始转换"))
                                 .track_focus(&self.import_submit_focus)
@@ -1660,6 +1715,7 @@ impl Desktop {
         Some(motion::state_enter(
             "import-selected-source-enter",
             tile([true, true, false, false])
+                .rounded_t(RADIUS_HERO)
                 .id("import-selected-source")
                 .flex()
                 .flex_col()
@@ -1916,6 +1972,7 @@ impl Desktop {
                                         "use-previous-subtitle",
                                         ButtonVariant::Outlined,
                                     )
+                                    .tone(ButtonTone::Accent)
                                     .icon(symbols::subtitles())
                                     .child(course2md::tr!("继续使用之前的字幕"))
                                     .on_click(
@@ -1930,6 +1987,7 @@ impl Desktop {
                     .when(login, |row| {
                         row.child(
                             material_button("login-for-subtitles", ButtonVariant::Outlined)
+                                .tone(ButtonTone::Accent)
                                 .icon(bilibili_mark())
                                 .child(course2md::tr!("登录 Bilibili"))
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -1974,6 +2032,8 @@ impl Desktop {
         };
         let selector =
             ConnectedButtonGroup::new("conversion-text-mode", course2md::tr!("文字来源方式"))
+                .tone(ButtonTone::Neutral)
+                .button_size(ButtonSize::Medium)
                 .full_width()
                 .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
                 .selected(text_source_id(mode))
@@ -1998,14 +2058,15 @@ impl Desktop {
                 && self.source_preview.as_ref().is_none_or(|source| {
                     self.subtitle_loading || subtitle_needs_confirmation(source, mode)
                 }));
-        let mut fields = vec![
-            ui::Field::below(
-                "conversion-text-mode-field",
-                course2md::tr!("文字来源方式"),
-                selector,
-            )
-            .hint(hint),
-        ];
+        let mut fields = vec![ui::Field::content(
+            "conversion-text-mode-field",
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(8.))
+                .child(selector)
+                .child(supporting_info("conversion-text-mode-hint", hint)),
+        )];
         if speech_relevant {
             fields.extend(self.import_speech_options(window, cx));
         }
@@ -2327,6 +2388,7 @@ impl Desktop {
                     TextField::new("import-title-field", &self.inputs[&Field::Title])
                         .w_full()
                         .outlined()
+                        .shape(TextFieldShape::Rounded)
                         .error(self.title_required)
                         .when_some(
                             self.source_validation
@@ -2352,9 +2414,12 @@ impl Desktop {
                     symbols::create_new_folder(),
                     course2md::tr!("新建文件夹"),
                     |button| {
-                        button.variant(IconButtonVariant::Tonal).on_click(
-                            cx.listener(|this, _, window, cx| this.begin_folder(None, window, cx)),
-                        )
+                        button
+                            .variant(IconButtonVariant::Tonal)
+                            .tone(ButtonTone::Neutral)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.begin_folder(None, window, cx)
+                            }))
                     },
                 )),
         ));
@@ -2476,7 +2541,7 @@ impl Desktop {
         let top = !attached;
         let scale = TileScale::Regular;
         // The plan joins the header; editable options stand below it as sections.
-        let joined = open && owner.is_some();
+        let joined = open;
         let header = scale
             .button("generation-options-toggle", [top, top, !joined, !joined])
             .accessibility_label(if open {
@@ -2496,28 +2561,38 @@ impl Desktop {
                     ))
                     .child(disclosure_chevron(open)),
             );
-        let body = match &owner {
-            Some(task) => v_flex().w_full().min_w_0().child(
-                tile([false, false, true, true])
-                    .flex()
-                    .flex_col()
+        // One surface: a hairline under the header, then quiet sections inside it.
+        let body = v_flex()
+            .w_full()
+            .min_w_0()
+            .bg(color(ColorRole::SURFACE))
+            .rounded_b(RADIUS_HERO)
+            .child(
+                div()
+                    .h(px(1.))
+                    .mx(ITEM_INSET)
+                    .bg(color(ColorRole::OUTLINE_VARIANT)),
+            )
+            .child(match &owner {
+                Some(task) => v_flex()
+                    .w_full()
+                    .min_w_0()
                     .gap(rem(12.))
                     .p(ITEM_INSET)
                     .children(self.task_plan_rows(task)),
-            ),
-            None => v_flex()
-                .w_full()
-                .min_w_0()
-                .pt(HERO_GAP)
-                .gap(rem(24.))
-                .child(self.import_text_mode_options(window, cx))
-                .child(self.import_ai_options(window, cx))
-                .child(self.import_destination(cx)),
-        };
+                None => v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .pt(rem(8.))
+                    .pb(rem(12.))
+                    .gap(rem(16.))
+                    .child(self.import_text_mode_options(window, cx))
+                    .child(self.import_ai_options(window, cx))
+                    .child(self.import_destination(cx)),
+            });
         v_flex()
             .w_full()
             .min_w_0()
-            .gap(TILE_GAP)
             .child(header)
             .child(motion::disclosure("generation-options-body", open, body))
     }
@@ -2684,7 +2759,7 @@ impl Desktop {
         let reading = self
             .preview_cancel
             .is_some()
-            .then(|| self.source_reading(cx));
+            .then(|| self.source_reading(window, cx));
         let attached = card.is_some();
         let options = motion::state_enter(
             "generation-options-panel",
@@ -2705,7 +2780,7 @@ impl Desktop {
                     .text_size(title.font_size)
                     .line_height(title.line_height),
             )
-            .child(self.source_input(cx))
+            .child(self.source_input(window, cx))
             .children(reading)
             .children(candidates)
             .children(self.source_preview_error(cx))

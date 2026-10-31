@@ -5,8 +5,8 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::{
     color::{ColorRole, Scheme},
     components::{
-        ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind, Snackbar,
-        SnackbarPosition, TitleBar as AppBar, material_button, notice_banner, spinner,
+        ButtonTone, ButtonVariant, CaptionLabels, IconButton, MaterialTooltip, NoticeKind,
+        Snackbar, SnackbarPosition, TitleBar as AppBar, material_button, notice_banner, spinner,
         title_bar_control,
     },
     icons::SymbolIcon,
@@ -80,7 +80,6 @@ fn brand(wordmark: bool) -> Div {
             brand.child(
                 div()
                     .text_size(rem(20.))
-                    .font_weight(FontWeight::MEDIUM)
                     .text_color(color(ColorRole::ON_SURFACE))
                     .child("course2md"),
             )
@@ -109,6 +108,7 @@ fn nav_destination(
                 ButtonVariant::Text
             },
         )
+        .tone(ButtonTone::Neutral)
         .button_size(ButtonSize::Small)
         .icon(icon)
         .accessibility_label(label.clone())
