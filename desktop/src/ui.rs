@@ -90,6 +90,26 @@ pub fn menu(
         .on_open_change(set_open)
 }
 
+/// A menu trigger's click handler: a pointer press already reached the popup, a key
+/// did not. `id` is the one given to [`menu`].
+///
+/// ```ignore
+/// IconButton::new("note-more", symbols::more_vert(), label)
+///     .on_click(ui::menu_key_toggle(&"note-menu".into(), window, cx))
+/// ```
+pub fn menu_key_toggle(
+    id: &ElementId,
+    window: &mut Window,
+    cx: &mut App,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    let (open, set_open) = keyed_open(id, window, cx);
+    move |event, window, cx| {
+        if event.is_keyboard() {
+            set_open(&!open, window, cx);
+        }
+    }
+}
+
 /// The items of a menu that picks one value, the current one checked.
 ///
 /// ```ignore
@@ -118,6 +138,7 @@ pub fn choice_items<T: PartialEq + 'static>(
 }
 
 type SwitchChange = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
+type RowClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 enum Control {
     Switch(bool, SwitchChange),
@@ -127,6 +148,14 @@ enum Control {
     Inline(AnyElement),
     /// A wide control under the label: a button group, a text field.
     Below(AnyElement),
+    /// A row that goes somewhere or adds something.
+    Link(RowClick),
+    /// A row that shows or hides its detail in place.
+    Disclosure(bool, RowClick, Div),
+    /// Content with the row's inset and no label of its own.
+    Content(AnyElement),
+    /// A row that draws its own surface, given its corners.
+    Tile(Box<dyn FnOnce(OuterCorners) -> AnyElement>),
 }
 
 /// One row of a [`field_table`].
@@ -134,6 +163,7 @@ pub struct Field {
     id: SharedString,
     label: SharedString,
     hint: Option<SharedString>,
+    icon: Option<Icon>,
     disabled: bool,
     control: Control,
 }
@@ -144,6 +174,7 @@ impl Field {
             id: id.into(),
             label: label.into(),
             hint: None,
+            icon: None,
             disabled: false,
             control,
         }
@@ -181,6 +212,46 @@ impl Field {
         control: impl IntoElement,
     ) -> Self {
         Self::new(id, label, Control::Below(control.into_any_element()))
+    }
+
+    pub fn link(
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        Self::new(id, label, Control::Link(Box::new(on_click)))
+    }
+
+    /// `detail` stays in the tree while closed, so closing can play.
+    pub fn disclosure(
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        open: bool,
+        on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        detail: Div,
+    ) -> Self {
+        Self::new(
+            id,
+            label,
+            Control::Disclosure(open, Box::new(on_toggle), detail),
+        )
+    }
+
+    pub fn content(id: impl Into<SharedString>, content: impl IntoElement) -> Self {
+        Self::new(id, "", Control::Content(content.into_any_element()))
+    }
+
+    pub fn tile(
+        id: impl Into<SharedString>,
+        build: impl FnOnce(OuterCorners) -> AnyElement + 'static,
+    ) -> Self {
+        Self::new(id, "", Control::Tile(Box::new(build)))
+    }
+
+    /// A leading icon for a menu or link row.
+    pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
+        self.icon = Some(icon.into());
+        self
     }
 
     /// Supporting text under the label; empty means none.
@@ -221,6 +292,7 @@ impl Field {
             id,
             label,
             hint,
+            icon,
             disabled,
             control,
         } = self;
@@ -239,17 +311,19 @@ impl Field {
                     Some(hint) => format!("{value} · {hint}").into(),
                     None => value,
                 });
+                let popup = ElementId::Name(format!("{id}-menu").into());
                 let trigger = scale
                     .button(ElementId::Name(id.clone()), outer)
                     .accessibility_label(label.clone())
                     .disabled(disabled)
+                    .on_click(menu_key_toggle(&popup, window, cx))
                     .child(
                         scale
                             .row()
+                            .children(icon)
                             .child(scale.text(text_id, label, value))
                             .child(tile_chevron()),
                     );
-                let popup = ElementId::Name(format!("{id}-menu").into());
                 menu(popup, trigger, items, window, cx)
                     .anchor(Anchor::TopRight)
                     .into_any_element()
@@ -270,6 +344,55 @@ impl Field {
                         .child(control),
                 )
                 .into_any_element(),
+            Control::Link(on_click) => scale
+                .button(ElementId::Name(id), outer)
+                .accessibility_label(label.clone())
+                .disabled(disabled)
+                .on_click(on_click)
+                .child(
+                    scale
+                        .row()
+                        .children(icon)
+                        .child(scale.text(text_id, label, hint))
+                        .child(tile_chevron()),
+                )
+                .into_any_element(),
+            Control::Disclosure(open, on_toggle, detail) => {
+                let detail_id = ElementId::Name(format!("{id}-detail").into());
+                let button_corners = [outer[0], outer[1], outer[2] && !open, outer[3] && !open];
+                scale
+                    .surface(outer)
+                    .child(
+                        scale
+                            .button(ElementId::Name(id), button_corners)
+                            .accessibility_label(label.clone())
+                            .on_click(on_toggle)
+                            .child(
+                                scale
+                                    .row()
+                                    .child(scale.text(text_id, label, hint))
+                                    .child(disclosure_chevron(open)),
+                            ),
+                    )
+                    .child(gpui_kit_material::motion::disclosure(
+                        detail_id,
+                        open,
+                        detail.w_full().min_w_0().px(ITEM_INSET).pb(rem(16.)),
+                    ))
+                    .into_any_element()
+            }
+            Control::Content(content) => scale
+                .surface(outer)
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .px(ITEM_INSET)
+                        .py(rem(16.))
+                        .child(content),
+                )
+                .into_any_element(),
+            Control::Tile(build) => build(outer),
         }
     }
 }
@@ -294,6 +417,7 @@ pub fn field_table(
         id: id.into(),
         title: title.into(),
         fields: fields.into_iter().collect(),
+        reveal: None,
     }
 }
 
@@ -302,6 +426,15 @@ pub struct FieldTable {
     id: SharedString,
     title: SharedString,
     fields: Vec<Field>,
+    reveal: Option<ScrollHandle>,
+}
+
+impl FieldTable {
+    /// A row taking keyboard focus scrolls into view in `scroll`.
+    pub fn reveal_in(mut self, scroll: ScrollHandle) -> Self {
+        self.reveal = Some(scroll);
+        self
+    }
 }
 
 impl RenderOnce for FieldTable {
@@ -311,7 +444,12 @@ impl RenderOnce for FieldTable {
         let count = self.fields.len();
         let mut group = TileGroup::new(self.id, self.title);
         for (index, field) in self.fields.into_iter().enumerate() {
+            let reveal_id = ElementId::Name(format!("{}-reveal", field.id).into());
             let row = field.render(list_corners(index, count), window, cx);
+            let row = match self.reveal.clone() {
+                Some(scroll) => RevealFocus::new(reveal_id, row, scroll).into_any_element(),
+                None => row,
+            };
             group = group.tile(move |_| row);
         }
         group
