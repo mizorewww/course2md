@@ -305,9 +305,7 @@ impl NpuWorker {
             }
             Ok(())
         };
-        if let Err(e) =
-            crate::runtime::wait_ready(&base, NPU_READY_LIMIT, &mut child, Some("ok"), Some(&check))
-        {
+        if let Err(e) = crate::runtime::wait_ready(&base, NPU_READY_LIMIT, &mut child, &check) {
             crate::runtime::terminate_tree(&mut child);
             return Err(e.context(format!(
                 "Intel NPU 服务启动失败/超时（首次模型编译可能需要更多时间） / Intel NPU service failed to start or timed out (the first model compilation may take longer); stderr tail:\n{}",

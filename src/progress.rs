@@ -599,21 +599,21 @@ impl Bar {
     }
 
     pub fn set_position(&self, pos: u64) {
-        self.bar.set_position(pos);
-        if is_json() {
-            self.current.store(pos, Ordering::Relaxed);
-            self.emit_progress(pos, false);
-        }
+        self.move_to(pos, false);
     }
 
     /// Like [`Self::set_position`] but never throttled, for producers that
     /// already report coarsely: a dropped sample before a quiet spell would
     /// leave the count stale until the next one.
     pub fn report_position(&self, pos: u64) {
+        self.move_to(pos, true);
+    }
+
+    fn move_to(&self, pos: u64, force: bool) {
         self.bar.set_position(pos);
         if is_json() {
             self.current.store(pos, Ordering::Relaxed);
-            self.emit_progress(pos, true);
+            self.emit_progress(pos, force);
         }
     }
 

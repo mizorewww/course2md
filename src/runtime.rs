@@ -228,26 +228,20 @@ pub fn run_bounded(
     })
 }
 
-/// 轮询 `{base}/health` 直到成功；子进程中途退出立即失败（不等满超时）。
-/// `expect_body` 非空时还要求响应体包含该子串——防止端口被无关服务
-/// 抢占（free_port 存在 TOCTOU 窗口）而误判就绪。
-/// `control` 非空时每轮轮询前调用：返回 Err 表示外部要求中止（暂停/取消），
-/// 立即报错返回而不等满超时；子进程由 ManagedChild 的 Drop 兜底 kill。
+/// 轮询 `{base}/health` 直到其 status 为 ok（端口可能被无关服务抢占，free_port 有
+/// TOCTOU 窗口）；子进程中途退出立即失败，不等满超时。`control` 每轮调用一次：
+/// 返回 Err 表示外部要求中止（暂停/取消），原样上抛，由调用方区分于启动失败。
 pub fn wait_ready(
     base: &str,
     timeout: Duration,
     child: &mut ManagedChild,
-    expect_status: Option<&str>,
-    control: Option<&dyn Fn() -> Result<()>>,
+    control: &dyn Fn() -> Result<()>,
 ) -> Result<()> {
     let t0 = Instant::now();
     let url = format!("{base}/health");
     let agent = http_agent(Duration::from_secs(2));
     loop {
-        if let Some(check) = control {
-            // 暂停/取消原样上抛：调用方要据此区分「用户中止」与「启动失败」
-            check()?;
-        }
+        control()?;
         if let Some(st) = child.try_wait() {
             anyhow::bail!(
                 "{} 启动失败（{st}） / {} exited during startup ({st})",
@@ -264,20 +258,13 @@ pub fn wait_ready(
                 timeout.as_secs_f64()
             );
         }
-        if let Ok(mut resp) = agent.get(&url).call() {
-            match expect_status {
-                None => return Ok(()),
-                Some(expected) => {
-                    if resp
-                        .body_mut()
-                        .read_json::<serde_json::Value>()
-                        .is_ok_and(|body| body["status"] == expected)
-                    {
-                        return Ok(());
-                    }
-                    // 端口上跑着别的服务：继续等（真正要起的服务可能还在绑端口）
-                }
-            }
+        if let Ok(mut resp) = agent.get(&url).call()
+            && resp
+                .body_mut()
+                .read_json::<serde_json::Value>()
+                .is_ok_and(|body| body["status"] == "ok")
+        {
+            return Ok(());
         }
         std::thread::sleep(Duration::from_millis(300));
     }
@@ -643,14 +630,13 @@ mod tests {
             "http://127.0.0.1:9",
             Duration::from_secs(60),
             &mut child,
-            None,
-            Some(&|| {
+            &|| {
                 if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1 {
                     anyhow::bail!("测试取消 / test cancellation")
                 } else {
                     Ok(())
                 }
-            }),
+            },
         );
         let err = result.expect_err("control 报错必须中止 wait_ready");
         assert_eq!(

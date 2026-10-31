@@ -354,13 +354,9 @@ impl LlamaServer {
             .unwrap_or_default();
         let base = format!("http://127.0.0.1:{port}");
         // 子进程秒退（端口冲突/模型损坏）会立即报错，而不是等满 300s
-        if let Err(e) = crate::runtime::wait_ready(
-            &base,
-            SERVER_READY_TIMEOUT,
-            &mut child,
-            Some("ok"),
-            Some(&|| control.check()),
-        ) {
+        if let Err(e) =
+            crate::runtime::wait_ready(&base, SERVER_READY_TIMEOUT, &mut child, &|| control.check())
+        {
             if e.downcast_ref::<crate::dispatch::Failure>().is_some() {
                 return Err(e); // 暂停/取消不是启动故障
             }
@@ -1042,6 +1038,47 @@ mod tests {
         for i in 2..EMPTY_RESULT_TRIPWIRE * 2 {
             empties.record(&mut cp, t(i), t(i + 1), "").unwrap();
         }
+    }
+
+    /// A 16 kHz mono WAV: tone, except for silence around `quiet` seconds.
+    fn tone_with_gap(path: &Path, seconds: u32, quiet: f64) {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(path, spec).unwrap();
+        for i in 0..seconds * 16000 {
+            let t = f64::from(i) / 16000.;
+            let level = if (t - quiet).abs() < 0.5 { 0. } else { 8000. };
+            let sample = level * (t * 440. * std::f64::consts::TAU).sin();
+            writer.write_sample(sample as i16).unwrap();
+        }
+        writer.finalize().unwrap();
+    }
+
+    #[test]
+    fn long_speech_splits_at_its_quietest_point_and_chunks_keep_their_samples() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("a.wav");
+        tone_with_gap(&wav, 30, 18.);
+        assert!((wav_duration(&wav).unwrap() - 30.).abs() < 1e-6);
+        let segs = normalize_segments(vec![(0., 30.)], 20., &wav, 30.).unwrap();
+        assert_eq!(segs.len(), 2, "{segs:?}");
+        assert!((segs[0].end - 18.).abs() < 0.5, "{segs:?}");
+        // Only the outer edges get padding, and they are clamped to the audio.
+        assert_eq!(segs[0].cut_start, 0.);
+        assert_eq!(segs[0].cut_end, segs[0].end);
+
+        let chunk = dir.path().join("c.wav");
+        cut_wav(&wav, 1.5, 3.5, &chunk).unwrap();
+        let reader = hound::WavReader::open(&chunk).unwrap();
+        assert_eq!(reader.spec().sample_rate, 16000);
+        assert_eq!(reader.duration(), 32000);
+        // A cut past the end holds what exists.
+        cut_wav(&wav, 29., 40., &chunk).unwrap();
+        assert_eq!(wav_duration(&chunk).unwrap(), 1.);
     }
 
     #[test]

@@ -23,14 +23,15 @@ fn unsupported_model(status: &status::LocalModelStatus) -> anyhow::Error {
     crate::config::unsupported_model_error(status.provider, &status.model)
 }
 
-/// 下载缺失的模型文件（不加载）。`verify` 时额外用正式加载器验证 Apple/NPU 模型可离线加载。
+/// What Apple preparation does beyond the shared download: `Cache` only fetches files,
+/// for the later transcription to load; `Prepare` also loads the model.
 enum CoremlMode {
-    /// Download/repair files only; the later transcription loads the model.
     Cache,
-    /// Load the model as the requested preparation step.
     // Only the Apple native backend reads whether files were already cached.
     #[cfg_attr(not(apple_native), allow(dead_code))]
-    Prepare { cached: bool },
+    Prepare {
+        cached: bool,
+    },
 }
 
 async fn fetch_model(
@@ -295,24 +296,14 @@ pub fn list_models(root: &Path) {
         "gpu/cpu 模型目录 / gpu/cpu model directory: {}",
         root.display()
     );
-    println!(
-        "  model  {} {}",
-        if file_complete(&p.model) {
+    for (name, path) in [("model ", &p.model), ("mmproj", &p.mmproj)] {
+        let state = if file_complete(path) {
             tr!("就绪 / Ready")
         } else {
             tr!("缺失或不完整 / Missing or incomplete")
-        },
-        p.model.display()
-    );
-    println!(
-        "  mmproj {} {}",
-        if file_complete(&p.mmproj) {
-            tr!("就绪 / Ready")
-        } else {
-            tr!("缺失或不完整 / Missing or incomplete")
-        },
-        p.mmproj.display()
-    );
+        };
+        println!("  {name} {state} {}", path.display());
+    }
     if !llama_ready(root) {
         println!(
             "下载或修复 / Download or repair: course2md models download --dir \"{}\"",
