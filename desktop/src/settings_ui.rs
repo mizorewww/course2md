@@ -1555,7 +1555,7 @@ impl Desktop {
         let content = match self.settings_tab {
             SettingsTab::Generation => self.generation_settings_page(window, cx),
             SettingsTab::Services => self.services_settings_page(window, cx),
-            SettingsTab::Storage => self.storage_settings_page(cx),
+            SettingsTab::Storage => self.storage_settings_page(window, cx),
             SettingsTab::Application => self.application_settings_page(window, cx),
             SettingsTab::Appearance => self.appearance_page(window, cx),
         };

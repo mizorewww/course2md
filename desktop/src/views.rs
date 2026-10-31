@@ -731,6 +731,7 @@ impl Render for Desktop {
                 view.child(self.workbench_drop_overlay(cx))
             })
             .children(crate::ui::confirm_host(cx))
+            .child(self.storage_dialog(window, cx))
             .into_any_element()
     }
 }
