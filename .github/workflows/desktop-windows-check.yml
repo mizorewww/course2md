@@ -24,7 +24,7 @@ jobs:
         run: |
           cargo build
           cargo build --manifest-path desktop/Cargo.toml
-          cargo build --manifest-path desktop/Cargo.toml --features capture --target-dir desktop/target/capture
+          cargo build --manifest-path desktop/Cargo.toml --features capture --target-dir target/capture
       - name: Capture pages
         shell: pwsh
         env:
@@ -36,7 +36,7 @@ jobs:
           $env:COURSE2MD_CAPTURE = $spec
           $env:COURSE2MD_BIN = Join-Path $PWD 'target/debug/course2md.exe'
           $env:COURSE2MD_LANG = 'en'
-          $p = Start-Process -FilePath 'desktop/target/capture/debug/course2md-desktop.exe' -PassThru
+          $p = Start-Process -FilePath 'target/capture/debug/course2md-desktop.exe' -PassThru
           if (-not $p.WaitForExit(240000)) { $p.Kill(); Write-Warning 'capture timed out' }
           Get-ChildItem $out
       - name: Click the app bar with real input
@@ -78,7 +78,7 @@ jobs:
           # A fresh, empty profile that no earlier step has touched.
           $env:XDG_CONFIG_HOME = Join-Path $PWD 'profile'
           New-Item -ItemType Directory -Force $env:XDG_CONFIG_HOME | Out-Null
-          $p = Start-Process -FilePath 'desktop/target/debug/course2md-desktop.exe' -PassThru
+          $p = Start-Process -FilePath 'target/debug/course2md-desktop.exe' -PassThru
           Start-Sleep 12
           $p.Refresh(); $h = $p.MainWindowHandle
           [W]::SetForegroundWindow($h) | Out-Null

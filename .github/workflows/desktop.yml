@@ -5,14 +5,13 @@ on:
     branches: [main, split/workspace, split/engine-crates]
     paths:
       - 'desktop/**'
-      - 'src/**'
+      - 'crates/**'
       - 'native/**'
-      - 'build.rs'
       - 'build_support/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'rust-toolchain.toml'
       - 'i18n/**'
-      - 'tests/i18n_catalog.rs'
       - 'packaging/licenses/**'
       - '.github/actions/**'
       - '.github/workflows/desktop.yml'
@@ -20,14 +19,13 @@ on:
   pull_request:
     paths:
       - 'desktop/**'
-      - 'src/**'
+      - 'crates/**'
       - 'native/**'
-      - 'build.rs'
       - 'build_support/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'rust-toolchain.toml'
       - 'i18n/**'
-      - 'tests/i18n_catalog.rs'
       - 'packaging/licenses/**'
       - '.github/actions/**'
       - '.github/workflows/desktop.yml'
@@ -82,7 +80,7 @@ jobs:
       - name: Free compiler intermediates before creating the disk image
         if: runner.os == 'macOS'
         run: |
-          rm -rf target/debug/deps target/debug/incremental desktop/target/debug/deps desktop/target/debug/incremental
+          rm -rf target/debug/deps target/debug/incremental
           df -h .
       # --require-tools: a tool that cannot be bundled, or that fails to run
       # (an ffmpeg without https, a missing library), fails the job.
@@ -92,6 +90,6 @@ jobs:
         with:
           name: course2md-desktop-${{ runner.os }}
           path: |
-            desktop/target/packages/*.zip
-            desktop/target/packages/*.tar.gz
-            desktop/target/packages/*.dmg
+            target/packages/*.zip
+            target/packages/*.tar.gz
+            target/packages/*.dmg

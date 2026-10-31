@@ -49,7 +49,7 @@ def generate(output, manifest, swift=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--manifest", type=Path, default=PROJECT / "Cargo.toml")
+    parser.add_argument("--manifest", type=Path, default=PROJECT / "crates/course2md/Cargo.toml")
     parser.add_argument("--swift", action="store_true", help="add the Swift packages' licenses")
     args = parser.parse_args()
     generate(args.output, args.manifest, args.swift)

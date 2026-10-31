@@ -211,14 +211,14 @@ def main():
     profile = "debug" if args.debug else "release"
     flags = [] if args.debug else ["--release", *(["--locked"] if distribution else [])]
     if not args.no_build:
-        # build.rs reads COURSE2MD_NO_APPLE; pass the flag on to it.
+        # c2m-asr's build.rs reads COURSE2MD_NO_APPLE; pass the flag on to it.
         env = {**os.environ, "COURSE2MD_NO_APPLE": "1"} if args.no_apple else None
         run("cargo", "build", *flags, env=env)
         run("cargo", "build", "--manifest-path", str(ROOT / "Cargo.toml"), *flags, env=env)
-    version = tomllib.loads((PROJECT / "Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
+    version = tomllib.loads((PROJECT / "Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["version"]
     suffix = ".exe" if system == "Windows" else ""
     package_name = f"course2md-desktop-{system.lower()}-{platform.machine()}"
-    base = ROOT / "target" / "packages" / package_name
+    base = PROJECT / "target" / "packages" / package_name
     if base.exists():
         shutil.rmtree(base)
     base.mkdir(parents=True, exist_ok=True)
@@ -241,7 +241,7 @@ def main():
         # MLX first searches beside the executable for mlx.metallib. Keeping
         # that layout avoids changing the CLI's working directory and breaking
         # user-supplied relative source, output, and model paths.
-        # build.rs copies it beside the CLI executable; see the note there.
+        # c2m-asr's build.rs copies it beside the CLI executable; see the note there.
         metal = PROJECT / "target" / profile / "mlx.metallib"
         if metal.is_file():
             shutil.copy2(metal, resources / "mlx.metallib")
@@ -256,7 +256,7 @@ def main():
                 "Exec=course2md-desktop\nIcon=course2md\nTerminal=false\nCategories=Education;AudioVideo;\n")
             shutil.copy2(ROOT / "assets/icon.png", base / "course2md.png")
     shutil.copy2(PROJECT / "target" / profile / f"course2md{suffix}", binaries / f"course2md{suffix}")
-    shutil.copy2(ROOT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
+    shutil.copy2(PROJECT / "target" / profile / f"course2md-desktop{suffix}", binaries / f"course2md-desktop{suffix}")
     # yt-dlp's onedir build goes in a yt-dlp directory, which the engine
     # searches first: beside the binaries, or in the .app's Resources (its
     # data files may not live in Contents/MacOS). --no-ytdlp skips it.

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Production Rust lines: every .rs under the repo's source roots, minus a trailing test module."""
+"""Production Rust lines: every .rs under the repo's source roots, minus a trailing test module.
+Workspace crates count one per line; c2m-test-http is test code."""
 import pathlib, re, sys
 
 root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
-skip = {"target", ".git", ".build", ".deps", ".cache", "tests", "benches", "examples"}
+skip = {"target", ".git", ".build", ".deps", ".cache", "tests", "benches", "examples", "c2m-test-http"}
 total = {}
 for path in root.rglob("*.rs"):
     rel = path.relative_to(root)

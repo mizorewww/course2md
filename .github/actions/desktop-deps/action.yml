@@ -5,10 +5,6 @@ runs:
   steps:
     - uses: ./.github/actions/rust-toolchain
     - uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: |
-          . -> target
-          desktop -> desktop/target
     - uses: taiki-e/install-action@v2
       with:
         tool: cargo-about@0.9.3
