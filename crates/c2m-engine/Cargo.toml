@@ -1,0 +1,33 @@
+[package]
+name = "c2m-engine"
+version.workspace = true
+edition.workspace = true
+description = "The conversion pipeline and the task protocol"
+license.workspace = true
+publish = false
+
+[dependencies]
+c2m-ai = { path = "../c2m-ai" }
+c2m-artifact = { path = "../c2m-artifact" }
+c2m-asr = { path = "../c2m-asr" }
+c2m-config = { path = "../c2m-config" }
+c2m-core = { path = "../c2m-core" }
+c2m-dispatch = { path = "../c2m-dispatch" }
+c2m-i18n = { path = "../c2m-i18n" }
+c2m-process = { path = "../c2m-process" }
+c2m-protocol = { path = "../c2m-protocol" }
+c2m-source = { path = "../c2m-source" }
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slide-detect.workspace = true
+strum.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+toml.workspace = true
+which.workspace = true

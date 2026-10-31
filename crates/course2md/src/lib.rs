@@ -1,10 +1,16 @@
+//! The `course2md` command line, and the one path the desktop reaches the engine through.
+
 pub use c2m_ai::{llm, login, provider, summarize};
 pub use c2m_artifact::{artifact, math, portable, render, summary_doc};
 #[cfg(apple_native)]
 pub use c2m_asr::apple;
 pub use c2m_asr::{asr, checkpoint, download, hub, models, npu};
 pub use c2m_config::{llm_settings, settings};
+pub use c2m_core::{digest, fsio, invalid, meta, outcome, paths, timeline};
 pub use c2m_dispatch::{dispatch, job, pool};
+pub use c2m_engine::{execution, options, pipeline, scene};
+pub use c2m_i18n::{eprint_tr, eprintln_tr, i18n, language, print_tr, println_tr, tr};
+pub use c2m_process::{error, media, runtime, tools, ytdlp};
 pub use c2m_protocol::{model_state, progress};
 pub use c2m_source::{auth, fetch, subtitle};
 
@@ -14,16 +20,6 @@ pub mod config {
     pub use c2m_config::config::*;
 }
 
-pub use c2m_core::{digest, fsio, invalid, meta, outcome, paths, timeline};
-pub use c2m_i18n::{eprint_tr, eprintln_tr, print_tr, println_tr, tr};
-pub use c2m_i18n::{i18n, language};
-pub use c2m_process::{error, media, runtime, tools, ytdlp};
 pub mod cli;
 pub mod doctor;
-pub mod execution;
-pub mod options;
-pub mod pipeline;
-pub mod scene;
-#[cfg(test)]
-use c2m_test_http as test_http;
 pub mod wizard;

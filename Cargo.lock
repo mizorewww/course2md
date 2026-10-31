@@ -1001,6 +1001,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "c2m-engine"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "c2m-ai",
+ "c2m-artifact",
+ "c2m-asr",
+ "c2m-config",
+ "c2m-core",
+ "c2m-dispatch",
+ "c2m-i18n",
+ "c2m-process",
+ "c2m-protocol",
+ "c2m-source",
+ "clap",
+ "serde",
+ "serde_json",
+ "slide-detect",
+ "strum 0.27.2",
+ "tempfile",
+ "tokio",
+ "toml 1.1.8+spec-1.1.0",
+ "tracing",
+ "walkdir",
+ "which",
+]
+
+[[package]]
 name = "c2m-i18n"
 version = "2.0.1"
 dependencies = [
@@ -1555,25 +1583,20 @@ dependencies = [
  "c2m-config",
  "c2m-core",
  "c2m-dispatch",
+ "c2m-engine",
  "c2m-i18n",
  "c2m-process",
  "c2m-protocol",
  "c2m-source",
- "c2m-test-http",
  "clap",
  "dialoguer",
- "serde",
  "serde_json",
- "slide-detect",
- "strum 0.27.2",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "toml 1.1.8+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "url",
- "walkdir",
  "which",
 ]
 

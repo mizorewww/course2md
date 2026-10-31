@@ -12,6 +12,7 @@ c2m-asr = { path = "../c2m-asr" }
 c2m-config = { path = "../c2m-config" }
 c2m-core = { path = "../c2m-core" }
 c2m-dispatch = { path = "../c2m-dispatch" }
+c2m-engine = { path = "../c2m-engine" }
 c2m-i18n = { path = "../c2m-i18n" }
 c2m-process = { path = "../c2m-process" }
 c2m-protocol = { path = "../c2m-protocol" }
@@ -19,21 +20,15 @@ c2m-source = { path = "../c2m-source" }
 anyhow.workspace = true
 clap.workspace = true
 dialoguer.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-slide-detect.workspace = true
-strum.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
-walkdir.workspace = true
 
 [dev-dependencies]
-c2m-test-http = { path = "../c2m-test-http" }
-toml.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
 which.workspace = true
 
 [lints.rust]
