@@ -16,7 +16,7 @@
 //! component takes one. A name outside the catalog fails the build; a symbol not in the
 //! list does not compile. The filled variant is a separate asset: mark the line ` fill`.
 use gpui::{AssetSource, SharedString};
-use gpui_kit_material::icons::{Style, SymbolIcon};
+use gpui_kit_material::icons::{Axes, Style, SymbolIcon};
 use std::borrow::Cow;
 
 include!(concat!(env!("OUT_DIR"), "/symbols.rs"));

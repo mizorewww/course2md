@@ -1,6 +1,9 @@
 #[path = "../build_support/git.rs"]
 mod git;
 
+/// The stroke weight of the app's Material Symbols.
+const ICON_WEIGHT: f32 = 300.;
+
 fn main() {
     emit_commit();
     render_symbols();
@@ -37,7 +40,9 @@ fn emit_commit() {
 /// Renders the symbols `assets/symbols.txt` lists and generates `symbols::<name>()`
 /// for each: the fonts behind every symbol stay in this build script, out of the app.
 fn render_symbols() {
-    use gpui_material_symbols::{Style, Symbol};
+    use gpui_material_symbols::{Axes, Style, Symbol};
+    // A fine, round-ended line is the app's icon character.
+    let axes = Axes::new(0., ICON_WEIGHT, 0., 24.).expect("valid symbol axes");
     use std::fmt::Write as _;
     println!("cargo:rerun-if-changed=assets/symbols.txt");
     let list = std::fs::read_to_string("assets/symbols.txt").expect("assets/symbols.txt");
@@ -55,8 +60,10 @@ fn render_symbols() {
         };
         let symbol = Symbol::named(name)
             .unwrap_or_else(|| panic!("assets/symbols.txt: {name} is not a Material Symbol"));
-        let icon = symbol.icon().style(Style::Rounded);
-        for icon in [Some(icon), fill.then(|| icon.filled(true))]
+        let icon = symbol.icon().style(Style::Rounded).axes(axes);
+        // The kit's components ask for their own glyphs at the catalog's default weight.
+        let kit = symbol.icon().style(Style::Rounded);
+        for icon in [Some(icon), Some(kit), fill.then(|| icon.filled(true))]
             .into_iter()
             .flatten()
         {
@@ -69,7 +76,8 @@ fn render_symbols() {
             functions,
             "#[allow(dead_code)]\npub fn {name}() -> SymbolIcon {{\n    \
              gpui_kit_material::icons::Symbol::named({name:?})\
-             .expect(\"a symbol of the pinned catalog\").icon().style(Style::Rounded)\n}}"
+             .expect(\"a symbol of the pinned catalog\").icon().style(Style::Rounded)\
+             .axes(Axes::new(0., {ICON_WEIGHT:?}, 0., 24.).expect(\"valid symbol axes\"))\n}}"
         )
         .unwrap();
     }
