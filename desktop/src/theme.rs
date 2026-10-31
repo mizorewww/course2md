@@ -590,7 +590,8 @@ pub fn tile_info(id: impl Into<gpui::ElementId>, text: impl Into<gpui::SharedStr
                 .h(rems(20. / 14.))
                 .items_center()
                 .child(
-                    crate::symbols::info().component()
+                    crate::symbols::info()
+                        .component()
                         .size(rems(18. / 14.))
                         .text_color(color(GRAY)),
                 ),
@@ -601,7 +602,8 @@ pub fn tile_info(id: impl Into<gpui::ElementId>, text: impl Into<gpui::SharedStr
 /// The trailing chevron of a tile that opens something.
 pub fn tile_chevron() -> gpui_kit::component::Icon {
     use gpui::Styled;
-    crate::symbols::chevron_right().component()
+    crate::symbols::chevron_right()
+        .component()
         .size(rems(20. / 14.))
         .flex_shrink_0()
         .text_color(color(GRAY))
@@ -907,7 +909,6 @@ pub fn tinted_icon(
         .child(icon.size(glyph))
 }
 
-
 /// Plain Div text is not exposed by GPUI's native accessibility bridge. Keep labels on
 /// leaf elements so an ancestor does not replace the accessibility of its controls.
 pub fn accessible_text(
@@ -924,7 +925,6 @@ pub fn accessible_text(
 }
 
 /// Failure feedback uses one accessible alert form everywhere. Callers
-
 
 /// M3 search bar: a filled, borderless pill with a leading search icon. The
 /// field's own frame is off, so the bar draws the focus outline itself.
@@ -957,7 +957,8 @@ pub fn search_field(
             }
         })
         .child(
-            crate::symbols::search().component()
+            crate::symbols::search()
+                .component()
                 .size(rems(18. / 14.))
                 .flex_shrink_0()
                 .text_color(color(GRAY)),

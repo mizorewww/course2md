@@ -2500,7 +2500,10 @@ mod tests {
                 .unwrap();
         assert_eq!(app.font_scale, 1.25);
         assert!(app.desktop.reduce_motion);
-        assert_eq!(app.appearance, gpui_kit_material::color::ThemePreferences::default());
+        assert_eq!(
+            app.appearance,
+            gpui_kit_material::color::ThemePreferences::default()
+        );
     }
 
     #[test]
