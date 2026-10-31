@@ -280,6 +280,22 @@ impl Desktop {
 
     /// Change the current draft and record it. A failed write is reported
     /// beside the workspace and returns false.
+    /// One saved change to the workspace. A failure shows in the shell as `failure`,
+    /// whose `{}` takes the cause; the caller only says what to do on success.
+    pub(crate) fn transact<T>(
+        &mut self,
+        failure: &str,
+        edit: impl FnOnce(&mut workspace::State) -> Result<T>,
+    ) -> Option<T> {
+        match self.workspace.as_mut()?.transaction(edit) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                self.workspace_error = Some(failure.replacen("{}", &format!("{error:#}"), 1));
+                None
+            }
+        }
+    }
+
     pub(crate) fn update_draft(
         &mut self,
         edit: impl FnOnce(&mut workspace::Draft),
@@ -500,23 +516,16 @@ impl Desktop {
             return;
         }
         let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
-        if let Some(workspace) = &mut self.workspace {
-            match workspace.transaction(|state| {
-                state.switch_source_kind(online, defaults);
-                Ok(())
-            }) {
-                Ok(()) => {
-                    self.following_conversion = None;
-                    self.invalidate_source();
-                    self.completed_source = None;
-                    self.message = None;
-                    self.restore_draft(window, cx);
-                }
-                Err(error) => {
-                    self.workspace_error =
-                        Some(course2md::tr!("无法切换来源：{}", format!("{error:#}")))
-                }
-            }
+        let switched = self.transact(course2md::tr!("无法切换来源：{}"), |state| {
+            state.switch_source_kind(online, defaults);
+            Ok(())
+        });
+        if switched.is_some() {
+            self.following_conversion = None;
+            self.invalidate_source();
+            self.completed_source = None;
+            self.message = None;
+            self.restore_draft(window, cx);
         }
     }
 
@@ -819,10 +828,7 @@ impl Desktop {
             return;
         }
         let total = plans.len();
-        let Some(workspace) = &mut self.workspace else {
-            return;
-        };
-        let result = workspace.transaction(|state| {
+        let queued = self.transact(course2md::tr!("任务尚未加入队列：{}"), |state| {
             let mut first_id = None;
             let mut duplicates = 0usize;
             for plan in plans {
@@ -834,33 +840,27 @@ impl Desktop {
             }
             Ok((first_id, duplicates))
         });
-        match result {
-            Ok((first_id, duplicates)) => {
-                self.selected_candidates.clear();
-                let created = total - duplicates;
-                let mut parts = Vec::new();
-                if created > 0 {
-                    parts.push(course2md::tr!("已把 {} 个视频加入队列", created));
-                }
-                if duplicates > 0 {
-                    parts.push(course2md::tr!(
-                        "{} 个与进行中的任务相同，未重复加入",
-                        duplicates
-                    ));
-                }
-                if skipped > 0 {
-                    parts.push(course2md::tr!("{} 个无法识别，已跳过", skipped));
-                }
-                self.message = Some(parts.join(course2md::tr!("；")));
-                if let Some(id) = first_id {
-                    self.select_task(&id, cx);
-                }
-                self.start_next_task(cx);
+        if let Some((first_id, duplicates)) = queued {
+            self.selected_candidates.clear();
+            let created = total - duplicates;
+            let mut parts = Vec::new();
+            if created > 0 {
+                parts.push(course2md::tr!("已把 {} 个视频加入队列", created));
             }
-            Err(error) => {
-                self.workspace_error =
-                    Some(course2md::tr!("任务尚未加入队列：{}", format!("{error:#}")))
+            if duplicates > 0 {
+                parts.push(course2md::tr!(
+                    "{} 个与进行中的任务相同，未重复加入",
+                    duplicates
+                ));
             }
+            if skipped > 0 {
+                parts.push(course2md::tr!("{} 个无法识别，已跳过", skipped));
+            }
+            self.message = Some(parts.join(course2md::tr!("；")));
+            if let Some(id) = first_id {
+                self.select_task(&id, cx);
+            }
+            self.start_next_task(cx);
         }
         cx.notify();
     }
@@ -925,50 +925,38 @@ impl Desktop {
             .flatten()
             .filter(|task| task.state.finished())
             .map(|task| task.id.clone());
-        let Some(workspace) = &mut self.workspace else {
-            return;
-        };
-        let parent = workspace
-            .state
-            .draft()
-            .and_then(|draft| draft.retry_of.clone());
-        let result = workspace.transaction(|state| {
-            let (id, created) = state.enqueue(plan, parent)?;
-            if let Some(previous) = acknowledged_input
-                .as_deref()
-                .and_then(|id| state.task_mut(id))
-            {
-                previous.unread = false;
-            }
-            if created && let Some(draft) = state.draft_mut() {
-                draft.submitted_task = Some(id.clone());
-            }
-            Ok((id, created))
-        });
-        match result {
-            Ok((id, created)) => {
-                self.pending_conversion = None;
-                self.source_validation = None;
-                self.title_required = false;
-                self.message =
-                    (!created).then(|| course2md::tr!("已有相同任务，未重复加入").into());
-                if created {
-                    self.following_conversion = self
-                        .following_conversion
-                        .take()
-                        .filter(|_| self.page == Page::New)
-                        .and_then(|follow| follow.submitted(self.preview_generation, id.clone()));
-                    self.source_editor_open = false;
-                    self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
+        let parent = self.draft().and_then(|draft| draft.retry_of.clone());
+        if let Some((id, created)) =
+            self.transact(course2md::tr!("任务尚未加入队列：{}"), |state| {
+                let (id, created) = state.enqueue(plan, parent)?;
+                if let Some(previous) = acknowledged_input
+                    .as_deref()
+                    .and_then(|id| state.task_mut(id))
+                {
+                    previous.unread = false;
                 }
-                self.select_task(&id, cx);
-                // Preparation may finish after navigation; keep the user's current page.
-                self.start_next_task(cx);
+                if created && let Some(draft) = state.draft_mut() {
+                    draft.submitted_task = Some(id.clone());
+                }
+                Ok((id, created))
+            })
+        {
+            self.pending_conversion = None;
+            self.source_validation = None;
+            self.title_required = false;
+            self.message = (!created).then(|| course2md::tr!("已有相同任务，未重复加入").into());
+            if created {
+                self.following_conversion = self
+                    .following_conversion
+                    .take()
+                    .filter(|_| self.page == Page::New)
+                    .and_then(|follow| follow.submitted(self.preview_generation, id.clone()));
+                self.source_editor_open = false;
+                self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
             }
-            Err(error) => {
-                self.workspace_error =
-                    Some(course2md::tr!("任务尚未加入队列：{}", format!("{error:#}")))
-            }
+            self.select_task(&id, cx);
+            // Preparation may finish after navigation; keep the user's current page.
+            self.start_next_task(cx);
         }
         cx.notify();
     }
@@ -1328,10 +1316,7 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let Some(workspace) = &mut self.workspace else {
-            return;
-        };
-        match workspace.transaction(|state| {
+        let changed = self.transact(course2md::tr!("任务状态尚未保存：{}"), |state| {
             state.set_intent(&id, intent)?;
             if active && intent != Intent::Run {
                 state
@@ -1340,34 +1325,29 @@ impl Desktop {
                     .state = TaskState::Pausing;
             }
             Ok(())
-        }) {
-            Ok(()) => {
-                if intent == Intent::Run {
-                    self.follow_resumed_input_task(&id, cx);
-                } else if intent == Intent::Cancel {
-                    self.following_conversion = None;
-                }
-                if let Some(task) = self
-                    .workspace
-                    .as_ref()
-                    .and_then(|w| w.state.task(&id))
-                    .cloned()
-                    && let Err(error) = self.send_task_control(&task)
-                {
-                    self.workspace_error =
-                        Some(course2md::tr!("任务指令尚未保存：{}", format!("{error:#}")));
-                    if self.active_task.as_ref() == Some(&id)
-                        && let Some(job) = &self.job
-                    {
-                        job.cancel();
-                    }
-                }
-                self.start_next_task(cx);
+        });
+        if changed.is_some() {
+            if intent == Intent::Run {
+                self.follow_resumed_input_task(&id, cx);
+            } else if intent == Intent::Cancel {
+                self.following_conversion = None;
             }
-            Err(error) => {
+            if let Some(task) = self
+                .workspace
+                .as_ref()
+                .and_then(|w| w.state.task(&id))
+                .cloned()
+                && let Err(error) = self.send_task_control(&task)
+            {
                 self.workspace_error =
-                    Some(course2md::tr!("任务状态尚未保存：{}", format!("{error:#}")))
+                    Some(course2md::tr!("任务指令尚未保存：{}", format!("{error:#}")));
+                if self.active_task.as_ref() == Some(&id)
+                    && let Some(job) = &self.job
+                {
+                    job.cancel();
+                }
             }
+            self.start_next_task(cx);
         }
         cx.notify();
     }
@@ -1380,20 +1360,15 @@ impl Desktop {
         if previous.as_deref() != Some(id)
             && let Some(previous) = previous
         {
-            self.clear_task_card_motion(&previous);
+            self.close_task_details(&previous);
         }
-        if let Some(workspace) = &mut self.workspace
-            && let Err(error) = workspace.transaction(|state| {
-                state.selected_task = Some(id.to_owned());
-                if let Some(task) = state.task_mut(id) {
-                    task.unread = false;
-                }
-                Ok(())
-            })
-        {
-            self.workspace_error =
-                Some(course2md::tr!("任务选择尚未保存：{}", format!("{error:#}")));
-        }
+        self.transact(course2md::tr!("任务选择尚未保存：{}"), |state| {
+            state.selected_task = Some(id.to_owned());
+            if let Some(task) = state.task_mut(id) {
+                task.unread = false;
+            }
+            Ok(())
+        });
         // Going to a task opens its details when there is something to read
         // or decide; new and running work stays a compact row.
         let waiting = self
@@ -1473,15 +1448,15 @@ impl Desktop {
             self.reprocess_task(id, components, requests, cx);
             return;
         }
-        if let Some(workspace) = &mut self.workspace {
-            let result = workspace.transaction(|state| state.authorize_uncertain(&id, &requests));
-            if let Err(error) = result {
-                self.workspace_error = Some(course2md::tr!(
-                    "重新发送的选择尚未保存：{}",
-                    format!("{error:#}")
-                ));
-                return;
-            }
+        if self.workspace.is_some()
+            && self
+                .transact(
+                    course2md::tr!("重新发送的选择尚未保存：{}"),
+                    |state| state.authorize_uncertain(&id, &requests),
+                )
+                .is_none()
+        {
+            return;
         }
         self.follow_resumed_input_task(&id, cx);
         self.start_next_task(cx);
@@ -1501,22 +1476,14 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let Some(workspace) = &mut self.workspace else {
-            return;
-        };
         components.sort();
         components.dedup();
-        let result = workspace.transaction(|state| state.reprocess(&id, components, resend));
-        match result {
-            Ok(id) => {
-                self.select_task(&id, cx);
-                self.follow_resumed_input_task(&id, cx);
-                self.start_next_task(cx);
-            }
-            Err(error) => {
-                self.workspace_error =
-                    Some(course2md::tr!("补做任务尚未建立：{}", format!("{error:#}")))
-            }
+        if let Some(id) = self.transact(course2md::tr!("补做任务尚未建立：{}"), |state| {
+            state.reprocess(&id, components, resend)
+        }) {
+            self.select_task(&id, cx);
+            self.follow_resumed_input_task(&id, cx);
+            self.start_next_task(cx);
         }
         cx.notify();
     }
@@ -1651,22 +1618,15 @@ impl Desktop {
         cx.spawn_in(window, async move |this, cx| {
             let events = events.recv().await.ok().flatten();
             let _ = this.update_in(cx, |this, window, cx| {
-                let Some(workspace) = &mut this.workspace else {
-                    return;
-                };
-                match workspace.transaction(|state| state.adjust_task(&id, events)) {
-                    Ok(()) => {
-                        this.following_conversion = None;
-                        this.invalidate_source();
-                        this.restore_draft(window, cx);
-                        this.page = Page::New;
-                    }
-                    Err(error) => {
-                        this.workspace_error = Some(course2md::tr!(
-                            "尚未打开任务调整选项：{}",
-                            format!("{error:#}")
-                        ))
-                    }
+                let adjusted = this.transact(
+                    course2md::tr!("尚未打开任务调整选项：{}"),
+                    |state| state.adjust_task(&id, events),
+                );
+                if adjusted.is_some() {
+                    this.following_conversion = None;
+                    this.invalidate_source();
+                    this.restore_draft(window, cx);
+                    this.page = Page::New;
                 }
                 cx.notify();
             });
