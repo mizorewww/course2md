@@ -297,6 +297,7 @@ dependencies = [
  "image",
  "indicatif",
  "libc",
+ "model-fetch",
  "qrcode",
  "ratex-layout",
  "ratex-parser",
@@ -905,6 +906,19 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "model-fetch"
+version = "0.1.0"
+source = "git+https://github.com/mizorewww/model-fetch?rev=4434f944d43fe2f5395fcbafb5e1e82ea3a9fb7d#4434f944d43fe2f5395fcbafb5e1e82ea3a9fb7d"
+dependencies = [
+ "getrandom 0.4.3",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "ureq",
+ "url",
 ]
 
 [[package]]

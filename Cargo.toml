@@ -32,6 +32,7 @@ libc = "0.2"
 dialoguer = "0.12.0"
 which = "8.0.6"
 sys-locale = "0.3"
+model-fetch = { git = "https://github.com/mizorewww/model-fetch", rev = "4434f944d43fe2f5395fcbafb5e1e82ea3a9fb7d", features = ["ip-lookup"] }
 slide-detect = { git = "https://github.com/mizorewww/slide-detect", rev = "87f8b78a8a70d8330a4bf1cb09924fe845c6c4ab" }
 subtitle-parse = { git = "https://github.com/mizorewww/subtitle-parse", rev = "53e0ab4aaf02ca2600e05f9b13085f97228c65ad", features = ["serde"] }
 
