@@ -13,10 +13,10 @@ directory when the project is accepted.
 
 1. The app becomes **pure Material**. Lucide and the app's own tile geometry go;
    `.agents/skills/course2md-design/SKILL.md` must be rewritten to say so.
-2. Reusable components are abstracted into `gpui-kit-material`, on a **worktree**,
-   never on its `main`, which the owner is actively developing. The owner merges.
-3. All GPUI Kit dependencies match `gpui-kit-material` exactly (same `gpui-kit`,
-   `gpui-base`, `gpui-pre`/`gpui-fast`, same vendored patches).
+2. Kit work happens on a **worktree**, never on the owner's `main` checkout. The owner merges.
+3. GPUI Kit dependencies come from one pinned revision of `gpui-kit-material`, tracking its
+   mainline. The `[patch]` table holds only what the build needs (six entries on macOS),
+   superseding "match exactly" per decision 11; add entries only if CI shows a platform needs them.
 4. Patches the kit already has are taken from the kit; do not port them twice.
 5. Order: sync patches and deps, fix bugs, then the rest of this plan.
 6. Develop with documents, atomic commits, frequent pushes.
@@ -63,7 +63,7 @@ directory when the project is accepted.
 | What | Where | Branch |
 | --- | --- | --- |
 | App | `/Users/aac6fef/Developer/course2md` | `split/workspace` |
-| Kit worktree | `/Users/aac6fef/Developer/gpui-kit-material-course2md` | `course2md-integration` (from `origin/main`) |
+| Kit worktree | `/Users/aac6fef/Developer/gpui-kit-material-course2md` | `course2md-integration` (equal to `origin/main`; for PR branches) |
 | Kit main (do not touch) | `/Users/aac6fef/Developer/gpui-kit-material` | `main` |
 | Symbols (do not touch unless needed) | `/Users/aac6fef/Developer/gpui-material-symbols` | `main` |
 
@@ -79,17 +79,15 @@ Working names; check availability before creating a repository.
 
 | Repository | Source | Must change first |
 | --- | --- | --- |
-| `gpui-kit-material` (existing) | Generic widgets from `theme.rs`, `motion.rs`, etc. | On the worktree |
+| `gpui-kit-material` (existing) | Nothing by default; see decision 11 | PR only when its API is awkward |
 | `gpui-material-symbols` (existing) | Icon assets | Nothing |
-| `subtitle-parse` | Parser half of `subtitle.rs` | Local `Cue` type; tag-stripping bug fixed |
+| `subtitle-parse` | Parser half of `subtitle.rs` | Local `Cue` type |
 | `slide-detect` | `scene.rs` | `SlideParams`, local event type, progress callback, injected ffmpeg |
 | `model-fetch` | `download.rs`, `hub.rs` | `Cancel`/`Progress` traits, no `tr!`, injected tool locator, opt-in IP lookup |
-| `apple-asr-sys` (conditional) | `native/apple-asr`, `build.rs`, `apple.rs` | `--scratch-path`, `links` metadata, metallib path metadata, registered callbacks, no hard-coded prose. Repository only once it builds outside the app |
+| `apple-asr-sys` (conditional) | `native/apple-asr`, `build.rs`, `apple.rs` | Decided by the sherpa-onnx spike |
 
 Rule: published libraries return typed errors and events; only the app translates.
-No `tr!` in them. Second-batch candidates (`llm` JSON salvage, process utilities,
-`dispatch` ledger, reader image cache, image viewer) stay internal unless a concrete
-reason appears; the image viewer and reader image cache go to the kit if generic.
+No `tr!` in them. Check name availability before creating a repository.
 
 ### Workspace crates in this repository
 
@@ -101,29 +99,37 @@ one lock file. CI, `package.py`, `release.yml` and the docs must follow.
 
 ## Phases
 
-Each phase ends green (see Checks) and pushed.
+`REDUCTION.md` is the execution guide for what each lever removes. Each wave ends green and
+pushed; agents work on branches in sibling worktrees, and the coordinator merges.
 
-- **P0 Setup.** Branch, kit worktree, these documents, scaffold residue removed.
-- **P1 Patches and deps.** Decide every patch in `desktop/patches` against the kit
-  vendor: already there, port to the kit worktree, or dropped by pure Material. Move
-  the desktop from pinned Zed and `gpui-component` to the `gpui-kit` facade with the
-  kit's `[patch]` tables. App must build and run at the end of this phase.
-- **P2 Bugs.** Fix `AUDIT.md` § Bugs, each with a test where meaningful, one commit each.
-- **P3 Engine workspace.** Break cycles in the order in `AUDIT.md`, create crates,
-  merge the two Cargo workspaces, teach `tests/i18n_catalog.rs` about the workspace.
-- **P4 Standalone repositories.** Extract, tests travel with the code, create public
-  repos, depend by git revision. Add `release-plz` and `cargo-deny`.
-- **P5 Pure Material.** Abstract reusable widgets into the kit worktree, replace
-  `theme.rs`, `palettes.rs`, `motion.rs`, `choice_group.rs`, `select_field.rs`,
-  `focus_scroll.rs`, `window_controls.rs`, `scroll.rs` and `icons.rs` by kit
-  equivalents, rewrite the design skill and references, verify every page.
-  Delete `sources.py`, `sources.lock.json`, `patches/`.
-- **P6 Desktop crates.** Cut the listed edges, `desktop-core`, split `Desktop`, `desktop-ui`.
-- **P7 Wheels and tooling.** `AUDIT.md` § Wheels; ship dependency licences.
-- **P8 Acceptance.** See below.
+Done: P0 setup, P1 deps, P2 bugs, docs rewrite.
 
-P1 precedes P2 by owner decision. P2 engine fixes can run while P1 is underway, as
-long as they are not in the same checkout at the same moment.
+**Wave 1, in parallel:**
+- `split/engine`: lever 1, engine cleanup, plus the engine wheels.
+- Spike: lever 2, sherpa-onnx, in a scratch directory; decides whether a second engine pass happens.
+- `split/persist`: levers 3 and 4, persistence and derived task state.
+- `split/foundation`: Material foundation in the app (kit theme installed, shell, icon asset
+  source, small shared primitives). Page files are not rewritten here.
+- `split/repos`: lever 10 engine half, `subtitle-parse`, `slide-detect`, `model-fetch`; repositories, `release-plz`, `cargo-deny`.
+- `split/tooling`: T7 dependency licences shipped, remaining `AUDIT.md` wheels outside `src/`.
+- Kit documentation PR (one concern, from kit `origin/main`, reviewed first).
+
+**Wave 2, after wave 1 merges, in parallel by file set.** Each page agent rewrites its files on
+the kit, removing its use of `theme::*` and the old widgets, taking the matching lever:
+settings, setup and services (lever 6); library (lever 6); import and tasks (lever 7);
+reader, including `note_text` → `TextView` (lever 8).
+
+**Wave 3.** Delete `theme.rs`, `palettes.rs`, `motion.rs`, `choice_group.rs`, `select_field.rs`,
+`focus_scroll.rs`, `window_controls.rs`, `scroll.rs`, `icons.rs` and what else lever 9 lists once
+nothing refers to them. Lucide assets go. Engine workspace: break cycles per `AUDIT.md`, create
+crates, merge the two Cargo workspaces, teach `tests/i18n_catalog.rs` about the workspace; CI,
+`package.py`, `release.yml` and docs follow. Desktop crates: cut the listed edges, split `Desktop`,
+`desktop-core`, `desktop-ui`. Lever 10 desktop half if still worthwhile.
+
+**Wave 4.** Acceptance, below.
+
+Metrics: `python3 docs/split/metrics.py` (3db4a88 reads 78,464 for `src` and `desktop/src`,
+against the 78,518 baseline). Record at each wave end in `STATUS.md`.
 
 ## Checks
 
@@ -131,7 +137,9 @@ long as they are not in the same checkout at the same moment.
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings      # engine; workspace-wide after P3
 cargo test
-cargo check --manifest-path desktop/Cargo.toml # until the workspaces merge
+cargo fmt --manifest-path desktop/Cargo.toml --check
+cargo clippy --manifest-path desktop/Cargo.toml --all-targets --no-deps -- -D warnings
+cargo test --manifest-path desktop/Cargo.toml  # until the workspaces merge
 ```
 Kit worktree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`. Before acceptance also read `.github/workflows/ci.yml` and
@@ -139,10 +147,9 @@ Kit worktree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
 
 ## Dependency form
 
-During development the desktop may use `path = "../../gpui-kit-material-course2md/..."`.
-**Before acceptance** this flips to `git = "https://github.com/mizorewww/gpui-kit-material"`
-with a pinned `rev` from `course2md-integration`, in both the dependency and every
-`[patch]` entry, so a clean clone builds. Tracked in `STATUS.md`.
+The desktop uses `git = "https://github.com/mizorewww/gpui-kit-material"` with a pinned `rev` of
+that repository's `main`, in the dependency and every `[patch]` entry, so a clean clone and CI build.
+For a kit change under test, point at the PR branch's commit; bump the rev to follow mainline.
 
 ## Acceptance
 

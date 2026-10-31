@@ -1,7 +1,8 @@
 # Audit findings the split plan is based on
 
 Taken on 2026-10-30 at `3db4a88`. Line numbers refer to that commit. Star counts came
-from `gh api` the same day.
+from `gh api` the same day. Superseded where `REDUCTION.md` disagrees: its kit audit showed the
+"candidates to add to the kit", the CJK dependency of `note_text`, and porting patches were wrong.
 
 ## Engine facts
 

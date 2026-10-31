@@ -2,8 +2,8 @@
 
 Update this file in the same commit as the work it records.
 
-**Current phase:** P2 Bugs is finished, except `AUDIT.md` T7 (dependency licences, in P7) and D12 (subsumed by P5).
-**Dependency form:** path (flip to git rev before acceptance). CI cannot build the desktop until then.
+**Current phase:** Wave 1 (see `PLAN.md` § Phases). P0, P1, P2 are finished; D12 goes with the kit scrollbar, T7 with `split/tooling`.
+**Dependency form:** git, kit `a5acb0c`, six `[patch]` entries. Windows and Linux depend on the desktop workflow run (dispatched on `split/workspace`).
 
 ## Done
 
@@ -14,19 +14,7 @@ Update this file in the same commit as the work it records.
 
 ## Patch triage
 
-| Patch | Result | Why |
-| --- | --- | --- |
-| `zed-cjk-line-break` | Ported, both backends | `gpui-fast` had the punctuation rules, `gpui-pre` had none. Both now also keep no-break spaces and word joiners together, including glyphless joiners in shaped text, and a forced break carries the previous character. `vendor/gpui-pre/cjk-line-break-patch.md` |
-| `component-input-accessibility` | Ported in part | Disabled input leaves the Tab order (`gpui-base`). Kit 0.8.1's `InputAccessibility` has the role, label and value. Text runs and selection for screen readers are not ported; the owner excluded specialist accessibility work |
-| `zed-input-accessibility` | Dropped | Only served the text-run part above |
-| `zed-macos-window` | Not ported | See the decision below |
-| `zed-metal-frame-lifetime` | Already in the kit | `draw_with_status` has a per-draw autorelease pool |
-| `zed-metal-present-stages` | Dropped | Superseded by `presentation_wait` and GPU timestamps; `performance.rs` now reports those |
-| `component-tooltip-lifecycle` | Dropped | Kit 0.8.1's `WindowState` dismisses a removed trigger's tooltip and keeps a pressed trigger's dismissed. Not covered: its dismissal on any keystroke |
-| `component-selectable-text-highlights` | Dropped | Unused: the app paints through its own `NoteText` element |
-| `component-button-text-size` | Dropped, debt | `MaterialButton` in P5 |
-| `component-menu-style` | Dropped, debt | `MaterialMenu` in P5 |
-| `component-switch-geometry` | Dropped, debt | `MaterialSwitch` in P5 |
+Superseded by `REDUCTION.md` § Kit audit: the kit carries no patch for this app.
 
 ## P1 verification
 
@@ -49,7 +37,7 @@ On kit merge `03b38ec` (which includes `origin/main` at `c6a1476`), Rust 1.99.1,
 
 ## Next action
 
-P3. `REDUCTION.md` asks for levers 1 and 3 before it, because they change crate boundaries. Before P5, read the debts below. P2 results are in `BUGS-ENGINE.md` and `BUGS-DESKTOP.md`.
+Merge wave 1 branches as they report, then start wave 2.
 
 ## Decisions made during the work
 
@@ -61,10 +49,8 @@ P3. `REDUCTION.md` asks for levers 1 and 3 before it, because they change crate 
   restoration, which can wait), and the fallback would draw synchronously on the main thread, against
   the kit's rule. Port it only if a frozen window is ever observed.
 - **`gpui-kit-material` is on with `default-features = false`** (`serde`, `gpui-fast`) until P5 uses it.
-- **Kit changes go upstream as one PR per concern** (plan decision 11): `05632a9` wrapping, `e016136`
-  disabled inputs. Both are separate, non-merge commits on `course2md-integration`.
 
-## Debts for P5
+## Debts for the Material work
 
 Visual only; the behaviours are verified below.
 
@@ -78,7 +64,7 @@ Visual only; the behaviours are verified below.
 
 ## Open problems
 
-- **Binary size for P5.** `gpui-kit-material`'s default `embedded-symbols` embeds about 52 MB (three
+- **Binary size.** `gpui-kit-material`'s default `embedded-symbols` embeds about 52 MB (three
   variable fonts and the SVG pack in `gpui-material-symbols`). It has no subset feature. Recommendation:
   keep the feature off and add an app-owned `AssetSource` that holds only the symbols the app uses,
   since `Asset::provide` exists for runtime supply and `icons::Assets::with` takes a fallback source.
