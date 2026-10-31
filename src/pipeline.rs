@@ -594,7 +594,7 @@ impl Task<'_> {
                 job.control.clone(),
             );
             blocking(move || {
-                crate::runtime::map_pool(images, 4, &control, |image| {
+                crate::pool::map_pool(images, 4, &control, |image| {
                     let source = artifact::safe_asset_path(&base_dir, &image)?;
                     let dest = out_dir.join("base").join(&image);
                     std::fs::create_dir_all(dest.parent().context("asset path")?)?;
@@ -1405,7 +1405,7 @@ impl Outcome {
 /// Screenshot checkpoints are verified by full-content digests, in parallel so
 /// resuming a large cache is not a serial wait.
 fn verified_cache_files(out_dir: &Path, files: &[(String, String)], control: &TaskControl) -> bool {
-    crate::runtime::map_pool(
+    crate::pool::map_pool(
         files.iter().collect(),
         FRAME_DIGEST_LANES,
         control,
@@ -1478,7 +1478,7 @@ mod tests {
             &Default::default(),
         )
         .unwrap();
-        let job = crate::execution::Job::detached(root.path());
+        let job = crate::job::Job::detached(root.path());
         cfg.no_download = false;
         let media = job.media_path();
         std::fs::write(&media, b"unverified original bytes").unwrap();

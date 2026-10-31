@@ -241,7 +241,7 @@ fn summarize_blocking(
         "summary map-reduce"
     );
     let total = chunks.len();
-    let partials = crate::runtime::map_pool(
+    let partials = crate::pool::map_pool(
         chunks.into_iter().enumerate().collect(),
         SUMMARIZE_CONCURRENCY,
         control,

@@ -296,7 +296,7 @@ fn run_batches(
         apply(&mut chunk, &segments);
         Ok(chunk.len())
     };
-    let counts = crate::runtime::map_pool(
+    let counts = crate::pool::map_pool(
         chunks,
         s.concurrency.clamp(1, MAX_CONCURRENCY),
         control,
@@ -749,7 +749,7 @@ impl<'a> Chat<'a> {
     ) -> Result<String> {
         let s = self.settings;
         let attempt = || self.once(body, description, validate);
-        let reply = match crate::runtime::retry(self.control, MAX_ATTEMPTS, attempt) {
+        let reply = match crate::pool::retry(self.control, MAX_ATTEMPTS, attempt) {
             Ok(reply) => reply,
             Err(first) => {
                 let degradable = first

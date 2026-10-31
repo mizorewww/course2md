@@ -384,7 +384,7 @@ pub fn enrich_bilibili_candidates(candidates: &mut [SourceCandidate]) {
         .build()
         .new_agent();
     // 每个请求最长 8s：并发补全，避免几十个分集串行等待。单个失败只记日志。
-    let views = crate::runtime::map_pool(
+    let views = crate::pool::map_pool(
         bvids.iter().collect(),
         BILIBILI_ENRICH_CONCURRENCY,
         &Default::default(),

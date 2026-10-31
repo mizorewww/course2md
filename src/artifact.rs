@@ -67,7 +67,7 @@ fn parallel_map<T: Sync, R: Send>(
     control: &TaskControl,
     f: impl Fn(&T) -> Result<R> + Sync,
 ) -> Result<Vec<R>> {
-    crate::runtime::map_pool(items.iter().collect(), IO_PARALLELISM, control, f)
+    crate::pool::map_pool(items.iter().collect(), IO_PARALLELISM, control, f)
 }
 
 #[derive(Debug, Clone)]

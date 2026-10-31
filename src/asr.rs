@@ -148,7 +148,7 @@ impl Backend {
 pub async fn run(
     cfg: &PipelineConfig,
     wav: &Path,
-    job: &crate::execution::Job,
+    job: &crate::job::Job,
 ) -> Result<Vec<TranscriptEvent>> {
     let backend = Backend::resolve(cfg, &job.control).await?;
     let mut cp = Checkpoint::open(&job.dir, true, &backend.identity(cfg.max_speech))?;
@@ -212,7 +212,7 @@ fn transcribe_all(
         });
     }
     let state = std::sync::Mutex::new((&mut *cp, EmptyResults::default()));
-    let result = crate::runtime::map_pool(pending, engine.workers(), control, |(index, seg)| {
+    let result = crate::pool::map_pool(pending, engine.workers(), control, |(index, seg)| {
         let chunk = tmp.path().join(format!("c{index:04}.wav"));
         let text = engine
             .cut(wav, seg, &chunk)
@@ -445,7 +445,7 @@ fn post_local_json(
 ) -> Result<Value> {
     use crate::dispatch::Failure;
     let bytes = serde_json::to_vec(body)?;
-    crate::runtime::retry(control, MAX_ATTEMPTS, || {
+    crate::pool::retry(control, MAX_ATTEMPTS, || {
         let request = agent.post(url).header("Content-Type", "application/json");
         match crate::dispatch::receive(request.send(&bytes)) {
             Ok(response) if (200..300).contains(&response.status) => {
@@ -508,7 +508,7 @@ impl CloudSpeech {
             start,
             end
         );
-        crate::runtime::retry(&self.control, MAX_ATTEMPTS, || {
+        crate::pool::retry(&self.control, MAX_ATTEMPTS, || {
             let send = || {
                 let request = self
                     .client

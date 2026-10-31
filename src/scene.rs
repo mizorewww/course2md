@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub async fn run(
     cfg: &PipelineConfig,
     video: &std::path::Path,
-    job: &crate::execution::Job,
+    job: &crate::job::Job,
 ) -> Result<Vec<FrameEvent>> {
     let t0 = std::time::Instant::now();
     progress::start(Stage::ScenesScan);
