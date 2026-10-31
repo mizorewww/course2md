@@ -19,7 +19,7 @@ use course2md::config::{AsrProvider, local_models, model_dir_from, model_label};
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit::component::scroll::Scrollbar;
-use gpui_kit_material::{icons::Icon, motion, prelude::*};
+use gpui_kit_material::{motion, prelude::*};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -957,24 +957,21 @@ impl Desktop {
             .pt(rem(24.))
             .pb(rem(20.))
             .child(
-                v_flex()
-                    .w_full()
-                    .gap(rem(8.))
-                    .child(TileScale::Regular.support("setup-position", position.clone()))
-                    .child(progress_with_label(
-                        "setup-progress",
-                        position,
-                        number as f32 / STEPS as f32,
-                        window,
-                        cx,
-                    )),
+                Stepper::new("setup-progress", position)
+                    .steps([
+                        course2md::tr!("识别方式"),
+                        course2md::tr!("AI 服务"),
+                        "Bilibili",
+                        course2md::tr!("模型准备"),
+                    ])
+                    .current(number - 1),
             )
             .child(
                 v_flex()
                     .w_full()
                     .min_w_0()
                     .gap(rem(4.))
-                    .child(page_heading("setup-title", title))
+                    .child(ui::page_title("setup-title", title))
                     .when_some(description, |view, description| {
                         view.child(TileScale::Regular.support("setup-description", description))
                     }),
@@ -1101,34 +1098,44 @@ impl Desktop {
                 issues.push(issue);
             }
         }
-        let engine_item = |provider: Option<AsrProvider>| {
-            let item = MaterialMenuItem::new(match provider {
-                Some(_) => provider_label(provider),
-                None => course2md::tr!("自动选择引擎"),
-            })
-            .leading(Icon::from(engine_icon(provider)))
-            .selected(selected == provider);
-            item.on_click(cx.listener(move |this, _, _, cx| {
+        // Engines are local resources: tinted circles like the routes above, one family so
+        // they read as one group. The first tile is automatic choice; the group's index
+        // counts it.
+        let count = engines.len() + 1;
+        let mut engine_group = ChoiceGroup::new("setup-engine", course2md::tr!("本机引擎")).tile(
+            ChoiceTile::new(
+                "setup-engine-auto",
+                0,
+                count,
+                course2md::tr!("自动选择引擎"),
+                selected.is_none(),
+            )
+            .tinted_icon(engine_icon(None).into(), Tint::Blue, icon_size)
+            .description(automatic.clone()),
+        );
+        for (index, engine) in engines.iter().enumerate() {
+            let issue = detected.then(|| self.engine_issue(*engine)).flatten();
+            let mut tile = ChoiceTile::new(
+                ("setup-engine-choice", index),
+                index + 1,
+                count,
+                provider_label(Some(*engine)),
+                selected == Some(*engine),
+            )
+            .tinted_icon(engine_icon(Some(*engine)).into(), Tint::Blue, icon_size)
+            .status(issue.map(|issue| status_chip(StatusKind::Warning).child(issue.short())))
+            .enabled(issue.is_none());
+            if !detected {
+                tile = tile.description(course2md::tr!("正在检测"));
+            }
+            engine_group = engine_group.tile(tile);
+        }
+        let engine_choices = engines.clone();
+        let engine_group =
+            engine_group.on_change(cx.listener(move |this, index: &usize, _, cx| {
+                let provider = index.checked_sub(1).map(|index| engine_choices[index]);
                 this.apply_setup_provider_choice(ProviderChoice::Engine(provider), cx);
-            }))
-        };
-        let engine_menu = MaterialMenu::new("setup-engine-items")
-            .width(SETUP_MENU_WIDTH)
-            .item(engine_item(None).supporting_text(automatic.clone()))
-            .items(engines.iter().map(|engine| {
-                let item = engine_item(Some(*engine));
-                if !detected {
-                    return item.supporting_text(course2md::tr!("正在检测"));
-                }
-                match self.engine_issue(*engine) {
-                    Some(issue) => item.supporting_text(issue.short()).disabled(true),
-                    None => item,
-                }
             }));
-        let engine_value = match selected {
-            None => course2md::tr!("自动选择引擎"),
-            provider => provider_label(provider),
-        };
 
         let provider = selected.unwrap_or(recommended);
         let models = local_model_choices(provider, &self.onboarding.model);
@@ -1162,42 +1169,30 @@ impl Desktop {
         let (_, model_status) = self.model_reading(&self.setup_model_request());
         let fields = ui::field_table(
             "setup-local-engine",
-            course2md::tr!("本机引擎和模型"),
-            [
-                ui::Field::menu(
-                    "setup-engine",
-                    course2md::tr!("本机引擎"),
-                    engine_value,
-                    engine_menu,
-                )
-                .hint(if selected.is_none() {
-                    automatic
-                } else {
-                    String::new()
-                }),
-                ui::Field::menu(
-                    "setup-model",
-                    course2md::tr!("识别模型"),
-                    current_model,
-                    model_menu,
-                )
-                .hint(model_status),
-            ],
+            course2md::tr!("识别模型"),
+            [ui::Field::menu(
+                "setup-model",
+                course2md::tr!("识别模型"),
+                current_model,
+                model_menu,
+            )
+            .hint(model_status)],
         );
-        body.child(
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(8.))
-                .child(self.setup_reveal("setup-engine-reveal", fields))
-                .children(issues.into_iter().map(|issue| {
-                    div().px(ITEM_INSET).child(self.engine_obstacle(
-                        &format!("setup-engine-obstacle-{issue:?}"),
-                        issue,
-                        cx,
-                    ))
-                })),
-        )
+        body.child(self.setup_reveal("setup-engine-choice-reveal", engine_group))
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .child(self.setup_reveal("setup-engine-reveal", fields))
+                    .children(issues.into_iter().map(|issue| {
+                        div().px(ITEM_INSET).child(self.engine_obstacle(
+                            &format!("setup-engine-obstacle-{issue:?}"),
+                            issue,
+                            cx,
+                        ))
+                    })),
+            )
     }
 
     /// One labeled input of a service form, with its error or kept-key note below.
@@ -1215,6 +1210,7 @@ impl Desktop {
         let kept = field == FormField::Key && form.draft.credential.is_some();
         let input = TextField::new(SharedString::from(id.clone()), form.input(field))
             .outlined()
+            .shape(TextFieldShape::Rounded)
             .label(label)
             // The input owns its placeholder: the label stays clear of it.
             .float_label(true)
@@ -1627,6 +1623,7 @@ impl Desktop {
                     .when(step == Step::Ai, |row| {
                         row.child(
                             material_button("setup-skip-ai", ButtonVariant::Outlined)
+                                .tone(ButtonTone::Accent)
                                 .child(course2md::tr!("稍后配置 AI"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     // Keep this private edit valid when the person returns
