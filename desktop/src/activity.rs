@@ -1392,15 +1392,18 @@ mod tests {
     fn classified_failures_are_worded_from_their_kind() {
         use course2md::artifact::{FailureKind, Outcome};
         // The text is ignored when the kind already names the cause.
-        let rejected = Outcome::failed_kind(
-            "摘要尚未完成 / Summary incomplete: HTTP 401",
-            FailureKind::Authentication,
-        );
+        let rejected = Outcome {
+            kind: Some(FailureKind::Authentication),
+            ..Outcome::failed("摘要尚未完成 / Summary incomplete: HTTP 401")
+        };
         assert_eq!(
             outcome_failure_message(NotePart::Summary, &rejected),
             "摘要未生成：服务拒绝了 API Key"
         );
-        let limited = Outcome::failed_kind("anything", FailureKind::RateLimit);
+        let limited = Outcome {
+            kind: Some(FailureKind::RateLimit),
+            ..Outcome::failed("anything")
+        };
         assert_eq!(
             outcome_failure_message(NotePart::Proofreading, &limited),
             "校对未完成：服务暂时限制了请求次数"
