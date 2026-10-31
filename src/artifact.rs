@@ -328,47 +328,7 @@ pub fn has_readable_body(sections: &[Section]) -> bool {
         .any(|e| !e.text.trim().is_empty())
 }
 
-/// Build and fsync all files on the target volume, then publish one directory rename.
-/// The pointer is a separate atomic commit. A restart can finish it without rerunning AI.
-///
-/// 重阻塞 IO（逐图复制、SHA-256、fsync）不占 tokio worker 线程：
-/// 克隆输入后整个发布在 spawn_blocking 中执行。
-#[allow(clippy::too_many_arguments)]
-pub async fn publish(
-    target: &Target,
-    work_dir: &Path,
-    meta: &VideoMeta,
-    sections: &[Section],
-    summary: Option<&Summary>,
-    formats: &[crate::config::OutputFormat],
-    outcomes: Outcomes,
-    control: &TaskControl,
-) -> Result<Manifest> {
-    let target = target.clone();
-    let control = control.clone();
-    let work_dir = work_dir.to_path_buf();
-    let meta = meta.clone();
-    let sections = sections.to_vec();
-    let summary = summary.cloned();
-    let formats = formats.to_vec();
-    let publish = move || {
-        publish_in_task(
-            &target,
-            &work_dir,
-            &meta,
-            &sections,
-            summary.as_ref(),
-            &formats,
-            outcomes,
-            &control,
-        )
-    };
-    tokio::task::spawn_blocking(publish)
-        .await
-        .context(crate::tr!("发布工作进程中断 / Publish worker interrupted"))?
-}
-
-/// publish 的同步实现（见 publish 的 spawn_blocking 纪律说明），用于任务之外。
+/// [`publish`] outside a task.
 pub fn publish_blocking(
     target: &Target,
     work_dir: &Path,
@@ -378,7 +338,7 @@ pub fn publish_blocking(
     formats: &[crate::config::OutputFormat],
     outcomes: Outcomes,
 ) -> Result<Manifest> {
-    publish_in_task(
+    publish(
         target,
         work_dir,
         meta,
@@ -390,8 +350,10 @@ pub fn publish_blocking(
     )
 }
 
+/// Build and fsync all files on the target volume, then publish one directory rename.
+/// The pointer is a separate atomic commit. A restart can finish it without rerunning AI.
 #[allow(clippy::too_many_arguments)]
-fn publish_in_task(
+pub(crate) fn publish(
     target: &Target,
     work_dir: &Path,
     meta: &VideoMeta,
@@ -639,7 +601,6 @@ mod tests {
             Outcomes::default(),
             &TaskControl::default(),
         )
-        .await
         .unwrap();
         let old_export = target.version_dir().join("exports/course.html");
         let edited = b"<p>My manual corrections must survive.</p>";
@@ -660,8 +621,7 @@ mod tests {
             &[],
             Outcomes::default(),
             &TaskControl::default(),
-        )
-        .await;
+        );
         std::fs::set_permissions(&target.course_dir, std::fs::Permissions::from_mode(0o755))
             .unwrap();
         assert!(interrupted.is_err());
@@ -680,7 +640,6 @@ mod tests {
                 Outcomes::default(),
                 &TaskControl::default(),
             )
-            .await
             .unwrap();
             assert_eq!(
                 std::fs::read(target.version_dir().join("manifest.json")).unwrap(),
@@ -704,7 +663,6 @@ mod tests {
             Outcomes::default(),
             &TaskControl::default(),
         )
-        .await
         .unwrap();
         let current: CurrentVersion =
             serde_json::from_slice(&std::fs::read(pointer).unwrap()).unwrap();
@@ -753,7 +711,6 @@ mod tests {
             Outcomes::default(),
             &TaskControl::default(),
         )
-        .await
         .unwrap();
         assert!(first.outputs.is_empty());
         assert!(target.version_dir().join("course.md").is_file());
@@ -773,7 +730,6 @@ mod tests {
                 Outcomes::default(),
                 &TaskControl::default()
             )
-            .await
             .is_err()
         );
         assert_eq!(
@@ -798,7 +754,6 @@ mod tests {
                 Outcomes::default(),
                 &TaskControl::default()
             )
-            .await
             .is_err()
         );
     }

@@ -38,7 +38,6 @@ AI 服务没有返回内容 / The AI service returned no content	AI 服务没有
 AI 服务返回了错误 / The AI service returned an error	AI 服务返回了错误	The AI service returned an error	AI 服務傳回了錯誤	AI サービスがエラーを返しました
 AI 校对	AI 校对	AI proofreading	AI 校對	AI 校正
 AI 校对 / AI proofreading	AI 校对	AI proofreading	AI 校對	AI校正
-AI 校对工作进程中断 / Proofreading worker interrupted	AI 校对工作进程中断	Proofreading worker interrupted	AI 校對工作程序中斷	AI校正プロセスが中断されました
 AI 校对并生成笔记	AI 校对并生成笔记	AI proofreads and generates notes	AI 校對並生成筆記	AI が校正してノートを生成
 AI 校对提示词 / AI proofreading instructions	AI 校对提示词	AI proofreading instructions	AI 校對提示詞	AI 校正プロンプト
 AI 校对服务地址 / AI proofreading base URL (OpenAI-compatible)	AI 校对服务地址	AI proofreading base URL (OpenAI-compatible)	AI 校對服務網址	AI 校正サービスの URL
@@ -59,7 +58,6 @@ Apple 识别程序	Apple 识别程序	Apple speech recognizer	Apple 辨識程式
 Apple 识别组件不可用，请选择其他识别方式	Apple 识别组件不可用，请选择其他识别方式	Apple speech recognition is unavailable; choose another recognition method	Apple 辨識元件不可用，請選擇其他辨識方式	Apple 音声認識コンポーネントは利用できません。別の認識方式を選択してください
 Apple 识别结果过长，部分文字被截断 / Apple transcript exceeded the size limit; some text was truncated	Apple 识别结果过长，部分文字被截断	Apple transcript exceeded the size limit; some text was truncated	Apple 辨識結果過長，部分文字被截斷	Apple の認識結果が長すぎるため、テキストの一部が切り捨てられました
 B 站暂时限制了访问。请稍后重试；若持续失败，运行 course2md --login bilibili 重新登录，或导入本地视频。 / Bilibili is temporarily limiting access. Retry later; if it keeps failing, run course2md --login bilibili to log in again, or import a local video.	B 站暂时限制了访问。请稍后重试；若持续失败，运行 course2md --login bilibili 重新登录，或导入本地视频。	Bilibili is temporarily limiting access. Retry later; if it keeps failing, run course2md --login bilibili to log in again, or import a local video.	B 站暫時限制了存取。請稍後重試；若持續失敗，執行 course2md --login bilibili 重新登入，或匯入本機影片。	Bilibiliは一時的にアクセスが制限されています。後でもう一度試してください。引き続き失敗する場合は、 course2md --login bilibili を実行して再度ログインするか、ローカル動画をインポートしてください。
-B 站暂时限制了访问，稍后重试 / Bilibili is limiting requests; retrying shortly	B 站暂时限制了访问，稍后重试	Bilibili is limiting requests; retrying shortly	B 站暫時限制了存取，稍後重試	Bilibili によりアクセスが一時的に制限されています。しばらくしてから再試行します
 Bilibili 未确认登录，请重新扫码 / Bilibili did not confirm the login; scan the QR code again	Bilibili 未确认登录，请重新扫码	Bilibili did not confirm the login; scan the QR code again	Bilibili 未確認登入，請重新掃描 QR 碼	Bilibili でログインが確認されませんでした。QR コードをもう一度スキャンしてください
 Bilibili 没有返回分集信息	Bilibili 没有返回分集信息	Bilibili did not return episode information	Bilibili 沒有傳回分集資訊	Bilibili がエピソード情報を返しませんでした
 Bilibili 用户	Bilibili 用户	Bilibili user	Bilibili 使用者	Bilibiliユーザー
@@ -120,8 +118,6 @@ codex CLI 登录态无法解析 / Cannot parse the codex CLI login state	codex C
 codex CLI 登录态缺少令牌，请在 codex 中重新登录 / The codex CLI login state is missing tokens; log in again in codex	codex CLI 登录态缺少令牌，请在 codex 中重新登录	The codex CLI login state is missing tokens; log in again in codex	codex CLI 登入態缺少令牌，請在 codex 中重新登入	Codex CLI ログイン状態にトークンがありません。Codexで再度ログインしてください。
 codex CLI 的登录已失效。改用浏览器授权登录（ChatGPT 账号）？/ The codex CLI login expired. Authorize in the browser instead?	codex CLI 的登录已失效。改用浏览器授权登录（ChatGPT 账号）？/ The codex CLI login expired. Authorize in the browser instead?	The codex CLI login expired. Authorize in the browser instead?	codex CLI 的登入已失效。改用瀏覽器授權登入（ChatGPT 帳號）？/ The codex CLI login expired. Authorize in the browser instead?	codex CLI のログインの有効期限が切れました。代わりにブラウザで認証しますか（ChatGPT アカウント）？
 course2md — 将视频转换为图文笔记	course2md — 将视频转换为图文笔记	course2md — Turn videos into illustrated notes	course2md — 將影片轉換為圖文筆記	course2md — 動画を画像付きノートに変換
-llama-server --help 探测失败，按旧版处理（仅 -ngl）	llama-server --help 探测失败，按旧版处理（仅 -ngl）	llama-server --help probe failed; treating it as an older version (-ngl only)	llama-server --help 探測失敗，按舊版處理（僅 -ngl）	llama-server --help による検出に失敗しました。旧バージョンとして扱います（-ngl のみ）
-llama-server flag 探测	llama-server flag 探测	llama-server flag detection	llama-server flag 探測	llama-server フラグの検出
 stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame	stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame	Seconds to wait for a stable frame	stable 模式的畫面穩定時間（秒）/ Seconds to wait for a stable frame	stable モードでフレームが安定するまで待つ時間（秒）
 stderr 管道已配置	stderr 管道已配置	The stderr pipe is configured	stderr 管道已配置	stderr パイプが構成されています
 stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdout 管道已配置	stdout パイプが構成されています
@@ -190,11 +186,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 《{}》：{}	《{}》：{}	“{}”: {}	《{}》：{}	「{}」：{}
 「{}」会重新发送失败部分，可能计费	「{}」会重新发送失败部分，可能计费	"{}" resends the failed parts; charges may apply.	「{}」會重新傳送失敗部分，可能計費	「{}」は失敗した部分を再送信します。料金が発生する場合があります。
 「未分类」已被使用，请换一个文件夹名称	「未分类」已被使用，请换一个文件夹名称	"Uncategorized" is already in use; choose a different folder name	「未分類」已被使用，請換一個資料夾名稱	「未分類」は既に使用されています。別のフォルダー名にしてください
-このメッセージまたはサブコマンドのヘルプを表示	このメッセージまたはサブコマンドのヘルプを表示	Show this message or the help for a subcommand	顯示此訊息或子命令的說明	このメッセージまたはサブコマンドのヘルプを表示
-オプション：	オプション：	Options:	選項：	オプション：
-コマンド：	コマンド：	Commands:	命令：	コマンド：
-バージョンを表示	バージョンを表示	Show version	顯示版本	バージョンを表示
-ヘルプを表示	ヘルプを表示	Show help	顯示說明	ヘルプを表示
 一切正常	一切正常	Everything is fine	一切正常	問題ありません
 上一个 Codex 请求尚未完成	上一个 Codex 请求尚未完成	The previous Codex request has not yet completed	上一個 Codex 請求尚未完成	前の Codex リクエストはまだ完了していません
 上一处	上一处	Previous match	上一處	前の一致
@@ -318,7 +309,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。 / For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.	使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。	For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.	使用 Bilibili 影片時，建議先執行 course2md --login bilibili 掃描 QR 碼登入，即可下載帳號權限範圍內更高畫質的影片。	Bilibili 動画を使用する場合は、course2md --login bilibili を実行し、QR コードをスキャンしてログインすることをお勧めします。アカウント権限の範囲内で、より高解像度の動画をダウンロードできます。
 使用你的 ChatGPT 订阅	使用你的 ChatGPT 订阅	Use your ChatGPT subscription	使用你的 ChatGPT 訂閱	ChatGPT サブスクリプションを使用する
 使用标准规则	使用标准规则	Use standard rules	使用標準規則	標準ルールを使用する
-使用法：	使用法：	Usage:	使用法：	使用法:
 使用环境变量 {}	使用环境变量 {}	Use environment variable {}	使用環境變數 {}	環境変数 {} を使用する
 使用自定义校对规则	使用自定义校对规则	Use custom proofing rules	使用自訂校對規則	カスタム校正ルールを使用する
 使用语音服务识别	使用语音服务识别	Recognize with a speech service	使用語音服務辨識	音声サービスで認識する
@@ -463,9 +453,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 原视频已移动或无法读取，请重新选择视频	原视频已移动或无法读取，请重新选择视频	The original video has been moved or cannot be read, please select the video again.	原影片已移動或無法讀取，請重新選擇影片	元の動画が移動されているか、読み込むことができません。動画を再度選択してください。
 原记录缺少文件名	原记录缺少文件名	The original record is missing a file name	原記錄缺少檔名	元のレコードにはファイル名がありません
 参数无效：{}	参数无效：{}	Invalid arguments: {}	參數無效：{}	無効なパラメータ: {}
-参数：	参数：	Parameters:	參數：	パラメータ:
-參數：	參數：	Parameters:	參數：	パラメータ:
-发布工作进程中断 / Publish worker interrupted	发布工作进程中断	Publish worker interrupted	發佈工作程序中斷	パブリッシングワーカープロセスが中断されました
+参数：	参数：	Arguments:	參數：	引数:
 发现 {} 项必需依赖或配置问题；请按上方提示修复	发现 {} 项必需依赖或配置问题；请按上方提示修复	Fix the {} required-tool or configuration issues listed above	發現 {} 項必需依賴或設定問題；請依上方提示修復	上記の必須ツールまたは設定の問題 {} 件を修正してください
 发送反馈	发送反馈	Send feedback	傳送意見回饋	フィードバックを送信する
 发送文字和截图 / Send text and slide images	发送文字和截图	Send text and slide images	傳送文字和截圖	テキストとスクリーンショットを送信する
@@ -495,7 +483,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 同时清除云端语音识别密钥 / Also clear the cloud speech API key	同时清除云端语音识别密钥	Also clear the cloud speech API key	同時清除雲端語音辨識金鑰	クラウド音声認識キーもクリア
 名称	名称	Name	名稱	名前
 名称尚未恢复：{}	名称尚未恢复：{}	Name not yet restored: {}	名稱尚未恢復：{}	名前はまだ復元されていません: {}
-后台文件校验中断 / Background file check interrupted	后台文件校验中断	Background file check interrupted	背景檔案校驗中斷	バックグラウンドでのファイル検証が中断されました
+后台工作中断 / Background work was interrupted	后台工作中断	Background work was interrupted	背景工作中斷	バックグラウンド処理が中断されました
 后续任务记录缺失，请先恢复任务记录	后续任务记录缺失，请先恢复任务记录	Subsequent task records are missing, please restore the task records first	後續任務記錄缺失，請先恢復任務記錄	後続のタスク レコードが欠落しています。最初にタスク レコードを復元してください。
 含 {} 张截图	含 {} 张截图	Contains {} screenshots	含 {} 張截圖	スクリーンショット {} 枚を含む
 含 1 张截图	含 1 张截图	Contains 1 screenshot	含 1 張截圖	スクリーンショット 1 枚を含む
@@ -721,7 +709,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 开始补做	开始补做	Start reprocessing	開始補做	再処理を開始
 开始转换	开始转换	Start conversion	開始轉換	変換を開始
 开源许可	开源许可	Open source licenses	開放原始碼授權	オープンソースライセンス
-引数：	引数：	Arguments:	引數：	引数:
 当前 LLM 配置不是 Ollama，未做改动。/ The current LLM configuration is not Ollama; nothing changed.	当前 LLM 配置不是 Ollama，未做改动。/ The current LLM configuration is not Ollama; nothing changed.	The current LLM configuration is not Ollama; nothing changed.	目前 LLM 設定不是 Ollama，未做改動。/ The current LLM configuration is not Ollama; nothing changed.	現在の LLM 設定は Ollama ではないため、変更しませんでした。
 当前 llama.cpp 版本过旧，不支持此显卡设置，请升级后重试 / This llama.cpp is too old for this GPU setting; upgrade and retry	当前 llama.cpp 版本过旧，不支持此显卡设置，请升级后重试	This llama.cpp is too old for this GPU setting; upgrade and retry	目前 llama.cpp 版本過舊，不支援此顯示卡設定，請升級後重試	llama.cpp の現在のバージョンは古すぎるため、このグラフィック カード設定をサポートしていません。アップグレードしてもう一度お試しください。
 当前 llama.cpp 版本过旧，无法只用 CPU 识别，请升级后重试 / This llama.cpp is too old to transcribe on CPU only; upgrade and retry	当前 llama.cpp 版本过旧，无法只用 CPU 识别，请升级后重试	This llama.cpp is too old to transcribe on CPU only; upgrade and retry	目前 llama.cpp 版本過舊，無法只用 CPU 辨識，請升級後重試	llama.cpp の現在のバージョンは古すぎるため、CPU だけでは認識できません。アップグレードしてもう一度お試しください。
@@ -778,7 +765,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 截图生成未完成	截图生成未完成	Screenshot generation is not completed	截圖生成未完成	スクリーンショットの生成が完了していません
 截图辅助校对	截图辅助校对	Screenshot-assisted proofreading	截圖輔助校對	スクリーンショット補助校正
 截图进度损坏，原文件已保留 / Screenshot checkpoint is damaged	截图进度损坏，原文件已保留	Screenshot checkpoint is damaged	截圖進度損壞，原檔案已保留	スクリーンショットの進行状況は破損しており、元のファイルは保持されています。
-截断 checkpoint 残行 {} / Failed to truncate checkpoint partial line {}	截断 checkpoint 残行 {}	Failed to truncate checkpoint partial line {}	截斷 checkpoint 殘行 {}	チェックポイントの不完全な末尾行 {} を切り詰められませんでした
 所有保存位置都暂时无法访问	所有保存位置都暂时无法访问	All save locations are temporarily inaccessible	所有儲存位置都暫時無法存取	すべての保存場所に一時的にアクセスできません
 所选仍是当前位置，请选择移动后的笔记库文件夹	所选仍是当前位置，请选择移动后的笔记库文件夹	The selection is still the current location, please select the moved note library folder.	所選仍是目前位置，請選擇移動後的筆記庫資料夾	選択内容は現在の場所のままです。移動したノート ライブラリ フォルダーを選択してください。
 所选位置不能写入	所选位置不能写入	The selected location cannot be written to	所選位置不能寫入	選択した場所には書き込めません
@@ -830,7 +816,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 找不到任务使用的服务版本，请选择服务后建立新尝试	找不到任务使用的服务版本，请选择服务后建立新尝试	The service version used by the task cannot be found. Please select the service and create a new attempt.	找不到任務使用的服務版本，請選擇服務後建立新嘗試	タスクで使用されているサービスのバージョンが見つかりません。サービスを選択し、新しい試行を作成してください。
 找不到已下载的视频，请允许重新下载 / The downloaded video is missing; allow downloading it again	找不到已下载的视频，请允许重新下载	The downloaded video is missing; allow downloading it again	找不到已下載的影片，請允許重新下載	ダウンロードした動画が見つかりません。再ダウンロードを許可してください
 找不到当前笔记	找不到当前笔记	Current note not found	找不到目前筆記	現在のノートが見つかりません
-找不到截图所需的视频 / Video required for screenshots is unavailable	找不到截图所需的视频	Video required for screenshots is unavailable	找不到截圖所需的影片	スクリーンショットに必要な動画が見つかりません
 找不到此服务	找不到此服务	This service cannot be found	找不到此服務	このサービスは見つかりません
 找不到此服务的凭据，请重新保存 API Key	找不到此服务的凭据，请重新保存 API Key	Credentials not found for this service, please save the API Key again	找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報が見つかりません。API キーを再度保存してください
 找不到视频文件或无法识别链接：{}	找不到视频文件或无法识别链接：{}	Video file not found or URL not recognized: {}	找不到影片檔案或無法辨識連結：{}	動画ファイルが見つからないか、リンクを認識できません: {}
@@ -870,7 +855,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 摘要	摘要	Summary	摘要	要約
 摘要 JSON 无法解析	摘要 JSON 无法解析	Summary JSON cannot be parsed	摘要 JSON 無法解析	要約 JSON を解析できません
 摘要合并未完成，已保存各段已确认结果 / Summary merge failed; completed parts retained	摘要合并未完成，已保存各段已确认结果	Summary merge failed; completed parts retained	摘要合併未完成，已儲存各段已確認結果	要約の結合が完了しませんでした。確認済みの各部分の結果は保存されています。
-摘要工作进程中断 / Summary worker interrupted	摘要工作进程中断	Summary worker interrupted	摘要工作程序中斷	要約作業プロセスが中断されました
 摘要结果未确认	摘要结果未确认	Summary result not confirmed	摘要結果未確認	要約結果は未確認
 操作已完成	操作已完成	Operation completed	操作已完成	操作が完了しました
 操作意外中断，请重试	操作意外中断，请重试	The operation was unexpectedly interrupted, please try again	操作意外中斷，請重試	操作が予期せず中断されました。もう一度お試しください。
@@ -951,7 +935,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法保留损坏的任务记录	无法保留损坏的任务记录	Unable to retain corrupted task records	無法保留損壞的任務記錄	破損したタスクレコードを保持できません
 无法保留旧识别进度 {} / Cannot preserve previous transcription progress {}	无法保留旧识别进度 {}	Cannot preserve previous transcription progress {}	無法保留舊辨識進度 {}	以前の文字起こしの進行状況 {} を保持できません
 无法切分音频 / Could not split audio	无法切分音频	Could not split audio	無法切分音訊	音声を分割できません
-无法切分音频 / ffmpeg could not split audio	无法切分音频	ffmpeg could not split audio	無法切分音訊	音声を分割できません
 无法切换来源：{}	无法切换来源：{}	Unable to switch source: {}	無法切換來源：{}	ソースを切り替えられません: {}
 无法创建 course2md 窗口	无法创建 course2md 窗口	Unable to create course2md window	無法建立 course2md 視窗	course2md ウィンドウを作成できません
 无法创建临时工作目录 / Could not create a temporary working directory	无法创建临时工作目录	Could not create a temporary working directory	無法建立暫存工作目錄	一時作業ディレクトリを作成できません
@@ -988,7 +971,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法获取 Codex 模型目录 / Cannot fetch the Codex model catalog	无法获取 Codex 模型目录	Cannot fetch the Codex model catalog	無法取得 Codex 模型目錄	Codex のモデル一覧を取得できません
 无法获取账号可用的模型列表，已使用默认模型 {}。	无法获取账号可用的模型列表，已使用默认模型 {}。	Could not fetch the account's models; using {}.	無法取得帳號可用的模型清單，已使用預設模型 {}。	アカウントで利用可能なモデル一覧を取得できません。デフォルトモデル {} を使用します。
 无法解析 Bilibili 登录响应 / Cannot parse Bilibili login response	无法解析 Bilibili 登录响应	Cannot parse Bilibili login response	無法解析 Bilibili 登入回應	Bilibili のログイン応答を解析できません
-无法解析 wav PCM 数据 / Cannot parse wav PCM data	无法解析 wav PCM 数据	Cannot parse wav PCM data	無法解析 wav PCM 資料	wav PCM データを解析できません
 无法解析令牌响应 / Cannot parse the token response	无法解析令牌响应	Cannot parse the token response	無法解析權杖回應	トークン応答を解析できません
 无法解析刷新响应 / Cannot parse the token refresh response	无法解析刷新响应	Cannot parse the token refresh response	無法解析重新整理回應	リフレッシュ応答を解析できません
 无法解析响应 / Cannot parse response	无法解析响应	Cannot parse response	無法解析回應	応答を解析できません
@@ -1070,7 +1052,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 暂时进入应用	暂时进入应用	Enter the app for now	暫時進入應用程式	ひとまずアプリに入る
 更多信息请运行 --help。	更多信息请运行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を実行してください。
 更多笔记操作	更多笔记操作	More note actions	更多筆記操作	その他のノート操作
-更多資訊請執行 --help。	更多資訊請執行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を実行してください。
 更快，占内存较少	更快，占内存较少	Faster, takes up less memory	更快，佔記憶體較少	より高速で、メモリ使用量が少ない
 更换	更换	Replace	更換	交換する
 更换模型	更换模型	Change model	更換模型	モデルを変更
@@ -1400,7 +1381,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 没有数组	没有数组	No array	沒有陣列	配列がありません
 没有检测到可用的 GPU 识别引擎。请选择 CPU 或其他本机识别方式。	没有检测到可用的 GPU 识别引擎。请选择 CPU 或其他本机识别方式。	No usable GPU transcription engine detected. Choose CPU or another local transcription method.	沒有偵測到可用的 GPU 辨識引擎。請選擇 CPU 或其他本機辨識方式。	利用可能な GPU 音声認識エンジンが検出されませんでした。CPU または他のローカル音声認識方式を選択してください。
 没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。	没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。	No usable Intel NPU transcription environment detected. Choose another local transcription method.	沒有偵測到可用的 Intel NPU 辨識環境。請選擇其他本機辨識方式。	利用可能な Intel NPU 音声認識環境が検出されませんでした。他のローカル音声認識方式を選択してください。
-没有获得可读文字 / No readable transcript	没有获得可读文字	No readable transcript	沒有獲得可讀文字	判読可能なテキストが得られませんでした
 没有获得可读文字；已保留可用截图 / No readable transcript; available screenshots were retained	没有获得可读文字；已保留可用截图	No readable transcript; available screenshots were retained	沒有獲得可讀文字；已保留可用截圖	読み取り可能なテキストが得られませんでした。使用可能なスクリーンショットは保持されています
 法语	法语	French	法語	フランス語
 浅色	浅色	Light	淺色	ライト
@@ -1635,14 +1615,11 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 补做任务尚未建立：{}	补做任务尚未建立：{}	The reprocessing task has not been created yet: {}	補做任務尚未建立：{}	再処理タスクはまだ作成されていません: {}
 补做内容无效 / Invalid requested components	补做内容无效	Invalid requested components	補做內容無效	再処理する内容が無効です
 补全未完成部分	补全未完成部分	Complete the unfinished parts	補全未完成部分	未完成の部分を補完
-补换行 {} / Failed to append newline to {}	补换行 {}	Failed to append newline to {}	補換行 {}	{} に改行を追加できませんでした
 西班牙语	西班牙语	Spanish	西班牙語	スペイン語
 要测试的服务能力	要测试的服务能力	Service capabilities to be tested	要測試的服務能力	テストするサービス機能
 观看	观看	Watch	觀看	視聴
 视频	视频	Video	影片	動画
 视频 {}	视频 {}	Video {}	影片 {}	動画 {}
-视频下载失败 / Video download failed	视频下载失败	Video download failed	影片下載失敗	動画のダウンロードに失敗しました
-视频下载失败，正在重试 / Retrying video download	视频下载失败，正在重试	Retrying video download	影片下載失敗，正在重試	動画のダウンロードに失敗しました。再試行しています
 视频不存在	视频不存在	Video does not exist	影片不存在	動画が存在しません
 视频位置已有未校验的文件 / An unverified file already exists at the video location	视频位置已有未校验的文件	An unverified file already exists at the video location	影片位置已有未校驗的檔案	動画の保存先に未検証のファイルが既に存在します
 视频内容发生变化，请重新读取视频	视频内容发生变化，请重新读取视频	The video content has changed. Please read the video again.	影片內容發生變化，請重新讀取影片	動画の内容が変更されました。もう一度動画を読み込んでください
@@ -1665,7 +1642,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 视频链接	视频链接	Video link	影片連結	動画リンク
 视频链接或本地文件 / Video URL or local file	视频链接或本地文件	Video URL or local file	影片連結或本地檔案	動画リンクまたはローカルファイル
 视频需要登录后读取，请登录后重试预览	视频需要登录后读取，请登录后重试预览	The video requires login to read. Please log in and retry the preview.	影片需要登入後讀取，請登入後重試預覽	動画の読み込みにはログインが必要です。ログインしてからプレビューを再試行してください。
-詳細は --help を参照してください。	詳細は --help を参照してください。	For details, please refer to --help.	詳情請參閱 --help。	詳細については、--help を参照してください。
 计算中	计算中	Calculating	計算中	計算中
 认证	认证	Authentication	認證	認証
 记录仍无法读取，原件已保留：{}	记录仍无法读取，原件已保留：{}	The record still cannot be read, the original has been retained: {}	記錄仍無法讀取，原件已保留：{}	レコードはまだ読み取れません。オリジナルは保持されています: {}
@@ -1880,7 +1856,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 选项：	选项：	Options:	選項：	オプション:
 速度	速度	Speed	速度	速度
 速度 {}	速度 {}	Speed {}	速度 {}	速度 {}
-選項：	選項：	Options:	選項：	オプション:
 部分内容待补全	部分内容待补全	Incomplete	部分內容待補全	一部の内容は補完が必要です
 部分内容暂未读取	部分内容暂未读取	Some content has not been read yet	部分內容暫未讀取	一部の内容はまだ読み込まれていません
 部分处理结果未确认	部分处理结果未确认	Some processing results are not confirmed	部分處理結果未確認	一部の処理結果が未確認
@@ -1971,14 +1946,9 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 韩语	韩语	Korean	韓語	韓国語
 音频会发送到所选服务	音频会发送到所选服务	Audio is sent to the selected service	音訊會傳送到所選服務	音声は選択したサービスに送信されます
 音频会发送到所选语音识别服务	音频会发送到所选语音识别服务	Audio is sent to the selected speech recognition service	音訊會傳送到所選語音辨識服務	音声は選択した音声認識サービスに送信されます
-音频切分线程异常终止 / Audio split thread terminated unexpectedly	音频切分线程异常终止	Audio split thread terminated unexpectedly	音訊切分執行緒異常終止	音声分割スレッドが異常終了しました
 音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)	音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)	Also run the audio encoder on the GPU (default)	音訊編碼部分也用 GPU（預設）/ Also run the audio encoder on the GPU (default)	GPU 上でオーディオ エンコーダも実行します (デフォルト)
 音频编码部分改用 CPU（显存不足时）/ Run the audio encoder on the CPU (when GPU memory is low)	音频编码部分改用 CPU（显存不足时）/ Run the audio encoder on the CPU (when GPU memory is low)	Run the audio encoder on the CPU (when GPU memory is low)	音訊編碼部分改用 CPU（視訊記憶體不足時）/ Run the audio encoder on the CPU (when GPU memory is low)	CPU 上でオーディオエンコーダーを実行します（GPU メモリが少ない場合）
-顯示此訊息或子命令的說明	顯示此訊息或子命令的說明	Show this message or the help for a subcommand	顯示此訊息或子命令的說明	このメッセージまたはサブコマンドのヘルプを表示します
-顯示版本	顯示版本	Show version	顯示版本	バージョンを表示
-顯示說明	顯示說明	Show help	顯示說明	ヘルプを表示
 项目主页	项目主页	Project homepage	專案首頁	プロジェクトのホームページ
-预切游标与当前 chunk 对齐	预切游标与当前 chunk 对齐	The precut cursor is aligned with the current chunk	預切游標與目前 chunk 對齊	プレカット カーソルは現在のチャンクと位置合わせされます
 预览视频	预览视频	Preview video	預覽影片	動画をプレビュー
 预计剩余	预计剩余	Estimated remaining	預計剩餘	推定残り時間
 预计剩余 {}	预计剩余 {}	{} remaining	預計剩餘 {}	推定残り時間 {}
@@ -2105,7 +2075,6 @@ ChatGPT 账号	ChatGPT 账号	ChatGPT account	ChatGPT 帳號	ChatGPT アカウ�
 服务返回的翻译结构无效 / Invalid translation structure	服务返回的翻译结构无效	Invalid translation structure	服務傳回的翻譯結構無效	サービスから返された翻訳の構造が無効です
 翻译结果与原文段落不对应 / Translated segments do not match the input	翻译结果与原文段落不对应	Translated segments do not match the input	翻譯結果與原文段落不對應	翻訳結果が元の段落と一致しません
 翻译未完成：{}	翻译未完成：{}	Translation incomplete: {}	翻譯未完成：{}	翻訳が完了していません: {}
-AI 翻译工作进程中断 / Translation worker interrupted	AI 翻译工作进程中断	Translation worker interrupted	AI 翻譯工作程序中斷	AI 翻訳プロセスが中断されました
 翻译未全部完成（{}/{} 失败）	翻译未全部完成（{}/{} 失败）	Translation incomplete ({}/{} failed)	翻譯未全部完成（{}/{} 失敗）	翻訳が完了していません（{}/{} 件失敗）
 AI 翻译	AI 翻译	AI translation	AI 翻譯	AI 翻訳
 双语翻译	双语翻译	Bilingual translation	雙語翻譯	バイリンガル翻訳
