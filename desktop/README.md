@@ -4,7 +4,7 @@ Native client for macOS, Windows and Linux, built on GPUI Kit and `gpui-kit-mate
 
 ## Build and run
 
-Requires the Rust toolchain named in `desktop/rust-toolchain.toml` and Python 3.11+ for the scripts; Xcode Command Line Tools on macOS; Visual Studio C++ Build Tools and LLVM on Windows; on Linux, the packages listed in `.github/actions/desktop-deps/action.yml`. Converting videos needs ffmpeg, and links need yt-dlp.
+Requires the Rust toolchain named in `desktop/rust-toolchain.toml` and Python 3.11+ for the scripts; on macOS, Xcode with its Metal toolchain for the Apple speech module (Command Line Tools alone build a development engine without it); Visual Studio C++ Build Tools on Windows; on Linux, the packages listed in `.github/actions/desktop-deps/action.yml`. Converting videos needs ffmpeg, and links need yt-dlp.
 
 ```sh
 cargo build
