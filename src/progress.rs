@@ -7,6 +7,7 @@
 //! human 模式下 [`emit`]/[`stage`] 全是 no-op，[`Bar`] 退化为普通可见进度条，
 //! 保证现有终端输出零变化。
 
+use crate::tr;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -221,32 +222,23 @@ impl ErrorCode {
 
 /// The published note version a finished task reports.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Done {
     /// Set when the task only produced exports for an existing version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<String>,
-    #[serde(default)]
     pub task_id: String,
-    #[serde(default)]
     pub course_id: String,
-    #[serde(default)]
     pub version_id: String,
     pub out_dir: PathBuf,
-    #[serde(default)]
     pub manifest: Option<PathBuf>,
     pub title: String,
     pub slides: usize,
-    #[serde(default)]
     pub segments: usize,
-    #[serde(default)]
     pub chars: usize,
-    #[serde(default)]
     pub outputs: Vec<PathBuf>,
-    #[serde(default)]
     pub partial: Option<bool>,
-    #[serde(default)]
     pub outcomes: Option<crate::artifact::Outcomes>,
-    #[serde(default)]
     pub elapsed_secs: f64,
 }
 
@@ -369,23 +361,23 @@ pub fn stage(stage: Stage, status: StageStatus) {
     }
     let label = match stage {
         Stage::ModelLoad | Stage::ModelApple => {
-            crate::tr!(
+            tr!(
                 "加载识别模型（首次可能需要下载）/ Loading speech model (first use may download files)"
             )
         }
-        Stage::Fetch => crate::tr!("读取视频信息 / Reading video information"),
-        Stage::Subtitle => crate::tr!("查找字幕 / Looking for subtitles"),
-        Stage::Download => crate::tr!("下载视频 / Downloading video"),
-        Stage::ScenesScan => crate::tr!("扫描画面 / Scanning video frames"),
-        Stage::ScenesExtract => crate::tr!("生成截图 / Saving screenshots"),
-        Stage::Audio => crate::tr!("提取音频 / Extracting audio"),
-        Stage::Transcribe => crate::tr!("识别语音 / Transcribing speech"),
-        Stage::Llm => crate::tr!("校对文字 / Proofreading transcript"),
-        Stage::Translate => crate::tr!("翻译文字 / Translating transcript"),
-        Stage::Summary => crate::tr!("生成摘要 / Generating summary"),
-        Stage::Render => crate::tr!("生成笔记 / Writing notes"),
-        Stage::ModelPrepare => crate::tr!("检查识别模型 / Checking speech model"),
-        Stage::ModelFile(_) => crate::tr!("下载识别模型 / Downloading speech model"),
+        Stage::Fetch => tr!("读取视频信息 / Reading video information"),
+        Stage::Subtitle => tr!("查找字幕 / Looking for subtitles"),
+        Stage::Download => tr!("下载视频 / Downloading video"),
+        Stage::ScenesScan => tr!("扫描画面 / Scanning video frames"),
+        Stage::ScenesExtract => tr!("生成截图 / Saving screenshots"),
+        Stage::Audio => tr!("提取音频 / Extracting audio"),
+        Stage::Transcribe => tr!("识别语音 / Transcribing speech"),
+        Stage::Llm => tr!("校对文字 / Proofreading transcript"),
+        Stage::Translate => tr!("翻译文字 / Translating transcript"),
+        Stage::Summary => tr!("生成摘要 / Generating summary"),
+        Stage::Render => tr!("生成笔记 / Writing notes"),
+        Stage::ModelPrepare => tr!("检查识别模型 / Checking speech model"),
+        Stage::ModelFile(_) => tr!("下载识别模型 / Downloading speech model"),
         Stage::Scenes | Stage::Exports | Stage::Other(_) => return,
     };
     eprintln!("{label}…");
@@ -531,7 +523,7 @@ fn repo_present(repo: &RepoTransfer) -> u64 {
 /// 共享进度条样式：模板均为静态字符串，解析失败是编程错误。
 fn progress_style(template: &str) -> ProgressStyle {
     ProgressStyle::with_template(template)
-        .expect(crate::tr!("静态进度条模板"))
+        .expect(tr!("静态进度条模板"))
         .progress_chars("##-")
 }
 
@@ -681,10 +673,6 @@ impl Bar {
 /// tracing Layer：把日志事件格式化为 `{"type":"log"}` NDJSON 行写 stdout。
 /// 仅在 json 模式注册（main.rs），level 映射 error/warn/info/debug（trace 归 debug）。
 pub struct JsonLogLayer;
-
-pub fn json_log_layer() -> JsonLogLayer {
-    JsonLogLayer
-}
 
 impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for JsonLogLayer {
     fn on_event(

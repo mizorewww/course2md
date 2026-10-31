@@ -1,5 +1,6 @@
 //! Fixed task inputs. The transport may contain credentials; persisted identities never do.
 
+use crate::tr;
 use crate::{config::PipelineConfig, settings::ConfigFile, timeline::TranscriptEvent};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -105,7 +106,7 @@ impl Request {
         reader.take(MAX_REQUEST_BYTES + 1).read_to_end(&mut data)?;
         anyhow::ensure!(
             data.len() as u64 <= MAX_REQUEST_BYTES,
-            crate::tr!(
+            tr!(
                 "任务参数过大（上限 {} MiB） / Task input exceeds {} MiB",
                 MAX_REQUEST_BYTES / (1024 * 1024),
                 MAX_REQUEST_BYTES / (1024 * 1024)
@@ -116,7 +117,7 @@ impl Request {
         let request: Self = serde_json::from_slice(&data).map_err(|e| {
             crate::error::invalid_input(anyhow::anyhow!(
                 "{}",
-                crate::tr!(
+                tr!(
                     "无法读取任务参数（第 {} 行，第 {} 列）/ Invalid task JSON",
                     e.line(),
                     e.column()
@@ -130,7 +131,7 @@ impl Request {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(
             self.schema == REQUEST_SCHEMA,
-            crate::tr!("不支持此任务格式 / Unsupported task schema")
+            tr!("不支持此任务格式 / Unsupported task schema")
         );
         for (name, value) in [
             ("task_id", &self.task_id),
@@ -144,35 +145,33 @@ impl Request {
         }
         anyhow::ensure!(
             !self.source.trim().is_empty() && !self.source_id.trim().is_empty(),
-            crate::tr!("任务缺少视频来源 / Task source is missing")
+            tr!("任务缺少视频来源 / Task source is missing")
         );
         anyhow::ensure!(
             !self.title.trim().is_empty(),
-            crate::tr!("任务缺少已确认的笔记名称 / Confirmed title is missing")
+            tr!("任务缺少已确认的笔记名称 / Confirmed title is missing")
         );
         anyhow::ensure!(
             self.duration.is_finite() && self.duration >= 0.0,
-            crate::tr!("视频时长无效 / Invalid duration")
+            tr!("视频时长无效 / Invalid duration")
         );
         anyhow::ensure!(
             self.work_dir.is_absolute() && self.course_dir.is_absolute(),
-            crate::tr!("任务与笔记位置必须是绝对路径 / Task paths must be absolute")
+            tr!("任务与笔记位置必须是绝对路径 / Task paths must be absolute")
         );
         anyhow::ensure!(
             self.work_dir != self.course_dir
                 && !self.work_dir.starts_with(self.course_dir.join("versions")),
-            crate::tr!("工作目录不能位于已发布版本内 / Work directory overlaps published versions")
+            tr!("工作目录不能位于已发布版本内 / Work directory overlaps published versions")
         );
         anyhow::ensure!(
             self.subtitle.is_none() || self.subtitle_events.is_none(),
-            crate::tr!(
-                "任务只能指定一种已选字幕内容 / Specify subtitle file or parsed events, not both"
-            )
+            tr!("任务只能指定一种已选字幕内容 / Specify subtitle file or parsed events, not both")
         );
         if let Some(path) = &self.subtitle {
             anyhow::ensure!(
                 path.is_absolute(),
-                crate::tr!("所选字幕必须使用绝对路径 / Subtitle path must be absolute")
+                tr!("所选字幕必须使用绝对路径 / Subtitle path must be absolute")
             );
         }
         if let Some(events) = &self.subtitle_events {
@@ -186,23 +185,23 @@ impl Request {
         {
             anyhow::ensure!(
                 base_version_dir.is_absolute(),
-                crate::tr!("原笔记版本需要绝对路径 / Base version requires an absolute path")
+                tr!("原笔记版本需要绝对路径 / Base version requires an absolute path")
             );
             anyhow::ensure!(
                 !components.is_empty(),
-                crate::tr!("补做内容无效 / Invalid requested components")
+                tr!("补做内容无效 / Invalid requested components")
             );
             anyhow::ensure!(
                 prior_work_dir
                     .as_ref()
                     .is_none_or(|p| p.is_absolute() && p != &self.work_dir),
-                crate::tr!("原任务进度位置无效 / Invalid prior work directory")
+                tr!("原任务进度位置无效 / Invalid prior work directory")
             );
         }
         if let Some(path) = &self.control_path {
             anyhow::ensure!(
                 path.is_absolute() && path.starts_with(&self.work_dir),
-                crate::tr!("任务控制文件必须位于工作目录 / Invalid control file location")
+                tr!("任务控制文件必须位于工作目录 / Invalid control file location")
             );
         }
         Ok(())
@@ -266,7 +265,7 @@ impl Request {
         ) {
             anyhow::ensure!(
                 expected == actual,
-                crate::tr!(
+                tr!(
                     "视频文件已在读取后发生变化，请重新读取来源；原任务进度已保留 / Source content changed after confirmation; reread the source"
                 )
             );
@@ -315,11 +314,11 @@ pub fn validate_events(events: &[TranscriptEvent]) -> Result<()> {
             && e.end.is_finite()
             && e.start >= 0.0
             && e.end >= e.start),
-        crate::tr!("字幕时间无效 / Invalid subtitle timestamps")
+        tr!("字幕时间无效 / Invalid subtitle timestamps")
     );
     anyhow::ensure!(
         events.iter().any(|e| !e.text.trim().is_empty()),
-        crate::tr!("所选字幕没有可读文字 / Selected subtitles contain no readable text")
+        tr!("所选字幕没有可读文字 / Selected subtitles contain no readable text")
     );
     Ok(())
 }
@@ -346,7 +345,7 @@ pub fn file_digest_cancellable(
     use sha2::{Digest, Sha256};
     use std::sync::atomic::Ordering;
     let mut file = std::fs::File::open(path).with_context(|| {
-        crate::tr!(
+        tr!(
             "无法读取 {} / Cannot read {}",
             path.display(),
             path.display()
@@ -357,7 +356,7 @@ pub fn file_digest_cancellable(
     loop {
         anyhow::ensure!(
             !cancel.load(Ordering::Relaxed),
-            crate::tr!("已取消读取文件 / File reading cancelled")
+            tr!("已取消读取文件 / File reading cancelled")
         );
         let n = file.read(&mut buffer)?;
         if n == 0 {
@@ -443,18 +442,18 @@ pub fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()>
     let path = work_dir.join("task-identity.json");
     if path.exists() {
         let old: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?).context(
-            crate::tr!("任务进度身份损坏，原文件已保留 / Task identity is damaged"),
+            tr!("任务进度身份损坏，原文件已保留 / Task identity is damaged"),
         )?;
         anyhow::ensure!(
             old == *binding,
-            crate::tr!(
+            tr!(
                 "任务来源或参数与已保存进度不一致，原进度已保留 / Task inputs changed; create a new task instead of reusing this work directory"
             )
         );
     } else {
         anyhow::ensure!(
             !work_dir.join("asr.jsonl").exists() && !work_dir.join("media.mp4").exists(),
-            crate::tr!(
+            tr!(
                 "此文件夹里有无法确认来源的旧进度，请换一个位置 / This folder contains earlier progress of unknown origin; choose another location"
             )
         );
@@ -477,14 +476,14 @@ pub async fn run(request: Request, parent: crate::dispatch::ParentProcess) -> Re
 pub fn relocate_work_bindings(root_old: &Path, root_new: &Path) -> Result<usize> {
     anyhow::ensure!(
         root_old.is_absolute() && root_new.is_absolute() && root_old != root_new,
-        crate::tr!("笔记库迁移位置无效 / Invalid relocation roots")
+        tr!("笔记库迁移位置无效 / Invalid relocation roots")
     );
     let mut paths = Vec::new();
     for entry in walkdir::WalkDir::new(root_new).min_depth(1) {
         let entry = entry?;
         anyhow::ensure!(
             entry.depth() <= 64,
-            crate::tr!("笔记库目录层级过深 / Library directory depth exceeds the safe limit")
+            tr!("笔记库目录层级过深 / Library directory depth exceeds the safe limit")
         );
         // Symbolic links are neither followed nor rewritten.
         if entry.file_type().is_file() && entry.file_name() == "task-identity.json" {
@@ -495,7 +494,7 @@ pub fn relocate_work_bindings(root_old: &Path, root_new: &Path) -> Result<usize>
     for path in paths {
         let old_path = root_old.join(path.strip_prefix(root_new)?);
         let old: serde_json::Value = serde_json::from_slice(&std::fs::read(&old_path).context(
-            crate::tr!("缺少可核验的原任务身份 / Original task identity is missing"),
+            tr!("缺少可核验的原任务身份 / Original task identity is missing"),
         )?)?;
         let current: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
         let mut relocated = old.clone();
@@ -515,7 +514,7 @@ pub fn relocate_work_bindings(root_old: &Path, root_new: &Path) -> Result<usize>
         }
         anyhow::ensure!(
             current == old || current == relocated,
-            crate::tr!(
+            tr!(
                 "迁移副本中的任务身份已经变化，未覆盖 / Copied task identity changed; not overwritten"
             )
         );

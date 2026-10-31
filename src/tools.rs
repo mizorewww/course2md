@@ -10,6 +10,7 @@
 //! yt-dlp has its own, wider search ([`crate::ytdlp`]) and reports its
 //! origin through [`origin_of`].
 
+use crate::tr;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
@@ -28,9 +29,9 @@ impl Origin {
     /// A short localized description, for `doctor` and the desktop checks.
     pub fn label(self) -> &'static str {
         match self {
-            Origin::Override => crate::tr!("由环境变量指定"),
-            Origin::Bundled => crate::tr!("随应用附带"),
-            Origin::System => crate::tr!("系统安装"),
+            Origin::Override => tr!("由环境变量指定"),
+            Origin::Bundled => tr!("随应用附带"),
+            Origin::System => tr!("系统安装"),
         }
     }
 }

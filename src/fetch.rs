@@ -1,5 +1,6 @@
 //! yt-dlp 子进程封装：元数据抓取 + 视频下载。
 
+use crate::tr;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -164,12 +165,12 @@ fn concrete_url(info: &ExtractorInfo) -> Option<String> {
 /// Parse one metadata response from a subtitle-enabled, flat-playlist extraction.
 /// Successful extraction can still contain explicit subtitle permission warnings.
 pub fn parse_online_probe(bytes: &[u8], input: &str, diagnostics: &str) -> Result<OnlineProbe> {
-    let info: ExtractorInfo = serde_json::from_slice(bytes).context(crate::tr!(
+    let info: ExtractorInfo = serde_json::from_slice(bytes).context(tr!(
         "无法读取视频信息，请重新读取 / Cannot read video info; probe again"
     ))?;
     if info.kind == "multi_video" {
         return Ok(OnlineProbe::Unresolved {
-            message: crate::tr!("这个视频被分成了多段，暂不支持。请下载完整视频后导入。 / This video is split into several parts and is not supported yet. Download the full video and import it.")
+            message: tr!("这个视频被分成了多段，暂不支持。请下载完整视频后导入。 / This video is split into several parts and is not supported yet. Download the full video and import it.")
                 .into(),
         });
     }
@@ -221,16 +222,16 @@ pub fn parse_online_probe(bytes: &[u8], input: &str, diagnostics: &str) -> Resul
     }
     if matches!(info.kind.as_str(), "url" | "url_transparent") {
         return Ok(OnlineProbe::Unresolved {
-            message: crate::tr!("还无法确定要处理哪个视频。请复制具体视频的链接。 / Cannot determine which video to process yet. Paste the link to a specific video.").into(),
+            message: tr!("还无法确定要处理哪个视频。请复制具体视频的链接。 / Cannot determine which video to process yet. Paste the link to a specific video.").into(),
         });
     }
     let extractor = extractor_name(&info).to_owned();
     let id = info
         .id
         .as_deref()
-        .context(crate::tr!("无法识别这个链接对应的视频，请粘贴具体视频的链接 / Cannot identify the video for this link; paste the link to a specific video"))?;
+        .context(tr!("无法识别这个链接对应的视频，请粘贴具体视频的链接 / Cannot identify the video for this link; paste the link to a specific video"))?;
     let identity = online_identity(&extractor, id)
-        .context(crate::tr!("无法识别这个链接对应的视频，请粘贴具体视频的链接 / Cannot identify the video for this link; paste the link to a specific video"))?;
+        .context(tr!("无法识别这个链接对应的视频，请粘贴具体视频的链接 / Cannot identify the video for this link; paste the link to a specific video"))?;
     let input = concrete_url(&info).unwrap_or_else(|| input.to_owned());
     // The original concrete part link is authoritative if the extractor returns a
     // canonical base URL: do not erase an explicitly selected Bilibili part.
@@ -264,7 +265,7 @@ pub fn parse_online_probe(bytes: &[u8], input: &str, diagnostics: &str) -> Resul
                 title: info
                     .title
                     .filter(|title| !title.trim().is_empty())
-                    .context(crate::tr!("来源没有返回视频标题，请重新读取 / The source returned no video title; probe again"))?,
+                    .context(tr!("来源没有返回视频标题，请重新读取 / The source returned no video title; probe again"))?,
                 uploader: info.uploader.unwrap_or_default(),
                 duration: info
                     .duration
@@ -348,13 +349,16 @@ fn bilibili_view(agent: &ureq::Agent, bvid: &str) -> Result<BilibiliViewData> {
         )
         .header("Referer", "https://www.bilibili.com")
         .call()
-        .context(crate::tr!("读取 Bilibili 分集信息失败"))?;
+        .context(tr!("读取 Bilibili 分集信息失败"))?;
     let view: BilibiliView = serde_json::from_str(&response.body_mut().read_to_string()?)?;
-    view.data.context(crate::tr!("Bilibili 没有返回分集信息"))
+    view.data.context(tr!("Bilibili 没有返回分集信息"))
 }
 
 /// 把一个 BV 的分集信息填进候选：只补缺失字段，提取器已有信息保持权威。
 fn apply_bilibili_view(candidates: &mut [SourceCandidate], bvid: &str, view: &BilibiliViewData) {
+    let filled = |value: &Option<String>| {
+        Some(value.as_deref()?.trim().to_owned()).filter(|text| !text.is_empty())
+    };
     let pages = view.pages.as_deref().unwrap_or_default();
     for candidate in candidates
         .iter_mut()
@@ -368,29 +372,12 @@ fn apply_bilibili_view(candidates: &mut [SourceCandidate], bvid: &str, view: &Bi
             candidate.title.trim().is_empty() || candidate.title.trim() == candidate.input.trim();
         if untitled {
             // 分集标题为空时回落到合集标题（同一 BV 只有一个标题）
-            let title = page
-                .part
-                .as_deref()
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .or_else(|| {
-                    view.title
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|t| !t.is_empty())
-                });
-            if let Some(title) = title {
-                candidate.title = title.to_string();
+            if let Some(title) = filled(&page.part).or_else(|| filled(&view.title)) {
+                candidate.title = title;
             }
         }
         if candidate.thumbnail.is_none() {
-            candidate.thumbnail = page
-                .first_frame
-                .as_deref()
-                .map(str::trim)
-                .filter(|url| !url.is_empty())
-                .map(str::to_string)
-                .or_else(|| view.pic.clone());
+            candidate.thumbnail = filled(&page.first_frame).or_else(|| view.pic.clone());
         }
         if candidate.duration.is_none() {
             candidate.duration = page
@@ -524,7 +511,7 @@ fn subtitle_evidence(
         SubtitleEvidence::Failed { message }
     } else if info.subtitles.is_none() && info.automatic_captions.is_none() {
         SubtitleEvidence::Unsupported {
-            message: crate::tr!("此来源暂不支持读取字幕，可以识别视频声音 / This source does not support reading subtitles yet; you can transcribe the video audio instead").into(),
+            message: tr!("此来源暂不支持读取字幕，可以识别视频声音 / This source does not support reading subtitles yet; you can transcribe the video audio instead").into(),
         }
     } else {
         SubtitleEvidence::NoneFound
@@ -539,7 +526,7 @@ pub fn local_content_identity(
 ) -> Result<String> {
     let metadata = |path: &Path| {
         std::fs::metadata(path).with_context(|| {
-            crate::tr!(
+            tr!(
                 "无法读取视频文件 {} / Cannot read video file {}",
                 path.display(),
                 path.display()
@@ -550,12 +537,12 @@ pub fn local_content_identity(
     let digest = crate::execution::file_digest_cancellable(path, cancel)?;
     ensure!(
         !cancel.load(std::sync::atomic::Ordering::Relaxed),
-        crate::tr!("已取消读取文件 / File reading cancelled")
+        tr!("已取消读取文件 / File reading cancelled")
     );
     let after = metadata(path)?;
     ensure!(
         before.len() == after.len() && before.modified().ok() == after.modified().ok(),
-        crate::tr!(
+        tr!(
             "视频文件在读取时发生变化，请重新读取 / The video file changed while reading; read it again"
         )
     );
@@ -567,7 +554,7 @@ pub async fn probe_video(url: &str, control: &crate::dispatch::TaskControl) -> R
     match probe_online(url, control).await? {
         OnlineProbe::Video { video } => Ok(video),
         OnlineProbe::Collection { .. } => {
-            anyhow::bail!(crate::tr!(
+            anyhow::bail!(tr!(
                 "这个链接包含多个视频，请选择具体单集后生成笔记 / This link contains multiple videos; choose a specific episode before generating notes"
             ))
         }
@@ -621,7 +608,7 @@ pub async fn fetch_subtitle(
                 "zh",
                 video.original_language.as_deref(),
             );
-            let track = tracks.first().context(crate::tr!(
+            let track = tracks.first().context(tr!(
                 "字幕列表为空，请重新读取字幕 / Subtitle list is empty; probe subtitles again"
             ))?;
             fetch_selected_subtitle(
@@ -637,7 +624,7 @@ pub async fn fetch_subtitle(
         SubtitleEvidence::Failed { message } => {
             anyhow::bail!("读取字幕失败 / Could not read subtitles: {message}")
         }
-        SubtitleEvidence::Unchecked => anyhow::bail!(crate::tr!(
+        SubtitleEvidence::Unchecked => anyhow::bail!(tr!(
             "尚未检查字幕，请重新读取视频信息 / Subtitles not checked yet; probe the video info again"
         )),
         SubtitleEvidence::NoneFound | SubtitleEvidence::Unsupported { .. } => Ok(None),
@@ -672,7 +659,7 @@ pub async fn fetch_selected_subtitle(
         inline_text,
     } = &track.origin
     else {
-        anyhow::bail!(crate::tr!(
+        anyhow::bail!(tr!(
             "所选字幕不是在线字幕 / The selected subtitle is not an online subtitle"
         ));
     };
@@ -680,7 +667,7 @@ pub async fn fetch_selected_subtitle(
         track
             .id
             .starts_with(&format!("{source_identity}:subtitle:")),
-        crate::tr!(
+        tr!(
             "所选字幕与当前视频不一致，请重新选择字幕 / The selected subtitle no longer matches the current video; select the subtitle again"
         )
     );
@@ -720,22 +707,22 @@ pub async fn fetch_selected_subtitle(
         match parse_online_probe(&out.stdout, url, &String::from_utf8_lossy(&out.stderr))? {
             OnlineProbe::Video { video } => ensure!(
                 video.identity == source_identity,
-                crate::tr!(
+                tr!(
                     "视频来源发生变化，请重新读取并选择字幕 / The video source changed; probe again and reselect the subtitle"
                 )
             ),
-            _ => anyhow::bail!(crate::tr!(
+            _ => anyhow::bail!(tr!(
                 "无法确认字幕对应的视频，请重新读取 / Cannot confirm the video for the subtitle; probe again"
             )),
         }
         let path = crate::subtitle::pick_subtitle_file(temp.path())
-            .context(crate::tr!("所选字幕下载失败，请重新读取字幕，或改用语音识别 / The selected subtitle could not be downloaded; read subtitles again or use speech recognition"))?;
+            .context(tr!("所选字幕下载失败，请重新读取字幕，或改用语音识别 / The selected subtitle could not be downloaded; read subtitles again or use speech recognition"))?;
         crate::subtitle::read_subtitle_text(&path)?
     };
     let events = crate::subtitle::parse_subtitle(&text);
     ensure!(
         !events.is_empty(),
-        crate::tr!(
+        tr!(
             "这份字幕未包含可读取的文字，请选择其他字幕 / This subtitle contains no readable text; choose another subtitle"
         )
     );
@@ -764,9 +751,7 @@ pub async fn download(
 ) -> Result<()> {
     ensure!(
         !dest.exists(),
-        crate::tr!(
-            "视频位置已有未校验的文件 / An unverified file already exists at the video location"
-        )
+        tr!("视频位置已有未校验的文件 / An unverified file already exists at the video location")
     );
     if let Some(p) = dest.parent() {
         tokio::fs::create_dir_all(p).await?;
@@ -804,7 +789,7 @@ pub async fn download(
     let produced = if merged.is_file() { &merged } else { &tmp };
     ensure!(
         produced.is_file(),
-        crate::tr!(
+        tr!(
             "未找到下载的视频（期望 {} 或 {}） / Downloaded video missing (expected {} or {})",
             tmp.display(),
             merged.display(),
@@ -962,9 +947,9 @@ async fn run_once(cmd: &mut Command) -> Result<std::process::Output> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .context(crate::tr!("启动 yt-dlp 失败 / Failed to start yt-dlp"))?;
-    let stdout = child.stdout.take().expect(crate::tr!("stdout 管道已配置"));
-    let stderr = child.stderr.take().expect(crate::tr!("stderr 管道已配置"));
+        .context(tr!("启动 yt-dlp 失败 / Failed to start yt-dlp"))?;
+    let stdout = child.stdout.take().expect(tr!("stdout 管道已配置"));
+    let stderr = child.stderr.take().expect(tr!("stderr 管道已配置"));
     let report = |line: &str| match ytdlp_progress(line) {
         Some((downloaded, total)) => {
             crate::progress::download_progress(downloaded, total);
@@ -1000,7 +985,7 @@ async fn run_once(cmd: &mut Command) -> Result<std::process::Output> {
         tail.into_iter().collect::<Vec<_>>().join("\n")
     };
     let (status, stdout, stderr) = tokio::join!(child.wait(), out, err);
-    let status = status.context(crate::tr!(
+    let status = status.context(tr!(
         "等待 yt-dlp 结束失败 / Failed waiting for yt-dlp to exit"
     ))?;
     if status.success() {

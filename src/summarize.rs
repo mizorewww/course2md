@@ -6,6 +6,7 @@
 use crate::fetch::VideoMeta;
 use crate::llm::{self, LlmSettings};
 use crate::timeline::TranscriptEvent;
+use crate::tr;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
@@ -53,15 +54,10 @@ fn system_prompt() -> String {
 }
 
 fn build_transcript(events: &[TranscriptEvent]) -> String {
-    let mut out = String::new();
-    for e in events {
-        out.push_str(&format!(
-            "[{}] {}\n",
-            crate::render::fmt_ts(e.start),
-            e.text
-        ));
-    }
-    out
+    events
+        .iter()
+        .map(|e| format!("[{}] {}\n", crate::render::fmt_ts(e.start), e.text))
+        .collect()
 }
 
 fn user_prompt(transcript: &str) -> String {
@@ -135,11 +131,11 @@ fn request_summary(
     chat.send(&body, description, &|content| {
         anyhow::ensure!(
             parse_summary(content).is_some(),
-            crate::tr!("服务返回的摘要结构无效 / Invalid summary structure")
+            tr!("服务返回的摘要结构无效 / Invalid summary structure")
         );
         Ok(())
     })
-    .context(crate::tr!("生成摘要请求失败 / Summary request failed"))
+    .context(tr!("生成摘要请求失败 / Summary request failed"))
 }
 
 /// Show the actionable cause once. Provider bodies never reach these errors;
@@ -193,7 +189,7 @@ pub async fn summarize(
 ) -> Result<Summary> {
     // 空转写直接报错：发给模型只会得到编造内容或报错，浪费请求
     if events.is_empty() {
-        bail!(crate::tr!(
+        bail!(tr!(
             "转写为空，无法摘要 / Transcript is empty; cannot summarize"
         ));
     }
@@ -206,7 +202,7 @@ pub async fn summarize(
     );
     tokio::task::spawn_blocking(move || summarize_blocking(&s, &events, &ctx, &control))
         .await
-        .context(crate::tr!(
+        .context(tr!(
             "生成摘要时意外中断 / Summary generation was interrupted"
         ))?
 }
@@ -218,7 +214,7 @@ fn summarize_blocking(
     control: &crate::dispatch::TaskControl,
 ) -> Result<Summary> {
     let chat = llm::Chat::new(s, llm::Purpose::Summary, control);
-    let invalid = || crate::tr!("服务返回的摘要结构无效 / Invalid summary response");
+    let invalid = || tr!("服务返回的摘要结构无效 / Invalid summary response");
     let range = |chunk: &[TranscriptEvent]| {
         let edge = |event: Option<&TranscriptEvent>, at: fn(&TranscriptEvent) -> f64| {
             event
@@ -243,7 +239,7 @@ fn summarize_blocking(
         let (first, last) = range(events);
         return summary_of(
             events,
-            &crate::tr!(
+            &tr!(
                 "生成整篇摘要（{}–{}） / Generate the full summary ({}–{})",
                 first,
                 last,
@@ -268,7 +264,7 @@ fn summarize_blocking(
             let (first, last) = range(&chunk);
             summary_of(
                 &chunk,
-                &crate::tr!(
+                &tr!(
                     "生成第 {}/{} 部分摘要（{}–{}） / Generate summary part {}/{} ({}–{})",
                     index + 1,
                     total,
@@ -306,11 +302,9 @@ fn summarize_blocking(
 \"key_points\": [整个视频的3-8条要点], \
 \"outline\": [{{\"t\":秒,\"title\":\"章节标题\",\"detail\":\"简述\"}}]}}"
         ),
-        crate::tr!(
-            "将全部分段摘要合并为整篇摘要 / Merge all partial summaries into the full summary"
-        ),
+        tr!("将全部分段摘要合并为整篇摘要 / Merge all partial summaries into the full summary"),
     )?;
-    parse_summary(&combined).context(crate::tr!(
+    parse_summary(&combined).context(tr!(
         "摘要合并未完成，已保存各段已确认结果 / Summary merge failed; completed parts retained"
     ))
 }
@@ -318,16 +312,16 @@ fn summarize_blocking(
 /// 生成插入 course.md 的摘要区块（markdown，哨兵注释包裹）。
 /// 有意信任 LLM 输出（markdown 语义直通），不做转义。
 pub fn render_md_block(sm: &Summary) -> String {
-    let mut out = format!("\n{SUMMARY_BEGIN}\n\n## 📝 {}\n\n", crate::tr!("视频摘要"));
+    let mut out = format!("\n{SUMMARY_BEGIN}\n\n## 📝 {}\n\n", tr!("视频摘要"));
     out.push_str(&format!("> {}\n", sm.tldr));
     if !sm.key_points.is_empty() {
-        out.push_str(&format!("\n### {}\n\n", crate::tr!("核心要点")));
+        out.push_str(&format!("\n### {}\n\n", tr!("核心要点")));
         for p in &sm.key_points {
             out.push_str(&format!("- {p}\n"));
         }
     }
     if !sm.outline.is_empty() {
-        out.push_str(&format!("\n### {}\n\n", crate::tr!("内容大纲")));
+        out.push_str(&format!("\n### {}\n\n", tr!("内容大纲")));
         for o in &sm.outline {
             out.push_str(&format!(
                 "- **{}** {}：{}\n",
@@ -345,7 +339,7 @@ pub fn render_md_block(sm: &Summary) -> String {
 pub fn render_html_block(sm: &Summary) -> String {
     let mut out = format!(
         "{SUMMARY_BEGIN}<section class=\"summary\"><h2>📝 {}</h2>",
-        crate::render::esc(crate::tr!("视频摘要"))
+        crate::render::esc(tr!("视频摘要"))
     );
     out.push_str(&format!(
         "<p class=\"mute\">{}</p>",
@@ -354,7 +348,7 @@ pub fn render_html_block(sm: &Summary) -> String {
     if !sm.key_points.is_empty() {
         out.push_str(&format!(
             "<h3>{}</h3><ul>",
-            crate::render::esc(crate::tr!("核心要点"))
+            crate::render::esc(tr!("核心要点"))
         ));
         for p in &sm.key_points {
             out.push_str(&format!("<li>{}</li>", crate::render::rich(p)));
@@ -364,10 +358,10 @@ pub fn render_html_block(sm: &Summary) -> String {
     if !sm.outline.is_empty() {
         out.push_str(&format!(
             "<h3>{}</h3><ul>",
-            crate::render::esc(crate::tr!("内容大纲"))
+            crate::render::esc(tr!("内容大纲"))
         ));
         for o in &sm.outline {
-            out.push_str(&crate::tr!(
+            out.push_str(&tr!(
                 "<li><b>{}</b> {}：{}</li>",
                 crate::render::esc(&crate::render::fmt_ts(o.t)),
                 crate::render::rich(&o.title),

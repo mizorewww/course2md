@@ -50,52 +50,33 @@ pub fn resolve(
         .or_else(|| d.out.clone())
         .map(config::expand_tilde)
         .unwrap_or_else(|| config::DEFAULT_OUT_DIR.into());
+    // CLI 显式参数 > 配置文件 > 内置默认
+    macro_rules! pick {
+        ($field:ident, $default:expr) => {
+            opts.$field.or(d.$field).unwrap_or($default)
+        };
+    }
     let mut cfg = config::PipelineConfig {
         url: source,
         out_root,
-        similarity: opts
-            .similarity
-            .or(d.similarity)
-            .unwrap_or(config::DEFAULT_SIMILARITY),
-        sample_interval: opts
-            .sample_interval
-            .or(d.sample_interval)
-            .unwrap_or(config::DEFAULT_SAMPLE_INTERVAL),
-        cooldown: opts
-            .cooldown
-            .or(d.cooldown)
-            .unwrap_or(config::DEFAULT_COOLDOWN),
-        max_height: opts
-            .max_height
-            .or(d.max_height)
-            .unwrap_or(config::DEFAULT_MAX_HEIGHT),
-        slide_mode: opts
-            .slide_mode
-            .or(d.slide_mode)
-            .unwrap_or(SlideMode::Stable),
-        stable_secs: opts
-            .stable_secs
-            .or(d.stable_secs)
-            .unwrap_or(config::DEFAULT_STABLE_SECS),
-        roi: match &opts.roi {
-            Some(s) => Some(config::Roi::parse(s)?),
-            None => match &d.roi {
-                Some(s) => Some(config::Roi::parse(s)?),
-                None => None,
-            },
-        },
-        threads: opts
-            .threads
-            .or(d.threads)
-            .unwrap_or(config::DEFAULT_THREADS),
+        similarity: pick!(similarity, config::DEFAULT_SIMILARITY),
+        sample_interval: pick!(sample_interval, config::DEFAULT_SAMPLE_INTERVAL),
+        cooldown: pick!(cooldown, config::DEFAULT_COOLDOWN),
+        max_height: pick!(max_height, config::DEFAULT_MAX_HEIGHT),
+        slide_mode: pick!(slide_mode, SlideMode::Stable),
+        stable_secs: pick!(stable_secs, config::DEFAULT_STABLE_SECS),
+        roi: opts
+            .roi
+            .as_ref()
+            .or(d.roi.as_ref())
+            .map(|s| config::Roi::parse(s))
+            .transpose()?,
+        threads: pick!(threads, config::DEFAULT_THREADS),
         provider: opts
             .provider
             .or(d.provider)
             .unwrap_or_else(config::default_provider_hint),
-        max_speech: opts
-            .max_speech
-            .or(d.max_speech)
-            .unwrap_or(config::DEFAULT_MAX_SPEECH),
+        max_speech: pick!(max_speech, config::DEFAULT_MAX_SPEECH),
         formats: opts
             .formats
             .clone()
@@ -108,20 +89,14 @@ pub fn resolve(
         llm: resolve_llm(opts, file),
         asr_api: resolve_asr_api(opts, file),
         asr_model: opts.asr_model.clone().or_else(|| d.asr_model.clone()),
-        gpu_layers: opts
-            .gpu_layers
-            .or(d.gpu_layers)
-            .unwrap_or(config::DEFAULT_GPU_LAYERS),
+        gpu_layers: pick!(gpu_layers, config::DEFAULT_GPU_LAYERS),
         mmproj_offload: config::resolve_flag(
             opts.mmproj_offload,
             opts.no_mmproj_offload,
             d.mmproj_offload,
             true,
         ),
-        transcript_source: opts
-            .transcript_source
-            .or(d.transcript_source)
-            .unwrap_or_default(),
+        transcript_source: pick!(transcript_source, Default::default()),
     };
     // Without a configured provider the backend is chosen here, and may be the
     // NPU: a Qwen3 model saved for another backend is not run on it. A model

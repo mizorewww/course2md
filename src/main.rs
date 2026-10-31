@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::{CommandFactory, FromArgMatches};
 use course2md::cli::{ChildProgress, Cli, Command, ConfigCmd, LlmCmd, ModelsCmd};
 use course2md::{config, doctor, llm, models, pipeline, progress, settings, wizard};
+use course2md::{eprintln_tr, println_tr, tr};
 use tracing_subscriber::EnvFilter;
 
 fn init_logging(verbose: u8, quiet: bool, json: bool) {
@@ -24,7 +25,7 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
         use tracing_subscriber::prelude::*;
         tracing_subscriber::registry()
             .with(filter)
-            .with(progress::json_log_layer())
+            .with(progress::JsonLogLayer)
             .init();
     } else if verbose >= 2 {
         // 调试档：完整格式（时间 + target）
@@ -78,7 +79,7 @@ fn main() -> std::process::ExitCode {
             if error.use_stderr() && json_requested {
                 progress::set_json_mode();
                 progress::emit(&progress::Event::Error {
-                    message: course2md::tr!("参数无效：{}", error),
+                    message: tr!("参数无效：{}", error),
                     code: progress::ErrorCode::InvalidArguments,
                 });
             } else if course2md::i18n::lang() == course2md::i18n::Lang::En {
@@ -99,7 +100,7 @@ fn main() -> std::process::ExitCode {
             None => {
                 eprintln!(
                     "{}",
-                    course2md::tr!(
+                    tr!(
                         "未知的语言：{}。可用：auto、en、zh-Hans、zh-Hant、ja",
                         value
                     )
@@ -155,7 +156,7 @@ fn main() -> std::process::ExitCode {
                     message,
                 });
             } else {
-                course2md::eprintln_tr!("错误：{}", message);
+                eprintln_tr!("错误：{}", message);
             }
             std::process::ExitCode::FAILURE
         }
@@ -169,7 +170,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
     if let Some(platform) = cli.login {
         anyhow::ensure!(
             cli.source.as_deref().is_none_or(config::looks_like_source),
-            course2md::tr!(
+            tr!(
                 "--login 后只能跟视频链接或本地视频路径 / After --login, provide only a video URL or local file path"
             )
         );
@@ -194,7 +195,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             #[cfg(not(apple_native))]
             {
                 let _ = model;
-                anyhow::bail!(course2md::tr!(
+                anyhow::bail!(tr!(
                     "此版本不支持 Apple 识别，请改用 GPU 或 CPU 识别 / This build lacks Apple transcription; use GPU or CPU transcription."
                 ))
             }
@@ -225,7 +226,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                     status: Some(Box::new(status.clone())),
                 });
                 if !json {
-                    course2md::println_tr!("模型准备完成 / Model preparation finished.");
+                    println_tr!("模型准备完成 / Model preparation finished.");
                     print_model_status(&status);
                 }
                 Ok(())
@@ -272,7 +273,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                     let path = settings::save(&cfg)?;
                     println!("已保存并启用 / Saved and enabled: {}", path.display());
                     match llm::test_connection(&cfg.llm) {
-                        Ok(()) => course2md::println_tr!("连接测试通过 / Connection test passed."),
+                        Ok(()) => println_tr!("连接测试通过 / Connection test passed."),
                         Err(e) => anyhow::bail!(
                             "配置已保存，但连接测试失败；请检查服务地址、密钥和模型 / Settings saved, but connection test failed; check endpoint, key and model: {e:#}"
                         ),
@@ -299,7 +300,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                     if path.is_file() && !force {
                         anyhow::bail!(
                             "{}",
-                            course2md::tr!("配置已存在：{}。使用 --force 替换", path.display())
+                            tr!("配置已存在：{}。使用 --force 替换", path.display())
                         );
                     }
                     let path = settings::write_template()?;
@@ -372,7 +373,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                 );
             }
             if !args.asr {
-                course2md::println_tr!(
+                println_tr!(
                     "云端语音识别密钥未清除；如需清除：course2md remove --asr / Cloud speech key kept; to clear it: course2md remove --asr"
                 );
             }
@@ -383,13 +384,13 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                 Some(source) => normalize_source(&source)?,
                 None => {
                     if !no_args {
-                        return Err(course2md::error::invalid_input(anyhow::anyhow!(
-                            course2md::tr!("缺少视频来源。示例：course2md ./lecture.mp4")
-                        )));
+                        return Err(course2md::error::invalid_input(anyhow::anyhow!(tr!(
+                            "缺少视频来源。示例：course2md ./lecture.mp4"
+                        ))));
                     }
-                    println!("{}\n", course2md::tr!("course2md — 将视频转换为图文笔记"));
-                    println!("{}", course2md::tr!(course2md::cli::QUICK_START));
-                    course2md::println_tr!("全部参数 / All options: course2md --help");
+                    println!("{}\n", tr!("course2md — 将视频转换为图文笔记"));
+                    println!("{}", tr!(course2md::cli::QUICK_START));
+                    println_tr!("全部参数 / All options: course2md --help");
                     return Ok(());
                 }
             };
@@ -448,9 +449,9 @@ fn note_version_dir(dir: &std::path::Path) -> anyhow::Result<Option<std::path::P
         let current: course2md::artifact::CurrentVersion =
             serde_json::from_slice(&std::fs::read(dir.join("current.json"))?)?;
         let manifest = course2md::artifact::safe_asset_path(dir, &current.manifest)?;
-        let version = manifest.parent().context(course2md::tr!(
-            "笔记清单位置无效 / Invalid note manifest location"
-        ))?;
+        let version = manifest
+            .parent()
+            .context(tr!("笔记清单位置无效 / Invalid note manifest location"))?;
         return Ok(Some(version.to_path_buf()));
     }
     Ok(dir
@@ -529,9 +530,7 @@ fn summarize_note(
     let course_dir = dir
         .parent()
         .and_then(|p| p.parent())
-        .context(course2md::tr!(
-            "笔记版本位置无效 / Invalid note version location"
-        ))?
+        .context(tr!("笔记版本位置无效 / Invalid note version location"))?
         .to_path_buf();
     let source = if document.meta.webpage_url.trim().is_empty() {
         base.source_id.clone()
@@ -572,7 +571,7 @@ fn summarize_note(
         let manifest = artifact::read_manifest(&version.join("manifest.json"))?;
         let saved: artifact::Document =
             serde_json::from_slice(&std::fs::read(version.join(&manifest.document))?)?;
-        let summary = saved.summary.context(course2md::tr!(
+        let summary = saved.summary.context(tr!(
             "新版笔记缺少摘要 / The new note version has no summary"
         ))?;
         let file = out.join(format!(
@@ -598,11 +597,11 @@ fn summarize_note(
 fn print_model_status(status: &models::status::LocalModelStatus) {
     use models::status::CacheState;
     let state = match status.state {
-        CacheState::Missing => course2md::tr!("缺失 / Missing"),
-        CacheState::Partial => course2md::tr!("不完整 / Incomplete"),
-        CacheState::Cached => course2md::tr!("已缓存（未验证加载）/ Cached (load not verified)"),
-        CacheState::Loaded => course2md::tr!("已就绪 / Ready"),
-        CacheState::Unsupported => course2md::tr!("不支持 / Unsupported"),
+        CacheState::Missing => tr!("缺失 / Missing"),
+        CacheState::Partial => tr!("不完整 / Incomplete"),
+        CacheState::Cached => tr!("已缓存（未验证加载）/ Cached (load not verified)"),
+        CacheState::Loaded => tr!("已就绪 / Ready"),
+        CacheState::Unsupported => tr!("不支持 / Unsupported"),
     };
     println!(
         "模型 / Model: {} · {} · {}",
@@ -612,7 +611,7 @@ fn print_model_status(status: &models::status::LocalModelStatus) {
     for part in &status.parts {
         println!("  {}: {}", part.name, part.path.display());
         for file in &part.missing {
-            course2md::println_tr!("    缺失：{}", file);
+            println_tr!("    缺失：{}", file);
         }
     }
     match status.state {
@@ -623,7 +622,7 @@ fn print_model_status(status: &models::status::LocalModelStatus) {
                 .map(|m| m.id)
                 .collect::<Vec<_>>()
                 .join(", ");
-            course2md::println_tr!("该后端支持的模型：{}", available)
+            println_tr!("该后端支持的模型：{}", available)
         }
         _ if status.can_prepare => println!(
             "下载或修复 / Download or repair: course2md models prepare --provider {} --model {}",
@@ -651,13 +650,13 @@ fn normalize_source(source: &str) -> anyhow::Result<String> {
     let source = source.trim();
     if source.starts_with("http://") || source.starts_with("https://") {
         let url = url::Url::parse(source).map_err(|_| {
-            anyhow::anyhow!(course2md::tr!(
+            anyhow::anyhow!(tr!(
                 "链接无效；请提供完整的视频链接 / Invalid URL; provide a complete video URL"
             ))
         })?;
         anyhow::ensure!(
             url.host_str().is_some(),
-            course2md::tr!("链接缺少主机名 / URL is missing a host")
+            tr!("链接缺少主机名 / URL is missing a host")
         );
         return Ok(source.to_owned());
     }
@@ -666,7 +665,7 @@ fn normalize_source(source: &str) -> anyhow::Result<String> {
     }
     Err(course2md::error::invalid_input(anyhow::anyhow!(
         "{}\n{}",
-        course2md::tr!("找不到视频文件或无法识别链接：{}", source),
-        course2md::tr!("请检查路径；含空格的路径需加引号")
+        tr!("找不到视频文件或无法识别链接：{}", source),
+        tr!("请检查路径；含空格的路径需加引号")
     )))
 }

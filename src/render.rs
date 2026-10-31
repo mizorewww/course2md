@@ -2,6 +2,7 @@
 
 use crate::fetch::VideoMeta;
 use crate::timeline::Section;
+use crate::tr;
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -99,7 +100,7 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
     let uploader = if meta.uploader.is_empty() {
         String::new()
     } else {
-        format!("- {}\n", crate::tr!("作者 {}", md_inline(&meta.uploader)))
+        format!("- {}\n", tr!("作者 {}", md_inline(&meta.uploader)))
     };
     // 本地来源的 canonicalize 每次渲染只算一次
     let source = source_url(meta);
@@ -108,13 +109,13 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
     write!(md, "# {title}\n\n").unwrap();
     md.push_str(&uploader);
     if meta.duration > 0. {
-        writeln!(md, "- {}", crate::tr!("时长 {}", fmt_ts(meta.duration))).unwrap();
+        writeln!(md, "- {}", tr!("时长 {}", fmt_ts(meta.duration))).unwrap();
     }
     if !meta.webpage_url.is_empty() {
         writeln!(
             md,
             "- {} [{}]({})",
-            crate::tr!("来源"),
+            tr!("来源"),
             md_link_text(&meta.webpage_url),
             md_link_target(&source)
         )
@@ -123,8 +124,8 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
     writeln!(
         md,
         "- {} · {}\n",
-        crate::tr!("由 course2md 生成"),
-        crate::tr!(
+        tr!("由 course2md 生成"),
+        tr!(
             "{} 张截图 / {} 段文字",
             sections.iter().filter(|s| !s.image.is_empty()).count(),
             sections.iter().map(|s| s.speech.len()).sum::<usize>()
@@ -148,7 +149,7 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
             write!(
                 md,
                 "![{}]({})\n\n",
-                crate::tr!("视频 {} 的截图", fmt_ts(s.t)),
+                tr!("视频 {} 的截图", fmt_ts(s.t)),
                 s.image
             )
             .unwrap();
@@ -170,19 +171,19 @@ pub fn render_html(meta: &VideoMeta, sections: &[Section]) -> String {
     // 本地来源的 canonicalize 每次渲染只算一次
     let source = source_url(meta);
     if !meta.uploader.is_empty() {
-        details.push(crate::tr!("作者 {}", esc(&meta.uploader)));
+        details.push(tr!("作者 {}", esc(&meta.uploader)));
     }
     if meta.duration > 0. {
-        details.push(crate::tr!("时长 {}", fmt_ts(meta.duration)));
+        details.push(tr!("时长 {}", fmt_ts(meta.duration)));
     }
     if !meta.webpage_url.is_empty() {
         details.push(format!(
             "<a href=\"{}\">{}</a>",
             esc(&source),
-            esc(crate::tr!("源视频"))
+            esc(tr!("源视频"))
         ));
     }
-    details.push(crate::tr!(
+    details.push(tr!(
         "{} 张截图 / {} 段文字",
         sections.iter().filter(|s| !s.image.is_empty()).count(),
         sections.iter().map(|s| s.speech.len()).sum::<usize>()
@@ -213,7 +214,7 @@ pub fn render_html(meta: &VideoMeta, sections: &[Section]) -> String {
                 body,
                 "<img loading=\"lazy\" src=\"{}\" alt=\"{}\">",
                 esc(&s.image),
-                esc(&crate::tr!("视频 {} 的截图", fmt_ts(s.t)))
+                esc(&tr!("视频 {} 的截图", fmt_ts(s.t)))
             )
             .unwrap();
         }
@@ -385,7 +386,7 @@ mod tests {
         let chinese = page(&"今天我们来讲一讲编译器是如何工作的以及它为什么重要".repeat(4));
         assert!(chinese.contains("<html lang=\"zh\">"), "{chinese}");
         // The caption is translated like its Markdown counterpart, not fixed text.
-        let caption = crate::tr!("视频 {} 的截图", fmt_ts(0.0));
+        let caption = tr!("视频 {} 的截图", fmt_ts(0.0));
         assert!(
             english.contains(&format!("alt=\"{}\"", esc(&caption))),
             "{english}"

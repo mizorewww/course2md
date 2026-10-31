@@ -14,6 +14,7 @@
 //! - 全部完成后原子写 `.asr_done` 标记，重跑完全跳过 ASR。
 
 use crate::timeline::TranscriptEvent;
+use crate::tr;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -140,13 +141,13 @@ impl Checkpoint {
             return Ok(None);
         }
         let s = std::fs::read_to_string(path).with_context(|| {
-            crate::tr!(
+            tr!(
                 "读取 {} / Failed to read {}",
                 path.display(),
                 path.display()
             )
         })?;
-        Ok(Some(serde_json::from_str(&s).context(crate::tr!(
+        Ok(Some(serde_json::from_str(&s).context(tr!(
             "识别进度记录已损坏 / The transcription progress record is damaged"
         ))?))
     }
@@ -170,7 +171,7 @@ impl Checkpoint {
             .keep();
         for file in old {
             std::fs::rename(file, archive.join(file.file_name().unwrap())).with_context(|| {
-                crate::tr!(
+                tr!(
                     "无法保留旧识别进度 {} / Cannot preserve previous transcription progress {}",
                     file.display(),
                     file.display()
@@ -187,7 +188,7 @@ impl Checkpoint {
             return Ok((vec![], true));
         }
         let read_failed = || {
-            crate::tr!(
+            tr!(
                 "读取 {} / Failed to read {}",
                 path.display(),
                 path.display()
@@ -256,41 +257,27 @@ impl Checkpoint {
             raw: None,
             translation: None,
         };
+        let failed = || {
+            tr!(
+                "写 checkpoint {} / Failed to write checkpoint {}",
+                self.path.display(),
+                self.path.display()
+            )
+        };
         if self.file.is_none() {
             if let Some(dir) = self.path.parent() {
-                std::fs::create_dir_all(dir).with_context(|| {
-                    crate::tr!(
-                        "创建 checkpoint 目录 {} / Failed to create checkpoint directory {}",
-                        dir.display(),
-                        dir.display()
-                    )
-                })?;
+                std::fs::create_dir_all(dir).with_context(failed)?;
             }
-            self.file = Some(
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&self.path)
-                    .with_context(|| {
-                        crate::tr!(
-                            "打开 checkpoint {} / Failed to open checkpoint {}",
-                            self.path.display(),
-                            self.path.display()
-                        )
-                    })?,
-            );
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+                .with_context(failed)?;
+            self.file = Some(file);
         }
-        let line = serde_json::to_string(&ev)?;
-        if let Some(f) = &mut self.file {
-            writeln!(f, "{line}").with_context(|| {
-                crate::tr!(
-                    "写 checkpoint {} / Failed to write checkpoint {}",
-                    self.path.display(),
-                    self.path.display()
-                )
-            })?;
-            f.flush()
-                .with_context(|| format!("flush checkpoint {}", self.path.display()))?;
+        if let Some(mut file) = self.file.as_ref() {
+            writeln!(file, "{}", serde_json::to_string(&ev)?).with_context(failed)?;
+            file.flush().with_context(failed)?;
         }
         // 只有落盘成功才更新内存状态
         self.done.insert(key(start, end));
@@ -355,22 +342,21 @@ fn write_atomically(path: &Path, bytes: &[u8], shared: bool) -> Result<()> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir).with_context(|| {
-        crate::tr!(
+        tr!(
             "创建目录 {} / Failed to create directory {}",
             dir.display(),
             dir.display()
         )
     })?;
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-    tmp.write_all(bytes).with_context(|| {
-        crate::tr!("写 {} / Failed to write {}", path.display(), path.display())
-    })?;
+    tmp.write_all(bytes)
+        .with_context(|| tr!("写 {} / Failed to write {}", path.display(), path.display()))?;
     if shared {
         make_shared(tmp.as_file())?;
     }
     tmp.as_file().sync_all()?;
     tmp.persist(path).with_context(|| {
-        crate::tr!(
+        tr!(
             "替换 {} / Failed to replace {}",
             path.display(),
             path.display()
