@@ -926,6 +926,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "c2m-asr"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "c2m-config",
+ "c2m-core",
+ "c2m-dispatch",
+ "c2m-i18n",
+ "c2m-process",
+ "c2m-protocol",
+ "c2m-test-http",
+ "hound",
+ "model-fetch",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "sys-locale",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "ureq 3.5.0",
+ "walkdir",
+ "which",
+]
+
+[[package]]
 name = "c2m-config"
 version = "2.0.1"
 dependencies = [
@@ -1522,9 +1549,9 @@ name = "course2md"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "base64 0.23.1",
  "c2m-ai",
  "c2m-artifact",
+ "c2m-asr",
  "c2m-config",
  "c2m-core",
  "c2m-dispatch",
@@ -1535,21 +1562,16 @@ dependencies = [
  "c2m-test-http",
  "clap",
  "dialoguer",
- "hound",
- "model-fetch",
  "serde",
  "serde_json",
- "sha2 0.11.1",
  "slide-detect",
  "strum 0.27.2",
- "sys-locale",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "toml 1.1.8+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
- "ureq 3.5.0",
  "url",
  "walkdir",
  "which",

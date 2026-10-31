@@ -1,5 +1,8 @@
 pub use c2m_ai::{llm, login, provider, summarize};
 pub use c2m_artifact::{artifact, math, portable, render, summary_doc};
+#[cfg(apple_native)]
+pub use c2m_asr::apple;
+pub use c2m_asr::{asr, checkpoint, download, hub, models, npu};
 pub use c2m_config::{llm_settings, settings};
 pub use c2m_dispatch::{dispatch, job, pool};
 pub use c2m_protocol::{model_state, progress};
@@ -15,16 +18,9 @@ pub use c2m_core::{digest, fsio, invalid, meta, outcome, paths, timeline};
 pub use c2m_i18n::{eprint_tr, eprintln_tr, print_tr, println_tr, tr};
 pub use c2m_i18n::{i18n, language};
 pub use c2m_process::{error, media, runtime, tools, ytdlp};
-pub mod apple;
-pub mod asr;
-pub mod checkpoint;
 pub mod cli;
 pub mod doctor;
-pub mod download;
 pub mod execution;
-pub mod hub;
-pub mod models;
-pub mod npu;
 pub mod options;
 pub mod pipeline;
 pub mod scene;

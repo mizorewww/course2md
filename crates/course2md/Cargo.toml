@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 c2m-ai = { path = "../c2m-ai" }
 c2m-artifact = { path = "../c2m-artifact" }
+c2m-asr = { path = "../c2m-asr" }
 c2m-config = { path = "../c2m-config" }
 c2m-core = { path = "../c2m-core" }
 c2m-dispatch = { path = "../c2m-dispatch" }
@@ -16,30 +17,24 @@ c2m-process = { path = "../c2m-process" }
 c2m-protocol = { path = "../c2m-protocol" }
 c2m-source = { path = "../c2m-source" }
 anyhow.workspace = true
-base64.workspace = true
 clap.workspace = true
 dialoguer.workspace = true
-hound.workspace = true
-model-fetch.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 slide-detect.workspace = true
 strum.workspace = true
-sys-locale.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-ureq.workspace = true
 url.workspace = true
 walkdir.workspace = true
-which.workspace = true
 
 [dev-dependencies]
 c2m-test-http = { path = "../c2m-test-http" }
 toml.workspace = true
+which.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(apple_native)'] }
