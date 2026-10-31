@@ -44,7 +44,6 @@ mod symbols;
 mod task_runner;
 mod task_ui;
 // Held for the design restoration; see its header.
-#[allow(dead_code, unused_imports)]
 mod theme;
 mod ui;
 mod views;
