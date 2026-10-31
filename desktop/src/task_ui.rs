@@ -7,7 +7,7 @@ use crate::{
 };
 use course2md::config::TranscriptSource;
 use course2md::execution::Component;
-use course2md::progress::{Stage, StageStatus as EngineStageStatus};
+use course2md::progress::Stage;
 use gpui_kit::component::{
     button::*,
     menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
@@ -526,7 +526,7 @@ pub(crate) fn task_attention_summary(task: &TaskRecord) -> String {
     if let Some(reason) = task_service_repair_reason(task) {
         return reason.into();
     }
-    task_failure_summary(task.state, task.error.as_deref())
+    task_failure_summary(task.state, task.events.error.as_deref())
         .unwrap_or_else(|| task_status_label(task))
 }
 
@@ -551,7 +551,7 @@ fn task_service_repair_reason(task: &TaskRecord) -> Option<&'static str> {
     if task.handled_by.is_some() || task.has_uncertain() {
         return None;
     }
-    let outcomes = task.outcomes.as_ref()?;
+    let outcomes = task.events.outcomes.as_ref()?;
     let components = [
         &outcomes.proofreading,
         &outcomes.translation,
@@ -565,6 +565,7 @@ fn task_service_repair_reason(task: &TaskRecord) -> Option<&'static str> {
         )
     });
     let blocked = task
+        .events
         .blocked
         .iter()
         .filter_map(|request| ai_component(request.purpose.as_deref()?).and(request.kind));
@@ -2273,9 +2274,12 @@ impl Desktop {
         });
         let waiting = worker_wait_state(
             active,
-            self.pending_done.is_some(),
+            task.events.done.is_some(),
             task.intent,
-            self.progress.iter().map(|(name, item)| (name, item.done)),
+            task.events
+                .stages
+                .iter()
+                .map(|(name, item)| (name, item.done)),
         );
         // Later steps depend on what the video turns out to need, so the
         // position counts the steps reached so far, without a total.
@@ -2539,7 +2543,12 @@ impl Desktop {
             progress.filter(|_| task.state != TaskState::Partial),
             |view, progress| view.child(progress),
         );
-        let uncertain: Vec<_> = task.blocked.iter().filter(|b| b.is_uncertain()).collect();
+        let uncertain: Vec<_> = task
+            .events
+            .blocked
+            .iter()
+            .filter(|b| b.is_uncertain())
+            .collect();
         if let Some(message) = self
             .task_feedback_view(task)
             .filter(|_| task.state != TaskState::Partial && !card)
@@ -2799,25 +2808,23 @@ impl Desktop {
     /// Live and retained stages use the same labels, status column and icon slot.
     fn task_stage_rows(&self, task: &TaskRecord) -> Vec<TaskStage> {
         let active = self.is_running_task(&task.id);
-        // `Stage` orders by pipeline position, so the set is already sorted.
-        let mut names: std::collections::BTreeSet<_> = task.stages.keys().cloned().collect();
-        if active {
-            names.extend(self.progress.keys().cloned());
-        }
-        names
-            .into_iter()
-            .map(|name| {
-                let stored = task.stages.get(&name);
-                let live = active.then(|| self.progress.get(&name)).flatten();
-                let done = live.map(|stage| stage.done).unwrap_or_else(|| {
-                    stored.is_some_and(|stage| stage.status == EngineStageStatus::Done)
-                });
+        // `Stage` orders by pipeline position, so the map is already sorted.
+        task.events
+            .stages
+            .iter()
+            .map(|(name, stored)| {
+                let name = name.clone();
+                let live = active
+                    .then_some(stored)
+                    .filter(|stage| !stage.elapsed().is_zero());
+                let done = stored.done;
                 let outcomes = if active {
-                    self.pending_done
+                    task.events
+                        .done
                         .as_ref()
                         .and_then(|done| done.outcomes.as_ref())
                 } else {
-                    task.outcomes.as_ref()
+                    task.events.outcomes.as_ref()
                 };
                 let status = if let Some(outcome) = ai_stage_outcome(&name, outcomes) {
                     outcome
@@ -2838,14 +2845,7 @@ impl Desktop {
                         _ => StageStatus::Failed,
                     }
                 };
-                let current = live
-                    .map(|stage| stage.current)
-                    .or_else(|| stored.map(|stage| stage.current))
-                    .unwrap_or(0);
-                let total = live
-                    .map(|stage| stage.total)
-                    .or_else(|| stored.map(|stage| stage.total))
-                    .unwrap_or(0);
+                let (current, total) = (stored.current, stored.total);
                 let (detail, fraction) = task_stage_progress(&name, done, live, current, total);
                 let (compact_detail, _) = stage_progress(&name, done, live, current, total, true);
                 TaskStage {
@@ -2912,9 +2912,12 @@ impl Desktop {
             .partition(|stage| !active && stage.status == StageStatus::Complete);
         let waiting = worker_wait_state(
             active,
-            self.pending_done.is_some(),
+            task.events.done.is_some(),
             task.intent,
-            self.progress.iter().map(|(name, item)| (name, item.done)),
+            task.events
+                .stages
+                .iter()
+                .map(|(name, item)| (name, item.done)),
         );
         let progress = if current.is_empty() && waiting.is_none() {
             None
@@ -2968,7 +2971,7 @@ impl Desktop {
         // reason per task, beside its repair action.
         task_service_repair_reason(task)
             .map(str::to_owned)
-            .or_else(|| task_failure_summary(task.state, task.error.as_deref()))
+            .or_else(|| task_failure_summary(task.state, task.events.error.as_deref()))
             .map(|message| {
                 accessible_text(id, message)
                     .role(Role::Alert)
@@ -2983,7 +2986,12 @@ impl Desktop {
     /// queue page and the workbench attention card.
     fn uncertain_block(&self, task: &TaskRecord, cx: &mut Context<Self>) -> Option<Div> {
         let id = task.id.clone();
-        let uncertain: Vec<_> = task.blocked.iter().filter(|b| b.is_uncertain()).collect();
+        let uncertain: Vec<_> = task
+            .events
+            .blocked
+            .iter()
+            .filter(|b| b.is_uncertain())
+            .collect();
         if uncertain.is_empty() || task.handled_by.is_some() {
             return None;
         }
@@ -3303,10 +3311,11 @@ fn adjust_label(task: &TaskRecord) -> &'static str {
 /// The worker's log, failure and blocked-request text, when there is any.
 fn task_log_text(task: &TaskRecord) -> Option<String> {
     let text = task
+        .events
         .logs
         .iter()
-        .chain(task.error.iter())
-        .chain(task.blocked.iter().map(|request| &request.message))
+        .chain(task.events.error.iter())
+        .chain(task.events.blocked.iter().map(|request| &request.message))
         .cloned()
         .collect::<Vec<_>>()
         .join("\n");
@@ -3378,6 +3387,7 @@ fn task_status_label(task: &TaskRecord) -> String {
     }
     if task.has_uncertain() {
         let purpose: std::collections::BTreeSet<_> = task
+            .events
             .blocked
             .iter()
             .filter(|request| request.is_uncertain())
@@ -3427,7 +3437,7 @@ fn request_scope(request: &workspace::BlockedRequest) -> String {
 pub(crate) fn task_component_failures(
     task: &TaskRecord,
 ) -> Vec<(String, activity::NotePart, course2md::artifact::Outcome)> {
-    let Some(outcomes) = &task.outcomes else {
+    let Some(outcomes) = &task.events.outcomes else {
         return Vec::new();
     };
     let mut results = Vec::new();
@@ -3557,13 +3567,12 @@ mod tests {
             parent: None,
             handled_by: None,
             work_dir: "work".into(),
-            stages: Default::default(),
-            error: None,
+            events: crate::activity::JobEvents {
+                error: None,
+                ..Default::default()
+            },
             artifact: None,
-            outcomes: None,
             unread: false,
-            logs: Vec::new(),
-            blocked: Vec::new(),
             resend: Vec::new(),
         }
     }
@@ -3799,13 +3808,12 @@ mod tests {
             parent: None,
             handled_by: None,
             work_dir: "work".into(),
-            stages: Default::default(),
-            error: None,
+            events: crate::activity::JobEvents {
+                outcomes: Some(outcomes.clone()),
+                ..Default::default()
+            },
             artifact: Some(path.clone()),
-            outcomes: Some(outcomes.clone()),
             unread: false,
-            logs: Vec::new(),
-            blocked: Vec::new(),
             resend: Vec::new(),
         };
         // The first recovery action in Recent Notes and every action in the
@@ -3856,7 +3864,7 @@ mod tests {
         ] {
             outcomes.proofreading.message = Some(message.into());
             outcomes.proofreading.kind = Some(kind);
-            task.outcomes = Some(outcomes.clone());
+            task.events.outcomes = Some(outcomes.clone());
             assert_eq!(
                 super::task_requires_service_repair(&task),
                 requires_repair,
@@ -3865,8 +3873,8 @@ mod tests {
         }
         outcomes.proofreading.message = Some("服务拒绝凭据".into());
         outcomes.proofreading.kind = Some(course2md::artifact::FailureKind::Authentication);
-        task.outcomes = Some(outcomes.clone());
-        task.blocked.push(crate::workspace::BlockedRequest {
+        task.events.outcomes = Some(outcomes.clone());
+        task.events.blocked.push(crate::workspace::BlockedRequest {
             reason: course2md::progress::BlockReason::Uncertain,
             request_id: Some("pending".into()),
             purpose: Some("summary".into()),
@@ -3875,18 +3883,18 @@ mod tests {
             message: "结果尚未确认".into(),
         });
         assert!(!super::task_requires_service_repair(&task));
-        task.blocked.clear();
+        task.events.blocked.clear();
         task.handled_by = Some("recovery".into());
         assert!(!super::task_requires_service_repair(&task));
         task.handled_by = None;
 
         outcomes.proofreading = Outcome::succeeded();
         outcomes.exports.insert("html".into(), Outcome::succeeded());
-        task.outcomes = Some(outcomes);
+        task.events.outcomes = Some(outcomes);
         assert!(super::task_component_failures(&task).is_empty());
-        task.error = Some("服务拒绝凭据".into());
+        task.events.error = Some("服务拒绝凭据".into());
         assert!(!super::task_requires_service_repair(&task));
-        task.outcomes = None;
+        task.events.outcomes = None;
         assert!(super::task_component_failures(&task).is_empty());
 
         let mut completed = task.clone();

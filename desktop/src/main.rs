@@ -44,6 +44,7 @@ mod settings_ui;
 mod source;
 mod storage;
 mod storage_ui;
+mod store;
 mod task_runner;
 mod task_ui;
 mod theme;
@@ -53,7 +54,7 @@ mod workspace;
 
 use backend::{Done, EngineEvent, Event, Job};
 use conversion::ConversionOptions;
-use course2md::progress::{ModelOperation, Stage, StageStatus};
+use course2md::progress::ModelOperation;
 use gpui::{prelude::*, *};
 use gpui_kit::component::{
     input::{InputEvent, InputState},
@@ -61,7 +62,7 @@ use gpui_kit::component::{
 };
 use notes::Course;
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashSet},
     path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
@@ -280,16 +281,12 @@ struct Desktop {
     /// A queued task's credentials are being resolved off the UI thread before it can start.
     start_pending: bool,
     task_status: String,
-    task_error: Option<String>,
-    progress: BTreeMap<Stage, activity::Activity>,
-    /// The engine's running token totals for the current job.
-    token_totals: (u64, u64),
+    /// What a model job has said; a task's events live on its record.
+    job_events: activity::JobEvents,
     /// When the current job started, for its elapsed time before any stage.
     job_started: Option<Instant>,
     desktop_settings: course2md::settings::DesktopSettings,
     last_tick: Instant,
-    logs: VecDeque<String>,
-    pending_done: Option<Done>,
     /// Debug validation only: a note to open after the first library scan,
     /// and the reader panels to show once it has loaded.
     validation: Option<ValidationOpen>,
@@ -590,7 +587,6 @@ impl Desktop {
                 ),
             };
         let (event_wake_tx, event_wake_rx) = smol::channel::bounded(1);
-        preferences.set_wake_sender(event_wake_tx.clone());
         if let Some(workspace) = &workspace {
             workspace.set_wake_sender(event_wake_tx.clone());
         }
@@ -674,13 +670,9 @@ impl Desktop {
             cancelling: false,
             closing: false,
             start_pending: false,
-            task_error: None,
+            job_events: Default::default(),
             task_status: String::new(),
-            progress: BTreeMap::new(),
-            token_totals: (0, 0),
             job_started: None,
-            logs: VecDeque::new(),
-            pending_done: None,
             validation: ValidationOpen::from_env(),
             completed: None,
             courses: vec![],
@@ -738,8 +730,18 @@ impl Desktop {
         let Some(workspace) = &self.workspace else {
             return;
         };
-        if let Some(error) = workspace.take_write_error() {
-            self.workspace_error = Some(course2md::tr!("任务进度尚未保存：{}", error));
+        if let Some(failure) = workspace.take_write_error() {
+            self.workspace_error = Some(if failure.control {
+                course2md::tr!("任务指令尚未保存：{}", failure.message)
+            } else {
+                course2md::tr!("任务进度尚未保存：{}", failure.message)
+            });
+            // A job that missed its instruction must not send anything new.
+            if failure.control
+                && let Some(job) = &self.job
+            {
+                job.cancel();
+            }
             cx.notify();
         }
         if self.workspace_reconciling {
@@ -967,14 +969,11 @@ impl Desktop {
                 self.active_task = None;
                 self.kind = Kind::Models;
                 self.cancelling = false;
-                self.logs.clear();
-                self.progress.clear();
-                self.pending_done = None;
-                self.task_error = None;
+                self.job_events = Default::default();
                 self.task_status = course2md::tr!("正在准备识别模型").into();
             }
             Err(error) => {
-                self.task_error = Some(format!("{error:#}"));
+                self.job_events.error = Some(format!("{error:#}"));
                 self.model_preparation_finished(false, false, cx);
             }
         }
@@ -1007,8 +1006,6 @@ impl Desktop {
         deadline
     }
     fn poll(&mut self, cx: &mut Context<Self>) {
-        let results = self.preferences.process_writes();
-        self.apply_settings_write_results(results, cx);
         if self
             .transient_task_result
             .as_ref()
@@ -1030,13 +1027,11 @@ impl Desktop {
             .as_ref()
             .map(|job| job.events.try_iter().take(512).collect())
             .unwrap_or_default();
-        let mut save = false;
-        // Stage transitions persist immediately; steady progress is throttled.
-        let mut flush = false;
+        let streaming = !events.is_empty();
         // Visible state transitions repaint now; log/progress lines coalesce.
         let mut immediate = false;
+        let mut commit = false;
         for event in events {
-            let recording = self.active_task.is_some();
             let event = match event {
                 Event::Exit { success, cancelled } => {
                     immediate = true;
@@ -1061,111 +1056,44 @@ impl Desktop {
                 }
                 Event::Engine(event) => event,
             };
-            if recording {
-                self.record_task_event(&event);
-                save = true;
-            }
-            match event {
-                EngineEvent::Log { message, .. } => self.logs.push_back(message),
-                EngineEvent::Stage { stage, status } => {
-                    match status {
-                        StageStatus::Start => {
-                            self.progress.insert(stage, activity::Activity::new());
-                        }
-                        StageStatus::Done => {
-                            self.progress
-                                .entry(stage)
-                                .or_insert_with(activity::Activity::new)
-                                .finish();
-                        }
+            if let EngineEvent::ModelReady {
+                operation, model, ..
+            } = &event
+            {
+                let name = model
+                    .as_ref()
+                    .map(|model| format!("{model} · "))
+                    .unwrap_or_default();
+                self.task_status = format!(
+                    "{name}{}",
+                    match operation {
+                        ModelOperation::Prepare => course2md::tr!("模型已就绪"),
+                        ModelOperation::Download => course2md::tr!("模型已下载"),
                     }
-                    flush = recording;
-                    immediate = true;
-                }
-                EngineEvent::Progress {
-                    stage,
-                    current,
-                    total,
-                    message,
-                    phase,
-                    unit,
-                } => {
-                    let activity = self
-                        .progress
-                        .entry(stage)
-                        .or_insert_with(activity::Activity::new);
-                    activity.update(current, total, message);
-                    activity.set_phase(phase);
-                    activity.unit = unit;
-                }
-                EngineEvent::Tokens {
-                    stage,
-                    prompt,
-                    completion,
-                } => {
-                    // The engine reports running totals for the whole task;
-                    // each stage keeps the part that arrived while it ran.
-                    let (sent, received) = self.token_totals;
-                    self.token_totals = (prompt, completion);
-                    self.progress
-                        .entry(stage)
-                        .or_insert_with(activity::Activity::new)
-                        .note_tokens(
-                            prompt.saturating_sub(sent),
-                            completion.saturating_sub(received),
-                        )
-                }
-                EngineEvent::Workers { stage, workers } => {
-                    self.progress
-                        .entry(stage)
-                        .or_insert_with(activity::Activity::new)
-                        .workers = workers
-                }
-                EngineEvent::Error { message, .. } => {
-                    self.task_error = Some(message.clone());
-                    self.logs.push_back(message);
-                    flush = recording;
-                    immediate = true;
-                }
-                EngineEvent::Blocked { message, .. } => {
-                    self.task_error = Some(message);
-                    flush = recording;
-                    immediate = true;
-                }
-                EngineEvent::Done(done) => {
-                    self.pending_done = Some(*done);
-                    immediate = true;
-                }
-                EngineEvent::ModelReady {
-                    operation, model, ..
-                } => {
-                    let name = model.map(|model| format!("{model} · ")).unwrap_or_default();
-                    self.task_status = format!(
-                        "{name}{}",
-                        match operation {
-                            ModelOperation::Prepare => course2md::tr!("模型已就绪"),
-                            ModelOperation::Download => course2md::tr!("模型已下载"),
-                        }
+                );
+            }
+            immediate |= match &self.active_task {
+                Some(id) => {
+                    // What the task said lives in `events.jsonl`. Only what changes
+                    // its record needs committing.
+                    commit |= matches!(
+                        event,
+                        EngineEvent::Error { .. } | EngineEvent::Blocked { .. }
                     );
-                    immediate = true;
+                    self.workspace
+                        .as_mut()
+                        .and_then(|workspace| workspace.state.task_mut(id))
+                        .is_some_and(|task| task.apply_event(&event))
                 }
-            }
-            while self.logs.len() > 400 {
-                self.logs.pop_front();
-            }
-        }
-        if save && let Some(workspace) = &self.workspace {
-            // Never wait on the writer here: a failure of this write arrives
-            // through `poll_workspace`.
-            let result = if flush {
-                workspace.save_soon()
-            } else {
-                workspace.save_progress().map(|_| ())
+                None => self.job_events.apply(&event),
             };
-            if let Err(error) = result {
-                self.workspace_error =
-                    Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
-            }
+        }
+        if commit
+            && let Some(workspace) = &self.workspace
+            && let Err(error) = workspace.commit()
+        {
+            self.workspace_error =
+                Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
         }
         if self.closing {
             if self.job.is_none() && self.preview_workers == 0 {
@@ -1185,9 +1113,9 @@ impl Desktop {
         } else {
             self.start_next_task(cx);
         }
-        let ticking = save || immediate || self.job.is_some() || self.event_repaint_pending;
+        let ticking = streaming || immediate || self.job.is_some() || self.event_repaint_pending;
         // Model downloads repaint at the task rate so their progress keeps up.
-        let interval = if save || self.event_repaint_pending || self.kind == Kind::Models {
+        let interval = if streaming || self.event_repaint_pending || self.kind == Kind::Models {
             EVENT_REPAINT_INTERVAL
         } else {
             Duration::from_secs(1)
@@ -1196,7 +1124,7 @@ impl Desktop {
             self.last_tick = Instant::now();
             self.event_repaint_pending = false;
             cx.notify();
-        } else if save {
+        } else if streaming {
             self.event_repaint_pending = true;
         }
     }
@@ -1230,6 +1158,18 @@ impl Desktop {
                 {
                     this.refresh_library(cx);
                     return;
+                }
+                // Tasks of a library that has come back can read their events now.
+                if let Some(workspace) = &mut this.workspace {
+                    for (location, check, _) in &results {
+                        if check.available && !check.needs_reassociation && check.problem.is_none()
+                        {
+                            workspace.recheck_library(&location.id);
+                        }
+                    }
+                    if workspace.state.reconciling {
+                        this.wake_poll();
+                    }
                 }
                 this.loading = false;
                 this.courses.clear();

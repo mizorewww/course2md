@@ -58,6 +58,16 @@ directory when the project is accepted.
       every feature stays. The working target is the largest reduction the audit finds
       achievable under that rule, whatever it comes to.
 
+14. **Choose components again; don't map old to new (owner, 2026-10-31).** Many current control
+    choices are wrong in meaning and UX. For each page element, ask what the user is doing and pick
+    the Material component that means that, from the kit's catalog, even if it changes the control
+    type, the layout or the number of controls. A one-to-one swap of a wrong control isn't done.
+    Every feature stays. Record changed choices in the page agent's report.
+15. **All motion is the kit's (owner, 2026-10-31).** Animation uses the kit's `motion` and its
+    components' built-in motion. `motion.rs` and hand-tuned curves and durations go. An app animation
+    the kit can't express and that is worth keeping is backported: generic, one PR to
+    `gpui-kit-material`, reviewed, under decision 11(c). Otherwise it is dropped for the kit's.
+
 ## Locations
 
 | What | Where | Branch |

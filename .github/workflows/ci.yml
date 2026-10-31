@@ -58,3 +58,8 @@ jobs:
         if: runner.os != 'Windows'
         run: cargo test --test scene_synthetic
 
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

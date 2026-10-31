@@ -1,0 +1,36 @@
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+ignore = [
+    # Unmaintained, not a vulnerability. Reached only through ratex-svg, for rendering
+    # formulas. Remove when ratex moves to another font parser.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained, transitive through ratex-svg" },
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+    "https://github.com/mizorewww/model-fetch",
+    "https://github.com/mizorewww/slide-detect",
+    "https://github.com/mizorewww/subtitle-parse",
+]

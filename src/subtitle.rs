@@ -1,77 +1,43 @@
-//! 平台字幕作为转写源：SRT/VTT 解析、sidecar 查找、语言偏好挑选。
+//! 平台字幕作为转写源：解析和发现在 `subtitle-parse`，这里是界面文字、任务状态与事件转换。
 //!
 //! 与 ASR 产物统一到 `TranscriptEvent`，下游 timeline/LLM/渲染完全复用。
 
 use crate::timeline::TranscriptEvent;
-use anyhow::{Context, Result, ensure};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use subtitle_parse::{DecodeError, ReadError, best_file, normalize_language};
 
-/// A track is a discovery result, not proof that its text can be read.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SubtitleTrack {
-    pub id: String,
-    pub language: Option<String>,
-    pub name: Option<String>,
-    pub kind: SubtitleKind,
-    pub origin: SubtitleOrigin,
-    #[serde(default)]
-    pub source_order: usize,
-}
+pub use subtitle_parse::{
+    Track as SubtitleTrack, TrackKind as SubtitleKind, TrackOrigin as SubtitleOrigin,
+    is_subtitle_file, sidecars as sidecar_tracks, sort_tracks,
+};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SubtitleKind {
-    Manual,
-    Automatic,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SubtitleOrigin {
-    Online {
-        /// Exact extractor key. This is not a translated display label.
-        language_key: String,
-        automatic: bool,
-        #[serde(default)]
-        inline_text: Option<String>,
-    },
-    Embedded {
-        stream_index: u32,
-        codec: String,
-    },
-    File {
-        path: PathBuf,
-    },
-}
-
-impl SubtitleTrack {
-    pub fn label(&self) -> String {
-        let mut parts = Vec::new();
-        if let Some(name) = self.name.as_ref().filter(|value| !value.trim().is_empty()) {
-            parts.push(name.clone());
-        } else if let Some(language) = &self.language {
-            parts.push(language_label(language));
-        } else if let SubtitleOrigin::File { path } = &self.origin {
-            parts.push(
-                path.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-        } else if let SubtitleOrigin::Embedded { stream_index, .. } = &self.origin {
-            parts.push(crate::tr!("内嵌字幕（轨道 {}）", stream_index));
-        } else {
-            parts.push(crate::tr!("字幕").into());
-        }
-        match self.kind {
-            SubtitleKind::Manual => parts.push(crate::tr!("人工字幕").into()),
-            SubtitleKind::Automatic => parts.push(crate::tr!("自动字幕").into()),
-            SubtitleKind::Unknown => {}
-        }
-        parts.join(" · ")
+/// A track's name for people.
+pub fn track_label(track: &SubtitleTrack) -> String {
+    let mut parts = Vec::new();
+    if let Some(name) = track.name.as_ref().filter(|value| !value.trim().is_empty()) {
+        parts.push(name.clone());
+    } else if let Some(language) = &track.language {
+        parts.push(language_label(language));
+    } else if let SubtitleOrigin::File { path } = &track.origin {
+        parts.push(
+            path.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+        );
+    } else if let SubtitleOrigin::Embedded { stream_index, .. } = &track.origin {
+        parts.push(crate::tr!("内嵌字幕（轨道 {}）", stream_index));
+    } else {
+        parts.push(crate::tr!("字幕").into());
     }
+    match track.kind {
+        SubtitleKind::Manual => parts.push(crate::tr!("人工字幕").into()),
+        SubtitleKind::Automatic => parts.push(crate::tr!("自动字幕").into()),
+        SubtitleKind::Unknown => {}
+    }
+    parts.join(" · ")
 }
 
 /// Failed discovery and successful discovery with no readable tracks are distinct.
@@ -158,820 +124,138 @@ pub fn language_label(language: &str) -> String {
     }
 }
 
-fn normalize_language(language: &str) -> String {
-    let value = language.trim().replace('_', "-").to_ascii_lowercase();
-    // ffprobe commonly returns ISO 639-2 language codes.
-    match value.as_str() {
-        "zho" | "chi" => "zh".into(),
-        "eng" => "en".into(),
-        "fra" | "fre" => "fr".into(),
-        "deu" | "ger" => "de".into(),
-        "jpn" => "ja".into(),
-        "kor" => "ko".into(),
-        "spa" => "es".into(),
-        "por" => "pt".into(),
-        "rus" => "ru".into(),
-        "ara" => "ar".into(),
-        "ita" => "it".into(),
-        _ => value,
-    }
-}
-
-/// Preference list → interface language → known original language → discovery
-/// order. A missed preference always falls through, never removes other languages.
-/// A generic preference such as `zh` covers its language family equally; a
-/// script/region preference such as `zh-Hans` prefers that exact variant.
-/// Within an identical language, known human captions precede known automatic ones.
-pub fn sort_tracks(
-    tracks: &mut [SubtitleTrack],
-    preferences: &[String],
-    interface_language: &str,
-    original_language: Option<&str>,
-) {
-    let mut languages = Vec::new();
-    for language in preferences
-        .iter()
-        .map(String::as_str)
-        .chain(std::iter::once(interface_language))
-        .chain(original_language)
-    {
-        let value = normalize_language(language);
-        if !value.is_empty() && !languages.contains(&value) {
-            languages.push(value);
-        }
-    }
-    // Precompute one rank for each exact language group. This preserves the
-    // extractor's order between remaining languages, including non-Latin tracks.
-    let mut groups: Vec<Option<String>> = Vec::new();
-    let mut discovery: Vec<_> = tracks.iter().collect();
-    discovery.sort_by_key(|track| track.source_order);
-    for track in discovery {
-        let language = track.language.as_deref().map(normalize_language);
-        if !groups.contains(&language) {
-            groups.push(language);
-        }
-    }
-    let rank = |track: &SubtitleTrack| {
-        let language = track.language.as_deref().map(normalize_language);
-        let preferred = language
-            .as_ref()
-            .and_then(|language| {
-                languages
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, preference)| {
-                        let same = language == preference;
-                        let family = language.split('-').next() == preference.split('-').next();
-                        (same || family).then_some((
-                            index,
-                            if same || !preference.contains('-') {
-                                0
-                            } else {
-                                1
-                            },
-                        ))
-                    })
-            })
-            .unwrap_or((languages.len(), 0));
-        let group = groups
-            .iter()
-            .position(|group| group == &language)
-            .unwrap_or(usize::MAX);
-        (preferred, group)
-    };
-    tracks.sort_by_key(rank);
-    // Unknown labels retain their positions. Only reorder slots whose type the
-    // source explicitly distinguishes, avoiding invented claims about a track.
-    let mut start = 0;
-    while start < tracks.len() {
-        let language = tracks[start].language.as_deref().map(normalize_language);
-        let end = tracks[start..]
-            .iter()
-            .position(|track| track.language.as_deref().map(normalize_language) != language)
-            .map(|offset| start + offset)
-            .unwrap_or(tracks.len());
-        let positions: Vec<_> = (start..end)
-            .filter(|index| tracks[*index].kind != SubtitleKind::Unknown)
-            .collect();
-        let mut known: Vec<_> = positions
-            .iter()
-            .map(|index| tracks[*index].clone())
-            .collect();
-        known.sort_by_key(|track| track.kind == SubtitleKind::Automatic);
-        for (position, track) in positions.into_iter().zip(known) {
-            tracks[position] = track;
-        }
-        start = end;
-    }
-}
-
 /// Decode supported sidecars without lossy replacement of the original words.
 pub fn read_subtitle_text(path: &Path) -> Result<String> {
-    use std::io::Read;
-    const MAX_BYTES: usize = 32 * 1024 * 1024;
-    let file = std::fs::File::open(path).with_context(|| {
-        crate::tr!(
+    subtitle_parse::read_text(path).map_err(|error| match error {
+        ReadError::Open { path, source } => anyhow::Error::new(source).context(crate::tr!(
             "无法读取字幕文件 {} / Cannot read subtitle file {}",
             path.display(),
             path.display()
-        )
-    })?;
-    let mut bytes = Vec::new();
-    file.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes)?;
-    ensure!(
-        bytes.len() <= MAX_BYTES,
-        crate::tr!(
+        )),
+        ReadError::Read(source) => source.into(),
+        ReadError::TooLarge => anyhow::anyhow!(crate::tr!(
             "字幕文件超过 32 MB，请选择较小的 SRT 或 VTT 文件 / Subtitle file exceeds 32 MB; choose a smaller SRT or VTT file"
-        )
-    );
-    decode_text_with_bom(&bytes)
+        )),
+        ReadError::Decode(DecodeError::IncompleteUtf16) => anyhow::anyhow!(crate::tr!(
+            "文件的 UTF-16 编码不完整，请重新导出为 UTF-8 / The file's UTF-16 encoding is incomplete; re-export as UTF-8"
+        )),
+        ReadError::Decode(source) => anyhow::Error::new(source).context(crate::tr!(
+            "文件的字符编码无法读取，请重新导出为 UTF-8 / The file's character encoding is unreadable; re-export as UTF-8"
+        )),
+    })
 }
 
-/// 解码 UTF-8 / UTF-16（按 BOM 判端序）文本：UTF-8 BOM 与 UTF-16 BOM 都会剥掉，
-/// 无 BOM 按 UTF-8 处理。拒绝不完整的 UTF-16 与非法编码，不做有损替换。
-pub(crate) fn decode_text_with_bom(bytes: &[u8]) -> Result<String> {
-    if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
-        ensure!(
-            (bytes.len() - 2).is_multiple_of(2),
-            crate::tr!(
-                "文件的 UTF-16 编码不完整，请重新导出为 UTF-8 / The file's UTF-16 encoding is incomplete; re-export as UTF-8"
-            )
+/// 解析 SRT / VTT 字幕为转写事件；时间区间无效的 cue 记入日志后跳过。
+pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
+    let parsed = subtitle_parse::parse(content);
+    for skipped in &parsed.skipped {
+        tracing::warn!(
+            line = skipped.header,
+            "字幕时间区间无效，已跳过 / Skipped subtitle with invalid timestamps"
         );
-        let little = bytes[0] == 0xff;
-        let words: Vec<u16> = bytes[2..]
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| {
-                if little {
-                    u16::from_le_bytes([pair[0], pair[1]])
-                } else {
-                    u16::from_be_bytes([pair[0], pair[1]])
-                }
-            })
-            .collect();
-        return String::from_utf16(&words).context(crate::tr!("文件的字符编码无法读取，请重新导出为 UTF-8 / The file's character encoding is unreadable; re-export as UTF-8"));
     }
-    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
-    String::from_utf8(bytes.to_vec()).context(crate::tr!("文件的字符编码无法读取，请重新导出为 UTF-8 / The file's character encoding is unreadable; re-export as UTF-8"))
+    parsed
+        .cues
+        .into_iter()
+        .map(|cue| TranscriptEvent {
+            start: cue.start,
+            end: cue.end,
+            text: cue.text,
+            raw: None,
+            translation: None,
+        })
+        .collect()
 }
 
 pub fn to_srt(events: &[TranscriptEvent]) -> String {
-    fn timestamp(seconds: f64) -> String {
-        let millis = (seconds.max(0.) * 1000.).round() as u64;
-        format!(
-            "{:02}:{:02}:{:02},{:03}",
-            millis / 3_600_000,
-            millis / 60_000 % 60,
-            millis / 1000 % 60,
-            millis % 1000
-        )
-    }
-    events
+    let cues: Vec<_> = events
         .iter()
-        .enumerate()
-        .map(|(index, event)| {
-            format!(
-                "{}\n{} --> {}\n{}\n\n",
-                index + 1,
-                timestamp(event.start),
-                timestamp(event.end),
-                event.text
-            )
-        })
-        .collect()
-}
-
-/// All exact-name and language-qualified sidecars, retaining both SRT and VTT.
-pub fn sidecar_tracks(video: &Path) -> Vec<SubtitleTrack> {
-    let Some(parent) = video.parent() else {
-        return Vec::new();
-    };
-    let Some(stem) = video.file_stem().and_then(|value| value.to_str()) else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return Vec::new();
-    };
-    let mut paths: Vec<_> = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| {
-            if !path.is_file() || !is_subtitle_file(path) {
-                return false;
-            }
-            path.file_stem()
-                .and_then(|value| value.to_str())
-                .is_some_and(|candidate| {
-                    candidate == stem || candidate.starts_with(&format!("{stem}."))
-                })
+        .map(|event| subtitle_parse::Cue {
+            start: event.start,
+            end: event.end,
+            text: event.text.clone(),
         })
         .collect();
-    paths.sort();
-    paths
-        .into_iter()
-        .enumerate()
-        .map(|(index, path)| {
-            let language = path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .and_then(|candidate| candidate.strip_prefix(&format!("{stem}.")))
-                .filter(|candidate| {
-                    candidate
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphabetic() || byte == b'-' || byte == b'_')
-                })
-                .map(str::to_owned);
-            let mut track = file_track(path, language);
-            track.source_order = index;
-            track
-        })
-        .collect()
-}
-
-pub fn is_subtitle_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "srt" | "vtt"))
+    subtitle_parse::to_srt(&cues)
 }
 
 pub fn file_track(path: PathBuf, language: Option<String>) -> SubtitleTrack {
-    SubtitleTrack {
-        id: format!("file:{}", path.display()),
-        language,
-        name: None,
-        kind: SubtitleKind::Unknown,
-        origin: SubtitleOrigin::File { path },
-        source_order: usize::MAX,
-    }
+    SubtitleTrack::file(path, language)
 }
 
-/// 解析 SRT / VTT 字幕为转写事件。
-/// - 时间戳兼容 `HH:MM:SS,mmm`（SRT）与 `HH:MM:SS.mmm`（VTT）及 `MM:SS.mmm`
-/// - 去除 VTT 行内标签（`<c>...</c>` 等）与常见 HTML 实体
-/// - 合并同一 cue 的多行文本；滚动字幕（YouTube/B站自动字幕常见）只保留新出现的文字
-pub fn parse_subtitle(content: &str) -> Vec<TranscriptEvent> {
-    let mut out: Vec<TranscriptEvent> = vec![];
-    let lines: Vec<&str> = content.lines().collect();
-    // The lines of the previous cue, as they were on screen.
-    let mut on_screen: Vec<String> = vec![];
-    let mut i = 0;
-    while i < lines.len() {
-        let line = lines[i];
-        if let Some((start, end)) = parse_cue_header(line) {
-            i += 1;
-            // 外部数据不信任：非有限时间戳的 cue 直接丢弃，
-            // 避免 NaN/inf 污染下游排序与二分查找
-            if !start.is_finite() || !end.is_finite() || end <= start {
-                tracing::warn!(
-                    line,
-                    "字幕时间区间无效，已跳过 / Skipped subtitle with invalid timestamps"
-                );
-                continue;
-            }
-            let mut text_parts: Vec<String> = vec![];
-            while i < lines.len() && !lines[i].trim().is_empty() {
-                let cleaned = clean_cue_text(lines[i]);
-                if !cleaned.is_empty() {
-                    text_parts.push(cleaned);
-                }
-                i += 1;
-            }
-            if text_parts.is_empty() {
-                continue;
-            }
-            // Rolling captions repeat what is already on screen. Only a cue that
-            // continues without a pause can be repeating the one before it.
-            let previous = out.last_mut().filter(|previous| start <= previous.end);
-            let repeated = previous
-                .as_ref()
-                .map_or(0, |_| repeated_lines(&on_screen, &text_parts));
-            let fresh = text_parts[repeated..].join(" ");
-            match previous {
-                // Everything is already there: the same caption stays up longer.
-                Some(previous) if fresh.is_empty() => previous.end = end.max(previous.end),
-                // The caption grew by a few words, in place.
-                Some(previous) if repeated == 0 && grows_from(&previous.text, &fresh) => {
-                    previous.text = fresh;
-                    previous.end = end.max(previous.end);
-                }
-                _ => out.push(TranscriptEvent {
-                    start,
-                    end,
-                    text: fresh,
-                    raw: None,
-                    translation: None,
-                }),
-            }
-            on_screen = text_parts;
-        } else {
-            i += 1;
-        }
-    }
-    out
-}
-
-/// How many leading lines of `next` end `previous`: the longest overlap.
-fn repeated_lines(previous: &[String], next: &[String]) -> usize {
-    (1..=previous.len().min(next.len()))
-        .rev()
-        .find(|count| previous[previous.len() - count..] == next[..*count])
-        .unwrap_or(0)
-}
-
-/// Whether `next` is `previous` with more words after it (not more letters in
-/// the same word).
-fn grows_from(previous: &str, next: &str) -> bool {
-    next.strip_prefix(previous).is_some_and(|rest| {
-        !rest.is_empty() && !rest.starts_with(|c: char| c.is_ascii_alphanumeric())
-    })
-}
-
-fn parse_cue_header(line: &str) -> Option<(f64, f64)> {
-    let (a, b) = line.split_once("-->")?;
-    // VTT cue header 可能带 "line:0" 等设置
-    let end = b.split_whitespace().next()?;
-    Some((
-        crate::timeline::parse_timestamp(a)?,
-        crate::timeline::parse_timestamp(end)?,
-    ))
-}
-
-/// Removes cue markup and decodes entities. Only the markup subtitle formats use
-/// counts as a tag, so `x < 3 and y > 2` stays text.
-fn clean_cue_text(line: &str) -> String {
-    let mut text = String::with_capacity(line.len());
-    let mut rest = line.trim();
-    while let Some(open) = rest.find('<') {
-        text.push_str(&rest[..open]);
-        let tag = &rest[open + 1..];
-        match tag.find('>').filter(|close| is_cue_tag(&tag[..*close])) {
-            Some(close) => rest = &tag[close + 1..],
-            None => {
-                text.push('<');
-                rest = tag;
-            }
-        }
-    }
-    text.push_str(rest);
-    decode_entities(&text).trim().to_string()
-}
-
-/// `inner` is what stands between `<` and `>`: a WebVTT word timestamp or a tag
-/// from SRT and WebVTT. Tags that carry free text (`<v Speaker>`) may have it;
-/// the rest allow only a class (`<c.yellow>`), so `a<b and c>d` is not a tag.
-fn is_cue_tag(inner: &str) -> bool {
-    if inner.contains('<') {
-        return false;
-    }
-    if inner.starts_with(|c: char| c.is_ascii_digit()) {
-        return inner
-            .bytes()
-            .all(|b| b.is_ascii_digit() || b == b':' || b == b'.');
-    }
-    let inner = inner.strip_prefix('/').unwrap_or(inner);
-    let end = inner
-        .find(|c: char| !c.is_ascii_alphanumeric())
-        .unwrap_or(inner.len());
-    let (name, rest) = inner.split_at(end);
-    match name.to_ascii_lowercase().as_str() {
-        "v" | "lang" | "font" | "span" => rest.is_empty() || rest.starts_with([' ', '\t', '.']),
-        "b" | "i" | "u" | "s" | "c" | "em" | "strong" | "ruby" | "rt" | "br" => {
-            rest.is_empty() || rest == "/" || rest.starts_with('.')
-        }
-        _ => false,
-    }
-}
-
-/// One pass, so `&amp;lt;` becomes `&lt;` and goes no further. Anything that is
-/// not a known entity stays as written.
-fn decode_entities(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(amp) = rest.find('&') {
-        out.push_str(&rest[..amp]);
-        let tail = &rest[amp + 1..];
-        let decoded = tail
-            .find(';')
-            .and_then(|end| Some((decode_entity(&tail[..end])?, end)));
-        match decoded {
-            Some((character, end)) => {
-                out.push(character);
-                rest = &tail[end + 1..];
-            }
-            None => {
-                out.push('&');
-                rest = tail;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-fn decode_entity(name: &str) -> Option<char> {
-    let numeric = name.strip_prefix('#').map(|number| {
-        match number.strip_prefix(['x', 'X']) {
-            Some(hex) => u32::from_str_radix(hex, 16),
-            None => number.parse(),
-        }
-        .ok()
-        .and_then(char::from_u32)
-    });
-    let character = match (name, numeric) {
-        (_, Some(character)) => character?,
-        ("nbsp", _) => ' ',
-        ("lt", _) => '<',
-        ("gt", _) => '>',
-        ("quot", _) => '"',
-        ("apos", _) => '\'',
-        ("amp", _) => '&',
-        _ => return None,
-    };
-    // A cue is one line of text: spacing entities are spaces, controls are not text.
-    Some(if character == '\u{a0}' || character.is_control() {
-        ' '
-    } else {
-        character
-    })
-}
-
-/// 在已有目录中挑一个字幕文件。新调用方会把确定的一条字幕抓取到独立目录；
-/// 这里绝不能选中属于其他来源的产物。
+/// 在已有目录中挑一个字幕文件（中文优先、其次英文）。新调用方会把确定的一条字幕抓取到
+/// 独立目录；这里绝不能选中属于其他来源的产物。
 pub fn pick_subtitle_file(dir: &Path) -> Option<PathBuf> {
-    let files: Vec<PathBuf> = std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| is_subtitle_file(path))
-        .collect();
-    if files.is_empty() {
-        return None;
-    }
-    let tracks: Vec<SubtitleTrack> = files
-        .into_iter()
-        .enumerate()
-        .map(|(index, path)| {
-            let language = path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .and_then(|stem| stem.split_once('.'))
-                .map(|(_, language)| language.to_owned());
-            let mut track = file_track(path, language);
-            track.source_order = index;
-            track
-        })
-        .collect();
-    preferred_file(tracks)
-}
-
-/// The best file track: Chinese first, then English.
-fn preferred_file(mut tracks: Vec<SubtitleTrack>) -> Option<PathBuf> {
-    sort_tracks(&mut tracks, &[], "zh", Some("en"));
-    tracks.into_iter().find_map(|track| match track.origin {
-        SubtitleOrigin::File { path } => Some(path),
-        _ => None,
-    })
+    best_file(subtitle_parse::files_in(dir), &[], "zh", Some("en"))
 }
 
 /// 本地视频的同名字幕 sidecar（`lecture.srt`、`lecture.zh.vtt` 等，与桌面端同一发现规则），
 /// 中文优先、其次英文。
 pub fn sidecar_subtitle(video: &Path) -> Option<PathBuf> {
-    preferred_file(sidecar_tracks(video))
+    best_file(sidecar_tracks(video), &[], "zh", Some("en"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn track(language: &str, kind: SubtitleKind) -> SubtitleTrack {
-        SubtitleTrack {
-            id: format!("{language}:{kind:?}"),
-            language: Some(language.into()),
-            name: None,
-            kind,
-            source_order: 0,
-            origin: SubtitleOrigin::Online {
-                language_key: language.into(),
-                automatic: kind == SubtitleKind::Automatic,
-                inline_text: None,
-            },
-        }
+    #[test]
+    fn labels_never_invent_a_caption_kind() {
+        let mut track = file_track("lesson.zh.srt".into(), Some("zh-Hans".into()));
+        assert!(!track_label(&track).contains("人工"));
+        assert!(!track_label(&track).contains("自动"));
+        track.kind = SubtitleKind::Manual;
+        assert!(track_label(&track).ends_with("人工字幕"));
     }
 
     #[test]
-    fn missed_preferences_fall_through_without_hiding_languages() {
-        let mut tracks = vec![
-            track("fr", SubtitleKind::Automatic),
-            track("ja", SubtitleKind::Manual),
-            track("fr", SubtitleKind::Manual),
-            track("de", SubtitleKind::Manual),
-        ];
-        sort_tracks(&mut tracks, &["zh".into()], "en", Some("ja"));
-        assert_eq!(
-            tracks
-                .iter()
-                .map(|track| track.language.as_deref().unwrap())
-                .collect::<Vec<_>>(),
-            ["ja", "fr", "fr", "de"]
-        );
-        assert_eq!(tracks[1].kind, SubtitleKind::Manual);
-        assert_eq!(tracks[2].kind, SubtitleKind::Automatic);
-        sort_tracks(&mut tracks, &["xx".into()], "yy", None);
-        assert_eq!(tracks.len(), 4);
-    }
-
-    #[test]
-    fn explicit_language_then_interface_then_original_then_discovery_order() {
-        let mut tracks = vec![
-            track("ru", SubtitleKind::Manual),
-            track("fr", SubtitleKind::Manual),
-            track("de", SubtitleKind::Manual),
-            track("en", SubtitleKind::Manual),
-            track("ja", SubtitleKind::Manual),
-        ];
-        sort_tracks(&mut tracks, &["ja".into()], "en", Some("de"));
-        assert_eq!(
-            tracks
-                .iter()
-                .map(|track| track.language.as_deref().unwrap())
-                .collect::<Vec<_>>(),
-            ["ja", "en", "de", "ru", "fr"]
-        );
-    }
-
-    #[test]
-    fn simplified_interface_prefers_hans_without_inventing_caption_kind() {
-        let mut tracks = vec![
-            track("zh", SubtitleKind::Automatic),
-            track("zh-Hans", SubtitleKind::Unknown),
-            track("ja", SubtitleKind::Manual),
-        ];
-        for (index, track) in tracks.iter_mut().enumerate() {
-            track.source_order = index;
-        }
-        sort_tracks(&mut tracks, &[], "zh-Hans", Some("ja"));
-        assert_eq!(tracks[0].language.as_deref(), Some("zh-Hans"));
-        assert_eq!(tracks[0].kind, SubtitleKind::Unknown);
-        assert!(!tracks[0].label().contains("人工"));
-        assert_eq!(tracks[1].kind, SubtitleKind::Automatic);
-    }
-
-    #[test]
-    fn generic_language_preference_does_not_promote_unspecified_script() {
-        let mut tracks = vec![
-            track("zh-Hans", SubtitleKind::Unknown),
-            track("zh", SubtitleKind::Automatic),
-            track("ja", SubtitleKind::Manual),
-        ];
-        for (index, track) in tracks.iter_mut().enumerate() {
-            track.source_order = index;
-        }
-        sort_tracks(&mut tracks, &["zh".into()], "en", None);
-        assert_eq!(tracks[0].language.as_deref(), Some("zh-Hans"));
-        assert_eq!(tracks[1].language.as_deref(), Some("zh"));
-    }
-
-    #[test]
-    fn sidecars_include_every_language_and_both_formats_without_unrelated_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let video = dir.path().join("Lecture.mp4");
-        for name in [
-            "Lecture.fr.srt",
-            "Lecture.JA.VTT",
-            "Lecture.srt",
-            "Other.srt",
-        ] {
-            std::fs::write(
-                dir.path().join(name),
-                "1\n00:00:00,000 --> 00:00:01,000\nBonjour\n",
-            )
-            .unwrap();
-        }
-        let tracks = sidecar_tracks(&video);
-        assert_eq!(tracks.len(), 3);
-        assert!(
-            tracks
-                .iter()
-                .any(|track| track.language.as_deref() == Some("fr"))
-        );
-        assert!(
-            tracks
-                .iter()
-                .any(|track| track.language.as_deref() == Some("JA"))
-        );
-    }
-
-    #[test]
-    fn utf16_sidecars_and_standard_cache_preserve_words_and_timing() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("arbitrary-name.srt");
-        let text = "1\n00:00:01,125 --> 00:00:02,375\nBonjour 世界\n";
-        let bytes: Vec<u8> = [0xff, 0xfe]
-            .into_iter()
-            .chain(text.encode_utf16().flat_map(u16::to_le_bytes))
-            .collect();
-        std::fs::write(&file, bytes).unwrap();
-        let events = parse_subtitle(&read_subtitle_text(&file).unwrap());
+    fn events_survive_the_srt_round_trip() {
+        let events = parse_subtitle("1\n00:00:01,125 --> 00:00:02,375\nBonjour 世界\n");
         assert_eq!(events.len(), 1);
         assert_eq!(events, parse_subtitle(&to_srt(&events)));
+    }
+
+    #[test]
+    fn read_failures_keep_their_words_and_causes() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lesson.srt");
+        let open = read_subtitle_text(&file).unwrap_err();
+        assert!(open.to_string().contains(&*file.to_string_lossy()));
+        assert!(open.source().is_some());
+        std::fs::write(&file, [0xff, 0xfe, 0x00]).unwrap();
+        let incomplete = read_subtitle_text(&file).unwrap_err().to_string();
+        assert!(incomplete.contains("UTF-16"));
         std::fs::write(&file, [0xff, 0xff, 0xfe]).unwrap();
-        assert!(read_subtitle_text(&file).is_err());
+        let invalid = read_subtitle_text(&file).unwrap_err();
+        assert!(invalid.to_string().contains("UTF-8"));
+        assert!(invalid.source().is_some());
     }
 
     #[test]
-    fn repeated_words_after_a_pause_remain_separate() {
-        let events = parse_subtitle(
-            "1\n00:00:01,000 --> 00:00:02,000\nhello\n\n2\n00:00:10,000 --> 00:00:11,000\nhello\n",
+    fn stored_subtitle_state_keeps_its_wire_format() {
+        let evidence = SubtitleEvidence::Found {
+            tracks: vec![file_track("lesson.srt".into(), None)],
+            warning: None,
+        };
+        let json = serde_json::to_value(&evidence).unwrap();
+        assert_eq!(json["state"], "found");
+        assert_eq!(json["tracks"][0]["kind"], "unknown");
+        assert_eq!(json["tracks"][0]["origin"]["kind"], "file");
+        assert_eq!(
+            serde_json::from_value::<SubtitleEvidence>(json).unwrap(),
+            evidence
         );
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].end, 2.0);
-        assert!(parse_subtitle("00:00:02,000 --> 00:00:01,000\nbackwards\n").is_empty());
-        assert!(crate::timeline::parse_timestamp("00:00:01.bad").is_none());
-        assert!(crate::timeline::parse_timestamp("00:99:01.000").is_none());
     }
 
     #[test]
-    fn parses_srt_with_multiline_cues() {
-        let srt = "\
-1
-00:00:01,000 --> 00:00:04,000
-大家好，今天我们讲
-编译原理
-
-2
-00:00:04,500 --> 00:00:07,250
-这是第二段
-";
-        let ev = parse_subtitle(srt);
-        assert_eq!(ev.len(), 2);
-        assert!((ev[0].start - 1.0).abs() < 1e-3);
-        assert!((ev[0].end - 4.0).abs() < 1e-3);
-        assert_eq!(ev[0].text, "大家好，今天我们讲 编译原理");
-        assert!((ev[1].start - 4.5).abs() < 1e-3);
-    }
-
-    #[test]
-    fn parses_vtt_and_strips_tags() {
-        let vtt = "\
-WEBVTT
-
-NOTE 这是注释
-
-00:01:01.000 --> 00:01:03.000 align:start
-<c>hello</c> world&nbsp;!
-
-00:03.500 --> 00:05.000
-second cue
-";
-        let ev = parse_subtitle(vtt);
-        assert_eq!(ev.len(), 2);
-        assert_eq!(ev[0].text, "hello world !");
-        assert!((ev[0].start - 61.0).abs() < 1e-3);
-        assert_eq!(ev[1].text, "second cue");
-    }
-
-    #[test]
-    fn angle_brackets_outside_tags_are_text() {
-        assert_eq!(clean_cue_text("x < 3 and y > 2"), "x < 3 and y > 2");
-        assert_eq!(clean_cue_text("if a<b and c>d then"), "if a<b and c>d then");
-        assert_eq!(clean_cue_text("1 <2"), "1 <2");
-        assert_eq!(clean_cue_text("a &lt; b"), "a < b");
-        // Real cue markup still goes, in every form subtitle files use it.
-        for (cue, text) in [
-            ("<i>word</i>", "word"),
-            ("<font color=\"#fff\">word</font>", "word"),
-            ("<v Speaker One>word</v>", "word"),
-            ("<c.colorE5E5E5>word</c>", "word"),
-            ("<lang en-GB>word</lang>", "word"),
-            ("<B>word</B>", "word"),
-            ("wo<00:00:01.500><c>rd</c>", "word"),
-        ] {
-            assert_eq!(clean_cue_text(cue), text, "{cue}");
-        }
-    }
-
-    #[test]
-    fn entities_decode_once_including_numeric_ones() {
-        for (cue, text) in [
-            ("it&#39;s", "it's"),
-            ("it&#x27;s", "it's"),
-            ("it&#X27;s &apos;ok&apos;", "it's 'ok'"),
-            ("a&nbsp;b &#160; c", "a b   c"),
-            ("&amp;lt;", "&lt;"),
-            ("&#38;lt;", "&lt;"),
-            (
-                "R&D; fish & chips &unknown; &#xZZ; &#1114112;",
-                "R&D; fish & chips &unknown; &#xZZ; &#1114112;",
-            ),
-            ("中&#25991;", "中文"),
-        ] {
-            assert_eq!(clean_cue_text(cue), text, "{cue}");
-        }
-    }
-
-    #[test]
-    fn rolling_lines_are_not_repeated() {
-        // YouTube automatic captions: each cue repeats the line before it.
-        let vtt = "\
-WEBVTT
-
-00:00:01.000 --> 00:00:03.000 align:start position:0%
-machine<00:00:01.500><c> learning</c>
-
-00:00:03.000 --> 00:00:03.010 align:start position:0%
-machine learning
-
-00:00:03.010 --> 00:00:05.000 align:start position:0%
-machine learning
-is<00:00:03.500><c> fun</c>
-
-00:00:05.000 --> 00:00:07.000 align:start position:0%
-is fun
-and<00:00:05.500><c> useful</c>
-";
-        let events = parse_subtitle(vtt);
-        let texts: Vec<_> = events.iter().map(|e| e.text.as_str()).collect();
-        assert_eq!(texts, ["machine learning", "is fun", "and useful"]);
-        assert_eq!((events[0].start, events[0].end), (1.0, 3.01));
-        assert_eq!((events[1].start, events[1].end), (3.01, 5.0));
-        assert_eq!(events[2].end, 7.0);
-
-        // A cue that grows word by word is one sentence.
-        let growing = parse_subtitle(
-            "00:00:01,000 --> 00:00:02,000\nhello\n\n\
-             00:00:02,000 --> 00:00:03,000\nhello world\n\n\
-             00:00:03,000 --> 00:00:04,000\nhello world again\n",
-        );
-        assert_eq!(growing.len(), 1);
-        assert_eq!(growing[0].text, "hello world again");
-        assert_eq!((growing[0].start, growing[0].end), (1.0, 4.0));
-    }
-
-    #[test]
-    fn words_that_only_look_rolling_stay_separate() {
-        // A pause between cues, and a shared prefix inside one word.
-        let events = parse_subtitle(
-            "00:00:01,000 --> 00:00:02,000\nyes\nno\n\n\
-             00:00:05,000 --> 00:00:06,000\nno\nmaybe\n\n\
-             00:00:06,000 --> 00:00:07,000\nmaybe\n\n\
-             00:00:07,000 --> 00:00:08,000\nmaybes\n",
-        );
-        let texts: Vec<_> = events.iter().map(|e| e.text.as_str()).collect();
-        assert_eq!(texts, ["yes no", "no maybe", "maybes"]);
-    }
-
-    #[test]
-    fn dedupes_rolling_captions() {
-        // YouTube 自动字幕的滚动重复：相邻 cue 文本相同
-        let srt = "\
-1
-00:00:01,000 --> 00:00:02,000
-机器学习是
-
-2
-00:00:02,000 --> 00:00:03,000
-机器学习是
-
-3
-00:00:03,000 --> 00:00:04,000
-一门人工智能分支
-";
-        let ev = parse_subtitle(srt);
-        assert_eq!(ev.len(), 2, "相邻重复应合并");
-        assert!((ev[0].end - 3.0).abs() < 1e-3, "重复 cue 延长时长");
-        assert_eq!(ev[1].text, "一门人工智能分支");
-    }
-
-    #[test]
-    fn pick_prefers_zh_then_en() {
-        let temp = tempfile::tempdir().unwrap();
-        let d = temp.path().to_path_buf();
+    fn the_defaults_prefer_chinese_then_english() {
+        let dir = tempfile::tempdir().unwrap();
         for name in ["sub.en.srt", "sub.zh-Hans.srt", "sub.ja.srt"] {
-            std::fs::write(d.join(name), b"1\n00:00:01,000 --> 00:00:02,000\nx\n").unwrap();
+            std::fs::write(dir.path().join(name), b"x").unwrap();
         }
-        let picked = pick_subtitle_file(&d).unwrap();
+        let picked = pick_subtitle_file(dir.path()).unwrap();
         assert_eq!(picked.file_name().unwrap(), "sub.zh-Hans.srt");
-    }
-
-    #[test]
-    fn sidecar_lookup() {
-        let temp = tempfile::tempdir().unwrap();
-        let d = temp.path().to_path_buf();
-        let video = d.join("lecture.mp4");
-        std::fs::write(&video, b"v").unwrap();
-        assert!(sidecar_subtitle(&video).is_none());
-        std::fs::write(
-            d.join("lecture.srt"),
-            b"1\n00:00:01,000 --> 00:00:02,000\nx\n",
-        )
-        .unwrap();
-        assert_eq!(sidecar_subtitle(&video).unwrap(), d.join("lecture.srt"));
-        std::fs::write(
-            d.join("lecture.zh.VTT"),
-            b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nx\n",
-        )
-        .unwrap();
-        assert_eq!(sidecar_subtitle(&video).unwrap(), d.join("lecture.zh.VTT"));
+        let video = dir.path().join("sub.mp4");
+        assert_eq!(sidecar_subtitle(&video).unwrap(), picked);
     }
 }

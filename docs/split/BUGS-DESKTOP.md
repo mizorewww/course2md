@@ -8,7 +8,7 @@ Status of `AUDIT.md` § Bugs → Desktop, the find field keys, and the gaps left
 | --- | --- | --- | --- |
 | D1 | fixed | 06c4293 | Unit tests: nested images, case-differing labels, a lookalike in code, a definition shared with a link, line endings |
 | D2 | fixed | 7b0590a | Unit tests on macOS with a fake system store: both flip directions, failed and garbled moves, two instances, 12 concurrent writers, a corrupt file. `credentials.rs` compiled for Linux and Windows against a stub engine. Never run on those systems, and never against a real keyring |
-| D3 | fixed | f9006a1, ef6d8ca | Existing crash-recovery tests pass. New unit tests: a 40-file move makes 80 hashes and 2 journal writes; a crash with an unrecorded temporary file resumes; another move's temporary file is refused; a source edited or added, or a copy resized, after its copy stops the move |
+| D3 | fixed | f9006a1, ef6d8ca; hashing later removed | `storage.rs` tests: an interrupted move restarts and clears its temporary files; a source edited or added, or a copy resized or missing a file, stops the move |
 | D4 | fixed | 57a2ce5 | By reading only. The line is `cfg(windows)`, and the Windows build cannot run here (the `gpui-pre` build script fails for that target) |
 | D5 | fixed | 68d0fd0 | Unit test |
 | D6 | fixed | 7c58e55 | Unit test: trailing commas, fences and prose pass; bad input does not. Needed one engine change: `llm::extract_json_object` is now `pub` |
@@ -35,7 +35,7 @@ Status of `AUDIT.md` § Bugs → Desktop, the find field keys, and the gaps left
 ## Decisions
 
 - **D2.** The choice is not stored, so it cannot go stale. New keys go to the keyring when it is reachable, and a reference is looked up in the file, then the keyring. File keys move up on a background thread and leave the file only after reading back equal. Nothing moves down, because an unreachable keyring cannot be read; those keys wait there and the error says so. A keyring that reports available but refuses writes still fails the save, with no silent plaintext fallback. The file vault no longer caches: it reads on each use and changes under `desktop-credentials.lock`.
-- **D3.** Temporary copies are named `.course2md-copy-<move id>-*`, so a resume recognizes them with no journal write, and a crash before recording no longer blocks it. Older journals' `temporary_files` are still honoured. Closing checks compare size and modification time, within what `REDUCTION.md` accepts for moves. A write that keeps both size and modification time would pass them; `cleanup_backup` still hashes the source before deleting it.
+- **D3.** A move no longer hashes: `REDUCTION.md` accepts a size-and-count check, so a source written during the copy shows by size or modification time, and a copy by count and size. The journal is written when the phase changes. An interrupted move starts its copy over, removing temporary files (`.course2md-copy-*`) and skipping files already finished. A write that keeps both size and modification time would pass these checks.
 - **D11 newer schema.** The note leaves the list and appears as a library issue rather than showing an older version, so this app cannot republish over a note it cannot read.
 
 ## Checks

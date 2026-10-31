@@ -1,329 +1,185 @@
-//! 幻灯片抽帧：对齐 yt-slide-mark
-//! 每 `sample_interval` 秒取一帧，与上一张保留帧做 SSIM；
-//! 低于 `similarity` 则保存，并跳过 `cooldown` 秒。
+//! 幻灯片抽帧：检测与截图在 `slide-detect`，这里是任务进度、取消与错误文字。
 
-use crate::config::{PipelineConfig, Roi};
+use crate::config::{PipelineConfig, SlideMode};
+use crate::dispatch::TaskControl;
 use crate::media;
-use crate::progress::Stage;
+use crate::progress::{self, Bar, Stage};
 use crate::timeline::FrameEvent;
 use anyhow::{Context, Result};
-use image::GrayImage;
-use image_compare::Algorithm;
-use std::borrow::Cow;
-use std::path::Path;
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
-
-/// SSIM 采样宽度：足够区分版面变化，同时控制 rawvideo 带宽与 SSIM 计算开销
-const SAMPLE_WIDTH: u32 = 640;
-/// 全分辨率抽帧并发度：每帧一个 ffmpeg 进程，4 路即可利用并行度又不至于进程风暴
-const EXTRACT_CONCURRENCY: usize = 4;
-
-fn scaled_wh(ow: u32, oh: u32, target_w: u32) -> (u32, u32) {
-    let h = ((oh as u64 * target_w as u64) / ow.max(1) as u64) as u32;
-    (target_w, (h & !1).max(2))
-}
-
-/// 无 ROI 时借用原图（零拷贝）；有 ROI 时返回裁剪后的新图。
-fn crop_roi(img: &GrayImage, roi: Option<Roi>) -> Cow<'_, GrayImage> {
-    let Some(r) = roi else {
-        return Cow::Borrowed(img);
-    };
-    let (w, h) = img.dimensions();
-    let (x1, y1, x2, y2) = r.pixels(w, h);
-    Cow::Owned(
-        image::imageops::crop_imm(img, x1, y1, (x2 - x1).max(1), (y2 - y1).max(1)).to_image(),
-    )
-}
-
-fn ssim(a: &GrayImage, b: &GrayImage) -> f64 {
-    image_compare::gray_similarity_structure(&Algorithm::MSSIMSimple, a, b)
-        .map(|s| s.score)
-        .unwrap_or(0.0)
-}
-
-/// 单点精确抽帧（全分辨率 JPEG）。
-async fn extract_frame(media: &Path, t: f64, dest: &Path) -> Result<()> {
-    let ss = format!("{t:.3}");
-    // -q:v 2：JPEG 高质量档（2~31，越小越好），讲义文字可读性优先
-    media::run_cmd(
-        Command::new(crate::tools::program("ffmpeg"))
-            .args(["-hide_banner", "-loglevel", "error", "-y", "-ss", &ss])
-            .arg("-i")
-            .arg(media)
-            .args(["-frames:v", "1", "-q:v", "2"])
-            .arg(dest),
-        "ffmpeg",
-    )
-    .await?;
-    anyhow::ensure!(
-        dest.is_file(),
-        "ffmpeg 未生成截图 {0} / ffmpeg did not produce screenshot {0}",
-        dest.display()
-    );
-    Ok(())
-}
-
-/// 第 n 张（1 起）截图的文件名。
-fn slide_name(n: usize) -> String {
-    format!("slide_{n:04}.jpg")
-}
-
-/// 1fps（或 sample_interval）灰度流 + SSIM，得到新幻灯片时间点。
-async fn sample_timestamps(
-    cfg: &PipelineConfig,
-    media: &Path,
-    control: &crate::dispatch::TaskControl,
-) -> Result<Vec<(f64, f64)>> {
-    let info = media::probe_video(media)
-        .await
-        .context(crate::tr!("无法读取视频尺寸，请检查文件是否可播放 / Could not read video dimensions; check that the file plays correctly"))?;
-    let interval = cfg.sample_interval;
-    let (tw, th) = scaled_wh(info.width, info.height, SAMPLE_WIDTH);
-    let fps = 1.0 / interval;
-    let vf = format!("fps={fps:.6},scale={tw}:{th},format=gray");
-
-    tracing::info!(
-        w = info.width,
-        h = info.height,
-        duration = format_args!("{:.0}s", info.duration),
-        interval,
-        similarity = cfg.similarity,
-        cooldown = cfg.cooldown,
-        "slide sample"
-    );
-
-    let mut child = Command::new(crate::tools::program("ffmpeg"))
-        .kill_on_drop(true)
-        .args(["-hide_banner", "-loglevel", "error", "-an"])
-        .arg("-i")
-        .arg(media)
-        .args(["-vf", &vf, "-f", "rawvideo", "pipe:1"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .context(crate::tr!(
-            "无法读取视频画面 / Could not start ffmpeg frame sampling"
-        ))?;
-    let mut stdout = child.stdout.take().context("ffmpeg stdout")?;
-    // stderr 必须全程 drain：piped 而不读的话，写满 64KB 管道缓冲会死锁。
-    // 缓存尾部供失败诊断，debug 时逐行转发。
-    let mut stderr_buf: Vec<u8> = Vec::new();
-    let mut stderr = child.stderr.take().context("ffmpeg stderr")?;
-    let stderr_task = tokio::spawn(async move {
-        use tokio::io::AsyncReadExt;
-        let _ = stderr.read_to_end(&mut stderr_buf).await;
-        stderr_buf
-    });
-    let frame_len = (tw as usize) * (th as usize);
-    let mut buf = vec![0u8; frame_len];
-    // Duration/interval gives an estimate, not the number ffmpeg will actually
-    // decode (especially for VFR input). The bar reports this estimate as the
-    // denominator so users see forward progress; actual samples may land one
-    // or two frames off, which the label tolerates. Candidate selection
-    // happens within this scan.
-    let estimate = (info.duration / interval).round().max(1.0) as u64;
-    let pb = crate::progress::Bar::new(Stage::ScenesScan, estimate)
-        .with_template("{spinner:.green} sample {pos}/{len} frames {msg}");
-    pb.set_position(0);
-
-    // 三状态检测：检测永不休眠（cooldown 只限制「发射」，不再造成盲区）。
-    //   last_emitted  已输出的视觉状态
-    //   candidate     正在观察的候选画面（含首次出现时间，用于真实时间戳）
-    // 发射条件：候选与上一输出差异显著 + 稳定时长足够 + 距上次发射 >= cooldown。
-    let stable_for = if matches!(cfg.slide_mode, crate::config::SlideMode::Stable) {
-        cfg.stable_secs
-    } else {
-        0.0
-    };
-    let mut times: Vec<(f64, f64)> = vec![];
-    let mut last_emitted: Option<GrayImage> = None;
-    let mut candidate: Option<GrayImage> = None;
-    let mut candidate_first_t: Option<f64> = None;
-    let mut candidate_last_t: Option<f64> = None;
-    let mut last_emit_t: f64 = -f64::INFINITY;
-    let mut i: u64 = 0;
-    loop {
-        control.check()?;
-        match stdout.read_exact(&mut buf).await {
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(e) => return Err(e.into()),
-        }
-        // 理想采样时刻 t = i * interval：fps 滤镜的取整与 VFR 补帧会让真实帧
-        // 时间略有漂移（通常 < 一个采样间隔）；场景检测只需秒级精度，可接受，
-        // 故不逐帧解析 pts。
-        let t = i as f64 * interval;
-        i += 1;
-        pb.inc(1);
-        // 帧缓冲复用：move 进 GrayImage 计算，结束时 into_raw 收回供下一帧
-        // （取消每帧 230KB 的 buf.clone()；仅物化 candidate 时才产生拥有所有权的拷贝）
-        let gray = GrayImage::from_raw(tw, th, std::mem::take(&mut buf)).ok_or_else(|| {
-            anyhow::anyhow!("灰度帧尺寸不匹配 {tw}x{th} / Grayscale frame size mismatch {tw}x{th}")
-        })?;
-        {
-            let cmp = crop_roi(&gray, cfg.roi);
-
-            let differs_from_emitted = match &last_emitted {
-                None => true,
-                Some(prev) => {
-                    prev.dimensions() != cmp.dimensions() || ssim(prev, &cmp) < cfg.similarity
-                }
-            };
-            if !differs_from_emitted {
-                // 画面回到已输出状态：候选是过渡帧（动画/抖动），丢弃
-                candidate = None;
-                candidate_first_t = None;
-            } else {
-                // 与已输出状态不同：跟踪候选（若候选本身又变了，说明动画进行中，重置起点）
-                let candidate_changed = match &candidate {
-                    None => true,
-                    Some(c) => c.dimensions() != cmp.dimensions() || ssim(c, &cmp) < cfg.similarity,
-                };
-                if candidate_changed {
-                    // 仅候选变更时才物化为拥有所有权的图；其余路径 cmp 只借不拷
-                    candidate = Some(cmp.into_owned());
-                    candidate_first_t = Some(t);
-                    candidate_last_t = Some(t);
-                } else {
-                    // 同一视觉状态的后续采样：更新代表帧时间（取稳定后的最后一帧）
-                    candidate_last_t = Some(t);
-                }
-                let onset_t = candidate_first_t.unwrap_or(t);
-                let capture_t = candidate_last_t.unwrap_or(t);
-                let stable = t - onset_t >= stable_for;
-                let gap_ok = t - last_emit_t >= cfg.cooldown;
-                if stable && gap_ok {
-                    // 发射两个时间戳：onset 用于时间线对齐，capture 用于全分辨率截帧
-                    // （stable 模式下 capture 取确认稳定时的代表帧，避开 transition 早期态）
-                    times.push((onset_t, capture_t));
-                    last_emitted = candidate.take();
-                    candidate_first_t = None;
-                    candidate_last_t = None;
-                    last_emit_t = t;
-                    pb.set_message(crate::tr!(
-                        "已找到 {} 张候选截图 / Found {} candidate slides",
-                        times.len(),
-                        times.len()
-                    ));
-                }
-            }
-        }
-        buf = gray.into_raw();
-    }
-    // EOF 冲刷：最后一个已稳定的候选即使还没过 cooldown 也补发（否则尾页永远丢失）
-    if let (Some(_), Some(onset), Some(capture)) = (&candidate, candidate_first_t, candidate_last_t)
-    {
-        let stable = capture - onset >= stable_for;
-        if stable {
-            times.push((onset, capture));
-        }
-    }
-    let status = child.wait().await?;
-    let stderr_bytes = stderr_task.await.unwrap_or_default();
-    if !status.success() {
-        let tail = crate::error::tail_lines(&String::from_utf8_lossy(&stderr_bytes), 5);
-        anyhow::bail!("读取视频画面失败 / Frame sampling failed ({status}): {tail}");
-    }
-    pb.finish();
-    tracing::info!(slides = times.len(), frames = i, mode = %cfg.slide_mode, "ssim scan done");
-    Ok(times)
-}
+use slide_detect::{Error, Event, ExtractError, Roi, SlideParams};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 场景阶段入口。
 pub async fn run(
     cfg: &PipelineConfig,
-    media: &Path,
+    video: &std::path::Path,
     job: &crate::execution::Job,
 ) -> Result<Vec<FrameEvent>> {
-    let control = &job.control;
-    let frames_dir = job.frames_dir();
-    tokio::fs::create_dir_all(&frames_dir).await?;
     let t0 = std::time::Instant::now();
-    crate::progress::start(Stage::ScenesScan);
-    let times = sample_timestamps(cfg, media, control).await?;
-    crate::progress::done(Stage::ScenesScan);
-    anyhow::ensure!(
-        !times.is_empty(),
-        crate::tr!("未采样到任何帧 / No frames sampled")
-    );
-
-    crate::progress::start(Stage::ScenesExtract);
-    let pb = crate::progress::Bar::new(Stage::ScenesExtract, times.len() as u64)
-        .with_template("{spinner:.green} extract {pos}/{len} [{bar:32.cyan/blue}] {msg}");
-    // Emit before launching ffmpeg: the first image may take a long time.
-    pb.set_position(0);
-    // JoinSet 限流并发抽帧：最多 EXTRACT_CONCURRENCY 个 ffmpeg 进程并行；
-    // 按帧索引收集结果后排序，保证输出文件名与结果顺序与串行版完全一致。
-    let mut set: tokio::task::JoinSet<(usize, Result<()>)> = tokio::task::JoinSet::new();
-    let mut pending = times.iter().copied().enumerate();
-    let mut results: Vec<(usize, Result<()>)> = Vec::with_capacity(times.len());
-    loop {
-        control.check()?;
-        while set.len() < EXTRACT_CONCURRENCY {
-            let Some((i, (_, capture_t))) = pending.next() else {
-                break;
-            };
-            // 截帧用代表帧时间（稳定后），时间线用 onset（首次出现）
-            let path = frames_dir.join(slide_name(i + 1));
-            let media = media.to_path_buf();
-            set.spawn(async move { (i, extract_frame(&media, capture_t, &path).await) });
-        }
-        match set.join_next().await {
-            Some(Ok((i, Ok(())))) => {
-                pb.inc(1);
-                results.push((i, Ok(())));
-            }
-            Some(Ok((i, Err(error)))) => {
-                set.abort_all();
-                let (onset_t, _) = times[i];
-                return Err(error).with_context(|| {
-                    // 中文只写具体原因：界面已用「截图未生成」命名这项失败
-                    let secs = onset_t.max(0.) as u64;
-                    format!(
-                        "第 {n} 张截图（{}:{:02}）提取失败 / Could not extract slide {n} (t={onset_t:.1}s)",
-                        secs / 60,
-                        secs % 60,
-                        n = i + 1
-                    )
-                });
-            }
-            Some(Err(e)) => {
-                return Err(e).context(crate::tr!(
-                    "截图任务异常终止 / Slide extraction stopped unexpectedly"
-                ));
-            }
-            None => break,
-        }
-    }
-    results.sort_by_key(|(i, _)| *i);
-    let mut frames = Vec::with_capacity(results.len());
-    for (i, r) in results {
-        let (onset_t, _) = times[i];
-        r.with_context(|| {
-            // 中文只写具体原因：界面已用「截图未生成」命名这项失败
-            let secs = onset_t.max(0.) as u64;
-            format!(
-                "第 {n} 张截图（{}:{:02}）提取失败 / Could not extract slide {n} (t={onset_t:.1}s)",
-                secs / 60,
-                secs % 60,
-                n = i + 1
-            )
-        })?;
-        let name = slide_name(i + 1);
-        frames.push(FrameEvent {
-            t: onset_t,
-            image: format!("frames/{name}"),
-        });
-    }
+    progress::start(Stage::ScenesScan);
+    let probed = media::probe_video(video)
+        .await
+        .context(crate::tr!("无法读取视频尺寸，请检查文件是否可播放 / Could not read video dimensions; check that the file plays correctly"))?;
+    let params = SlideParams {
+        sample_interval: cfg.sample_interval,
+        similarity: cfg.similarity,
+        cooldown: cfg.cooldown,
+        stable_secs: match cfg.slide_mode {
+            SlideMode::Stable => cfg.stable_secs,
+            _ => 0.0,
+        },
+        roi: cfg.roi.map(|roi| Roi {
+            x1: roi.x1,
+            y1: roi.y1,
+            x2: roi.x2,
+            y2: roi.y2,
+        }),
+    };
     tracing::info!(
-        frames = frames.len(),
+        w = probed.width,
+        h = probed.height,
+        duration = format_args!("{:.0}s", probed.duration),
+        interval = params.sample_interval,
+        similarity = params.similarity,
+        cooldown = params.cooldown,
+        "slide sample"
+    );
+    let info = slide_detect::VideoInfo {
+        width: probed.width,
+        height: probed.height,
+        duration: probed.duration,
+    };
+    let (ffmpeg, video, dir) = (
+        crate::tools::program("ffmpeg"),
+        video.to_path_buf(),
+        job.frames_dir(),
+    );
+    let control = job.control.clone();
+    // The pipeline drops this future to stop early; the blocking work must follow.
+    let abandoned = AbandonOnDrop::default();
+    let stop = abandoned.0.clone();
+    let slides = tokio::task::spawn_blocking(move || {
+        let mut bar = None;
+        let slides = slide_detect::detect(
+            &ffmpeg,
+            &video,
+            info,
+            &params,
+            &dir,
+            &|| stop.load(Ordering::Relaxed) || control.check().is_err(),
+            &mut |event| report(event, &mut bar),
+        )?;
+        bar.inspect(Bar::finish);
+        progress::done(Stage::ScenesExtract);
+        Ok::<_, Error>(slides)
+    })
+    .await
+    .context(crate::tr!(
+        "截图任务异常终止 / Slide extraction stopped unexpectedly"
+    ))?
+    .map_err(|error| error_text(error, &job.control))?;
+    tracing::info!(
+        frames = slides.len(),
         secs = format_args!("{:.1}", t0.elapsed().as_secs_f64()),
         "slides extracted"
     );
-    pb.finish();
-    crate::progress::done(Stage::ScenesExtract);
-    Ok(frames)
+    Ok(slides
+        .into_iter()
+        .map(|slide| FrameEvent {
+            t: slide.onset,
+            image: format!("frames/{}", slide.file_name),
+        })
+        .collect())
+}
+
+#[derive(Default)]
+struct AbandonOnDrop(Arc<AtomicBool>);
+
+impl Drop for AbandonOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+fn report(event: Event, bar: &mut Option<Bar>) {
+    // Emit before the first result: the first image may take a long time.
+    let started = |stage, len, template: &str| {
+        let bar = Bar::new(stage, len).with_template(template);
+        bar.set_position(0);
+        Some(bar)
+    };
+    match event {
+        Event::ScanStarted { estimate } => {
+            let template = "{spinner:.green} sample {pos}/{len} frames {msg}";
+            *bar = started(Stage::ScenesScan, estimate, template);
+        }
+        Event::Sampled { .. } | Event::Extracted { .. } => {
+            bar.as_ref().inspect(|bar| bar.inc(1));
+        }
+        Event::CandidateFound { slides } => {
+            bar.as_ref().inspect(|bar| {
+                bar.set_message(crate::tr!(
+                    "已找到 {} 张候选截图 / Found {} candidate slides",
+                    slides,
+                    slides
+                ))
+            });
+        }
+        Event::ScanFinished { frames, slides } => {
+            bar.as_ref().inspect(|bar| bar.finish());
+            tracing::info!(slides, frames, "ssim scan done");
+            progress::done(Stage::ScenesScan);
+        }
+        Event::ExtractStarted { slides } => {
+            progress::start(Stage::ScenesExtract);
+            let template = "{spinner:.green} extract {pos}/{len} [{bar:32.cyan/blue}] {msg}";
+            *bar = started(Stage::ScenesExtract, slides as u64, template);
+        }
+    }
+}
+
+fn error_text(error: Error, control: &TaskControl) -> anyhow::Error {
+    match error {
+        Error::Cancelled => control.check().err().unwrap_or_else(|| {
+            anyhow::anyhow!(crate::tr!("截图已停止 / Slide extraction stopped"))
+        }),
+        Error::Spawn(source) => anyhow::Error::new(source).context(crate::tr!(
+            "无法读取视频画面 / Could not start ffmpeg frame sampling"
+        )),
+        Error::ScanFailed { status, stderr } => {
+            anyhow::anyhow!("读取视频画面失败 / Frame sampling failed ({status}): {stderr}")
+        }
+        Error::NoFrames => anyhow::anyhow!(crate::tr!("未采样到任何帧 / No frames sampled")),
+        Error::Extract {
+            number: n,
+            onset,
+            source,
+        } => {
+            let cause = match source {
+                ExtractError::Spawn(source) => anyhow::Error::new(source).context(crate::tr!(
+                    "无法启动 {} / Could not start {}",
+                    "ffmpeg",
+                    "ffmpeg"
+                )),
+                ExtractError::Failed { code, stderr } => {
+                    crate::error::cmd_error("ffmpeg", code, &stderr)
+                }
+                ExtractError::Missing(path) => anyhow::anyhow!(
+                    "ffmpeg 未生成截图 {0} / ffmpeg did not produce screenshot {0}",
+                    path.display()
+                ),
+            };
+            // 中文只写具体原因：界面已用「截图未生成」命名这项失败
+            let secs = onset.max(0.) as u64;
+            cause.context(format!(
+                "第 {n} 张截图（{}:{:02}）提取失败 / Could not extract slide {n} (t={onset:.1}s)",
+                secs / 60,
+                secs % 60,
+            ))
+        }
+        Error::Io(source) => source.into(),
+    }
 }
 
 #[cfg(test)]
@@ -331,9 +187,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scale_keeps_even_height() {
-        let (w, h) = scaled_wh(1280, 410, 640);
-        assert_eq!(w, 640);
-        assert_eq!(h % 2, 0);
+    fn a_failed_image_names_its_slide_and_keeps_the_cause() {
+        let error = error_text(
+            Error::Extract {
+                number: 2,
+                onset: 75.5,
+                source: ExtractError::Failed {
+                    code: Some(1),
+                    stderr: "bad frame".into(),
+                },
+            },
+            &TaskControl::default(),
+        );
+        let text = format!("{error:#}");
+        assert!(text.contains("第 2 张截图（1:15）"), "{text}");
+        assert!(
+            text.contains("Could not extract slide 2 (t=75.5s)"),
+            "{text}"
+        );
+        assert!(text.contains("bad frame"), "{text}");
+    }
+
+    #[test]
+    fn a_failed_scan_reports_ffmpegs_words() {
+        let status = std::process::Command::new(if cfg!(windows) { "cmd" } else { "false" })
+            .args(if cfg!(windows) {
+                &["/C", "exit 1"][..]
+            } else {
+                &[][..]
+            })
+            .status()
+            .unwrap();
+        let text = error_text(
+            Error::ScanFailed {
+                status,
+                stderr: "no such stream".into(),
+            },
+            &TaskControl::default(),
+        )
+        .to_string();
+        assert!(text.contains("Frame sampling failed"), "{text}");
+        assert!(text.contains("no such stream"), "{text}");
     }
 }

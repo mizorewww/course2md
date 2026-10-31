@@ -10,7 +10,6 @@ use crate::{
 use anyhow::{Context as _, Result, ensure};
 use course2md::config::TranscriptSource;
 use course2md::execution::Component;
-use course2md::progress::{BlockReason, Stage, StageStatus as EngineStageStatus};
 use std::collections::HashMap;
 
 /// A stable validation identity for the missing-title case. Rendering compares
@@ -319,33 +318,38 @@ impl Desktop {
         )
     }
 
+    fn workspace_root(&self) -> PathBuf {
+        self.config
+            .defaults
+            .out
+            .clone()
+            .unwrap_or_else(default_output)
+    }
+
+    /// Puts a freshly opened or rebuilt record in place and shows what it holds.
+    fn install_workspace(
+        &mut self,
+        workspace: workspace::Workspace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.message = workspace.recovery.clone();
+        self.workspace = Some(workspace);
+        self.workspace_error = None;
+        self.restore_draft(window, cx);
+        self.refresh_library(cx);
+    }
+
     pub fn retry_workspace_records(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(workspace) = &self.workspace {
-            match workspace.save() {
-                Ok(()) => self.workspace_error = None,
-                Err(error) => {
-                    self.workspace_error =
-                        Some(course2md::tr!("记录仍未保存：{}", format!("{error:#}")))
-                }
-            }
+            self.workspace_error = workspace
+                .save()
+                .err()
+                .map(|error| course2md::tr!("记录仍未保存：{}", format!("{error:#}")));
         } else {
-            let root = self
-                .config
-                .defaults
-                .out
-                .clone()
-                .unwrap_or_else(default_output);
-            match workspace::Workspace::open(
-                root,
-                ConversionOptions::from_config(&self.preferences.defaults_config()),
-            ) {
-                Ok(workspace) => {
-                    self.message = workspace.recovery.clone();
-                    self.workspace = Some(workspace);
-                    self.workspace_error = None;
-                    self.restore_draft(window, cx);
-                    self.refresh_library(cx);
-                }
+            let options = ConversionOptions::from_config(&self.preferences.defaults_config());
+            match workspace::Workspace::open(self.workspace_root(), options) {
+                Ok(workspace) => self.install_workspace(workspace, window, cx),
                 Err(error) => {
                     self.workspace_error = Some(course2md::tr!(
                         "记录仍无法读取，原件已保留：{}",
@@ -372,12 +376,7 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let root = self
-            .config
-            .defaults
-            .out
-            .clone()
-            .unwrap_or_else(default_output);
+        let root = self.workspace_root();
         let options = ConversionOptions::from_config(&self.preferences.defaults_config());
         let result = if let Some(workspace) = &self.workspace {
             workspace::Workspace::rebuild_at(workspace.storage_path().to_owned(), root, options)
@@ -385,13 +384,7 @@ impl Desktop {
             workspace::Workspace::rebuild(root, options)
         };
         match result {
-            Ok(workspace) => {
-                self.message = workspace.recovery.clone();
-                self.workspace = Some(workspace);
-                self.workspace_error = None;
-                self.restore_draft(window, cx);
-                self.refresh_library(cx);
-            }
+            Ok(workspace) => self.install_workspace(workspace, window, cx),
             Err(error) => {
                 self.workspace_error = Some(course2md::tr!(
                     "记录尚未重建，原件仍保留：{}",
@@ -447,32 +440,14 @@ impl Desktop {
         let title = self.value(Field::Title, cx);
         let source = self.source_preview.clone();
         let scroll = f32::from(self.scrolls[Page::New as usize].offset().y);
-        let Some(workspace) = &mut self.workspace else {
-            return false;
-        };
-        let Some(mut next) = workspace.state.draft().cloned() else {
-            self.workspace_error = Some(course2md::tr!("当前输入记录暂时不可用").into());
-            return false;
-        };
         self.draft_deadline = None;
-        let (options, folder) = (next.options.clone(), next.folder);
-        if !update_input_form(&mut next, input, title, source, options, folder, scroll) {
-            return true;
-        }
-        let result = workspace.transaction(|state| {
-            *state
-                .draft_mut()
-                .context(course2md::tr!("没有可保存的输入"))? = next;
-            Ok(())
-        });
-        if let Err(error) = result {
-            self.workspace_error =
-                Some(course2md::tr!("当前输入尚未保存：{}", format!("{error:#}")));
-            cx.notify();
-            return false;
-        }
-        self.workspace_error = None;
-        true
+        self.update_draft(
+            |draft| {
+                let (options, folder) = (draft.options.clone(), draft.folder);
+                update_input_form(draft, input, title, source, options, folder, scroll);
+            },
+            cx,
+        )
     }
 
     pub fn restore_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1006,11 +981,6 @@ impl Desktop {
         let location = self
             .task_library(task)
             .context(course2md::tr!("任务保存位置暂时不可用"))?;
-        workspace::check_library(location)?;
-        ensure!(
-            task.work_dir == location.root.join(".course2md/work").join(&task.id),
-            course2md::tr!("任务位置与笔记库记录不匹配，请先恢复存储位置")
-        );
         let refs = ServiceRefs {
             asr: task.plan.asr_service.clone(),
             llm: task.plan.ai_service.clone(),
@@ -1067,21 +1037,8 @@ impl Desktop {
         })
     }
 
-    fn write_task_control(&self, task: &TaskRecord, resend: Vec<String>) -> Result<()> {
-        let library = self
-            .task_library(task)
-            .context(course2md::tr!("任务保存位置尚未恢复"))?;
-        workspace::check_library(library)?;
-        ensure!(
-            task.work_dir == library.root.join(".course2md/work").join(&task.id),
-            course2md::tr!("任务工作目录与保存位置不匹配")
-        );
-        let mut authorizations = task.resend.clone();
-        for id in resend {
-            if !authorizations.contains(&id) {
-                authorizations.push(id);
-            }
-        }
+    /// What a task's control file should say: the engine reads it at every safe boundary.
+    fn task_control(&self, task: &TaskRecord) -> Result<Vec<u8>> {
         let stopped: Vec<_> = [&task.plan.asr_service, &task.plan.ai_service]
             .into_iter()
             .flatten()
@@ -1092,13 +1049,20 @@ impl Desktop {
             })
             .cloned()
             .collect();
-        std::fs::create_dir_all(&task.work_dir)?;
-        course2md::checkpoint::atomic_write(
-            &task.work_dir.join("control.json"),
-            &serde_json::to_vec(&serde_json::json!({
-                "intent": task.intent, "stopped_services": stopped, "resend": authorizations,
-            }))?,
-        )
+        Ok(serde_json::to_vec(&serde_json::json!({
+            "intent": task.intent, "stopped_services": stopped, "resend": task.resend,
+        }))?)
+    }
+
+    /// Sends a task its current instruction. A failure comes back through
+    /// `take_write_error`, which stops the job rather than let it miss the instruction.
+    fn send_task_control(&self, task: &TaskRecord) -> Result<()> {
+        let workspace = self
+            .workspace
+            .as_ref()
+            .context(course2md::tr!("任务记录不可用"))?;
+        workspace.write_control(task, self.task_control(task)?);
+        Ok(())
     }
 
     pub fn refresh_dispatch_controls(&mut self, cx: &mut Context<Self>) {
@@ -1106,8 +1070,7 @@ impl Desktop {
             .active_task
             .as_deref()
             .and_then(|id| self.workspace.as_ref()?.state.task(id))
-            .cloned()
-            && let Err(error) = self.write_task_control(&task, Vec::new())
+            && let Err(error) = self.send_task_control(task)
         {
             self.workspace_error = Some(course2md::tr!(
                 "停止新请求的指令尚未保存：{}",
@@ -1206,8 +1169,21 @@ impl Desktop {
         if task.state != TaskState::Queued || task.intent != Intent::Run {
             return;
         }
-        let request = match self.request_for(&task, &secrets) {
-            Ok(request) => request,
+        let prepared = self.request_for(&task, &secrets).and_then(|request| {
+            let control = self.task_control(&task)?;
+            let location = self
+                .task_library(&task)
+                .cloned()
+                .context(course2md::tr!("任务保存位置尚未恢复"))?;
+            let writes = self
+                .workspace
+                .as_ref()
+                .context(course2md::tr!("任务记录不可用"))?
+                .library_writes();
+            Ok((request, control, location, writes))
+        });
+        let (request, control, location, writes) = match prepared {
+            Ok(prepared) => prepared,
             Err(error) => {
                 self.fail_task_before_start(&task.id, format!("{error:#}"));
                 cx.notify();
@@ -1215,13 +1191,17 @@ impl Desktop {
             }
         };
         let read_task = task.clone();
+        // All of this touches the library's disk, which may be slow.
         let read = crate::spawn_blocking_io(move || {
             let mut request = request;
+            workspace::check_library(&location)?;
             if read_task.plan.options().source_mode != TranscriptSource::Asr
                 && read_task.plan.subtitle.is_none()
             {
                 request.subtitle_events = workspace::task_subtitle_events(&read_task)?;
             }
+            workspace::store_task_subtitles(&read_task)?;
+            writes.write_control_now(&read_task.work_dir.join("control.json"), &control)?;
             request.validate()?;
             Ok::<_, anyhow::Error>(request)
         });
@@ -1265,11 +1245,6 @@ impl Desktop {
         {
             return;
         }
-        if let Err(error) = self.write_task_control(&task, Vec::new()) {
-            self.fail_task_before_start(&task.id, format!("{error:#}"));
-            cx.notify();
-            return;
-        }
         let running = self
             .workspace
             .as_mut()
@@ -1280,7 +1255,8 @@ impl Desktop {
                         .task_mut(&task.id)
                         .context(course2md::tr!("任务不存在"))?;
                     record.state = TaskState::Running;
-                    record.error = None;
+                    record.events.begin_run();
+                    workspace::forget_task_subtitles(record);
                     record.updated = workspace::now();
                     Ok(())
                 })
@@ -1303,12 +1279,7 @@ impl Desktop {
                     this.active_task = Some(task.id.clone());
                     this.kind = Kind::Convert;
                     this.cancelling = false;
-                    this.progress.clear();
-                    this.token_totals = (0, 0);
                     this.job_started = Some(std::time::Instant::now());
-                    this.logs.clear();
-                    this.pending_done = None;
-                    this.task_error = None;
                     this.task_status = course2md::tr!("正在生成《{}》", task.plan.title);
                     cx.notify();
                 }
@@ -1332,7 +1303,7 @@ impl Desktop {
                     .task_mut(task_id)
                     .context(course2md::tr!("任务不存在"))?;
                 record.state = TaskState::NeedsAttention;
-                record.error = Some(message.clone());
+                record.events.error = Some(message.clone());
                 record.unread = true;
                 Ok(())
             });
@@ -1341,7 +1312,7 @@ impl Desktop {
                 // scheduler: mark it NeedsAttention in memory too; recover() reconciles with the disk on restart.
                 if let Some(record) = workspace.state.task_mut(task_id) {
                     record.state = TaskState::NeedsAttention;
-                    record.error = Some(message);
+                    record.events.error = Some(message);
                     record.unread = true;
                 }
                 self.workspace_error =
@@ -1381,7 +1352,7 @@ impl Desktop {
                     .as_ref()
                     .and_then(|w| w.state.task(&id))
                     .cloned()
-                    && let Err(error) = self.write_task_control(&task, Vec::new())
+                    && let Err(error) = self.send_task_control(&task)
                 {
                     self.workspace_error =
                         Some(course2md::tr!("任务指令尚未保存：{}", format!("{error:#}")));
@@ -1481,6 +1452,7 @@ impl Desktop {
             return;
         }
         let requests: Vec<_> = task
+            .events
             .blocked
             .iter()
             .filter(|b| b.is_uncertain())
@@ -1491,6 +1463,7 @@ impl Desktop {
         }
         if task.artifact.is_some() {
             let components = task
+                .events
                 .blocked
                 .iter()
                 .filter(|b| b.is_uncertain())
@@ -1701,86 +1674,6 @@ impl Desktop {
         .detach();
     }
 
-    pub fn record_task_event(&mut self, event: &EngineEvent) {
-        let Some(id) = &self.active_task else {
-            return;
-        };
-        let Some(task) = self.workspace.as_mut().and_then(|w| w.state.task_mut(id)) else {
-            return;
-        };
-        // High-frequency log/progress events keep the persisted timestamp;
-        // only state the user would act on moves it (and rewrites the mirror).
-        match event {
-            EngineEvent::Log { message, .. } => {
-                task.logs.push(message.clone());
-                if task.logs.len() > 200 {
-                    task.logs.drain(..task.logs.len() - 200);
-                }
-            }
-            EngineEvent::Stage { stage, status } => {
-                task.updated = workspace::now();
-                if matches!(stage, Stage::ScenesScan | Stage::ScenesExtract) {
-                    // Old workers combined scanning and extraction under this
-                    // key. Do not retain its completed counter on continuation.
-                    task.stages.remove(&Stage::Scenes);
-                    if *stage == Stage::ScenesScan && *status == EngineStageStatus::Start {
-                        task.stages.remove(&Stage::ScenesExtract);
-                    }
-                }
-                let value = task.stages.entry(stage.clone()).or_default();
-                match status {
-                    EngineStageStatus::Start => value.begin(),
-                    EngineStageStatus::Done => value.status = EngineStageStatus::Done,
-                }
-            }
-            EngineEvent::Progress {
-                stage,
-                current,
-                total,
-                message,
-                phase,
-                ..
-            } => {
-                let value = task.stages.entry(stage.clone()).or_default();
-                value.current = *current;
-                value.total = *total;
-                value.detail = message.clone().or_else(|| {
-                    phase.map(|phase| crate::activity::model_transfer_phase(stage, Some(phase)))
-                });
-            }
-            EngineEvent::Error { message, .. } => {
-                task.updated = workspace::now();
-                task.error = Some(message.clone());
-            }
-            EngineEvent::Blocked {
-                reason,
-                request_id,
-                purpose,
-                description,
-                kind,
-                message,
-            } => {
-                task.updated = workspace::now();
-                if *reason == BlockReason::Uncertain {
-                    task.state = TaskState::Uncertain;
-                }
-                let blocked = workspace::BlockedRequest {
-                    reason: *reason,
-                    request_id: request_id.clone(),
-                    purpose: purpose.clone(),
-                    description: description.clone().unwrap_or_default(),
-                    kind: Some(*kind),
-                    message: message.clone(),
-                };
-                if !task.blocked.contains(&blocked) {
-                    task.blocked.push(blocked);
-                }
-                task.error = Some(message.clone());
-            }
-            _ => {}
-        }
-    }
-
     pub fn finish_task(
         &mut self,
         id: &str,
@@ -1788,7 +1681,11 @@ impl Desktop {
         cancelled: bool,
         cx: &mut Context<Self>,
     ) {
-        let done = self.pending_done.take();
+        let done = self
+            .workspace
+            .as_mut()
+            .and_then(|workspace| workspace.state.task_mut(id))
+            .and_then(|task| task.events.done.take());
         let manifest = done.as_ref().and_then(|d| {
             course2md::artifact::read_manifest(&d.out_dir.join("manifest.json")).ok()
         });
@@ -1803,7 +1700,7 @@ impl Desktop {
                 .context(course2md::tr!("任务记录不存在"))?;
             task.updated = workspace::now();
             task.unread = !visible;
-            task.outcomes = done
+            task.events.outcomes = done
                 .as_ref()
                 .and_then(|done| done.outcomes.clone())
                 .or_else(|| manifest.as_ref().map(|manifest| manifest.outcomes.clone()));
@@ -1819,7 +1716,7 @@ impl Desktop {
                     TaskState::Complete
                 };
                 if !partial && task.state != TaskState::Uncertain {
-                    task.error = None;
+                    task.events.error = None;
                 }
             } else {
                 task.state = match task.intent {
@@ -1828,8 +1725,8 @@ impl Desktop {
                     Intent::Run if task.has_uncertain() => TaskState::Uncertain,
                     Intent::Run => TaskState::NeedsAttention,
                 };
-                if task.error.is_none() && !cancelled && task.intent == Intent::Run {
-                    task.error = Some(
+                if task.events.error.is_none() && !cancelled && task.intent == Intent::Run {
+                    task.events.error = Some(
                         if success {
                             course2md::tr!("未生成可读笔记")
                         } else {

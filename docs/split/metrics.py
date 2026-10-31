@@ -10,7 +10,7 @@ for path in root.rglob("*.rs"):
     if skip & set(rel.parts) or rel.name in {"build.rs", "tests.rs"} or "build_support" in rel.parts:
         continue
     text = path.read_text(errors="replace")
-    match = re.search(r"^#\[cfg\(test\)\]\s*\n(pub )?mod \w+ *\{", text, re.M)
+    match = re.search(r"^#\[cfg\(test\)\]\s*\n(pub(\(\w+\))? )?mod \w+ *\{", text, re.M)
     if match:
         text = text[: match.start()]
     if "test_" in rel.name:

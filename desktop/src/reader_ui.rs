@@ -4983,7 +4983,11 @@ impl Desktop {
                                 | workspace::TaskState::Queued
                                 | workspace::TaskState::Uncertain
                         )
-                        && !task.blocked.iter().any(|blocked| blocked.is_uncertain())
+                        && !task
+                            .events
+                            .blocked
+                            .iter()
+                            .any(|blocked| blocked.is_uncertain())
                         && task.artifact.as_ref() == Some(&preview.course.dir)
                 });
                 let components = preview
@@ -7008,13 +7012,12 @@ mod tests {
             parent: None,
             handled_by: None,
             work_dir: root.join(".course2md/work").join(&manifest.task_id),
-            stages: Default::default(),
-            error: None,
+            events: crate::activity::JobEvents {
+                error: None,
+                ..Default::default()
+            },
             artifact: Some(course.dir.clone()),
-            outcomes: None,
             unread: false,
-            logs: Vec::new(),
-            blocked: Vec::new(),
             resend: Vec::new(),
         };
         (task, library)

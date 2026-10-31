@@ -144,12 +144,12 @@ pub struct Job {
 }
 impl Job {
     pub fn start(args: Vec<String>, wake: smol::channel::Sender<()>) -> Result<Self> {
-        Self::spawn_input(resolve_cli()?, args, None, Redactions(vec![]), wake)
+        Self::spawn_input(resolve_cli()?, args, None, Redactions(vec![]), None, wake)
     }
     #[cfg(all(test, unix))]
     fn spawn(bin: PathBuf, args: Vec<String>) -> Result<Self> {
         let (wake, _) = smol::channel::bounded(1);
-        Self::spawn_input(bin, args, None, Redactions(vec![]), wake)
+        Self::spawn_input(bin, args, None, Redactions(vec![]), None, wake)
     }
     pub fn start_task(
         request: &course2md::execution::Request,
@@ -160,6 +160,9 @@ impl Job {
             vec!["run-task".into()],
             Some(serde_json::to_vec(request)?),
             Redactions::for_request(request),
+            Some(EventLog::open(
+                &request.work_dir.join(crate::workspace::TASK_EVENTS_FILE),
+            )?),
             wake,
         )
     }
@@ -168,9 +171,11 @@ impl Job {
         args: Vec<String>,
         input: Option<Vec<u8>>,
         redactions: Redactions,
+        log: Option<EventLog>,
         wake: smol::channel::Sender<()>,
     ) -> Result<Self> {
         let redactions = std::sync::Arc::new(redactions);
+        let log = log.map(std::sync::Arc::new);
         let mut command = Command::new(&bin);
         command
             .args(args)
@@ -219,7 +224,7 @@ impl Job {
         let (stdout, stderr, stdin) = match pipes {
             Ok(pipes) => pipes,
             Err(error) => {
-                terminate(&mut child);
+                kill_pid(child.id(), true);
                 let _ = child.wait();
                 return Err(error);
             }
@@ -233,6 +238,7 @@ impl Job {
             tx.clone(),
             true,
             redactions.clone(),
+            log.clone(),
             wake.clone(),
             finished.clone(),
         );
@@ -241,6 +247,7 @@ impl Job {
             tx.clone(),
             false,
             redactions,
+            log,
             wake.clone(),
             finished,
         );
@@ -390,11 +397,60 @@ impl Drop for Redactions {
         self.0.zeroize();
     }
 }
+/// A task's `events.jsonl`: what it said, after redaction, so its card reads the same after
+/// a restart and in another copy of the library. Steady progress is thinned to one sample
+/// a second; the newest skipped sample goes out before anything that is not progress.
+struct EventLog(std::sync::Mutex<EventLogState>);
+
+struct EventLogState {
+    file: std::fs::File,
+    sampled: Option<Instant>,
+    skipped: Option<EngineEvent>,
+}
+
+impl EventLog {
+    fn open(path: &Path) -> Result<Self> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .with_context(|| course2md::tr!("无法读取 {}", path.display()))?;
+        Ok(Self(std::sync::Mutex::new(EventLogState {
+            file,
+            sampled: None,
+            skipped: None,
+        })))
+    }
+
+    /// A failed write costs only detail in a task's history, never its state.
+    fn record(&self, event: &EngineEvent) {
+        let mut log = course2md::runtime::lock_recover(&self.0);
+        if matches!(event, EngineEvent::Progress { .. }) {
+            if log
+                .sampled
+                .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
+            {
+                log.skipped = Some(event.clone());
+                return;
+            }
+            log.sampled = Some(Instant::now());
+        }
+        let mut lines = Vec::new();
+        for event in log.skipped.take().iter().chain([event]) {
+            if serde_json::to_writer(&mut lines, event).is_ok() {
+                lines.push(b'\n');
+            }
+        }
+        let _ = log.file.write_all(&lines);
+    }
+}
+
 fn reader(
     stream: impl std::io::Read + Send + 'static,
     tx: SyncSender<Event>,
     json: bool,
     redactions: std::sync::Arc<Redactions>,
+    log: Option<std::sync::Arc<EventLog>>,
     wake: smol::channel::Sender<()>,
     finished: mpsc::Sender<()>,
 ) -> thread::JoinHandle<()> {
@@ -429,6 +485,9 @@ fn reader(
                     break;
                 }
             };
+            if let (Some(log), Event::Engine(event)) = (&log, &event) {
+                log.record(event);
+            }
             if tx.send(event).is_err() {
                 break;
             }
@@ -451,24 +510,6 @@ fn line_event(line: &str, json: bool, redactions: &Redactions) -> Event {
         }
         Err(_) => Event::log(line),
     }
-}
-
-pub(crate) fn terminate(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    unsafe {
-        libc::killpg(child.id() as i32, libc::SIGKILL);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = Command::new(course2md::runtime::system32_program("taskkill.exe"))
-            .creation_flags(CREATE_NO_WINDOW)
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    let _ = child.kill();
 }
 
 /// The search path for engine and helper tools. The environment it is built
@@ -784,6 +825,7 @@ mod tests {
             tx,
             true,
             std::sync::Arc::new(Redactions(vec![])),
+            None,
             wake,
             mpsc::channel().0,
         )
@@ -820,6 +862,7 @@ mod tests {
             tx,
             true,
             redactions.clone(),
+            None,
             wake,
             mpsc::channel().0,
         );
@@ -1042,6 +1085,7 @@ mod tests {
             vec![],
             Some(input),
             Redactions(vec![]),
+            None,
             wake,
         )
         .unwrap();
@@ -1113,6 +1157,47 @@ mod tests {
         }
         assert!(llama_binary_on_path(dir.path().as_os_str()));
     }
+    #[test]
+    fn a_task_log_keeps_what_was_said_thins_progress_and_saves_after_redaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let log = std::sync::Arc::new(EventLog::open(&path).unwrap());
+        let progress = |current| {
+            format!(
+                "{{\"type\":\"progress\",\"stage\":\"transcribe\",\"current\":{current},\"total\":9}}\n"
+            )
+        };
+        let mut source = String::new();
+        for current in 1..=9 {
+            source.push_str(&progress(current));
+        }
+        source.push_str("{\"type\":\"log\",\"level\":\"info\",\"message\":\"key sk-secret\"}\n");
+        let (tx, rx) = mpsc::sync_channel(32);
+        let (wake, _) = smol::channel::bounded(1);
+        reader(
+            std::io::Cursor::new(source),
+            tx,
+            true,
+            std::sync::Arc::new(Redactions(vec!["sk-secret".into()])),
+            Some(log),
+            wake,
+            mpsc::channel().0,
+        )
+        .join()
+        .unwrap();
+        // The live stream misses nothing; the saved one only skips steady progress.
+        assert_eq!(rx.iter().count(), 10);
+        let saved = std::fs::read(&path).unwrap();
+        let text = String::from_utf8_lossy(&saved);
+        assert!(!text.contains("sk-secret"));
+        assert!(text.lines().count() < 10);
+        let mut replayed = crate::activity::JobEvents::default();
+        replayed.replay(&saved);
+        let stage = &replayed.stages[&course2md::progress::Stage::Transcribe];
+        assert_eq!((stage.current, stage.total), (9, 9));
+        assert_eq!(replayed.logs.len(), 1);
+    }
+
     fn read_all(stream: impl std::io::Read + Send + 'static, json: bool) -> Vec<Event> {
         let (tx, rx) = mpsc::sync_channel(8);
         let (wake, _) = smol::channel::bounded(1);
@@ -1121,6 +1206,7 @@ mod tests {
             tx,
             json,
             std::sync::Arc::new(Redactions(vec![])),
+            None,
             wake,
             mpsc::channel().0,
         );

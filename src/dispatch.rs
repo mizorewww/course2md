@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -138,13 +138,6 @@ pub struct Reply {
     pub replayed: bool,
 }
 
-struct Rejection {
-    retryable: bool,
-    unsupported_response_format: bool,
-    message: String,
-    kind: crate::artifact::FailureKind,
-}
-
 fn kind_for_status(status: Option<u16>) -> crate::artifact::FailureKind {
     match status {
         Some(401 | 403) => crate::artifact::FailureKind::Authentication,
@@ -154,15 +147,6 @@ fn kind_for_status(status: Option<u16>) -> crate::artifact::FailureKind {
         Some(500..=599) => crate::artifact::FailureKind::Service,
         None => crate::artifact::FailureKind::Local,
         _ => crate::artifact::FailureKind::Other,
-    }
-}
-
-fn classify_rejection(status: u16, value: Option<&Value>) -> Rejection {
-    Rejection {
-        retryable: status == 429,
-        unsupported_response_format: rejects_response_format(status, value),
-        message: rejection_message(status),
-        kind: kind_for_status(Some(status)),
     }
 }
 
@@ -229,24 +213,14 @@ pub struct NetworkFailure {
     pub definitely_unsent: bool,
 }
 
-/// Where a ledger keeps its receipts. A task keeps them on disk so a later run
-/// sees them; a plain CLI request keeps them in memory for that one call, so a
-/// lost response is classified the same way without surviving the process.
-enum Receipts {
-    Disk(PathBuf),
-    Memory(Mutex<HashMap<String, Receipt>>),
-}
-
 struct Ledger {
-    receipts: Receipts,
+    /// Where receipts are kept, so a later run sees them. A plain CLI request has none:
+    /// a lost response is classified the same way, and nothing outlives the call.
+    receipts: Option<PathBuf>,
     control_path: Option<PathBuf>,
-    /// The control file as last read, with the metadata it had: polling at every
-    /// safe boundary must not parse the same bytes again.
-    control: Mutex<Option<(std::fs::Metadata, Control)>>,
     service_versions: BTreeMap<String, String>,
     parent: Option<ParentProcess>,
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
-    emitted: Mutex<HashSet<String>>,
     /// Sending/Uncertain receipts by stable id: read from disk once, then kept in step by `save`.
     unresolved: Mutex<Option<HashMap<String, Receipt>>>,
 }
@@ -354,7 +328,8 @@ impl TaskControl {
             Some(ledger) => ledger.send_described(spec, send, validate),
             // Outside a task there is no durable context, so one in-memory ledger per
             // request classifies the response by the same rules without keeping it.
-            None => Ledger::ephemeral().send_described(spec, send, validate),
+            None => Ledger::with_receipts(None, None, &BTreeMap::new())
+                .send_described(spec, send, validate),
         }
     }
 }
@@ -388,33 +363,19 @@ impl Ledger {
     ) -> Result<Self> {
         let dir = work_dir.join("requests");
         std::fs::create_dir_all(&dir)?;
-        Ok(Self::with_receipts(
-            Receipts::Disk(dir),
-            control_path,
-            versions,
-        ))
-    }
-    /// A ledger for one request outside a task: same classification, no files.
-    fn ephemeral() -> Self {
-        Self::with_receipts(
-            Receipts::Memory(Mutex::new(HashMap::new())),
-            None,
-            &BTreeMap::new(),
-        )
+        Ok(Self::with_receipts(Some(dir), control_path, versions))
     }
     fn with_receipts(
-        receipts: Receipts,
+        receipts: Option<PathBuf>,
         control_path: Option<&Path>,
         versions: &BTreeMap<String, String>,
     ) -> Self {
         Self {
             receipts,
             control_path: control_path.map(Path::to_path_buf),
-            control: Mutex::new(None),
             service_versions: versions.clone(),
             parent: None,
             locks: Mutex::new(HashMap::new()),
-            emitted: Mutex::new(HashSet::new()),
             unresolved: Mutex::new(None),
         }
     }
@@ -422,41 +383,25 @@ impl Ledger {
         let Some(path) = &self.control_path else {
             return Ok(Control::default());
         };
-        let metadata = match std::fs::metadata(path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Control::default());
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let mut cached = crate::runtime::lock_recover(&self.control);
-        if let Some((seen, control)) = cached.as_ref()
-            && seen.len() == metadata.len()
-            && seen.modified().ok() == metadata.modified().ok()
-        {
-            return Ok(control.clone());
+        match std::fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).context(crate::tr!(
+                "任务状态无法识别，已暂停 / Task state is unreadable; paused"
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Control::default()),
+            Err(error) => Err(error.into()),
         }
-        let control: Control = serde_json::from_slice(&std::fs::read(path)?).context(
-            crate::tr!("任务状态无法识别，已暂停 / Task state is unreadable; paused"),
-        )?;
-        *cached = Some((metadata, control.clone()));
-        Ok(control)
     }
     fn load(&self, stable_id: &str) -> std::result::Result<Option<Receipt>, Failure> {
-        match &self.receipts {
-            Receipts::Disk(dir) => {
-                let path = dir.join(format!("{stable_id}.json"));
-                if !path.exists() {
-                    return Ok(None);
-                }
-                serde_json::from_slice(&std::fs::read(&path).map_err(Failure::local)?)
-                    .map(Some)
-                    .map_err(Failure::local)
-            }
-            Receipts::Memory(map) => {
-                Ok(map.lock().map_err(Failure::local)?.get(stable_id).cloned())
-            }
+        let Some(dir) = &self.receipts else {
+            return Ok(None);
+        };
+        let path = dir.join(format!("{stable_id}.json"));
+        if !path.exists() {
+            return Ok(None);
         }
+        serde_json::from_slice(&std::fs::read(&path).map_err(Failure::local)?)
+            .map(Some)
+            .map_err(Failure::local)
     }
     fn block(&self, reason: BlockReason, request: Option<&Receipt>, message: &str) -> Failure {
         let request_id = request.map(|r| r.request_id.clone());
@@ -469,22 +414,14 @@ impl Ledger {
         } else {
             crate::artifact::FailureKind::Other
         };
-        let signature = format!("{reason:?}:{request_id:?}:{message}");
-        if self
-            .emitted
-            .lock()
-            .map(|mut seen| seen.insert(signature))
-            .unwrap_or(true)
-        {
-            crate::progress::emit(&Event::Blocked {
-                reason,
-                request_id: request_id.clone(),
-                purpose: request.map(|r| r.purpose.clone()),
-                description: request.map(|r| r.description.clone()),
-                kind,
-                message: message.clone(),
-            });
-        }
+        crate::progress::emit(&Event::Blocked {
+            reason,
+            request_id,
+            purpose: request.map(|r| r.purpose.clone()),
+            description: request.map(|r| r.description.clone()),
+            kind,
+            message: message.clone(),
+        });
         Failure {
             kind,
             ..Failure::local(message)
@@ -527,17 +464,12 @@ impl Ledger {
         Ok(control)
     }
     fn save(&self, receipt: &Receipt) -> std::result::Result<(), Failure> {
-        match &self.receipts {
-            Receipts::Disk(dir) => atomic_write(
+        if let Some(dir) = &self.receipts {
+            atomic_write(
                 &dir.join(format!("{}.json", receipt.stable_id)),
                 &serde_json::to_vec_pretty(receipt).map_err(Failure::local)?,
             )
-            .map_err(Failure::local)?,
-            Receipts::Memory(map) => {
-                map.lock()
-                    .map_err(Failure::local)?
-                    .insert(receipt.stable_id.clone(), receipt.clone());
-            }
+            .map_err(Failure::local)?;
         }
         if let Some(index) = self.unresolved.lock().map_err(Failure::local)?.as_mut() {
             if is_unresolved(receipt) {
@@ -552,13 +484,8 @@ impl Ledger {
         let mut index = self.unresolved.lock().map_err(Failure::local)?;
         if index.is_none() {
             let all = match &self.receipts {
-                Receipts::Disk(dir) => read_receipts(dir).map_err(Failure::local)?,
-                Receipts::Memory(map) => map
-                    .lock()
-                    .map_err(Failure::local)?
-                    .values()
-                    .cloned()
-                    .collect(),
+                Some(dir) => read_receipts(dir).map_err(Failure::local)?,
+                None => Vec::new(),
             };
             let loaded = all
                 .into_iter()
@@ -570,29 +497,6 @@ impl Ledger {
         Ok(index
             .as_ref()
             .map_or_else(Vec::new, |index| index.values().cloned().collect()))
-    }
-    #[cfg(test)]
-    fn send(
-        &self,
-        service: &str,
-        purpose: &str,
-        endpoint: &str,
-        identity: &Value,
-        send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
-        validate: impl FnOnce(&Value) -> Result<()>,
-    ) -> std::result::Result<Reply, Failure> {
-        self.send_described(
-            &RequestSpec {
-                service,
-                purpose,
-                description: purpose,
-                endpoint,
-                identity,
-                resend: Resend::AskUser,
-            },
-            send,
-            validate,
-        )
     }
     fn send_described(
         &self,
@@ -741,22 +645,18 @@ impl Ledger {
         receipt.http_status = Some(response.status);
         let value = serde_json::from_slice::<Value>(&response.body);
         if (400..500).contains(&response.status) {
-            let rejection = classify_rejection(response.status, value.as_ref().ok());
+            let unsupported = rejects_response_format(response.status, value.as_ref().ok());
+            let message = rejection_message(response.status);
             receipt.state = State::Rejected;
-            receipt.unsupported_response_format = rejection.unsupported_response_format;
-            receipt.message = Some(rejection.message.clone());
+            receipt.unsupported_response_format = unsupported;
+            receipt.message = Some(message.clone());
             // Error bodies may echo credentials. Keep status, not the untrusted body.
             self.save(&receipt)?;
             // Each caller bounds its retry loop; a later task continuation may retry
             // a confirmed rejection without requiring uncertain-request authorization.
             return Err(Failure {
-                unsupported_response_format: rejection.unsupported_response_format,
-                kind: rejection.kind,
-                ..Failure::with_status(
-                    Some(response.status),
-                    rejection.retryable,
-                    rejection.message,
-                )
+                unsupported_response_format: unsupported,
+                ..Failure::with_status(Some(response.status), response.status == 429, message)
             });
         }
         if !(200..300).contains(&response.status) {
@@ -876,6 +776,75 @@ pub(crate) fn receive(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    impl Ledger {
+        fn send(
+            &self,
+            service: &str,
+            purpose: &str,
+            endpoint: &str,
+            identity: &Value,
+            send: impl FnOnce() -> std::result::Result<HttpResponse, NetworkFailure>,
+            validate: impl FnOnce(&Value) -> Result<()>,
+        ) -> std::result::Result<Reply, Failure> {
+            self.send_described(
+                &RequestSpec {
+                    service,
+                    purpose,
+                    description: purpose,
+                    endpoint,
+                    identity,
+                    resend: Resend::AskUser,
+                },
+                send,
+                validate,
+            )
+        }
+    }
+
+    #[test]
+    fn a_request_left_sending_by_a_dead_process_is_never_resent_silently() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = serde_json::json!({"text":"paid"});
+        let first = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        // The process died inside `send`: the receipt says Sending and nothing else.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = first.send(
+                "llm",
+                "summary",
+                "https://example.test",
+                &payload,
+                || panic!("the process died here"),
+                |_| Ok(()),
+            );
+        }));
+        assert_eq!(receipts(dir.path()).unwrap()[0].state, State::Sending);
+        let restarted = Ledger::new(dir.path(), None, &Default::default()).unwrap();
+        let blocked = restarted
+            .send(
+                "llm",
+                "summary",
+                "https://example.test",
+                &payload,
+                || panic!("an unconfirmed paid request was sent again"),
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(blocked.uncertain());
+        // Later requests wait for that decision too.
+        let later = restarted
+            .send(
+                "llm",
+                "summary",
+                "https://example.test",
+                &serde_json::json!({"text":"next"}),
+                || panic!("a later request went out past an unconfirmed one"),
+                |_| Ok(()),
+            )
+            .unwrap_err();
+        assert!(later.uncertain());
+        assert_eq!(receipts(dir.path()).unwrap().len(), 1);
+    }
 
     #[test]
     fn response_format_fallback_requires_explicit_provider_evidence() {

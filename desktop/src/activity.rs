@@ -1,5 +1,9 @@
-//! Progress samples, independent of rendering. ETA excludes cached work and resets on retries.
-use course2md::progress::{Phase, Stage, Unit};
+//! What a running job's events say, independent of rendering: the one fold over engine
+//! events, for live streams and for a task's saved `events.jsonl` alike. ETA excludes
+//! cached work and resets on retries.
+use course2md::progress::{BlockReason, Done, Event, Phase, Stage, StageStatus, Unit};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 /// One wave of Apple download ranges: sixteen 8 MiB ranges in flight.
@@ -10,6 +14,8 @@ const QUIET_AFTER: Duration = Duration::from_secs(30);
 /// a landed range (`HuggingFaceDownloader.downloadStallTimeoutSeconds`).
 const BLOCK_STALL_AFTER: Duration = Duration::from_secs(300);
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(from = "SavedStage")]
 pub struct Activity {
     pub current: u64,
     pub total: u64,
@@ -32,6 +38,206 @@ pub struct Activity {
     baseline: u64,
     updated: Instant,
 }
+/// A stage as task records before `events.jsonl` saved it.
+#[derive(Deserialize)]
+struct SavedStage {
+    status: StageStatus,
+    current: u64,
+    total: u64,
+    #[serde(default)]
+    detail: Option<String>,
+}
+
+impl From<SavedStage> for Activity {
+    fn from(saved: SavedStage) -> Self {
+        let mut activity = Self::new();
+        activity.update(saved.current, saved.total, saved.detail);
+        activity.done = saved.status == StageStatus::Done;
+        activity
+    }
+}
+
+/// A request that stopped a job, as the task card explains it.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BlockedRequest {
+    pub reason: BlockReason,
+    pub request_id: Option<String>,
+    pub purpose: Option<String>,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub kind: Option<course2md::artifact::FailureKind>,
+    pub message: String,
+}
+
+impl BlockedRequest {
+    pub fn is_uncertain(&self) -> bool {
+        self.reason == BlockReason::Uncertain
+    }
+}
+
+/// Log lines a job keeps in memory.
+const LOG_LINES: usize = 200;
+
+/// Everything a job's events say. Only `error` is part of a saved task record, because
+/// the app raises errors of its own: the rest comes back from `events.jsonl`.
+/// Records written before that file existed carry these fields, so they still read.
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct JobEvents {
+    #[serde(default, skip_serializing)]
+    pub stages: BTreeMap<Stage, Activity>,
+    #[serde(default, skip_serializing)]
+    pub logs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub blocked: Vec<BlockedRequest>,
+    #[serde(default, skip_serializing)]
+    pub outcomes: Option<course2md::artifact::Outcomes>,
+    /// The result of the run in progress, until the job exits.
+    #[serde(skip)]
+    pub done: Option<Done>,
+    /// The saved events have been read back; a disconnected library's have not.
+    #[serde(skip)]
+    pub loaded: bool,
+    #[serde(skip)]
+    pub(crate) tokens: (u64, u64),
+}
+
+/// A record's identity is what it saves: the rest is derived.
+impl PartialEq for JobEvents {
+    fn eq(&self, other: &Self) -> bool {
+        self.error == other.error
+    }
+}
+
+impl JobEvents {
+    /// Applies one event. Returns whether it changes what a person sees right away;
+    /// logs and steady progress can wait for the next repaint.
+    pub fn apply(&mut self, event: &Event) -> bool {
+        match event {
+            Event::Log { message, .. } => {
+                self.logs.push(message.clone());
+                if self.logs.len() > LOG_LINES {
+                    self.logs.drain(..self.logs.len() - LOG_LINES);
+                }
+                false
+            }
+            Event::Stage { stage, status } => {
+                if matches!(stage, Stage::ScenesScan | Stage::ScenesExtract) {
+                    // Old workers combined scanning and extraction under this
+                    // key. Do not retain its completed counter on continuation.
+                    self.stages.remove(&Stage::Scenes);
+                    if *stage == Stage::ScenesScan && *status == StageStatus::Start {
+                        self.stages.remove(&Stage::ScenesExtract);
+                    }
+                }
+                match status {
+                    StageStatus::Start => {
+                        self.stages.insert(stage.clone(), Activity::new());
+                    }
+                    StageStatus::Done => self.stage(stage).finish(),
+                }
+                true
+            }
+            Event::Progress {
+                stage,
+                current,
+                total,
+                message,
+                phase,
+                unit,
+            } => {
+                let activity = self.stage(stage);
+                activity.update(*current, *total, message.clone());
+                activity.set_phase(*phase);
+                activity.unit = *unit;
+                false
+            }
+            Event::Tokens {
+                stage,
+                prompt,
+                completion,
+            } => {
+                // The engine reports running totals for the whole task; each
+                // stage keeps the part that arrived while it ran.
+                let (sent, received) = std::mem::replace(&mut self.tokens, (*prompt, *completion));
+                self.stage(stage).note_tokens(
+                    prompt.saturating_sub(sent),
+                    completion.saturating_sub(received),
+                );
+                false
+            }
+            Event::Workers { stage, workers } => {
+                self.stage(stage).workers = *workers;
+                false
+            }
+            Event::Error { message, .. } => {
+                self.error = Some(message.clone());
+                true
+            }
+            Event::Blocked {
+                reason,
+                request_id,
+                purpose,
+                description,
+                kind,
+                message,
+            } => {
+                let blocked = BlockedRequest {
+                    reason: *reason,
+                    request_id: request_id.clone(),
+                    purpose: purpose.clone(),
+                    description: description.clone().unwrap_or_default(),
+                    kind: Some(*kind),
+                    message: message.clone(),
+                };
+                if !self.blocked.contains(&blocked) {
+                    self.blocked.push(blocked);
+                }
+                self.error = Some(message.clone());
+                true
+            }
+            Event::Done(done) => {
+                if done.outcomes.is_some() {
+                    self.outcomes.clone_from(&done.outcomes);
+                }
+                self.done = Some((**done).clone());
+                true
+            }
+            Event::ModelReady { .. } => true,
+        }
+    }
+
+    fn stage(&mut self, stage: &Stage) -> &mut Activity {
+        self.stages
+            .entry(stage.clone())
+            .or_insert_with(Activity::new)
+    }
+
+    /// A new run of the same job: finished stages stay, its result and counters do not.
+    pub fn begin_run(&mut self) {
+        self.done = None;
+        self.error = None;
+        self.tokens = (0, 0);
+    }
+
+    /// Applies a saved stream. A line this build cannot read is skipped: this is a view
+    /// of the job, and the state that decides anything is saved elsewhere.
+    pub fn replay(&mut self, bytes: &[u8]) {
+        for line in bytes.split(|byte| *byte == b'\n') {
+            if let Ok(event) = serde_json::from_slice::<Event>(line) {
+                self.apply(&event);
+            }
+        }
+        self.done = None;
+        // How long a stage ran in an earlier session is not known.
+        for stage in self.stages.values_mut().filter(|stage| stage.done) {
+            stage.finished = Some(stage.created);
+        }
+    }
+}
+
 impl Activity {
     pub fn new() -> Self {
         let now = Instant::now();
@@ -1061,15 +1267,78 @@ mod tests {
                 .replace('\u{a0}', " "),
             "已完成"
         );
-        let mut persisted = crate::workspace::StageRecord {
-            status: course2md::progress::StageStatus::Done,
-            current: 18,
-            total: 18,
-            detail: Some("old sample".into()),
-        };
-        persisted.begin();
-        assert_eq!((persisted.current, persisted.total), (0, 0));
-        assert!(persisted.detail.is_none());
+    }
+
+    #[test]
+    fn a_replayed_stream_says_what_the_live_one_said() {
+        let stage = Stage::Transcribe;
+        let stream = [
+            Event::Stage {
+                stage: stage.clone(),
+                status: StageStatus::Start,
+            },
+            Event::Progress {
+                stage: stage.clone(),
+                current: 3,
+                total: 9,
+                message: None,
+                phase: None,
+                unit: None,
+            },
+            Event::Log {
+                level: course2md::progress::LogLevel::Info,
+                message: "working".into(),
+            },
+            Event::Blocked {
+                reason: BlockReason::Uncertain,
+                request_id: Some("r.1".into()),
+                purpose: Some("proofreading".into()),
+                description: None,
+                kind: course2md::artifact::FailureKind::Uncertain,
+                message: "unconfirmed".into(),
+            },
+            Event::Stage {
+                stage: Stage::Llm,
+                status: StageStatus::Done,
+            },
+        ];
+        let mut live = JobEvents::default();
+        let mut saved = Vec::new();
+        for event in &stream {
+            live.apply(event);
+            saved.extend(serde_json::to_vec(event).unwrap());
+            saved.push(b'\n');
+        }
+        saved.extend(b"{\"type\":\"not_an_event\"}\ntorn line");
+        let mut replayed = JobEvents::default();
+        replayed.replay(&saved);
+        assert_eq!(replayed.stages[&stage].current, 3);
+        assert_eq!(replayed.stages[&stage].total, 9);
+        assert!(replayed.stages[&Stage::Llm].done);
+        assert_eq!(replayed.logs, live.logs);
+        assert_eq!(replayed.blocked, live.blocked);
+        assert_eq!(replayed.error, live.error);
+    }
+
+    #[test]
+    fn a_new_stage_start_clears_a_retained_counter_and_old_records_still_read() {
+        let saved: JobEvents = serde_json::from_value(serde_json::json!({
+            "stages": {"transcribe": {"status": "done", "current": 18, "total": 18, "detail": "old"}},
+            "logs": ["old line"],
+            "error": "kept",
+        }))
+        .unwrap();
+        assert!(saved.stages[&Stage::Transcribe].done);
+        assert_eq!(saved.logs, ["old line"]);
+        let mut continued = saved.clone();
+        continued.apply(&Event::Stage {
+            stage: Stage::Transcribe,
+            status: StageStatus::Start,
+        });
+        let stage = &continued.stages[&Stage::Transcribe];
+        assert_eq!((stage.current, stage.total, stage.done), (0, 0, false));
+        let written = serde_json::to_value(&saved).unwrap();
+        assert_eq!(written, serde_json::json!({"error": "kept"}));
     }
     #[test]
     fn saved_component_failures_have_one_label_and_no_english_diagnostics() {
