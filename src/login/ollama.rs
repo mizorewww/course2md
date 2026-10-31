@@ -2,6 +2,7 @@
 //! Ollama 的 OpenAI 兼容端点无需凭据（空 api_key 不发 Authorization 头，
 //! 见 llm.rs request_chat_once），"登录"实为服务发现 + 配置。
 
+use crate::{println_tr, tr};
 use anyhow::{Context, Result, bail, ensure};
 
 use crate::llm::LlmProvider;
@@ -40,11 +41,11 @@ pub(super) fn models(host: &str) -> Result<Vec<String>> {
                 "无法连接 Ollama 服务 {host}；请确认已安装并正在运行（ollama serve） / Cannot reach the Ollama service at {host}; make sure it is installed and running (ollama serve)"
             )
         })?;
-    let value: serde_json::Value = response.body_mut().read_json().context(crate::tr!(
+    let value: serde_json::Value = response.body_mut().read_json().context(tr!(
         "Ollama 响应无法解析 / Cannot parse the Ollama response"
     ))?;
     let Some(list) = value["models"].as_array() else {
-        bail!(crate::tr!(
+        bail!(tr!(
             "Ollama 响应缺少模型列表 / Ollama response is missing the model list"
         ));
     };
@@ -68,7 +69,7 @@ pub(super) fn login() -> Result<()> {
     let names = models(&host)?;
     ensure!(
         !names.is_empty(),
-        crate::tr!(
+        tr!(
             "Ollama 中没有已下载的模型，请先运行 ollama pull <模型名> / No downloaded models found; run ollama pull <model> first"
         )
     );
@@ -76,21 +77,15 @@ pub(super) fn login() -> Result<()> {
     let model = if names.len() == 1 {
         names.into_iter().next().unwrap_or_default()
     } else if interactive {
-        let pick = dialoguer::Select::new()
-            .with_prompt(crate::tr!(
-                "选择用于校对的模型 / Choose a model for proofreading"
-            ))
-            .items(&names)
-            .default(0)
-            .interact_opt()?
-            .ok_or_else(|| {
-                anyhow::anyhow!(crate::tr!(
-                    "已取消登录，未保存配置。 / Login cancelled; no configuration saved."
-                ))
-            })?;
+        let pick = crate::runtime::choose(
+            tr!("选择用于校对的模型 / Choose a model for proofreading"),
+            &names,
+            0,
+            tr!("已取消登录，未保存配置。 / Login cancelled; no configuration saved."),
+        )?;
         names.into_iter().nth(pick).unwrap_or_default()
     } else {
-        bail!(crate::tr!(
+        bail!(tr!(
             "Ollama 有多个模型可用，请在终端中运行 course2md --login ollama 以选择 / Multiple Ollama models available; run course2md --login ollama in a terminal to choose"
         ));
     };
@@ -103,7 +98,7 @@ pub(super) fn login() -> Result<()> {
     if cfg.llm.vision {
         // 本地模型多数不支持图片输入；登录时回落纯文本，需要时可在 llm setup 重开
         cfg.llm.vision = false;
-        crate::println_tr!(
+        println_tr!(
             "已关闭截图辅助校对（本地模型通常不支持图片输入）。/ Image-assisted proofreading disabled (local models usually do not accept images)."
         );
     }
@@ -111,14 +106,14 @@ pub(super) fn login() -> Result<()> {
     crate::llm::validate(&cfg.llm)?;
     let path = crate::settings::save(&cfg)?;
     let saved = path.display().to_string();
-    crate::println_tr!(
+    println_tr!(
         "已登录 Ollama（{}），模型 {}，配置已保存并启用：{}",
         host,
         model,
         saved
     );
     match crate::llm::test_connection(&cfg.llm) {
-        Ok(()) => crate::println_tr!("连接测试通过 / Connection test passed."),
+        Ok(()) => println_tr!("连接测试通过 / Connection test passed."),
         Err(e) => bail!(
             "配置已保存，但连接测试失败；请确认模型 {model} 可正常对话 / Settings saved, but the connection test failed; make sure {model} can chat: {e:#}"
         ),
@@ -130,14 +125,14 @@ pub(super) fn login() -> Result<()> {
 pub(super) fn logout() -> Result<()> {
     let mut cfg = crate::settings::load()?;
     if cfg.llm.provider != LlmProvider::Ollama {
-        crate::println_tr!(
+        println_tr!(
             "当前 LLM 配置不是 Ollama，未做改动。/ The current LLM configuration is not Ollama; nothing changed."
         );
         return Ok(());
     }
     cfg.llm = crate::llm::LlmSettings::default();
     crate::settings::save(&cfg)?;
-    crate::println_tr!(
+    println_tr!(
         "已清除 Ollama 登录配置并关闭 AI 校对。/ Ollama login removed and AI proofreading disabled."
     );
     Ok(())

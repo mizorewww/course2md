@@ -1,3 +1,4 @@
+use crate::tr;
 use anyhow::{Context, Result as AnyhowResult};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -28,11 +29,11 @@ pub const DEFAULT_GPU_LAYERS: u32 = 99;
 /// 校验服务地址为完整的 HTTP(S) URL（llm base_url 与 asr_api 共用同一判定）。
 pub fn ensure_http_url(raw: &str) -> AnyhowResult<url::Url> {
     let url = url::Url::parse(raw.trim()).context(
-        crate::tr!("服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid service URL; use a complete HTTP(S) URL."),
+        tr!("服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid service URL; use a complete HTTP(S) URL."),
     )?;
     anyhow::ensure!(
         matches!(url.scheme(), "http" | "https") && url.host_str().is_some(),
-        crate::tr!(
+        tr!(
             "服务地址无效，请使用完整的 HTTP(S) URL。 / Invalid service URL; use a complete HTTP(S) URL."
         )
     );
@@ -70,7 +71,7 @@ pub fn asr_endpoint(api: &crate::settings::AsrApi) -> AnyhowResult<String> {
             suffix,
             &["/audio/transcriptions", "/chat/completions"]
         ),
-        crate::tr!("服务地址与所选服务类型不一致 / Service endpoint and protocol do not match")
+        tr!("服务地址与所选服务类型不一致 / Service endpoint and protocol do not match")
     );
     Ok(append_endpoint_suffix(base, suffix))
 }
@@ -118,11 +119,11 @@ impl AsrProvider {
     /// 面向用户的识别方式名称（中文 / English）。
     pub fn label(&self) -> (&'static str, &'static str) {
         match self {
-            Self::Coreml => (crate::tr!("Apple 芯片本机识别"), "Apple silicon on-device"),
-            Self::Gpu => (crate::tr!("显卡加速"), "GPU"),
-            Self::Cpu => (crate::tr!("CPU（较慢）"), "CPU (slower)"),
-            Self::Npu => (crate::tr!("Intel NPU 加速"), "Intel NPU"),
-            Self::Api => (crate::tr!("云端语音识别"), "Cloud speech service"),
+            Self::Coreml => (tr!("Apple 芯片本机识别"), "Apple silicon on-device"),
+            Self::Gpu => (tr!("显卡加速"), "GPU"),
+            Self::Cpu => (tr!("CPU（较慢）"), "CPU (slower)"),
+            Self::Npu => (tr!("Intel NPU 加速"), "Intel NPU"),
+            Self::Api => (tr!("云端语音识别"), "Cloud speech service"),
         }
     }
 }
@@ -256,15 +257,12 @@ pub fn unsupported_model_error(provider: AsrProvider, raw: &str) -> anyhow::Erro
         .collect::<Vec<_>>()
         .join(", ");
     if provider == AsrProvider::Npu {
-        available.push_str(crate::tr!("，或 Hugging Face 仓库名（如 org/model）"));
+        available.push_str(tr!("，或 Hugging Face 仓库名（如 org/model）"));
     }
     if provider == AsrProvider::Npu && retired_npu_model(raw) {
-        anyhow::anyhow!(crate::tr!(
-            "Intel NPU 不再支持 Qwen3 模型。可用：{}",
-            available
-        ))
+        anyhow::anyhow!(tr!("Intel NPU 不再支持 Qwen3 模型。可用：{}", available))
     } else {
-        anyhow::anyhow!(crate::tr!(
+        anyhow::anyhow!(tr!(
             "识别方式 {} 不支持模型「{}」。可用：{}",
             provider,
             raw.trim(),
@@ -303,7 +301,7 @@ pub fn migrate_retired_npu_model(
 }
 
 pub fn retired_npu_model_notice() -> &'static str {
-    crate::tr!("Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo")
+    tr!("Intel NPU 不再提供 Qwen3，已改用 Whisper large-v3-turbo")
 }
 
 /// Prints [`retired_npu_model_notice`] to stderr, once per process however
@@ -506,16 +504,9 @@ fn parse_coord(s: &str) -> anyhow::Result<f64> {
     let percent: f64 = p.trim().parse()?;
     anyhow::ensure!(
         (0.0..=100.0).contains(&percent),
-        crate::tr!("ROI 百分比必须在 0–100 / ROI percentages must be between 0 and 100")
+        tr!("ROI 百分比必须在 0–100 / ROI percentages must be between 0 and 100")
     );
-    let v = percent / 100.0;
-    anyhow::ensure!(
-        v.is_finite() && v >= 0.0,
-        crate::tr!(
-            "ROI 坐标必须为非负有限数值 / ROI coordinates must be finite, non-negative numbers"
-        )
-    );
-    Ok(v)
+    Ok(percent / 100.0)
 }
 
 impl PipelineConfig {
@@ -617,18 +608,18 @@ impl PipelineConfig {
             ensure_http_url(&asr_endpoint(&self.asr_api)?)?;
             anyhow::ensure!(
                 !self.asr_api.model.trim().is_empty(),
-                crate::tr!("请输入语音服务提供的模型 ID / Speech model ID is required")
+                tr!("请输入语音服务提供的模型 ID / Speech model ID is required")
             );
             let has_key = !self.asr_api.api_key.trim().is_empty()
                 || (allow_environment && asr_api_key_from_env().is_some());
             if require_key && !has_key {
                 // 桌面任务不读环境变量，只有命令行才提示它
                 anyhow::bail!(if allow_environment {
-                    crate::tr!(
+                    tr!(
                         "云端语音识别需要 API Key：用 --asr-api-key 或环境变量 COURSE2MD_ASR_API_KEY 提供 / Cloud transcription requires an API key: pass --asr-api-key or set COURSE2MD_ASR_API_KEY"
                     )
                 } else {
-                    crate::tr!(
+                    tr!(
                         "云端语音识别需要 API Key，请在服务设置中填写 / Cloud transcription requires an API key; add it in service settings"
                     )
                 });
@@ -865,20 +856,6 @@ pub fn platform_from(source: &str, extractor: &str) -> String {
     }
 }
 
-pub fn infer_slug(source: &str) -> String {
-    let p = Path::new(source);
-    if p.is_file() {
-        return sanitize_component(p.file_stem().and_then(|s| s.to_str()).unwrap_or("local"));
-    }
-    if let Some(id) = bilibili_bvid(source) {
-        return id;
-    }
-    if let Some(id) = youtube_id(source) {
-        return id;
-    }
-    sanitize_component(source)
-}
-
 /// B 站链接 `/video/BVxxxxxxxxxx` 路径段中的 BV 号（"BV" + 10 位）。
 pub fn bilibili_bvid(source: &str) -> Option<String> {
     let url = url::Url::parse(source)
@@ -893,27 +870,6 @@ pub fn bilibili_bvid(source: &str) -> Option<String> {
             && segment.chars().all(|c| c.is_ascii_alphanumeric()))
         .then(|| segment.to_string())
     })
-}
-
-fn youtube_id(s: &str) -> Option<String> {
-    let url = url::Url::parse(s)
-        .or_else(|_| url::Url::parse(&format!("https://{}", s.trim())))
-        .ok()?;
-    if known_video_site(url.as_str()) != Some("youtube") {
-        return None;
-    }
-    let id = if url.host_str()?.eq_ignore_ascii_case("youtu.be") {
-        url.path_segments()?.next()?.to_owned()
-    } else {
-        url.query_pairs()
-            .find(|(key, _)| key == "v")
-            .map(|(_, value)| value.into_owned())?
-    };
-    (id.len() >= 6
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-    .then_some(id)
 }
 
 /// 路径组件的字符数上限（净化后的标题/平台名）：防止超长标题撑出超过
@@ -1061,15 +1017,6 @@ mod tests {
             "https://www.bilibili.com/video/BV1pb8o6yE8f"
         ));
         assert!(looks_like_source("https://youtu.be/dQw4w9WgXcQ"));
-    }
-
-    #[test]
-    fn slug_from_source() {
-        assert_eq!(
-            infer_slug("https://www.bilibili.com/video/BV1pb8o6yE8f/?spm=1"),
-            "BV1pb8o6yE8f"
-        );
-        assert_eq!(infer_slug("https://youtu.be/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
     }
 
     #[test]

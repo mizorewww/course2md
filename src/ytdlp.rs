@@ -1,16 +1,7 @@
 //! yt-dlp 二进制定位：`COURSE2MD_YTDLP` 覆盖 → 可执行文件旁（随包自带）→
 //! PATH → 常见安装目录兜底。CLI（fetch/pipeline/doctor）与桌面端（环境检测、
 //! 在线读取）共用同一份清单，保证「检测到可用」与「实际能启动」不互相矛盾。
-//!
-//! 各档位的来由：
-//! - `COURSE2MD_YTDLP`：显式指向某个二进制（与 COURSE2MD_BIN 同一约定），
-//!   打包测试、临时换版本时用；
-//! - 可执行文件同目录：install.sh 与桌面安装包把 yt-dlp 放在 course2md 旁；
-//!   `.app` 布局额外检查 `../Resources`（codesign 把 Contents/MacOS 当代码区，
-//!   数据文件属于资源区）；Homebrew/pipx 装的 yt-dlp 也常与 course2md 同在 bin/；
-//! - PATH：终端安装的标准位置；桌面端传入 tool_path() 的扩展版本；
-//! - 常见安装目录兜底：Finder/桌面会话启动的进程拿不到登录 shell 的 PATH，
-//!   mise/asdf/conda/Nix/Scoop/Python user-base 等位置只能逐个枚举。
+//! 常见安装目录是因为 Finder/桌面会话启动的进程拿不到登录 shell 的 PATH。
 
 use crate::tools;
 use std::ffi::OsStr;

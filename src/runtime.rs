@@ -4,9 +4,12 @@
 //! - `wait_ready`：健康轮询期间监视子进程，秒退立即报错而不是等满超时
 //! - `retry_backoff` / `interruptible_sleep`：可取消的重试退避
 
+use crate::tr;
 use anyhow::{Context, Result};
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(windows)]
+use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -40,7 +43,7 @@ impl ManagedChild {
     pub fn spawn(name: &'static str, cmd: &mut Command) -> Result<Self> {
         let child = cmd
             .spawn()
-            .with_context(|| crate::tr!("无法启动 {} / Could not start {}", name, name))?;
+            .with_context(|| tr!("无法启动 {} / Could not start {}", name, name))?;
         Ok(Self { child, name })
     }
 
@@ -77,14 +80,6 @@ impl ManagedChild {
             );
             std::thread::sleep(WAIT_POLL_INTERVAL);
         }
-    }
-
-    pub fn kill(&mut self) {
-        let _ = self.child.kill();
-    }
-
-    pub fn wait(&mut self) -> std::io::Result<ExitStatus> {
-        self.child.wait()
     }
 }
 
@@ -288,18 +283,13 @@ pub fn wait_ready(
     }
 }
 
-/// 进程级抖动序列：与纳秒异或打散，避免并发请求同步重试（不引入 rand）。
-static JITTER_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// 第 `attempt` 次失败后的退避时长：1s、2s、4s… 指数增长 + 0~500ms 抖动。
+/// 第 `attempt` 次失败后的退避时长：1s、2s、4s… 指数增长 + 0~500ms 抖动，
+/// 避免并发请求同步重试。
 pub fn retry_backoff(attempt: u32) -> Duration {
     let base = 1_u64 << attempt.saturating_sub(1).min(6);
-    let seq = JITTER_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| u64::from(d.subsec_nanos()))
-        .unwrap_or(0);
-    let jitter_ns = (nanos ^ seq.wrapping_mul(0x9E37_79B9_7F4A_7C15)) % 500_000_000;
+    let mut random = [0; 4];
+    let _ = getrandom::fill(&mut random);
+    let jitter_ns = u64::from(u32::from_le_bytes(random)) % 500_000_000;
     Duration::from_nanos(base * 1_000_000_000 + jitter_ns)
 }
 
@@ -367,6 +357,21 @@ pub(crate) fn http_agent_keeping_errors(timeout: Duration) -> ureq::Agent {
     agent.http_status_as_error(false).build().new_agent()
 }
 
+/// A menu that Esc cancels with `cancelled` as the error, not accepting the default.
+pub(crate) fn choose(
+    prompt: &str,
+    items: &[impl ToString],
+    default: usize,
+    cancelled: &str,
+) -> Result<usize> {
+    dialoguer::Select::new()
+        .with_prompt(prompt)
+        .items(items.iter().map(ToString::to_string))
+        .default(default)
+        .interact_opt()?
+        .ok_or_else(|| anyhow::anyhow!("{cancelled}"))
+}
+
 /// Whether a person is at both ends of this terminal, so a prompt can be answered.
 pub(crate) fn interactive() -> bool {
     use std::io::IsTerminal as _;
@@ -428,13 +433,6 @@ pub fn system32_program(name: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
-/// 在 PATH 上查找可执行文件。
-/// 用 `which` crate 而非手写 PATH 遍历：正确处理 Windows PATHEXT
-/// （PATHEXT 含 `.bat`/`.cmd` 等）。
-pub fn which(cmd: &str) -> Option<PathBuf> {
-    which::which(cmd).ok()
-}
-
 /// Own an OS lock separately from the lifetime of duplicated file descriptors.
 pub struct FileLock {
     file: std::fs::File,
@@ -463,7 +461,7 @@ fn open_lock_file(path: &Path) -> Result<std::fs::File> {
 pub fn lock_file(path: &Path) -> Result<FileLock> {
     let file = open_lock_file(path)?;
     file.try_lock().with_context(|| {
-        crate::tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
+        tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
     })?;
     Ok(FileLock { file })
 }
@@ -481,7 +479,7 @@ pub fn lock_file_within(path: &Path, timeout: Duration) -> Result<FileLock> {
             }
             Err(error) => {
                 return Err(error).with_context(|| {
-                    crate::tr!(
+                    tr!(
                         "等待文件锁 {} 超时 / Timed out waiting for the file lock {}",
                         path.display(),
                         path.display()
@@ -501,24 +499,13 @@ pub fn free_port() -> Result<u16> {
 
 /// 临时工作目录（chunk / worker 脚本等中间产物）：创建失败立即报错，
 /// Drop 时尽力清理整个目录。目录名带 tag 与随机后缀，避免并发实例冲突。
-pub struct TempWorkDir {
-    dir: tempfile::TempDir,
-}
-
-impl TempWorkDir {
-    pub fn new(tag: &str) -> Result<Self> {
-        let dir = tempfile::Builder::new()
-            .prefix(&format!("course2md-{tag}-"))
-            .tempdir()
-            .context(crate::tr!(
-                "无法创建临时工作目录 / Could not create a temporary working directory"
-            ))?;
-        Ok(Self { dir })
-    }
-
-    pub fn path(&self) -> &Path {
-        self.dir.path()
-    }
+pub(crate) fn temp_work_dir(tag: &str) -> Result<tempfile::TempDir> {
+    tempfile::Builder::new()
+        .prefix(&format!("course2md-{tag}-"))
+        .tempdir()
+        .context(tr!(
+            "无法创建临时工作目录 / Could not create a temporary working directory"
+        ))
 }
 
 /// Runs `work` for every item on a bounded number of OS threads, preserving

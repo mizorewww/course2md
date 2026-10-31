@@ -9,6 +9,7 @@ use crate::dispatch::TaskControl;
 use crate::progress::Stage;
 use crate::settings::{AsrApi, AsrApiMode};
 use crate::timeline::TranscriptEvent;
+use crate::tr;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
@@ -79,7 +80,7 @@ impl Backend {
                 cfg.asr_model.as_deref().filter(|s| !s.trim().is_empty()),
             )?),
             #[cfg(not(apple_native))]
-            AsrProvider::Coreml => anyhow::bail!(crate::tr!(
+            AsrProvider::Coreml => anyhow::bail!(tr!(
                 "此版本不支持 Apple 识别，请改用 GPU 或 CPU 识别 / This build lacks Apple transcription; use GPU or CPU transcription."
             )),
             AsrProvider::Gpu | AsrProvider::Cpu => {
@@ -153,11 +154,11 @@ pub async fn run(
         Ok(events)
     })
     .await
-    .context(crate::tr!(
+    .context(tr!(
         "语音识别任务未能完成 / Speech recognition task did not complete"
     ))?;
     if cfg.provider == AsrProvider::Coreml {
-        return events.context(crate::tr!(
+        return events.context(tr!(
             "已选的 Apple 识别方式未完成；任务参数和进度已保留 / Selected Apple transcription failed; task settings retained"
         ));
     }
@@ -187,7 +188,7 @@ fn transcribe_all(
         secs = format_args!("{:.1}", started.elapsed().as_secs_f64()),
         "asr ready"
     );
-    let tmp = crate::runtime::TempWorkDir::new("asr")?;
+    let tmp = crate::runtime::temp_work_dir("asr")?;
     let pending: Vec<(usize, Seg)> = segs
         .iter()
         .copied()
@@ -307,9 +308,7 @@ impl LlamaServer {
     fn start(self, control: &TaskControl) -> Result<LlamaEngine> {
         let bin = crate::tools::locate("llama-server")
             .map(|tool| tool.path)
-            .context(crate::tr!(
-                "未找到 llama-server。请安装 llama.cpp 并加入 PATH"
-            ))?;
+            .context(tr!("未找到 llama-server。请安装 llama.cpp 并加入 PATH"))?;
         if !self.cpu_only() {
             let devices = gpu_devices(&bin)?;
             anyhow::ensure!(
@@ -322,7 +321,7 @@ impl LlamaServer {
         // Probed each start: a failed probe (an old build, a timeout) means only -ngl.
         let caps =
             probe_help_text(&bin).map_or_else(Default::default, |help| caps_from_help(&help));
-        let too_old = crate::tr!(
+        let too_old = tr!(
             "当前 llama.cpp 版本过旧，无法只用 CPU 识别，请升级后重试 / This llama.cpp is too old to transcribe on CPU only; upgrade and retry"
         );
         if self.cpu_only() && !(caps.device && caps.no_op_offload && caps.no_mmproj_offload) {
@@ -331,7 +330,7 @@ impl LlamaServer {
         } else if !self.cpu_only() && !self.mmproj_offload {
             anyhow::ensure!(
                 caps.no_mmproj_offload,
-                crate::tr!(
+                tr!(
                     "当前 llama.cpp 版本过旧，不支持此显卡设置，请升级后重试 / This llama.cpp is too old for this GPU setting; upgrade and retry"
                 )
             );
@@ -367,7 +366,7 @@ impl LlamaServer {
             }
             return Err(stderr.attach(
                 e,
-                crate::tr!("无法启动识别服务 / Could not start the speech recognition service"),
+                tr!("无法启动识别服务 / Could not start the speech recognition service"),
             ));
         }
         crate::progress::done(Stage::ModelLoad);
@@ -407,13 +406,13 @@ impl Transcribe for LlamaEngine {
                 ]
             }]
         });
-        let reply = post_local_json(&self.client, &self.url, &body, &self.control).context(
-            crate::tr!("本地语音识别请求失败 / Local transcription request failed"),
-        )?;
+        let reply = post_local_json(&self.client, &self.url, &body, &self.control).context(tr!(
+            "本地语音识别请求失败 / Local transcription request failed"
+        ))?;
         let choice = &reply["choices"][0];
         anyhow::ensure!(
             !choice.is_null(),
-            crate::tr!(
+            tr!(
                 "本机识别服务返回的内容无法读取 / The local speech service response could not be read"
             )
         );
@@ -426,10 +425,7 @@ impl Transcribe for LlamaEngine {
     /// 转写中途失败大概率是 server 侧问题，附上 stderr 与启动参数便于定位。
     fn explain(&self, error: anyhow::Error) -> anyhow::Error {
         self.stderr
-            .attach(
-                error,
-                crate::tr!("识别服务错误详情 / llama-server error details"),
-            )
+            .attach(error, tr!("识别服务错误详情 / llama-server error details"))
             .context(format!(
                 "llama-server 启动参数 / arguments: {}",
                 self.args.join(" ")
@@ -455,7 +451,7 @@ fn post_local_json(
             Ok(response) => Err(Failure {
                 status: Some(response.status),
                 retryable: response.status == 429 || response.status >= 500,
-                ..Failure::local(crate::tr!(
+                ..Failure::local(tr!(
                     "本机识别请求失败（HTTP {}） / Local transcription request failed (HTTP {})",
                     response.status,
                     response.status
@@ -502,7 +498,7 @@ impl CloudSpeech {
             crate::render::fmt_ts(seg.start),
             crate::render::fmt_ts(seg.end),
         );
-        let description = crate::tr!(
+        let description = tr!(
             "识别视频 {}–{} 的声音 / Transcribe video audio {}–{}",
             start,
             end,
@@ -535,11 +531,11 @@ impl CloudSpeech {
                 |value| {
                     anyhow::ensure!(
                         value.get("error").is_none_or(Value::is_null),
-                        crate::tr!("语音服务返回了错误 / The speech service returned an error")
+                        tr!("语音服务返回了错误 / The speech service returned an error")
                     );
                     anyhow::ensure!(
                         reply_text(self.mode, value).is_some(),
-                        crate::tr!("语音服务没有返回文字 / The speech service returned no text")
+                        tr!("语音服务没有返回文字 / The speech service returned no text")
                     );
                     Ok(())
                 },
@@ -579,7 +575,7 @@ impl Transcribe for CloudSpeech {
                 )
             }
         }
-        .with_context(|| crate::tr!("云端语音识别失败：{}", crate::render::fmt_ts(seg.start)))?;
+        .with_context(|| tr!("云端语音识别失败：{}", crate::render::fmt_ts(seg.start)))?;
         Ok(reply_text(self.mode, &reply)
             .unwrap_or_default()
             .trim()
@@ -636,7 +632,7 @@ pub fn gpu_devices(bin: &Path) -> Result<Vec<String>> {
     let mut cmd = Command::new(bin);
     cmd.arg("--list-devices");
     let out = crate::runtime::run_bounded("llama-server", &mut cmd, GPU_PROBE_TIMEOUT)
-        .with_context(|| crate::tr!("无法检测显卡：{}", GPU_SETUP_HINT))?;
+        .with_context(|| tr!("无法检测显卡：{}", GPU_SETUP_HINT))?;
     anyhow::ensure!(
         out.status.success(),
         "无法检测显卡，请更新 llama.cpp 和显卡驱动 / Could not detect the GPU; update llama.cpp and the GPU driver. {GPU_SETUP_HINT}"
@@ -653,7 +649,7 @@ pub fn is_gpu_device_id(id: &str) -> bool {
 }
 
 fn parse_gpu_devices(output: &str) -> Result<Vec<String>> {
-    let (_, rows) = output.split_once("Available devices:").context(crate::tr!(
+    let (_, rows) = output.split_once("Available devices:").context(tr!(
         "无法读取显卡列表，请更新 llama.cpp / Could not read the GPU list; update llama.cpp"
     ))?;
     Ok(rows
@@ -809,7 +805,7 @@ pub(crate) fn wav_duration(wav: &Path) -> Result<f64> {
     let duration = reader.duration() as f64 / reader.spec().sample_rate as f64;
     anyhow::ensure!(
         duration > 0.0,
-        crate::tr!("无法读取音频时长 / Could not read the audio duration")
+        tr!("无法读取音频时长 / Could not read the audio duration")
     );
     Ok(duration)
 }
@@ -990,7 +986,7 @@ fn cut_wav(src: &Path, start: f64, end: f64, dest: &Path) -> Result<()> {
         writer.finalize()?;
         Ok(())
     };
-    cut().context(crate::tr!("无法切分音频 / Could not split audio"))
+    cut().context(tr!("无法切分音频 / Could not split audio"))
 }
 
 #[cfg(test)]
@@ -1241,7 +1237,7 @@ mod cloud_tests {
     /// nothing for chunks already transcribed.
     #[test]
     fn cloud_chunks_are_transcribed_on_the_pool_and_checkpointed() {
-        if crate::runtime::which("ffmpeg").is_none() {
+        if which::which("ffmpeg").ok().is_none() {
             assert!(std::env::var_os("CI").is_none(), "ffmpeg is required in CI");
             return;
         }

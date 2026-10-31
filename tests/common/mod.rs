@@ -10,7 +10,7 @@ pub fn tools_available(names: &[&str]) -> bool {
     let missing: Vec<&str> = names
         .iter()
         .copied()
-        .filter(|name| course2md::runtime::which(name).is_none())
+        .filter(|name| which::which(name).ok().is_none())
         .collect();
     if missing.is_empty() {
         return true;

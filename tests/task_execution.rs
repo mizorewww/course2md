@@ -114,8 +114,8 @@ fn scanning_finishes_before_a_slow_screenshot_reports_progress_with_estimated_to
     if !common::tools_available(&["ffmpeg", "ffprobe", "python3"]) {
         return;
     }
-    let ffmpeg = course2md::runtime::which("ffmpeg").unwrap();
-    let python = course2md::runtime::which("python3").unwrap();
+    let ffmpeg = which::which("ffmpeg").ok().unwrap();
+    let python = which::which("python3").ok().unwrap();
     let root = tempfile::tempdir().unwrap();
     let video = root.path().join("flat-video.mp4");
     common::fixture_video(&video, 18);

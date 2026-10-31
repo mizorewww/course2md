@@ -6,6 +6,7 @@
 
 use crate::config::{AsrProvider, DEFAULT_ASR_MODEL, canonical_model};
 use crate::progress::Stage;
+use crate::{eprintln_tr, tr};
 use anyhow::{Context, Result};
 use std::ffi::{CStr, CString};
 use std::path::{Path, PathBuf};
@@ -72,7 +73,7 @@ extern "C" fn c2m_model_progress(
         static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
         let percent = (fraction * 100.0) as i64;
         if LAST.swap(percent, std::sync::atomic::Ordering::Relaxed) != percent {
-            crate::eprintln_tr!("模型 {}% · {}", percent, message);
+            eprintln_tr!("模型 {}% · {}", percent, message);
         }
     }
 }
@@ -104,7 +105,7 @@ extern "C" fn c2m_model_transfer_plan(plan: *const std::ffi::c_char) -> std::ffi
     bar.set_phase(
         crate::progress::Phase::Download,
         ledger.host(),
-        crate::tr!("Apple 识别模型 · {}", ledger.host()),
+        tr!("Apple 识别模型 · {}", ledger.host()),
     );
     *crate::runtime::lock_recover(&TRANSFER) = Some((ledger, bar));
     0
@@ -167,7 +168,7 @@ pub fn vad(wav: &Path, min_speech: f64, min_silence: f64) -> Result<Vec<(f64, f6
     // FFI 契约防御：rc==0 且 n>0 时指针必须非空
     anyhow::ensure!(
         n >= 0 && (n == 0 || (!starts.is_null() && !ends.is_null())),
-        crate::tr!("语音检测返回了空结果指针 / Speech detection returned null result pointers")
+        tr!("语音检测返回了空结果指针 / Speech detection returned null result pointers")
     );
     let mut out = Vec::with_capacity(n as usize);
     if n > 0 {
@@ -201,7 +202,7 @@ fn ensure_metallib() -> Result<()> {
         "源码构建：把 native/apple-asr/.build 下的 mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib 复制为 {}",
         dir.join("mlx.metallib").display()
     );
-    anyhow::bail!(crate::tr!(
+    anyhow::bail!(tr!(
         "缺少 Apple 识别所需的组件，请重新安装 course2md / Apple speech component missing; reinstall course2md"
     ))
 }
@@ -244,19 +245,15 @@ fn prompt_model_choice() -> Result<String> {
     let models = crate::config::local_models(AsrProvider::Coreml);
     let items: Vec<String> = models
         .iter()
-        .map(|m| format!("{}{}", m.label, crate::tr!(m.note)))
+        .map(|m| format!("{}{}", m.label, tr!(m.note)))
         .collect();
-    let choice = dialoguer::Select::new()
-        .with_prompt(crate::tr!("选择识别模型 / Choose a speech model"))
-        .items(&items)
-        .default(0)
-        .interact_opt()?;
-    match choice {
-        Some(index) => Ok(models[index].id.to_owned()),
-        None => anyhow::bail!(crate::tr!(
-            "已取消模型选择，未开始下载 / Model selection cancelled; download not started"
-        )),
-    }
+    let index = crate::runtime::choose(
+        tr!("选择识别模型 / Choose a speech model"),
+        &items,
+        0,
+        tr!("已取消模型选择，未开始下载 / Model selection cancelled; download not started"),
+    )?;
+    Ok(models[index].id.to_owned())
 }
 
 impl CoremlAsr {
@@ -275,9 +272,8 @@ impl CoremlAsr {
         ensure_metallib()?;
         tracing::info!(model, "loading cached Apple native ASR");
         crate::progress::start(Stage::ModelApple);
-        let asr = Self::load(model).context(crate::tr!(
-            "CoreML 模型加载失败 / CoreML model loading failed"
-        ))?;
+        let asr =
+            Self::load(model).context(tr!("CoreML 模型加载失败 / CoreML model loading failed"))?;
         crate::progress::done(Stage::ModelApple);
         Ok(asr)
     }

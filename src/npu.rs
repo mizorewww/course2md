@@ -146,7 +146,7 @@ impl Launcher {
 pub fn find_launcher(path: Option<&OsStr>) -> Option<Launcher> {
     let lookup = |name: &str| match path {
         Some(path) => which::which_in(name, Some(path), std::env::current_dir().ok()?).ok(),
-        None => crate::runtime::which(name),
+        None => which::which(name).ok(),
     };
     // The uv that Windows and Linux archives carry beside the engine comes first.
     if let Some(uv) = crate::tools::locate_in("uv", path) {
@@ -224,7 +224,7 @@ pub fn resolve_npu_model(raw: Option<&str>) -> String {
 
 /// 运行中的 NPU 伴随进程；Drop 时优雅关闭，失败才终止进程树。
 pub(crate) struct NpuWorker {
-    _tmp: crate::runtime::TempWorkDir,
+    _tmp: tempfile::TempDir,
     child: crate::runtime::ManagedChild,
     stderr: crate::runtime::StderrTail,
     base: String,
@@ -273,7 +273,7 @@ impl NpuWorker {
     /// `model_id` 须经 [`resolve_npu_model`] 解析：checkpoint 身份与 worker 加载是同一个模型。
     pub(crate) fn start(model_id: &str, control: &crate::dispatch::TaskControl) -> Result<Self> {
         let t0 = Instant::now();
-        let tmp = crate::runtime::TempWorkDir::new("npu")?;
+        let tmp = crate::runtime::temp_work_dir("npu")?;
         let script_path = tmp.path().join("npu_worker.py");
         crate::checkpoint::atomic_write(&script_path, NPU_WORKER_SCRIPT.as_bytes())?;
 
@@ -402,7 +402,7 @@ mod tests {
     /// 无 python3 的环境下跳过。
     #[test]
     fn worker_script_is_valid_python() {
-        let Some(py) = crate::runtime::which("python3") else {
+        let Some(py) = which::which("python3").ok() else {
             eprintln!("skip: python3 not found");
             return;
         };

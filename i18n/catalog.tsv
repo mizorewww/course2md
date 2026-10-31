@@ -105,7 +105,6 @@ Ollama 本地服务	Ollama 本地服务	Ollama local service	Ollama 本地服務
 OpenAI Codex 订阅	OpenAI Codex 订阅	OpenAI Codex subscription	OpenAI Codex 訂閱	OpenAI Codex サブスクリプション
 OpenAI 兼容服务	OpenAI 兼容服务	OpenAI-compatible service	OpenAI 相容服務	OpenAI互換サービス
 OpenVINO 模型 XML 和权重 / OpenVINO model XML and weights	OpenVINO 模型 XML 和权重	OpenVINO model XML and weights	OpenVINO 模型 XML 和權重	OpenVINO モデルの XML と重み
-ROI 坐标必须为非负有限数值 / ROI coordinates must be finite, non-negative numbers	ROI 坐标必须为非负有限数值	ROI coordinates must be finite, non-negative numbers	ROI 座標必須為非負有限數值	ROI 座標は負でない有限値でなければなりません
 ROI 百分比必须在 0–100 / ROI percentages must be between 0 and 100	ROI 百分比必须在 0–100	ROI percentages must be between 0 and 100	ROI 百分比必須在 0–100	ROI パーセンテージは 0 ～ 100 の範囲にする必要があります
 UP主/作者：{}\n	UP主/作者：{}\n	Uploader/author: {}\n	UP主/作者：{}\n	投稿者/作成者：{}\n
 [已隐藏凭据]	[已隐藏凭据]	[Credentials hidden]	[已隱藏憑證]	[認証情報を非表示]
@@ -406,7 +405,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 分组展开状态尚未保存：{}	分组展开状态尚未保存：{}	Group expansion status has not been saved: {}	分組展開狀態尚未儲存：{}	グループ展開ステータスが保存されていません: {}
 分集信息补充失败：{error:#}	分集信息补充失败：{error:#}	Failed to supplement episode information: {error:#}	分集資訊補充失敗：{error:#}	エピソード情報を補足できませんでした: {error:#}
 列表	列表	List	列表	リスト
-创建 checkpoint 目录 {} / Failed to create checkpoint directory {}	创建 checkpoint 目录 {}	Failed to create checkpoint directory {}	建立 checkpoint 目錄 {}	チェックポイント ディレクトリ {} の作成に失敗しました
 创建文件夹	创建文件夹	Create folder	建立資料夾	フォルダーの作成
 创建目录 {} / Failed to create directory {}	创建目录 {}	Failed to create directory {}	建立目錄 {}	ディレクトリ {} の作成に失敗しました
 删除	删除	Delete	刪除	削除
@@ -795,7 +793,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 所选识别方式暂不可用，可在模型管理中查看原因	所选识别方式暂不可用，可在模型管理中查看原因	The selected recognition method is temporarily unavailable. You can check the reason in model management.	所選辨識方式暫不可用，可在模型管理中檢視原因	選択した認識方法は一時的に利用できません。理由はモデル管理で確認できます。
 所需程序	所需程序	Required programs	所需程式	必要なプログラム
 打开	打开	Open	開啟	開く
-打开 checkpoint {} / Failed to open checkpoint {}	打开 checkpoint {}	Failed to open checkpoint {}	開啟 checkpoint {}	チェックポイント {} を開けませんでした
 打开 {} 的模型文件夹：{}	打开 {} 的模型文件夹：{}	Open the model folder of {}: {}	開啟 {} 的模型資料夾：{}	{} のモデルフォルダーを開く: {}
 打开位置	打开位置	Open location	開啟位置	場所を開く
 打开保存位置	打开保存位置	Open save location	開啟儲存位置	保存場所を開く
