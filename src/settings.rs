@@ -36,8 +36,20 @@ pub struct Defaults {
 }
 
 /// 云端 STT 的请求模式。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    clap::ValueEnum,
+    strum::Display,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum AsrApiMode {
     /// POST {base_url}/audio/transcriptions（OpenAI 兼容转录端点，如 OpenRouter 的 qwen3-asr）
     #[default]
@@ -45,15 +57,6 @@ pub enum AsrApiMode {
     /// POST {base_url}/chat/completions（支持音频输入的多模态 LLM，
     /// 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）
     Chat,
-}
-
-impl std::fmt::Display for AsrApiMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Transcriptions => "transcriptions",
-            Self::Chat => "chat",
-        })
-    }
 }
 
 /// 云端 STT（provider = "api"，OpenAI 兼容端点，如 OpenRouter）。

@@ -26,8 +26,22 @@ pub enum Operation {
 
 /// A version component that a reprocess task can redo. The wire format stays the
 /// lowercase name so stored desktop plans keep loading.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum Component {
     Screenshots,
     Proofreading,
@@ -44,16 +58,11 @@ impl Component {
     ];
 
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Screenshots => "screenshots",
-            Self::Proofreading => "proofreading",
-            Self::Summary => "summary",
-            Self::Exports => "exports",
-        }
+        self.into()
     }
 
     pub fn parse(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|c| c.as_str() == name)
+        name.parse().ok()
     }
 }
 

@@ -1,6 +1,5 @@
 use anyhow::{Context, Result as AnyhowResult};
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 // —— 内置默认值（唯一来源）：options.rs 的合并与 settings.rs 的展示统一引用这里 ——
@@ -84,8 +83,21 @@ pub fn asr_api_key_from_env() -> Option<String> {
 }
 
 /// ASR 后端。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum AsrProvider {
     Coreml,
     Gpu,
@@ -96,28 +108,13 @@ pub enum AsrProvider {
 
 impl AsrProvider {
     pub fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "coreml" => Some(Self::Coreml),
-            "gpu" => Some(Self::Gpu),
-            "cpu" => Some(Self::Cpu),
-            "npu" => Some(Self::Npu),
-            "api" => Some(Self::Api),
-            _ => None,
-        }
+        id.parse().ok()
     }
 
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Coreml => "coreml",
-            Self::Gpu => "gpu",
-            Self::Cpu => "cpu",
-            Self::Npu => "npu",
-            Self::Api => "api",
-        }
+        self.into()
     }
-}
 
-impl AsrProvider {
     /// 面向用户的识别方式名称（中文 / English）。
     pub fn label(&self) -> (&'static str, &'static str) {
         match self {
@@ -127,12 +124,6 @@ impl AsrProvider {
             Self::Npu => (crate::tr!("Intel NPU 加速"), "Intel NPU"),
             Self::Api => (crate::tr!("云端语音识别"), "Cloud speech service"),
         }
-    }
-}
-
-impl fmt::Display for AsrProvider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
     }
 }
 
@@ -340,36 +331,41 @@ pub fn effective_model(provider: AsrProvider, saved: Option<&str>) -> &str {
 }
 
 /// 截图发射模式：first（首个不同帧）| stable（等待画面稳定，适合动画课件）。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    Serialize,
+    Deserialize,
+    strum::Display,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum SlideMode {
     First,
     #[default]
     Stable,
 }
 
-impl fmt::Display for TranscriptSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Auto => "auto",
-            Self::Subtitle => "subtitle",
-            Self::Asr => "asr",
-        })
-    }
-}
-
-impl fmt::Display for SlideMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::First => "first",
-            Self::Stable => "stable",
-        })
-    }
-}
-
 /// 转写来源策略。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    Serialize,
+    Deserialize,
+    strum::Display,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum TranscriptSource {
     /// 优先字幕，无字幕时识别语音 / Prefer subtitles; transcribe speech if unavailable
     #[default]
@@ -381,35 +377,25 @@ pub enum TranscriptSource {
 }
 
 /// 输出格式。非法值在配置解析期即报错，不再拖到渲染阶段。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+/// `Display` and `FromStr` share one spelling: export result keys, config values.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum OutputFormat {
     Md,
     Html,
     Json,
-}
-
-impl fmt::Display for OutputFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Md => "md",
-            Self::Html => "html",
-            Self::Json => "json",
-        })
-    }
-}
-
-impl std::str::FromStr for OutputFormat {
-    type Err = ();
-    /// The spelling `Display` writes (export result keys, config values).
-    fn from_str(value: &str) -> std::result::Result<Self, ()> {
-        match value {
-            "md" => Ok(Self::Md),
-            "html" => Ok(Self::Html),
-            "json" => Ok(Self::Json),
-            _ => Err(()),
-        }
-    }
 }
 
 /// A credential in `Debug` output: shows whether it is set, never its value.

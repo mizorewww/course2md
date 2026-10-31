@@ -15,7 +15,21 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Pipeline stages in pipeline order; the derived `Ord` is the display order.
 /// Serialized as the stage name (`"scenes/scan"`, `"model/<file>"`).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    strum::EnumString,
+)]
+#[serde(into = "String", from = "String")]
+#[strum(serialize_all = "lowercase")]
 pub enum Stage {
     Fetch,
     Subtitle,
@@ -23,70 +37,46 @@ pub enum Stage {
     /// Old workers reported scanning and extraction under this one key; it only
     /// survives in saved task records.
     Scenes,
+    #[strum(serialize = "scenes/scan")]
     ScenesScan,
+    #[strum(serialize = "scenes/extract")]
     ScenesExtract,
     Audio,
+    #[strum(serialize = "model/prepare")]
     ModelPrepare,
     /// One model file download, named by its file.
+    #[strum(disabled)]
     ModelFile(String),
+    #[strum(serialize = "model/load")]
     ModelLoad,
+    #[strum(serialize = "model/apple")]
     ModelApple,
     Transcribe,
     Llm,
     Translate,
     Summary,
     Render,
+    #[strum(serialize = "exports", serialize = "export")]
     Exports,
     /// A name this build does not know (a newer or older engine).
+    #[strum(disabled)]
     Other(String),
 }
 
 impl Stage {
     pub fn name(&self) -> std::borrow::Cow<'static, str> {
         match self {
-            Self::Fetch => "fetch".into(),
-            Self::Subtitle => "subtitle".into(),
-            Self::Download => "download".into(),
-            Self::Scenes => "scenes".into(),
-            Self::ScenesScan => "scenes/scan".into(),
-            Self::ScenesExtract => "scenes/extract".into(),
-            Self::Audio => "audio".into(),
-            Self::ModelPrepare => "model/prepare".into(),
             Self::ModelFile(file) => format!("model/{file}").into(),
-            Self::ModelLoad => "model/load".into(),
-            Self::ModelApple => "model/apple".into(),
-            Self::Transcribe => "transcribe".into(),
-            Self::Llm => "llm".into(),
-            Self::Translate => "translate".into(),
-            Self::Summary => "summary".into(),
-            Self::Render => "render".into(),
-            Self::Exports => "exports".into(),
             Self::Other(name) => name.clone().into(),
+            known => <&'static str>::from(known).into(),
         }
     }
     pub fn parse(name: &str) -> Self {
-        match name {
-            "fetch" => Self::Fetch,
-            "subtitle" => Self::Subtitle,
-            "download" => Self::Download,
-            "scenes" => Self::Scenes,
-            "scenes/scan" => Self::ScenesScan,
-            "scenes/extract" => Self::ScenesExtract,
-            "audio" => Self::Audio,
-            "model/prepare" => Self::ModelPrepare,
-            "model/load" => Self::ModelLoad,
-            "model/apple" => Self::ModelApple,
-            "transcribe" => Self::Transcribe,
-            "llm" => Self::Llm,
-            "translate" => Self::Translate,
-            "summary" => Self::Summary,
-            "render" => Self::Render,
-            "export" | "exports" => Self::Exports,
-            _ => match name.strip_prefix("model/") {
+        name.parse()
+            .unwrap_or_else(|_| match name.strip_prefix("model/") {
                 Some(file) if !file.is_empty() => Self::ModelFile(file.to_owned()),
                 _ => Self::Other(name.to_owned()),
-            },
-        }
+            })
     }
     /// Stages that move model files or video bytes rather than count items.
     pub fn is_model_transfer(&self) -> bool {
@@ -106,21 +96,14 @@ impl std::fmt::Display for Stage {
         f.write_str(&self.name())
     }
 }
-impl std::str::FromStr for Stage {
-    type Err = std::convert::Infallible;
-    fn from_str(name: &str) -> Result<Self, Self::Err> {
-        Ok(Self::parse(name))
+impl From<Stage> for String {
+    fn from(stage: Stage) -> Self {
+        stage.name().into_owned()
     }
 }
-impl Serialize for Stage {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.name())
-    }
-}
-impl<'de> Deserialize<'de> for Stage {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let name = std::borrow::Cow::<str>::deserialize(deserializer)?;
-        Ok(Self::parse(&name))
+impl From<String> for Stage {
+    fn from(name: String) -> Self {
+        Self::parse(&name)
     }
 }
 

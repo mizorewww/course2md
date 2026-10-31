@@ -44,7 +44,19 @@ const TEST_QUESTION: &str = "只回复两个字符：ok";
 const BATCH: usize = 20;
 
 /// LLM 服务方言/登录方式。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::IntoStaticStr,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum LlmProvider {
     /// OpenAI 兼容 /chat/completions 端点
@@ -58,17 +70,7 @@ pub enum LlmProvider {
 
 impl LlmProvider {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::OpenAiCompatible => "openai-compatible",
-            Self::Ollama => "ollama",
-            Self::Codex => "codex",
-        }
-    }
-}
-
-impl std::fmt::Display for LlmProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        self.into()
     }
 }
 
