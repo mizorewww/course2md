@@ -3,9 +3,7 @@ description: Rust toolchain with cache, packaging tools and native libraries.
 runs:
   using: composite
   steps:
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        components: clippy, rustfmt
+    - uses: ./.github/actions/rust-toolchain
     - uses: Swatinem/rust-cache@v2
       with:
         workspaces: |
