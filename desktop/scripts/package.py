@@ -13,6 +13,7 @@ import zipfile
 
 from dmg import build_install_dmg
 import ffmpeg_bundle
+import licenses
 import prebuilt
 import ytdlp_bundle
 
@@ -62,6 +63,18 @@ def copy_licenses(dest, tools=()):
     shutil.copytree(ROOT / "assets/themes/licenses", dest / "design-licenses", dirs_exist_ok=True)
 
 
+def third_party_notices(dest, swift, required):
+    """The dependency notices (licenses.py), or None in a development build that cannot make them."""
+    try:
+        return licenses.generate(dest / licenses.FILE_NAME, ROOT / "Cargo.toml", swift)
+    except (OSError, subprocess.CalledProcessError) as error:
+        if required:
+            raise SystemExit(f"Release builds must carry dependency licenses: {error}. "
+                             "Install cargo-about (see docs/PACKAGING.md).") from error
+        print(f"warning: dependency licenses not generated ({error})")
+        return None
+
+
 def notarize(path, key_path, key_id, issuer):
     run("xcrun", "notarytool", "submit", str(path), "--key", key_path,
         "--key-id", key_id, "--issuer", issuer, "--wait")
@@ -91,6 +104,10 @@ def bundle_ytdlp(parent, required, local=None, suffix=""):
 def verify_tools(binaries, system, skip=(), ytdlp=None):
     """Run each bundled tool once, so a missing library or an ffmpeg without
     TLS fails the package build rather than a user's first conversion."""
+    # yt-dlp's onedir build carries the notices of what it bundles.
+    if ytdlp and ytdlp.parent.name == ytdlp_bundle.DIRECTORY:
+        if not (ytdlp.parent / "_internal/THIRD_PARTY_LICENSES.txt").is_file():
+            raise SystemExit("The bundled yt-dlp has no THIRD_PARTY_LICENSES.txt")
     suffix = ".exe" if system == "Windows" else ""
     checks = []
     if ytdlp:
@@ -268,6 +285,11 @@ def main():
                      ytdlp=ytdlp)
     if system == "Windows":
         verify_windows_icon(binaries / "course2md-desktop.exe")
+    # The desktop's dependency graph includes the engine's. The Swift module is
+    # part of arm64 macOS builds only (build.rs).
+    swift = system == "Darwin" and platform.machine() == "arm64" and not args.no_apple
+    if notices := third_party_notices(base.parent, swift, required=tools_required):
+        tool_licenses = [*tool_licenses, notices]
     copy_licenses(base, tool_licenses)
     shutil.copy2(PROJECT / "readme.md", base / "README.md")
     if system == "Darwin":

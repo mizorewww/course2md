@@ -11,6 +11,9 @@ runs:
         workspaces: |
           . -> target
           desktop -> desktop/target
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-about@0.9.3
     - uses: actions/setup-python@v5
       if: runner.environment == 'github-hosted'
       with:
