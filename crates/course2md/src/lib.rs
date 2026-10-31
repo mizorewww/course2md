@@ -1,3 +1,11 @@
+pub use c2m_config::{llm_settings, settings};
+
+/// The settings types, and the provider this machine defaults to.
+pub mod config {
+    pub use crate::asr::{apple_native_available, default_provider_hint};
+    pub use c2m_config::config::*;
+}
+
 pub use c2m_core::{digest, fsio, invalid, meta, outcome, paths, timeline};
 pub use c2m_i18n::{eprint_tr, eprintln_tr, print_tr, println_tr, tr};
 pub use c2m_i18n::{i18n, language};
@@ -8,7 +16,6 @@ pub mod asr;
 pub mod auth;
 pub mod checkpoint;
 pub mod cli;
-pub mod config;
 pub mod dispatch;
 pub mod doctor;
 pub mod download;
@@ -17,7 +24,6 @@ pub mod fetch;
 pub mod hub;
 pub mod job;
 pub mod llm;
-pub mod llm_settings;
 pub mod login;
 pub mod math;
 pub mod model_state;
@@ -31,7 +37,6 @@ pub mod progress;
 pub mod provider;
 pub mod render;
 pub mod scene;
-pub mod settings;
 pub mod subtitle;
 pub mod summarize;
 pub mod summary_doc;

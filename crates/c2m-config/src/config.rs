@@ -1,4 +1,3 @@
-pub use crate::asr::{apple_native_available, default_provider_hint};
 pub use crate::paths::*;
 use crate::tr;
 use anyhow::{Context, Result as AnyhowResult};

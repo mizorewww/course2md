@@ -6,6 +6,7 @@ description = "Turn online course videos (YouTube/Bilibili) into image+transcrip
 license.workspace = true
 
 [dependencies]
+c2m-config = { path = "../c2m-config" }
 c2m-core = { path = "../c2m-core" }
 c2m-i18n = { path = "../c2m-i18n" }
 c2m-process = { path = "../c2m-process" }
@@ -35,7 +36,6 @@ sys-locale.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 ureq.workspace = true
@@ -46,6 +46,7 @@ zip.workspace = true
 
 [dev-dependencies]
 c2m-test-http = { path = "../c2m-test-http" }
+toml.workspace = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(apple_native)'] }
