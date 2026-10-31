@@ -2387,6 +2387,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.8.1"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2485,6 +2486,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast"
 version = "0.1.12"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2554,6 +2556,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-apple"
 version = "0.1.12"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
 dependencies = [
  "anyhow",
  "async-task",
@@ -2595,6 +2598,8 @@ dependencies = [
 [[package]]
 name = "gpui-fast-linux"
 version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d5a4351392d339049584e06a58460a4907a060e3f46e49b7c130d80ffe36871"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -2638,6 +2643,7 @@ dependencies = [
 [[package]]
 name = "gpui-fast-macos"
 version = "0.1.12"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -2704,6 +2710,8 @@ dependencies = [
 [[package]]
 name = "gpui-fast-web"
 version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad903fddb78ae4c8f1c24b7fa07c79a0697da7614183d8c7dad67bd296802901"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2732,6 +2740,8 @@ dependencies = [
 [[package]]
 name = "gpui-fast-wgpu"
 version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebf72d3c1fee16dde347707ef306940d39656f80e35d3aaace01075996f12199"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2758,6 +2768,8 @@ dependencies = [
 [[package]]
 name = "gpui-fast-windows"
 version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a1a193343ef7faaa18eb9ccc0aadf8ec9571f2791c4419c2ca23aa17198f970"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -2786,6 +2798,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.8.1"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
 dependencies = [
  "gpui-base",
  "gpui-component",
@@ -2817,6 +2830,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material"
 version = "0.1.0"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
 dependencies = [
  "chrono",
  "gpui-base",
@@ -2829,6 +2843,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-material-color"
 version = "0.1.0"
+source = "git+https://github.com/mizorewww/gpui-kit-material?rev=a5acb0c2c52f091759f6ba157c05abd21c94c34b#a5acb0c2c52f091759f6ba157c05abd21c94c34b"
 dependencies = [
  "serde",
 ]
@@ -2846,6 +2861,8 @@ dependencies = [
 [[package]]
 name = "gpui-pre"
 version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df4b5f8d0c278308df2f11e0bfe0212dd77d7848ce1bdc4b9d513334414396f6"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2902,7 +2919,6 @@ dependencies = [
  "taffy",
  "thiserror 2.0.21",
  "ttf-parser",
- "unicode-segmentation",
  "url",
  "usvg 0.46.0",
  "uuid",
@@ -2915,6 +2931,8 @@ dependencies = [
 [[package]]
 name = "gpui-pre-apple"
 version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e97cd068d8134b4e073321b946491760aa1e4511e486084a92e73b9174bff78a"
 dependencies = [
  "anyhow",
  "async-task",
@@ -2949,7 +2967,6 @@ dependencies = [
  "pathfinder_geometry",
  "smallvec",
  "thiserror 2.0.21",
- "unicode-bidi",
  "zed-font-kit",
 ]
 
@@ -3019,6 +3036,8 @@ dependencies = [
 [[package]]
 name = "gpui-pre-linux"
 version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c6ffd2dce7b75cce0bb3382994912f84c2a05389a4a236bb8bd72cb098fc083"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -3062,6 +3081,8 @@ dependencies = [
 [[package]]
 name = "gpui-pre-macos"
 version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e07a5e5c84f0b2160c194a1c852cc89d1942db66867938ceabcd7f763cb4386"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3239,6 +3260,8 @@ dependencies = [
 [[package]]
 name = "gpui-pre-web"
 version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1acd86af2347f0dd8b63c441a5dbd43b3fcd7dac69b340827c3497da5a13d6fb"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -3267,6 +3290,8 @@ dependencies = [
 [[package]]
 name = "gpui-pre-wgpu"
 version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce693915768aae38bf788f245af75aae78e3e1179245860fc80ce831d0a8f74e"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -3293,6 +3318,8 @@ dependencies = [
 [[package]]
 name = "gpui-pre-windows"
 version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80670f987b920fba019917b2e222ecf2b377f2a6d77872010c7d284c235837b3"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -8352,6 +8379,8 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 [[package]]
 name = "wgpu"
 version = "30.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "527ccdf43dd5b2e8676eed9984ce00e2bbb0a1b85b70c1969dcb6cd2eb55ab9e"
 dependencies = [
  "arrayvec",
  "bitflags 2.13.2",

@@ -16,11 +16,10 @@ capture = ["gpui-kit/test-support"]
 
 [dependencies]
 course2md = { path = ".." }
-# The same stack as gpui-kit-material. The [patch] tables below must stay equal
-# to that repository's. Paths flip to a pinned Git revision before acceptance.
-gpui-kit = { path = "../../gpui-kit-material-course2md/vendor/gpui-kit", features = ["gpui-fast"] }
-gpui-base = { path = "../../gpui-kit-material-course2md/vendor/gpui-base" }
-gpui-kit-material = { path = "../../gpui-kit-material-course2md/crates/material", default-features = false, features = ["serde", "gpui-fast"] }
+# The stack gpui-kit-material pins, at one revision of that repository.
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b", features = ["gpui-fast"] }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b" }
+gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b", default-features = false, features = ["serde", "gpui-fast"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -54,7 +53,7 @@ security-framework = "3.7"
 embed-resource = "3.0"
 
 [dev-dependencies]
-gpui-kit = { path = "../../gpui-kit-material-course2md/vendor/gpui-kit", features = ["gpui-fast", "test-support"] }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b", features = ["gpui-fast", "test-support"] }
 
 [profile.dev]
 debug = "line-tables-only"
@@ -70,23 +69,11 @@ lto = "thin"
 strip = true
 
 [patch.crates-io]
-gpui-fast-macos = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-macos" }
-gpui-pre-macos = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-macos" }
-gpui-fast = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast" }
-gpui-fast-web = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-web" }
-gpui-fast-apple = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-apple" }
-gpui-base = { path = "../../gpui-kit-material-course2md/vendor/gpui-base" }
-gpui-pre = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre" }
-gpui-pre-web = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-web" }
-gpui-pre-apple = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-apple" }
-gpui-fast-linux = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-linux" }
-gpui-fast-wgpu = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-wgpu" }
-gpui-fast-windows = { path = "../../gpui-kit-material-course2md/vendor/gpui-fast-windows" }
-gpui-pre-linux = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-linux" }
-gpui-pre-wgpu = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-wgpu" }
-gpui-pre-windows = { path = "../../gpui-kit-material-course2md/vendor/gpui-pre-windows" }
-wgpu = { path = "../../gpui-kit-material-course2md/vendor/wgpu" }
+gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b" }
+gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b" }
+gpui-fast-macos = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b" }
 
 [patch."https://github.com/longbridge/gpui-kit"]
-gpui-kit = { path = "../../gpui-kit-material-course2md/vendor/gpui-kit" }
-gpui-base = { path = "../../gpui-kit-material-course2md/vendor/gpui-base" }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "a5acb0c2c52f091759f6ba157c05abd21c94c34b" }
