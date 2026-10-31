@@ -196,65 +196,26 @@ fn write_config(bytes: &[u8]) -> Result<PathBuf> {
     Ok(p)
 }
 
-/// `config init` 写入的带注释模板。默认值占位符由内置默认渲染，注释不会与实际默认脱节。
+/// `config init` 写入的带注释模板。`{field}` 占位符由内置默认值渲染（JSON 字面量也是
+/// 合法的 TOML），注释不会与实际默认脱节。
 pub fn template() -> String {
-    use crate::config as c;
-    let formats = crate::options::default_formats()
-        .iter()
-        .map(|f| format!("\"{f}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let api = AsrApi::default();
-    let llm = crate::llm::LlmSettings::default();
-    [
-        ("{OUT}", c::DEFAULT_OUT_DIR.to_string()),
-        ("{SIMILARITY}", c::DEFAULT_SIMILARITY.to_string()),
-        (
-            "{SAMPLE_INTERVAL}",
-            format!("{:?}", c::DEFAULT_SAMPLE_INTERVAL),
-        ),
-        ("{COOLDOWN}", format!("{:?}", c::DEFAULT_COOLDOWN)),
-        ("{MAX_HEIGHT}", c::DEFAULT_MAX_HEIGHT.to_string()),
-        ("{STABLE_SECS}", format!("{:?}", c::DEFAULT_STABLE_SECS)),
-        ("{THREADS}", c::DEFAULT_THREADS.to_string()),
-        ("{GPU_LAYERS}", c::DEFAULT_GPU_LAYERS.to_string()),
-        (
-            "{ASR_MODEL}",
-            c::default_model(c::default_provider_hint()).to_string(),
-        ),
-        ("{MAX_SPEECH}", format!("{:?}", c::DEFAULT_MAX_SPEECH)),
-        ("{FORMATS}", formats),
-        ("{API_BASE_URL}", api.base_url),
-        ("{API_MODEL}", api.model),
-        ("{SLIDE_MODE}", c::SlideMode::default().to_string()),
-        (
-            "{PROVIDER}",
-            c::default_provider_hint().as_str().to_string(),
-        ),
-        ("{MMPROJ_OFFLOAD}", "true".to_string()),
-        ("{KEEP_VIDEO}", "false".to_string()),
-        ("{RESUME}", "true".to_string()),
-        (
-            "{TRANSCRIPT_SOURCE}",
-            c::TranscriptSource::default().to_string(),
-        ),
-        // A TOML string, escaped: Windows paths contain backslashes.
-        (
-            "{MODEL_DIR}",
-            toml::Value::String(c::model_dir_from(None).display().to_string()).to_string(),
-        ),
-        ("{LLM_ENABLED}", llm.enabled.to_string()),
-        ("{LLM_BASE_URL}", llm.base_url),
-        ("{LLM_MODEL}", llm.model),
-        ("{LLM_VISION}", llm.vision.to_string()),
-        ("{LLM_SUMMARIZE}", llm.summarize.to_string()),
-        ("{LLM_DISABLE_HINT}", llm.disable_hint.to_string()),
-        ("{LLM_CONCURRENCY}", llm.concurrency.to_string()),
-    ]
-    .into_iter()
-    .fold(TEMPLATE.to_string(), |text, (key, value)| {
-        text.replace(key, &value)
-    })
+    let resolved = crate::options::resolve(String::new(), &Default::default(), &Default::default());
+    let mut defaults = resolved
+        .and_then(|cfg| Ok(serde_json::to_value(cfg)?))
+        .unwrap_or_default();
+    let provider = crate::config::default_provider_hint();
+    defaults["asr_model"] = crate::config::default_model(provider).into();
+    let mut text = TEMPLATE.to_string();
+    for (prefix, values) in [
+        ("", &defaults),
+        ("llm.", &defaults["llm"]),
+        ("asr_api.", &defaults["asr_api"]),
+    ] {
+        for (key, value) in values.as_object().into_iter().flatten() {
+            text = text.replace(&format!("{{{prefix}{key}}}"), &value.to_string());
+        }
+    }
+    text
 }
 
 const TEMPLATE: &str = include_str!("config_template.toml");
@@ -268,47 +229,50 @@ pub fn print_effective(cfg: &ConfigFile) -> Result<()> {
     crate::println_tr!(
         "文件设置与内置默认值；不含本次命令行或环境变量覆盖 / File settings and built-in defaults, before CLI and environment overrides"
     );
-    let rows: Vec<(&str, String)> = vec![
-        ("out", r.out_root.display().to_string()),
-        ("similarity", r.similarity.to_string()),
-        ("sample_interval", r.sample_interval.to_string()),
-        ("cooldown", r.cooldown.to_string()),
-        ("max_height", r.max_height.to_string()),
-        ("roi", d.roi.clone().unwrap_or_else(|| "-".into())),
-        ("threads", r.threads.to_string()),
-        (
-            "provider",
-            match d.provider {
-                Some(p) => p.to_string(),
-                None => crate::tr!("{}（自动选择）", r.provider),
-            },
-        ),
-        ("slide_mode", r.slide_mode.to_string()),
-        ("stable_secs", r.stable_secs.to_string()),
-        (
-            "asr_model",
-            r.asr_model.clone().unwrap_or_else(|| "-".into()),
-        ),
-        ("transcript_source", r.transcript_source.to_string()),
-        ("max_speech", r.max_speech.to_string()),
-        (
-            "formats",
-            r.formats
+    let values = serde_json::to_value(&r)?;
+    let plain = |value: &serde_json::Value| match value {
+        serde_json::Value::Null => "-".to_owned(),
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(items) => {
+            let items: Vec<String> = items
                 .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join(","),
-        ),
-        ("model_dir", r.model_dir.display().to_string()),
-        ("keep_video", r.keep_video.to_string()),
-        ("no_download", r.no_download.to_string()),
-        ("resume", r.resume.to_string()),
-        ("gpu_layers", r.gpu_layers.to_string()),
-        ("mmproj_offload", r.mmproj_offload.to_string()),
-    ];
+                .filter_map(|i| i.as_str())
+                .map(str::to_owned)
+                .collect();
+            items.join(",")
+        }
+        other => other.to_string(),
+    };
     println!("[defaults]");
-    for (key, value) in rows {
-        println!("  {key:<17}: {value}");
+    println!("  {:<17}: {}", "out", r.out_root.display());
+    for key in ["similarity", "sample_interval", "cooldown", "max_height"] {
+        println!("  {key:<17}: {}", plain(&values[key]));
+    }
+    println!("  {:<17}: {}", "roi", d.roi.as_deref().unwrap_or("-"));
+    println!("  {:<17}: {}", "threads", r.threads);
+    match d.provider {
+        Some(provider) => println!("  {:<17}: {provider}", "provider"),
+        None => println!(
+            "  {:<17}: {}",
+            "provider",
+            crate::tr!("{}（自动选择）", r.provider)
+        ),
+    }
+    for key in [
+        "slide_mode",
+        "stable_secs",
+        "asr_model",
+        "transcript_source",
+        "max_speech",
+        "formats",
+        "model_dir",
+        "keep_video",
+        "no_download",
+        "resume",
+        "gpu_layers",
+        "mmproj_offload",
+    ] {
+        println!("  {key:<17}: {}", plain(&values[key]));
     }
     let hidden = |key: &str| {
         if key.is_empty() {
