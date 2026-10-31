@@ -35,9 +35,10 @@
 //! shows the idle result state ("操作已完成"). `dialog:storage~move:<folder>` runs a
 //! real move of the first library, and `dialog:storage~link` a real reassociation,
 //! so use them only on a fixture; the harness fakes none of their states.
-use crate::{Desktop, Page, palettes::PaletteId, settings_ui::SettingsTab};
+use crate::{Desktop, Page, settings_ui::SettingsTab};
 use gpui::{App, AsyncWindowContext, WeakEntity, Window};
 use gpui_kit::component::WindowExt as _;
+use gpui_kit_material::color::{Appearance, PaletteId, ThemePreferences};
 use std::{cell::Cell, path::PathBuf, time::Duration};
 
 thread_local! {
@@ -58,13 +59,13 @@ pub fn palette_override() -> Option<PaletteId> {
 
 /// Applies the capture palette to an appearance the way the window paints
 /// it: that palette selected, in its own light or dark mode.
-pub fn override_appearance(appearance: &mut crate::palettes::ThemePreferences) {
+pub fn override_appearance(appearance: &mut ThemePreferences) {
     if let Some(palette) = palette_override() {
         appearance.select(palette);
         appearance.mode = if palette.is_dark() {
-            crate::palettes::Appearance::Dark
+            Appearance::Dark
         } else {
-            crate::palettes::Appearance::Light
+            Appearance::Light
         };
     }
 }
@@ -131,12 +132,22 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
                     });
                 }
                 cx.background_executor().timer(delay).await;
-                let _ = cx.update(|window, cx| {
-                    // Draw now: a window hidden behind others gets no frames, and
-                    // the image would show whatever it drew last.
-                    window.refresh();
-                    window.draw(cx).clear(cx);
-                });
+                // Draw now: a window hidden behind others gets no frames, and the image would
+                // show whatever it drew last. A first draw only starts an entrance or an exit,
+                // so draw again after it has played. Without frames the theme's next-frame
+                // callback does not run either, so move the theme here.
+                for settle in [true, false] {
+                    let _ = cx.update(|window, cx| {
+                        let _ = view.update(cx, |this, cx| this.prepare_theme(window, cx));
+                        window.refresh();
+                        window.draw(cx).clear(cx);
+                    });
+                    if settle {
+                        cx.background_executor()
+                            .timer(Duration::from_millis(900))
+                            .await;
+                    }
+                }
                 let _ = cx.update(|window, _| match window.render_to_image() {
                     Ok(image) => {
                         if let Err(error) = image.save(&path) {

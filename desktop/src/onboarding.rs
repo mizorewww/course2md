@@ -943,11 +943,9 @@ impl Desktop {
         let content = match step {
             Step::Engine => self.setup_engine_content(window, cx),
             Step::Ai => self.setup_service_content(ServicePurpose::Ai, window, cx),
-            Step::Account => setup_tile().child(self.account_row(
-                course2md::tr!("账号状态"),
-                window,
-                cx,
-            )),
+            Step::Account => {
+                setup_tile().child(self.account_row(course2md::tr!("账号状态"), window, cx))
+            }
             Step::Model => self.setup_model_content(window, cx),
         };
         let position = course2md::tr!("第 {} 步，共 {} 步", number, STEPS);
@@ -1254,17 +1252,15 @@ impl Desktop {
         let keyless = draft.protocol.keyless();
         let form = setup_tile()
             .gap(rem(20.))
-            .child(
-                self.setup_reveal(
-                    SharedString::from(format!("setup-protocol-reveal-{suffix}")),
-                    self.service_type_field(
-                        owner,
-                        SharedString::from(format!("setup-protocol-{suffix}")),
-                        busy,
-                        cx,
-                    ),
+            .child(self.setup_reveal(
+                SharedString::from(format!("setup-protocol-reveal-{suffix}")),
+                self.service_type_field(
+                    owner,
+                    SharedString::from(format!("setup-protocol-{suffix}")),
+                    busy,
+                    cx,
                 ),
-            )
+            ))
             .when(!codex, |form| {
                 form.child(self.setup_field(
                     purpose,
