@@ -47,7 +47,11 @@ mod storage_ui;
 mod symbols;
 mod task_runner;
 mod task_ui;
+#[allow(dead_code)]
 mod theme;
+// Primitives for the page rewrites of wave 2; the attribute goes once they have callers.
+#[allow(dead_code)]
+mod ui;
 mod views;
 mod window_controls;
 mod workspace;
