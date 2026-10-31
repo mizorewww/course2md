@@ -1,4 +1,4 @@
-//! Scrollbars take their policy from Kit's theme, which `Theme::sync_scrollbar_appearance`
+//! Scrollbars take their policy from Kit's theme, which `sync_scrollbars` in `main.rs`
 //! keeps with the system.
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode};
 

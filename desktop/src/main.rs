@@ -357,6 +357,20 @@ fn earliest_deadline(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> 
     }
 }
 
+/// Scrollbars fade after scrolling, or stay visible when the system asks for that.
+/// `Theme::sync_scrollbar_appearance` would map the system's choice to hover.
+fn sync_scrollbars(cx: &mut App) {
+    use gpui_kit::component::scroll::ScrollbarMode;
+    Theme::set_scrollbar_mode(
+        if cx.should_auto_hide_scrollbars() {
+            ScrollbarMode::Scrolling
+        } else {
+            ScrollbarMode::Always
+        },
+        cx,
+    );
+}
+
 impl Desktop {
     /// Splice a virtualized page list to a new item identity sequence, keeping
     /// the measured heights and scroll anchor of the unchanged prefix/suffix.
@@ -562,7 +576,7 @@ impl Desktop {
         ));
         // The system's scrollbar preference can change while the window is away.
         subscriptions.push(cx.observe_window_activation(window, |_, _, cx| {
-            Theme::sync_scrollbar_appearance(cx);
+            sync_scrollbars(cx);
         }));
         let options = ConversionOptions::from_config(&config);
         let poll = cx.spawn_in(window, async |this, cx| {
@@ -1619,7 +1633,7 @@ fn main() {
         gpui_kit::init(cx);
         gpui_kit_material::init(cx);
         theme::init(cx);
-        Theme::sync_scrollbar_appearance(cx);
+        sync_scrollbars(cx);
         // Debug validation uses the same native window and render path at an exact size.
         // Release builds always use the ordinary initial window size.
         // Debug validation asks for an exact size, which it keeps even where
