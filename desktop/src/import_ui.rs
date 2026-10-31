@@ -841,7 +841,7 @@ impl Desktop {
                     });
                 }
             },
-            |source, cancel| source::refresh_subtitles(source, cancel),
+            source::refresh_subtitles,
             || Err(anyhow::anyhow!(course2md::tr!("字幕读取意外中断"))),
             |this, result, cx| this.finish_subtitle_refresh(result, cx),
             cx,

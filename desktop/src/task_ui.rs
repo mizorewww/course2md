@@ -1500,7 +1500,7 @@ impl Desktop {
                 group = Some(action.group());
                 menu = menu.item(
                     PopupMenuItem::new(*label)
-                        .icon(icon.clone().component())
+                        .icon(icon.component())
                         .disabled(*disabled)
                         .on_click(action.clone().click(entity.clone(), id.clone())),
                 );
@@ -2514,6 +2514,32 @@ mod tests {
     }
 
     use crate::workspace::{Intent, TaskState};
+
+    #[test]
+    fn one_action_is_filled_and_an_unconfirmed_request_leaves_the_card_without_one() {
+        use super::{TaskAction as Action, TaskSurface, lead_action};
+        let mut task = task_record("task");
+        task.state = TaskState::Partial;
+        let home = [Action::Read, Action::Repair, Action::NextVideo];
+        assert_eq!(
+            lead_action(&home, &task, TaskSurface::Home),
+            Some(&Action::Read)
+        );
+        assert_eq!(
+            lead_action(&home, &task, TaskSurface::Card),
+            Some(&Action::Repair)
+        );
+        task.state = TaskState::Running;
+        let running = [Action::Cancel, Action::ViewTask, Action::NextVideo];
+        assert_eq!(
+            lead_action(&running, &task, TaskSurface::Home),
+            Some(&Action::NextVideo)
+        );
+        // The resend button in the card's own block is that decision's one main action.
+        task.state = TaskState::Uncertain;
+        let uncertain = [Action::Adjust, Action::ViewTask, Action::NextVideo];
+        assert_eq!(lead_action(&uncertain, &task, TaskSurface::Home), None);
+    }
 
     #[test]
     fn a_closed_intermediate_stage_does_not_claim_the_task_is_finishing() {
