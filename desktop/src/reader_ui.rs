@@ -4502,6 +4502,8 @@ impl Desktop {
             None => library.to_owned(),
         };
         let height = TITLE_BAR_HEIGHT.to_pixels(window.rem_size());
+        // So short a window keeps the bar for its tools; the note opens with its title.
+        let short = ReaderMetrics::new(window, false).short;
         crate::views::app_bar(height, window, cx).child(
             bar.gap(rem(12.))
                 .child(title_bar_control(
@@ -4519,6 +4521,7 @@ impl Desktop {
                     v_flex()
                         .flex_1()
                         .min_w_0()
+                        .when(short, |title| title.invisible())
                         .child(
                             accessible_text("reader-crumb", crumb)
                                 .truncate()
