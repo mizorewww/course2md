@@ -901,6 +901,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "c2m-artifact"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "c2m-config",
+ "c2m-core",
+ "c2m-dispatch",
+ "c2m-i18n",
+ "c2m-process",
+ "image",
+ "ratex-layout",
+ "ratex-parser",
+ "ratex-svg",
+ "ratex-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "url",
+ "zip",
+]
+
+[[package]]
 name = "c2m-config"
 version = "2.0.1"
 dependencies = [
@@ -1499,6 +1524,7 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "c2m-ai",
+ "c2m-artifact",
  "c2m-config",
  "c2m-core",
  "c2m-dispatch",
@@ -1510,12 +1536,7 @@ dependencies = [
  "clap",
  "dialoguer",
  "hound",
- "image",
  "model-fetch",
- "ratex-layout",
- "ratex-parser",
- "ratex-svg",
- "ratex-types",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -1532,7 +1553,6 @@ dependencies = [
  "url",
  "walkdir",
  "which",
- "zip",
 ]
 
 [[package]]

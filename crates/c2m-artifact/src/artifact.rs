@@ -162,7 +162,7 @@ pub fn validate_version(dir: &Path, manifest: &Manifest) -> Result<()> {
 }
 
 /// [`validate_version`] that stops at the task's safe boundaries.
-pub(crate) fn validate_version_in_task(
+pub fn validate_version_in_task(
     dir: &Path,
     manifest: &Manifest,
     control: &TaskControl,
@@ -227,7 +227,7 @@ pub fn publish_blocking(
 /// Build and fsync all files on the target volume, then publish one directory rename.
 /// The pointer is a separate atomic commit. A restart can finish it without rerunning AI.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn publish(
+pub fn publish(
     target: &Target,
     work_dir: &Path,
     meta: &VideoMeta,

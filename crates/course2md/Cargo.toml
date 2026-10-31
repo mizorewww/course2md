@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 c2m-ai = { path = "../c2m-ai" }
+c2m-artifact = { path = "../c2m-artifact" }
 c2m-config = { path = "../c2m-config" }
 c2m-core = { path = "../c2m-core" }
 c2m-dispatch = { path = "../c2m-dispatch" }
@@ -19,12 +20,7 @@ base64.workspace = true
 clap.workspace = true
 dialoguer.workspace = true
 hound.workspace = true
-image.workspace = true
 model-fetch.workspace = true
-ratex-layout.workspace = true
-ratex-parser.workspace = true
-ratex-svg.workspace = true
-ratex-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -40,7 +36,6 @@ ureq.workspace = true
 url.workspace = true
 walkdir.workspace = true
 which.workspace = true
-zip.workspace = true
 
 [dev-dependencies]
 c2m-test-http = { path = "../c2m-test-http" }

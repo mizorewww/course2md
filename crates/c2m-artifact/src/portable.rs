@@ -34,7 +34,7 @@ pub fn export(version_dir: &Path, format: OutputFormat, destination: &Path) -> R
 }
 
 /// [`export`] that stops at the task's safe boundaries.
-pub(crate) fn export_in_task(
+pub fn export_in_task(
     version_dir: &Path,
     format: OutputFormat,
     destination: &Path,
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn all_exports_survive_without_the_original_library_and_never_overwrite() {
         use crate::{
-            fetch::VideoMeta,
+            meta::VideoMeta,
             timeline::{Section, TranscriptEvent},
         };
         let root = tempfile::tempdir().unwrap();
