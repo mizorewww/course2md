@@ -33,13 +33,16 @@ owner's no-drop rule:
 - **Keep:** paid-request safety in `dispatch` (a sent but unconfirmed paid request must not
   resend silently); no silent loss on library move (size-and-count check is acceptable, an
   interrupted move restarting is acceptable).
-- **sherpa-onnx is a spike and must not regress.** Pass bar: Qwen3 speed on Apple and
-  Windows no worse than today, Whisper on NPU, and existing users' model caches handled.
-  Without it the target becomes 46,700 total, 44,300 in repo.
+- **sherpa-onnx rejected after the spike; lever 2 is off.** Qwen3 1.7B on Apple failed the speed
+  bar on a loaded M2 (0.09x real time on CPU, against 1.88-2.63x on MLX today): sherpa has no
+  MLX or Metal path, and CoreML took only part of the graph and was slower. Windows speed and Whisper
+  on NPU could not be shown, and no model cache is reusable. Accuracy was on par on a small sample.
+  Only an NPU-only swap (about -350 to -400) is worth revisiting, after a test on real NPU hardware.
 
 ## Working target
 
-**About 43,200 lines (-45%)**, about 40,800 in this repo (-48%) after lever 10. Componentization
+**About 46,700 lines (-40%)**, about 44,300 in this repo (-44%) after lever 10, with lever 2 off.
+Levers 1, 3 and 10 came in well under estimate (see `STATUS.md`), so this is re-estimated after wave 2. Componentization
 alone is about -11,450 (14.6%, range 13.3-16.5%): lever 9 plus 4,200-6,700 of page view code
 already counted in levers 6-8. So the 20% first target needs the logic levers as well.
 

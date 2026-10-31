@@ -2,7 +2,7 @@
 
 Update this file in the same commit as the work it records.
 
-**Current phase:** Wave 1 (see `PLAN.md` § Phases). P0, P1, P2 are finished; D12 goes with the kit scrollbar.
+**Current phase:** Wave 2 (see `PLAN.md` § Phases). P0, P1, P2 are finished; D12 goes with the kit scrollbar.
 **Dependency form:** git, kit `a5acb0c`, six `[patch]` entries, enough on all three platforms (desktop run 41160350984).
 
 ## Done
@@ -37,9 +37,15 @@ On kit merge `03b38ec` (which includes `origin/main` at `c6a1476`), Rust 1.99.1,
 - Not exercised: a real conversion (no engine binary beside the app, so home shows its "cannot run" notice,
   as it should), Windows and Linux builds, and the old stack for comparison.
 
+## Wave 1 metrics
+
+`docs/split/metrics.py` at `0a13c9f`: 74,176 (src 17,457, desktop 56,581, native 138). Estimate against
+actual: lever 1 -3,314 / about -1,655 true deletion (-2,095 by metric); levers 3 and 4 -4,354 / -1,107;
+lever 10 engine half -1,495 / -1,212, with +2,388 in the three new repositories (secondary metric); lever 2 rejected.
+
 ## Next action
 
-Merge wave 1 branches as they report, then start wave 2.
+Merge wave 2 page branches as they report, then wave 3.
 
 ## Decisions made during the work
 
