@@ -2,9 +2,9 @@
 //! draft, inputs, field errors, model discovery and key visibility. Each surface
 //! lays the controls out in its own form; behavior and choices live here once.
 use super::*;
-use crate::codex_ui::CodexSurface;
 use crate::model_discovery;
 use crate::preferences::FieldError;
+use desktop_core::codex::CodexSurface;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum FormField {

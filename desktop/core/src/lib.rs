@@ -2,16 +2,20 @@
 //! preferences, the task record and the task logic. Nothing here depends on GPUI, so all
 //! of it is tested without one. Pages render this crate's state and call its decisions.
 
+pub mod account;
 pub mod activity;
 pub mod backend;
 pub mod bounded_http;
+pub mod codex;
 pub mod conversion;
 pub mod credentials;
 pub mod import;
 pub mod library;
 pub mod locations;
 pub mod model_discovery;
+pub mod model_status;
 pub mod notes;
+pub mod ollama;
 pub mod organize;
 pub mod page;
 pub mod plan;
@@ -19,7 +23,9 @@ pub mod preferences;
 pub mod provider_serde;
 pub mod reader;
 pub mod reader_navigation;
+pub mod service_binding;
 pub mod service_test;
+pub mod setup;
 pub mod source;
 pub mod storage;
 pub mod store;

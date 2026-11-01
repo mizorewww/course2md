@@ -10,8 +10,8 @@ pub(crate) mod service_form;
 
 use crate::credentials::Secret;
 use crate::preferences::{
-    self, ApplicationPreferences, Authentication, BindingScope, GenerationPreferences,
-    PreferenceGroup, ServiceDraft, ServiceProtocol, ServicePurpose, ServiceVersion,
+    self, ApplicationPreferences, Authentication, GenerationPreferences, PreferenceGroup,
+    ServiceDraft, ServiceProtocol, ServicePurpose, ServiceVersion,
 };
 use crate::service_test::{self, TestKind};
 use crate::{ConversionOptions, Desktop, Page, symbols, ui};
@@ -512,7 +512,7 @@ impl Desktop {
             && self.codex.status.is_none()
             && !self.codex.busy()
         {
-            self.codex_refresh_status(crate::codex_ui::CodexSurface::Settings, cx);
+            self.codex_refresh_status(desktop_core::codex::CodexSurface::Settings, cx);
         }
     }
 
@@ -931,7 +931,7 @@ impl Desktop {
         if protocol == ServiceProtocol::CodexResponses {
             lines.extend(
                 self.codex
-                    .notice_on(crate::codex_ui::CodexSurface::Settings),
+                    .notice_on(desktop_core::codex::CodexSurface::Settings),
             );
         }
         lines.extend(
@@ -1136,7 +1136,7 @@ impl Desktop {
                 self.confirm_default_service(version.id.clone(), window, cx)
             }
             ServiceCommand::SignOut => {
-                self.codex_logout(crate::codex_ui::CodexSurface::Settings, cx)
+                self.codex_logout(desktop_core::codex::CodexSurface::Settings, cx)
             }
             ServiceCommand::Delete => {
                 self.confirm_delete_service(version.service_id.clone(), window, cx)
@@ -1171,7 +1171,7 @@ impl Desktop {
         tests: &[(TestKind, &preferences::ServiceTestEvidence)],
     ) -> (StatusKind, &'static str) {
         if version.config.protocol == ServiceProtocol::CodexResponses {
-            return self.codex.badge();
+            return crate::codex_ui::codex_badge(&self.codex);
         }
         if tests.is_empty() {
             (StatusKind::Neutral, course2md::tr!("尚未测试"))

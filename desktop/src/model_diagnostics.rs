@@ -5,9 +5,10 @@ use crate::{
     ui::{self, AsyncStatus},
 };
 use course2md::{
-    config::{AsrProvider, canonical_model, model_dir_from, model_label},
-    models::status::{CacheState, LocalModelStatus},
+    config::{AsrProvider, model_dir_from, model_label},
+    models::status::CacheState,
 };
+pub(crate) use desktop_core::model_status::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{
@@ -15,10 +16,7 @@ use gpui_kit_material::{
     motion,
     prelude::*,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
-};
+use std::{collections::BTreeMap, path::Path};
 
 /// One vocabulary for cache states across settings, setup and diagnostics.
 pub(crate) fn cache_state_label(state: CacheState) -> (StatusKind, &'static str) {
@@ -31,67 +29,8 @@ pub(crate) fn cache_state_label(state: CacheState) -> (StatusKind, &'static str)
     }
 }
 
-/// Shown wherever a model cannot be prepared while another job runs.
-pub(crate) fn job_busy() -> &'static str {
-    course2md::tr!("当前任务完成后才能准备模型")
-}
-
 /// Preparation log lines shown when expanded; older lines stay in the task log.
 const LOG_TAIL: usize = 80;
-
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct Request {
-    pub(crate) provider: AsrProvider,
-    pub(crate) model: String,
-    pub(crate) root: PathBuf,
-}
-impl Request {
-    /// Aliases share the canonical cache entry; an unsupported value is checked as typed.
-    pub(crate) fn new(provider: AsrProvider, model: Option<&str>, root: &Path) -> Self {
-        let model = course2md::config::effective_model(provider, model);
-        Self {
-            provider,
-            model: canonical_model(provider, model).unwrap_or_else(|_| model.to_owned()),
-            root: root.into(),
-        }
-    }
-    pub(crate) fn key(&self) -> String {
-        format!(
-            "{}:{}:{}",
-            self.provider.as_str(),
-            self.model,
-            self.root.display()
-        )
-    }
-}
-struct Entry {
-    request: Request,
-    generation: u64,
-    checking: bool,
-    result: Option<Result<LocalModelStatus, String>>,
-    cache_directories: BTreeSet<PathBuf>,
-}
-impl Entry {
-    fn status(&self) -> Option<&LocalModelStatus> {
-        self.result.as_ref().and_then(|result| result.as_ref().ok())
-    }
-}
-/// How the last preparation ended, kept with the request it belongs to.
-pub(crate) struct Outcome {
-    key: String,
-    pub(crate) message: String,
-    pub(crate) error: bool,
-    pub(crate) cancelled: bool,
-}
-#[derive(Default)]
-pub(super) struct State {
-    entries: BTreeMap<String, Entry>,
-    /// The request the running model job is preparing; taken when it exits.
-    preparing: Option<Request>,
-    outcome: Option<Outcome>,
-    /// The models whose files and preparation log are expanded.
-    details: BTreeSet<String>,
-}
 
 /// Local recognition engines in display order.
 pub(crate) const LOCAL_ENGINES: [AsrProvider; 4] = [
@@ -110,24 +49,6 @@ pub(crate) fn engine_icon(provider: Option<AsrProvider>) -> SymbolIcon {
         Some(AsrProvider::Api) => symbols::cloud(),
     }
 }
-/// Hardware this platform cannot have is not offered: Apple silicon engines only on
-/// macOS, Intel NPU never there. A saved choice stays visible on any platform.
-pub(crate) fn engine_offered(provider: AsrProvider, selected: Option<AsrProvider>) -> bool {
-    Some(provider) == selected
-        || match provider {
-            AsrProvider::Coreml => cfg!(target_os = "macos"),
-            AsrProvider::Npu => !cfg!(target_os = "macos"),
-            _ => true,
-        }
-}
-/// The one compatibility rule for a saved local model, aliases and NPU repositories included.
-pub(crate) fn model_supported(provider: AsrProvider, model: &str) -> bool {
-    provider != AsrProvider::Api && canonical_model(provider, model).is_ok()
-}
-pub(crate) fn unsupported_model() -> &'static str {
-    course2md::tr!("所选识别方式不支持这个模型，请换一个")
-}
-
 /// 模型准备按钮文案的唯一权威来源（设置页与引导页共用）。
 fn model_action_label(provider: AsrProvider, state: Option<&CacheState>) -> &'static str {
     match state {
@@ -147,60 +68,6 @@ const VC_RUNTIME_URL: &str = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
 const RELEASES_URL: &str = "https://github.com/mizorewww/course2md/releases";
 const LLAMA_GUIDE_URL: &str = "https://github.com/ggml-org/llama.cpp#quick-start";
 const UV_GUIDE_URL: &str = "https://docs.astral.sh/uv/getting-started/installation/";
-
-/// The one classification of why a local engine cannot run here. Messages,
-/// repair actions and engine choices all derive from it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DeviceIssue {
-    Engine,
-    AppleHardware,
-    AppleRuntime,
-    LlamaMissing,
-    /// Windows: llama-server is there but the Microsoft Visual C++ runtime it
-    /// links against is not.
-    VcRuntime,
-    GpuAbsent,
-    NpuDevice,
-    NpuRuntime,
-}
-impl DeviceIssue {
-    /// A short status for an engine choice.
-    pub(crate) fn short(self) -> &'static str {
-        match self {
-            Self::Engine => course2md::tr!("需要重新安装应用"),
-            Self::AppleHardware => course2md::tr!("需要 Apple 芯片的 Mac"),
-            Self::GpuAbsent => course2md::tr!("未检测到可用显卡"),
-            Self::NpuDevice => course2md::tr!("未检测到 Intel NPU"),
-            Self::AppleRuntime | Self::LlamaMissing | Self::VcRuntime | Self::NpuRuntime => {
-                course2md::tr!("需要安装识别组件")
-            }
-        }
-    }
-    /// The full explanation shown with repair actions.
-    fn message(self) -> &'static str {
-        match self {
-            Self::Engine => course2md::tr!("转换程序无法运行，请重新安装应用"),
-            Self::AppleHardware => course2md::tr!("当前系统不支持 Apple 芯片识别，请改用其他方式"),
-            Self::AppleRuntime => {
-                course2md::tr!("缺少 Apple 识别组件，请重新安装应用或改用其他方式")
-            }
-            Self::LlamaMissing => course2md::tr!("安装 llama.cpp 后才能用 GPU 或 CPU 识别"),
-            Self::VcRuntime => {
-                course2md::tr!("GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查")
-            }
-            Self::GpuAbsent => course2md::tr!("未检测到可用显卡，可改用 CPU"),
-            Self::NpuDevice => course2md::tr!("未检测到 Intel NPU，请改用其他方式"),
-            Self::NpuRuntime => course2md::tr!("安装 uv 后才能用 Intel NPU 识别"),
-        }
-    }
-    /// Whether installing something on this machine can clear the issue.
-    pub(crate) fn installable(self) -> bool {
-        matches!(
-            self,
-            Self::LlamaMissing | Self::VcRuntime | Self::NpuRuntime | Self::AppleRuntime
-        )
-    }
-}
 
 /// One repair an engine obstacle offers.
 enum Repair {
@@ -249,30 +116,6 @@ fn repairs(issue: DeviceIssue) -> Vec<(&'static str, SymbolIcon, &'static str, R
             UV_GUIDE_URL,
         )],
         DeviceIssue::AppleHardware | DeviceIssue::GpuAbsent | DeviceIssue::NpuDevice => Vec::new(),
-    }
-}
-
-pub(crate) fn device_issue(
-    provider: AsrProvider,
-    environment: &crate::backend::Environment,
-) -> Option<DeviceIssue> {
-    if !environment.engine {
-        return Some(DeviceIssue::Engine);
-    }
-    match provider {
-        AsrProvider::Coreml if !cfg!(all(target_os = "macos", target_arch = "aarch64")) => {
-            Some(DeviceIssue::AppleHardware)
-        }
-        AsrProvider::Coreml if !environment.apple => Some(DeviceIssue::AppleRuntime),
-        AsrProvider::Gpu if !environment.llama => Some(DeviceIssue::LlamaMissing),
-        AsrProvider::Gpu | AsrProvider::Cpu if !environment.vc_runtime => {
-            Some(DeviceIssue::VcRuntime)
-        }
-        AsrProvider::Gpu if environment.gpu.is_none() => Some(DeviceIssue::GpuAbsent),
-        AsrProvider::Cpu if !environment.llama => Some(DeviceIssue::LlamaMissing),
-        AsrProvider::Npu if !environment.npu_device() => Some(DeviceIssue::NpuDevice),
-        AsrProvider::Npu if !environment.npu_runtime() => Some(DeviceIssue::NpuRuntime),
-        _ => None,
     }
 }
 

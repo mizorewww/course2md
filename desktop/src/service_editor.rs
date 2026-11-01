@@ -1,5 +1,6 @@
 //! Service editor: picker, editor dialog, connection testing and publishing.
 use super::*;
+use desktop_core::service_binding::*;
 
 impl Desktop {
     pub fn selected_task_service(&self, purpose: ServicePurpose) -> Option<ServiceVersion> {
@@ -490,7 +491,7 @@ impl Desktop {
         });
         match draft_protocol {
             ServiceProtocol::CodexResponses => {
-                self.codex_refresh_status(crate::codex_ui::CodexSurface::Editor, cx)
+                self.codex_refresh_status(desktop_core::codex::CodexSurface::Editor, cx)
             }
             ServiceProtocol::OllamaChat => self.ollama_prepare_form(cx),
             _ => {}
@@ -675,7 +676,7 @@ impl Desktop {
         if protocol == ServiceProtocol::CodexResponses {
             parts.push(
                 self.codex_account_section(
-                    crate::codex_ui::CodexSurface::Editor,
+                    desktop_core::codex::CodexSurface::Editor,
                     awaiting_binding,
                     cx,
                 )
@@ -1723,83 +1724,5 @@ impl Desktop {
             }
         }
         cx.notify();
-    }
-}
-
-fn purpose_label(purpose: ServicePurpose) -> &'static str {
-    match purpose {
-        ServicePurpose::Speech => course2md::tr!("语音服务"),
-        ServicePurpose::Ai => course2md::tr!("AI 服务"),
-    }
-}
-
-fn add_service_label(purpose: ServicePurpose) -> &'static str {
-    match purpose {
-        ServicePurpose::Speech => course2md::tr!("添加语音服务"),
-        ServicePurpose::Ai => course2md::tr!("添加 AI 服务"),
-    }
-}
-
-/// What a service publication continues with once its credential is checked.
-struct PublishPlan {
-    draft_id: String,
-    continue_repair: bool,
-    target: Option<String>,
-    repair_task: Option<(String, Vec<Component>)>,
-    scope: BindingScope,
-}
-
-/// Where a published service applies. A repair, or a service chosen while
-/// editing one input, binds to that task alone unless the person also made it
-/// the default; a service saved in settings is the default only when chosen so.
-fn publish_scope(repairing: bool, from_input: bool, also_default: bool) -> BindingScope {
-    if repairing || (from_input && !also_default) {
-        BindingScope::CurrentTask
-    } else if also_default {
-        BindingScope::Defaults
-    } else {
-        BindingScope::Saved
-    }
-}
-
-/// The service the input records after a publish: its own binding, or none so
-/// that it follows the defaults the publish just changed.
-fn draft_service(scope: BindingScope, id: &str) -> Option<String> {
-    (scope == BindingScope::CurrentTask).then(|| id.to_owned())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{BindingScope, draft_service, publish_scope};
-
-    #[test]
-    fn a_repair_binds_only_its_task_whatever_the_default_choice() {
-        for (from_input, also_default) in
-            [(false, false), (false, true), (true, false), (true, true)]
-        {
-            assert_eq!(
-                publish_scope(true, from_input, also_default),
-                BindingScope::CurrentTask
-            );
-        }
-    }
-
-    #[test]
-    fn a_service_chosen_for_an_input_binds_it_unless_it_becomes_the_default() {
-        let scope = publish_scope(false, true, false);
-        assert_eq!(scope, BindingScope::CurrentTask);
-        assert_eq!(draft_service(scope, "svc").as_deref(), Some("svc"));
-
-        // Made the default as well: the input follows the new default instead
-        // of pinning a copy of it.
-        let scope = publish_scope(false, true, true);
-        assert_eq!(scope, BindingScope::Defaults);
-        assert_eq!(draft_service(scope, "svc"), None);
-    }
-
-    #[test]
-    fn a_service_saved_in_settings_changes_defaults_only_when_asked() {
-        assert_eq!(publish_scope(false, false, false), BindingScope::Saved);
-        assert_eq!(publish_scope(false, false, true), BindingScope::Defaults);
     }
 }
