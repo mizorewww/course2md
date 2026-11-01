@@ -531,6 +531,20 @@ fn conversion_gate(gate: GateInputs) -> ConversionGate {
     }
 }
 
+/// Everything a derived preview plan reads: any change derives it again.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PlanKey {
+    workspace: u64,
+    preferences: u64,
+    defaults_pending: bool,
+    source: u64,
+    reading: bool,
+    subtitle_failed: bool,
+    environment_ready: bool,
+    library: u64,
+    library_loading: bool,
+}
+
 /// What a subtitle read belongs to. Its late result counts only while all of this holds.
 struct SubtitleRead {
     generation: u64,
@@ -1411,7 +1425,8 @@ impl Desktop {
                                 } else {
                                     course2md::tr!("整理选中的视频").to_owned()
                                 })
-                                .disabled(selected_count == 0)
+                                // The component check decides whether these can run at all.
+                                .disabled(selected_count == 0 || self.environment.is_none())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.enqueue_selected_candidates(cx)
                                 })),
@@ -2885,18 +2900,27 @@ impl Desktop {
             }))
     }
 
-    /// Derived once per draft, preference and source revision, not on every render.
+    /// Derived once per change of what the plan reads, not on every render. A result that
+    /// outlived a check it waited for would turn the wait into a failure in red.
     fn cached_preview_plan(&mut self) -> Result<workspace::TaskPlan, (String, bool)> {
-        let key = (
-            self.workspace
+        let key = PlanKey {
+            workspace: self
+                .workspace
                 .as_ref()
                 .map_or(0, |workspace| workspace.state.revision),
-            self.preferences
+            preferences: self
+                .preferences
                 .revision(crate::preferences::PreferenceGroup::Generation),
-            self.preview_generation,
-        );
-        if let Some((workspace, preferences, source, plan)) = &self.preview_plan_cache
-            && (*workspace, *preferences, *source) == key
+            defaults_pending: self.preference_defaults_pending,
+            source: self.preview_generation,
+            reading: self.preview_cancel.is_some() || self.subtitle_loading,
+            subtitle_failed: self.subtitle_error.is_some(),
+            environment_ready: self.environment.is_some(),
+            library: self.library_generation,
+            library_loading: self.loading,
+        };
+        if let Some((cached, plan)) = &self.preview_plan_cache
+            && *cached == key
         {
             return plan.clone();
         }
@@ -2906,7 +2930,7 @@ impl Desktop {
                 .is_some();
             (format!("{error:#}"), pending)
         });
-        self.preview_plan_cache = Some((key.0, key.1, key.2, plan.clone()));
+        self.preview_plan_cache = Some((key, plan.clone()));
         plan
     }
 
@@ -3099,7 +3123,7 @@ impl Desktop {
                     course2md::tr!("生成新版笔记"),
                 )
                 .track_focus(&self.import_submit_focus)
-                .disabled(reading || self.workspace.is_none() || preferences_blocked)
+                .disabled(reading || checking || self.workspace.is_none() || preferences_blocked)
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.following_conversion =
                         Some(ConversionFollow::Preparing(this.preview_generation));
@@ -3187,7 +3211,7 @@ impl Desktop {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConversionFollow, ConversionGate, GateInputs, automatic_subtitle_fallback,
+        ConversionFollow, ConversionGate, GateInputs, PlanKey, automatic_subtitle_fallback,
         completed_input_task, conversion_gate, locked_input_task, submitted_input_task,
         subtitle_needs_confirmation, uses_speech,
     };
@@ -3213,6 +3237,38 @@ mod tests {
             environment_ready: true,
             library_ready: true,
             existing_note: false,
+        }
+    }
+
+    #[test]
+    fn a_preview_plan_is_derived_again_once_what_it_waited_for_has_finished() {
+        let waiting = PlanKey {
+            workspace: 3,
+            preferences: 2,
+            defaults_pending: false,
+            source: 1,
+            reading: true,
+            subtitle_failed: false,
+            environment_ready: false,
+            library: 4,
+            library_loading: true,
+        };
+        assert!(waiting == PlanKey { ..waiting });
+        for finished in [
+            PlanKey {
+                environment_ready: true,
+                ..waiting
+            },
+            PlanKey {
+                library_loading: false,
+                ..waiting
+            },
+            PlanKey {
+                reading: false,
+                ..waiting
+            },
+        ] {
+            assert!(waiting != finished);
         }
     }
 

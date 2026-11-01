@@ -306,7 +306,7 @@ struct Desktop {
     event_wake_rx: smol::channel::Receiver<()>,
     /// The derived preview plan; an error carries whether it is only waiting
     /// on background checks (`task_runner::PlanPending`).
-    preview_plan_cache: Option<(u64, u64, u64, PreviewPlan)>,
+    preview_plan_cache: Option<(import_ui::PlanKey, PreviewPlan)>,
     queue_keys: Vec<String>,
     queue_focus: Vec<FocusHandle>,
     queue_rem: f32,

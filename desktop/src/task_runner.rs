@@ -82,6 +82,13 @@ impl std::fmt::Display for PlanPending {
 
 impl std::error::Error for PlanPending {}
 
+/// The finished component check, or the wait for it.
+fn plan_environment(
+    environment: Option<&crate::backend::Environment>,
+) -> Result<&crate::backend::Environment> {
+    Ok(environment.ok_or(PlanPending(course2md::tr!("正在检查所需组件…")))?)
+}
+
 fn validate_plan_storage(
     validation: PlanValidation,
     library: &workspace::LibraryLocation,
@@ -544,11 +551,9 @@ impl Desktop {
 
     /// The plan builders' shared tool check: the engine and FFmpeg always; an `online` source also needs
     /// yt-dlp (batch plans are always online; a single plan follows its confirmed source).
+    /// A check still in progress is [`PlanPending`], not a failure.
     fn ensure_plan_environment(&self, online: bool) -> Result<&crate::backend::Environment> {
-        let environment = self
-            .environment
-            .as_ref()
-            .context(course2md::tr!("正在检查所需组件…"))?;
+        let environment = plan_environment(self.environment.as_ref())?;
         ensure!(environment.engine, course2md::tr!("生成引擎无法启动"));
         ensure!(
             environment.ffmpeg && environment.ffprobe,
@@ -2249,6 +2254,11 @@ pub(crate) mod tests {
             )
             .is_err(),
             "a removed folder cannot be authorized by an old preview"
+        );
+        let checking = super::plan_environment(None).err().unwrap();
+        assert!(
+            checking.downcast_ref::<super::PlanPending>().is_some(),
+            "a component check still in progress is waiting, not a failure"
         );
         let waiting = validate_plan_storage(PlanValidation::Preview, &location, None, None, None)
             .unwrap_err();
