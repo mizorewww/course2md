@@ -2555,10 +2555,8 @@ impl Desktop {
         };
         let top = !attached;
         let scale = TileScale::Regular;
-        // The plan joins the header; editable options stand below it as sections.
-        let joined = open;
         let header = scale
-            .button("generation-options-toggle", [top, top, !joined, !joined])
+            .button("generation-options-toggle", [top, top, false, false])
             .accessibility_label(if open {
                 course2md::tr!("收起处理选项")
             } else {
@@ -2576,25 +2574,49 @@ impl Desktop {
                     ))
                     .child(disclosure_chevron(open)),
             );
+        let hairline = || {
+            div()
+                .h(px(1.))
+                .mx(ITEM_INSET)
+                .bg(color(ColorRole::OUTLINE_VARIANT))
+        };
+        // The way to the next video stays visible whether or not the plan is open: a
+        // running task's card carries it; otherwise it sits right under this header.
+        let next = owner
+            .as_ref()
+            .filter(|task| !crate::task_ui::runs_in_card(task))
+            .map(|_| {
+                v_flex().w_full().min_w_0().child(hairline()).child(
+                    scale
+                        .button("set-up-next-video", [false, false, false, false])
+                        .accessibility_label(course2md::tr!("设置下一个视频"))
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.set_up_next_video(window, cx)),
+                        )
+                        .child(
+                            scale
+                                .row()
+                                .child(Icon::from(symbols::add()).color(color(ColorRole::PRIMARY)))
+                                .child(scale.text(
+                                    "set-up-next-video-label",
+                                    course2md::tr!("设置下一个视频"),
+                                    Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
+                                )),
+                        ),
+                )
+            });
         // One surface: a hairline under the header, then quiet sections inside it.
         let body = v_flex()
             .w_full()
             .min_w_0()
-            .bg(color(ColorRole::SURFACE))
-            .rounded_b(RADIUS_HERO)
-            .child(
-                div()
-                    .h(px(1.))
-                    .mx(ITEM_INSET)
-                    .bg(color(ColorRole::OUTLINE_VARIANT)),
-            )
+            .child(hairline())
             .child(match &owner {
                 Some(task) => v_flex()
                     .w_full()
                     .min_w_0()
                     .gap(rem(12.))
                     .p(ITEM_INSET)
-                    .children(self.task_plan_rows(task)),
+                    .children(self.task_plan_rows(task, true)),
                 None => v_flex()
                     .w_full()
                     .min_w_0()
@@ -2605,10 +2627,14 @@ impl Desktop {
                     .child(self.import_ai_options(window, cx))
                     .child(self.import_destination(cx)),
             });
-        v_flex()
-            .w_full()
-            .min_w_0()
+        tile([top, top, true, true])
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .rounded_b(RADIUS_HERO)
+            .when(top, |panel| panel.rounded_t(RADIUS_HERO))
             .child(header)
+            .children(next)
             .child(motion::disclosure("generation-options-body", open, body))
     }
 

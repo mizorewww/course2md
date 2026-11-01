@@ -729,13 +729,26 @@ fn lead_action<'a>(
         .then(|| actions.iter().find(|action| **action == TaskAction::Read))
         .flatten();
     // A running task has nothing to decide, so its next step is the next video.
-    let working =
-        !task.state.finished() && task.state != TaskState::Uncertain && !task.has_uncertain();
+    let working = runs_in_card(task);
     read.or_else(recovery).or_else(|| {
         actions
             .iter()
             .find(|action| home && working && **action == TaskAction::NextVideo)
     })
+}
+
+/// A task still working carries the way to the next video on its card; otherwise it
+/// sits right under the options panel's header.
+pub(crate) fn runs_in_card(task: &TaskRecord) -> bool {
+    !task.state.finished() && task.state != TaskState::Uncertain && !task.has_uncertain()
+}
+
+/// Where a task's plan goes and what it does: a card's second line.
+fn task_support_line(id: &str, support: String) -> Stateful<Div> {
+    accessible_text(SharedString::from(format!("task-support-{id}")), support)
+        .text_size(TEXT_AUX)
+        .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+        .whitespace_normal()
 }
 
 /// Why a task needs the person: each unfinished part of a partial note, or its one reason.
@@ -789,14 +802,14 @@ fn task_note_failures(
 /// An icon, a label and its value: one fact about how a task was planned.
 pub(crate) fn fact_row(
     id: impl Into<SharedString>,
-    icon: SymbolIcon,
+    icon: Option<SymbolIcon>,
     label: &'static str,
     value: String,
 ) -> Div {
     let scale = TileScale::Compact;
     scale
         .row()
-        .child(Icon::from(icon).color(color(ColorRole::ON_SURFACE_VARIANT)))
+        .children(icon.map(|icon| Icon::from(icon).color(color(ColorRole::ON_SURFACE_VARIANT))))
         .child(scale.text(ElementId::Name(id.into()), label, Some(value.into())))
 }
 
@@ -1448,7 +1461,10 @@ impl Desktop {
                     }
                     actions.extend(recovery);
                 }
-                actions.extend([ViewTask, NextVideo]);
+                actions.push(ViewTask);
+                if runs_in_card(task) {
+                    actions.push(NextVideo);
+                }
             }
         }
         actions
@@ -1640,7 +1656,7 @@ impl Desktop {
 
     /// What a task was planned with, read from its saved plan: a submitted task's
     /// options on the workbench, and the record in its details.
-    pub(crate) fn task_plan_rows(&self, task: &TaskRecord) -> Vec<Div> {
+    pub(crate) fn task_plan_rows(&self, task: &TaskRecord, flat: bool) -> Vec<Div> {
         let options = task.plan.options();
         let mut ai: Vec<String> = [
             import_ui::ConversionAiOption::Proofread,
@@ -1683,26 +1699,29 @@ impl Desktop {
             None => folder,
         };
         let id = &task.id;
-        vec![
-            fact_row(
+        [
+            (
                 format!("task-destination-{id}"),
                 symbols::folder_open(),
                 course2md::tr!("保存到"),
                 destination,
             ),
-            fact_row(
+            (
                 format!("task-text-source-{id}"),
                 symbols::subtitles(),
                 course2md::tr!("文字来源"),
                 task_text_source(task).to_owned(),
             ),
-            fact_row(
+            (
                 format!("task-ai-{id}"),
                 symbols::auto_fix_high(),
                 course2md::tr!("AI 处理"),
                 ai,
             ),
         ]
+        .into_iter()
+        .map(|(id, icon, label, value)| fact_row(id, (!flat).then_some(icon), label, value))
+        .collect()
     }
 
     fn task_cover(&self, task: &TaskRecord) -> Option<PathBuf> {
@@ -1724,21 +1743,30 @@ impl Desktop {
         let id = &task.id;
         let expanded = self.expanded_task.as_ref() == Some(id);
         let more = self.task_menu_button(task, window, cx);
-        let chip = (task.state != TaskState::Queued || !matches!(place, CardPlace::Row { .. }))
-            .then(|| status_chip(task_status_kind(task.state)).child(task_status_label(task)));
+        // On the workbench the running card's status is its step; Tasks owns the rest.
+        let on_home_running = matches!(place, CardPlace::Home) && runs_in_card(task);
+        let chip = (!on_home_running
+            && (task.state != TaskState::Queued || !matches!(place, CardPlace::Row { .. })))
+        .then(|| status_chip(task_status_kind(task.state)).child(task_status_label(task)));
         let context_menu = self.task_menu(task, cx);
+        // The running card's progress and actions stay in its text column.
+        let inner = on_home_running.then(|| self.task_body(task, place, window, cx));
         let (outer, head, body) = match place {
             CardPlace::Row { outer, number } => {
                 let head = self.task_row_head(task, number, chip, more, cx);
                 (outer, head.into_any_element(), expanded)
             }
             CardPlace::Open { outer } => {
-                let head = self.task_card_head(task, place, chip, more, window);
+                let head = self.task_card_head(task, place, chip, more, None, window);
                 (outer, head.into_any_element(), true)
             }
             CardPlace::Home => {
-                let head = self.task_card_head(task, place, chip, more, window);
-                ([true, true, false, false], head.into_any_element(), true)
+                let head = self.task_card_head(task, place, chip, more, inner, window);
+                (
+                    [true, true, false, false],
+                    head.into_any_element(),
+                    !on_home_running,
+                )
             }
         };
         let body = body.then(|| self.task_body(task, place, window, cx));
@@ -1865,6 +1893,7 @@ impl Desktop {
         place: CardPlace,
         chip: Option<Div>,
         more: AnyElement,
+        inner: Option<Div>,
         window: &Window,
     ) -> Div {
         let id = &task.id;
@@ -1873,6 +1902,12 @@ impl Desktop {
             task.plan.source.title.clone()
         } else {
             task.plan.title.clone()
+        };
+        let generating = task.state == TaskState::Running && task.intent == Intent::Run;
+        let title = if generating && !home {
+            course2md::tr!("正在生成《{}》", title)
+        } else {
+            title
         };
         // Where it saves, where its text comes from and which service
         // receives it, on one line; on the workbench, whose video it is.
@@ -1893,7 +1928,11 @@ impl Desktop {
         } else {
             import_ui::cover_width(window)
         };
-        let step = self.task_step_line(task);
+        let step = if home {
+            self.task_home_step_line(task)
+        } else {
+            self.task_step_line(task)
+        };
         // A running task's status ends its title; one that waits says so below it.
         let (title_chip, line_chip) = if home || needs_person(task) {
             (None, chip)
@@ -1952,6 +1991,12 @@ impl Desktop {
                             .children(title_chip)
                             .child(more),
                     )
+                    // Whose video first on the workbench, where the step belongs to the bar.
+                    .when(home, |column| {
+                        column.when(!support.is_empty(), |column| {
+                            column.child(task_support_line(id, support.clone()))
+                        })
+                    })
                     .when_some(step, |column, step| {
                         column.child(
                             accessible_text(SharedString::from(format!("task-step-{id}")), step)
@@ -1961,18 +2006,11 @@ impl Desktop {
                                 .whitespace_normal(),
                         )
                     })
-                    .when(!support.is_empty(), |column| {
-                        column.child(
-                            accessible_text(
-                                SharedString::from(format!("task-support-{id}")),
-                                support,
-                            )
-                            .text_size(TEXT_AUX)
-                            .text_color(color(ColorRole::ON_SURFACE_VARIANT))
-                            .whitespace_normal(),
-                        )
+                    .when(!home && !support.is_empty(), |column| {
+                        column.child(task_support_line(id, support.clone()))
                     })
-                    .child(h_flex().pt(rem(4.)).children(line_chip)),
+                    .child(h_flex().pt(rem(4.)).children(line_chip))
+                    .children(inner),
             )
     }
 
@@ -1984,6 +2022,22 @@ impl Desktop {
             .iter()
             .position(|stage| stage.status.running())
             .map(|index| course2md::tr!("第 {} 步 · {}", index + 1, stages[index].title))
+            .or_else(|| self.task_wait(task).map(|wait| wait.label().to_owned()))
+    }
+
+    /// The workbench says the step and its measure on one line, above the bar.
+    fn task_home_step_line(&self, task: &TaskRecord) -> Option<String> {
+        let stages = self.task_stage_rows(task);
+        stages
+            .iter()
+            .find(|stage| stage.status.running())
+            .map(|stage| {
+                if stage.detail.is_empty() {
+                    stage.title.clone()
+                } else {
+                    format!("{} · {}", stage.title, stage.detail)
+                }
+            })
             .or_else(|| self.task_wait(task).map(|wait| wait.label().to_owned()))
     }
 
@@ -2002,7 +2056,12 @@ impl Desktop {
     /// One indicator for the step in progress: its measured fraction when the
     /// worker reports one, motion otherwise. The line under it carries the step's
     /// own measurement and clock, never an estimate.
-    fn task_progress(&self, task: &TaskRecord, stages: &[TaskStage]) -> Option<Div> {
+    fn task_progress(
+        &self,
+        task: &TaskRecord,
+        stages: &[TaskStage],
+        surface: TaskSurface,
+    ) -> Option<Div> {
         let id = &task.id;
         let active = self.is_running_task(id);
         let current = stages.iter().find(|stage| stage.status.running());
@@ -2016,7 +2075,8 @@ impl Desktop {
                 self.job_started
                     .filter(|_| self.job.is_some())
                     .map(|started| activity::elapsed_label(started.elapsed()))
-            });
+            })
+            .filter(|_| surface != TaskSurface::Home || current.is_none());
         Some(
             v_flex()
                 .w_full()
@@ -2134,7 +2194,7 @@ impl Desktop {
         });
         let stages = self.task_stage_rows(task);
         let running = stages.iter().any(|stage| stage.status.running());
-        let progress = self.task_progress(task, &stages);
+        let progress = self.task_progress(task, &stages, surface);
         // A single reached step is already the step line above.
         let chips = (running && stages.len() > 1 && surface != TaskSurface::Home).then(|| {
             h_flex()
@@ -2143,7 +2203,16 @@ impl Desktop {
                 .gap(rem(8.))
                 .flex_wrap()
                 .children(stages.iter().map(|stage| {
-                    status_chip_outlined(stage.status.chip()).child(stage.title.clone())
+                    status_chip_outlined(stage.status.chip())
+                        .when(stage.status.running(), |chip| {
+                            chip.child(icon_spinner(
+                                SharedString::from(format!("{}-chip-spinner", stage.id)),
+                                stage.title.clone(),
+                                rem(16.),
+                                cx,
+                            ))
+                        })
+                        .child(stage.title.clone())
                 }))
         });
         let buttons = actions.iter().map(|action| {
@@ -2178,16 +2247,44 @@ impl Desktop {
                 )
                 .on_click(action.clone().click(cx.weak_entity(), id.clone()))
         });
-        let buttons = h_flex()
-            .w_full()
-            .min_w_0()
-            .gap(rem(8.))
-            .flex_wrap()
-            .when(
-                !needs_person(task) || matches!(place, CardPlace::Home),
-                |row| row.justify_end(),
-            )
-            .children(buttons.collect::<Vec<_>>());
+        let mut buttons: Vec<MaterialButton> = buttons.collect();
+        let home_running = surface == TaskSurface::Home && runs_in_card(task);
+        // Stopping stands apart from what goes on; those wrap as one trailing group.
+        let leading_cancel = (home_running)
+            .then(|| {
+                actions
+                    .iter()
+                    .position(|action| *action == TaskAction::Cancel)
+            })
+            .flatten()
+            .map(|index| buttons.remove(index));
+        let buttons = if home_running {
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(8.))
+                .flex_wrap()
+                .children(leading_cancel)
+                .child(
+                    h_flex()
+                        .ml_auto()
+                        .gap(rem(8.))
+                        .flex_wrap()
+                        .justify_end()
+                        .children(buttons),
+                )
+        } else {
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(8.))
+                .flex_wrap()
+                .when(
+                    !needs_person(task) || matches!(place, CardPlace::Home),
+                    |row| row.justify_end(),
+                )
+                .children(buttons)
+        };
         let details = (self.expanded_task.as_ref() == Some(&id)).then(|| {
             let content = v_flex()
                 .w_full()
@@ -2196,7 +2293,7 @@ impl Desktop {
                 .pt(rem(12.))
                 .border_t_1()
                 .border_color(color(ColorRole::OUTLINE_VARIANT))
-                .children(self.task_plan_rows(task))
+                .children(self.task_plan_rows(task, false))
                 .children(
                     self.task_stage_rows(task)
                         .into_iter()
