@@ -10,7 +10,7 @@ use course2md::execution::Component;
 use desktop_core::task_view::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
-use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
+use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     color::ColorRole,
     icons::{Icon, SymbolIcon},
@@ -714,12 +714,12 @@ impl Desktop {
         }
     }
 
-    /// Every command for a task, on right-click: Kit's context menu holds them.
+    /// Every command for a task, on a right press and behind the card's ⋯ button.
     pub(crate) fn task_menu(
         &self,
         task: &TaskRecord,
         cx: &mut Context<Self>,
-    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+    ) -> impl Fn(&mut Window, &mut App) -> MaterialMenu + 'static {
         let entity = cx.weak_entity();
         let id = task.id.clone();
         let items: Vec<_> = self
@@ -727,21 +727,28 @@ impl Desktop {
             .into_iter()
             .map(|action| (action.present(task, self), action))
             .collect();
-        move |mut menu, _, _| {
-            let mut group = None;
-            for ((label, icon, disabled), action) in &items {
-                if group.is_some_and(|group| group != action.group()) {
-                    menu = menu.separator();
-                }
-                group = Some(action.group());
-                menu = menu.item(
-                    PopupMenuItem::new(*label)
-                        .icon(icon.component())
-                        .disabled(*disabled)
-                        .on_click(action.clone().click(entity.clone(), id.clone())),
-                );
-            }
-            menu
+        move |_, _| {
+            let groups: Vec<u8> = items.iter().map(|(_, action)| action.group()).collect();
+            MaterialMenu::new(SharedString::from(format!("task-more-items-{id}"))).items(
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(index, ((text, icon, disabled), action))| {
+                        let danger = *action == TaskAction::Cancel;
+                        MaterialMenuItem::new(*text)
+                            .leading(
+                                Icon::from(*icon)
+                                    .when(danger, |icon| icon.color(color(ColorRole::ERROR))),
+                            )
+                            .disabled(*disabled)
+                            .divider(
+                                groups
+                                    .get(index + 1)
+                                    .is_some_and(|next| *next != groups[index]),
+                            )
+                            .on_click(action.clone().click(entity.clone(), id.clone()))
+                    }),
+            )
         }
     }
 
@@ -754,21 +761,7 @@ impl Desktop {
     ) -> AnyElement {
         let id = &task.id;
         let label = course2md::tr!("更多操作");
-        let actions = self.task_actions(task, TaskSurface::Menu);
-        let groups: Vec<u8> = actions.iter().map(TaskAction::group).collect();
-        let items = actions.into_iter().enumerate().map(|(index, action)| {
-            let (text, icon, disabled) = action.present(task, self);
-            let danger = action == TaskAction::Cancel;
-            MaterialMenuItem::new(text)
-                .leading(Icon::from(icon).when(danger, |icon| icon.color(color(ColorRole::ERROR))))
-                .disabled(disabled)
-                .divider(
-                    groups
-                        .get(index + 1)
-                        .is_some_and(|next| *next != groups[index]),
-                )
-                .on_click(action.click(cx.weak_entity(), id.clone()))
-        });
+        let items = self.task_menu(task, cx)(window, cx);
         let trigger =
             MaterialTooltip::plain(SharedString::from(format!("task-more-tip-{id}")), label)
                 .trigger(IconButton::new(
@@ -779,7 +772,7 @@ impl Desktop {
         ui::menu(
             SharedString::from(format!("task-more-menu-{id}")),
             trigger,
-            MaterialMenu::new(SharedString::from(format!("task-more-items-{id}"))).items(items),
+            items,
             window,
             cx,
         )
@@ -1000,16 +993,20 @@ impl Desktop {
                 _ => card,
             })
             .id(SharedString::from(format!("task-menu-{id}")))
+            .relative()
             .flex()
             .flex_col()
             .overflow_hidden()
+            .child(MaterialContextMenu::new(
+                SharedString::from(format!("task-context-{id}")),
+                context_menu,
+            ))
             .map(|card| match place {
                 CardPlace::Row { .. } => card
                     .child(head)
                     .children(body.map(|body| div().px(rem(16.)).pb(rem(16.)).child(body))),
                 _ => card.p(rem(16.)).gap(rem(16.)).child(head).children(body),
             })
-            .context_menu(move |popup, window, cx| context_menu(popup, window, cx))
             .into_any_element()
     }
 

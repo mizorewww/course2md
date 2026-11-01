@@ -21,9 +21,9 @@ use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit::component::{
     input::{InputEvent, InputState, TextareaState},
-    menu::{ContextMenuExt, PopupMenuItem},
     scroll::Scrollbar,
 };
+use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     icons::{Icon, SymbolIcon},
     motion,
@@ -963,27 +963,10 @@ impl Desktop {
             )
             .on_click(ui::menu_key_toggle(&menu_id, window, cx)),
         );
-        let items = actions.iter().map(|action| {
-            let (kind, version) = (action.kind, version.clone());
-            let icon = Icon::from(action.icon);
-            MaterialMenuItem::new(action.label)
-                .leading(if action.danger {
-                    icon.color(color(ColorRole::ERROR))
-                } else {
-                    icon
-                })
-                .disabled(action.disabled)
-                .divider(action.divider)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.run_service_action(kind, &version, window, cx)
-                }))
-        });
         let menu = ui::menu(
             menu_id,
             trigger,
-            MaterialMenu::new(SharedString::from(format!("service-action-items-{id}")))
-                .width(MENU_WIDTH)
-                .items(items),
+            service_action_menu(&id, &actions, version, &cx.weak_entity()),
             window,
             cx,
         )
@@ -1007,6 +990,7 @@ impl Desktop {
         .row(cx);
         let this = cx.weak_entity();
         let context_version = version.clone();
+        let context_id = id.clone();
         let open_version = id.clone();
         let open = cx.listener(move |this, _, window, cx| {
             this.open_settings_service_editor(purpose, Some(open_version.clone()), window, cx);
@@ -1014,35 +998,19 @@ impl Desktop {
         ui::Field::tile(format!("saved-service-row-{id}"), move |outer| {
             div()
                 .id(SharedString::from(format!("service-context-{id}")))
+                .relative()
                 .w_full()
                 .min_w_0()
+                .child(MaterialContextMenu::new(
+                    SharedString::from(format!("service-context-menu-{id}")),
+                    move |_, _| service_action_menu(&context_id, &actions, &context_version, &this),
+                ))
                 .child(
                     TileScale::Regular
                         .button(SharedString::from(format!("saved-service-{id}")), outer)
                         .on_click(open)
                         .child(row),
                 )
-                .context_menu(move |menu, _, _| {
-                    actions.iter().fold(menu, |menu, action| {
-                        let (kind, version, this) =
-                            (action.kind, context_version.clone(), this.clone());
-                        let item = menu.item(
-                            PopupMenuItem::new(action.label)
-                                .icon(action.icon.component())
-                                .disabled(action.disabled)
-                                .on_click(move |_, window, cx| {
-                                    let _ = this.update(cx, |this, cx| {
-                                        this.run_service_action(kind, &version, window, cx)
-                                    });
-                                }),
-                        );
-                        if action.divider {
-                            item.separator()
-                        } else {
-                            item
-                        }
-                    })
-                })
                 .into_any_element()
         })
     }
@@ -2098,6 +2066,34 @@ struct ServiceAction {
     disabled: bool,
     divider: bool,
     danger: bool,
+}
+
+/// A saved service's commands, on a right press and behind its ⋮ button.
+fn service_action_menu(
+    id: &str,
+    actions: &[ServiceAction],
+    version: &ServiceVersion,
+    desktop: &WeakEntity<Desktop>,
+) -> MaterialMenu {
+    MaterialMenu::new(SharedString::from(format!("service-action-items-{id}")))
+        .width(MENU_WIDTH)
+        .items(actions.iter().map(|action| {
+            let (kind, version, desktop) = (action.kind, version.clone(), desktop.clone());
+            let icon = Icon::from(action.icon);
+            MaterialMenuItem::new(action.label)
+                .leading(if action.danger {
+                    icon.color(color(ColorRole::ERROR))
+                } else {
+                    icon
+                })
+                .disabled(action.disabled)
+                .divider(action.divider)
+                .on_click(move |_, window, cx| {
+                    let _ = desktop.update(cx, |this, cx| {
+                        this.run_service_action(kind, &version, window, cx)
+                    });
+                })
+        }))
 }
 
 #[cfg(test)]

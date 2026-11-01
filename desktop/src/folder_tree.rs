@@ -4,10 +4,8 @@
 use super::*;
 use crate::library_ui::Moving;
 use crate::symbols;
-use gpui_kit::component::{
-    menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
-    scroll::Scrollbar,
-};
+use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     color::ColorRole,
     icons::{Icon, SymbolIcon},
@@ -18,7 +16,7 @@ use gpui_kit_material::{
     },
     tokens::shape::RADIUS_CARD,
 };
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 /// Width of the folder navigation beside the notes.
 pub(crate) const FOLDER_SIDEBAR: f32 = 256.;
@@ -67,7 +65,7 @@ impl Render for FolderDrag {
 type CommandRun = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// One command of a note's or folder's menu. The list draws both behind the ⋮ button
-/// (the kit's menu) and on right-click (Kit's, which `context_menu` requires).
+/// and on a right press.
 #[derive(Clone)]
 pub(crate) struct Command {
     label: SharedString,
@@ -134,25 +132,16 @@ pub(crate) fn command_menu(id: impl Into<ElementId>, commands: Vec<Command>) -> 
         }))
 }
 
-/// The commands as a right-click menu.
-pub(crate) fn command_popup(mut menu: PopupMenu, commands: &[Command]) -> PopupMenu {
-    for command in commands {
-        let icon = command.icon.component();
-        let run = command.run.clone();
-        menu = menu.item(
-            PopupMenuItem::new(command.label.clone())
-                .icon(if command.danger {
-                    icon.text_color(color(ColorRole::ERROR))
-                } else {
-                    icon
-                })
-                .on_click(move |_, window, cx| run(window, cx)),
-        );
-        if command.ends_group {
-            menu = menu.separator();
-        }
-    }
-    menu
+/// The commands on a right press: the first child of the `relative` element they serve.
+pub(crate) fn command_context_menu(
+    id: impl Into<ElementId>,
+    commands: Vec<Command>,
+) -> MaterialContextMenu {
+    let id = id.into();
+    let items = ElementId::NamedChild(Arc::new(id.clone()), "items".into());
+    MaterialContextMenu::new(id, move |_, _| {
+        command_menu(items.clone(), commands.clone())
+    })
 }
 
 /// Note counts shown beside the navigation's places.
@@ -584,9 +573,11 @@ impl Desktop {
         };
         let mut row = div()
             .id(SharedString::from(format!("{key}-row")))
+            .relative()
             .flex_1()
             .min_w_0()
             .on_key_down(keys)
+            .child(command_context_menu(format!("{key}-context"), commands))
             .child(
                 // A long name is cut by its row; the tooltip shows the whole.
                 MaterialTooltip::plain(SharedString::from(format!("{key}-tip")), label.clone())
@@ -606,7 +597,6 @@ impl Desktop {
             };
             row = row.on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()));
         }
-        let row = row.context_menu(move |menu, _, _| command_popup(menu, &commands));
         h_flex()
             .w_full()
             .min_w_0()
@@ -659,8 +649,13 @@ impl Desktop {
                 "folder-tree-library-{}",
                 root.display()
             )))
+            .relative()
             .w_full()
             .mt(rem(8.))
+            .child(command_context_menu(
+                SharedString::from(format!("folder-tree-library-context-{}", root.display())),
+                commands,
+            ))
             .child(
                 ListItem::new("library-header", name)
                     .density(ListDensity::Compact)
@@ -679,7 +674,6 @@ impl Desktop {
                         cx.listener(move |this, _, _, cx| this.toggle_tree_node(&toggle, 0, cx)),
                     ),
             )
-            .context_menu(move |menu, _, _| command_popup(menu, &commands))
     }
 
     /// The folder navigation: every note, each library's unfiled notes and its
@@ -859,11 +853,16 @@ impl Desktop {
                 self.drop_target(
                     div()
                         .id(SharedString::from(format!("folder-row-{id}")))
+                        .relative()
                         .min_w_0(),
                     root,
                     Some(id),
                     cx,
                 )
+                .child(command_context_menu(
+                    ("folder-context", id as usize),
+                    commands,
+                ))
                 .child(
                     ListItem::new(("folder-item", id as usize), name)
                         .leading(ListLeading::Icon(symbols::folder().into()))
@@ -879,7 +878,6 @@ impl Desktop {
                         })),
                 )
                 .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
-                .context_menu(move |menu, _, _| command_popup(menu, &commands))
             })
             .collect();
         Some(

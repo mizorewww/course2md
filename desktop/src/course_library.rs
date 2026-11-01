@@ -1,10 +1,11 @@
 //! The note library and the workbench's lists of notes and tasks.
 use super::*;
-use crate::folder_tree::{Command, NoteDrag, command_menu, command_popup, note_count};
+use crate::folder_tree::{Command, NoteDrag, command_context_menu, command_menu, note_count};
 use crate::library_ui::{Moving, NameTarget};
 use crate::{symbols, ui};
 use desktop_core::library::*;
-use gpui_kit::component::{menu::ContextMenuExt, scroll::Scrollbar};
+use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     color::ColorRole,
     icons::{Icon, SymbolIcon},
@@ -1635,6 +1636,8 @@ impl Desktop {
             .rounded(TILE_RADIUS)
             .accessibility_label(course2md::tr!("阅读 {}", course.title))
             .on_click(cx.listener(move |this, _, _, cx| this.open_course(open.clone(), cx)))
+            .relative()
+            .child(command_context_menu(("note-card-context", index), commands))
             .child(
                 v_flex()
                     .w_full()
@@ -1682,7 +1685,6 @@ impl Desktop {
             .children(self.course_read_error(course, index, cx))
             .children(self.course_export_feedback(course, cx))
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
-            .context_menu(move |menu, _, _| command_popup(menu, &commands))
             .into_any_element()
     }
 
@@ -1761,10 +1763,11 @@ impl Desktop {
             );
         list_surface(outer)
             .id(("note", index))
+            .relative()
+            .child(command_context_menu(("note-context", index), commands))
             .child(row)
             .children(details)
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
-            .context_menu(move |menu, _, _| command_popup(menu, &commands))
             .into_any_element()
     }
 
@@ -1864,9 +1867,13 @@ impl Desktop {
             list = list.child(
                 div()
                     .id(SharedString::from(format!("workbench-task-{cancel}")))
+                    .relative()
                     .w_full()
-                    .child(row)
-                    .context_menu(move |popup, window, cx| menu(popup, window, cx)),
+                    .child(MaterialContextMenu::new(
+                        SharedString::from(format!("workbench-task-context-{cancel}")),
+                        menu,
+                    ))
+                    .child(row),
             );
         }
         Some(home_section(

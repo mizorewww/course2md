@@ -10,7 +10,7 @@ use anyhow::{Context as _, Result, ensure};
 use desktop_core::locations::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
-use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
+use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     icons::{Icon, SymbolIcon},
     prelude::*,
@@ -1085,15 +1085,6 @@ impl Desktop {
         let path = course2md::config::simplify_verbatim(library.root.clone());
         let actions = self.location_actions(library, repair, offline, default);
         let entity = cx.weak_entity();
-        let items = actions.iter().map(|action| {
-            let (run, entity) = (action.run.clone(), entity.clone());
-            MaterialMenuItem::new(action.label)
-                .leading(Icon::from(action.icon))
-                .disabled(!action.enabled)
-                .on_click(move |_, window, cx| {
-                    let _ = entity.update(cx, |this, cx| run(this, window, cx));
-                })
-        });
         let more = ui::menu(
             ("storage-location-menu", index),
             MaterialTooltip::plain(
@@ -1105,7 +1096,7 @@ impl Desktop {
                 symbols::more_vert(),
                 course2md::tr!("{} 操作", library.name),
             )),
-            MaterialMenu::new(("storage-location-items", index)).items(items),
+            location_menu(index, &actions, &entity),
             window,
             cx,
         )
@@ -1213,26 +1204,15 @@ impl Desktop {
         .row(cx);
         div()
             .id(("storage-location", index))
+            .relative()
             .w_full()
             .min_w_0()
-            .context_menu(move |menu, _, _| {
-                actions
-                    .iter()
-                    .enumerate()
-                    .fold(menu, |menu, (index, action)| {
-                        let (run, entity) = (action.run.clone(), entity.clone());
-                        menu.when(index == 1, PopupMenu::separator).item(
-                            PopupMenuItem::new(action.label)
-                                .icon(action.icon.component())
-                                .disabled(!action.enabled)
-                                .on_click(move |_, window, cx| {
-                                    let _ = entity.update(cx, |this, cx| run(this, window, cx));
-                                }),
-                        )
-                    })
-            })
             .px(ITEM_INSET)
             .py(rem(16.))
+            .child(MaterialContextMenu::new(
+                ("storage-location-context", index),
+                move |_, _| location_menu(index, &actions, &entity),
+            ))
             .child(row)
             .into_any_element()
     }
@@ -1414,4 +1394,23 @@ fn storage_item<const N: usize>(
                 .flex_wrap()
                 .children(actions),
         )
+}
+/// A library location's commands, on a right press and behind its ⋮ button.
+fn location_menu(
+    index: usize,
+    actions: &[LocationAction],
+    entity: &WeakEntity<Desktop>,
+) -> MaterialMenu {
+    MaterialMenu::new(("storage-location-items", index)).items(actions.iter().enumerate().map(
+        |(position, action)| {
+            let (run, entity) = (action.run.clone(), entity.clone());
+            MaterialMenuItem::new(action.label)
+                .leading(Icon::from(action.icon))
+                .disabled(!action.enabled)
+                .divider(position == 0)
+                .on_click(move |_, window, cx| {
+                    let _ = entity.update(cx, |this, cx| run(this, window, cx));
+                })
+        },
+    ))
 }
