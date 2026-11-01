@@ -147,9 +147,8 @@ struct SubtitleRead {
 impl Desktop {
     /// Explicit confirmation of an already visible preview owns submission.
     pub fn start_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.reading && self.page == Page::New {
-            self.read_generation = self.read_generation.wrapping_add(1);
-            self.reading = false;
+        if self.opened.reading && self.page == Page::New {
+            self.opened.stop_reading();
         }
         let input = self.value(Field::Source, cx);
         if self.draft().is_some_and(|draft| draft.input != input) {
@@ -2277,7 +2276,7 @@ impl Desktop {
                 matches!(
                     task.state,
                     workspace::TaskState::Complete | workspace::TaskState::Cancelled
-                ) && !(self.reading
+                ) && !(self.opened.reading
                     && self
                         .import
                         .following_conversion
@@ -2295,7 +2294,7 @@ impl Desktop {
 
     /// The source card and hero share one definition of the submitted task.
     fn workbench_linked_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
-        let opening_result = self.reading && self.import.following_conversion.is_some();
+        let opening_result = self.opened.reading && self.import.following_conversion.is_some();
         self.current_input_task(cx).filter(|task| {
             (opening_result
                 && matches!(
@@ -2396,7 +2395,7 @@ impl Desktop {
             self.scrolls[Page::New as usize].set_offset(point(px(0.), px(-offset)));
         }
         let compact = is_compact(window);
-        let opening_result = self.reading && self.import.following_conversion.is_some();
+        let opening_result = self.opened.reading && self.import.following_conversion.is_some();
         let linked_task = self.workbench_linked_task(cx).cloned();
         let cancelled = self
             .current_input_task(cx)
@@ -2580,7 +2579,7 @@ impl Desktop {
     /// What stands between this video and a conversion, each obstacle with its one
     /// way forward. Only unresolved choices interrupt a submitted conversion.
     fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Option<Div> {
-        let busy = self.job.is_some()
+        let busy = self.work.job.is_some()
             || self.workspace.as_ref().is_some_and(|workspace| {
                 workspace.state.tasks.iter().any(|task| {
                     matches!(

@@ -249,6 +249,15 @@ fn shell_column_at(width: AbsoluteLength) -> Div {
         .px(px(SHELL_GUTTER))
 }
 
+/// The running theme transition's frames.
+#[derive(Default)]
+pub(crate) struct ThemeFrame {
+    /// One pending next-frame callback advances a running theme transition.
+    pub pending: bool,
+    /// The paint the unprojected Kit theme fields were last written for.
+    pub unprojected: Option<(gpui_kit_material::color::Scheme, f32)>,
+}
+
 impl Desktop {
     /// Keep task results reachable while the user is on another page.
     fn shell_topbar(
@@ -392,7 +401,7 @@ impl Desktop {
                     && task.unread
                     && task.handled_by.is_none()
                     && visible_task != Some(task.id.as_str())
-                    && !(self.reading
+                    && !(self.opened.reading
                         && self.page == Page::New
                         && self
                             .import
@@ -536,16 +545,16 @@ impl Desktop {
         let (scheme, scale) = self.theme_target(cx);
         let running = advance_component_theme(scheme, scale, window, cx);
         let painted = (current_scheme(), scale);
-        if self.unprojected_paint != Some(painted) {
-            self.unprojected_paint = Some(painted);
+        if self.theme_frame.unprojected != Some(painted) {
+            self.theme_frame.unprojected = Some(painted);
             theme::sync_unprojected(scale, cx);
         }
-        if running && !self.theme_frame_pending {
-            self.theme_frame_pending = true;
+        if running && !self.theme_frame.pending {
+            self.theme_frame.pending = true;
             let view = cx.weak_entity();
             window.on_next_frame(move |window, cx| {
                 let _ = view.update(cx, |this, cx| {
-                    this.theme_frame_pending = false;
+                    this.theme_frame.pending = false;
                     this.prepare_theme(window, cx);
                 });
             });
@@ -602,7 +611,7 @@ impl Render for Desktop {
             )
             .when(
                 // The workbench card already shows a followed result opening.
-                self.reading
+                self.opened.reading
                     && !matches!(self.page, Page::Library | Page::Result)
                     && !(self.page == Page::New && self.import.following_conversion.is_some()),
                 |v| {
@@ -664,7 +673,7 @@ impl Render for Desktop {
                                 material_button("retry-workspace-records", ButtonVariant::Tonal)
                                     .icon(symbols::refresh())
                                     .child(course2md::tr!("重试"))
-                                    .disabled(self.job.is_some() || self.storage_ui.busy)
+                                    .disabled(self.work.job.is_some() || self.storage_ui.busy)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.retry_workspace_records(window, cx)
                                     })),
@@ -677,7 +686,7 @@ impl Render for Desktop {
                                     )
                                     .icon(symbols::restart_alt())
                                     .child(course2md::tr!("备份并重建任务记录"))
-                                    .disabled(self.job.is_some() || self.storage_ui.busy)
+                                    .disabled(self.work.job.is_some() || self.storage_ui.busy)
                                     .on_click(cx.listener(
                                         |this, _, window, cx| {
                                             this.rebuild_workspace_records(window, cx)

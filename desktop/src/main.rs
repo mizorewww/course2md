@@ -35,8 +35,10 @@ use desktop_core::{
 use desktop_ui::{note_text, symbols, theme, ui};
 
 use desktop_core::conversion::{provider_from_id, provider_label, providers};
+use desktop_core::job::{earliest_deadline, job_exit_status};
 use desktop_core::library::FolderFilter;
 use desktop_core::page::{Kind, Page};
+use desktop_core::reader::note_read_failure;
 use desktop_core::reader::{carry_repaired_reading_positions, settle_reader_notice};
 
 use backend::{Done, EngineEvent, Event, Job};
@@ -86,8 +88,6 @@ impl ValidationOpen {
 }
 
 struct Desktop {
-    /// The window size and text scale the link placeholder was last fitted
-    /// in; a change asks for one more frame so the fit reads fresh bounds.
     preferences: preferences::Store,
     settings_ui: settings_ui::State,
     onboarding: onboarding::State,
@@ -96,13 +96,17 @@ struct Desktop {
     workspace: Option<workspace::Workspace>,
     workspace_error: Option<String>,
     import: desktop_core::import::ImportSession,
+    /// The running job: a task's or a model's.
+    work: desktop_core::job::WorkState,
+    /// The note being read, or on its way.
+    opened: desktop_core::reader::OpenedNote,
+    task_list: task_ui::TaskListUi,
+    theme_frame: views::ThemeFrame,
     library: desktop_core::library::LibraryState,
     library_ui: library_ui::LibraryUi,
     preference_defaults_pending: bool,
-    active_task: Option<String>,
     transient_task_result: Option<(String, Instant)>,
     draft_deadline: Option<Instant>,
-    quit_deadline: Option<Instant>,
     account: desktop_core::account::AccountUi,
     codex: desktop_core::codex::CodexUi,
     ollama: desktop_core::ollama::OllamaUi,
@@ -113,64 +117,26 @@ struct Desktop {
     /// The window this view lives in; deferred work returns to it.
     window: AnyWindowHandle,
     page: Page,
-    result_origin: Page,
     /// Where Settings was opened from, and the control to refocus on return.
     settings_origin: Option<(Page, Option<FocusHandle>)>,
-    result_tab: usize,
     settings_tab: settings_ui::SettingsTab,
     environment: Option<backend::Environment>,
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
     config: course2md::settings::ConfigFile,
     settings_options: ConversionOptions,
-    job: Option<Job>,
-    kind: Kind,
-    cancelling: bool,
-    closing: bool,
-    /// A queued task's credentials are being resolved off the UI thread before it can start.
-    start_pending: bool,
-    task_status: String,
-    /// What a model job has said; a task's events live on its record.
-    job_events: activity::JobEvents,
-    /// When the current job started, for its elapsed time before any stage.
-    job_started: Option<Instant>,
     desktop_settings: course2md::settings::DesktopSettings,
-    last_tick: Instant,
     /// Debug validation only: a note to open after the first library scan,
     /// and the reader panels to show once it has loaded.
     validation: Option<ValidationOpen>,
-    completed: Option<Done>,
-    preview: Option<Rc<notes::Preview>>,
-    read_generation: u64,
-    reading: bool,
-    opening_course: Option<PathBuf>,
-    reader_course_error: Option<(PathBuf, String)>,
-    reader_failure_notice: Option<String>,
     candidate_scroll: ScrollHandle,
-    // Virtualized long pages: the task queue and the course library each keep
-    // a persistent list state plus the identity keys and focus containers of
-    // the items the state currently describes.
-    queue_list: ListState,
-    queue_cache: Option<(u64, Rc<Vec<workspace::TaskRecord>>)>,
     event_wake_tx: smol::channel::Sender<()>,
     event_wake_rx: smol::channel::Receiver<()>,
-    queue_keys: Vec<String>,
-    queue_focus: Vec<FocusHandle>,
-    queue_rem: f32,
     // Entrance animations already played for logical content that a
     // virtualized list may unmount and remount while scrolling.
     entered: HashSet<String>,
-    // Disclosure open state that outlives a virtualized row's unmount.
-    task_logs_open: HashSet<String>,
-    /// The task row showing its details on the task page.
-    expanded_task: Option<String>,
-    event_repaint_pending: bool,
     message: Option<String>,
     _subscriptions: Vec<Subscription>,
-    /// One pending next-frame callback advances a running theme transition.
-    theme_frame_pending: bool,
-    /// The paint the unprojected Kit theme fields were last written for.
-    unprojected_paint: Option<(gpui_kit_material::color::Scheme, f32)>,
     _poll: Task<()>,
 }
 
@@ -178,20 +144,6 @@ actions!(
     course2md_desktop,
     [Quit, OpenSettings, OpenAbout, ImportVideo, SearchContent]
 );
-
-/// Task log/progress events coalesce into at most one repaint per interval;
-/// stage, error and completion transitions still repaint immediately.
-const EVENT_REPAINT_INTERVAL: Duration = Duration::from_millis(250);
-
-/// `Option<Instant>` orders `None` before every `Some`; polling needs the
-/// earliest concrete deadline and must ignore absent ones.
-fn earliest_deadline(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
-    match (a, b) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (Some(a), None) => Some(a),
-        (None, b) => b,
-    }
-}
 
 /// Scrollbars fade after scrolling, or stay visible when the system asks for that.
 /// `Theme::sync_scrollbar_appearance` would map the system's choice to hover.
@@ -271,11 +223,11 @@ impl Desktop {
         }
         self.import.cancel_background_reads();
         self.codex.cancel_authorization();
-        self.closing = true;
-        self.quit_deadline = Some(Instant::now() + Duration::from_secs(10));
+        self.work.closing = true;
+        self.work.quit_deadline = Some(Instant::now() + Duration::from_secs(10));
         self.refresh_dispatch_controls(cx);
-        if self.active_task.is_none()
-            && let Some(job) = &self.job
+        if self.work.active_task.is_none()
+            && let Some(job) = &self.work.job
         {
             job.cancel();
         }
@@ -291,7 +243,7 @@ impl Desktop {
         }
         self.message = Some(course2md::tr!("正在保存进度并退出…").into());
         cx.notify();
-        self.job.is_none() && self.import.preview_workers == 0
+        self.work.job.is_none() && self.import.preview_workers == 0
     }
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let configuration_directory = course2md::config::config_dir();
@@ -342,9 +294,8 @@ impl Desktop {
                         // preview accepts it; anything else is a new edit.
                         if this.draft().is_some_and(|draft| draft.input != value) {
                             this.import.following_conversion = None;
-                            if this.reading && this.page == Page::New {
-                                this.read_generation = this.read_generation.wrapping_add(1);
-                                this.reading = false;
+                            if this.opened.reading && this.page == Page::New {
+                                this.opened.stop_reading();
                             }
                             if !this.prepare_next_import(&value, window, cx) {
                                 return;
@@ -459,13 +410,15 @@ impl Desktop {
             workspace,
             workspace_error,
             import: Default::default(),
+            work: desktop_core::job::WorkState::new(),
+            opened: Default::default(),
+            task_list: task_ui::TaskListUi::new(),
+            theme_frame: Default::default(),
             library: desktop_core::library::LibraryState::new(output),
             library_ui: library_ui::LibraryUi::new(),
             preference_defaults_pending: false,
-            active_task: None,
             transient_task_result: None,
             draft_deadline: None,
-            quit_deadline: None,
             page: Page::New,
             workspace_reconciling: false,
             import_submit_focus: cx.focus_handle(),
@@ -474,49 +427,21 @@ impl Desktop {
             codex: desktop_core::codex::CodexUi::default(),
             ollama: desktop_core::ollama::OllamaUi::default(),
             window: window.window_handle(),
-            result_origin: Page::Library,
             settings_origin: None,
-            result_tab: 0,
             settings_tab: settings_ui::SettingsTab::Appearance,
             environment: None,
             scrolls: std::array::from_fn(|_| ScrollHandle::new()),
             inputs,
             desktop_settings: config.desktop.clone(),
-            last_tick: Instant::now(),
             config,
             settings_options: options,
-            job: None,
-            kind: Kind::Convert,
-            cancelling: false,
-            closing: false,
-            start_pending: false,
-            job_events: Default::default(),
-            task_status: String::new(),
-            job_started: None,
             validation: ValidationOpen::from_env(),
-            completed: None,
-            preview: None,
-            read_generation: 0,
-            reading: false,
-            opening_course: None,
-            reader_course_error: None,
-            reader_failure_notice: None,
             candidate_scroll: ScrollHandle::new(),
-            queue_list: ListState::new(0, ListAlignment::Top, px(1000.)),
-            queue_cache: None,
             event_wake_tx,
             event_wake_rx,
-            queue_keys: Vec::new(),
-            queue_focus: Vec::new(),
-            queue_rem: f32::NAN,
             entered: HashSet::new(),
-            task_logs_open: HashSet::new(),
-            expanded_task: None,
-            event_repaint_pending: false,
             message,
             _subscriptions: subscriptions,
-            theme_frame_pending: false,
-            unprojected_paint: None,
             _poll: poll,
         };
         // Preferences and workspace records are saved separately. Reconcile
@@ -550,7 +475,7 @@ impl Desktop {
             });
             // A job that missed its instruction must not send anything new.
             if failure.control
-                && let Some(job) = &self.job
+                && let Some(job) = &self.work.job
             {
                 job.cancel();
             }
@@ -706,9 +631,8 @@ impl Desktop {
             self.import.following_conversion = None;
         }
         self.save_reading_position(cx);
-        self.read_generation = self.read_generation.wrapping_add(1);
-        self.reading = false;
-        self.opening_course = None;
+        self.opened.stop_reading();
+        self.opened.opening_course = None;
         if self.page == Page::New {
             self.save_current_draft(cx);
         }
@@ -777,15 +701,15 @@ impl Desktop {
     fn start_model_preparation(&mut self, cx: &mut Context<Self>) {
         match Job::start(self.model_preparation_args(), self.event_wake_tx.clone()) {
             Ok(job) => {
-                self.job = Some(job);
-                self.active_task = None;
-                self.kind = Kind::Models;
-                self.cancelling = false;
-                self.job_events = Default::default();
-                self.task_status = course2md::tr!("正在准备识别模型").into();
+                self.work.job = Some(job);
+                self.work.active_task = None;
+                self.work.kind = Kind::Models;
+                self.work.cancelling = false;
+                self.work.job_events = Default::default();
+                self.work.task_status = course2md::tr!("正在准备识别模型").into();
             }
             Err(error) => {
-                self.job_events.error = Some(format!("{error:#}"));
+                self.work.job_events.error = Some(format!("{error:#}"));
                 self.model_preparation_finished(false, false, cx);
             }
         }
@@ -804,12 +728,12 @@ impl Desktop {
     /// The next instant the UI must run `poll` even without a job event.
     /// Returning `None` lets the loop sleep until an explicit wake.
     fn next_poll_deadline(&self) -> Option<Instant> {
-        let mut deadline = earliest_deadline(self.draft_deadline, self.quit_deadline);
+        let mut deadline = earliest_deadline(self.draft_deadline, self.work.quit_deadline);
         if let Some((_, shown)) = &self.transient_task_result {
             deadline = earliest_deadline(deadline, Some(*shown + Duration::from_secs(8)));
         }
         // Running work shows a live clock.
-        if self.job.is_some() {
+        if self.work.job.is_some() {
             deadline = earliest_deadline(deadline, Some(Instant::now() + Duration::from_secs(1)));
         }
         if self.storage_ui.resume_ready() {
@@ -835,6 +759,7 @@ impl Desktop {
             self.save_current_draft(cx);
         }
         let events: Vec<_> = self
+            .work
             .job
             .as_ref()
             .map(|job| job.events.try_iter().take(512).collect())
@@ -847,21 +772,14 @@ impl Desktop {
             let event = match event {
                 Event::Exit { success, cancelled } => {
                     immediate = true;
-                    self.job = None;
+                    self.work.job = None;
                     self.storage_ui.job_exited();
-                    self.cancelling = false;
-                    if let Some(id) = self.active_task.take() {
+                    self.work.cancelling = false;
+                    if let Some(id) = self.work.active_task.take() {
                         self.finish_task(&id, success, cancelled, cx);
                         self.refresh_model_diagnostics(cx);
                     } else {
-                        self.task_status = if success {
-                            course2md::tr!("已完成")
-                        } else if cancelled {
-                            course2md::tr!("已停止")
-                        } else {
-                            course2md::tr!("未完成")
-                        }
-                        .into();
+                        self.work.task_status = job_exit_status(success, cancelled).into();
                         self.model_preparation_finished(success, cancelled, cx);
                     }
                     continue;
@@ -876,7 +794,7 @@ impl Desktop {
                     .as_ref()
                     .map(|model| format!("{model} · "))
                     .unwrap_or_default();
-                self.task_status = format!(
+                self.work.task_status = format!(
                     "{name}{}",
                     match operation {
                         ModelOperation::Prepare => course2md::tr!("模型已就绪"),
@@ -884,7 +802,7 @@ impl Desktop {
                     }
                 );
             }
-            immediate |= match &self.active_task {
+            immediate |= match &self.work.active_task {
                 Some(id) => {
                     // What the task said lives in `events.jsonl`. Only what changes
                     // its record needs committing.
@@ -897,7 +815,7 @@ impl Desktop {
                         .and_then(|workspace| workspace.state.task_mut(id))
                         .is_some_and(|task| task.apply_event(&event))
                 }
-                None => self.job_events.apply(&event),
+                None => self.work.job_events.apply(&event),
             };
         }
         if commit
@@ -907,16 +825,17 @@ impl Desktop {
             self.workspace_error =
                 Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
         }
-        if self.closing {
-            if self.job.is_none() && self.import.preview_workers == 0 {
+        if self.work.closing {
+            if self.work.job.is_none() && self.import.preview_workers == 0 {
                 cx.quit();
                 return;
             }
             if self
+                .work
                 .quit_deadline
                 .is_some_and(|deadline| Instant::now() >= deadline)
             {
-                if let Some(job) = &self.job {
+                if let Some(job) = &self.work.job {
                     job.cancel();
                 }
                 cx.quit();
@@ -925,19 +844,8 @@ impl Desktop {
         } else {
             self.start_next_task(cx);
         }
-        let ticking = streaming || immediate || self.job.is_some() || self.event_repaint_pending;
-        // Model downloads repaint at the task rate so their progress keeps up.
-        let interval = if streaming || self.event_repaint_pending || self.kind == Kind::Models {
-            EVENT_REPAINT_INTERVAL
-        } else {
-            Duration::from_secs(1)
-        };
-        if ticking && (immediate || self.last_tick.elapsed() >= interval) {
-            self.last_tick = Instant::now();
-            self.event_repaint_pending = false;
+        if self.work.repaint_due(streaming, immediate) {
             cx.notify();
-        } else if streaming {
-            self.event_repaint_pending = true;
         }
     }
     pub(crate) fn refresh_library(&mut self, cx: &mut Context<Self>) {
@@ -1027,7 +935,7 @@ impl Desktop {
         // Reading needs its own copy on the worker; rendering shares the rest.
         let course = Rc::unwrap_or_clone(course);
         self.save_reading_position(cx);
-        let reader_revision = self.read_generation;
+        let reader_revision = self.opened.read_generation;
         let reader_origin = follow.as_ref().and_then(|follow| {
             if !matches!(
                 follow,
@@ -1035,26 +943,13 @@ impl Desktop {
             ) {
                 return None;
             }
-            let manifest = self.preview.as_ref()?.course.manifest.as_ref()?;
+            let manifest = self.opened.preview.as_ref()?.course.manifest.as_ref()?;
             Some((manifest.course_id.clone(), manifest.version_id.clone()))
         });
         cx.notify();
-        self.reading = true;
         let reading_path = course.dir.clone();
-        self.opening_course = Some(reading_path.clone());
-        self.reader_course_error = None;
-        self.read_generation = self.read_generation.wrapping_add(1);
-        let generation = self.read_generation;
         let origin = self.page;
-        self.result_origin = if origin == Page::Result {
-            if self.result_origin == Page::Result {
-                Page::Library
-            } else {
-                self.result_origin
-            }
-        } else {
-            origin
-        };
+        let generation = self.opened.begin_read(reading_path.clone(), origin);
         let task = spawn_blocking_io(move || notes::read_preview(course));
         cx.spawn(async move |this, cx| {
             let result = task
@@ -1062,11 +957,11 @@ impl Desktop {
                 .await
                 .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("读取笔记时出错，请重试"))));
             let _ = this.update(cx, |this, cx| {
-                if this.read_generation != generation || this.page != origin {
+                if this.opened.read_generation != generation || this.page != origin {
                     return;
                 }
-                this.reading = false;
-                this.opening_course = None;
+                this.opened.reading = false;
+                this.opened.opening_course = None;
                 if this.reader_viewer_open() {
                     desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
                         &mut this.import.following_conversion,
@@ -1078,7 +973,8 @@ impl Desktop {
                             this.page,
                             this.import.preview_generation,
                             reader_revision,
-                            this.preview
+                            this.opened
+                                .preview
                                 .as_ref()
                                 .map(|preview| preview.course.dir.as_path()),
                         )
@@ -1130,11 +1026,14 @@ impl Desktop {
                                 ));
                             }
                         }
-                        settle_reader_notice(&mut this.message, &mut this.reader_failure_notice);
+                        settle_reader_notice(
+                            &mut this.message,
+                            &mut this.opened.reader_failure_notice,
+                        );
                         if reader_origin.is_none() {
-                            this.result_tab = 0;
+                            this.opened.result_tab = 0;
                         }
-                        this.preview = Some(Rc::new(preview));
+                        this.opened.preview = Some(Rc::new(preview));
                         this.ensure_reader_data(cx);
                         this.apply_course_title_aliases();
                         this.restore_reading_position(cx);
@@ -1145,25 +1044,11 @@ impl Desktop {
                         }
                     }
                     Err(error) => {
-                        let io_kind = error.chain().find_map(|cause| {
-                            cause
-                                .downcast_ref::<std::io::Error>()
-                                .map(std::io::Error::kind)
-                        });
-                        let message = match io_kind {
-                            Some(std::io::ErrorKind::NotFound) => {
-                                course2md::tr!("笔记文件不存在，请重新连接保存位置后重试")
-                            }
-                            Some(std::io::ErrorKind::PermissionDenied) => {
-                                course2md::tr!("无权读取这份笔记，请检查保存位置的访问权限")
-                            }
-                            _ => course2md::tr!("这份笔记无法读取，请检查保存位置中的文件"),
-                        }
-                        .to_owned();
-                        this.reader_course_error = Some((reading_path, message.clone()));
+                        let message = note_read_failure(&error).to_owned();
+                        this.opened.reader_course_error = Some((reading_path, message.clone()));
                         if origin != Page::Library {
                             this.message = Some(message);
-                            this.reader_failure_notice = this.message.clone();
+                            this.opened.reader_failure_notice = this.message.clone();
                         }
                     }
                 }
@@ -1451,24 +1336,6 @@ mod list_reconcile_tests {
         );
         assert_eq!(state.item_count(), 4);
         assert_eq!(state.logical_scroll_top().item_ix, 3);
-    }
-}
-
-#[cfg(test)]
-mod deadline_tests {
-    use super::earliest_deadline;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn absent_deadlines_do_not_hide_other_deadlines() {
-        let now = Instant::now();
-        assert_eq!(earliest_deadline(None, None), None);
-        assert_eq!(earliest_deadline(Some(now), None), Some(now));
-        assert_eq!(earliest_deadline(None, Some(now)), Some(now));
-        assert_eq!(
-            earliest_deadline(Some(now + Duration::from_secs(2)), Some(now)),
-            Some(now)
-        );
     }
 }
 

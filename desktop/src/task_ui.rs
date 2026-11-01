@@ -20,6 +20,34 @@ use gpui_kit_material::{
 };
 use std::{path::PathBuf, rc::Rc};
 
+/// The task page's own view state.
+pub(crate) struct TaskListUi {
+    /// The virtualized queue: the list, and the identity and focus of what it describes.
+    pub list: ListState,
+    pub cache: Option<(u64, Rc<Vec<TaskRecord>>)>,
+    pub keys: Vec<String>,
+    pub focus: Vec<FocusHandle>,
+    pub rem: f32,
+    /// Disclosure open state that outlives a virtualized row's unmount.
+    pub logs_open: std::collections::HashSet<String>,
+    /// The task row showing its details on the task page.
+    pub expanded: Option<String>,
+}
+
+impl TaskListUi {
+    pub fn new() -> Self {
+        Self {
+            list: ListState::new(0, ListAlignment::Top, px(1000.)),
+            cache: None,
+            keys: Vec::new(),
+            focus: Vec::new(),
+            rem: f32::NAN,
+            logs_open: Default::default(),
+            expanded: None,
+        }
+    }
+}
+
 /// One row of the virtualized task queue. Task rows carry their index into
 /// the task snapshot captured for the frame.
 enum QueueItem {
@@ -206,16 +234,16 @@ impl Desktop {
         let tasks: Rc<Vec<TaskRecord>> = match &self.workspace {
             None => {
                 items.push(QueueItem::Unavailable);
-                self.queue_cache = None;
+                self.task_list.cache = None;
                 Rc::new(Vec::new())
             }
             Some(workspace) if workspace.state.tasks.is_empty() => {
                 items.push(QueueItem::Empty);
-                self.queue_cache = None;
+                self.task_list.cache = None;
                 Rc::new(Vec::new())
             }
             Some(workspace) => {
-                if let Some((revision, tasks)) = &self.queue_cache
+                if let Some((revision, tasks)) = &self.task_list.cache
                     && *revision == workspace.state.revision
                 {
                     Rc::clone(tasks)
@@ -234,7 +262,7 @@ impl Desktop {
                     });
                     let tasks: Vec<_> = tasks.into_iter().map(|(_, task)| task).collect();
                     let tasks = Rc::new(tasks);
-                    self.queue_cache = Some((workspace.state.revision, Rc::clone(&tasks)));
+                    self.task_list.cache = Some((workspace.state.revision, Rc::clone(&tasks)));
                     tasks
                 }
             }
@@ -250,7 +278,8 @@ impl Desktop {
         // Finished work and earlier records fold behind one tile; a task the
         // person went to (from the library or a notice) stays visible.
         let expanded_done = self
-            .expanded_task
+            .task_list
+            .expanded
             .as_ref()
             .is_some_and(|id| tasks.iter().any(|task| &task.id == id && done(task)));
         let completed_open = *completed_state.read(cx) || expanded_done;
@@ -318,18 +347,18 @@ impl Desktop {
         }
         let keys = items.iter().map(|item| item.key(&tasks)).collect();
         Self::reconcile_list_items(
-            &self.queue_list,
-            &mut self.queue_keys,
-            &mut self.queue_focus,
+            &self.task_list.list,
+            &mut self.task_list.keys,
+            &mut self.task_list.focus,
             keys,
             cx,
         );
-        if self.queue_rem != rem_size {
-            self.queue_list.remeasure();
-            self.queue_rem = rem_size;
+        if self.task_list.rem != rem_size {
+            self.task_list.list.remeasure();
+            self.task_list.rem = rem_size;
         }
-        let focus = Rc::new(self.queue_focus.clone());
-        let state = self.queue_list.clone();
+        let focus = Rc::new(self.task_list.focus.clone());
+        let state = self.task_list.list.clone();
         let items = Rc::new(items);
         let desktop = cx.weak_entity();
         let queue = list(state, move |index, window, cx| {
@@ -641,7 +670,7 @@ impl Desktop {
                 // from elsewhere, or the fold could not close.
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if open
-                        && let Some(id) = this.expanded_task.clone()
+                        && let Some(id) = this.task_list.expanded.clone()
                         && this
                             .workspace
                             .as_ref()
@@ -651,7 +680,7 @@ impl Desktop {
                             })
                     {
                         this.close_task_details(&id);
-                        this.expanded_task = None;
+                        this.task_list.expanded = None;
                     }
                     toggle.update(cx, |state, cx| {
                         *state = !open;
@@ -754,7 +783,7 @@ impl Desktop {
                     actions.push(Read);
                 }
                 actions.push(Details);
-                if has_log && self.expanded_task.as_ref() == Some(&task.id) {
+                if has_log && self.task_list.expanded.as_ref() == Some(&task.id) {
                     actions.push(Log);
                 }
             }
@@ -890,20 +919,20 @@ impl Desktop {
 
     /// Expand a row's details, or fold the expanded one.
     pub(crate) fn toggle_task_row(&mut self, id: &str, cx: &mut Context<Self>) {
-        if self.expanded_task.as_deref() == Some(id) {
+        if self.task_list.expanded.as_deref() == Some(id) {
             self.close_task_details(id);
-            self.expanded_task = None;
+            self.task_list.expanded = None;
             cx.notify();
             return;
         }
         self.select_task(id, cx);
-        self.expanded_task = Some(id.to_owned());
+        self.task_list.expanded = Some(id.to_owned());
     }
 
     /// Show or hide a task's log; a stopped task opens its details to show it.
     fn toggle_task_log(&mut self, task: &TaskRecord, cx: &mut Context<Self>) {
-        if !self.task_logs_open.remove(&task.id) {
-            self.task_logs_open.insert(task.id.clone());
+        if !self.task_list.logs_open.remove(&task.id) {
+            self.task_list.logs_open.insert(task.id.clone());
             if task_group(task) != TaskGroup::Running {
                 self.select_task(&task.id, cx);
             }
@@ -914,7 +943,7 @@ impl Desktop {
     /// Folding a card unmounts its details; opening it later starts fresh.
     pub(crate) fn close_task_details(&mut self, id: &str) {
         self.entered.remove(&format!("task-detail-{id}"));
-        self.task_logs_open.remove(id);
+        self.task_list.logs_open.remove(id);
     }
 
     fn open_task_note(&mut self, task: &TaskRecord, cx: &mut Context<Self>) {
@@ -1054,7 +1083,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = &task.id;
-        let expanded = self.expanded_task.as_ref() == Some(id);
+        let expanded = self.task_list.expanded.as_ref() == Some(id);
         let more = self.task_menu_button(task, window, cx);
         // On the workbench the running card's status is its step; Tasks owns the rest.
         let on_home_running = matches!(place, CardPlace::Home) && runs_in_card(task);
@@ -1396,8 +1425,9 @@ impl Desktop {
             .map(|stage| stage.detail.clone())
             .filter(|detail| !detail.is_empty())
             .or_else(|| {
-                self.job_started
-                    .filter(|_| self.job.is_some())
+                self.work
+                    .job_started
+                    .filter(|_| self.work.job.is_some())
                     .map(|started| activity::elapsed_label(started.elapsed()))
             })
             .filter(|_| surface != TaskSurface::Home || current.is_none());
@@ -1609,7 +1639,7 @@ impl Desktop {
                 )
                 .children(buttons)
         };
-        let details = (self.expanded_task.as_ref() == Some(&id)).then(|| {
+        let details = (self.task_list.expanded.as_ref() == Some(&id)).then(|| {
             let content = v_flex()
                 .w_full()
                 .min_w_0()
@@ -1631,7 +1661,7 @@ impl Desktop {
             }
         });
         let log = task_log_text(task)
-            .filter(|_| self.task_logs_open.contains(&id))
+            .filter(|_| self.task_list.logs_open.contains(&id))
             .map(|text| ui::log_box(&id, text));
         // A task that waits for the person keeps its explanation on the text's ruler too.
         let ruler = if needs_person(task) && !matches!(place, CardPlace::Home) {
@@ -1732,7 +1762,7 @@ impl Desktop {
     /// A waiting line with the running job's clock, so a pause between
     /// stages never looks stalled.
     pub(crate) fn with_job_clock(&self, label: &str) -> String {
-        match self.job_started.filter(|_| self.job.is_some()) {
+        match self.work.job_started.filter(|_| self.work.job.is_some()) {
             Some(started) => format!("{label} · {}", activity::elapsed_label(started.elapsed())),
             None => label.to_owned(),
         }
@@ -1802,8 +1832,8 @@ impl TaskActionView for TaskAction {
     fn present(&self, task: &TaskRecord, desktop: &Desktop) -> (&'static str, SymbolIcon, bool) {
         let cancelling = task.state == TaskState::Pausing && task.intent == Intent::Cancel;
         let pausing = task.state == TaskState::Pausing && !cancelling;
-        let details = desktop.expanded_task.as_ref() == Some(&task.id);
-        let log = desktop.task_logs_open.contains(&task.id);
+        let details = desktop.task_list.expanded.as_ref() == Some(&task.id);
+        let log = desktop.task_list.logs_open.contains(&task.id);
         use course2md::tr;
         match self {
             Self::Read => (tr!("阅读笔记"), symbols::menu_book(), false),

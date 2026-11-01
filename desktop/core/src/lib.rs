@@ -10,6 +10,7 @@ pub mod codex;
 pub mod conversion;
 pub mod credentials;
 pub mod import;
+pub mod job;
 pub mod library;
 pub mod locations;
 pub mod model_discovery;

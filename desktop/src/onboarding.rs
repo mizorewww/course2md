@@ -1523,10 +1523,11 @@ impl Desktop {
         let request = self.onboarding.background_model.as_ref()?;
         let running = self.is_preparing(request);
         let outcome = self.model_outcome(request);
-        let label = if running && self.cancelling {
+        let label = if running && self.work.cancelling {
             course2md::tr!("正在暂停").to_owned()
         } else if running {
-            self.job_events
+            self.work
+                .job_events
                 .stages
                 .iter()
                 .find(|(stage, progress)| {

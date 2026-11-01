@@ -404,10 +404,11 @@ impl Desktop {
             }
         }
         let title = self
+            .opened
             .preview
             .as_ref()
             .map(|preview| self.course_display_title(&preview.course));
-        if let (Some(preview), Some(title)) = (self.preview.as_mut(), title) {
+        if let (Some(preview), Some(title)) = (self.opened.preview.as_mut(), title) {
             Rc::make_mut(preview).course.title = title;
         }
     }
@@ -492,6 +493,7 @@ impl Desktop {
             move |this, result, cx| match result {
                 Ok(()) => {
                     let reading = this
+                        .opened
                         .preview
                         .as_ref()
                         .is_some_and(|preview| preview.course.storage_dir() == dir);
@@ -501,7 +503,7 @@ impl Desktop {
                         this.refresh_library(cx);
                     }
                     if reading {
-                        this.preview = None;
+                        this.opened.preview = None;
                     }
                     this.message = Some(course2md::tr!(
                         "已将《{}》移到{}",
@@ -1604,6 +1606,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let (_, message) = self
+            .opened
             .reader_course_error
             .as_ref()
             .filter(|(path, _)| path == &course.dir)?;
@@ -1694,7 +1697,7 @@ impl Desktop {
                         .map(|manifest| manifest.source_id.as_str()),
                 )
             });
-        if self.opening_course.as_ref() == Some(&course.dir) {
+        if self.opened.opening_course.as_ref() == Some(&course.dir) {
             Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在打开笔记…")))
         } else if busy {
             Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在处理")))

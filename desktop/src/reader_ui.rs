@@ -216,7 +216,7 @@ impl State {
                 let query = this.reader_ui.find.input.read(cx).value();
                 this.reader_ui.find.open |= !query.trim().is_empty();
                 this.update_reader_matches(cx);
-                if this.result_tab == 0 {
+                if this.opened.result_tab == 0 {
                     this.move_reader_match(0, cx);
                 }
             }
@@ -616,7 +616,7 @@ impl Desktop {
 
     /// The list of the current view.
     fn reader_list(&self) -> &ListState {
-        if self.result_tab == 0 {
+        if self.opened.result_tab == 0 {
             &self.reader_ui.note.list
         } else {
             &self.reader_ui.gallery.list
@@ -630,11 +630,13 @@ impl Desktop {
         cx.notify();
     }
     fn reading_key(&self) -> Option<String> {
-        let preview = self.preview.as_ref()?;
+        let preview = self.opened.preview.as_ref()?;
         Some(match &preview.course.manifest {
-            Some(manifest) => {
-                manifest_reading_key(&manifest.course_id, &manifest.version_id, self.result_tab)
-            }
+            Some(manifest) => manifest_reading_key(
+                &manifest.course_id,
+                &manifest.version_id,
+                self.opened.result_tab,
+            ),
             None => {
                 let identity = self
                     .course_location(&preview.course)
@@ -647,15 +649,15 @@ impl Desktop {
                             .map(|relative| format!("{}:{}", library.id, relative.display()))
                     })
                     .unwrap_or_else(|| preview.course.dir.display().to_string());
-                format!("{identity}:{}", self.result_tab)
+                format!("{identity}:{}", self.opened.result_tab)
             }
         })
     }
     /// The current view's top block and how far into it the view starts.
     fn capture_reading_position(&self) -> Option<workspace::ReadingPosition> {
-        let preview = self.preview.as_ref()?;
+        let preview = self.opened.preview.as_ref()?;
         let top = self.reader_list().logical_scroll_top();
-        let (paragraph, seconds) = if self.result_tab == 0 {
+        let (paragraph, seconds) = if self.opened.result_tab == 0 {
             let index = self.reader_ui.note.document.block_at(top.item_ix)?;
             // Above the first block the note draws, the note reads from its top.
             if self
@@ -704,8 +706,8 @@ impl Desktop {
     }
     pub fn save_reading_position(&mut self, cx: &mut Context<Self>) {
         if self.page != Page::Result
-            || self.reading
-            || (self.result_tab == 1 && self.reader_ui.gallery.search_position.is_some())
+            || self.opened.reading
+            || (self.opened.result_tab == 1 && self.reader_ui.gallery.search_position.is_some())
             || self.reader_ui.restore.active
             || self.reader_ui.restore.pending.is_some()
         {
@@ -774,8 +776,8 @@ impl Desktop {
     }
     fn schedule_reader_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.reader_ui.restore.pending.is_none()
-            || (self.result_tab == 1 && self.reader_ui.data_loading)
-            || (self.result_tab == 0 && !self.note_is_current(cx))
+            || (self.opened.result_tab == 1 && self.reader_ui.data_loading)
+            || (self.opened.result_tab == 0 && !self.note_is_current(cx))
         {
             return;
         }
@@ -799,8 +801,8 @@ impl Desktop {
     }
     /// Where the current view's list shows `position`.
     fn reader_list_target(&self, position: &workspace::ReadingPosition) -> ListOffset {
-        let item = if self.result_tab == 0 {
-            self.preview.as_ref().and_then(|preview| {
+        let item = if self.opened.result_tab == 0 {
+            self.opened.preview.as_ref().and_then(|preview| {
                 let block = note_position_index(&preview.blocks, position)?;
                 self.reader_ui.note.document.item_of(block)
             })
@@ -818,7 +820,7 @@ impl Desktop {
         }
     }
     pub(crate) fn ensure_reader_data(&mut self, cx: &mut Context<Self>) {
-        let Some(preview) = self.preview.clone() else {
+        let Some(preview) = self.opened.preview.clone() else {
             return;
         };
         if self.reader_ui.loaded.as_ref() == Some(&preview.course.dir) {
@@ -908,7 +910,7 @@ impl Desktop {
     /// A search keeps the position it left, to return to when it is cleared.
     fn gallery_search_changed(&mut self, cx: &mut Context<Self>) {
         self.update_gallery_matches(cx);
-        if self.result_tab != 1 {
+        if self.opened.result_tab != 1 {
             return;
         }
         let searching = !self
@@ -956,6 +958,7 @@ impl Desktop {
         // The blocking closure below needs an owned, Send preview; data loads
         // are per open/reload, not per frame, so this clone is not the hot path.
         let Some(preview) = self
+            .opened
             .preview
             .as_ref()
             .map(|preview| preview.as_ref().clone())
@@ -1006,13 +1009,14 @@ impl Desktop {
             let _ = this.update(cx, |this, cx| {
                 if this.reader_ui.generation != generation
                     || this
+                        .opened
                         .preview
                         .as_ref()
                         .is_none_or(|preview| preview.course.dir != path)
                 {
                     return;
                 }
-                let top = (this.result_tab == 1
+                let top = (this.opened.result_tab == 1
                     && this.reader_ui.restore.pending.is_none()
                     && !this.reader_ui.restore.active)
                     .then(|| this.capture_reading_position())
@@ -1036,7 +1040,7 @@ impl Desktop {
         .detach();
     }
     fn reader_source_key(&self) -> Option<String> {
-        let preview = self.preview.as_ref()?;
+        let preview = self.opened.preview.as_ref()?;
         Some(
             preview
                 .course
@@ -1053,7 +1057,7 @@ impl Desktop {
         )
     }
     fn reader_offline_video_request(&self) -> Option<OfflineVideoRequest> {
-        let course = &self.preview.as_ref()?.course;
+        let course = &self.opened.preview.as_ref()?.course;
         let manifest = course.manifest.as_ref()?;
         let state = &self.workspace.as_ref()?.state;
         let task = state.task(&manifest.task_id)?;
@@ -1078,6 +1082,7 @@ impl Desktop {
             let _ = this.update(cx, |this, cx| {
                 if this.reader_ui.generation != generation
                     || this
+                        .opened
                         .preview
                         .as_ref()
                         .is_none_or(|preview| preview.course.dir != version)
@@ -1106,7 +1111,7 @@ impl Desktop {
         {
             return Some(nav::SourceTarget::Local(path.clone()));
         }
-        let meta = &self.preview.as_ref()?.document.meta;
+        let meta = &self.opened.preview.as_ref()?.document.meta;
         nav::source_target(&meta.webpage_url, meta.is_local())
     }
     fn open_reader_source(&mut self, cx: &mut Context<Self>) {
@@ -1197,23 +1202,23 @@ impl Desktop {
     }
     /// The search input of the current view.
     fn reader_find_input(&self) -> Entity<InputState> {
-        if self.result_tab == 0 {
+        if self.opened.result_tab == 0 {
             self.reader_ui.find.input.clone()
         } else {
             self.reader_ui.gallery.find.clone()
         }
     }
     pub fn open_reader_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.preview.is_none() {
+        if self.opened.preview.is_none() {
             return;
         }
         if !self.reader_ui.find.open {
             self.reader_ui.find.return_focus = window.focused(cx);
         }
-        self.reader_ui.find.open |= self.result_tab == 0;
+        self.reader_ui.find.open |= self.opened.result_tab == 0;
         self.reader_find_input()
             .update(cx, |input, cx| input.focus(window, cx));
-        if self.result_tab == 0 {
+        if self.opened.result_tab == 0 {
             self.update_reader_matches(cx);
         }
         cx.notify();
@@ -1271,7 +1276,7 @@ impl Desktop {
         });
     }
     fn move_reader_match(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if self.result_tab != 0 {
+        if self.opened.result_tab != 0 {
             return;
         }
         let count = self.reader_ui.find.matches.len();
@@ -1290,11 +1295,11 @@ impl Desktop {
     }
     /// Shows note block `index` at the top of the note tab.
     fn jump_reader_block(&mut self, index: usize, cx: &mut Context<Self>) {
-        if self.result_tab != 0 {
+        if self.opened.result_tab != 0 {
             self.save_reading_position(cx);
-            self.result_tab = 0;
+            self.opened.result_tab = 0;
         }
-        let Some(preview) = &self.preview else {
+        let Some(preview) = &self.opened.preview else {
             return;
         };
         let Some(block) = preview.blocks.get(index) else {
@@ -1311,9 +1316,10 @@ impl Desktop {
         self.load_reader_version(Rc::unwrap_or_clone(course.into()), false, cx);
     }
     fn load_reader_version(&mut self, course: Course, refresh: bool, cx: &mut Context<Self>) {
-        if self.reading
+        if self.opened.reading
             || (!refresh
                 && self
+                    .opened
                     .preview
                     .as_ref()
                     .is_some_and(|preview| preview.course.dir == course.dir))
@@ -1322,10 +1328,10 @@ impl Desktop {
         }
         self.save_reading_position(cx);
         let position = self.capture_reading_position();
-        let tab = self.result_tab;
-        self.read_generation += 1;
-        let generation = self.read_generation;
-        self.reading = true;
+        let tab = self.opened.result_tab;
+        self.opened.read_generation += 1;
+        let generation = self.opened.read_generation;
+        self.opened.reading = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = crate::spawn_blocking_io(move || notes::read_preview(course))
@@ -1333,15 +1339,15 @@ impl Desktop {
                 .await
                 .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("打开时意外中断，请重试"))));
             let _ = this.update(cx, |this, cx| {
-                if this.read_generation != generation {
+                if this.opened.read_generation != generation {
                     return;
                 }
-                this.reading = false;
+                this.opened.reading = false;
                 match result {
                     Ok(mut preview) => {
                         preview.course.title = this.course_display_title(&preview.course);
-                        this.preview = Some(Rc::new(preview));
-                        this.result_tab = tab;
+                        this.opened.preview = Some(Rc::new(preview));
+                        this.opened.result_tab = tab;
                         if refresh {
                             this.reader_ui.loaded = None;
                         }
@@ -1360,7 +1366,7 @@ impl Desktop {
                             && !has_saved_position
                             && let Some(seconds) = position.and_then(|position| position.seconds)
                         {
-                            let blocks = &this.preview.as_ref().unwrap().blocks;
+                            let blocks = &this.opened.preview.as_ref().unwrap().blocks;
                             let nearest = nav::nearest_time(heading_times(blocks), seconds);
                             if let Some((index, exact)) = nearest {
                                 this.reader_ui.restore.pending = Some(workspace::ReadingPosition {
@@ -1458,7 +1464,7 @@ impl Desktop {
                 "find" => self.reader_ui.find.open = true,
                 "info" => self.reader_ui.details_open = true,
                 "toc" => self.reader_ui.toc_open = true,
-                "images" => self.result_tab = 1,
+                "images" => self.opened.result_tab = 1,
                 _ => {}
             }
         }
@@ -1473,7 +1479,8 @@ impl Desktop {
             .find(|course| course.dir == dir)
             .cloned()
             .or_else(|| {
-                self.preview
+                self.opened
+                    .preview
                     .as_ref()
                     .filter(|preview| preview.course.dir == dir)
                     .map(|preview| Rc::new(preview.course.clone()))
@@ -1692,9 +1699,9 @@ impl Desktop {
     }
 
     fn select_reader_view(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if self.result_tab != index {
+        if self.opened.result_tab != index {
             self.save_reading_position(cx);
-            self.result_tab = index;
+            self.opened.result_tab = index;
             let searching = !self
                 .reader_ui
                 .gallery
@@ -1720,7 +1727,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (AnyElement, Option<AnyElement>) {
-        let Some(preview) = self.preview.clone() else {
+        let Some(preview) = self.opened.preview.clone() else {
             return (self.reader_opening(cx), None);
         };
         self.reader_ui.images.next_frame();
@@ -1738,7 +1745,7 @@ impl Desktop {
             .flatten();
         let tabs = (!metrics.short).then(|| self.reader_tabs(&preview, metrics, cx));
         let find = self.reader_find_bar(cx);
-        let view = if self.result_tab == 0 {
+        let view = if self.opened.result_tab == 0 {
             self.reader_article(&preview, metrics, cx)
         } else {
             self.reader_gallery(&preview, metrics, window, cx)
@@ -1799,7 +1806,7 @@ impl Desktop {
                     .min_h_0()
                     .w_full()
                     // A note alone keeps its views at its own measure.
-                    .when(self.result_tab == 0 && !metrics.toc_beside, |page| {
+                    .when(self.opened.result_tab == 0 && !metrics.toc_beside, |page| {
                         page.max_w(ARTICLE_MAX).mx_auto()
                     })
                     .pb(rem(16.))
@@ -1833,7 +1840,7 @@ impl Desktop {
                         .variant(IconButtonVariant::Tonal)
                         .tone(ButtonTone::Neutral)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.navigate(this.result_origin, cx);
+                            this.navigate(this.opened.result_origin, cx);
                         })),
                     "reader-loading-back-tip",
                     label,
@@ -1866,7 +1873,7 @@ impl Desktop {
     ) -> Option<Div> {
         let feedback = self.course_export_feedback(&preview.course, cx);
         let loading = course2md::tr!("正在切换版本…");
-        let switching = self.reading.then(|| {
+        let switching = self.opened.reading.then(|| {
             motion::enter(
                 "reader-version-loading",
                 h_flex()
@@ -1922,7 +1929,7 @@ impl Desktop {
                         ])
                         .icon("note", symbols::description())
                         .icon("images", symbols::image())
-                        .selected(if self.result_tab == 0 {
+                        .selected(if self.opened.result_tab == 0 {
                             "note"
                         } else {
                             "images"
@@ -1945,7 +1952,7 @@ impl Desktop {
         metrics: ReaderMetrics,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.result_tab != 0 || self.reader_ui.outline.is_empty() || metrics.toc_beside {
+        if self.opened.result_tab != 0 || self.reader_ui.outline.is_empty() || metrics.toc_beside {
             return None;
         }
         let label = course2md::tr!("阅读目录");
@@ -2149,7 +2156,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let preview = self.preview.clone();
+        let preview = self.opened.preview.clone();
         if let (Some(preview), Some(block)) = (
             &preview,
             address
@@ -2301,7 +2308,7 @@ impl Desktop {
         let trigger = material_button("choose-note-version", ButtonVariant::Text)
             .icon(symbols::keyboard_arrow_down())
             .icon_position(ButtonIconPosition::Trailing)
-            .disabled(self.reading)
+            .disabled(self.opened.reading)
             .child(course2md::tr!(
                 "第 {} 版 · {} 生成",
                 manifest.revision,
@@ -2534,7 +2541,7 @@ impl Desktop {
             } else {
                 issues.join("\n")
             };
-            let reading = self.reading;
+            let reading = self.opened.reading;
             notices.push(motion::enter(
                 "reader-file-notice",
                 notice_banner("reader-file-notice-text", NoticeKind::Danger, text).child(
@@ -2726,7 +2733,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let icon_only = is_compact(window);
-        let reading_note = self.result_tab == 0;
+        let reading_note = self.opened.result_tab == 0;
         let shortcut = if cfg!(target_os = "macos") {
             "⌘F"
         } else {
@@ -3054,7 +3061,7 @@ impl Desktop {
     /// Finding in the current view. The note's bar comes when asked for and shows where
     /// in the matches it is; the screenshots' stays and narrows them.
     fn reader_find_bar(&mut self, cx: &mut Context<Self>) -> Option<Div> {
-        let reading_note = self.result_tab == 0;
+        let reading_note = self.opened.result_tab == 0;
         if (reading_note && !self.reader_ui.find.open)
             || (!reading_note && self.reader_ui.frames.is_empty())
         {
@@ -3431,7 +3438,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.preview.is_none()
+        if self.opened.preview.is_none()
             || self.reader_viewer_open()
             || self
                 .reader_ui
@@ -3441,7 +3448,7 @@ impl Desktop {
         {
             return;
         }
-        let filtered = self.result_tab == 1
+        let filtered = self.opened.result_tab == 1
             && !self
                 .reader_ui
                 .gallery
@@ -3450,7 +3457,7 @@ impl Desktop {
                 .value()
                 .trim()
                 .is_empty();
-        let visible: Vec<usize> = if self.result_tab == 1 {
+        let visible: Vec<usize> = if self.opened.result_tab == 1 {
             self.reader_ui.gallery.matches.to_vec()
         } else {
             (0..self.reader_ui.frames.len()).collect()
@@ -4081,7 +4088,7 @@ impl Desktop {
 
     /// Where the reader returns to, named for its crumb in the title bar.
     pub(crate) fn reader_origin_label(&self) -> &'static str {
-        match self.result_origin {
+        match self.opened.result_origin {
             Page::New => course2md::tr!("主页"),
             Page::Task => course2md::tr!("任务"),
             Page::Settings => course2md::tr!("设置"),
@@ -4099,6 +4106,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> gpui_kit_material::components::TitleBar {
         let title = self
+            .opened
             .preview
             .as_ref()
             .map(|preview| preview.course.title.clone())
@@ -4107,7 +4115,7 @@ impl Desktop {
         // The crumb names where the note lives, however it was reached; the
         // return button names the origin.
         let library = course2md::tr!("笔记库");
-        let crumb = match &self.preview {
+        let crumb = match &self.opened.preview {
             Some(preview) => {
                 let folder = self.folder_context(Some(preview.course.dir.clone()));
                 match folder.load_error {
@@ -4127,9 +4135,9 @@ impl Desktop {
                         IconButton::new("reader-back", symbols::arrow_back(), back.clone())
                             .variant(IconButtonVariant::Tonal)
                             .tone(ButtonTone::Neutral)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.navigate(this.result_origin, cx)),
-                            ),
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.navigate(this.opened.result_origin, cx)
+                            })),
                         "reader-back-tip",
                         back,
                     )),

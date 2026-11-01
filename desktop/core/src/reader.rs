@@ -2,12 +2,14 @@
 //! the offline video, and the positions that outlive a repair.
 use crate::{
     notes::{self, Course, PreviewBlock},
+    page::Page,
     reader_navigation as nav, workspace,
 };
 use std::{
     collections::{BTreeMap, HashMap},
     ops::Range,
     path::PathBuf,
+    rc::Rc,
 };
 
 pub fn block_anchor(block: &PreviewBlock, index: usize) -> String {
@@ -668,10 +670,99 @@ pub fn settle_reader_notice(current: &mut Option<String>, failure: &mut Option<S
     }
 }
 
+/// The note being read, or on its way. A read that finishes after a newer one started no
+/// longer counts.
+pub struct OpenedNote {
+    pub preview: Option<Rc<notes::Preview>>,
+    pub read_generation: u64,
+    pub reading: bool,
+    pub opening_course: Option<PathBuf>,
+    pub reader_course_error: Option<(PathBuf, String)>,
+    pub reader_failure_notice: Option<String>,
+    /// The page reading returns to.
+    pub result_origin: Page,
+    pub result_tab: usize,
+}
+
+impl Default for OpenedNote {
+    fn default() -> Self {
+        Self {
+            preview: None,
+            read_generation: 0,
+            reading: false,
+            opening_course: None,
+            reader_course_error: None,
+            reader_failure_notice: None,
+            result_origin: Page::Library,
+            result_tab: 0,
+        }
+    }
+}
+
+impl OpenedNote {
+    /// Starts reading a note from `page`: returning from it goes to where the person came
+    /// from, also when one note opens another. Returns the read's generation.
+    pub fn begin_read(&mut self, path: PathBuf, page: Page) -> u64 {
+        self.reading = true;
+        self.opening_course = Some(path);
+        self.reader_course_error = None;
+        self.read_generation = self.read_generation.wrapping_add(1);
+        self.result_origin = if page != Page::Result {
+            page
+        } else if self.result_origin == Page::Result {
+            Page::Library
+        } else {
+            self.result_origin
+        };
+        self.read_generation
+    }
+
+    /// Late results of a running read no longer count.
+    pub fn stop_reading(&mut self) {
+        self.read_generation = self.read_generation.wrapping_add(1);
+        self.reading = false;
+    }
+}
+
+/// Why a note could not be read, in the person's terms.
+pub fn note_read_failure(error: &anyhow::Error) -> &'static str {
+    let kind = error.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .map(std::io::Error::kind)
+    });
+    match kind {
+        Some(std::io::ErrorKind::NotFound) => {
+            course2md::tr!("笔记文件不存在，请重新连接保存位置后重试")
+        }
+        Some(std::io::ErrorKind::PermissionDenied) => {
+            course2md::tr!("无权读取这份笔记，请检查保存位置的访问权限")
+        }
+        _ => course2md::tr!("这份笔记无法读取，请检查保存位置中的文件"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{notes::Course, source};
+
+    #[test]
+    fn returning_from_a_note_goes_where_the_person_came_from() {
+        let mut opened = OpenedNote::default();
+        assert_eq!(opened.begin_read("a".into(), Page::Task), 1);
+        assert!(opened.reading);
+        assert!(opened.result_origin == Page::Task);
+        // One note opening another keeps the way back.
+        opened.begin_read("b".into(), Page::Result);
+        assert!(opened.result_origin == Page::Task);
+        opened.result_origin = Page::Result;
+        opened.begin_read("c".into(), Page::Result);
+        assert!(opened.result_origin == Page::Library);
+        opened.stop_reading();
+        assert!(!opened.reading);
+        assert_eq!(opened.read_generation, 4);
+    }
 
     fn fixture_version(
         root: &std::path::Path,

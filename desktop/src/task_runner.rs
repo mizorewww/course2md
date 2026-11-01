@@ -147,7 +147,7 @@ impl Desktop {
 
     /// Called only by the explicit global recovery action; rebuilding never starts the queue.
     pub fn rebuild_workspace_records(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.job.is_some() || self.storage_ui.busy {
+        if self.work.job.is_some() || self.storage_ui.busy {
             self.workspace_error = Some(
                 course2md::tr!("当前还有处理或文件移动在进行，请等候停止后再重建记录。").into(),
             );
@@ -179,7 +179,7 @@ impl Desktop {
 
     /// Whether this task holds the running background job (its record may lag the event stream).
     pub(crate) fn is_running_task(&self, id: &str) -> bool {
-        self.active_task.as_deref() == Some(id) && self.job.is_some()
+        self.work.active_task.as_deref() == Some(id) && self.work.job.is_some()
     }
 
     /// The library location a task's plan saves to; the record may name a removed library.
@@ -583,6 +583,7 @@ impl Desktop {
 
     pub fn refresh_dispatch_controls(&mut self, cx: &mut Context<Self>) {
         if let Some(task) = self
+            .work
             .active_task
             .as_deref()
             .and_then(|id| self.workspace.as_ref()?.state.task(id))
@@ -592,7 +593,7 @@ impl Desktop {
                 "停止新请求的指令尚未保存：{}",
                 format!("{error:#}")
             ));
-            if let Some(job) = &self.job {
+            if let Some(job) = &self.work.job {
                 job.cancel();
             }
             cx.notify();
@@ -600,7 +601,11 @@ impl Desktop {
     }
 
     pub fn start_next_task(&mut self, cx: &mut Context<Self>) {
-        if self.job.is_some() || self.closing || self.storage_ui.busy || self.start_pending {
+        if self.work.job.is_some()
+            || self.work.closing
+            || self.storage_ui.busy
+            || self.work.start_pending
+        {
             return;
         }
         let Some(task) = self
@@ -633,7 +638,7 @@ impl Desktop {
         // Keychain resolution may surface a system authorization dialog whose queue can even
         // be held by another application; resolving on the UI thread would freeze the whole
         // interface, so the secrets are gathered on a background executor first.
-        self.start_pending = true;
+        self.work.start_pending = true;
         let vault = self.preferences.vault();
         let task_id = task.id.clone();
         let secrets_rx = crate::spawn_blocking_io(move || -> Result<HashMap<String, String>> {
@@ -650,7 +655,7 @@ impl Desktop {
                 .await
                 .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("凭据读取意外中断"))));
             let _ = this.update(cx, |this, cx| {
-                this.start_pending = false;
+                this.work.start_pending = false;
                 match secrets {
                     Ok(secrets) => this.finish_task_start(&task_id, secrets, cx),
                     Err(error) => {
@@ -670,7 +675,7 @@ impl Desktop {
         secrets: HashMap<String, String>,
         cx: &mut Context<Self>,
     ) {
-        if self.job.is_some() || self.closing {
+        if self.work.job.is_some() || self.work.closing {
             return;
         }
         let Some(task) = self
@@ -754,8 +759,8 @@ impl Desktop {
         request: course2md::execution::Request,
         cx: &mut Context<Self>,
     ) {
-        if self.job.is_some()
-            || self.closing
+        if self.work.job.is_some()
+            || self.work.closing
             || task.state != TaskState::Queued
             || task.intent != Intent::Run
         {
@@ -791,12 +796,12 @@ impl Desktop {
             let job = started.recv().await;
             let _ = desktop.update(cx, |this, cx| match job {
                 Ok(Ok(job)) => {
-                    this.job = Some(job);
-                    this.active_task = Some(task.id.clone());
-                    this.kind = Kind::Convert;
-                    this.cancelling = false;
-                    this.job_started = Some(std::time::Instant::now());
-                    this.task_status = course2md::tr!("正在生成《{}》", task.plan.title);
+                    this.work.job = Some(job);
+                    this.work.active_task = Some(task.id.clone());
+                    this.work.kind = Kind::Convert;
+                    this.work.cancelling = false;
+                    this.work.job_started = Some(std::time::Instant::now());
+                    this.work.task_status = course2md::tr!("正在生成《{}》", task.plan.title);
                     cx.notify();
                 }
                 Ok(Err(error)) => {
@@ -869,8 +874,8 @@ impl Desktop {
             {
                 self.workspace_error =
                     Some(course2md::tr!("任务指令尚未保存：{}", format!("{error:#}")));
-                if self.active_task.as_ref() == Some(&id)
-                    && let Some(job) = &self.job
+                if self.work.active_task.as_ref() == Some(&id)
+                    && let Some(job) = &self.work.job
                 {
                     job.cancel();
                 }
@@ -904,7 +909,7 @@ impl Desktop {
             .as_ref()
             .and_then(|workspace| workspace.state.task(id))
             .is_some_and(|task| matches!(task_group(task), TaskGroup::Running | TaskGroup::Queued));
-        self.expanded_task = (!waiting).then(|| id.to_owned());
+        self.task_list.expanded = (!waiting).then(|| id.to_owned());
         cx.notify();
     }
 
@@ -918,17 +923,17 @@ impl Desktop {
                 id: id.to_owned(),
                 source_revision: self.import.preview_generation,
             });
-        } else if self.page == Page::Result && !self.reading {
+        } else if self.page == Page::Result && !self.opened.reading {
             self.import.following_conversion = self
                 .workspace
                 .as_ref()
                 .and_then(|workspace| workspace.state.task(id))
-                .zip(self.preview.as_ref())
+                .zip(self.opened.preview.as_ref())
                 .and_then(|(task, preview)| {
                     desktop_core::import::ConversionFollow::reader_reprocess(
                         task,
                         &preview.course.dir,
-                        self.read_generation,
+                        self.opened.read_generation,
                     )
                 });
         }
@@ -1252,7 +1257,7 @@ impl Desktop {
                         )
                     })
                     .is_some_and(|task| task.id == id);
-                let follow_reader_completion = !self.reading
+                let follow_reader_completion = !self.opened.reading
                     && self
                         .import
                         .following_conversion
@@ -1261,14 +1266,15 @@ impl Desktop {
                             follow.completed_reader_task(
                                 &task,
                                 self.page,
-                                self.read_generation,
-                                self.preview
+                                self.opened.read_generation,
+                                self.opened
+                                    .preview
                                     .as_ref()
                                     .map(|preview| preview.course.dir.as_path()),
                             )
                         });
                 if let Some(done) = done {
-                    self.completed = Some(done.clone());
+                    self.work.completed = Some(done.clone());
                     let root = self.task_library(&task).map(|l| l.root.clone());
                     let open = !task.exports_only()
                         && (follow_input_completion || follow_reader_completion);
@@ -1334,7 +1340,7 @@ impl Desktop {
                     })
                     .detach();
                 }
-                self.task_status = task.status_label().into();
+                self.work.task_status = task.status_label().into();
                 self.transient_task_result = Some((id.to_owned(), std::time::Instant::now()));
                 self.schedule_wake(std::time::Duration::from_secs(8));
             }

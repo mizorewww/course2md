@@ -122,7 +122,7 @@ fn repairs(issue: DeviceIssue) -> Vec<(&'static str, SymbolIcon, &'static str, R
 impl Desktop {
     /// The request a running model job is preparing.
     fn active_preparation(&self) -> Option<&Request> {
-        (self.kind == Kind::Models && self.job.is_some())
+        (self.work.kind == Kind::Models && self.work.job.is_some())
             .then_some(self.settings_ui.model_diagnostics.preparing.as_ref())
             .flatten()
     }
@@ -147,7 +147,7 @@ impl Desktop {
     }
     /// Whether the guide's forward action should wait behind a prepare action.
     pub(crate) fn model_awaits_download(&self, request: &Request) -> bool {
-        self.job.is_none()
+        self.work.job.is_none()
             && self.environment.is_some()
             && self.engine_issue(request.provider).is_none()
             && matches!(
@@ -296,7 +296,7 @@ impl Desktop {
         ]
     }
     fn begin_model_preparation(&mut self, request: Request, cx: &mut Context<Self>) {
-        if self.job.is_some() {
+        if self.work.job.is_some() {
             self.message = Some(job_busy().into());
             cx.notify();
             return;
@@ -328,7 +328,8 @@ impl Desktop {
             course2md::tr!(
                 "{} 的准备未完成：{}",
                 name,
-                self.job_events
+                self.work
+                    .job_events
                     .error
                     .as_deref()
                     .unwrap_or(course2md::tr!("准备失败"))
@@ -509,7 +510,7 @@ impl Desktop {
         let prepare_allowed = self.environment.is_some()
             && issue.is_none()
             && status.is_some_and(|status| status.can_prepare);
-        if self.job.is_some() && !preparing && prepare_allowed {
+        if self.work.job.is_some() && !preparing && prepare_allowed {
             lines.push(("job-busy", AsyncStatus::Warning(job_busy().into())));
         }
 
@@ -519,16 +520,16 @@ impl Desktop {
                 material_button(id("pause"), ButtonVariant::Outlined)
                     .tone(ButtonTone::Accent)
                     .icon(symbols::pause())
-                    .child(if self.cancelling {
+                    .child(if self.work.cancelling {
                         course2md::tr!("正在暂停…")
                     } else {
                         course2md::tr!("暂停准备")
                     })
-                    .disabled(self.cancelling)
+                    .disabled(self.work.cancelling)
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(job) = &this.job {
+                        if let Some(job) = &this.work.job {
                             job.cancel();
-                            this.cancelling = true;
+                            this.work.cancelling = true;
                             cx.notify();
                         }
                     })),
@@ -553,7 +554,7 @@ impl Desktop {
                 material_button(id("prepare"), variant)
                     .icon(icon)
                     .child(label)
-                    .disabled(self.job.is_some() || checking)
+                    .disabled(self.work.job.is_some() || checking)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.begin_model_preparation(target.clone(), cx)
                     })),
@@ -626,6 +627,7 @@ impl Desktop {
     /// sample, so incoming progress does not move the actions.
     fn model_transfers(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let transfers: Vec<_> = self
+            .work
             .job_events
             .stages
             .iter()
@@ -718,11 +720,11 @@ impl Desktop {
             }
         }
         // Logs belong to the last model job: shown while it runs and after it ends.
-        if self.kind == Kind::Models
-            && !self.job_events.logs.is_empty()
+        if self.work.kind == Kind::Models
+            && !self.work.job_events.logs.is_empty()
             && (self.is_preparing(request) || self.model_outcome(request).is_some())
         {
-            let logs = &self.job_events.logs;
+            let logs = &self.work.job_events.logs;
             details = details
                 .child(section_title(
                     id("log-heading".into()),
