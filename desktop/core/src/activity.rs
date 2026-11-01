@@ -210,9 +210,7 @@ impl JobEvents {
     }
 
     fn stage(&mut self, stage: &Stage) -> &mut Activity {
-        self.stages
-            .entry(stage.clone())
-            .or_default()
+        self.stages.entry(stage.clone()).or_default()
     }
 
     /// A new run of the same job: finished stages stay, its result and counters do not.
