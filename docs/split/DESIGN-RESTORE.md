@@ -170,15 +170,22 @@ A `restore` verdict states the intent. These are not there yet:
 
 | # | What remains |
 | --- | --- |
-| R8 | Open: the summary panel needs block styling from `TextView` |
-| G11 | Row and card titles are still Medium, as the kit's `TileScale::label` paints them, and read heavier in Roboto than they did |
-| G12 | Partly: storage and generation changed; the library's and all-notes' icons did not find a closer symbol |
-| G18 | Partly: note cards, tiles, home panels and task cards are back; other surfaces keep the kit's card radius |
-| H11 | Partly: step chips and the bar's place are off home, but the status chip and extra lines stay |
-| H12 | The action 「设置下一个视频」 stays in the task card, not in the panel; rows keep their icons |
-| T3 | The active step has no spinner |
-| T4 | The running title is the note's title with the chip at its end, without 「正在生成《…》」 |
-| R1 | The tone is back; the notice stays in the scrolling head, not above the view switch |
-| R3 | The chips carry no platform icon |
-| D1 | Corners are back; the label stays notched rather than above the field |
-| O4 | Switches have their icons; the rows' leading icons are not back |
+| R8 | Open. `TextView` paints no block background, and nothing kit-native gives a tinted summary without a hack: block quotes are the one block with a style option (`with_blockquote_style` can paint a panel), but a translation already draws as a quote, and the style is per view, so every translation would read as the summary; flipping it per note gives translated notes another look. A surface above the document, or a nested `TextView` in a block plugin, breaks selection and find across it. A real fix is block styling in `TextView`, in vendored engine code, which decision 12 rules out for this app's sake |
+
+## Finished after the audit
+
+The rows above state the verdict; this says what the last pass did.
+
+| # | How it was restored |
+| --- | --- |
+| G11 | The kit's `TileScale::label` takes body large's weight (kit #15); video titles and note headings take their role's |
+| G12 | `newsstand` for the library, `book_2` for all notes, `database` for storage, `description` for a note. `notebook` is not in the catalog; `book_2` is the nearest form |
+| G18 | Palette cards, the log box, the uncertain-request panel, the QR frame and the image viewer moved from 12 to `RADIUS_LARGE`; a tree row's drop outline stays on the row's own 12 |
+| H11 | On home a running card has no step chips, status chip or second measure line; progress and actions are in the text column. Its menu button stays: it holds actions the old card lacked |
+| H12 | 「设置下一个视频」 stays on a running card, as in the baseline, and is otherwise a row under the panel's header, shown whether or not the plan is open; the plan's rows are flat |
+| T3 | The active step's chip spins |
+| T4 | A running title reads 「正在生成《…》」 and its chip 「处理中」 |
+| R1 | The notice heads the page above the view switch, radius 28. A window too short to give the views a line of their own keeps it in the scrolling head |
+| R3 | Platform and uploader are one chip led by the platform's icon |
+| D1 | The label stands above the field; an empty field shows it as its placeholder |
+| O4 | `ui::Field::icon` leads the switch rows with their icons |
