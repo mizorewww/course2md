@@ -98,6 +98,8 @@ struct Desktop {
     reader_ui: reader_ui::State,
     workspace: Option<workspace::Workspace>,
     workspace_error: Option<String>,
+    library: desktop_core::library::LibraryState,
+    library_ui: library_ui::LibraryUi,
     preference_defaults_pending: bool,
     active_task: Option<String>,
     transient_task_result: Option<(String, Instant)>,
@@ -136,22 +138,6 @@ struct Desktop {
     root_focus: FocusHandle,
     show_preview_details: bool,
     expanded_subtitle_issue: Option<SharedString>,
-    library: organize::Library,
-    library_root: PathBuf,
-    library_error: Option<String>,
-    library_issues: Vec<desktop_core::library::LibraryIssue>,
-    library_indexes: BTreeMap<PathBuf, organize::Library>,
-    library_view_cache: desktop_core::library::LibraryViewCache,
-    library_generation: u64,
-    folder_filter: FolderFilter,
-    name_dialog: Option<library_ui::NameDialog>,
-    move_dialog: Option<library_ui::MoveDialog>,
-    folder_picker_open: bool,
-    /// The folder navigation's sheet on narrow windows.
-    places_open: bool,
-    /// Tree nodes the person toggled: opened folders, or closed library tops (id 0).
-    folder_tree_open: HashSet<(PathBuf, u64)>,
-    folder_tree_scroll: ScrollHandle,
     /// The window this view lives in; deferred work returns to it.
     window: AnyWindowHandle,
     page: Page,
@@ -184,10 +170,6 @@ struct Desktop {
     /// and the reader panels to show once it has loaded.
     validation: Option<ValidationOpen>,
     completed: Option<Done>,
-    /// Library notes, shared so render closures hold a pointer, not a copy.
-    courses: Vec<Rc<Course>>,
-    cover_by_source: BTreeMap<String, PathBuf>,
-    loading: bool,
     preview: Option<Rc<notes::Preview>>,
     read_generation: u64,
     reading: bool,
@@ -208,10 +190,6 @@ struct Desktop {
     queue_keys: Vec<String>,
     queue_focus: Vec<FocusHandle>,
     queue_rem: f32,
-    library_list: ListState,
-    library_keys: Vec<String>,
-    library_focus: Vec<FocusHandle>,
-    library_rem: f32,
     // Entrance animations already played for logical content that a
     // virtualized list may unmount and remount while scrolling.
     entered: HashSet<String>,
@@ -428,7 +406,7 @@ impl Desktop {
                         this.title_required = false;
                     }
                     if field == Field::Search {
-                        this.library_list.scroll_to(ListOffset {
+                        this.library_ui.list.scroll_to(ListOffset {
                             item_ix: 0,
                             offset_in_item: px(0.),
                         });
@@ -522,6 +500,8 @@ impl Desktop {
             storage_ui: Default::default(),
             workspace,
             workspace_error,
+            library: desktop_core::library::LibraryState::new(output),
+            library_ui: library_ui::LibraryUi::new(),
             preference_defaults_pending: false,
             active_task: None,
             transient_task_result: None,
@@ -556,20 +536,6 @@ impl Desktop {
             account: desktop_core::account::AccountUi::default(),
             codex: desktop_core::codex::CodexUi::default(),
             ollama: desktop_core::ollama::OllamaUi::default(),
-            library: Default::default(),
-            library_root: output,
-            library_error: None,
-            library_issues: Vec::new(),
-            library_indexes: BTreeMap::new(),
-            library_view_cache: Default::default(),
-            library_generation: 0,
-            folder_filter: FolderFilter::All,
-            name_dialog: None,
-            move_dialog: None,
-            folder_picker_open: false,
-            places_open: false,
-            folder_tree_open: HashSet::new(),
-            folder_tree_scroll: ScrollHandle::new(),
             window: window.window_handle(),
             result_origin: Page::Library,
             settings_origin: None,
@@ -594,9 +560,6 @@ impl Desktop {
             job_started: None,
             validation: ValidationOpen::from_env(),
             completed: None,
-            courses: vec![],
-            cover_by_source: BTreeMap::new(),
-            loading: false,
             preview: None,
             read_generation: 0,
             reading: false,
@@ -612,10 +575,6 @@ impl Desktop {
             queue_keys: Vec::new(),
             queue_focus: Vec::new(),
             queue_rem: f32::NAN,
-            library_list: ListState::new(0, ListAlignment::Top, px(1000.)),
-            library_keys: Vec::new(),
-            library_focus: Vec::new(),
-            library_rem: f32::NAN,
             entered: HashSet::new(),
             task_logs_open: HashSet::new(),
             expanded_task: None,
@@ -850,7 +809,7 @@ impl Desktop {
             .as_ref()
             .and_then(|w| w.state.library(&w.state.default_library))
             .map(|l| l.root.clone())
-            .unwrap_or_else(|| self.library_root.clone())
+            .unwrap_or_else(|| self.library.root.clone())
     }
     fn pick_video(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prompt = cx.prompt_for_paths(PathPromptOptions {
@@ -1049,12 +1008,10 @@ impl Desktop {
     }
     pub(crate) fn refresh_library(&mut self, cx: &mut Context<Self>) {
         let locations = self.registered_storage_locations();
-        self.library_generation = self.library_generation.wrapping_add(1);
-        let generation = self.library_generation;
+        let generation = self.library.begin_scan();
         self.storage_ui
             .location_checks
             .begin(generation, &locations);
-        self.loading = true;
         let task = desktop_core::locations::scan_locations(locations, move |location| {
             let scan = notes::scan_library(&location.root);
             let organization = organize::Library::load(&location.root);
@@ -1065,7 +1022,7 @@ impl Desktop {
         cx.spawn(async move |this, cx| {
             let results = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.library_generation != generation {
+                if this.library.generation != generation {
                     return;
                 }
                 let current = this.registered_storage_locations();
@@ -1093,91 +1050,15 @@ impl Desktop {
                         this.wake_poll();
                     }
                 }
-                this.loading = false;
-                this.courses.clear();
-                this.cover_by_source.clear();
-                this.library_issues.clear();
-                this.library_indexes.clear();
-                this.library_view_cache = Default::default();
-                for (location, _, (scan, organization, cache)) in results {
-                    this.library_view_cache.merge(cache);
-                    match scan {
-                        Ok(scan) => {
-                            for course in &scan.courses {
-                                if let Some(cover) = &course.thumbnail
-                                    && let Some(source_id) = course
-                                        .manifest
-                                        .as_ref()
-                                        .map(|manifest| manifest.source_id.clone())
-                                {
-                                    this.cover_by_source.insert(source_id, cover.clone());
-                                }
-                            }
-                            this.courses.extend(scan.courses.into_iter().map(Rc::new));
-                            this.library_issues
-                                .extend(scan.issues.into_iter().map(|message| {
-                                    desktop_core::library::LibraryIssue {
-                                        root: location.root.clone(),
-                                        kind: desktop_core::library::LibraryIssueKind::Scan,
-                                        message,
-                                    }
-                                }));
-                        }
-                        Err(error) => {
-                            this.library_issues
-                                .push(desktop_core::library::LibraryIssue {
-                                    root: location.root.clone(),
-                                    kind: desktop_core::library::LibraryIssueKind::Scan,
-                                    message: course2md::tr!(
-                                        "{}读取失败：{}",
-                                        location.name,
-                                        format!("{error:#}")
-                                    ),
-                                })
-                        }
-                    }
-                    match organization {
-                        Ok(library) => {
-                            this.library_indexes.insert(location.root, library);
-                        }
-                        Err(error) => {
-                            this.library_issues
-                                .push(desktop_core::library::LibraryIssue {
-                                    root: location.root.clone(),
-                                    kind: desktop_core::library::LibraryIssueKind::Folders,
-                                    message: course2md::tr!(
-                                        "{}的文件夹信息已损坏：{}",
-                                        location.name,
-                                        format!("{error:#}")
-                                    ),
-                                })
-                        }
-                    }
-                }
-                this.courses.sort_by_key(|c| std::cmp::Reverse(c.modified));
+                this.library.apply_scan(results);
                 this.apply_course_title_aliases();
                 this.open_validation_note(cx);
-                if let Some(library) = this.library_indexes.get(&this.library_root) {
-                    this.library = library.clone();
-                    this.library_error = None;
-                } else if let Some((root, library)) = this
+                let registered = this
                     .workspace
                     .as_ref()
-                    .and_then(|workspace| workspace.state.libraries.first())
-                    .and_then(|location| {
-                        this.library_indexes
-                            .get(&location.root)
-                            .map(|library| (location.root.clone(), library.clone()))
-                    })
-                {
-                    // The configured default is not a registered library; follow
-                    // the workspace's first readable location instead.
-                    this.library_root = root;
-                    this.library = library;
-                    this.library_error = None;
-                } else {
-                    this.library_error = Some(course2md::tr!("文件夹信息读取失败").into());
-                }
+                    .map(|workspace| workspace.state.libraries.as_slice())
+                    .unwrap_or_default();
+                this.library.settle_root(registered);
                 this.advance_conversion_when_ready(cx);
                 cx.notify();
             });
@@ -1186,24 +1067,12 @@ impl Desktop {
     }
 
     fn course_location(&self, course: &Course) -> Option<&workspace::LibraryLocation> {
-        let cached = self
-            .library_view_cache
-            .locations
-            .get(&course.storage_dir())?;
-        self.workspace
-            .as_ref()?
-            .state
-            .libraries
-            .iter()
-            .find(|lib| lib.id == cached.id && lib.root == cached.root)
+        self.library
+            .course_location(&self.workspace.as_ref()?.state.libraries, course)
     }
     fn course_folder(&self, course: &Course) -> Option<u64> {
-        let root = &self.course_location(course)?.root;
-        let cached = self
-            .library_view_cache
-            .locations
-            .get(&course.storage_dir())?;
-        self.library_indexes.get(root)?.folder_key(&cached.relative)
+        self.library
+            .course_folder(&self.workspace.as_ref()?.state.libraries, course)
     }
     fn open_course(&mut self, course: impl Into<Rc<Course>>, cx: &mut Context<Self>) {
         self.following_conversion = None;

@@ -225,7 +225,7 @@ impl Desktop {
             has_source: self.source_preview.is_some(),
             needs_text_choice: self.subtitle_attention_required(),
             environment_ready: self.environment.is_some(),
-            library_ready: !self.loading,
+            library_ready: !self.library.loading,
             existing_note: self.existing_source_note().is_some(),
         }) {
             ConversionGate::Wait => cx.notify(),
@@ -2533,8 +2533,8 @@ impl Desktop {
             reading: self.preview_cancel.is_some() || self.subtitle_loading,
             subtitle_failed: self.subtitle_error.is_some(),
             environment_ready: self.environment.is_some(),
-            library: self.library_generation,
-            library_loading: self.loading,
+            library: self.library.generation,
+            library_loading: self.library.loading,
         };
         if let Some((cached, plan)) = &self.preview_plan_cache
             && *cached == key

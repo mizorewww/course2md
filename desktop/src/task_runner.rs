@@ -337,7 +337,7 @@ impl Desktop {
             library,
             draft.folder,
             self.cached_location_check(library),
-            self.library_indexes.get(&library.root),
+            self.library.indexes.get(&library.root),
         )?;
         Ok(())
     }
@@ -1546,7 +1546,7 @@ impl Desktop {
                             }
                             if let Some(manifest) = &manifest {
                                 update_published_course(
-                                    &mut this.courses,
+                                    &mut this.library.courses,
                                     &done,
                                     manifest,
                                     thumbnail,

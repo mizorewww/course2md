@@ -40,6 +40,40 @@ pub(crate) enum NameTarget {
     },
 }
 
+/// The library page's own view state: its dialogs, folder tree and virtualized list.
+pub(crate) struct LibraryUi {
+    pub name_dialog: Option<NameDialog>,
+    pub move_dialog: Option<MoveDialog>,
+    pub folder_picker_open: bool,
+    /// The folder navigation's sheet on narrow windows.
+    pub places_open: bool,
+    /// Tree nodes the person toggled: opened folders, or closed library tops (id 0).
+    pub folder_tree_open: HashSet<(PathBuf, u64)>,
+    pub folder_tree_scroll: ScrollHandle,
+    /// The virtualized notes: the list, and the identity and focus of what it describes.
+    pub list: ListState,
+    pub keys: Vec<String>,
+    pub focus: Vec<FocusHandle>,
+    pub rem: f32,
+}
+
+impl LibraryUi {
+    pub fn new() -> Self {
+        Self {
+            name_dialog: None,
+            move_dialog: None,
+            folder_picker_open: false,
+            places_open: false,
+            folder_tree_open: HashSet::new(),
+            folder_tree_scroll: ScrollHandle::new(),
+            list: ListState::new(0, ListAlignment::Top, px(1000.)),
+            keys: Vec::new(),
+            focus: Vec::new(),
+            rem: f32::NAN,
+        }
+    }
+}
+
 /// The dialog naming a new folder, a folder or a note. It outlives its answer, so it
 /// can play its exit; `open` says whether the question still stands.
 pub(crate) struct NameDialog {
@@ -357,6 +391,7 @@ impl Desktop {
             None => course2md::tr!("未分类").into(),
             Some(id) => self
                 .library
+                .current
                 .folders
                 .get(&id)
                 .cloned()
@@ -373,7 +408,7 @@ impl Desktop {
         {
             return (library.root.clone(), Some(draft.id.clone()));
         }
-        (self.library_root.clone(), None)
+        (self.library.root.clone(), None)
     }
 
     pub fn begin_folder(&mut self, id: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
@@ -419,7 +454,7 @@ impl Desktop {
         let name = match &target {
             NameTarget::NewFolder { .. } => String::new(),
             NameTarget::Folder { root, id } => {
-                let Some(library) = self.library_indexes.get(root) else {
+                let Some(library) = self.library.indexes.get(root) else {
                     self.message = Some(folders_unavailable().into());
                     cx.notify();
                     return;
@@ -427,6 +462,7 @@ impl Desktop {
                 library.folders.get(id).cloned().unwrap_or_default()
             }
             NameTarget::Note { storage, .. } => self
+                .library
                 .courses
                 .iter()
                 .find(|course| &course.storage_dir() == storage)
@@ -437,7 +473,7 @@ impl Desktop {
             self.navigate(Page::Library, cx);
         }
         self.inputs[&Field::Name].update(cx, |state, cx| state.set_value(name, window, cx));
-        self.name_dialog = Some(NameDialog {
+        self.library_ui.name_dialog = Some(NameDialog {
             target,
             error: None,
             saving: false,
@@ -448,7 +484,7 @@ impl Desktop {
     }
 
     pub(crate) fn close_name_dialog(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = &mut self.name_dialog {
+        if let Some(dialog) = &mut self.library_ui.name_dialog {
             dialog.open = false;
         }
         cx.notify();
@@ -456,7 +492,7 @@ impl Desktop {
 
     /// The name changed: an earlier failure no longer applies.
     pub(crate) fn name_edited(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = &mut self.name_dialog {
+        if let Some(dialog) = &mut self.library_ui.name_dialog {
             dialog.error = None;
         }
         cx.notify();
@@ -515,17 +551,18 @@ impl Desktop {
     }
 
     pub(crate) fn store_folders(&mut self, root: &Path, library: organize::Library) {
-        if self.library_root == root {
-            self.library = library.clone();
-            self.library_error = None;
+        if self.library.root == root {
+            self.library.current = library.clone();
+            self.library.error = None;
         }
-        self.library_indexes.insert(root.to_owned(), library);
+        self.library.indexes.insert(root.to_owned(), library);
     }
 
     /// Saves the dialog's name. Pressing Return in its field lands here too.
     pub fn save_name(&mut self, cx: &mut Context<Self>) {
         let name = self.value(Field::Name, cx);
         let Some(dialog) = self
+            .library_ui
             .name_dialog
             .as_mut()
             .filter(|dialog| dialog.open && !dialog.saving && !name.is_empty())
@@ -570,7 +607,12 @@ impl Desktop {
         target: &NameTarget,
         cx: &mut Context<Self>,
     ) {
-        let Some(dialog) = self.name_dialog.as_mut().filter(|dialog| dialog.open) else {
+        let Some(dialog) = self
+            .library_ui
+            .name_dialog
+            .as_mut()
+            .filter(|dialog| dialog.open)
+        else {
             return;
         };
         dialog.saving = false;
@@ -598,7 +640,7 @@ impl Desktop {
                         }
                         Ok(())
                     })
-                    && let Some(dialog) = &mut self.name_dialog
+                    && let Some(dialog) = &mut self.library_ui.name_dialog
                 {
                     dialog.error = Some(course2md::tr!(
                         "文件夹已创建，保存位置尚未更新：{}",
@@ -629,7 +671,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let input = self.inputs[&Field::Name].clone();
-        let dialog = self.name_dialog.as_mut()?;
+        let dialog = self.library_ui.name_dialog.as_mut()?;
         if std::mem::take(&mut dialog.focus_field) {
             let input = input.clone();
             window.on_next_frame(move |window, cx| {
@@ -709,7 +751,7 @@ impl Desktop {
     }
 
     pub(crate) fn begin_move(&mut self, root: PathBuf, moving: Moving, cx: &mut Context<Self>) {
-        self.move_dialog = Some(MoveDialog {
+        self.library_ui.move_dialog = Some(MoveDialog {
             root,
             moving,
             open: true,
@@ -718,7 +760,7 @@ impl Desktop {
     }
 
     fn close_move_dialog(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = &mut self.move_dialog {
+        if let Some(dialog) = &mut self.library_ui.move_dialog {
             dialog.open = false;
         }
         cx.notify();
@@ -727,13 +769,14 @@ impl Desktop {
     /// The dialog choosing a destination, drawn by the shell. A list of folders can
     /// outgrow a menu, and a folder cannot move inside itself.
     pub(crate) fn move_dialog_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.move_dialog.as_ref()?;
-        let library = self.library_indexes.get(&dialog.root)?;
+        let dialog = self.library_ui.move_dialog.as_ref()?;
+        let library = self.library.indexes.get(&dialog.root)?;
         let (top, top_icon, current, inside) = match &dialog.moving {
             Moving::Note(storage) => (
                 course2md::tr!("未分类").to_owned(),
                 symbols::inbox(),
-                self.library_view_cache
+                self.library
+                    .view_cache
                     .locations
                     .get(storage)
                     .and_then(|location| library.folder_key(&location.relative)),
@@ -813,7 +856,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let library = self.library_indexes.get(&root);
+        let library = self.library.indexes.get(&root);
         let name = library
             .and_then(|library| library.folders.get(&id))
             .cloned()
@@ -848,13 +891,17 @@ impl Desktop {
                         // Drafts keep the deleted folder so their next submission
                         // asks for a deliberate destination.
                         Ok(()) => {
-                            let removed = this.folder_filter.folder_id().is_some_and(|folder| {
-                                this.library_indexes
-                                    .get(&removed_root)
-                                    .is_none_or(|library| !library.folders.contains_key(&folder))
-                            });
-                            if this.library_root == removed_root && removed {
-                                this.folder_filter = FolderFilter::Unfiled;
+                            let removed =
+                                this.library
+                                    .folder_filter
+                                    .folder_id()
+                                    .is_some_and(|folder| {
+                                        this.library.indexes.get(&removed_root).is_none_or(
+                                            |library| !library.folders.contains_key(&folder),
+                                        )
+                                    });
+                            if this.library.root == removed_root && removed {
+                                this.library.folder_filter = FolderFilter::Unfiled;
                             }
                         }
                         Err(error) => {
@@ -872,7 +919,8 @@ impl Desktop {
 
     pub(crate) fn folder_context(&self, course: Option<PathBuf>) -> FolderContext {
         let storage = course.as_ref().map(|path| {
-            self.courses
+            self.library
+                .courses
                 .iter()
                 .find(|course| &course.dir == path || &course.storage_dir() == path)
                 .map(|course| course.storage_dir())
@@ -880,21 +928,23 @@ impl Desktop {
         });
         let (root, draft_id) = match &storage {
             Some(path) => (
-                self.library_view_cache
+                self.library
+                    .view_cache
                     .locations
                     .get(path)
                     .map(|location| location.root.clone())
-                    .unwrap_or_else(|| self.library_root.clone()),
+                    .unwrap_or_else(|| self.library.root.clone()),
                 None,
             ),
             None => self.current_folder_origin(),
         };
-        let loaded = self.library_indexes.get(&root);
-        let checking = loaded.is_none() && self.loading;
+        let loaded = self.library.indexes.get(&root);
+        let checking = loaded.is_none() && self.library.loading;
         let load_error = (loaded.is_none() && !checking).then(|| folders_unavailable().to_owned());
         let folder = match &storage {
             Some(path) => self
-                .library_view_cache
+                .library
+                .view_cache
                 .locations
                 .get(path)
                 .filter(|location| location.root == root)
@@ -947,18 +997,18 @@ impl Desktop {
             )
             .selected(selected)
             .width(320.)
-            .open(self.folder_picker_open)
-            .disabled(self.loading || context.load_error.is_some())
+            .open(self.library_ui.folder_picker_open)
+            .disabled(self.library.loading || context.load_error.is_some())
             .error(context.load_error.is_some())
             .when_some(context.load_error, |picker, error| {
                 picker.supporting_text(error)
             })
             .on_open_change(cx.listener(|this, open: &bool, _, cx| {
-                this.folder_picker_open = *open;
+                this.library_ui.folder_picker_open = *open;
                 cx.notify();
             }))
             .on_select(cx.listener(move |this, index: &usize, _, cx| {
-                this.folder_picker_open = false;
+                this.library_ui.folder_picker_open = false;
                 let current = this
                     .workspace
                     .as_ref()

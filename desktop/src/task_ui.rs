@@ -923,6 +923,7 @@ impl Desktop {
         };
         // The note opens from its path even before the library has listed it.
         let course = self
+            .library
             .courses
             .iter()
             .find(|course| &course.dir == path)
@@ -997,7 +998,8 @@ impl Desktop {
             .plan
             .folder
             .and_then(|id| {
-                self.library_indexes
+                self.library
+                    .indexes
                     .get(&library?.root)?
                     .folders
                     .get(&id)
@@ -1035,11 +1037,12 @@ impl Desktop {
     }
 
     fn task_cover(&self, task: &TaskRecord) -> Option<PathBuf> {
-        task.plan
-            .source
-            .cover
-            .clone()
-            .or_else(|| self.cover_by_source.get(&task.plan.source_id).cloned())
+        task.plan.source.cover.clone().or_else(|| {
+            self.library
+                .cover_by_source
+                .get(&task.plan.source_id)
+                .cloned()
+        })
     }
 
     /// One task, wherever it stands.

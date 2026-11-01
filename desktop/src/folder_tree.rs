@@ -194,15 +194,15 @@ impl Desktop {
                 (
                     location.root.clone(),
                     location.name.clone(),
-                    self.library_indexes.get(&location.root).cloned(),
+                    self.library.indexes.get(&location.root).cloned(),
                 )
             })
             .collect();
         if libraries.is_empty() {
             vec![(
-                self.library_root.clone(),
+                self.library.root.clone(),
                 course2md::tr!("笔记库").to_owned(),
-                Some(self.library.clone()),
+                Some(self.library.current.clone()),
             )]
         } else {
             libraries
@@ -217,10 +217,10 @@ impl Desktop {
     }
 
     fn selected_target(&self) -> TreeTarget {
-        match self.folder_filter {
+        match self.library.folder_filter {
             FolderFilter::All => TreeTarget::All,
-            FolderFilter::Unfiled => TreeTarget::Root(self.library_root.clone()),
-            FolderFilter::Folder(id) => TreeTarget::Folder(self.library_root.clone(), id),
+            FolderFilter::Unfiled => TreeTarget::Root(self.library.root.clone()),
+            FolderFilter::Folder(id) => TreeTarget::Folder(self.library.root.clone(), id),
         }
     }
 
@@ -230,29 +230,31 @@ impl Desktop {
         filter: FolderFilter,
         cx: &mut Context<Self>,
     ) {
-        if let Some(organization) = self.library_indexes.get(&root) {
-            self.library = organization.clone();
+        if let Some(organization) = self.library.indexes.get(&root) {
+            self.library.current = organization.clone();
         }
         // The tree keeps the selected folder visible: its library top and
         // every folder above it open.
         if let (FolderFilter::Folder(id), Some(organization)) =
-            (filter, self.library_indexes.get(&root))
+            (filter, self.library.indexes.get(&root))
         {
             let mut parent = organization.parent(id);
             while let Some(folder) = parent {
-                self.folder_tree_open.insert((root.clone(), folder));
+                self.library_ui
+                    .folder_tree_open
+                    .insert((root.clone(), folder));
                 parent = organization.parent(folder);
             }
             // A selected folder also shows the folders it holds.
             if !organization.children(Some(id)).is_empty() {
-                self.folder_tree_open.insert((root.clone(), id));
+                self.library_ui.folder_tree_open.insert((root.clone(), id));
             }
-            self.folder_tree_open.remove(&(root.clone(), 0));
+            self.library_ui.folder_tree_open.remove(&(root.clone(), 0));
         }
-        self.library_root = root;
-        self.folder_filter = filter;
-        self.places_open = false;
-        self.library_list.scroll_to(ListOffset {
+        self.library.root = root;
+        self.library.folder_filter = filter;
+        self.library_ui.places_open = false;
+        self.library_ui.list.scroll_to(ListOffset {
             item_ix: 0,
             offset_in_item: px(0.),
         });
@@ -260,7 +262,7 @@ impl Desktop {
     }
 
     fn select_target(&mut self, target: TreeTarget, cx: &mut Context<Self>) {
-        let root = self.library_root.clone();
+        let root = self.library.root.clone();
         match target {
             TreeTarget::All => self.select_library_scope(root, FolderFilter::All, cx),
             TreeTarget::Root(root) => self.select_library_scope(root, FolderFilter::Unfiled, cx),
@@ -272,15 +274,18 @@ impl Desktop {
 
     fn toggle_tree_node(&mut self, root: &Path, id: u64, cx: &mut Context<Self>) {
         let key = (root.to_path_buf(), id);
-        if !self.folder_tree_open.remove(&key) {
-            self.folder_tree_open.insert(key);
+        if !self.library_ui.folder_tree_open.remove(&key) {
+            self.library_ui.folder_tree_open.insert(key);
         }
         cx.notify();
     }
 
     /// Library tops start open; folders open when the person opens them.
     fn tree_node_open(&self, root: &Path, id: u64) -> bool {
-        let open = self.folder_tree_open.contains(&(root.to_path_buf(), id));
+        let open = self
+            .library_ui
+            .folder_tree_open
+            .contains(&(root.to_path_buf(), id));
         if id == 0 { !open } else { open }
     }
 
@@ -293,7 +298,8 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let own_root = self
-            .library_view_cache
+            .library
+            .view_cache
             .locations
             .get(&storage)
             .map(|location| location.root.clone());
@@ -329,7 +335,7 @@ impl Desktop {
             move |this, result, cx| match result {
                 Ok(()) => {
                     if let Some(parent) = parent {
-                        this.folder_tree_open.insert((moved, parent));
+                        this.library_ui.folder_tree_open.insert((moved, parent));
                     }
                 }
                 Err(error) => {
@@ -416,14 +422,14 @@ impl Desktop {
     /// 全部笔记 is 未分类 plus the top folders and the folder page agrees.
     fn nav_counts(&self) -> NavCounts {
         let mut counts = NavCounts {
-            all: self.courses.len(),
+            all: self.library.courses.len(),
             ..NavCounts::default()
         };
-        for course in &self.courses {
+        for course in &self.library.courses {
             let Some(location) = self.course_location(course) else {
                 continue;
             };
-            let Some(library) = self.library_indexes.get(&location.root) else {
+            let Some(library) = self.library.indexes.get(&location.root) else {
                 continue;
             };
             match self.course_folder(course) {
@@ -469,7 +475,8 @@ impl Desktop {
             TreeTarget::All => (course2md::tr!("全部笔记").into(), None),
             TreeTarget::Root(root) => (course2md::tr!("未分类").into(), library_name(&root)),
             TreeTarget::Folder(root, id) => (
-                self.library_indexes
+                self.library
+                    .indexes
                     .get(&root)
                     .and_then(|library| library.folders.get(&id).cloned())
                     .unwrap_or_else(|| course2md::tr!("文件夹").into()),
@@ -786,8 +793,10 @@ impl Desktop {
                 );
             }
         }
-        let (create_root, create_parent) =
-            (self.library_root.clone(), self.folder_filter.folder_id());
+        let (create_root, create_parent) = (
+            self.library.root.clone(),
+            self.library.folder_filter.folder_id(),
+        );
         v_flex().w_full().min_w_0().gap(rem(8.)).child(tree).child(
             material_button("folder-tree-new", ButtonVariant::Text)
                 .self_start()
@@ -812,11 +821,11 @@ impl Desktop {
                     .id("folder-tree-scroll")
                     .size_full()
                     .overflow_y_scroll()
-                    .track_scroll(&self.folder_tree_scroll)
+                    .track_scroll(&self.library_ui.folder_tree_scroll)
                     .pb(rem(24.))
                     .child(self.folder_tree(ColorRole::SURFACE_CONTAINER, cx)),
             )
-            .child(Scrollbar::vertical(&self.folder_tree_scroll))
+            .child(Scrollbar::vertical(&self.library_ui.folder_tree_scroll))
             .into_any_element()
     }
 
@@ -828,7 +837,7 @@ impl Desktop {
         columns: usize,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        let library = self.library_indexes.get(root)?;
+        let library = self.library.indexes.get(root)?;
         let children = library.children(parent);
         if children.is_empty() {
             return None;

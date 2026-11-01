@@ -41,7 +41,7 @@ impl Desktop {
                 vec![workspace::LibraryLocation {
                     id: String::new(),
                     name: course2md::tr!("笔记库").into(),
-                    root: self.library_root.clone(),
+                    root: self.library.root.clone(),
                     previous_roots: Vec::new(),
                 }]
             })
@@ -260,8 +260,8 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.library_root == link.previous_root {
-            self.library_root = link.folder.clone();
+        if self.library.root == link.previous_root {
+            self.library.root = link.folder.clone();
         }
         self.read_generation = self.read_generation.wrapping_add(1);
         self.reading = false;
@@ -653,8 +653,8 @@ impl Desktop {
                             );
                             return;
                         }
-                        if this.library_root == prepared.journal.source {
-                            this.library_root = prepared.journal.destination.clone();
+                        if this.library.root == prepared.journal.source {
+                            this.library.root = prepared.journal.destination.clone();
                         }
                         prepared.journal.phase = Phase::Committed;
                         this.storage_ui.error = None;

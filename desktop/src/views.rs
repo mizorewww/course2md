@@ -322,7 +322,7 @@ impl Desktop {
             course2md::tr!("笔记库"),
             shown(course2md::tr!("笔记库")),
             cx.listener(|this, _, _, cx| {
-                this.folder_filter = crate::FolderFilter::All;
+                this.library.folder_filter = crate::FolderFilter::All;
                 this.navigate(Page::Library, cx);
             }),
         );

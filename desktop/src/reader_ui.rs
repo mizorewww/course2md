@@ -1432,6 +1432,7 @@ impl Desktop {
             return;
         };
         let found = self
+            .library
             .courses
             .iter()
             .find(|course| {
@@ -1466,7 +1467,8 @@ impl Desktop {
     /// The note version at `dir`: the library's shared copy, or the open note
     /// when the library has not listed it yet. Copies only when it must.
     pub(crate) fn note_at(&self, dir: &std::path::Path) -> Option<Rc<Course>> {
-        self.courses
+        self.library
+            .courses
             .iter()
             .find(|course| course.dir == dir)
             .cloned()
@@ -2497,8 +2499,9 @@ impl Desktop {
         let mut notices = Vec::new();
         if let Some(current) = &preview.course.manifest
             && let Some(newer) = self
-                .library_view_cache
-                .newer_version(&self.courses, current)
+                .library
+                .view_cache
+                .newer_version(&self.library.courses, current)
         {
             notices.push(motion::enter(
                 "reader-new-version-notice",
