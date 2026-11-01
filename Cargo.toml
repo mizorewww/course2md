@@ -63,11 +63,11 @@ strip = true
 
 # Only the workspace root's patches count, so the desktop's stack is pinned here.
 [patch.crates-io]
-gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "401bb4727125eaae094745d8fc331632ad4924d7" }
-gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "401bb4727125eaae094745d8fc331632ad4924d7" }
-gpui-fast-macos = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "401bb4727125eaae094745d8fc331632ad4924d7" }
-gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "401bb4727125eaae094745d8fc331632ad4924d7" }
+gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "ab9fa9c703fe334abeb85286738857a5f42388c9" }
+gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "ab9fa9c703fe334abeb85286738857a5f42388c9" }
+gpui-fast-macos = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "ab9fa9c703fe334abeb85286738857a5f42388c9" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "ab9fa9c703fe334abeb85286738857a5f42388c9" }
 
 [patch."https://github.com/longbridge/gpui-kit"]
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "401bb4727125eaae094745d8fc331632ad4924d7" }
-gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "401bb4727125eaae094745d8fc331632ad4924d7" }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "ab9fa9c703fe334abeb85286738857a5f42388c9" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "ab9fa9c703fe334abeb85286738857a5f42388c9" }

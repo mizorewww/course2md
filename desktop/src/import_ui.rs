@@ -86,7 +86,7 @@ pub(crate) fn video_title(id: String, title: impl Into<SharedString>) -> Statefu
         .min_w_0()
         .text_size(role.font_size)
         .line_height(role.line_height)
-        .font_weight(FontWeight::MEDIUM)
+        .font_weight(FontWeight(role.font_weight as f32))
         .whitespace_normal()
         .text_ellipsis()
         .line_clamp(2)

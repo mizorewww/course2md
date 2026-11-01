@@ -485,7 +485,7 @@ pub fn note_style(cx: &App) -> TextViewStyle {
             StyleRefinement::default()
                 .text_size(scale.font_size)
                 .line_height(scale.line_height)
-                .font_weight(FontWeight::MEDIUM)
+                .font_weight(FontWeight(scale.font_weight as f32))
         })
 }
 
