@@ -5,7 +5,8 @@ use gpui_kit_material::{
     icons::Icon,
     prelude::{
         ButtonVariant, ExposedDropdown, ListDensity, ListItem, ListLeading, MaterialDialog,
-        TextField, TextFieldShape, TextFieldVariant, material_button, rem, segmented_list,
+        TextField, TextFieldShape, TextFieldVariant, TileScale, material_button, rem,
+        segmented_list,
     },
 };
 use std::{
@@ -668,15 +669,19 @@ impl Desktop {
                 .container(ColorRole::SURFACE)
                 .headline(headline)
                 .content(
-                    div().px(rem(24.)).child(
-                        TextField::new("name-field", &input)
-                            .label(label)
-                            .outlined()
-                            .shape(TextFieldShape::Rounded)
-                            .w_full()
-                            .error(error.is_some())
-                            .when_some(error, |field, error| field.supporting_text(error)),
-                    ),
+                    v_flex()
+                        .px(rem(24.))
+                        .gap(rem(8.))
+                        .child(TileScale::Regular.support("name-field-label", label))
+                        .child(
+                            TextField::new("name-field", &input)
+                                .placeholder(label)
+                                .outlined()
+                                .shape(TextFieldShape::Rounded)
+                                .w_full()
+                                .error(error.is_some())
+                                .when_some(error, |field, error| field.supporting_text(error)),
+                        ),
                 )
                 .action(
                     material_button("name-cancel", ButtonVariant::Text)
