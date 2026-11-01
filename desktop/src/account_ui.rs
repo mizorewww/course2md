@@ -228,12 +228,12 @@ impl Desktop {
 
     fn can_retry_account_source(&self, cx: &App) -> bool {
         self.account.can_resume_source(
-            self.preview_generation,
+            self.import.preview_generation,
             &self.value(Field::Source, cx),
             !self.onboarding.active
                 && matches!(self.page, Page::New)
                 && self.online()
-                && (self.preview_error.is_some() || self.subtitle_attention_required()),
+                && (self.import.preview_error.is_some() || self.subtitle_attention_required()),
         )
     }
 
@@ -282,9 +282,14 @@ impl Desktop {
         self.account.retry_source = (!self.onboarding.active
             && matches!(self.page, Page::New)
             && self.online()
-            && (self.preview_error.is_some() || self.subtitle_attention_required())
+            && (self.import.preview_error.is_some() || self.subtitle_attention_required())
             && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx)))
-        .then(|| (self.preview_generation, self.value(Field::Source, cx)));
+        .then(|| {
+            (
+                self.import.preview_generation,
+                self.value(Field::Source, cx),
+            )
+        });
         self.start_account_qr(cx);
         window.refresh();
     }

@@ -85,9 +85,6 @@ impl ValidationOpen {
     }
 }
 
-/// A derived preview plan, or its message and whether it is only waiting.
-type PreviewPlan = Result<workspace::TaskPlan, (String, bool)>;
-
 struct Desktop {
     /// The window size and text scale the link placeholder was last fitted
     /// in; a change asks for one more frame so the fit reads fresh bounds.
@@ -98,6 +95,7 @@ struct Desktop {
     reader_ui: reader_ui::State,
     workspace: Option<workspace::Workspace>,
     workspace_error: Option<String>,
+    import: desktop_core::import::ImportSession,
     library: desktop_core::library::LibraryState,
     library_ui: library_ui::LibraryUi,
     preference_defaults_pending: bool,
@@ -108,36 +106,10 @@ struct Desktop {
     account: desktop_core::account::AccountUi,
     codex: desktop_core::codex::CodexUi,
     ollama: desktop_core::ollama::OllamaUi,
-    completed_source: Option<String>,
-    source_preview: Option<source::Source>,
-    source_candidates: Vec<source::SourceCandidate>,
-    source_collection_title: Option<String>,
-    /// The real collection name from the probe (the batch note title prefix); placeholder hints are not names, see source_collection_title.
-    source_collection_name: Option<String>,
-    /// Inputs of the candidates checked in an online list; cleared when the candidates change.
-    selected_candidates: std::collections::BTreeSet<String>,
-    /// Local cache of candidate row previews (candidate.input → cached file), downloaded once per URL in the background.
-    source_candidate_covers: std::collections::HashMap<String, PathBuf>,
-    source_covers_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    subtitle_loading: bool,
-    subtitle_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    subtitle_error: Option<String>,
-    subtitle_generation: u64,
-    preview_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    preview_generation: u64,
-    pending_conversion: Option<u64>,
-    following_conversion: Option<desktop_core::import::ConversionFollow>,
-    preview_workers: usize,
     /// A startup reconciliation of the task record is running.
     workspace_reconciling: bool,
-    preview_error: Option<String>,
-    source_validation: Option<String>,
-    /// The current validation error is the missing-title case (typed, not text-matched).
-    title_required: bool,
     import_submit_focus: FocusHandle,
     root_focus: FocusHandle,
-    show_preview_details: bool,
-    expanded_subtitle_issue: Option<SharedString>,
     /// The window this view lives in; deferred work returns to it.
     window: AnyWindowHandle,
     page: Page,
@@ -146,8 +118,6 @@ struct Desktop {
     settings_origin: Option<(Page, Option<FocusHandle>)>,
     result_tab: usize,
     settings_tab: settings_ui::SettingsTab,
-    source_editor_open: bool,
-    validation_attempt: usize,
     environment: Option<backend::Environment>,
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
@@ -184,9 +154,6 @@ struct Desktop {
     queue_cache: Option<(u64, Rc<Vec<workspace::TaskRecord>>)>,
     event_wake_tx: smol::channel::Sender<()>,
     event_wake_rx: smol::channel::Receiver<()>,
-    /// The derived preview plan; an error carries whether it is only waiting
-    /// on background checks (`desktop_core::plan::PlanPending`).
-    preview_plan_cache: Option<(desktop_core::import::PlanKey, PreviewPlan)>,
     queue_keys: Vec<String>,
     queue_focus: Vec<FocusHandle>,
     queue_rem: f32,
@@ -283,15 +250,6 @@ impl Desktop {
         self.entered.insert(id)
     }
 
-    /// Stop background preview/subtitle readers; request_close and Drop share this.
-    fn cancel_background_reads(&self) {
-        if let Some(cancel) = &self.preview_cancel {
-            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-        if let Some(cancel) = &self.subtitle_cancel {
-            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
     fn request_close(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.flush_settings_for_exit(cx) || !self.save_current_draft(cx) {
             return false;
@@ -311,7 +269,7 @@ impl Desktop {
             cx.notify();
             return false;
         }
-        self.cancel_background_reads();
+        self.import.cancel_background_reads();
         self.codex.cancel_authorization();
         self.closing = true;
         self.quit_deadline = Some(Instant::now() + Duration::from_secs(10));
@@ -333,7 +291,7 @@ impl Desktop {
         }
         self.message = Some(course2md::tr!("正在保存进度并退出…").into());
         cx.notify();
-        self.job.is_none() && self.preview_workers == 0
+        self.job.is_none() && self.import.preview_workers == 0
     }
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let configuration_directory = course2md::config::config_dir();
@@ -383,7 +341,7 @@ impl Desktop {
                         // The draft records the input once autosave or a
                         // preview accepts it; anything else is a new edit.
                         if this.draft().is_some_and(|draft| draft.input != value) {
-                            this.following_conversion = None;
+                            this.import.following_conversion = None;
                             if this.reading && this.page == Page::New {
                                 this.read_generation = this.read_generation.wrapping_add(1);
                                 this.reading = false;
@@ -400,10 +358,10 @@ impl Desktop {
                     }
                     if field == Field::Title
                         && !this.value(Field::Title, cx).is_empty()
-                        && this.title_required
+                        && this.import.title_required
                     {
-                        this.source_validation = None;
-                        this.title_required = false;
+                        this.import.source_validation = None;
+                        this.import.title_required = false;
                     }
                     if field == Field::Search {
                         this.library_ui.list.scroll_to(ListOffset {
@@ -500,6 +458,7 @@ impl Desktop {
             storage_ui: Default::default(),
             workspace,
             workspace_error,
+            import: Default::default(),
             library: desktop_core::library::LibraryState::new(output),
             library_ui: library_ui::LibraryUi::new(),
             preference_defaults_pending: false,
@@ -508,31 +467,9 @@ impl Desktop {
             draft_deadline: None,
             quit_deadline: None,
             page: Page::New,
-            completed_source: None,
-            source_preview: None,
-            source_candidates: Vec::new(),
-            source_collection_title: None,
-            source_collection_name: None,
-            selected_candidates: std::collections::BTreeSet::new(),
-            source_candidate_covers: std::collections::HashMap::new(),
-            source_covers_cancel: None,
-            subtitle_loading: false,
-            subtitle_cancel: None,
-            subtitle_error: None,
-            subtitle_generation: 0,
-            preview_cancel: None,
-            preview_generation: 0,
-            pending_conversion: None,
-            following_conversion: None,
-            preview_workers: 0,
             workspace_reconciling: false,
-            preview_error: None,
-            source_validation: None,
-            title_required: false,
             import_submit_focus: cx.focus_handle(),
             root_focus: Self::install_root_focus(window, cx),
-            show_preview_details: false,
-            expanded_subtitle_issue: None,
             account: desktop_core::account::AccountUi::default(),
             codex: desktop_core::codex::CodexUi::default(),
             ollama: desktop_core::ollama::OllamaUi::default(),
@@ -541,8 +478,6 @@ impl Desktop {
             settings_origin: None,
             result_tab: 0,
             settings_tab: settings_ui::SettingsTab::Appearance,
-            source_editor_open: false,
-            validation_attempt: 0,
             environment: None,
             scrolls: std::array::from_fn(|_| ScrollHandle::new()),
             inputs,
@@ -571,7 +506,6 @@ impl Desktop {
             queue_cache: None,
             event_wake_tx,
             event_wake_rx,
-            preview_plan_cache: None,
             queue_keys: Vec::new(),
             queue_focus: Vec::new(),
             queue_rem: f32::NAN,
@@ -718,7 +652,7 @@ impl Desktop {
         }
         match workspace.transaction(|state| Ok(state.prepare_next_import(value, defaults))) {
             Ok(true) => {
-                self.completed_source = None;
+                self.import.completed_source = None;
                 self.invalidate_source();
                 self.message = None;
                 self.inputs[&Field::Title].update(cx, |state, cx| state.set_value("", window, cx));
@@ -739,7 +673,7 @@ impl Desktop {
         if !self.prepare_workbench_input(window, cx) {
             return;
         }
-        self.source_editor_open = true;
+        self.import.source_editor_open = true;
         self.navigate(Page::New, cx);
         if self.online() {
             self.inputs[&Field::Source].update(cx, |input, cx| input.focus(window, cx));
@@ -765,11 +699,11 @@ impl Desktop {
         self.transient_task_result = None;
         if page != Page::New
             || matches!(
-                self.following_conversion,
+                self.import.following_conversion,
                 Some(desktop_core::import::ConversionFollow::ReaderTask { .. })
             )
         {
-            self.following_conversion = None;
+            self.import.following_conversion = None;
         }
         self.save_reading_position(cx);
         self.read_generation = self.read_generation.wrapping_add(1);
@@ -974,7 +908,7 @@ impl Desktop {
                 Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
         }
         if self.closing {
-            if self.job.is_none() && self.preview_workers == 0 {
+            if self.job.is_none() && self.import.preview_workers == 0 {
                 cx.quit();
                 return;
             }
@@ -1075,12 +1009,12 @@ impl Desktop {
             .course_folder(&self.workspace.as_ref()?.state.libraries, course)
     }
     fn open_course(&mut self, course: impl Into<Rc<Course>>, cx: &mut Context<Self>) {
-        self.following_conversion = None;
+        self.import.following_conversion = None;
         self.open_course_with_conversion_guard(course.into(), None, cx);
     }
 
     fn open_completed_conversion(&mut self, course: Course, cx: &mut Context<Self>) {
-        let follow = self.following_conversion.clone();
+        let follow = self.import.following_conversion.clone();
         self.open_course_with_conversion_guard(Rc::new(course), follow, cx);
     }
 
@@ -1135,14 +1069,14 @@ impl Desktop {
                 this.opening_course = None;
                 if this.reader_viewer_open() {
                     desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
-                        &mut this.following_conversion,
+                        &mut this.import.following_conversion,
                     );
                 }
                 if follow.as_ref().is_some_and(|follow| {
-                    this.following_conversion.as_ref() != Some(follow)
+                    this.import.following_conversion.as_ref() != Some(follow)
                         || !follow.context_is_current(
                             this.page,
-                            this.preview_generation,
+                            this.import.preview_generation,
                             reader_revision,
                             this.preview
                                 .as_ref()
@@ -1160,7 +1094,7 @@ impl Desktop {
                             this.save_current_draft(cx);
                         }
                         if follow.is_none() {
-                            this.following_conversion = None;
+                            this.import.following_conversion = None;
                         }
                         // The old note remains scrollable during the read. Its
                         // current anchor, after all ownership guards pass, is the
@@ -1207,7 +1141,7 @@ impl Desktop {
                         this.page = Page::Result;
                         this.show_validation_panels();
                         if follow.is_some() {
-                            this.following_conversion = None;
+                            this.import.following_conversion = None;
                         }
                     }
                     Err(error) => {
@@ -1242,7 +1176,7 @@ impl Desktop {
 
 impl Drop for Desktop {
     fn drop(&mut self) {
-        self.cancel_background_reads();
+        self.import.cancel_background_reads();
     }
 }
 

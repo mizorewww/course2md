@@ -169,7 +169,7 @@ impl Desktop {
             return;
         }
         let op = StorageOp::Link(library_id.clone());
-        if self.job.is_some() || self.preview_workers > 0 {
+        if self.job.is_some() || self.import.preview_workers > 0 {
             let message = course2md::tr!("正在处理内容，结束或停止后再重新定位");
             return self.storage_refused(op, message.into(), cx);
         }
@@ -233,7 +233,7 @@ impl Desktop {
                         course2md::tr!("已取消重新定位")
                     );
                     ensure!(
-                        this.job.is_none() && this.preview_workers == 0,
+                        this.job.is_none() && this.import.preview_workers == 0,
                         course2md::tr!("内容仍在处理中，请停止后重新定位")
                     );
                     let workspace = this.workspace.as_mut().context(registry_unavailable())?;

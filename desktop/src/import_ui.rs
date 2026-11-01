@@ -156,11 +156,11 @@ impl Desktop {
             if !self.prepare_next_import(&input, window, cx) {
                 return;
             }
-            self.following_conversion = None;
+            self.import.following_conversion = None;
             self.invalidate_source();
         }
         if input.is_empty() {
-            self.source_validation = Some(
+            self.import.source_validation = Some(
                 if self.online() {
                     course2md::tr!("先粘贴视频链接")
                 } else {
@@ -176,18 +176,18 @@ impl Desktop {
         }
         // Preview is a separate user step. Never queue an unseen source,
         // including callers returning from login or selecting a local file.
-        if self.source_preview.is_none() {
+        if self.import.source_preview.is_none() {
             self.inspect_source(window, cx);
             return;
         }
-        self.pending_conversion = Some(self.preview_generation);
-        self.following_conversion = (self.page == Page::New)
-            .then_some(ConversionFollow::Preparing(self.preview_generation));
+        self.import.pending_conversion = Some(self.import.preview_generation);
+        self.import.following_conversion = (self.page == Page::New)
+            .then_some(ConversionFollow::Preparing(self.import.preview_generation));
         self.advance_conversion(window, cx);
     }
 
     pub fn advance_conversion_when_ready(&mut self, cx: &mut Context<Self>) {
-        if self.pending_conversion.is_none() {
+        if self.import.pending_conversion.is_none() {
             return;
         }
         let Some(handle) = cx.windows().first().copied() else {
@@ -202,27 +202,31 @@ impl Desktop {
     }
 
     pub fn advance_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(generation) = self.pending_conversion else {
+        let Some(generation) = self.import.pending_conversion else {
             return;
         };
-        let reading = self.preview_cancel.is_some() || self.subtitle_loading;
+        let reading = self.import.reading();
         let source_mode = self.task_options().source_mode;
-        if generation == self.preview_generation
+        if generation == self.import.preview_generation
             && !reading
-            && let Some(source) = &mut self.source_preview
-            && automatic_subtitle_fallback(source, source_mode, self.subtitle_error.as_deref())
+            && let Some(source) = &mut self.import.source_preview
+            && automatic_subtitle_fallback(
+                source,
+                source_mode,
+                self.import.subtitle_error.as_deref(),
+            )
         {
-            self.subtitle_error = None;
+            self.import.subtitle_error = None;
             if !self.save_current_draft(cx) {
-                self.pending_conversion = None;
+                self.import.pending_conversion = None;
                 return;
             }
         }
         match conversion_gate(GateInputs {
-            requested_revision: self.pending_conversion,
-            current_revision: self.preview_generation,
+            requested_revision: self.import.pending_conversion,
+            current_revision: self.import.preview_generation,
             reading,
-            has_source: self.source_preview.is_some(),
+            has_source: self.import.source_preview.is_some(),
             needs_text_choice: self.subtitle_attention_required(),
             environment_ready: self.environment.is_some(),
             library_ready: !self.library.loading,
@@ -230,7 +234,7 @@ impl Desktop {
         }) {
             ConversionGate::Wait => cx.notify(),
             ConversionGate::Stop => {
-                self.pending_conversion = None;
+                self.import.pending_conversion = None;
                 cx.notify();
             }
             ConversionGate::Submit => self.enqueue_current(window, cx),
@@ -246,9 +250,10 @@ impl Desktop {
     }
 
     fn subtitle_read_is_current(&self, read: &SubtitleRead) -> bool {
-        self.subtitle_generation == read.generation
-            && self.preview_generation == read.source_generation
+        self.import.subtitle_generation == read.generation
+            && self.import.preview_generation == read.source_generation
             && self
+                .import
                 .source_preview
                 .as_ref()
                 .is_some_and(|source| source.identity == read.identity)
@@ -269,23 +274,23 @@ impl Desktop {
         finish: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let Some(source) = self.source_preview.clone() else {
+        let Some(source) = self.import.source_preview.clone() else {
             return;
         };
         let generation = self.stop_subtitle_read();
         let cancel = Arc::new(AtomicBool::new(false));
-        self.subtitle_cancel = Some(cancel.clone());
-        self.subtitle_loading = true;
-        self.subtitle_error = None;
+        self.import.subtitle_cancel = Some(cancel.clone());
+        self.import.subtitle_loading = true;
+        self.import.subtitle_error = None;
         mark(self, cx);
         if !self.save_current_draft(cx) {
-            self.subtitle_loading = false;
-            self.subtitle_cancel = None;
+            self.import.subtitle_loading = false;
+            self.import.subtitle_cancel = None;
             return;
         }
         let read = SubtitleRead {
             generation,
-            source_generation: self.preview_generation,
+            source_generation: self.import.preview_generation,
             identity: source.identity.clone(),
             input: self
                 .workspace
@@ -293,17 +298,17 @@ impl Desktop {
                 .and_then(|workspace| workspace.state.draft())
                 .map(|draft| (draft.id.clone(), draft.revision)),
         };
-        self.preview_workers += 1;
+        self.import.preview_workers += 1;
         let task = crate::spawn_blocking_io(move || work(&source, cancel));
         cx.spawn(async move |this, cx| {
             let result = task.recv().await.unwrap_or_else(|_| lost());
             let _ = this.update(cx, |this, cx| {
-                this.preview_workers = this.preview_workers.saturating_sub(1);
+                this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
                 if !this.subtitle_read_is_current(&read) {
                     return;
                 }
-                this.subtitle_loading = false;
-                this.subtitle_cancel = None;
+                this.import.subtitle_loading = false;
+                this.import.subtitle_cancel = None;
                 finish(this, result, cx);
                 this.advance_conversion_when_ready(cx);
                 cx.notify();
@@ -327,7 +332,7 @@ impl Desktop {
                     // caption read must never silently keep the previous ASR choice.
                     this.update_task_options(|o| o.source_mode = TranscriptSource::Subtitle, cx);
                 }
-                if let Some(source) = &mut this.source_preview {
+                if let Some(source) = &mut this.import.source_preview {
                     source.subtitle_request = Some(requested);
                     source.subtitle_read_error = None;
                 }
@@ -341,7 +346,7 @@ impl Desktop {
             move |this, result, cx| {
                 match result {
                     Ok(subtitle) => {
-                        if let Some(source) = &mut this.source_preview {
+                        if let Some(source) = &mut this.import.source_preview {
                             source.selected_subtitle = Some(subtitle);
                             source.subtitle_request = None;
                             source.subtitle_read_error = None;
@@ -354,12 +359,12 @@ impl Desktop {
                         }
                     }
                     Err(SubtitleReadError::Cancelled) => {
-                        this.pending_conversion = None;
+                        this.import.pending_conversion = None;
                         return;
                     }
                     Err(error) => {
-                        this.subtitle_error = Some(error.to_string());
-                        if let Some(source) = &mut this.source_preview {
+                        this.import.subtitle_error = Some(error.to_string());
+                        if let Some(source) = &mut this.import.source_preview {
                             source.subtitle_read_error = Some(error);
                         }
                     }
@@ -371,10 +376,10 @@ impl Desktop {
     }
 
     fn choose_attached_subtitle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(source) = self.source_preview.clone() else {
+        let Some(source) = self.import.source_preview.clone() else {
             return;
         };
-        let source_generation = self.preview_generation;
+        let source_generation = self.import.preview_generation;
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -384,8 +389,9 @@ impl Desktop {
         cx.spawn_in(window, async move |this, cx| {
             let result = prompt.await;
             let _ = this.update_in(cx, |this, _, cx| {
-                if this.preview_generation != source_generation
+                if this.import.preview_generation != source_generation
                     || !this
+                        .import
                         .source_preview
                         .as_ref()
                         .is_some_and(|current| current.identity == source.identity)
@@ -400,12 +406,12 @@ impl Desktop {
                     }
                     Ok(Ok(None)) => {}
                     Ok(Err(error)) => {
-                        this.subtitle_error = Some(course2md::tr!(
+                        this.import.subtitle_error = Some(course2md::tr!(
                             "无法打开字幕选择器：{}",
                             format!("{error:#}")
                         ))
                     }
-                    Err(error) => this.subtitle_error = Some(error.to_string()),
+                    Err(error) => this.import.subtitle_error = Some(error.to_string()),
                 }
                 cx.notify();
             });
@@ -415,11 +421,11 @@ impl Desktop {
 
     fn attach_subtitle(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if !course2md::subtitle::is_subtitle_file(&path) {
-            self.subtitle_error = Some(course2md::tr!("请选择 SRT 或 VTT 字幕文件").into());
+            self.import.subtitle_error = Some(course2md::tr!("请选择 SRT 或 VTT 字幕文件").into());
             return;
         }
         let track = course2md::subtitle::file_track(path, None);
-        if let Some(source) = &mut self.source_preview {
+        if let Some(source) = &mut self.import.source_preview {
             match &mut source.subtitles {
                 SubtitleEvidence::Found { tracks, .. } => {
                     if !tracks.iter().any(|candidate| candidate.id == track.id) {
@@ -440,7 +446,7 @@ impl Desktop {
     fn retry_subtitles(&mut self, cx: &mut Context<Self>) {
         self.read_subtitles(
             |this, _| {
-                if let Some(source) = &mut this.source_preview {
+                if let Some(source) = &mut this.import.source_preview {
                     source.subtitle_read_error = Some(SubtitleReadError::Failed {
                         message: course2md::tr!("字幕重新读取未完成").into(),
                     });
@@ -461,9 +467,10 @@ impl Desktop {
         let mut evidence = match result {
             Ok(evidence) => evidence,
             Err(error) => {
-                self.subtitle_error = Some(format!("{error:#}"));
-                if let Some(source) = &mut self.source_preview {
+                self.import.subtitle_error = Some(format!("{error:#}"));
+                if let Some(source) = &mut self.import.source_preview {
                     source.subtitle_read_error = self
+                        .import
                         .subtitle_error
                         .clone()
                         .map(|message| SubtitleReadError::Failed { message });
@@ -474,6 +481,7 @@ impl Desktop {
         };
         if let SubtitleEvidence::Found { tracks, .. } = &mut evidence {
             let original = self
+                .import
                 .source_preview
                 .as_ref()
                 .and_then(|source| source.original_language.as_deref());
@@ -485,6 +493,7 @@ impl Desktop {
             );
         }
         let old_id = self
+            .import
             .source_preview
             .as_ref()
             .and_then(|source| source.selected_subtitle.as_ref())
@@ -495,11 +504,12 @@ impl Desktop {
         }
         .cloned();
         if old_id.is_some() && track.is_none() {
-            self.subtitle_error = Some(course2md::tr!("原字幕无法重新读取").into());
+            self.import.subtitle_error = Some(course2md::tr!("原字幕无法重新读取").into());
         }
-        if let Some(source) = &mut self.source_preview {
+        if let Some(source) = &mut self.import.source_preview {
             source.subtitles = evidence;
             source.subtitle_read_error = self
+                .import
                 .subtitle_error
                 .clone()
                 .map(|message| SubtitleReadError::Failed { message });
@@ -512,18 +522,13 @@ impl Desktop {
 
     /// Cancel any subtitle read in flight and ignore its late result.
     fn stop_subtitle_read(&mut self) -> u64 {
-        if let Some(cancel) = self.subtitle_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
-        self.subtitle_loading = false;
-        self.subtitle_generation
+        self.import.stop_subtitle_read()
     }
 
     /// Stop reading subtitles and drop the unfinished request.
     fn abort_subtitle_read(&mut self) {
         self.stop_subtitle_read();
-        if let Some(source) = &mut self.source_preview {
+        if let Some(source) = &mut self.import.source_preview {
             source.subtitle_request = None;
             source.subtitle_read_error = None;
         }
@@ -532,7 +537,7 @@ impl Desktop {
     /// The person settled the text source: drop what was in flight and go on.
     fn settle_text_source(&mut self, mode: TranscriptSource, cx: &mut Context<Self>) {
         self.abort_subtitle_read();
-        self.subtitle_error = None;
+        self.import.subtitle_error = None;
         self.update_task_options(|o| o.source_mode = mode, cx);
         self.advance_conversion_when_ready(cx);
         cx.notify();
@@ -544,6 +549,7 @@ impl Desktop {
 
     fn use_confirmed_subtitle(&mut self, cx: &mut Context<Self>) {
         if self
+            .import
             .source_preview
             .as_ref()
             .is_some_and(|source| source.selected_subtitle.is_some())
@@ -576,8 +582,9 @@ impl Desktop {
             [] => {}
             _ => {
                 self.invalidate_source();
-                self.source_collection_title = Some(course2md::tr!("选择要处理的视频").into());
-                self.source_candidates = files
+                self.import.source_collection_title =
+                    Some(course2md::tr!("选择要处理的视频").into());
+                self.import.source_candidates = files
                     .iter()
                     .map(|path| source::SourceCandidate {
                         input: path.display().to_string(),
@@ -597,9 +604,9 @@ impl Desktop {
     }
 
     pub(super) fn subtitle_attention_required(&self) -> bool {
-        self.subtitle_loading
-            || self.subtitle_error.is_some()
-            || self.source_preview.as_ref().is_some_and(|source| {
+        self.import.subtitle_loading
+            || self.import.subtitle_error.is_some()
+            || self.import.source_preview.as_ref().is_some_and(|source| {
                 subtitle_needs_confirmation(source, self.task_options().source_mode)
             })
     }
@@ -654,15 +661,16 @@ impl Desktop {
                 .children(local);
         }
         let validation = self
+            .import
             .source_preview
             .is_none()
-            .then(|| self.source_validation.clone())
+            .then(|| self.import.source_validation.clone())
             .flatten();
-        let failed = validation.is_some() || self.preview_error.is_some();
+        let failed = validation.is_some() || self.import.preview_error.is_some();
         // The start action owns the submit focus once it is on screen.
-        let start_shown = self.source_preview.is_some() && self.can_start_input(cx);
+        let start_shown = self.import.source_preview.is_some() && self.can_start_input(cx);
         let preview_label = course2md::tr!("预览视频");
-        let preview_disabled = self.preview_cancel.is_some()
+        let preview_disabled = self.import.preview_cancel.is_some()
             || self.value(Field::Source, cx).is_empty()
             || self.owning_task(cx).is_some();
         let preview_click = cx.listener(|this, _, window, cx| this.inspect_source(window, cx));
@@ -772,7 +780,7 @@ impl Desktop {
                     )),
             );
         }
-        if self.source_preview.is_some() {
+        if self.import.source_preview.is_some() {
             return None;
         }
         let filename = PathBuf::from(&input)
@@ -813,14 +821,14 @@ impl Desktop {
                                     .icon(symbols::visibility())
                                     .child(course2md::tr!("预览视频"))
                                     .track_focus(&self.import_submit_focus)
-                                    .disabled(self.preview_cancel.is_some())
+                                    .disabled(self.import.preview_cancel.is_some())
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.inspect_source(window, cx)
                                     })),
                             )
                         }),
                 )
-                .when_some(self.source_validation.clone(), |view, error| {
+                .when_some(self.import.source_validation.clone(), |view, error| {
                     view.child(error_text("import-preview-error", error).whitespace_normal())
                 }),
         )
@@ -912,9 +920,12 @@ impl Desktop {
     /// Candidates that can be checked for a batch: identified, without a note yet.
     fn selectable_candidates(&self) -> impl Iterator<Item = &source::SourceCandidate> {
         let batch = self.online();
-        self.source_candidates.iter().filter(move |candidate| {
-            batch && candidate.identity.is_some() && !self.candidate_has_note(candidate)
-        })
+        self.import
+            .source_candidates
+            .iter()
+            .filter(move |candidate| {
+                batch && candidate.identity.is_some() && !self.candidate_has_note(candidate)
+            })
     }
 
     /// The candidate list. Online lists queue several at once, but only candidates
@@ -925,24 +936,27 @@ impl Desktop {
         let selectable = self.selectable_candidates().count();
         let selectable_selected = self
             .selectable_candidates()
-            .filter(|candidate| self.selected_candidates.contains(&candidate.input))
+            .filter(|candidate| self.import.selected_candidates.contains(&candidate.input))
             .count();
         // A checked candidate that already has a note gets a new version; say so beside the action.
         let noted_selected = self
+            .import
             .source_candidates
             .iter()
             .filter(|candidate| {
                 self.candidate_has_note(candidate)
-                    && self.selected_candidates.contains(&candidate.input)
+                    && self.import.selected_candidates.contains(&candidate.input)
             })
             .count();
         let any_batchable = self
+            .import
             .source_candidates
             .iter()
             .any(|candidate| candidate.identity.is_some());
-        let selected_count = self.selected_candidates.len();
+        let selected_count = self.import.selected_candidates.len();
         let all_selected = selectable > 0 && selectable_selected == selectable;
         let rows = self
+            .import
             .source_candidates
             .iter()
             .enumerate()
@@ -982,13 +996,13 @@ impl Desktop {
                                 })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if all_selected {
-                                        this.selected_candidates.clear();
+                                        this.import.selected_candidates.clear();
                                     } else {
                                         let inputs: Vec<String> = this
                                             .selectable_candidates()
                                             .map(|candidate| candidate.input.clone())
                                             .collect();
-                                        this.selected_candidates.extend(inputs);
+                                        this.import.selected_candidates.extend(inputs);
                                     }
                                     cx.notify();
                                 })),
@@ -1045,7 +1059,11 @@ impl Desktop {
             .duration
             .filter(|value| *value > 0. && value.is_finite() && !untitled)
             .map(course2md::render::fmt_ts);
-        let cover = self.source_candidate_covers.get(&candidate.input).cloned();
+        let cover = self
+            .import
+            .source_candidate_covers
+            .get(&candidate.input)
+            .cloned();
         let thumbnail = match cover {
             Some(cover) => img(cover)
                 .size_full()
@@ -1061,14 +1079,14 @@ impl Desktop {
             .leading(ListLeading::Video(Some(thumbnail)))
             .supporting(duration.unwrap_or_else(|| candidate.input.clone()));
         if batch && candidate.identity.is_some() {
-            let selected = self.selected_candidates.contains(&input);
+            let selected = self.import.selected_candidates.contains(&input);
             row.when(self.candidate_has_note(candidate), |row| {
                 row.trailing_text(course2md::tr!("已有笔记"))
             })
             .trailing(ListTrailing::Checkbox(selected))
             .on_click(cx.listener(move |this, _, _, cx| {
-                if !this.selected_candidates.remove(&input) {
-                    this.selected_candidates.insert(input.clone());
+                if !this.import.selected_candidates.remove(&input) {
+                    this.import.selected_candidates.insert(input.clone());
                 }
                 cx.notify();
             }))
@@ -1082,8 +1100,8 @@ impl Desktop {
 
     /// A source failure beside the field, with retry, login and details still reachable.
     fn source_preview_error(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let error = self.preview_error.as_ref()?;
-        if !self.source_candidates.is_empty() {
+        let error = self.import.preview_error.as_ref()?;
+        if !self.import.source_candidates.is_empty() {
             return Some(supporting("import-source-error", error.clone()).into_any_element());
         }
         let needs_login = source::legacy_login_failure_from_text(error);
@@ -1093,7 +1111,7 @@ impl Desktop {
             readable_first_line(error)
                 .unwrap_or(course2md::tr!("暂时无法读取这个视频，请检查链接或稍后重试"))
         };
-        let open = self.show_preview_details;
+        let open = self.import.show_preview_details;
         Some(motion::state_enter(
             "source-error",
             v_flex()
@@ -1144,7 +1162,8 @@ impl Desktop {
                             )
                             .child(details_toggle("source-error-details", open).on_click(
                                 cx.listener(|this, _, _, cx| {
-                                    this.show_preview_details = !this.show_preview_details;
+                                    this.import.show_preview_details =
+                                        !this.import.show_preview_details;
                                     cx.notify();
                                 }),
                             )),
@@ -1168,10 +1187,10 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let source = self.source_preview.clone()?;
+        let source = self.import.source_preview.clone()?;
         let duration = (source.duration.is_finite() && source.duration > 0.)
             .then(|| course2md::render::fmt_ts(source.duration));
-        let details_open = self.show_preview_details;
+        let details_open = self.import.show_preview_details;
         let metadata = source_metadata(&source);
         let cover = video_cover(source.cover.clone(), cover_width(window))
             .self_start()
@@ -1245,8 +1264,8 @@ impl Desktop {
                                 .child(course2md::tr!("开始转换"))
                                 .track_focus(&self.import_submit_focus)
                                 .disabled(
-                                    self.pending_conversion.is_some()
-                                        || self.preview_cancel.is_some(),
+                                    self.import.pending_conversion.is_some()
+                                        || self.import.preview_cancel.is_some(),
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.start_conversion(window, cx)
@@ -1293,8 +1312,8 @@ impl Desktop {
                                         |button| {
                                             button.button_size(ButtonSize::ExtraSmall).on_click(
                                                 cx.listener(|this, _, _, cx| {
-                                                    this.show_preview_details =
-                                                        !this.show_preview_details;
+                                                    this.import.show_preview_details =
+                                                        !this.import.show_preview_details;
                                                     cx.notify();
                                                 }),
                                             )
@@ -1355,14 +1374,14 @@ impl Desktop {
     ) -> Div {
         let speech = self.import_uses_speech();
         let mode = self.task_options().source_mode;
-        let failure = self.subtitle_error.as_deref().or_else(|| {
+        let failure = self.import.subtitle_error.as_deref().or_else(|| {
             match (&source.subtitles, subtitle_needs_confirmation(source, mode)) {
                 (SubtitleEvidence::Failed { message }, true) => Some(message.as_str()),
                 _ => None,
             }
         });
         let pending = source.subtitle_request.is_some() || source.subtitle_read_error.is_some();
-        let value: SharedString = if self.subtitle_loading {
+        let value: SharedString = if self.import.subtitle_loading {
             course2md::tr!("正在读取字幕…").into()
         } else if !speech && pending {
             course2md::tr!("字幕还没读取完成").into()
@@ -1395,6 +1414,7 @@ impl Desktop {
         let login = source.online
             && course2md::auth::is_bilibili_url(&source.input)
             && self
+                .import
                 .subtitle_error
                 .as_deref()
                 .or(match &source.subtitles {
@@ -1403,7 +1423,7 @@ impl Desktop {
                 })
                 .is_some_and(source::legacy_login_failure_from_text);
         let notice = match &source.subtitles {
-            _ if !speech || self.subtitle_loading => None,
+            _ if !speech || self.import.subtitle_loading => None,
             SubtitleEvidence::NoneFound => Some(course2md::tr!("未找到字幕").to_owned()),
             SubtitleEvidence::Unsupported { message } => Some(message.clone()),
             _ => None,
@@ -1412,7 +1432,7 @@ impl Desktop {
             SubtitleEvidence::Found {
                 warning: Some(message),
                 ..
-            } if self.subtitle_error.is_none() => {
+            } if self.import.subtitle_error.is_none() => {
                 Some(course2md::tr!("部分字幕无法读取：{}", message))
             }
             _ => None,
@@ -1425,7 +1445,7 @@ impl Desktop {
             .when_some(notice, |view, notice| {
                 view.child(supporting_info("import-subtitle-message", notice))
             })
-            .when(self.subtitle_loading, |view| {
+            .when(self.import.subtitle_loading, |view| {
                 view.children(ui::async_status(
                     "subtitle-reading",
                     &ui::AsyncStatus::Busy(course2md::tr!("正在读取字幕…").into()),
@@ -1438,7 +1458,7 @@ impl Desktop {
                         .self_start()
                         .child(course2md::tr!("取消读取字幕"))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.pending_conversion = None;
+                            this.import.pending_conversion = None;
                             this.abort_subtitle_read();
                             this.save_current_draft(cx);
                             cx.notify();
@@ -1511,7 +1531,7 @@ impl Desktop {
         items.push(
             MaterialMenuItem::new(course2md::tr!("重新读取字幕"))
                 .leading(Icon::from(symbols::refresh()))
-                .disabled(self.subtitle_loading)
+                .disabled(self.import.subtitle_loading)
                 .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx))),
         );
         if !source.online {
@@ -1543,12 +1563,12 @@ impl Desktop {
             readable_first_line(message)
                 .unwrap_or(course2md::tr!("无法读取字幕，可重试或改用语音识别"))
         };
-        let open = self.expanded_subtitle_issue.is_some();
+        let open = self.import.subtitle_issue_open;
         let details = (summary != message).then(|| message.to_owned());
         let retry = material_button("retry-subtitles", ButtonVariant::Text)
             .icon(symbols::refresh())
             .child(course2md::tr!("重新读取字幕"))
-            .disabled(self.subtitle_loading)
+            .disabled(self.import.subtitle_loading)
             .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx)))
             .into_any_element();
         let status = if failed {
@@ -1604,8 +1624,7 @@ impl Desktop {
                     .when(details.is_some(), |row| {
                         row.child(details_toggle("subtitle-issue-details", open).on_click(
                             cx.listener(move |this, _, _, cx| {
-                                this.expanded_subtitle_issue =
-                                    (!open).then(|| "subtitle-issue".into());
+                                this.import.subtitle_issue_open = !open;
                                 cx.notify();
                             }),
                         ))
@@ -1661,8 +1680,8 @@ impl Desktop {
         // a previewed video whose subtitles will be used does not.
         let speech_relevant = mode == TranscriptSource::Asr
             || (mode == TranscriptSource::Auto
-                && self.source_preview.as_ref().is_none_or(|source| {
-                    self.subtitle_loading || subtitle_needs_confirmation(source, mode)
+                && self.import.source_preview.as_ref().is_none_or(|source| {
+                    self.import.subtitle_loading || subtitle_needs_confirmation(source, mode)
                 }));
         let mut fields = vec![ui::Field::content(
             "conversion-text-mode-field",
@@ -1882,7 +1901,8 @@ impl Desktop {
     }
 
     fn import_uses_speech(&self) -> bool {
-        self.source_preview
+        self.import
+            .source_preview
             .as_ref()
             .is_some_and(|source| uses_speech(source, self.task_options().source_mode))
     }
@@ -1985,21 +2005,22 @@ impl Desktop {
             )
             .disabled(libraries.len() < 2),
         ];
-        if self.source_preview.is_some() {
+        if self.import.source_preview.is_some() {
             fields.push(ui::Field::below(
                 "import-title",
                 course2md::tr!("笔记名称"),
                 RevealFocus::new(
-                    ("import-title-focus", self.validation_attempt),
+                    ("import-title-focus", self.import.validation_attempt),
                     TextField::new("import-title-field", &self.inputs[&Field::Title])
                         .w_full()
                         .outlined()
                         .shape(TextFieldShape::Rounded)
-                        .error(self.title_required)
+                        .error(self.import.title_required)
                         .when_some(
-                            self.source_validation
+                            self.import
+                                .source_validation
                                 .clone()
-                                .filter(|_| self.title_required),
+                                .filter(|_| self.import.title_required),
                             |field, message| field.supporting_text(message),
                         ),
                     self.scrolls[Page::New as usize].clone(),
@@ -2087,8 +2108,8 @@ impl Desktop {
 
     /// The preview card is on screen (not replaced by reading or a task).
     fn preview_card_shown(&self, cx: &App) -> bool {
-        self.preview_cancel.is_none()
-            && self.source_preview.is_some()
+        self.import.preview_cancel.is_none()
+            && self.import.source_preview.is_some()
             && self.workbench_linked_task(cx).is_none()
     }
 
@@ -2137,7 +2158,7 @@ impl Desktop {
     ) -> Div {
         let open = self.desktop_settings.home_options;
         let owner = self.owning_task(cx).cloned();
-        let applies_to: SharedString = match (&owner, &self.source_preview) {
+        let applies_to: SharedString = match (&owner, &self.import.source_preview) {
             (Some(_), _) => course2md::tr!("提交时已确定，不能再更改").into(),
             (None, Some(source)) if attached => {
                 course2md::tr!("仅对「{}」生效", source.title).into()
@@ -2230,7 +2251,7 @@ impl Desktop {
     }
 
     fn existing_source_note(&self) -> Option<&Course> {
-        let source = self.source_preview.as_ref()?;
+        let source = self.import.source_preview.as_ref()?;
         let preferred = self
             .workspace
             .as_ref()
@@ -2248,9 +2269,9 @@ impl Desktop {
     fn can_start_input(&self, cx: &App) -> bool {
         // While candidates show, batch and single actions live in the list's own action area; the input row's
         // 「开始转换」 would always fail for a collection link, so two primary actions never share the screen.
-        self.source_collection_title.is_none()
+        self.import.source_collection_title.is_none()
             && (self.online() || !self.value(Field::Source, cx).is_empty())
-            && self.preview_error.is_none()
+            && self.import.preview_error.is_none()
             && self.existing_source_note().is_none()
             && self.current_input_task(cx).is_none_or(|task| {
                 matches!(
@@ -2258,9 +2279,12 @@ impl Desktop {
                     workspace::TaskState::Complete | workspace::TaskState::Cancelled
                 ) && !(self.reading
                     && self
+                        .import
                         .following_conversion
                         .as_ref()
-                        .is_some_and(|follow| follow.follows(&task.id, self.preview_generation)))
+                        .is_some_and(|follow| {
+                            follow.follows(&task.id, self.import.preview_generation)
+                        }))
             })
     }
 
@@ -2271,7 +2295,7 @@ impl Desktop {
 
     /// The source card and hero share one definition of the submitted task.
     fn workbench_linked_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
-        let opening_result = self.reading && self.following_conversion.is_some();
+        let opening_result = self.reading && self.import.following_conversion.is_some();
         self.current_input_task(cx).filter(|task| {
             (opening_result
                 && matches!(
@@ -2310,7 +2334,7 @@ impl Desktop {
     ) -> bool {
         #[cfg(feature = "capture")]
         self.capture_source(window, cx);
-        if self.pending_conversion.is_some() || self.following_conversion.is_some() {
+        if self.import.pending_conversion.is_some() || self.import.following_conversion.is_some() {
             return true;
         }
         let input = self.value(Field::Source, cx);
@@ -2354,10 +2378,10 @@ impl Desktop {
             cx.notify();
             return false;
         }
-        self.completed_source = None;
+        self.import.completed_source = None;
         self.invalidate_source();
         self.restore_draft(window, cx);
-        self.source_editor_open = true;
+        self.import.source_editor_open = true;
         true
     }
 
@@ -2372,7 +2396,7 @@ impl Desktop {
             self.scrolls[Page::New as usize].set_offset(point(px(0.), px(-offset)));
         }
         let compact = is_compact(window);
-        let opening_result = self.reading && self.following_conversion.is_some();
+        let opening_result = self.reading && self.import.following_conversion.is_some();
         let linked_task = self.workbench_linked_task(cx).cloned();
         let cancelled = self
             .current_input_task(cx)
@@ -2389,6 +2413,7 @@ impl Desktop {
             None => None,
         };
         let reading = self
+            .import
             .preview_cancel
             .is_some()
             .then(|| self.source_reading(window, cx));
@@ -2398,6 +2423,7 @@ impl Desktop {
             self.workbench_options(attached, window, cx),
         );
         let candidates = self
+            .import
             .source_collection_title
             .clone()
             .map(|title| self.candidate_list(&title, cx));
@@ -2529,14 +2555,14 @@ impl Desktop {
                 .preferences
                 .revision(crate::preferences::PreferenceGroup::Generation),
             defaults_pending: self.preference_defaults_pending,
-            source: self.preview_generation,
-            reading: self.preview_cancel.is_some() || self.subtitle_loading,
-            subtitle_failed: self.subtitle_error.is_some(),
+            source: self.import.preview_generation,
+            reading: self.import.reading(),
+            subtitle_failed: self.import.subtitle_error.is_some(),
             environment_ready: self.environment.is_some(),
             library: self.library.generation,
             library_loading: self.library.loading,
         };
-        if let Some((cached, plan)) = &self.preview_plan_cache
+        if let Some((cached, plan)) = &self.import.preview_plan_cache
             && *cached == key
         {
             return plan.clone();
@@ -2547,7 +2573,7 @@ impl Desktop {
                 .is_some();
             (format!("{error:#}"), pending)
         });
-        self.preview_plan_cache = Some((key, plan.clone()));
+        self.import.preview_plan_cache = Some((key, plan.clone()));
         plan
     }
 
@@ -2563,7 +2589,7 @@ impl Desktop {
                     )
                 })
             });
-        let reading = self.preview_cancel.is_some() || self.subtitle_loading;
+        let reading = self.import.reading();
         let preview_plan = self.cached_preview_plan();
         let plan_pending = matches!(&preview_plan, Err((_, true)));
         let matching_task = preview_plan
@@ -2580,7 +2606,7 @@ impl Desktop {
             .as_ref()
             .map(|issue| issue.message.clone())
             .or_else(|| {
-                let settled = self.source_preview.is_some()
+                let settled = self.import.source_preview.is_some()
                     && !reading
                     && !self.subtitle_attention_required();
                 preview_plan
@@ -2742,8 +2768,8 @@ impl Desktop {
                 .track_focus(&self.import_submit_focus)
                 .disabled(reading || checking || self.workspace.is_none() || preferences_blocked)
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.following_conversion =
-                        Some(ConversionFollow::Preparing(this.preview_generation));
+                    this.import.following_conversion =
+                        Some(ConversionFollow::Preparing(this.import.preview_generation));
                     this.enqueue_current(window, cx);
                 })),
             );
@@ -2763,8 +2789,8 @@ impl Desktop {
                 })),
             );
         }
-        if self.pending_conversion.is_some() && !reading {
-            if self.source_validation.is_some()
+        if self.import.pending_conversion.is_some() && !reading {
+            if self.import.source_validation.is_some()
                 && self.missing_import_service().is_none()
                 && self.existing_source_note().is_none()
                 && !has_match
@@ -2787,8 +2813,8 @@ impl Desktop {
                     course2md::tr!("取消转换"),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.pending_conversion = None;
-                    this.following_conversion = None;
+                    this.import.pending_conversion = None;
+                    this.import.following_conversion = None;
                     cx.notify();
                 })),
             );

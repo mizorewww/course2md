@@ -174,19 +174,7 @@ impl Desktop {
     }
 
     pub fn recommended_local_provider(&self) -> course2md::config::AsrProvider {
-        use course2md::config::AsrProvider;
-        match &self.environment {
-            Some(environment) if environment.supports(AsrProvider::Coreml) => AsrProvider::Coreml,
-            Some(environment) if environment.supports(AsrProvider::Gpu) => AsrProvider::Gpu,
-            Some(environment) if environment.supports(AsrProvider::Npu) && !environment.llama => {
-                AsrProvider::Npu
-            }
-            Some(_) => AsrProvider::Cpu,
-            // Detection runs in the background. A temporary display hint must
-            // not scan Linux devices or PATH while the interface is rendering.
-            None if course2md::config::apple_native_available() => AsrProvider::Coreml,
-            None => AsrProvider::Cpu,
-        }
+        recommended_local_provider(self.environment.as_ref())
     }
 
     /// Whether this task holds the running background job (its record may lag the event stream).
@@ -216,7 +204,7 @@ impl Desktop {
             return false;
         }
         let title = self.value(Field::Title, cx);
-        let source = self.source_preview.clone();
+        let source = self.import.source_preview.clone();
         let scroll = f32::from(self.scrolls[Page::New as usize].offset().y);
         self.draft_deadline = None;
         self.update_draft(
@@ -237,15 +225,15 @@ impl Desktop {
         else {
             return;
         };
-        self.source_preview = draft.source.clone();
-        self.preview_error = None;
-        self.source_validation = None;
-        self.title_required = false;
-        self.source_candidates.clear();
-        self.source_collection_title = None;
-        self.source_collection_name = None;
-        self.selected_candidates.clear();
-        self.subtitle_error = draft.source.as_ref().and_then(|source| {
+        self.import.source_preview = draft.source.clone();
+        self.import.preview_error = None;
+        self.import.source_validation = None;
+        self.import.title_required = false;
+        self.import.source_candidates.clear();
+        self.import.source_collection_title = None;
+        self.import.source_collection_name = None;
+        self.import.selected_candidates.clear();
+        self.import.subtitle_error = draft.source.as_ref().and_then(|source| {
             source
                 .subtitle_read_error
                 .as_ref()
@@ -257,7 +245,7 @@ impl Desktop {
                     })
                 })
         });
-        self.subtitle_loading = false;
+        self.import.subtitle_loading = false;
         self.inputs[&Field::Source].update(cx, |s, cx| s.set_value(draft.input, window, cx));
         self.inputs[&Field::Title].update(cx, |s, cx| s.set_value(draft.title, window, cx));
         self.scrolls[Page::New as usize].set_offset(point(px(0.), px(draft.scroll)));
@@ -283,281 +271,58 @@ impl Desktop {
             Ok(())
         });
         if switched.is_some() {
-            self.following_conversion = None;
+            self.import.following_conversion = None;
             self.invalidate_source();
-            self.completed_source = None;
+            self.import.completed_source = None;
             self.message = None;
             self.restore_draft(window, cx);
         }
     }
 
-    /// The plan builders' shared preamble: the workspace and draft they both require.
-    fn plan_draft(&self) -> Result<(&workspace::Workspace, &workspace::Draft)> {
-        let workspace = self
-            .workspace
-            .as_ref()
-            .context(course2md::tr!("输入与任务记录尚未恢复"))?;
-        let draft = workspace
-            .state
-            .draft()
-            .context(course2md::tr!("当前输入尚未准备好"))?;
-        Ok((workspace, draft))
-    }
-
-    /// The plan builders' shared tool check: the engine and FFmpeg always; an `online` source also needs
-    /// yt-dlp (batch plans are always online; a single plan follows its confirmed source).
-    /// A check still in progress is [`PlanPending`], not a failure.
-    fn ensure_plan_environment(&self, online: bool) -> Result<&crate::backend::Environment> {
-        let environment = plan_environment(self.environment.as_ref())?;
-        ensure!(environment.engine, course2md::tr!("生成引擎无法启动"));
-        ensure!(
-            environment.ffmpeg && environment.ffprobe,
-            course2md::tr!("缺少视频处理组件，请在设置中查看")
-        );
-        ensure!(
-            !online || environment.ytdlp,
-            course2md::tr!("缺少在线视频下载组件，请在设置中查看")
-        );
-        Ok(environment)
-    }
-
-    /// The destination is still a registered, writable library; both plan builders share these checks and messages.
-    fn ensure_plan_storage(
-        &self,
-        workspace: &workspace::Workspace,
-        draft: &workspace::Draft,
-        validation: PlanValidation,
-    ) -> Result<()> {
-        let library = workspace
-            .state
-            .library(&draft.library_id)
-            .context(course2md::tr!("保存位置已不在笔记库中，请选择保存位置"))?;
-        validate_plan_storage(
-            validation,
-            library,
-            draft.folder,
-            self.cached_location_check(library),
-            self.library.indexes.get(&library.root),
-        )?;
-        Ok(())
-    }
-
-    /// Draft options override the base config and normalize the model directory; both plan builders build it this way.
-    fn plan_config(&self, draft: &workspace::Draft) -> course2md::settings::ConfigFile {
-        let mut config = draft
-            .base_config
-            .clone()
-            .unwrap_or_else(|| self.preferences.defaults_config());
-        draft.options.apply_to(&mut config);
-        config.defaults.model_dir = Some(course2md::config::model_dir_from(
-            config.defaults.model_dir.as_deref(),
-        ));
-        config
-    }
-
-    /// The draft's service references, falling back to the default services.
-    fn plan_refs(&self, draft: &workspace::Draft) -> ServiceRefs {
-        let defaults = self.preferences.default_refs();
-        ServiceRefs {
-            asr: draft.asr_service.clone().or(defaults.asr),
-            llm: draft.ai_service.clone().or(defaults.llm),
+    /// What a plan is built from, as of now.
+    fn plan_inputs(&self) -> PlanInputs<'_> {
+        PlanInputs {
+            preferences: &self.preferences,
+            workspace: self.workspace.as_ref(),
+            environment: self.environment.as_ref(),
+            import: &self.import,
+            library: &self.library,
+            locations: &self.storage_ui.location_checks,
+            defaults_pending: self.preference_defaults_pending,
+            preferences_issue: self
+                .ordinary_preferences_submit_issue()
+                .map(|issue| issue.message),
         }
     }
 
     fn build_plan(&self, validation: PlanValidation) -> Result<TaskPlan> {
-        self.ordinary_preferences_ready_for_submit()?;
-        ensure!(
-            !self.preference_defaults_pending,
-            course2md::tr!("默认设置已保存，当前视频的选项尚未同步。请重试。")
-        );
-        let (workspace, draft) = self.plan_draft()?;
-        ensure!(
-            !draft.input.is_empty(),
-            if draft.online {
-                course2md::tr!("先粘贴视频链接")
-            } else {
-                course2md::tr!("先选择一个视频")
-            }
-        );
-        ensure!(
-            !self.subtitle_loading && self.preview_cancel.is_none(),
-            course2md::tr!("正在确认来源，请等待读取完成")
-        );
-        ensure!(
-            self.source_preview.is_some(),
-            course2md::tr!("还没读取到视频信息，请重新预览")
-        );
-        ensure!(
-            self.subtitle_error.is_none(),
-            course2md::tr!("字幕还没读取完成，请重新读取，或改用语音识别")
-        );
-        let source = draft
-            .source
-            .clone()
-            .context(course2md::tr!("请先读取并确认视频"))?;
-        let environment = self.ensure_plan_environment(source.online)?;
-        ensure!(
-            draft.options.source_mode == TranscriptSource::Asr
-                || (source.subtitle_request.is_none() && source.subtitle_read_error.is_none()),
-            course2md::tr!("所选字幕还未确认，请继续读取或明确选择其他文字来源。")
-        );
-        ensure!(
-            !source.identity.is_empty(),
-            course2md::tr!("无法识别这个视频，请重新预览")
-        );
-        if draft.title.trim().is_empty() {
-            return Err(TitleRequired.into());
-        }
-        self.ensure_plan_storage(workspace, draft, validation)?;
-        let mut config = self.plan_config(draft);
-        let using_subtitle = draft.options.source_mode != TranscriptSource::Asr
-            && (source.selected_subtitle.is_some() || draft.subtitle.is_some());
-        if using_subtitle {
-            if let Some(subtitle) = &source.selected_subtitle {
-                ensure!(
-                    subtitle.source_identity == source.identity,
-                    course2md::tr!("所选字幕与当前视频不匹配，请重新读取字幕")
-                );
-            }
-            config.defaults.transcript_source = Some(course2md::config::TranscriptSource::Subtitle);
-        } else {
-            use course2md::subtitle::SubtitleEvidence;
-            ensure!(
-                draft.options.source_mode == TranscriptSource::Asr
-                    || (draft.options.source_mode == TranscriptSource::Auto
-                        && matches!(
-                            source.subtitles,
-                            SubtitleEvidence::NoneFound
-                                | SubtitleEvidence::Unsupported { .. }
-                                | SubtitleEvidence::Failed { .. }
-                        )),
-                course2md::tr!("字幕还未确认。请读取字幕，或明确选择语音识别。")
-            );
-            config.defaults.transcript_source = Some(course2md::config::TranscriptSource::Asr);
-            let provider = config
-                .defaults
-                .provider
-                .unwrap_or_else(|| self.recommended_local_provider());
-            ensure_asr_capability(environment, provider)?;
-            config.defaults.provider = Some(provider);
-            fill_default_asr_model(&mut config, provider);
-        }
-        let refs = self.plan_refs(draft);
-        let config = match validation {
-            PlanValidation::Preview => self.preferences.config_for_preview(&config, &refs)?,
-            PlanValidation::Submission => self.preferences.config_for_refs(&config, &refs)?,
-        };
-        let mut validation_config = config.clone();
-        validation_config
-            .defaults
-            .provider
-            .get_or_insert_with(|| self.recommended_local_provider());
-        validate_plan_config(&source.input, &validation_config)?;
-        if validation == PlanValidation::Submission && !source.online {
-            ensure!(
-                std::path::Path::new(&source.input).is_file(),
-                course2md::tr!("原视频已移动或无法读取，请重新选择视频")
-            );
-        }
-        Ok(TaskPlan {
-            operation: Default::default(),
-            source_id: source.identity.clone(),
-            source,
-            title: draft.title.clone(),
-            library_id: draft.library_id.clone(),
-            folder: draft.folder,
-            subtitle: draft.subtitle.clone(),
-            config,
-            asr_service: refs.asr,
-            ai_service: refs.llm,
-        })
+        self.plan_inputs().build_plan(validation)
     }
 
-    /// The batch plan for selected candidates. Tools, destination and config resolve as in build_plan;
-    /// subtitles are found when each task runs (the pipeline probes by transcript_source), so the desktop
-    /// need not read every video first. Titles are the episode titles shown in the candidate rows.
     fn build_batch_plan(
         &self,
         candidate: &source::SourceCandidate,
         title: String,
     ) -> Result<TaskPlan> {
-        self.ordinary_preferences_ready_for_submit()?;
-        ensure!(
-            !self.preference_defaults_pending,
-            course2md::tr!("默认设置已保存，当前选项尚未同步。请重试。")
-        );
-        let (workspace, draft) = self.plan_draft()?;
-        let identity = course2md::fetch::candidate_identity(candidate)
-            .context(course2md::tr!("还无法确认这个视频的身份，请单独打开后转换"))?;
-        let environment = self.ensure_plan_environment(true)?;
-        self.ensure_plan_storage(workspace, draft, PlanValidation::Submission)?;
-        let mut config = self.plan_config(draft);
-        // Subtitles-only never reaches speech recognition; other modes may fall back to ASR at run time,
-        // so, as in build_plan, check local recognition and fill in the default model first.
-        if draft.options.source_mode != TranscriptSource::Subtitle {
-            let provider = config
-                .defaults
-                .provider
-                .unwrap_or_else(|| self.recommended_local_provider());
-            let capability = ensure_asr_capability(environment, provider);
-            if draft.options.source_mode == TranscriptSource::Auto {
-                capability.context(course2md::tr!(
-                    "部分视频可能没有字幕，需要语音识别能力作为后备"
-                ))?;
-            } else {
-                capability?;
-            }
-            config.defaults.provider = Some(provider);
-            fill_default_asr_model(&mut config, provider);
-        }
-        let refs = self.plan_refs(draft);
-        let config = self.preferences.config_for_refs(&config, &refs)?;
-        let mut validation_config = config.clone();
-        validation_config
-            .defaults
-            .provider
-            .get_or_insert_with(|| self.recommended_local_provider());
-        validate_plan_config(&candidate.input, &validation_config)?;
-        Ok(TaskPlan {
-            operation: Default::default(),
-            source_id: identity.clone(),
-            source: source::Source {
-                input: candidate.input.clone(),
-                title: title.clone(),
-                duration: candidate
-                    .duration
-                    .filter(|value| value.is_finite() && *value > 0.)
-                    .unwrap_or_default(),
-                cover: self.source_candidate_covers.get(&candidate.input).cloned(),
-                identity,
-                online: true,
-                ..source::Source::default()
-            },
-            title,
-            library_id: draft.library_id.clone(),
-            folder: draft.folder,
-            subtitle: None,
-            config,
-            asr_service: refs.asr,
-            ai_service: refs.llm,
-        })
+        self.plan_inputs().build_batch_plan(candidate, title)
     }
 
     /// Queue the selected candidates at once, reusing per-candidate deduplication (an identical task in
     /// progress is not created again), in one transaction; then select the first task and start the queue.
     pub fn enqueue_selected_candidates(&mut self, cx: &mut Context<Self>) {
         let selected: Vec<(usize, source::SourceCandidate)> = self
+            .import
             .source_candidates
             .iter()
             .enumerate()
-            .filter(|(_, candidate)| self.selected_candidates.contains(&candidate.input))
+            .filter(|(_, candidate)| self.import.selected_candidates.contains(&candidate.input))
             .map(|(index, candidate)| (index, candidate.clone()))
             .collect();
         if selected.is_empty() {
             return;
         }
         self.message = None;
-        let collection = self.source_collection_name.clone();
+        let collection = self.import.source_collection_name.clone();
         let mut plans = Vec::new();
         let mut skipped = 0usize;
         for (index, candidate) in selected {
@@ -601,7 +366,7 @@ impl Desktop {
             Ok((first_id, duplicates))
         });
         if let Some((first_id, duplicates)) = queued {
-            self.selected_candidates.clear();
+            self.import.selected_candidates.clear();
             let created = total - duplicates;
             let mut parts = Vec::new();
             if created > 0 {
@@ -647,16 +412,16 @@ impl Desktop {
         let plan = match self.build_plan(PlanValidation::Submission) {
             Ok(plan) => plan,
             Err(error) => {
-                self.title_required = error.downcast_ref::<TitleRequired>().is_some();
-                self.source_validation = Some(format!("{error:#}"));
-                self.validation_attempt = self.validation_attempt.wrapping_add(1);
+                self.import.title_required = error.downcast_ref::<TitleRequired>().is_some();
+                self.import.source_validation = Some(format!("{error:#}"));
+                self.import.validation_attempt = self.import.validation_attempt.wrapping_add(1);
                 let subtitle_attention = self.subtitle_attention_required();
-                let field = if self.source_preview.is_some()
+                let field = if self.import.source_preview.is_some()
                     && !subtitle_attention
                     && self.value(Field::Title, cx).trim().is_empty()
                 {
                     Some(Field::Title)
-                } else if self.source_preview.is_none() && self.online() {
+                } else if self.import.source_preview.is_none() && self.online() {
                     Some(Field::Source)
                 } else {
                     None
@@ -666,8 +431,8 @@ impl Desktop {
                         // The name field is in the processing options; show
                         // them for this fix without changing the saved choice.
                         self.desktop_settings.home_options = true;
-                        self.pending_conversion = None;
-                        self.following_conversion = None;
+                        self.import.pending_conversion = None;
+                        self.import.following_conversion = None;
                     }
                     let input = self.inputs[&field].clone();
                     window.on_next_frame(move |window, cx| {
@@ -701,17 +466,20 @@ impl Desktop {
                 Ok((id, created))
             })
         {
-            self.pending_conversion = None;
-            self.source_validation = None;
-            self.title_required = false;
+            self.import.pending_conversion = None;
+            self.import.source_validation = None;
+            self.import.title_required = false;
             self.message = (!created).then(|| course2md::tr!("已有相同任务，未重复加入").into());
             if created {
-                self.following_conversion = self
+                self.import.following_conversion = self
+                    .import
                     .following_conversion
                     .take()
                     .filter(|_| self.page == Page::New)
-                    .and_then(|follow| follow.submitted(self.preview_generation, id.clone()));
-                self.source_editor_open = false;
+                    .and_then(|follow| {
+                        follow.submitted(self.import.preview_generation, id.clone())
+                    });
+                self.import.source_editor_open = false;
                 self.scrolls[Page::New as usize].set_offset(point(px(0.), px(0.)));
             }
             self.select_task(&id, cx);
@@ -1090,7 +858,7 @@ impl Desktop {
             if intent == Intent::Run {
                 self.follow_resumed_input_task(&id, cx);
             } else if intent == Intent::Cancel {
-                self.following_conversion = None;
+                self.import.following_conversion = None;
             }
             if let Some(task) = self
                 .workspace
@@ -1146,12 +914,12 @@ impl Desktop {
                 .current_input_task(cx)
                 .is_some_and(|task| task.id == id)
         {
-            self.following_conversion = Some(desktop_core::import::ConversionFollow::Task {
+            self.import.following_conversion = Some(desktop_core::import::ConversionFollow::Task {
                 id: id.to_owned(),
-                source_revision: self.preview_generation,
+                source_revision: self.import.preview_generation,
             });
         } else if self.page == Page::Result && !self.reading {
-            self.following_conversion = self
+            self.import.following_conversion = self
                 .workspace
                 .as_ref()
                 .and_then(|workspace| workspace.state.task(id))
@@ -1383,7 +1151,7 @@ impl Desktop {
                     |state| state.adjust_task(&id, events),
                 );
                 if adjusted.is_some() {
-                    this.following_conversion = None;
+                    this.import.following_conversion = None;
                     this.invalidate_source();
                     this.restore_draft(window, cx);
                     this.page = Page::New;
@@ -1466,17 +1234,18 @@ impl Desktop {
             Ok(task) => {
                 if self.reader_viewer_open() {
                     desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
-                        &mut self.following_conversion,
+                        &mut self.import.following_conversion,
                     );
                 }
                 let follow_input_completion = self
+                    .import
                     .following_conversion
                     .as_ref()
                     .zip(self.workspace.as_ref())
                     .and_then(|(follow, workspace)| {
                         follow.completed_task(
                             self.page == Page::New,
-                            self.preview_generation,
+                            self.import.preview_generation,
                             workspace.state.draft()?,
                             &workspace.state.tasks,
                             &self.value(Field::Source, cx),
@@ -1484,16 +1253,20 @@ impl Desktop {
                     })
                     .is_some_and(|task| task.id == id);
                 let follow_reader_completion = !self.reading
-                    && self.following_conversion.as_ref().is_some_and(|follow| {
-                        follow.completed_reader_task(
-                            &task,
-                            self.page,
-                            self.read_generation,
-                            self.preview
-                                .as_ref()
-                                .map(|preview| preview.course.dir.as_path()),
-                        )
-                    });
+                    && self
+                        .import
+                        .following_conversion
+                        .as_ref()
+                        .is_some_and(|follow| {
+                            follow.completed_reader_task(
+                                &task,
+                                self.page,
+                                self.read_generation,
+                                self.preview
+                                    .as_ref()
+                                    .map(|preview| preview.course.dir.as_path()),
+                            )
+                        });
                 if let Some(done) = done {
                     self.completed = Some(done.clone());
                     let root = self.task_library(&task).map(|l| l.root.clone());

@@ -394,9 +394,13 @@ impl Desktop {
                     && visible_task != Some(task.id.as_str())
                     && !(self.reading
                         && self.page == Page::New
-                        && self.following_conversion.as_ref().is_some_and(|follow| {
-                            follow.follows(&task.id, self.preview_generation)
-                        }))
+                        && self
+                            .import
+                            .following_conversion
+                            .as_ref()
+                            .is_some_and(|follow| {
+                                follow.follows(&task.id, self.import.preview_generation)
+                            }))
             })
             .max_by_key(|task| task.updated)?;
         let id = task.id.clone();
@@ -600,7 +604,7 @@ impl Render for Desktop {
                 // The workbench card already shows a followed result opening.
                 self.reading
                     && !matches!(self.page, Page::Library | Page::Result)
-                    && !(self.page == Page::New && self.following_conversion.is_some()),
+                    && !(self.page == Page::New && self.import.following_conversion.is_some()),
                 |v| {
                     v.child(
                         h_flex()

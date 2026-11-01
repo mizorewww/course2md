@@ -120,32 +120,7 @@ impl Desktop {
     }
 
     pub fn invalidate_source(&mut self) {
-        self.pending_conversion = None;
-        if let Some(cancel) = self.preview_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        if let Some(cancel) = self.subtitle_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        if let Some(cancel) = self.source_covers_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        self.preview_generation = self.preview_generation.wrapping_add(1);
-        self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
-        self.source_preview = None;
-        self.source_editor_open = false;
-        self.source_candidates.clear();
-        self.source_candidate_covers.clear();
-        self.source_collection_title = None;
-        self.source_collection_name = None;
-        self.selected_candidates.clear();
-        self.subtitle_loading = false;
-        self.subtitle_error = None;
-        self.preview_error = None;
-        self.source_validation = None;
-        self.title_required = false;
-        self.show_preview_details = false;
-        self.expanded_subtitle_issue = None;
+        self.import.invalidate_source();
     }
 
     pub fn inspect_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -153,14 +128,16 @@ impl Desktop {
         if !self.prepare_next_import(&input, window, cx) {
             return;
         }
-        if self.preview_cancel.is_some() && self.draft().is_some_and(|draft| draft.input == input) {
+        if self.import.preview_cancel.is_some()
+            && self.draft().is_some_and(|draft| draft.input == input)
+        {
             return;
         }
-        let previous_source = self.source_preview.clone();
-        self.completed_source = None;
+        let previous_source = self.import.source_preview.clone();
+        self.import.completed_source = None;
         self.invalidate_source();
         if input.is_empty() {
-            self.source_validation = Some(
+            self.import.source_validation = Some(
                 if self.online() {
                     course2md::tr!("先粘贴视频链接")
                 } else {
@@ -180,7 +157,7 @@ impl Desktop {
         if self.online() {
             let links = source::video_links(&input);
             if links.len() > 1 {
-                self.source_candidates = links
+                self.import.source_candidates = links
                     .into_iter()
                     .map(|input| {
                         let mut candidate = source::SourceCandidate {
@@ -194,7 +171,7 @@ impl Desktop {
                         candidate
                     })
                     .collect();
-                self.source_collection_title =
+                self.import.source_collection_title =
                     Some(course2md::tr!("分享内容中有多个链接，请选择一个视频").into());
                 self.save_current_draft(cx);
                 cx.notify();
@@ -209,7 +186,7 @@ impl Desktop {
                 input = link;
             }
             if let Err(error) = source::validate_url(&input) {
-                self.source_validation = Some(error.to_string());
+                self.import.source_validation = Some(error.to_string());
                 cx.notify();
                 return;
             }
@@ -222,11 +199,11 @@ impl Desktop {
             .as_ref()
             .and_then(|workspace| workspace.state.draft())
             .map(|draft| (draft.id.clone(), draft.revision));
-        let generation = self.preview_generation;
+        let generation = self.import.preview_generation;
         let request_input = input.clone();
-        self.preview_workers += 1;
+        self.import.preview_workers += 1;
         let cancel = Arc::new(AtomicBool::new(false));
-        self.preview_cancel = Some(cancel.clone());
+        self.import.preview_cancel = Some(cancel.clone());
         let online = self.online();
         let handle = window.window_handle();
         // probe is blocking network/subprocess work; see crate::spawn_blocking_io.
@@ -238,17 +215,17 @@ impl Desktop {
                 .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
             // Always return the worker count, window or not (request_close waits for zero).
             let _ = this.update(cx, |this, _| {
-                this.preview_workers = this.preview_workers.saturating_sub(1);
+                this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
             });
             {
                 let _ = cx.update_window(handle, |_, window, cx| this.update(cx, |this, cx| {
-                    if this.preview_generation != generation || this.value(Field::Source, cx) != request_input { return; }
+                    if this.import.preview_generation != generation || this.value(Field::Source, cx) != request_input { return; }
                     if let Some((id, revision)) = &token
                         && !this.workspace.as_ref().is_some_and(|workspace| workspace.state.matches_input(id, *revision))
                     {
                         return;
                     }
-                    this.preview_cancel = None;
+                    this.import.preview_cancel = None;
                     match result {
                         Ok(source::SourceProbe::Single(source)) => {
                             let mut source = *source;
@@ -267,34 +244,34 @@ impl Desktop {
                             if let Some(previous) = previous_source { source.selected_subtitle = previous.selected_subtitle.clone(); }
                             if wanted.is_some() && default_track.is_none() {
                                 let message = course2md::tr!("原来选择的字幕无法读取，请重新选择文字来源").to_owned();
-                                this.subtitle_error = Some(message.clone());
+                                this.import.subtitle_error = Some(message.clone());
                                 source.subtitle_read_error = Some(course2md::subtitle::SubtitleReadError::Failed { message });
                             }
-                            this.source_preview = Some(source);
+                            this.import.source_preview = Some(source);
                             this.save_current_draft(cx);
                             if this.task_options().source_mode != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
                                 this.confirm_subtitle(track, false, cx);
                             }
                         }
                         Ok(source::SourceProbe::Collection { title, candidates, unavailable_entries }) => {
-                            this.source_collection_name = (!title.is_empty()).then(|| title.clone());
-                            this.source_collection_title = Some(if title.is_empty() { course2md::tr!("请选择本次处理的视频").into() } else { title });
+                            this.import.source_collection_name = (!title.is_empty()).then(|| title.clone());
+                            this.import.source_collection_title = Some(if title.is_empty() { course2md::tr!("请选择本次处理的视频").into() } else { title });
                             this.start_source_cover_fetch(&candidates, generation, window, cx);
-                            this.source_candidates = candidates
+                            this.import.source_candidates = candidates
                                 .into_iter()
                                 .map(|mut candidate| {
                                     candidate.identity = course2md::fetch::candidate_identity(&candidate);
                                     candidate
                                 })
                                 .collect();
-                            if this.source_candidates.is_empty() {
-                                this.preview_error = Some(course2md::tr!("还无法确定要处理哪个视频。请复制具体视频的链接。").into());
+                            if this.import.source_candidates.is_empty() {
+                                this.import.preview_error = Some(course2md::tr!("还无法确定要处理哪个视频。请复制具体视频的链接。").into());
                             } else if unavailable_entries > 0 {
-                                this.preview_error = Some(course2md::tr!("另有 {} 个条目无法确认", unavailable_entries));
+                                this.import.preview_error = Some(course2md::tr!("另有 {} 个条目无法确认", unavailable_entries));
                             }
                         }
-                        Ok(source::SourceProbe::Unresolved { message }) => this.preview_error = Some(message),
-                        Err(error) => this.preview_error = Some(format!("{error:#}")),
+                        Ok(source::SourceProbe::Unresolved { message }) => this.import.preview_error = Some(message),
+                        Err(error) => this.import.preview_error = Some(format!("{error:#}")),
                     }
                     this.advance_conversion(window, cx);
                     cx.notify();
@@ -328,11 +305,11 @@ impl Desktop {
         if groups.is_empty() {
             return;
         }
-        if let Some(cancel) = self.source_covers_cancel.take() {
+        if let Some(cancel) = self.import.source_covers_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
         let cancel = Arc::new(AtomicBool::new(false));
-        self.source_covers_cancel = Some(cancel.clone());
+        self.import.source_covers_cancel = Some(cancel.clone());
         let workers = groups.len().min(4);
         let queue = Arc::new(std::sync::Mutex::new(
             groups
@@ -366,11 +343,12 @@ impl Desktop {
                 let keep = cx
                     .update_window(handle, |_, _window, cx| {
                         this.update(cx, |this, cx| {
-                            if this.preview_generation != generation {
+                            if this.import.preview_generation != generation {
                                 return false;
                             }
                             for input in inputs.iter() {
-                                this.source_candidate_covers
+                                this.import
+                                    .source_candidate_covers
                                     .insert(input.clone(), path.clone());
                             }
                             cx.notify();

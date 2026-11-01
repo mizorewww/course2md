@@ -3,7 +3,14 @@
 use crate::{conversion::ConversionOptions, page::Page, source, workspace};
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError};
-use std::path::PathBuf;
+use std::{
+    collections::{BTreeSet, HashMap},
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 /// Where a video comes from and who made it.
 pub fn source_metadata(source: &source::Source) -> String {
@@ -415,8 +422,138 @@ pub struct PlanKey {
     pub library_loading: bool,
 }
 
+/// What the workbench knows about the current input while no task owns it: the source
+/// being read, its candidates and subtitles, and a start intent on its way.
+#[derive(Default)]
+pub struct ImportSession {
+    pub completed_source: Option<String>,
+    pub source_preview: Option<source::Source>,
+    pub source_candidates: Vec<source::SourceCandidate>,
+    pub source_collection_title: Option<String>,
+    /// The real collection name from the probe (the batch note title prefix); placeholder
+    /// hints are not names, see source_collection_title.
+    pub source_collection_name: Option<String>,
+    /// Inputs of the candidates checked in an online list; cleared when the candidates change.
+    pub selected_candidates: BTreeSet<String>,
+    /// Local cache of candidate row previews (candidate.input → cached file), downloaded
+    /// once per URL in the background.
+    pub source_candidate_covers: HashMap<String, PathBuf>,
+    pub source_covers_cancel: Option<Arc<AtomicBool>>,
+    pub subtitle_loading: bool,
+    pub subtitle_cancel: Option<Arc<AtomicBool>>,
+    pub subtitle_error: Option<String>,
+    pub subtitle_generation: u64,
+    pub preview_cancel: Option<Arc<AtomicBool>>,
+    pub preview_generation: u64,
+    pub pending_conversion: Option<u64>,
+    pub following_conversion: Option<ConversionFollow>,
+    pub preview_workers: usize,
+    pub preview_error: Option<String>,
+    pub source_validation: Option<String>,
+    /// The current validation error is the missing-title case (typed, not text-matched).
+    pub title_required: bool,
+    pub show_preview_details: bool,
+    pub subtitle_issue_open: bool,
+    pub source_editor_open: bool,
+    pub validation_attempt: usize,
+    /// The derived preview plan; an error carries whether it is only waiting on background
+    /// checks (`plan::PlanPending`).
+    pub preview_plan_cache: Option<(PlanKey, PreviewPlan)>,
+}
+
+/// A derived preview plan, or its message and whether it is only waiting.
+pub type PreviewPlan = Result<workspace::TaskPlan, (String, bool)>;
+
+impl ImportSession {
+    /// A source or its subtitles are being read.
+    pub fn reading(&self) -> bool {
+        self.preview_cancel.is_some() || self.subtitle_loading
+    }
+
+    /// Stops the background preview and subtitle readers.
+    pub fn cancel_background_reads(&self) {
+        if let Some(cancel) = &self.preview_cancel {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(cancel) = &self.subtitle_cancel {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Forgets the source: running reads stop, their late results no longer count.
+    pub fn invalidate_source(&mut self) {
+        self.pending_conversion = None;
+        for cancel in [
+            self.preview_cancel.take(),
+            self.subtitle_cancel.take(),
+            self.source_covers_cancel.take(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
+        self.source_preview = None;
+        self.source_editor_open = false;
+        self.source_candidates.clear();
+        self.source_candidate_covers.clear();
+        self.source_collection_title = None;
+        self.source_collection_name = None;
+        self.selected_candidates.clear();
+        self.subtitle_loading = false;
+        self.subtitle_error = None;
+        self.preview_error = None;
+        self.source_validation = None;
+        self.title_required = false;
+        self.show_preview_details = false;
+        self.subtitle_issue_open = false;
+    }
+
+    /// Stops a subtitle read; its late result no longer counts. Returns the new generation.
+    pub fn stop_subtitle_read(&mut self) -> u64 {
+        if let Some(cancel) = self.subtitle_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
+        self.subtitle_loading = false;
+        self.subtitle_generation
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn forgetting_a_source_stops_its_reads_and_outdates_their_results() {
+        use super::ImportSession;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let (preview, subtitles) = (
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let mut session = ImportSession {
+            preview_cancel: Some(preview.clone()),
+            subtitle_cancel: Some(subtitles.clone()),
+            subtitle_loading: true,
+            pending_conversion: Some(0),
+            source_validation: Some("先粘贴视频链接".into()),
+            ..Default::default()
+        };
+        assert!(session.reading());
+        session.invalidate_source();
+        assert!(!session.reading());
+        assert!(preview.load(Ordering::Relaxed) && subtitles.load(Ordering::Relaxed));
+        assert_eq!(session.preview_generation, 1);
+        assert_eq!(session.subtitle_generation, 1);
+        assert_eq!(session.pending_conversion, None);
+        assert_eq!(session.source_validation, None);
+        assert_eq!(session.stop_subtitle_read(), 2);
+    }
+
     use super::{
         ConversionFollow, ConversionGate, GateInputs, PlanKey, automatic_subtitle_fallback,
         completed_input_task, conversion_gate, locked_input_task, submitted_input_task,

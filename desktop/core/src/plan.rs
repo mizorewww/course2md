@@ -2,11 +2,17 @@
 use crate::{
     backend::{Done, Environment},
     conversion::ConversionOptions,
-    locations::LocationCheck,
+    import::ImportSession,
+    library::LibraryState,
+    locations::{LocationCheck, LocationChecks},
     notes::Course,
-    organize, source, workspace,
+    organize,
+    preferences::{self, ServiceRefs},
+    source,
+    workspace::{self, TaskPlan},
 };
 use anyhow::{Context as _, Result, ensure};
+use course2md::config::{AsrProvider, TranscriptSource};
 use std::{path::PathBuf, rc::Rc};
 
 /// A stable validation identity for the missing-title case. Rendering compares
@@ -329,12 +335,359 @@ pub fn update_published_course(
     courses.sort_by_key(|course| std::cmp::Reverse(course.modified));
 }
 
+/// The local engine to suggest for this machine.
+pub fn recommended_local_provider(environment: Option<&Environment>) -> AsrProvider {
+    match environment {
+        Some(environment) if environment.supports(AsrProvider::Coreml) => AsrProvider::Coreml,
+        Some(environment) if environment.supports(AsrProvider::Gpu) => AsrProvider::Gpu,
+        Some(environment) if environment.supports(AsrProvider::Npu) && !environment.llama => {
+            AsrProvider::Npu
+        }
+        Some(_) => AsrProvider::Cpu,
+        // Detection runs in the background. A temporary display hint must
+        // not scan Linux devices or PATH while the interface is rendering.
+        None if course2md::config::apple_native_available() => AsrProvider::Coreml,
+        None => AsrProvider::Cpu,
+    }
+}
+
+/// What a plan is built from.
+pub struct PlanInputs<'a> {
+    pub preferences: &'a preferences::Store,
+    pub workspace: Option<&'a workspace::Workspace>,
+    pub environment: Option<&'a Environment>,
+    pub import: &'a ImportSession,
+    pub library: &'a LibraryState,
+    pub locations: &'a LocationChecks,
+    /// Saved defaults have not reached the current input yet.
+    pub defaults_pending: bool,
+    /// Why ordinary preferences stop a submission.
+    pub preferences_issue: Option<String>,
+}
+
+impl PlanInputs<'_> {
+    /// The plan builders' shared preamble: the workspace and draft they both require.
+    pub fn plan_draft(&self) -> Result<(&workspace::Workspace, &workspace::Draft)> {
+        let workspace = self
+            .workspace
+            .context(course2md::tr!("输入与任务记录尚未恢复"))?;
+        let draft = workspace
+            .state
+            .draft()
+            .context(course2md::tr!("当前输入尚未准备好"))?;
+        Ok((workspace, draft))
+    }
+
+    /// The plan builders' shared tool check: the engine and FFmpeg always; an `online` source also needs
+    /// yt-dlp (batch plans are always online; a single plan follows its confirmed source).
+    /// A check still in progress is [`PlanPending`], not a failure.
+    pub fn ensure_plan_environment(&self, online: bool) -> Result<&Environment> {
+        let environment = plan_environment(self.environment)?;
+        ensure!(environment.engine, course2md::tr!("生成引擎无法启动"));
+        ensure!(
+            environment.ffmpeg && environment.ffprobe,
+            course2md::tr!("缺少视频处理组件，请在设置中查看")
+        );
+        ensure!(
+            !online || environment.ytdlp,
+            course2md::tr!("缺少在线视频下载组件，请在设置中查看")
+        );
+        Ok(environment)
+    }
+
+    /// The destination is still a registered, writable library; both plan builders share these checks and messages.
+    pub fn ensure_plan_storage(
+        &self,
+        workspace: &workspace::Workspace,
+        draft: &workspace::Draft,
+        validation: PlanValidation,
+    ) -> Result<()> {
+        let library = workspace
+            .state
+            .library(&draft.library_id)
+            .context(course2md::tr!("保存位置已不在笔记库中，请选择保存位置"))?;
+        validate_plan_storage(
+            validation,
+            library,
+            draft.folder,
+            self.locations.get(library),
+            self.library.indexes.get(&library.root),
+        )?;
+        Ok(())
+    }
+
+    /// Draft options override the base config and normalize the model directory; both plan builders build it this way.
+    pub fn plan_config(&self, draft: &workspace::Draft) -> course2md::settings::ConfigFile {
+        let mut config = draft
+            .base_config
+            .clone()
+            .unwrap_or_else(|| self.preferences.defaults_config());
+        draft.options.apply_to(&mut config);
+        config.defaults.model_dir = Some(course2md::config::model_dir_from(
+            config.defaults.model_dir.as_deref(),
+        ));
+        config
+    }
+
+    /// The draft's service references, falling back to the default services.
+    pub fn plan_refs(&self, draft: &workspace::Draft) -> ServiceRefs {
+        let defaults = self.preferences.default_refs();
+        ServiceRefs {
+            asr: draft.asr_service.clone().or(defaults.asr),
+            llm: draft.ai_service.clone().or(defaults.llm),
+        }
+    }
+
+    pub fn build_plan(&self, validation: PlanValidation) -> Result<TaskPlan> {
+        if let Some(issue) = &self.preferences_issue {
+            anyhow::bail!("{issue}");
+        }
+        ensure!(
+            !self.defaults_pending,
+            course2md::tr!("默认设置已保存，当前视频的选项尚未同步。请重试。")
+        );
+        let (workspace, draft) = self.plan_draft()?;
+        ensure!(
+            !draft.input.is_empty(),
+            if draft.online {
+                course2md::tr!("先粘贴视频链接")
+            } else {
+                course2md::tr!("先选择一个视频")
+            }
+        );
+        ensure!(
+            !self.import.subtitle_loading && self.import.preview_cancel.is_none(),
+            course2md::tr!("正在确认来源，请等待读取完成")
+        );
+        ensure!(
+            self.import.source_preview.is_some(),
+            course2md::tr!("还没读取到视频信息，请重新预览")
+        );
+        ensure!(
+            self.import.subtitle_error.is_none(),
+            course2md::tr!("字幕还没读取完成，请重新读取，或改用语音识别")
+        );
+        let source = draft
+            .source
+            .clone()
+            .context(course2md::tr!("请先读取并确认视频"))?;
+        let environment = self.ensure_plan_environment(source.online)?;
+        ensure!(
+            draft.options.source_mode == TranscriptSource::Asr
+                || (source.subtitle_request.is_none() && source.subtitle_read_error.is_none()),
+            course2md::tr!("所选字幕还未确认，请继续读取或明确选择其他文字来源。")
+        );
+        ensure!(
+            !source.identity.is_empty(),
+            course2md::tr!("无法识别这个视频，请重新预览")
+        );
+        if draft.title.trim().is_empty() {
+            return Err(TitleRequired.into());
+        }
+        self.ensure_plan_storage(workspace, draft, validation)?;
+        let mut config = self.plan_config(draft);
+        let using_subtitle = draft.options.source_mode != TranscriptSource::Asr
+            && (source.selected_subtitle.is_some() || draft.subtitle.is_some());
+        if using_subtitle {
+            if let Some(subtitle) = &source.selected_subtitle {
+                ensure!(
+                    subtitle.source_identity == source.identity,
+                    course2md::tr!("所选字幕与当前视频不匹配，请重新读取字幕")
+                );
+            }
+            config.defaults.transcript_source = Some(course2md::config::TranscriptSource::Subtitle);
+        } else {
+            use course2md::subtitle::SubtitleEvidence;
+            ensure!(
+                draft.options.source_mode == TranscriptSource::Asr
+                    || (draft.options.source_mode == TranscriptSource::Auto
+                        && matches!(
+                            source.subtitles,
+                            SubtitleEvidence::NoneFound
+                                | SubtitleEvidence::Unsupported { .. }
+                                | SubtitleEvidence::Failed { .. }
+                        )),
+                course2md::tr!("字幕还未确认。请读取字幕，或明确选择语音识别。")
+            );
+            config.defaults.transcript_source = Some(course2md::config::TranscriptSource::Asr);
+            let provider = config
+                .defaults
+                .provider
+                .unwrap_or_else(|| recommended_local_provider(self.environment));
+            ensure_asr_capability(environment, provider)?;
+            config.defaults.provider = Some(provider);
+            fill_default_asr_model(&mut config, provider);
+        }
+        let refs = self.plan_refs(draft);
+        let config = match validation {
+            PlanValidation::Preview => self.preferences.config_for_preview(&config, &refs)?,
+            PlanValidation::Submission => self.preferences.config_for_refs(&config, &refs)?,
+        };
+        let mut validation_config = config.clone();
+        validation_config
+            .defaults
+            .provider
+            .get_or_insert_with(|| recommended_local_provider(self.environment));
+        validate_plan_config(&source.input, &validation_config)?;
+        if validation == PlanValidation::Submission && !source.online {
+            ensure!(
+                std::path::Path::new(&source.input).is_file(),
+                course2md::tr!("原视频已移动或无法读取，请重新选择视频")
+            );
+        }
+        Ok(TaskPlan {
+            operation: Default::default(),
+            source_id: source.identity.clone(),
+            source,
+            title: draft.title.clone(),
+            library_id: draft.library_id.clone(),
+            folder: draft.folder,
+            subtitle: draft.subtitle.clone(),
+            config,
+            asr_service: refs.asr,
+            ai_service: refs.llm,
+        })
+    }
+
+    /// The batch plan for selected candidates. Tools, destination and config resolve as in build_plan;
+    /// subtitles are found when each task runs (the pipeline probes by transcript_source), so the desktop
+    /// need not read every video first. Titles are the episode titles shown in the candidate rows.
+    pub fn build_batch_plan(
+        &self,
+        candidate: &source::SourceCandidate,
+        title: String,
+    ) -> Result<TaskPlan> {
+        if let Some(issue) = &self.preferences_issue {
+            anyhow::bail!("{issue}");
+        }
+        ensure!(
+            !self.defaults_pending,
+            course2md::tr!("默认设置已保存，当前选项尚未同步。请重试。")
+        );
+        let (workspace, draft) = self.plan_draft()?;
+        let identity = course2md::fetch::candidate_identity(candidate)
+            .context(course2md::tr!("还无法确认这个视频的身份，请单独打开后转换"))?;
+        let environment = self.ensure_plan_environment(true)?;
+        self.ensure_plan_storage(workspace, draft, PlanValidation::Submission)?;
+        let mut config = self.plan_config(draft);
+        // Subtitles-only never reaches speech recognition; other modes may fall back to ASR at run time,
+        // so, as in build_plan, check local recognition and fill in the default model first.
+        if draft.options.source_mode != TranscriptSource::Subtitle {
+            let provider = config
+                .defaults
+                .provider
+                .unwrap_or_else(|| recommended_local_provider(self.environment));
+            let capability = ensure_asr_capability(environment, provider);
+            if draft.options.source_mode == TranscriptSource::Auto {
+                capability.context(course2md::tr!(
+                    "部分视频可能没有字幕，需要语音识别能力作为后备"
+                ))?;
+            } else {
+                capability?;
+            }
+            config.defaults.provider = Some(provider);
+            fill_default_asr_model(&mut config, provider);
+        }
+        let refs = self.plan_refs(draft);
+        let config = self.preferences.config_for_refs(&config, &refs)?;
+        let mut validation_config = config.clone();
+        validation_config
+            .defaults
+            .provider
+            .get_or_insert_with(|| recommended_local_provider(self.environment));
+        validate_plan_config(&candidate.input, &validation_config)?;
+        Ok(TaskPlan {
+            operation: Default::default(),
+            source_id: identity.clone(),
+            source: source::Source {
+                input: candidate.input.clone(),
+                title: title.clone(),
+                duration: candidate
+                    .duration
+                    .filter(|value| value.is_finite() && *value > 0.)
+                    .unwrap_or_default(),
+                cover: self
+                    .import
+                    .source_candidate_covers
+                    .get(&candidate.input)
+                    .cloned(),
+                identity,
+                online: true,
+                ..source::Source::default()
+            },
+            title,
+            library_id: draft.library_id.clone(),
+            folder: draft.folder,
+            subtitle: None,
+            config,
+            asr_service: refs.asr,
+            ai_service: refs.llm,
+        })
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::{
         PlanValidation, apply_draft_options, batch_note_title, edit_current_draft,
         update_draft_source_title, update_input_form, validate_plan_config, validate_plan_storage,
     };
+
+    #[test]
+    fn a_plan_tells_an_obstacle_from_a_check_still_running() {
+        use super::{PlanInputs, PlanPending};
+        use crate::{
+            credentials::MemoryCredentialVault, import::ImportSession, library::LibraryState,
+            locations::LocationChecks, preferences, workspace::Workspace,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let store = preferences::Store::open(
+            dir.path().join("preferences"),
+            std::sync::Arc::new(MemoryCredentialVault::new()),
+        );
+        let root = dir.path().join("library");
+        let mut workspace = Workspace::open_at_inline(
+            dir.path().join("workspace.json"),
+            root.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        workspace
+            .transaction(|state| {
+                let draft = state.draft_mut().unwrap();
+                draft.input = "https://example.test/video".into();
+                draft.source = Some(source("https://example.test/video", "课程"));
+                Ok(())
+            })
+            .unwrap();
+        let import = ImportSession {
+            source_preview: Some(source("https://example.test/video", "课程")),
+            ..Default::default()
+        };
+        let library = LibraryState::new(root);
+        let locations = LocationChecks::default();
+        let inputs = |preferences_issue: Option<&str>| PlanInputs {
+            preferences: &store,
+            workspace: Some(&workspace),
+            environment: None,
+            import: &import,
+            library: &library,
+            locations: &locations,
+            defaults_pending: false,
+            preferences_issue: preferences_issue.map(str::to_owned),
+        };
+        let error = inputs(Some("生成选项暂时无法读取"))
+            .build_plan(super::PlanValidation::Preview)
+            .err()
+            .unwrap();
+        assert_eq!(error.to_string(), "生成选项暂时无法读取");
+        assert!(error.downcast_ref::<PlanPending>().is_none());
+        let waiting = inputs(None)
+            .build_plan(super::PlanValidation::Preview)
+            .err()
+            .unwrap();
+        assert!(waiting.downcast_ref::<PlanPending>().is_some());
+    }
 
     #[test]
     fn an_automatic_engine_resolving_to_the_npu_does_not_keep_qwen3() {

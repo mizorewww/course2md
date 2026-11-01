@@ -1899,12 +1899,6 @@ impl Desktop {
     /// Service editor drafts are deliberately excluded: an existing published service
     /// continues to be usable. An unapplied failed ordinary commit must never be silently
     /// replaced by the older effective defaults when submitting a task.
-    pub fn ordinary_preferences_ready_for_submit(&self) -> Result<()> {
-        if let Some(issue) = self.ordinary_preferences_submit_issue() {
-            return Err(anyhow!(issue.message));
-        }
-        Ok(())
-    }
     pub fn ordinary_preferences_submit_issue(&self) -> Option<OrdinaryPreferenceIssue> {
         let group = PreferenceGroup::Generation;
         if self.preferences.is_blocked(PreferenceGroup::Generation) {
@@ -2020,7 +2014,7 @@ impl Desktop {
         if let Some(previous) = previous {
             messages.insert(previous);
         }
-        for error in [&mut self.source_validation, &mut self.message] {
+        for error in [&mut self.import.source_validation, &mut self.message] {
             if error.as_ref().is_some_and(|error| messages.contains(error)) {
                 *error = None;
             }

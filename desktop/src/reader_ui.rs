@@ -3459,7 +3459,7 @@ impl Desktop {
             return;
         };
         desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
-            &mut self.following_conversion,
+            &mut self.import.following_conversion,
         );
         self.reader_ui.viewer = Some(ImageViewer {
             open: true,
