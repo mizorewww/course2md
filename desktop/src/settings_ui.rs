@@ -20,7 +20,6 @@ use course2md::execution::Component;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit::component::{
-    ActiveTheme as _,
     input::{InputEvent, InputState, TextareaState},
     menu::{ContextMenuExt, PopupMenuItem},
     scroll::Scrollbar,
@@ -200,91 +199,6 @@ impl State {
 pub(crate) fn dialog_body_height(window: &Window) -> Pixels {
     let chrome = rem(152.).to_pixels(window.rem_size()) + px(48.);
     (window.viewport_size().height - chrome).max(px(120.))
-}
-
-/// One thing the person keeps (an account or a service): what it is, how it stands
-/// and its commands. A long name wraps within its column; when the column and the
-/// commands no longer fit side by side, the commands wrap below as one group.
-pub(crate) struct Resource {
-    pub(crate) id: SharedString,
-    pub(crate) icon: Icon,
-    pub(crate) tint: Tint,
-    pub(crate) title: SharedString,
-    pub(crate) status: Vec<(StatusKind, &'static str)>,
-    pub(crate) busy: bool,
-    /// Lines under the name, and whether each is a failure.
-    pub(crate) lines: Vec<(String, bool)>,
-    /// The lines are data such as a path, set in the monospaced face.
-    pub(crate) mono: bool,
-    /// What else belongs under the name: a problem and its repairs.
-    pub(crate) below: Vec<AnyElement>,
-    pub(crate) actions: Vec<AnyElement>,
-}
-
-impl Resource {
-    pub(crate) fn row(self, cx: &App) -> Div {
-        let id = self.id;
-        let child = |name: &'static str| ElementId::Name(format!("{id}-{name}").into());
-        let scale = TileScale::Regular;
-        let mut text = v_flex().flex_1().min_w_0().gap(rem(2.)).child(
-            h_flex()
-                .min_w_0()
-                .flex_wrap()
-                .gap(rem(8.))
-                .items_center()
-                .child(scale.label(child("title"), self.title))
-                .when(self.busy, |row| {
-                    row.child(spinner(child("busy"), course2md::tr!("正在检查"), cx))
-                })
-                .children(
-                    self.status
-                        .into_iter()
-                        .map(|(kind, label)| status_chip(kind).child(label)),
-                ),
-        );
-        for (index, (line, failed)) in self.lines.into_iter().enumerate() {
-            let line_id = ElementId::NamedChild(Arc::new(child("line")), index.to_string().into());
-            text = text.child(if failed {
-                error_text(line_id, line).min_w_0().whitespace_normal()
-            } else {
-                scale.support(line_id, line).when(self.mono, |line| {
-                    line.font_family(cx.theme().mono_font_family.clone())
-                })
-            });
-        }
-        let text = text.children(self.below);
-        h_flex()
-            .w_full()
-            .min_w_0()
-            .flex_wrap()
-            .items_center()
-            .gap(rem(12.))
-            .child(
-                h_flex()
-                    .flex_1()
-                    .flex_basis(rem(240.))
-                    .min_w_0()
-                    .gap(rem(16.))
-                    .items_center()
-                    .child(tinted_icon(self.icon, self.tint, ui::RESOURCE_ICON))
-                    .child(text),
-            )
-            .when(!self.actions.is_empty(), |row| {
-                row.child(
-                    h_flex()
-                        .flex_shrink_0()
-                        .max_w_full()
-                        .ml_auto()
-                        .flex_wrap()
-                        .items_center()
-                        .gap(rem(8.))
-                        // A command in a row that opens something does only its command.
-                        .id(child("actions"))
-                        .on_click(|_, _, cx| cx.stop_propagation())
-                        .children(self.actions),
-                )
-            })
-    }
 }
 
 /// Settings categories in navigation order.
@@ -1074,7 +988,7 @@ impl Desktop {
             cx,
         )
         .anchor(Anchor::TopRight);
-        let row = Resource {
+        let row = ui::Resource {
             id: SharedString::from(format!("saved-service-{id}")),
             icon: service_form::protocol_icon(protocol).into(),
             tint: if purpose == ServicePurpose::Ai {

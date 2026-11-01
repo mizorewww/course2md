@@ -1,10 +1,9 @@
 //! Controlled library migration and explicit cleanup of verified old-location backups.
 use crate::{
     Desktop,
-    settings_ui::Resource,
     storage::{self, Journal, Phase, Progress},
     symbols,
-    ui::{self, AsyncStatus},
+    ui::{self, AsyncStatus, Resource},
     workspace,
 };
 use anyhow::{Context as _, Result, ensure};

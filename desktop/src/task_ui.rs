@@ -799,20 +799,6 @@ fn task_note_failures(
     }
 }
 
-/// An icon, a label and its value: one fact about how a task was planned.
-pub(crate) fn fact_row(
-    id: impl Into<SharedString>,
-    icon: Option<SymbolIcon>,
-    label: &'static str,
-    value: String,
-) -> Div {
-    let scale = TileScale::Compact;
-    scale
-        .row()
-        .children(icon.map(|icon| Icon::from(icon).color(color(ColorRole::ON_SURFACE_VARIANT))))
-        .child(scale.text(ElementId::Name(id.into()), label, Some(value.into())))
-}
-
 fn stage_row(stage: TaskStage, window: &mut Window, cx: &mut App) -> Div {
     let icon_id = SharedString::from(format!("{}-icon", stage.id));
     let status_id = SharedString::from(format!("{}-status", stage.id));
@@ -869,24 +855,6 @@ fn stage_row(stage: TaskStage, window: &mut Window, cx: &mut App) -> Div {
                     .child(progress(progress_id, fraction, window, cx)),
             )
         })
-}
-
-fn log_box(id: &str, text: String) -> Stateful<Div> {
-    div()
-        .id(SharedString::from(format!("task-log-{id}")))
-        .w_full()
-        .min_w_0()
-        .max_h(rem(224.))
-        .overflow_y_scroll()
-        .p(rem(16.))
-        .rounded(RADIUS_LARGE)
-        .bg(color(ColorRole::INSET))
-        .child(
-            accessible_text(SharedString::from(format!("task-log-text-{id}")), text)
-                .text_size(TEXT_AUX)
-                .text_color(color(ColorRole::ON_SURFACE_VARIANT))
-                .whitespace_normal(),
-        )
 }
 
 impl Desktop {
@@ -1720,7 +1688,7 @@ impl Desktop {
             ),
         ]
         .into_iter()
-        .map(|(id, icon, label, value)| fact_row(id, (!flat).then_some(icon), label, value))
+        .map(|(id, icon, label, value)| ui::fact_row(id, (!flat).then_some(icon), label, value))
         .collect()
     }
 
@@ -2319,7 +2287,7 @@ impl Desktop {
         });
         let log = task_log_text(task)
             .filter(|_| self.task_logs_open.contains(&id))
-            .map(|text| log_box(&id, text));
+            .map(|text| ui::log_box(&id, text));
         // A task that waits for the person keeps its explanation on the text's ruler too.
         let ruler = if needs_person(task) && !matches!(place, CardPlace::Home) {
             rem(ui::RESOURCE_ICON_SIZE + 16.)

@@ -2,7 +2,7 @@
 //! Credentials live only in the CLI token file ({config_dir}/auth/codex.json); desktop settings, logs and
 //! interface text never touch the token. The settings service editor and first-use AI step share this state.
 use crate::preferences::{ServiceProtocol, ServicePurpose};
-use crate::settings_ui::Resource;
+use crate::ui::Resource;
 use crate::{Desktop, symbols};
 use course2md::login::codex::LoginStatus;
 use gpui::{prelude::*, *};

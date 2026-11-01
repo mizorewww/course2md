@@ -1,5 +1,5 @@
 //! Bilibili account settings and cancellable QR login. No ticket is logged or stored in UI text.
-use crate::settings_ui::Resource;
+use crate::ui::Resource;
 use crate::{Desktop, Field, Page, symbols, ui};
 use anyhow::Result;
 use course2md::auth::{AccountProfile, AccountStatus, QrPoll, QrSession};

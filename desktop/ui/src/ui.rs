@@ -4,6 +4,7 @@
 use crate::symbols;
 use gpui::{prelude::*, *};
 use gpui_base::{active_focus_trap, h_flex, v_flex};
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit_material::{
     color::ColorRole,
     icons::{Icon, SymbolIcon},
@@ -75,7 +76,7 @@ pub fn keyed_open(
 /// ```ignore
 /// ui::menu("note-menu", IconButton::new("note-more", symbols::more_vert(), label), {
 ///     MaterialMenu::new("note-menu-items").item(
-///         MaterialMenuItem::new(course2md::tr!("重命名"))
+///         MaterialMenuItem::new(c2m_i18n::tr!("重命名"))
 ///             .leading(Icon::from(symbols::edit()))
 ///             .on_click(cx.listener(|this, _, window, cx| this.rename(window, cx))),
 ///     )
@@ -125,7 +126,7 @@ pub fn menu_key_toggle(
 ///
 /// ```ignore
 /// let items = ui::choice_items(
-///     [(Mode::Fast, course2md::tr!("快速")), (Mode::Full, course2md::tr!("完整"))],
+///     [(Mode::Fast, c2m_i18n::tr!("快速")), (Mode::Full, c2m_i18n::tr!("完整"))],
 ///     &self.mode,
 ///     cx.listener(|this, mode: &Mode, _, cx| this.set_mode(*mode, cx)),
 /// );
@@ -487,10 +488,10 @@ pub fn add_row(
 /// alone cannot express this; the rows' ruler stays here instead of in each page.
 ///
 /// ```ignore
-/// ui::field_table("note-settings", course2md::tr!("笔记"), [
-///     ui::Field::switch("summary", course2md::tr!("生成摘要"), on, change).hint(hint),
-///     ui::Field::menu("language", course2md::tr!("语言"), current, language_menu),
-///     ui::Field::below("mode", course2md::tr!("模式"), mode_group),
+/// ui::field_table("note-settings", c2m_i18n::tr!("笔记"), [
+///     ui::Field::switch("summary", c2m_i18n::tr!("生成摘要"), on, change).hint(hint),
+///     ui::Field::menu("language", c2m_i18n::tr!("语言"), current, language_menu),
+///     ui::Field::below("mode", c2m_i18n::tr!("模式"), mode_group),
 /// ])
 /// ```
 pub fn field_table(
@@ -559,7 +560,7 @@ pub enum AsyncStatus {
 /// ui::async_status("ollama-status", &status, Some(
 ///     material_button("ollama-retry", ButtonVariant::Text)
 ///         .icon(symbols::refresh())
-///         .child(course2md::tr!("重试"))
+///         .child(c2m_i18n::tr!("重试"))
 ///         .on_click(cx.listener(|this, _, _, cx| this.ollama_refresh(cx)))
 ///         .into_any_element(),
 /// ), cx)
@@ -660,7 +661,7 @@ impl Confirm {
     /// The dialog itself is drawn by the shell through [`confirm_host`].
     ///
     /// ```ignore
-    /// ui::Confirm::new(course2md::tr!("删除笔记"), course2md::tr!("保留笔记"), label)
+    /// ui::Confirm::new(c2m_i18n::tr!("删除笔记"), c2m_i18n::tr!("保留笔记"), label)
     ///     .danger()
     ///     .text(consequence)
     ///     .ask(cx.listener(|this, _, window, cx| this.delete_note(window, cx)), window, cx);
@@ -735,7 +736,7 @@ pub fn confirm_host(cx: &App) -> Option<AnyElement> {
 pub fn transfer_status(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
-    metrics: &crate::activity::TransferMetrics,
+    summary: &str,
     fraction: Option<f32>,
     window: &mut Window,
     cx: &mut App,
@@ -752,7 +753,7 @@ pub fn transfer_status(
                 .text_color(color(ColorRole::ON_SURFACE)),
         )
         .child(
-            status_line(child_id(&id, "detail"), &metrics.summary())
+            status_line(child_id(&id, "detail"), summary)
                 .text_size(TEXT_AUX)
                 .text_color(color(ColorRole::ON_SURFACE_VARIANT)),
         )
@@ -765,6 +766,123 @@ pub fn transfer_status(
 pub fn modal_open(window: &mut Window, cx: &mut App) -> bool {
     use gpui_kit::component::WindowExt as _;
     window.has_active_dialog(cx) || active_focus_trap(window, cx).is_some()
+}
+
+/// One thing the person keeps (an account or a service): what it is, how it stands
+/// and its commands. A long name wraps within its column; when the column and the
+/// commands no longer fit side by side, the commands wrap below as one group.
+pub struct Resource {
+    pub id: SharedString,
+    pub icon: Icon,
+    pub tint: Tint,
+    pub title: SharedString,
+    pub status: Vec<(StatusKind, &'static str)>,
+    pub busy: bool,
+    /// Lines under the name, and whether each is a failure.
+    pub lines: Vec<(String, bool)>,
+    /// The lines are data such as a path, set in the monospaced face.
+    pub mono: bool,
+    /// What else belongs under the name: a problem and its repairs.
+    pub below: Vec<AnyElement>,
+    pub actions: Vec<AnyElement>,
+}
+
+impl Resource {
+    pub fn row(self, cx: &App) -> Div {
+        let id = self.id;
+        let child = |name: &'static str| ElementId::Name(format!("{id}-{name}").into());
+        let scale = TileScale::Regular;
+        let mut text = v_flex().flex_1().min_w_0().gap(rem(2.)).child(
+            h_flex()
+                .min_w_0()
+                .flex_wrap()
+                .gap(rem(8.))
+                .items_center()
+                .child(scale.label(child("title"), self.title))
+                .when(self.busy, |row| {
+                    row.child(spinner(child("busy"), c2m_i18n::tr!("正在检查"), cx))
+                })
+                .children(
+                    self.status
+                        .into_iter()
+                        .map(|(kind, label)| status_chip(kind).child(label)),
+                ),
+        );
+        for (index, (line, failed)) in self.lines.into_iter().enumerate() {
+            let line_id = ElementId::NamedChild(Arc::new(child("line")), index.to_string().into());
+            text = text.child(if failed {
+                error_text(line_id, line).min_w_0().whitespace_normal()
+            } else {
+                scale.support(line_id, line).when(self.mono, |line| {
+                    line.font_family(cx.theme().mono_font_family.clone())
+                })
+            });
+        }
+        let text = text.children(self.below);
+        h_flex()
+            .w_full()
+            .min_w_0()
+            .flex_wrap()
+            .items_center()
+            .gap(rem(12.))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .flex_basis(rem(240.))
+                    .min_w_0()
+                    .gap(rem(16.))
+                    .items_center()
+                    .child(tinted_icon(self.icon, self.tint, RESOURCE_ICON))
+                    .child(text),
+            )
+            .when(!self.actions.is_empty(), |row| {
+                row.child(
+                    h_flex()
+                        .flex_shrink_0()
+                        .max_w_full()
+                        .ml_auto()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(rem(8.))
+                        // A command in a row that opens something does only its command.
+                        .id(child("actions"))
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .children(self.actions),
+                )
+            })
+    }
+}
+
+/// An icon, a label and its value: one fact about how a task was planned.
+pub fn fact_row(
+    id: impl Into<SharedString>,
+    icon: Option<SymbolIcon>,
+    label: &'static str,
+    value: String,
+) -> Div {
+    let scale = TileScale::Compact;
+    scale
+        .row()
+        .children(icon.map(|icon| Icon::from(icon).color(color(ColorRole::ON_SURFACE_VARIANT))))
+        .child(scale.text(ElementId::Name(id.into()), label, Some(value.into())))
+}
+
+pub fn log_box(id: &str, text: String) -> Stateful<Div> {
+    div()
+        .id(SharedString::from(format!("task-log-{id}")))
+        .w_full()
+        .min_w_0()
+        .max_h(rem(224.))
+        .overflow_y_scroll()
+        .p(rem(16.))
+        .rounded(RADIUS_LARGE)
+        .bg(color(ColorRole::INSET))
+        .child(
+            accessible_text(SharedString::from(format!("task-log-text-{id}")), text)
+                .text_size(TEXT_AUX)
+                .text_color(color(ColorRole::ON_SURFACE_VARIANT))
+                .whitespace_normal(),
+        )
 }
 
 #[cfg(test)]

@@ -433,7 +433,7 @@ impl MarkdownPlugin for SourceLink {
     ) -> Option<InlineElement> {
         let url = node.data::<String>()?.clone();
         let at = node.source_range().map_or(0, |range| range.start);
-        let label = course2md::tr!("从此处观看");
+        let label = c2m_i18n::tr!("从此处观看");
         // Centred on the text beside it: a Latin x-height above the baseline.
         let middle =
             CONTROL_HEIGHT.to_pixels(context.rem_size()) * 0.4 + context.font_size() * 0.35;
@@ -517,16 +517,6 @@ pub fn marked_markdown(text: &str, marks: &[Range<usize>], highlight: Rgba) -> S
     out
 }
 
-/// What a selection of a note copies: its source, without the figures and the blank
-/// lines they leave.
-pub fn copied_text(selected: &str) -> String {
-    let mut text = crate::notes::without_image_references(selected);
-    while text.contains("\n\n\n") {
-        text = text.replace("\n\n\n", "\n\n");
-    }
-    text.trim().to_owned()
-}
-
 /// The byte ranges `pieces` cover in `text`: prose as written, and a formula
 /// together with its delimiters (and any space inside them).
 pub fn piece_sources(text: &str) -> Vec<(Range<usize>, Piece<'_>)> {
@@ -555,9 +545,7 @@ pub fn piece_sources(text: &str) -> Vec<(Range<usize>, Piece<'_>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        blocks, copied_text, formula_of, inline_markdown, markdown, marked_markdown, piece_sources,
-    };
+    use super::{blocks, formula_of, inline_markdown, markdown, marked_markdown, piece_sources};
 
     fn source_of(text: &str) -> Vec<&str> {
         piece_sources(text)
@@ -624,14 +612,6 @@ mod tests {
         );
         // A formula holding a dollar cannot use one as its fence.
         assert_eq!(blocks("设 $a\\$b$ 为"), ["设 $$a\\$b$$ 为"]);
-    }
-
-    #[test]
-    fn a_copy_leaves_figures_behind() {
-        assert_eq!(
-            copied_text("一段\n\n![](figure:5)\n\n### 01:00\n\n![](figure:9)"),
-            "一段\n\n### 01:00"
-        );
     }
 
     #[test]

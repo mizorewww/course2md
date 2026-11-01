@@ -1608,11 +1608,11 @@ dependencies = [
  "chrono",
  "course2md",
  "desktop-core",
+ "desktop-ui",
  "embed-resource",
  "gpui-base",
  "gpui-kit",
  "gpui-kit-material",
- "gpui-material-symbols",
  "image",
  "libc",
  "serde_json",
@@ -1793,6 +1793,19 @@ dependencies = [
  "walkdir",
  "which",
  "zeroize",
+]
+
+[[package]]
+name = "desktop-ui"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "c2m-artifact",
+ "c2m-i18n",
+ "gpui-base",
+ "gpui-kit",
+ "gpui-kit-material",
+ "gpui-material-symbols",
 ]
 
 [[package]]

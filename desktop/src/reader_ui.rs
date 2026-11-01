@@ -2447,7 +2447,7 @@ impl Desktop {
                 // Copying from the note leaves its figures behind.
                 .capture_action(|_: &CopyText, window, cx| {
                     let text = TextSelection::selected_text(window, cx);
-                    let text = note_text::copied_text(&text);
+                    let text = copied_text(&text);
                     if !text.is_empty() {
                         cx.write_to_clipboard(ClipboardItem::new_string(text));
                         cx.stop_propagation();
@@ -4757,6 +4757,16 @@ fn image_zoom_offset(viewport: f32, old_extent: f32, new_extent: f32, offset: f3
         .clamp(-(new_extent - viewport).max(0.), 0.)
 }
 
+/// What a selection of a note copies: its source, without the figures and the blank
+/// lines they leave.
+fn copied_text(selected: &str) -> String {
+    let mut text = notes::without_image_references(selected);
+    while text.contains("\n\n\n") {
+        text = text.replace("\n\n\n", "\n\n");
+    }
+    text.trim().to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -4768,6 +4778,14 @@ mod tests {
     use crate::{notes::Course, source, workspace};
     use gpui::{AppContext as _, ListAlignment, ListOffset, ListState, TestAppContext, px};
     use std::collections::HashMap;
+
+    #[test]
+    fn a_copy_leaves_figures_behind() {
+        assert_eq!(
+            super::copied_text("一段\n\n![](figure:5)\n\n### 01:00\n\n![](figure:9)"),
+            "一段\n\n### 01:00"
+        );
+    }
 
     #[test]
     fn keys_scroll_the_screenshot_text_within_its_range() {

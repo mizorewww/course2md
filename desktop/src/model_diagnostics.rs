@@ -806,7 +806,7 @@ impl Desktop {
                     ui::transfer_status(
                         ("model-download-progress", index),
                         activity::model_transfer_phase(stage, progress.phase),
-                        &progress.transfer_metrics(stage, true),
+                        &progress.transfer_metrics(stage, true).summary(),
                         progress.fraction(),
                         window,
                         cx,

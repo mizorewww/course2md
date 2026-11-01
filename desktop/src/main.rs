@@ -15,8 +15,6 @@ mod folder_tree;
 mod i18n;
 mod import_ui;
 mod library_ui;
-mod math;
-mod note_text;
 mod ollama_ui;
 mod onboarding;
 #[cfg(feature = "performance")]
@@ -25,18 +23,16 @@ mod reader_images;
 mod reader_ui;
 mod settings_ui;
 mod storage_ui;
-mod symbols;
 mod task_runner;
 mod task_ui;
-// Held for the design restoration; see its header.
-mod theme;
-mod ui;
 mod views;
 
 use desktop_core::{
     activity, backend, conversion, credentials, interrupted, model_discovery, notes, organize,
     preferences, reader_navigation, service_test, source, spawn_blocking_io, storage, workspace,
 };
+
+use desktop_ui::{math, note_text, symbols, theme, ui};
 
 use backend::{Done, EngineEvent, Event, Job};
 use conversion::ConversionOptions;
