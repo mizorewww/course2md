@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-pub use c2m_artifact::math::{Piece, pieces};
+pub use c2m_artifact::math::{Piece, piece_sources, pieces};
 
 /// A typeset formula: its asset path and its box in em, with the baseline
 /// `height` below the top.

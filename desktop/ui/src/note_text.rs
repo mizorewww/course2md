@@ -5,7 +5,7 @@
 //! One document holds a whole note, so selection, find and scrolling cross its
 //! paragraphs inside one virtualized list. Copying yields its source: a formula
 //! with its delimiters, a list item as `- item`, paragraphs a blank line apart.
-use crate::math::{self, Formula, Piece};
+use crate::math::{self, Formula, Piece, piece_sources};
 use gpui::{prelude::*, *};
 use gpui_base::text::markdown_ast::Node;
 use gpui_base::{
@@ -515,32 +515,6 @@ pub fn marked_markdown(text: &str, marks: &[Range<usize>], highlight: Rgba) -> S
     }
     out.push_str(&inline_markdown(&text[end..]));
     out
-}
-
-/// The byte ranges `pieces` cover in `text`: prose as written, and a formula
-/// together with its delimiters (and any space inside them).
-pub fn piece_sources(text: &str) -> Vec<(Range<usize>, Piece<'_>)> {
-    let offset = |slice: &str| slice.as_ptr() as usize - text.as_ptr() as usize;
-    let mut position = 0;
-    math::pieces(text)
-        .into_iter()
-        .map(|piece| {
-            let end = match &piece {
-                Piece::Text(prose) => offset(prose) + prose.len(),
-                // `pieces` trims the LaTeX inside its delimiters; the source
-                // runs on through that space and the closing delimiter.
-                Piece::Math { latex, display } => {
-                    let inner_end = offset(latex) + latex.len();
-                    let rest = &text[inner_end..];
-                    let space = rest.len() - rest.trim_start().len();
-                    (inner_end + space + if *display { 2 } else { 1 }).min(text.len())
-                }
-            };
-            let source = position..end;
-            position = end;
-            (source, piece)
-        })
-        .collect()
 }
 
 #[cfg(test)]

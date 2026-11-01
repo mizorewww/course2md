@@ -32,9 +32,12 @@ use desktop_core::{
     preferences, reader_navigation, service_test, source, spawn_blocking_io, storage, workspace,
 };
 
-use desktop_ui::{math, note_text, symbols, theme, ui};
+use desktop_ui::{note_text, symbols, theme, ui};
 
+use desktop_core::conversion::{provider_from_id, provider_label, providers};
+use desktop_core::library::FolderFilter;
 use desktop_core::page::{Kind, Page};
+use desktop_core::reader::{carry_repaired_reading_positions, settle_reader_notice};
 
 use backend::{Done, EngineEvent, Event, Job};
 use conversion::ConversionOptions;
@@ -52,26 +55,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum FolderFilter {
-    #[default]
-    All,
-    Unfiled,
-    Folder(u64),
-}
-
-impl FolderFilter {
-    pub(crate) fn is_all(self) -> bool {
-        self == Self::All
-    }
-    pub(crate) fn folder_id(self) -> Option<u64> {
-        match self {
-            Self::Folder(id) => Some(id),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Field {
     Source,
@@ -80,38 +63,6 @@ enum Field {
     Name,
     Search,
 }
-fn providers() -> [(&'static str, &'static str); 6] {
-    [
-        ("", course2md::tr!("自动")),
-        ("coreml", course2md::tr!("Apple 芯片")),
-        ("gpu", "GPU"),
-        ("cpu", "CPU"),
-        ("npu", "Intel NPU"),
-        ("api", course2md::tr!("云端服务")),
-    ]
-}
-
-/// Choice id of a recognition engine, as in `providers()`; automatic
-/// selection is the empty id.
-pub(crate) fn provider_id(provider: Option<course2md::config::AsrProvider>) -> &'static str {
-    provider.map_or("", |provider| provider.as_str())
-}
-
-/// The canonical display name of a recognition engine; the desktop's one source for choosing and describing it.
-/// Matches the ids of `providers()` one to one; None means 「自动」.
-pub(crate) fn provider_label(provider: Option<course2md::config::AsrProvider>) -> &'static str {
-    let id = provider_id(provider);
-    providers()
-        .iter()
-        .find(|(provider_id, _)| *provider_id == id)
-        .map(|(_, label)| *label)
-        .unwrap_or(course2md::tr!("自动"))
-}
-
-pub(crate) fn provider_from_id(id: &str) -> Option<course2md::config::AsrProvider> {
-    course2md::config::AsrProvider::from_id(id)
-}
-
 /// Debug builds: open a note in a given reader state at startup, so native
 /// layout can be checked without synthetic input. Release builds ignore it.
 struct ValidationOpen {
@@ -188,9 +139,9 @@ struct Desktop {
     library: organize::Library,
     library_root: PathBuf,
     library_error: Option<String>,
-    library_issues: Vec<course_library::LibraryIssue>,
+    library_issues: Vec<desktop_core::library::LibraryIssue>,
     library_indexes: BTreeMap<PathBuf, organize::Library>,
-    library_view_cache: course_library::LibraryViewCache,
+    library_view_cache: desktop_core::library::LibraryViewCache,
     library_generation: u64,
     folder_filter: FolderFilter,
     name_dialog: Option<library_ui::NameDialog>,
@@ -1107,7 +1058,8 @@ impl Desktop {
         let task = desktop_core::locations::scan_locations(locations, move |location| {
             let scan = notes::scan_library(&location.root);
             let organization = organize::Library::load(&location.root);
-            let cache = course_library::LibraryViewCache::inspect(location, scan.as_ref().ok());
+            let cache =
+                desktop_core::library::LibraryViewCache::inspect(location, scan.as_ref().ok());
             (scan, organization, cache)
         });
         cx.spawn(async move |this, cx| {
@@ -1164,36 +1116,42 @@ impl Desktop {
                             this.courses.extend(scan.courses.into_iter().map(Rc::new));
                             this.library_issues
                                 .extend(scan.issues.into_iter().map(|message| {
-                                    course_library::LibraryIssue {
+                                    desktop_core::library::LibraryIssue {
                                         root: location.root.clone(),
-                                        kind: course_library::LibraryIssueKind::Scan,
+                                        kind: desktop_core::library::LibraryIssueKind::Scan,
                                         message,
                                     }
                                 }));
                         }
-                        Err(error) => this.library_issues.push(course_library::LibraryIssue {
-                            root: location.root.clone(),
-                            kind: course_library::LibraryIssueKind::Scan,
-                            message: course2md::tr!(
-                                "{}读取失败：{}",
-                                location.name,
-                                format!("{error:#}")
-                            ),
-                        }),
+                        Err(error) => {
+                            this.library_issues
+                                .push(desktop_core::library::LibraryIssue {
+                                    root: location.root.clone(),
+                                    kind: desktop_core::library::LibraryIssueKind::Scan,
+                                    message: course2md::tr!(
+                                        "{}读取失败：{}",
+                                        location.name,
+                                        format!("{error:#}")
+                                    ),
+                                })
+                        }
                     }
                     match organization {
                         Ok(library) => {
                             this.library_indexes.insert(location.root, library);
                         }
-                        Err(error) => this.library_issues.push(course_library::LibraryIssue {
-                            root: location.root.clone(),
-                            kind: course_library::LibraryIssueKind::Folders,
-                            message: course2md::tr!(
-                                "{}的文件夹信息已损坏：{}",
-                                location.name,
-                                format!("{error:#}")
-                            ),
-                        }),
+                        Err(error) => {
+                            this.library_issues
+                                .push(desktop_core::library::LibraryIssue {
+                                    root: location.root.clone(),
+                                    kind: desktop_core::library::LibraryIssueKind::Folders,
+                                    message: course2md::tr!(
+                                        "{}的文件夹信息已损坏：{}",
+                                        location.name,
+                                        format!("{error:#}")
+                                    ),
+                                })
+                        }
                     }
                 }
                 this.courses.sort_by_key(|c| std::cmp::Reverse(c.modified));
@@ -1410,98 +1368,6 @@ impl Desktop {
             });
         })
         .detach();
-    }
-}
-
-fn carry_repaired_reading_positions(
-    positions: &mut BTreeMap<String, workspace::ReadingPosition>,
-    previous: (&str, &str),
-    next: (&str, &str),
-) {
-    if previous.0 != next.0 || previous.1 == next.1 {
-        return;
-    }
-    for tab in 0..=1 {
-        let previous_key = crate::reader_ui::manifest_reading_key(previous.0, previous.1, tab);
-        let next_key = crate::reader_ui::manifest_reading_key(next.0, next.1, tab);
-        if let Some(position) = positions.get(&previous_key).cloned() {
-            positions.entry(next_key).or_insert(position);
-        }
-    }
-}
-
-/// A completed read clears only its own earlier failure notice; newer,
-/// unrelated feedback stays visible.
-fn settle_reader_notice(current: &mut Option<String>, failure: &mut Option<String>) {
-    if failure
-        .take()
-        .is_some_and(|failed| current.as_deref() == Some(failed.as_str()))
-    {
-        *current = None;
-    }
-}
-
-#[cfg(test)]
-mod reader_notice_tests {
-    use super::settle_reader_notice;
-
-    #[test]
-    fn repair_position_handoff_uses_the_latest_old_position_and_keeps_existing_versions() {
-        use super::{BTreeMap, carry_repaired_reading_positions, workspace::ReadingPosition};
-        let start = ReadingPosition {
-            seconds: Some(12.),
-            offset: -120.,
-            ..Default::default()
-        };
-        let latest = ReadingPosition {
-            paragraph: Some("section-80".into()),
-            seconds: Some(80.),
-            offset: -840.,
-            fraction: Some(0.4),
-            ..Default::default()
-        };
-        let gallery = ReadingPosition {
-            seconds: Some(36.),
-            offset: -300.,
-            ..Default::default()
-        };
-        let mut positions = BTreeMap::from([
-            ("course:old:0".into(), start.clone()),
-            ("course:old:1".into(), gallery.clone()),
-        ]);
-        // The user keeps scrolling while the new version is read. Completion
-        // saves this latest old-note position before performing the handoff.
-        positions.insert("course:old:0".into(), latest.clone());
-        carry_repaired_reading_positions(&mut positions, ("course", "old"), ("course", "new"));
-        assert_eq!(positions["course:new:0"], latest);
-        assert_eq!(positions["course:new:1"], gallery);
-        assert_eq!(positions["course:old:0"], latest);
-        assert_eq!(positions["course:old:1"], gallery);
-
-        positions.insert("course:new:0".into(), start.clone());
-        carry_repaired_reading_positions(&mut positions, ("course", "old"), ("course", "new"));
-        assert_eq!(positions["course:new:0"], start);
-        let snapshot = positions.clone();
-        carry_repaired_reading_positions(&mut positions, ("course", "old"), ("different", "new"));
-        carry_repaired_reading_positions(&mut positions, ("course", "old"), ("course", "old"));
-        assert_eq!(positions, snapshot);
-    }
-
-    #[test]
-    fn a_successful_read_clears_only_its_own_failure_notice() {
-        let failed = "笔记文件暂时无法访问";
-        for (current, failure, expected) in [
-            (Some(failed), Some(failed), None),
-            (Some("分类已恢复"), Some(failed), Some("分类已恢复")),
-            (None, Some(failed), None),
-            (Some(failed), None, Some(failed)),
-        ] {
-            let mut message = current.map(String::from);
-            let mut failure = failure.map(String::from);
-            settle_reader_notice(&mut message, &mut failure);
-            assert_eq!(message.as_deref(), expected);
-            assert!(failure.is_none());
-        }
     }
 }
 

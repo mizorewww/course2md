@@ -1787,6 +1787,7 @@ dependencies = [
  "smol",
  "tempfile",
  "trash",
+ "unicode-segmentation",
  "ureq 2.12.1",
  "url",
  "uuid",
