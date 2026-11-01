@@ -2051,6 +2051,7 @@ impl Desktop {
             .enumerate()
             .map(|(index, label)| {
                 ChipSetItem::new(
+                    ("import-export-item", index),
                     FilterChip::new(("import-export", index), label)
                         .selected(self.task_options().formats[index])
                         .on_toggle(cx.listener(move |this, on: &bool, _, cx| {

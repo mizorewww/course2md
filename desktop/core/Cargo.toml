@@ -12,7 +12,7 @@ test-support = []
 
 [dependencies]
 course2md = { path = "../../crates/course2md" }
-gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "ab9fa9c703fe334abeb85286738857a5f42388c9", features = ["serde"] }
+gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86", features = ["serde"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -539,6 +539,7 @@ impl Desktop {
                 .enumerate()
                 .map(|(index, (format, label))| {
                     ChipSetItem::new(
+                        ("default-export-format-item", index),
                         FilterChip::new(("default-export-format", index), label)
                             .selected(selected.contains(&format))
                             .on_toggle(cx.listener(move |this, _: &bool, _, cx| {
