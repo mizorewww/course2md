@@ -2,100 +2,13 @@
 //! Credentials live only in the CLI token file ({config_dir}/auth/codex.json); desktop settings, logs and
 //! interface text never touch the token. The settings service editor and first-use AI step share this state.
 use crate::preferences::{ServiceProtocol, ServicePurpose};
-use crate::settings_ui::Resource;
+use crate::ui::Resource;
 use crate::{Desktop, symbols};
 use course2md::login::codex::LoginStatus;
+use desktop_core::codex::*;
 use gpui::{prelude::*, *};
 use gpui_kit::component::input::InputState;
 use gpui_kit_material::prelude::*;
-
-/// Recognize the engine's missing/expired login marker and replace it with in-app connection guidance.
-fn login_required(error: &anyhow::Error) -> bool {
-    error.chain().any(|cause| {
-        cause
-            .downcast_ref::<course2md::login::codex::CodexLoginRequired>()
-            .is_some()
-    })
-}
-
-/// The surface a Codex action belongs to: asynchronous results return only to the surface that started it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum CodexSurface {
-    Editor,
-    Onboarding,
-    /// The account card on the services and accounts page: connection state only, no model input.
-    Settings,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CodexWork {
-    Checking,
-    Importing,
-    Authorizing,
-    Models,
-    LoggingOut,
-}
-
-#[derive(Default)]
-pub(crate) struct CodexUi {
-    generation: u64,
-    pub(crate) status: Option<LoginStatus>,
-    working: Option<CodexWork>,
-    /// The visible result of the last action; the bool marks a failure (shown in the danger color).
-    pub(crate) notice: Option<(String, bool)>,
-    surface: Option<CodexSurface>,
-    authorize_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-}
-
-impl CodexUi {
-    fn begin(&mut self, surface: CodexSurface, work: CodexWork) -> u64 {
-        self.generation = self.generation.wrapping_add(1);
-        self.surface = Some(surface);
-        self.working = Some(work);
-        // A status check follows other actions and must not hide their result.
-        if work != CodexWork::Checking {
-            self.notice = None;
-        }
-        self.generation
-    }
-    fn current(&self, generation: u64, work: CodexWork) -> bool {
-        self.generation == generation && self.working == Some(work)
-    }
-    pub(crate) fn busy(&self) -> bool {
-        self.working.is_some()
-    }
-
-    /// The account's one status badge, shared by every place that shows it.
-    pub(crate) fn badge(&self) -> (StatusKind, &'static str) {
-        match (self.working, &self.status) {
-            (Some(CodexWork::Checking), _) => (StatusKind::Progress, course2md::tr!("正在检查")),
-            (Some(CodexWork::LoggingOut), _) => (StatusKind::Progress, course2md::tr!("正在退出")),
-            (Some(_), _) => (StatusKind::Progress, course2md::tr!("正在连接")),
-            (_, Some(LoginStatus::Connected)) => (StatusKind::Success, course2md::tr!("已连接")),
-            (_, Some(LoginStatus::Expired)) => (StatusKind::Warning, course2md::tr!("登录已失效")),
-            _ => (StatusKind::Neutral, course2md::tr!("未连接")),
-        }
-    }
-
-    /// The last action's result, shown only where that action started.
-    pub(crate) fn notice_on(&self, surface: CodexSurface) -> Option<(String, bool)> {
-        self.notice
-            .clone()
-            .filter(|_| self.surface == Some(surface))
-    }
-
-    pub(crate) fn cancel_authorization(&self) {
-        if let Some(cancel) = &self.authorize_cancel {
-            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
-    fn fail(&mut self, message: String) {
-        self.notice = Some((message, true));
-    }
-    fn inform(&mut self, message: String) {
-        self.notice = Some((message, false));
-    }
-}
 
 /// When the catalog arrives, an empty model input takes the first candidate (a supported default, still editable).
 /// set_value needs the Window, so it returns to the window through the shared defer + update_window path.
@@ -119,6 +32,18 @@ pub(crate) fn autofill_input(
             });
         });
     });
+}
+
+/// The account's one status badge, shared by every place that shows it.
+pub(crate) fn codex_badge(codex: &CodexUi) -> (StatusKind, &'static str) {
+    match (codex.working, &codex.status) {
+        (Some(CodexWork::Checking), _) => (StatusKind::Progress, course2md::tr!("正在检查")),
+        (Some(CodexWork::LoggingOut), _) => (StatusKind::Progress, course2md::tr!("正在退出")),
+        (Some(_), _) => (StatusKind::Progress, course2md::tr!("正在连接")),
+        (_, Some(LoginStatus::Connected)) => (StatusKind::Success, course2md::tr!("已连接")),
+        (_, Some(LoginStatus::Expired)) => (StatusKind::Warning, course2md::tr!("登录已失效")),
+        _ => (StatusKind::Neutral, course2md::tr!("未连接")),
+    }
 }
 
 impl Desktop {
@@ -445,7 +370,7 @@ impl Desktop {
             tint: Tint::Purple,
             mono: false,
             title: course2md::tr!("ChatGPT 账号").into(),
-            status: vec![self.codex.badge()],
+            status: vec![codex_badge(&self.codex)],
             busy,
             lines,
             below: Vec::new(),

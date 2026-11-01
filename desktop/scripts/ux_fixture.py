@@ -97,7 +97,7 @@ def prepare(root):
 def serve(root, port):
     lock = threading.Lock()
     markers, responses = FAKE_AI["markers"], FAKE_AI["responses"]
-    probes = markers["service_test"]  # request samples from desktop/src/service_test.rs
+    probes = markers["service_test"]  # request samples from desktop/core/src/service_test.rs
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):

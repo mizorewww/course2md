@@ -542,7 +542,7 @@ fn task_export_directory(task: &TaskRecord, location: &LibraryLocation) -> Optio
 
 /// No filesystem access: rendering can offer the exact successful outputs from
 /// the durable outcome record. Existence is checked when the user opens them.
-pub(crate) fn task_export_files(task: &TaskRecord, location: &LibraryLocation) -> Vec<PathBuf> {
+pub fn task_export_files(task: &TaskRecord, location: &LibraryLocation) -> Vec<PathBuf> {
     if task.artifact.is_none()
         || matches!(
             task.state,
@@ -570,10 +570,7 @@ pub(crate) fn task_export_files(task: &TaskRecord, location: &LibraryLocation) -
         .collect()
 }
 
-pub(crate) fn available_task_export(
-    task: &TaskRecord,
-    location: &LibraryLocation,
-) -> Result<PathBuf> {
+pub fn available_task_export(task: &TaskRecord, location: &LibraryLocation) -> Result<PathBuf> {
     task_export_files(task, location)
         .into_iter()
         .find(|path| path.is_file())
@@ -1262,7 +1259,7 @@ impl State {
 
     /// Adds tasks a library carries that this record has not seen. They are evidence of
     /// earlier work, never permission to run it.
-    pub(crate) fn adopt_tasks(&mut self, tasks: Vec<TaskRecord>) {
+    pub fn adopt_tasks(&mut self, tasks: Vec<TaskRecord>) {
         for mut task in tasks {
             if self.task(&task.id).is_none() {
                 task.pause_as_restored();
@@ -1321,7 +1318,7 @@ struct TaskMirror {
 /// waiting. A mirror is recovery evidence and reading the library rewrites it; a failed
 /// control write stops the job, which then sends nothing new.
 #[derive(Clone, Default)]
-pub(crate) struct LibraryWrites {
+pub struct LibraryWrites {
     pending: Arc<Mutex<BTreeMap<PathBuf, LibraryWrite>>>,
     writing: Arc<Mutex<()>>,
     failure: Arc<Mutex<Option<WriteFailure>>>,
@@ -1346,7 +1343,7 @@ impl LibraryWrites {
     }
 
     /// Performs everything queued so far, waiting for any write already running.
-    pub(crate) fn drain(&self) {
+    pub fn drain(&self) {
         let _writing = course2md::runtime::lock_recover(&self.writing);
         let writes = std::mem::take(&mut *course2md::runtime::lock_recover(&self.pending));
         for (path, (bytes, mirror_of)) in writes {
@@ -1368,7 +1365,7 @@ impl LibraryWrites {
     }
 
     /// Writes a task's control file now, for a job about to start.
-    pub(crate) fn write_control_now(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+    pub fn write_control_now(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         let _writing = course2md::runtime::lock_recover(&self.writing);
         write_control(path, bytes)
     }
@@ -1512,7 +1509,7 @@ pub fn check_library(location: &LibraryLocation) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn create_library_marker(location: &LibraryLocation) -> Result<()> {
+pub fn create_library_marker(location: &LibraryLocation) -> Result<()> {
     use std::io::Write;
     ensure!(
         location.root.is_dir(),
@@ -1880,7 +1877,7 @@ pub fn forget_task_subtitles(task: &mut TaskRecord) {
 
 /// Task records a library's folder carries, with their paths moved to where the folder
 /// is now. Unreadable ones are named in the second list; their materials stay. Blocking.
-pub(crate) fn read_library_tasks(location: &LibraryLocation) -> (Vec<TaskRecord>, Vec<String>) {
+pub fn read_library_tasks(location: &LibraryLocation) -> (Vec<TaskRecord>, Vec<String>) {
     let mut tasks = Vec::new();
     let mut issues = Vec::new();
     let Ok(entries) = std::fs::read_dir(location.root.join(".course2md/work")) else {
@@ -2346,8 +2343,8 @@ impl Workspace {
     }
 
     /// `open_at` for tests, with the startup checks applied.
-    #[cfg(test)]
-    pub(crate) fn open_at_inline(
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn open_at_inline(
         path: PathBuf,
         root: PathBuf,
         options: ConversionOptions,
@@ -2357,8 +2354,8 @@ impl Workspace {
         Ok(workspace)
     }
 
-    #[cfg(test)]
-    pub(crate) fn reconcile_now(&mut self) {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn reconcile_now(&mut self) {
         if let Some(reconciliation) = self.reconciliation() {
             self.apply_reconciliation(reconciliation.run()).unwrap();
         }
@@ -2445,7 +2442,7 @@ impl Workspace {
             .queue(task.work_dir.join("control.json"), bytes, None);
     }
 
-    pub(crate) fn library_writes(&self) -> LibraryWrites {
+    pub fn library_writes(&self) -> LibraryWrites {
         self.library_writes.clone()
     }
 
@@ -2567,7 +2564,7 @@ impl Workspace {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn register_library(
         &mut self,
         root: PathBuf,
@@ -2587,12 +2584,8 @@ impl Workspace {
 }
 
 /// Apply a preview result the way the import page does, for tests.
-#[cfg(test)]
-pub(crate) fn accept_source(
-    draft: &mut Draft,
-    revision: u64,
-    source: crate::source::Source,
-) -> bool {
+#[cfg(any(test, feature = "test-support"))]
+pub fn accept_source(draft: &mut Draft, revision: u64, source: crate::source::Source) -> bool {
     if draft.revision != revision {
         return false;
     }

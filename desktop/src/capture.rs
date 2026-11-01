@@ -274,7 +274,12 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
             let _ = cx.update(|window, cx| {
                 match Keystroke::parse_with_os(key, cx.platform_info().os) {
                     Ok(keystroke) => {
-                        window.dispatch_keystroke(keystroke, cx);
+                        window.dispatch_keystroke(keystroke.clone(), cx);
+                        // Controls that act on release need the key to come up too.
+                        window.dispatch_event(
+                            PlatformInput::KeyUp(gpui::KeyUpEvent { keystroke }),
+                            cx,
+                        );
                     }
                     Err(error) => eprintln!("capture input {step}: {error}"),
                 }
@@ -310,8 +315,8 @@ impl Desktop {
         let (page, category) = page.split_once(':').unwrap_or((page, ""));
         // One dialog per shot: close whatever the previous capture opened.
         window.close_all_dialogs(cx);
-        self.name_dialog = None;
-        self.move_dialog = None;
+        self.library_ui.name_dialog = None;
+        self.library_ui.move_dialog = None;
         self.close_reader_image(cx);
         self.close_settings_dialogs(cx);
         self.close_storage_dialog();
@@ -367,6 +372,7 @@ impl Desktop {
                     }
                 }
                 let course = self
+                    .library
                     .courses
                     .iter()
                     .find(|course| title.is_empty() || course.title.contains(title))
@@ -426,7 +432,11 @@ impl Desktop {
                 .timer(Duration::from_millis(900))
                 .await;
             let _ = this.update_in(cx, |this, window, cx| {
-                let newest = this.courses.first().map(|course| (**course).clone());
+                let newest = this
+                    .library
+                    .courses
+                    .first()
+                    .map(|course| (**course).clone());
                 match name.as_str() {
                     "palette" => this.open_palette_picker(false, cx),
                     "storage" => this.capture_storage_operation(&detail, window, cx),
@@ -525,7 +535,7 @@ impl Desktop {
             self.desktop_settings.library_cards,
             self.desktop_settings.library_group_folders,
         ) = saved;
-        let root = self.library_root.clone();
+        let root = self.library.root.clone();
         self.select_library_scope(root, crate::FolderFilter::All, cx);
         self.inputs[&crate::Field::Search].update(cx, |input, cx| input.set_value("", window, cx));
         for state in states.split(',').filter(|state| !state.is_empty()) {
@@ -534,12 +544,12 @@ impl Desktop {
                 "list" => self.desktop_settings.library_cards = false,
                 "group" => self.desktop_settings.library_group_folders = true,
                 "unfiled" => {
-                    let root = self.library_root.clone();
+                    let root = self.library.root.clone();
                     self.select_library_scope(root, crate::FolderFilter::Unfiled, cx);
                 }
                 "folder" => {
-                    let root = self.library_root.clone();
-                    let found = self.library_indexes.get(&root).and_then(|library| {
+                    let root = self.library.root.clone();
+                    let found = self.library.indexes.get(&root).and_then(|library| {
                         library
                             .folders
                             .iter()

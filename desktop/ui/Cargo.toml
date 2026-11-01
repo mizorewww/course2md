@@ -1,0 +1,23 @@
+[package]
+name = "desktop-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The course2md desktop's shared compositions on gpui-kit-material, without page state"
+publish = false
+
+[dependencies]
+c2m-artifact = { path = "../../crates/c2m-artifact" }
+c2m-i18n = { path = "../../crates/c2m-i18n" }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86", features = ["gpui-fast"] }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86" }
+gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86", default-features = false, features = ["serde", "gpui-fast", "buttons", "containment", "dialogs", "feedback", "inputs", "menus", "progress", "selection", "window-chrome"] }
+anyhow = "1"
+
+[build-dependencies]
+# The revision gpui-kit-material pins. Its fonts stay in the build script: build.rs
+# renders what assets/symbols.txt lists, and the app keeps `embedded-symbols` off.
+gpui-material-symbols = { git = "https://github.com/mizorewww/gpui-material-symbols", rev = "593aa15a46076f3e2870c23c0e4fd79f94f105bd", default-features = false, features = ["embed-assets"] }
+
+[dev-dependencies]
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86", features = ["gpui-fast", "test-support"] }

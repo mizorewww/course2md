@@ -5,7 +5,7 @@
 //! One document holds a whole note, so selection, find and scrolling cross its
 //! paragraphs inside one virtualized list. Copying yields its source: a formula
 //! with its delimiters, a list item as `- item`, paragraphs a blank line apart.
-use crate::math::{self, Formula, Piece};
+use crate::math::{self, Formula, Piece, piece_sources};
 use gpui::{prelude::*, *};
 use gpui_base::text::markdown_ast::Node;
 use gpui_base::{
@@ -433,7 +433,7 @@ impl MarkdownPlugin for SourceLink {
     ) -> Option<InlineElement> {
         let url = node.data::<String>()?.clone();
         let at = node.source_range().map_or(0, |range| range.start);
-        let label = course2md::tr!("从此处观看");
+        let label = c2m_i18n::tr!("从此处观看");
         // Centred on the text beside it: a Latin x-height above the baseline.
         let middle =
             CONTROL_HEIGHT.to_pixels(context.rem_size()) * 0.4 + context.font_size() * 0.35;
@@ -485,7 +485,7 @@ pub fn note_style(cx: &App) -> TextViewStyle {
             StyleRefinement::default()
                 .text_size(scale.font_size)
                 .line_height(scale.line_height)
-                .font_weight(FontWeight::MEDIUM)
+                .font_weight(FontWeight(scale.font_weight as f32))
         })
 }
 
@@ -517,47 +517,9 @@ pub fn marked_markdown(text: &str, marks: &[Range<usize>], highlight: Rgba) -> S
     out
 }
 
-/// What a selection of a note copies: its source, without the figures and the blank
-/// lines they leave.
-pub fn copied_text(selected: &str) -> String {
-    let mut text = crate::notes::without_image_references(selected);
-    while text.contains("\n\n\n") {
-        text = text.replace("\n\n\n", "\n\n");
-    }
-    text.trim().to_owned()
-}
-
-/// The byte ranges `pieces` cover in `text`: prose as written, and a formula
-/// together with its delimiters (and any space inside them).
-pub fn piece_sources(text: &str) -> Vec<(Range<usize>, Piece<'_>)> {
-    let offset = |slice: &str| slice.as_ptr() as usize - text.as_ptr() as usize;
-    let mut position = 0;
-    math::pieces(text)
-        .into_iter()
-        .map(|piece| {
-            let end = match &piece {
-                Piece::Text(prose) => offset(prose) + prose.len(),
-                // `pieces` trims the LaTeX inside its delimiters; the source
-                // runs on through that space and the closing delimiter.
-                Piece::Math { latex, display } => {
-                    let inner_end = offset(latex) + latex.len();
-                    let rest = &text[inner_end..];
-                    let space = rest.len() - rest.trim_start().len();
-                    (inner_end + space + if *display { 2 } else { 1 }).min(text.len())
-                }
-            };
-            let source = position..end;
-            position = end;
-            (source, piece)
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        blocks, copied_text, formula_of, inline_markdown, markdown, marked_markdown, piece_sources,
-    };
+    use super::{blocks, formula_of, inline_markdown, markdown, marked_markdown, piece_sources};
 
     fn source_of(text: &str) -> Vec<&str> {
         piece_sources(text)
@@ -624,14 +586,6 @@ mod tests {
         );
         // A formula holding a dollar cannot use one as its fence.
         assert_eq!(blocks("设 $a\\$b$ 为"), ["设 $$a\\$b$$ 为"]);
-    }
-
-    #[test]
-    fn a_copy_leaves_figures_behind() {
-        assert_eq!(
-            copied_text("一段\n\n![](figure:5)\n\n### 01:00\n\n![](figure:9)"),
-            "一段\n\n### 01:00"
-        );
     }
 
     #[test]

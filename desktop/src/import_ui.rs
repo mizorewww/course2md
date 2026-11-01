@@ -7,6 +7,7 @@ use crate::{
 use anyhow::Context as _;
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
+use desktop_core::import::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{
@@ -17,10 +18,7 @@ use gpui_kit_material::{
 };
 use std::{
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, atomic::AtomicBool},
 };
 
 /// The workbench's one column.
@@ -86,30 +84,10 @@ pub(crate) fn video_title(id: String, title: impl Into<SharedString>) -> Statefu
         .min_w_0()
         .text_size(role.font_size)
         .line_height(role.line_height)
-        .font_weight(FontWeight::MEDIUM)
+        .font_weight(FontWeight(role.font_weight as f32))
         .whitespace_normal()
         .text_ellipsis()
         .line_clamp(2)
-}
-
-/// Where a video comes from and who made it.
-pub(crate) fn source_metadata(source: &source::Source) -> String {
-    let platform = if !source.online {
-        course2md::tr!("本地视频").to_owned()
-    } else {
-        match crate::views::video_site_name(&source.input) {
-            Some(name) => name.to_owned(),
-            None => url::Url::parse(&source.input)
-                .ok()
-                .and_then(|url| url.host_str().map(str::to_owned))
-                .unwrap_or_default(),
-        }
-    };
-    [platform, source.author.clone()]
-        .into_iter()
-        .filter(|part| !part.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join(" · ")
 }
 
 /// Text that names one thing beside a control.
@@ -155,382 +133,6 @@ fn readable_first_line(message: &str) -> Option<&str> {
     (!first.contains("WARNING:") && !first.contains("ERROR:")).then_some(first)
 }
 
-/// One AI processing switch in the processing options.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ConversionAiOption {
-    Proofread,
-    Vision,
-    Summary,
-}
-
-pub(crate) fn conversion_ai_option_label(option: ConversionAiOption) -> &'static str {
-    match option {
-        ConversionAiOption::Proofread => course2md::tr!("校对文字和标点"),
-        ConversionAiOption::Vision => course2md::tr!("校对时附带对应截图"),
-        ConversionAiOption::Summary => course2md::tr!("在开头生成摘要"),
-    }
-}
-
-pub(crate) fn conversion_ai_option_enabled(
-    options: &ConversionOptions,
-    option: ConversionAiOption,
-) -> bool {
-    match option {
-        ConversionAiOption::Proofread => options.llm,
-        ConversionAiOption::Vision => options.vision,
-        ConversionAiOption::Summary => options.summarize,
-    }
-}
-
-pub(crate) fn apply_conversion_ai_option(
-    options: &mut ConversionOptions,
-    option: ConversionAiOption,
-    enabled: bool,
-) {
-    match option {
-        ConversionAiOption::Proofread => options.llm = enabled,
-        ConversionAiOption::Vision => options.vision = enabled,
-        ConversionAiOption::Summary => options.summarize = enabled,
-    }
-}
-
-fn text_source_choices() -> [(TranscriptSource, &'static str); 3] {
-    [
-        (TranscriptSource::Auto, course2md::tr!("自动")),
-        (TranscriptSource::Subtitle, course2md::tr!("仅字幕")),
-        (TranscriptSource::Asr, course2md::tr!("语音识别")),
-    ]
-}
-
-fn text_source_id(mode: TranscriptSource) -> &'static str {
-    match mode {
-        TranscriptSource::Auto => "auto",
-        TranscriptSource::Subtitle => "subtitle",
-        TranscriptSource::Asr => "asr",
-    }
-}
-
-fn uses_speech(source: &source::Source, source_mode: TranscriptSource) -> bool {
-    source_mode == TranscriptSource::Asr
-        || (source_mode == TranscriptSource::Auto
-            && source.selected_subtitle.is_none()
-            && source.subtitle_request.is_none()
-            && source.subtitle_read_error.is_none()
-            && matches!(
-                source.subtitles,
-                SubtitleEvidence::NoneFound
-                    | SubtitleEvidence::Unsupported { .. }
-                    | SubtitleEvidence::Failed { .. }
-            ))
-}
-
-fn automatic_subtitle_fallback(
-    source: &mut source::Source,
-    source_mode: TranscriptSource,
-    error: Option<&str>,
-) -> bool {
-    if source_mode != TranscriptSource::Auto
-        || source.selected_subtitle.is_some()
-        || matches!(
-            source.subtitle_read_error,
-            Some(SubtitleReadError::Cancelled)
-        )
-    {
-        return false;
-    }
-    let failure = error.map(str::to_owned).or_else(|| {
-        source
-            .subtitle_read_error
-            .as_ref()
-            .map(ToString::to_string)
-            .or_else(|| match &source.subtitles {
-                SubtitleEvidence::Failed { message } => Some(message.clone()),
-                _ => None,
-            })
-    });
-    let Some(message) = failure else {
-        return false;
-    };
-    source.subtitles = SubtitleEvidence::Failed { message };
-    source.subtitle_request = None;
-    source.subtitle_read_error = None;
-    true
-}
-
-fn subtitle_needs_confirmation(source: &source::Source, source_mode: TranscriptSource) -> bool {
-    !uses_speech(source, source_mode)
-        && (source.selected_subtitle.is_none()
-            || source.subtitle_request.is_some()
-            || source.subtitle_read_error.is_some())
-}
-
-/// Follow only this input's submitted recovery chain. A matching URL or the
-/// selected queue item alone cannot establish that a task belongs to this form.
-fn submitted_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    if draft.input != input || input.trim().is_empty() {
-        return None;
-    }
-    let find = |id: &str| {
-        let mut matches = tasks.iter().filter(|task| task.id == id);
-        let task = matches.next()?;
-        matches.next().is_none().then_some(task)
-    };
-    let mut task = find(draft.submitted_task.as_deref()?)?;
-    let source_id = &task.plan.source_id;
-    let online = task.plan.source.online;
-    if source_id.is_empty()
-        || task.plan.source.input != input
-        || online != draft.online
-        || draft
-            .source
-            .as_ref()
-            .is_some_and(|source| source.identity != *source_id || source.online != online)
-    {
-        return None;
-    }
-    let mut visited = std::collections::BTreeSet::new();
-    loop {
-        if !visited.insert(task.id.as_str())
-            || task.plan.source_id != *source_id
-            || task.plan.source.identity != *source_id
-            || task.plan.source.online != online
-        {
-            return None;
-        }
-        let Some(next) = task.handled_by.as_deref() else {
-            return Some(task);
-        };
-        let next = find(next)?;
-        if next.parent.as_deref() != Some(task.id.as_str()) {
-            return None;
-        }
-        task = next;
-    }
-}
-
-/// The submitted task still owns this input until it finishes. Its plan
-/// copied the options at submission, so the form cannot change them.
-fn locked_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    submitted_input_task(draft, tasks, input).filter(|task| !task.state.finished())
-}
-
-fn completed_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    submitted_input_task(draft, tasks, input).filter(|task| {
-        matches!(
-            task.state,
-            workspace::TaskState::Complete | workspace::TaskState::Partial
-        ) && task.artifact.is_some()
-    })
-}
-
-/// A saved result is history when entering the workbench. A running or paused
-/// recovery, an uncertain request, and any changes after submission stay in place.
-fn retired_input_task<'a>(
-    draft: &workspace::Draft,
-    tasks: &'a [workspace::TaskRecord],
-    input: &str,
-) -> Option<&'a workspace::TaskRecord> {
-    let task = submitted_input_task(draft, tasks, input)?;
-    if !task.state.finished()
-        || task.has_uncertain()
-        || (task.state != workspace::TaskState::Cancelled && task.artifact.is_none())
-    {
-        return None;
-    }
-    let submitted = tasks
-        .iter()
-        .find(|task| Some(task.id.as_str()) == draft.submitted_task.as_deref())?;
-    (draft.title == submitted.plan.title
-        && draft.options.as_planned() == submitted.plan.options()
-        && draft.library_id == submitted.plan.library_id
-        && draft.folder == submitted.plan.folder
-        && draft.subtitle == submitted.plan.subtitle
-        && draft
-            .asr_service
-            .as_ref()
-            .is_none_or(|id| Some(id) == submitted.plan.asr_service.as_ref())
-        && draft
-            .ai_service
-            .as_ref()
-            .is_none_or(|id| Some(id) == submitted.plan.ai_service.as_ref()))
-    .then_some(task)
-}
-
-/// A live navigation intent is separate from the saved task. Leaving its
-/// originating input or note ends following without cancelling the work.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ConversionFollow {
-    Preparing(u64),
-    Task {
-        id: String,
-        source_revision: u64,
-    },
-    ReaderTask {
-        id: String,
-        base_version: PathBuf,
-        reader_revision: u64,
-    },
-}
-
-impl ConversionFollow {
-    /// Opening a viewer owns the old version until the person closes it. Do not
-    /// restore this intent afterwards, even if an in-flight read is still pending.
-    pub(crate) fn interrupt_for_reader_viewer(follow: &mut Option<Self>) {
-        if matches!(follow, Some(Self::ReaderTask { .. })) {
-            *follow = None;
-        }
-    }
-
-    pub(crate) fn submitted(self, revision: u64, id: String) -> Option<Self> {
-        matches!(self, Self::Preparing(current) if current == revision).then_some(Self::Task {
-            id,
-            source_revision: revision,
-        })
-    }
-
-    pub(crate) fn follows(&self, id: &str, revision: u64) -> bool {
-        matches!(self, Self::Task { id: followed, source_revision }
-            if followed == id && *source_revision == revision)
-    }
-
-    pub(crate) fn reader_reprocess(
-        task: &workspace::TaskRecord,
-        version: &std::path::Path,
-        revision: u64,
-    ) -> Option<Self> {
-        let course2md::execution::Operation::Reprocess {
-            base_version_dir,
-            components,
-            ..
-        } = &task.plan.operation
-        else {
-            return None;
-        };
-        (base_version_dir == version && !components.is_empty() && !task.exports_only()).then(|| {
-            Self::ReaderTask {
-                id: task.id.clone(),
-                base_version: base_version_dir.clone(),
-                reader_revision: revision,
-            }
-        })
-    }
-
-    /// Check both before starting an automatic read and after its asynchronous
-    /// load. The latter also retains the caller's existing read-generation guard.
-    pub(crate) fn context_is_current(
-        &self,
-        page: Page,
-        source_revision: u64,
-        reader_revision: u64,
-        version: Option<&std::path::Path>,
-    ) -> bool {
-        match self {
-            Self::Preparing(_) => false,
-            Self::Task {
-                source_revision: expected,
-                ..
-            } => page == Page::New && *expected == source_revision,
-            Self::ReaderTask {
-                base_version,
-                reader_revision: expected,
-                ..
-            } => {
-                page == Page::Result
-                    && *expected == reader_revision
-                    && version == Some(base_version.as_path())
-            }
-        }
-    }
-
-    pub(crate) fn completed_reader_task(
-        &self,
-        task: &workspace::TaskRecord,
-        page: Page,
-        reader_revision: u64,
-        version: Option<&std::path::Path>,
-    ) -> bool {
-        let Self::ReaderTask {
-            id, base_version, ..
-        } = self
-        else {
-            return false;
-        };
-        task.id == *id
-            && self.context_is_current(page, 0, reader_revision, version)
-            && Self::reader_reprocess(task, base_version, reader_revision).as_ref() == Some(self)
-            && matches!(
-                task.state,
-                workspace::TaskState::Complete | workspace::TaskState::Partial
-            )
-            && task
-                .artifact
-                .as_ref()
-                .is_some_and(|path| path != base_version)
-    }
-
-    pub(crate) fn completed_task<'a>(
-        &self,
-        on_workbench: bool,
-        revision: u64,
-        draft: &workspace::Draft,
-        tasks: &'a [workspace::TaskRecord],
-        input: &str,
-    ) -> Option<&'a workspace::TaskRecord> {
-        let task = completed_input_task(draft, tasks, input)?;
-        (on_workbench && self.follows(&task.id, revision)).then_some(task)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ConversionGate {
-    Wait,
-    Stop,
-    Submit,
-}
-
-/// Normal asynchronous stages retain the first Start intent. Only an abandoned
-/// source or an unresolved material choice ends this automatic continuation.
-/// What a pending Start depends on.
-#[derive(Clone, Copy)]
-struct GateInputs {
-    requested_revision: Option<u64>,
-    current_revision: u64,
-    reading: bool,
-    has_source: bool,
-    needs_text_choice: bool,
-    environment_ready: bool,
-    library_ready: bool,
-    existing_note: bool,
-}
-
-fn conversion_gate(gate: GateInputs) -> ConversionGate {
-    if gate.requested_revision != Some(gate.current_revision) {
-        ConversionGate::Stop
-    } else if gate.reading {
-        ConversionGate::Wait
-    } else if !gate.has_source {
-        ConversionGate::Stop
-    } else if gate.needs_text_choice || !gate.environment_ready || !gate.library_ready {
-        ConversionGate::Wait
-    } else if gate.existing_note {
-        ConversionGate::Stop
-    } else {
-        ConversionGate::Submit
-    }
-}
-
 /// What a subtitle read belongs to. Its late result counts only while all of this holds.
 struct SubtitleRead {
     generation: u64,
@@ -542,20 +144,19 @@ struct SubtitleRead {
 impl Desktop {
     /// Explicit confirmation of an already visible preview owns submission.
     pub fn start_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.reading && self.page == Page::New {
-            self.read_generation = self.read_generation.wrapping_add(1);
-            self.reading = false;
+        if self.opened.reading && self.page == Page::New {
+            self.opened.stop_reading();
         }
         let input = self.value(Field::Source, cx);
         if self.draft().is_some_and(|draft| draft.input != input) {
             if !self.prepare_next_import(&input, window, cx) {
                 return;
             }
-            self.following_conversion = None;
+            self.import.following_conversion = None;
             self.invalidate_source();
         }
         if input.is_empty() {
-            self.source_validation = Some(
+            self.import.source_validation = Some(
                 if self.online() {
                     course2md::tr!("先粘贴视频链接")
                 } else {
@@ -571,18 +172,18 @@ impl Desktop {
         }
         // Preview is a separate user step. Never queue an unseen source,
         // including callers returning from login or selecting a local file.
-        if self.source_preview.is_none() {
+        if self.import.source_preview.is_none() {
             self.inspect_source(window, cx);
             return;
         }
-        self.pending_conversion = Some(self.preview_generation);
-        self.following_conversion = (self.page == Page::New)
-            .then_some(ConversionFollow::Preparing(self.preview_generation));
+        self.import.pending_conversion = Some(self.import.preview_generation);
+        self.import.following_conversion = (self.page == Page::New)
+            .then_some(ConversionFollow::Preparing(self.import.preview_generation));
         self.advance_conversion(window, cx);
     }
 
     pub fn advance_conversion_when_ready(&mut self, cx: &mut Context<Self>) {
-        if self.pending_conversion.is_none() {
+        if self.import.pending_conversion.is_none() {
             return;
         }
         let Some(handle) = cx.windows().first().copied() else {
@@ -597,35 +198,39 @@ impl Desktop {
     }
 
     pub fn advance_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(generation) = self.pending_conversion else {
+        let Some(generation) = self.import.pending_conversion else {
             return;
         };
-        let reading = self.preview_cancel.is_some() || self.subtitle_loading;
+        let reading = self.import.reading();
         let source_mode = self.task_options().source_mode;
-        if generation == self.preview_generation
+        if generation == self.import.preview_generation
             && !reading
-            && let Some(source) = &mut self.source_preview
-            && automatic_subtitle_fallback(source, source_mode, self.subtitle_error.as_deref())
+            && let Some(source) = &mut self.import.source_preview
+            && automatic_subtitle_fallback(
+                source,
+                source_mode,
+                self.import.subtitle_error.as_deref(),
+            )
         {
-            self.subtitle_error = None;
+            self.import.subtitle_error = None;
             if !self.save_current_draft(cx) {
-                self.pending_conversion = None;
+                self.import.pending_conversion = None;
                 return;
             }
         }
         match conversion_gate(GateInputs {
-            requested_revision: self.pending_conversion,
-            current_revision: self.preview_generation,
+            requested_revision: self.import.pending_conversion,
+            current_revision: self.import.preview_generation,
             reading,
-            has_source: self.source_preview.is_some(),
+            has_source: self.import.source_preview.is_some(),
             needs_text_choice: self.subtitle_attention_required(),
             environment_ready: self.environment.is_some(),
-            library_ready: !self.loading,
+            library_ready: !self.library.loading,
             existing_note: self.existing_source_note().is_some(),
         }) {
             ConversionGate::Wait => cx.notify(),
             ConversionGate::Stop => {
-                self.pending_conversion = None;
+                self.import.pending_conversion = None;
                 cx.notify();
             }
             ConversionGate::Submit => self.enqueue_current(window, cx),
@@ -641,9 +246,10 @@ impl Desktop {
     }
 
     fn subtitle_read_is_current(&self, read: &SubtitleRead) -> bool {
-        self.subtitle_generation == read.generation
-            && self.preview_generation == read.source_generation
+        self.import.subtitle_generation == read.generation
+            && self.import.preview_generation == read.source_generation
             && self
+                .import
                 .source_preview
                 .as_ref()
                 .is_some_and(|source| source.identity == read.identity)
@@ -664,23 +270,23 @@ impl Desktop {
         finish: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let Some(source) = self.source_preview.clone() else {
+        let Some(source) = self.import.source_preview.clone() else {
             return;
         };
         let generation = self.stop_subtitle_read();
         let cancel = Arc::new(AtomicBool::new(false));
-        self.subtitle_cancel = Some(cancel.clone());
-        self.subtitle_loading = true;
-        self.subtitle_error = None;
+        self.import.subtitle_cancel = Some(cancel.clone());
+        self.import.subtitle_loading = true;
+        self.import.subtitle_error = None;
         mark(self, cx);
         if !self.save_current_draft(cx) {
-            self.subtitle_loading = false;
-            self.subtitle_cancel = None;
+            self.import.subtitle_loading = false;
+            self.import.subtitle_cancel = None;
             return;
         }
         let read = SubtitleRead {
             generation,
-            source_generation: self.preview_generation,
+            source_generation: self.import.preview_generation,
             identity: source.identity.clone(),
             input: self
                 .workspace
@@ -688,17 +294,17 @@ impl Desktop {
                 .and_then(|workspace| workspace.state.draft())
                 .map(|draft| (draft.id.clone(), draft.revision)),
         };
-        self.preview_workers += 1;
+        self.import.preview_workers += 1;
         let task = crate::spawn_blocking_io(move || work(&source, cancel));
         cx.spawn(async move |this, cx| {
             let result = task.recv().await.unwrap_or_else(|_| lost());
             let _ = this.update(cx, |this, cx| {
-                this.preview_workers = this.preview_workers.saturating_sub(1);
+                this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
                 if !this.subtitle_read_is_current(&read) {
                     return;
                 }
-                this.subtitle_loading = false;
-                this.subtitle_cancel = None;
+                this.import.subtitle_loading = false;
+                this.import.subtitle_cancel = None;
                 finish(this, result, cx);
                 this.advance_conversion_when_ready(cx);
                 cx.notify();
@@ -722,7 +328,7 @@ impl Desktop {
                     // caption read must never silently keep the previous ASR choice.
                     this.update_task_options(|o| o.source_mode = TranscriptSource::Subtitle, cx);
                 }
-                if let Some(source) = &mut this.source_preview {
+                if let Some(source) = &mut this.import.source_preview {
                     source.subtitle_request = Some(requested);
                     source.subtitle_read_error = None;
                 }
@@ -736,7 +342,7 @@ impl Desktop {
             move |this, result, cx| {
                 match result {
                     Ok(subtitle) => {
-                        if let Some(source) = &mut this.source_preview {
+                        if let Some(source) = &mut this.import.source_preview {
                             source.selected_subtitle = Some(subtitle);
                             source.subtitle_request = None;
                             source.subtitle_read_error = None;
@@ -749,12 +355,12 @@ impl Desktop {
                         }
                     }
                     Err(SubtitleReadError::Cancelled) => {
-                        this.pending_conversion = None;
+                        this.import.pending_conversion = None;
                         return;
                     }
                     Err(error) => {
-                        this.subtitle_error = Some(error.to_string());
-                        if let Some(source) = &mut this.source_preview {
+                        this.import.subtitle_error = Some(error.to_string());
+                        if let Some(source) = &mut this.import.source_preview {
                             source.subtitle_read_error = Some(error);
                         }
                     }
@@ -766,10 +372,10 @@ impl Desktop {
     }
 
     fn choose_attached_subtitle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(source) = self.source_preview.clone() else {
+        let Some(source) = self.import.source_preview.clone() else {
             return;
         };
-        let source_generation = self.preview_generation;
+        let source_generation = self.import.preview_generation;
         let prompt = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -779,8 +385,9 @@ impl Desktop {
         cx.spawn_in(window, async move |this, cx| {
             let result = prompt.await;
             let _ = this.update_in(cx, |this, _, cx| {
-                if this.preview_generation != source_generation
+                if this.import.preview_generation != source_generation
                     || !this
+                        .import
                         .source_preview
                         .as_ref()
                         .is_some_and(|current| current.identity == source.identity)
@@ -795,12 +402,12 @@ impl Desktop {
                     }
                     Ok(Ok(None)) => {}
                     Ok(Err(error)) => {
-                        this.subtitle_error = Some(course2md::tr!(
+                        this.import.subtitle_error = Some(course2md::tr!(
                             "无法打开字幕选择器：{}",
                             format!("{error:#}")
                         ))
                     }
-                    Err(error) => this.subtitle_error = Some(error.to_string()),
+                    Err(error) => this.import.subtitle_error = Some(error.to_string()),
                 }
                 cx.notify();
             });
@@ -810,11 +417,11 @@ impl Desktop {
 
     fn attach_subtitle(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if !course2md::subtitle::is_subtitle_file(&path) {
-            self.subtitle_error = Some(course2md::tr!("请选择 SRT 或 VTT 字幕文件").into());
+            self.import.subtitle_error = Some(course2md::tr!("请选择 SRT 或 VTT 字幕文件").into());
             return;
         }
         let track = course2md::subtitle::file_track(path, None);
-        if let Some(source) = &mut self.source_preview {
+        if let Some(source) = &mut self.import.source_preview {
             match &mut source.subtitles {
                 SubtitleEvidence::Found { tracks, .. } => {
                     if !tracks.iter().any(|candidate| candidate.id == track.id) {
@@ -835,7 +442,7 @@ impl Desktop {
     fn retry_subtitles(&mut self, cx: &mut Context<Self>) {
         self.read_subtitles(
             |this, _| {
-                if let Some(source) = &mut this.source_preview {
+                if let Some(source) = &mut this.import.source_preview {
                     source.subtitle_read_error = Some(SubtitleReadError::Failed {
                         message: course2md::tr!("字幕重新读取未完成").into(),
                     });
@@ -856,9 +463,10 @@ impl Desktop {
         let mut evidence = match result {
             Ok(evidence) => evidence,
             Err(error) => {
-                self.subtitle_error = Some(format!("{error:#}"));
-                if let Some(source) = &mut self.source_preview {
+                self.import.subtitle_error = Some(format!("{error:#}"));
+                if let Some(source) = &mut self.import.source_preview {
                     source.subtitle_read_error = self
+                        .import
                         .subtitle_error
                         .clone()
                         .map(|message| SubtitleReadError::Failed { message });
@@ -869,6 +477,7 @@ impl Desktop {
         };
         if let SubtitleEvidence::Found { tracks, .. } = &mut evidence {
             let original = self
+                .import
                 .source_preview
                 .as_ref()
                 .and_then(|source| source.original_language.as_deref());
@@ -880,6 +489,7 @@ impl Desktop {
             );
         }
         let old_id = self
+            .import
             .source_preview
             .as_ref()
             .and_then(|source| source.selected_subtitle.as_ref())
@@ -890,11 +500,12 @@ impl Desktop {
         }
         .cloned();
         if old_id.is_some() && track.is_none() {
-            self.subtitle_error = Some(course2md::tr!("原字幕无法重新读取").into());
+            self.import.subtitle_error = Some(course2md::tr!("原字幕无法重新读取").into());
         }
-        if let Some(source) = &mut self.source_preview {
+        if let Some(source) = &mut self.import.source_preview {
             source.subtitles = evidence;
             source.subtitle_read_error = self
+                .import
                 .subtitle_error
                 .clone()
                 .map(|message| SubtitleReadError::Failed { message });
@@ -907,18 +518,13 @@ impl Desktop {
 
     /// Cancel any subtitle read in flight and ignore its late result.
     fn stop_subtitle_read(&mut self) -> u64 {
-        if let Some(cancel) = self.subtitle_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
-        self.subtitle_loading = false;
-        self.subtitle_generation
+        self.import.stop_subtitle_read()
     }
 
     /// Stop reading subtitles and drop the unfinished request.
     fn abort_subtitle_read(&mut self) {
         self.stop_subtitle_read();
-        if let Some(source) = &mut self.source_preview {
+        if let Some(source) = &mut self.import.source_preview {
             source.subtitle_request = None;
             source.subtitle_read_error = None;
         }
@@ -927,7 +533,7 @@ impl Desktop {
     /// The person settled the text source: drop what was in flight and go on.
     fn settle_text_source(&mut self, mode: TranscriptSource, cx: &mut Context<Self>) {
         self.abort_subtitle_read();
-        self.subtitle_error = None;
+        self.import.subtitle_error = None;
         self.update_task_options(|o| o.source_mode = mode, cx);
         self.advance_conversion_when_ready(cx);
         cx.notify();
@@ -939,6 +545,7 @@ impl Desktop {
 
     fn use_confirmed_subtitle(&mut self, cx: &mut Context<Self>) {
         if self
+            .import
             .source_preview
             .as_ref()
             .is_some_and(|source| source.selected_subtitle.is_some())
@@ -971,8 +578,9 @@ impl Desktop {
             [] => {}
             _ => {
                 self.invalidate_source();
-                self.source_collection_title = Some(course2md::tr!("选择要处理的视频").into());
-                self.source_candidates = files
+                self.import.source_collection_title =
+                    Some(course2md::tr!("选择要处理的视频").into());
+                self.import.source_candidates = files
                     .iter()
                     .map(|path| source::SourceCandidate {
                         input: path.display().to_string(),
@@ -992,9 +600,9 @@ impl Desktop {
     }
 
     pub(super) fn subtitle_attention_required(&self) -> bool {
-        self.subtitle_loading
-            || self.subtitle_error.is_some()
-            || self.source_preview.as_ref().is_some_and(|source| {
+        self.import.subtitle_loading
+            || self.import.subtitle_error.is_some()
+            || self.import.source_preview.as_ref().is_some_and(|source| {
                 subtitle_needs_confirmation(source, self.task_options().source_mode)
             })
     }
@@ -1049,15 +657,16 @@ impl Desktop {
                 .children(local);
         }
         let validation = self
+            .import
             .source_preview
             .is_none()
-            .then(|| self.source_validation.clone())
+            .then(|| self.import.source_validation.clone())
             .flatten();
-        let failed = validation.is_some() || self.preview_error.is_some();
+        let failed = validation.is_some() || self.import.preview_error.is_some();
         // The start action owns the submit focus once it is on screen.
-        let start_shown = self.source_preview.is_some() && self.can_start_input(cx);
+        let start_shown = self.import.source_preview.is_some() && self.can_start_input(cx);
         let preview_label = course2md::tr!("预览视频");
-        let preview_disabled = self.preview_cancel.is_some()
+        let preview_disabled = self.import.preview_cancel.is_some()
             || self.value(Field::Source, cx).is_empty()
             || self.owning_task(cx).is_some();
         let preview_click = cx.listener(|this, _, window, cx| this.inspect_source(window, cx));
@@ -1167,7 +776,7 @@ impl Desktop {
                     )),
             );
         }
-        if self.source_preview.is_some() {
+        if self.import.source_preview.is_some() {
             return None;
         }
         let filename = PathBuf::from(&input)
@@ -1208,14 +817,14 @@ impl Desktop {
                                     .icon(symbols::visibility())
                                     .child(course2md::tr!("预览视频"))
                                     .track_focus(&self.import_submit_focus)
-                                    .disabled(self.preview_cancel.is_some())
+                                    .disabled(self.import.preview_cancel.is_some())
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.inspect_source(window, cx)
                                     })),
                             )
                         }),
                 )
-                .when_some(self.source_validation.clone(), |view, error| {
+                .when_some(self.import.source_validation.clone(), |view, error| {
                     view.child(error_text("import-preview-error", error).whitespace_normal())
                 }),
         )
@@ -1307,9 +916,12 @@ impl Desktop {
     /// Candidates that can be checked for a batch: identified, without a note yet.
     fn selectable_candidates(&self) -> impl Iterator<Item = &source::SourceCandidate> {
         let batch = self.online();
-        self.source_candidates.iter().filter(move |candidate| {
-            batch && candidate.identity.is_some() && !self.candidate_has_note(candidate)
-        })
+        self.import
+            .source_candidates
+            .iter()
+            .filter(move |candidate| {
+                batch && candidate.identity.is_some() && !self.candidate_has_note(candidate)
+            })
     }
 
     /// The candidate list. Online lists queue several at once, but only candidates
@@ -1320,24 +932,27 @@ impl Desktop {
         let selectable = self.selectable_candidates().count();
         let selectable_selected = self
             .selectable_candidates()
-            .filter(|candidate| self.selected_candidates.contains(&candidate.input))
+            .filter(|candidate| self.import.selected_candidates.contains(&candidate.input))
             .count();
         // A checked candidate that already has a note gets a new version; say so beside the action.
         let noted_selected = self
+            .import
             .source_candidates
             .iter()
             .filter(|candidate| {
                 self.candidate_has_note(candidate)
-                    && self.selected_candidates.contains(&candidate.input)
+                    && self.import.selected_candidates.contains(&candidate.input)
             })
             .count();
         let any_batchable = self
+            .import
             .source_candidates
             .iter()
             .any(|candidate| candidate.identity.is_some());
-        let selected_count = self.selected_candidates.len();
+        let selected_count = self.import.selected_candidates.len();
         let all_selected = selectable > 0 && selectable_selected == selectable;
         let rows = self
+            .import
             .source_candidates
             .iter()
             .enumerate()
@@ -1377,13 +992,13 @@ impl Desktop {
                                 })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if all_selected {
-                                        this.selected_candidates.clear();
+                                        this.import.selected_candidates.clear();
                                     } else {
                                         let inputs: Vec<String> = this
                                             .selectable_candidates()
                                             .map(|candidate| candidate.input.clone())
                                             .collect();
-                                        this.selected_candidates.extend(inputs);
+                                        this.import.selected_candidates.extend(inputs);
                                     }
                                     cx.notify();
                                 })),
@@ -1411,7 +1026,8 @@ impl Desktop {
                                 } else {
                                     course2md::tr!("整理选中的视频").to_owned()
                                 })
-                                .disabled(selected_count == 0)
+                                // The component check decides whether these can run at all.
+                                .disabled(selected_count == 0 || self.environment.is_none())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.enqueue_selected_candidates(cx)
                                 })),
@@ -1439,7 +1055,11 @@ impl Desktop {
             .duration
             .filter(|value| *value > 0. && value.is_finite() && !untitled)
             .map(course2md::render::fmt_ts);
-        let cover = self.source_candidate_covers.get(&candidate.input).cloned();
+        let cover = self
+            .import
+            .source_candidate_covers
+            .get(&candidate.input)
+            .cloned();
         let thumbnail = match cover {
             Some(cover) => img(cover)
                 .size_full()
@@ -1455,14 +1075,14 @@ impl Desktop {
             .leading(ListLeading::Video(Some(thumbnail)))
             .supporting(duration.unwrap_or_else(|| candidate.input.clone()));
         if batch && candidate.identity.is_some() {
-            let selected = self.selected_candidates.contains(&input);
+            let selected = self.import.selected_candidates.contains(&input);
             row.when(self.candidate_has_note(candidate), |row| {
                 row.trailing_text(course2md::tr!("已有笔记"))
             })
             .trailing(ListTrailing::Checkbox(selected))
             .on_click(cx.listener(move |this, _, _, cx| {
-                if !this.selected_candidates.remove(&input) {
-                    this.selected_candidates.insert(input.clone());
+                if !this.import.selected_candidates.remove(&input) {
+                    this.import.selected_candidates.insert(input.clone());
                 }
                 cx.notify();
             }))
@@ -1476,8 +1096,8 @@ impl Desktop {
 
     /// A source failure beside the field, with retry, login and details still reachable.
     fn source_preview_error(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let error = self.preview_error.as_ref()?;
-        if !self.source_candidates.is_empty() {
+        let error = self.import.preview_error.as_ref()?;
+        if !self.import.source_candidates.is_empty() {
             return Some(supporting("import-source-error", error.clone()).into_any_element());
         }
         let needs_login = source::legacy_login_failure_from_text(error);
@@ -1487,7 +1107,7 @@ impl Desktop {
             readable_first_line(error)
                 .unwrap_or(course2md::tr!("暂时无法读取这个视频，请检查链接或稍后重试"))
         };
-        let open = self.show_preview_details;
+        let open = self.import.show_preview_details;
         Some(motion::state_enter(
             "source-error",
             v_flex()
@@ -1538,7 +1158,8 @@ impl Desktop {
                             )
                             .child(details_toggle("source-error-details", open).on_click(
                                 cx.listener(|this, _, _, cx| {
-                                    this.show_preview_details = !this.show_preview_details;
+                                    this.import.show_preview_details =
+                                        !this.import.show_preview_details;
                                     cx.notify();
                                 }),
                             )),
@@ -1562,10 +1183,10 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let source = self.source_preview.clone()?;
+        let source = self.import.source_preview.clone()?;
         let duration = (source.duration.is_finite() && source.duration > 0.)
             .then(|| course2md::render::fmt_ts(source.duration));
-        let details_open = self.show_preview_details;
+        let details_open = self.import.show_preview_details;
         let metadata = source_metadata(&source);
         let cover = video_cover(source.cover.clone(), cover_width(window))
             .self_start()
@@ -1639,8 +1260,8 @@ impl Desktop {
                                 .child(course2md::tr!("开始转换"))
                                 .track_focus(&self.import_submit_focus)
                                 .disabled(
-                                    self.pending_conversion.is_some()
-                                        || self.preview_cancel.is_some(),
+                                    self.import.pending_conversion.is_some()
+                                        || self.import.preview_cancel.is_some(),
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.start_conversion(window, cx)
@@ -1687,8 +1308,8 @@ impl Desktop {
                                         |button| {
                                             button.button_size(ButtonSize::ExtraSmall).on_click(
                                                 cx.listener(|this, _, _, cx| {
-                                                    this.show_preview_details =
-                                                        !this.show_preview_details;
+                                                    this.import.show_preview_details =
+                                                        !this.import.show_preview_details;
                                                     cx.notify();
                                                 }),
                                             )
@@ -1749,14 +1370,14 @@ impl Desktop {
     ) -> Div {
         let speech = self.import_uses_speech();
         let mode = self.task_options().source_mode;
-        let failure = self.subtitle_error.as_deref().or_else(|| {
+        let failure = self.import.subtitle_error.as_deref().or_else(|| {
             match (&source.subtitles, subtitle_needs_confirmation(source, mode)) {
                 (SubtitleEvidence::Failed { message }, true) => Some(message.as_str()),
                 _ => None,
             }
         });
         let pending = source.subtitle_request.is_some() || source.subtitle_read_error.is_some();
-        let value: SharedString = if self.subtitle_loading {
+        let value: SharedString = if self.import.subtitle_loading {
             course2md::tr!("正在读取字幕…").into()
         } else if !speech && pending {
             course2md::tr!("字幕还没读取完成").into()
@@ -1789,6 +1410,7 @@ impl Desktop {
         let login = source.online
             && course2md::auth::is_bilibili_url(&source.input)
             && self
+                .import
                 .subtitle_error
                 .as_deref()
                 .or(match &source.subtitles {
@@ -1797,7 +1419,7 @@ impl Desktop {
                 })
                 .is_some_and(source::legacy_login_failure_from_text);
         let notice = match &source.subtitles {
-            _ if !speech || self.subtitle_loading => None,
+            _ if !speech || self.import.subtitle_loading => None,
             SubtitleEvidence::NoneFound => Some(course2md::tr!("未找到字幕").to_owned()),
             SubtitleEvidence::Unsupported { message } => Some(message.clone()),
             _ => None,
@@ -1806,7 +1428,7 @@ impl Desktop {
             SubtitleEvidence::Found {
                 warning: Some(message),
                 ..
-            } if self.subtitle_error.is_none() => {
+            } if self.import.subtitle_error.is_none() => {
                 Some(course2md::tr!("部分字幕无法读取：{}", message))
             }
             _ => None,
@@ -1819,7 +1441,7 @@ impl Desktop {
             .when_some(notice, |view, notice| {
                 view.child(supporting_info("import-subtitle-message", notice))
             })
-            .when(self.subtitle_loading, |view| {
+            .when(self.import.subtitle_loading, |view| {
                 view.children(ui::async_status(
                     "subtitle-reading",
                     &ui::AsyncStatus::Busy(course2md::tr!("正在读取字幕…").into()),
@@ -1832,7 +1454,7 @@ impl Desktop {
                         .self_start()
                         .child(course2md::tr!("取消读取字幕"))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.pending_conversion = None;
+                            this.import.pending_conversion = None;
                             this.abort_subtitle_read();
                             this.save_current_draft(cx);
                             cx.notify();
@@ -1905,7 +1527,7 @@ impl Desktop {
         items.push(
             MaterialMenuItem::new(course2md::tr!("重新读取字幕"))
                 .leading(Icon::from(symbols::refresh()))
-                .disabled(self.subtitle_loading)
+                .disabled(self.import.subtitle_loading)
                 .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx))),
         );
         if !source.online {
@@ -1937,12 +1559,12 @@ impl Desktop {
             readable_first_line(message)
                 .unwrap_or(course2md::tr!("无法读取字幕，可重试或改用语音识别"))
         };
-        let open = self.expanded_subtitle_issue.is_some();
+        let open = self.import.subtitle_issue_open;
         let details = (summary != message).then(|| message.to_owned());
         let retry = material_button("retry-subtitles", ButtonVariant::Text)
             .icon(symbols::refresh())
             .child(course2md::tr!("重新读取字幕"))
-            .disabled(self.subtitle_loading)
+            .disabled(self.import.subtitle_loading)
             .on_click(cx.listener(|this, _, _, cx| this.retry_subtitles(cx)))
             .into_any_element();
         let status = if failed {
@@ -1998,8 +1620,7 @@ impl Desktop {
                     .when(details.is_some(), |row| {
                         row.child(details_toggle("subtitle-issue-details", open).on_click(
                             cx.listener(move |this, _, _, cx| {
-                                this.expanded_subtitle_issue =
-                                    (!open).then(|| "subtitle-issue".into());
+                                this.import.subtitle_issue_open = !open;
                                 cx.notify();
                             }),
                         ))
@@ -2055,8 +1676,8 @@ impl Desktop {
         // a previewed video whose subtitles will be used does not.
         let speech_relevant = mode == TranscriptSource::Asr
             || (mode == TranscriptSource::Auto
-                && self.source_preview.as_ref().is_none_or(|source| {
-                    self.subtitle_loading || subtitle_needs_confirmation(source, mode)
+                && self.import.source_preview.as_ref().is_none_or(|source| {
+                    self.import.subtitle_loading || subtitle_needs_confirmation(source, mode)
                 }));
         let mut fields = vec![ui::Field::content(
             "conversion-text-mode-field",
@@ -2276,7 +1897,8 @@ impl Desktop {
     }
 
     fn import_uses_speech(&self) -> bool {
-        self.source_preview
+        self.import
+            .source_preview
             .as_ref()
             .is_some_and(|source| uses_speech(source, self.task_options().source_mode))
     }
@@ -2324,7 +1946,7 @@ impl Desktop {
         let provider = self.actual_local_provider();
         let mut config = self.import_base_config();
         // The plan builders' rule: an empty model takes the engine's default (NPU resolves its own).
-        crate::task_runner::fill_default_asr_model(&mut config, provider);
+        desktop_core::plan::fill_default_asr_model(&mut config, provider);
         let model = config.defaults.asr_model.unwrap_or_default();
         let root = course2md::config::model_dir_from(config.defaults.model_dir.as_deref());
         (provider, model, root)
@@ -2379,21 +2001,22 @@ impl Desktop {
             )
             .disabled(libraries.len() < 2),
         ];
-        if self.source_preview.is_some() {
+        if self.import.source_preview.is_some() {
             fields.push(ui::Field::below(
                 "import-title",
                 course2md::tr!("笔记名称"),
                 RevealFocus::new(
-                    ("import-title-focus", self.validation_attempt),
+                    ("import-title-focus", self.import.validation_attempt),
                     TextField::new("import-title-field", &self.inputs[&Field::Title])
                         .w_full()
                         .outlined()
                         .shape(TextFieldShape::Rounded)
-                        .error(self.title_required)
+                        .error(self.import.title_required)
                         .when_some(
-                            self.source_validation
+                            self.import
+                                .source_validation
                                 .clone()
-                                .filter(|_| self.title_required),
+                                .filter(|_| self.import.title_required),
                             |field, message| field.supporting_text(message),
                         ),
                     self.scrolls[Page::New as usize].clone(),
@@ -2428,6 +2051,7 @@ impl Desktop {
             .enumerate()
             .map(|(index, label)| {
                 ChipSetItem::new(
+                    ("import-export-item", index),
                     FilterChip::new(("import-export", index), label)
                         .selected(self.task_options().formats[index])
                         .on_toggle(cx.listener(move |this, on: &bool, _, cx| {
@@ -2481,8 +2105,8 @@ impl Desktop {
 
     /// The preview card is on screen (not replaced by reading or a task).
     fn preview_card_shown(&self, cx: &App) -> bool {
-        self.preview_cancel.is_none()
-            && self.source_preview.is_some()
+        self.import.preview_cancel.is_none()
+            && self.import.source_preview.is_some()
             && self.workbench_linked_task(cx).is_none()
     }
 
@@ -2531,7 +2155,7 @@ impl Desktop {
     ) -> Div {
         let open = self.desktop_settings.home_options;
         let owner = self.owning_task(cx).cloned();
-        let applies_to: SharedString = match (&owner, &self.source_preview) {
+        let applies_to: SharedString = match (&owner, &self.import.source_preview) {
             (Some(_), _) => course2md::tr!("提交时已确定，不能再更改").into(),
             (None, Some(source)) if attached => {
                 course2md::tr!("仅对「{}」生效", source.title).into()
@@ -2540,10 +2164,8 @@ impl Desktop {
         };
         let top = !attached;
         let scale = TileScale::Regular;
-        // The plan joins the header; editable options stand below it as sections.
-        let joined = open;
         let header = scale
-            .button("generation-options-toggle", [top, top, !joined, !joined])
+            .button("generation-options-toggle", [top, top, false, false])
             .accessibility_label(if open {
                 course2md::tr!("收起处理选项")
             } else {
@@ -2561,25 +2183,49 @@ impl Desktop {
                     ))
                     .child(disclosure_chevron(open)),
             );
+        let hairline = || {
+            div()
+                .h(px(1.))
+                .mx(ITEM_INSET)
+                .bg(color(ColorRole::OUTLINE_VARIANT))
+        };
+        // The way to the next video stays visible whether or not the plan is open: a
+        // running task's card carries it; otherwise it sits right under this header.
+        let next = owner
+            .as_ref()
+            .filter(|task| !desktop_core::task_view::runs_in_card(task))
+            .map(|_| {
+                v_flex().w_full().min_w_0().child(hairline()).child(
+                    scale
+                        .button("set-up-next-video", [false, false, false, false])
+                        .accessibility_label(course2md::tr!("设置下一个视频"))
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.set_up_next_video(window, cx)),
+                        )
+                        .child(
+                            scale
+                                .row()
+                                .child(Icon::from(symbols::add()).color(color(ColorRole::PRIMARY)))
+                                .child(scale.text(
+                                    "set-up-next-video-label",
+                                    course2md::tr!("设置下一个视频"),
+                                    Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
+                                )),
+                        ),
+                )
+            });
         // One surface: a hairline under the header, then quiet sections inside it.
         let body = v_flex()
             .w_full()
             .min_w_0()
-            .bg(color(ColorRole::SURFACE))
-            .rounded_b(RADIUS_HERO)
-            .child(
-                div()
-                    .h(px(1.))
-                    .mx(ITEM_INSET)
-                    .bg(color(ColorRole::OUTLINE_VARIANT)),
-            )
+            .child(hairline())
             .child(match &owner {
                 Some(task) => v_flex()
                     .w_full()
                     .min_w_0()
                     .gap(rem(12.))
                     .p(ITEM_INSET)
-                    .children(self.task_plan_rows(task)),
+                    .children(self.task_plan_rows(task, true)),
                 None => v_flex()
                     .w_full()
                     .min_w_0()
@@ -2590,15 +2236,19 @@ impl Desktop {
                     .child(self.import_ai_options(window, cx))
                     .child(self.import_destination(cx)),
             });
-        v_flex()
-            .w_full()
-            .min_w_0()
+        tile([top, top, true, true])
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .rounded_b(RADIUS_HERO)
+            .when(top, |panel| panel.rounded_t(RADIUS_HERO))
             .child(header)
+            .children(next)
             .child(motion::disclosure("generation-options-body", open, body))
     }
 
     fn existing_source_note(&self) -> Option<&Course> {
-        let source = self.source_preview.as_ref()?;
+        let source = self.import.source_preview.as_ref()?;
         let preferred = self
             .workspace
             .as_ref()
@@ -2608,27 +2258,29 @@ impl Desktop {
                     .draft()
                     .and_then(|draft| workspace.state.library(&draft.library_id))
             })
-            .map(|library| &library.root);
-        self.notes_for_source(&source.identity)
-            .min_by_key(|course| !preferred.is_some_and(|root| course.dir.starts_with(root)))
+            .map(|library| library.root.as_path());
+        self.library.preferred_note(&source.identity, preferred)
     }
 
     fn can_start_input(&self, cx: &App) -> bool {
         // While candidates show, batch and single actions live in the list's own action area; the input row's
         // 「开始转换」 would always fail for a collection link, so two primary actions never share the screen.
-        self.source_collection_title.is_none()
+        self.import.source_collection_title.is_none()
             && (self.online() || !self.value(Field::Source, cx).is_empty())
-            && self.preview_error.is_none()
+            && self.import.preview_error.is_none()
             && self.existing_source_note().is_none()
             && self.current_input_task(cx).is_none_or(|task| {
                 matches!(
                     task.state,
                     workspace::TaskState::Complete | workspace::TaskState::Cancelled
-                ) && !(self.reading
+                ) && !(self.opened.reading
                     && self
+                        .import
                         .following_conversion
                         .as_ref()
-                        .is_some_and(|follow| follow.follows(&task.id, self.preview_generation)))
+                        .is_some_and(|follow| {
+                            follow.follows(&task.id, self.import.preview_generation)
+                        }))
             })
     }
 
@@ -2639,7 +2291,7 @@ impl Desktop {
 
     /// The source card and hero share one definition of the submitted task.
     fn workbench_linked_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
-        let opening_result = self.reading && self.following_conversion.is_some();
+        let opening_result = self.opened.reading && self.import.following_conversion.is_some();
         self.current_input_task(cx).filter(|task| {
             (opening_result
                 && matches!(
@@ -2649,7 +2301,7 @@ impl Desktop {
                 || !task.state.finished()
                 || (task.state == workspace::TaskState::Partial
                     && task.artifact.is_some()
-                    && !crate::task_ui::task_component_failures(task).is_empty())
+                    && !desktop_core::task_view::task_component_failures(task).is_empty())
         })
     }
 
@@ -2657,6 +2309,7 @@ impl Desktop {
     /// once at startup and previews it, so preview states can be rendered.
     #[cfg(feature = "capture")]
     fn capture_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use std::sync::atomic::Ordering;
         static DONE: AtomicBool = AtomicBool::new(false);
         let Ok(link) = std::env::var("COURSE2MD_CAPTURE_SOURCE") else {
             return;
@@ -2678,7 +2331,7 @@ impl Desktop {
     ) -> bool {
         #[cfg(feature = "capture")]
         self.capture_source(window, cx);
-        if self.pending_conversion.is_some() || self.following_conversion.is_some() {
+        if self.import.pending_conversion.is_some() || self.import.following_conversion.is_some() {
             return true;
         }
         let input = self.value(Field::Source, cx);
@@ -2722,10 +2375,10 @@ impl Desktop {
             cx.notify();
             return false;
         }
-        self.completed_source = None;
+        self.import.completed_source = None;
         self.invalidate_source();
         self.restore_draft(window, cx);
-        self.source_editor_open = true;
+        self.import.source_editor_open = true;
         true
     }
 
@@ -2740,7 +2393,7 @@ impl Desktop {
             self.scrolls[Page::New as usize].set_offset(point(px(0.), px(-offset)));
         }
         let compact = is_compact(window);
-        let opening_result = self.reading && self.following_conversion.is_some();
+        let opening_result = self.opened.reading && self.import.following_conversion.is_some();
         let linked_task = self.workbench_linked_task(cx).cloned();
         let cancelled = self
             .current_input_task(cx)
@@ -2757,6 +2410,7 @@ impl Desktop {
             None => None,
         };
         let reading = self
+            .import
             .preview_cancel
             .is_some()
             .then(|| self.source_reading(window, cx));
@@ -2766,6 +2420,7 @@ impl Desktop {
             self.workbench_options(attached, window, cx),
         );
         let candidates = self
+            .import
             .source_collection_title
             .clone()
             .map(|title| self.candidate_list(&title, cx));
@@ -2885,35 +2540,44 @@ impl Desktop {
             }))
     }
 
-    /// Derived once per draft, preference and source revision, not on every render.
+    /// Derived once per change of what the plan reads, not on every render. A result that
+    /// outlived a check it waited for would turn the wait into a failure in red.
     fn cached_preview_plan(&mut self) -> Result<workspace::TaskPlan, (String, bool)> {
-        let key = (
-            self.workspace
+        let key = PlanKey {
+            workspace: self
+                .workspace
                 .as_ref()
                 .map_or(0, |workspace| workspace.state.revision),
-            self.preferences
+            preferences: self
+                .preferences
                 .revision(crate::preferences::PreferenceGroup::Generation),
-            self.preview_generation,
-        );
-        if let Some((workspace, preferences, source, plan)) = &self.preview_plan_cache
-            && (*workspace, *preferences, *source) == key
+            defaults_pending: self.preference_defaults_pending,
+            source: self.import.preview_generation,
+            reading: self.import.reading(),
+            subtitle_failed: self.import.subtitle_error.is_some(),
+            environment_ready: self.environment.is_some(),
+            library: self.library.generation,
+            library_loading: self.library.loading,
+        };
+        if let Some((cached, plan)) = &self.import.preview_plan_cache
+            && *cached == key
         {
             return plan.clone();
         }
         let plan = self.preview_plan().map_err(|error| {
             let pending = error
-                .downcast_ref::<crate::task_runner::PlanPending>()
+                .downcast_ref::<desktop_core::plan::PlanPending>()
                 .is_some();
             (format!("{error:#}"), pending)
         });
-        self.preview_plan_cache = Some((key.0, key.1, key.2, plan.clone()));
+        self.import.preview_plan_cache = Some((key, plan.clone()));
         plan
     }
 
     /// What stands between this video and a conversion, each obstacle with its one
     /// way forward. Only unresolved choices interrupt a submitted conversion.
     fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Option<Div> {
-        let busy = self.job.is_some()
+        let busy = self.work.job.is_some()
             || self.workspace.as_ref().is_some_and(|workspace| {
                 workspace.state.tasks.iter().any(|task| {
                     matches!(
@@ -2922,7 +2586,7 @@ impl Desktop {
                     )
                 })
             });
-        let reading = self.preview_cancel.is_some() || self.subtitle_loading;
+        let reading = self.import.reading();
         let preview_plan = self.cached_preview_plan();
         let plan_pending = matches!(&preview_plan, Err((_, true)));
         let matching_task = preview_plan
@@ -2939,7 +2603,7 @@ impl Desktop {
             .as_ref()
             .map(|issue| issue.message.clone())
             .or_else(|| {
-                let settled = self.source_preview.is_some()
+                let settled = self.import.source_preview.is_some()
                     && !reading
                     && !self.subtitle_attention_required();
                 preview_plan
@@ -3024,7 +2688,7 @@ impl Desktop {
                 button(
                     "reassociate-import-location",
                     ButtonVariant::Outlined,
-                    symbols::storage(),
+                    symbols::database(),
                     course2md::tr!("重新关联此保存位置"),
                 )
                 .disabled(self.storage_ui.busy)
@@ -3099,10 +2763,10 @@ impl Desktop {
                     course2md::tr!("生成新版笔记"),
                 )
                 .track_focus(&self.import_submit_focus)
-                .disabled(reading || self.workspace.is_none() || preferences_blocked)
+                .disabled(reading || checking || self.workspace.is_none() || preferences_blocked)
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.following_conversion =
-                        Some(ConversionFollow::Preparing(this.preview_generation));
+                    this.import.following_conversion =
+                        Some(ConversionFollow::Preparing(this.import.preview_generation));
                     this.enqueue_current(window, cx);
                 })),
             );
@@ -3122,8 +2786,8 @@ impl Desktop {
                 })),
             );
         }
-        if self.pending_conversion.is_some() && !reading {
-            if self.source_validation.is_some()
+        if self.import.pending_conversion.is_some() && !reading {
+            if self.import.source_validation.is_some()
                 && self.missing_import_service().is_none()
                 && self.existing_source_note().is_none()
                 && !has_match
@@ -3146,8 +2810,8 @@ impl Desktop {
                     course2md::tr!("取消转换"),
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.pending_conversion = None;
-                    this.following_conversion = None;
+                    this.import.pending_conversion = None;
+                    this.import.following_conversion = None;
                     cx.notify();
                 })),
             );
@@ -3181,886 +2845,5 @@ impl Desktop {
                         .children(actions),
                 ),
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        ConversionFollow, ConversionGate, GateInputs, automatic_subtitle_fallback,
-        completed_input_task, conversion_gate, locked_input_task, submitted_input_task,
-        subtitle_needs_confirmation, uses_speech,
-    };
-    use crate::{source, workspace};
-    use course2md::config::TranscriptSource;
-    use course2md::subtitle::{CachedSubtitle, SubtitleEvidence, SubtitleReadError};
-
-    /// A plan's configuration as build_plan writes it from default options.
-    fn planned_config() -> course2md::settings::ConfigFile {
-        let mut config = course2md::settings::ConfigFile::default();
-        crate::ConversionOptions::default().apply_to(&mut config);
-        config
-    }
-
-    /// A pending Start for revision 7 with every prerequisite met.
-    fn ready() -> GateInputs {
-        GateInputs {
-            requested_revision: Some(7),
-            current_revision: 7,
-            reading: false,
-            has_source: true,
-            needs_text_choice: false,
-            environment_ready: true,
-            library_ready: true,
-            existing_note: false,
-        }
-    }
-
-    #[test]
-    fn preview_completion_without_confirmation_never_submits() {
-        for reading in [true, false] {
-            for environment_ready in [true, false] {
-                for library_ready in [true, false] {
-                    let gate = GateInputs {
-                        requested_revision: None,
-                        reading,
-                        environment_ready,
-                        library_ready,
-                        ..ready()
-                    };
-                    assert_eq!(conversion_gate(gate), ConversionGate::Stop);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn confirmed_start_waits_for_remaining_prerequisites() {
-        // The same Start revision survives each independently completing prerequisite.
-        for (reading, has_source, needs_text_choice, environment_ready) in [
-            (true, false, false, false),
-            (true, true, true, true),
-            (false, true, false, false),
-            (false, true, true, true),
-        ] {
-            let gate = GateInputs {
-                reading,
-                has_source,
-                needs_text_choice,
-                environment_ready,
-                ..ready()
-            };
-            assert_eq!(conversion_gate(gate), ConversionGate::Wait);
-        }
-        assert_eq!(conversion_gate(ready()), ConversionGate::Submit);
-        // Source replacement and duplicate content require a fresh intent/choice.
-        let replaced = GateInputs {
-            current_revision: 8,
-            reading: true,
-            has_source: false,
-            ..ready()
-        };
-        assert_eq!(conversion_gate(replaced), ConversionGate::Stop);
-        assert_eq!(
-            conversion_gate(GateInputs {
-                existing_note: true,
-                ..ready()
-            }),
-            ConversionGate::Stop
-        );
-        assert_eq!(
-            conversion_gate(GateInputs {
-                has_source: false,
-                ..ready()
-            }),
-            ConversionGate::Stop
-        );
-    }
-
-    #[test]
-    fn first_start_waits_for_library_scan_before_existing_note_decision() {
-        // A restored source and the environment can be ready before the async
-        // library scan replaces its initially empty (or stale) note list.
-        for existing_note in [false, true] {
-            let gate = GateInputs {
-                library_ready: false,
-                existing_note,
-                ..ready()
-            };
-            assert_eq!(conversion_gate(gate), ConversionGate::Wait);
-        }
-        // The original Start is still pending when the scan reports a result.
-        assert_eq!(
-            conversion_gate(GateInputs {
-                existing_note: true,
-                ..ready()
-            }),
-            ConversionGate::Stop
-        );
-        assert_eq!(conversion_gate(ready()), ConversionGate::Submit);
-        let replaced = GateInputs {
-            current_revision: 8,
-            library_ready: false,
-            ..ready()
-        };
-        assert_eq!(conversion_gate(replaced), ConversionGate::Stop);
-    }
-
-    #[test]
-    fn explicit_new_version_follows_new_task_instead_of_previous_result() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        tasks[0].state = workspace::TaskState::Complete;
-        tasks[0].artifact = Some("versions/previous".into());
-        tasks[0].handled_by = None;
-        tasks[0].events.error = None;
-        tasks[1].id = "new-version".into();
-        tasks[1].parent = None;
-        tasks[1].plan.operation = Default::default();
-        draft.submitted_task = Some(tasks[1].id.clone());
-        let following = ConversionFollow::Preparing(7)
-            .submitted(7, tasks[1].id.clone())
-            .unwrap();
-        // The old version remains readable but is not the explicit new intent.
-        assert!(
-            following
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("versions/new-version".into());
-        assert_eq!(
-            following
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "new-version",
-        );
-    }
-
-    #[test]
-    fn completion_opens_only_the_result_still_followed_in_the_current_input() {
-        let (draft, mut tasks) = submitted_recovery_chain();
-        let followed = ConversionFollow::Preparing(7)
-            .submitted(7, "recovery".into())
-            .unwrap();
-        assert!(
-            ConversionFollow::Preparing(7)
-                .submitted(8, "recovery".into())
-                .is_none()
-        );
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].state = workspace::TaskState::Complete;
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].artifact = Some("versions/recovery".into());
-        assert_eq!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "recovery"
-        );
-        assert!(
-            followed
-                .completed_task(false, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        assert!(
-            followed
-                .completed_task(true, 8, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, "new video")
-                .is_none()
-        );
-        let other = ConversionFollow::Task {
-            id: "original".into(),
-            source_revision: 7,
-        };
-        assert!(
-            other
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_none()
-        );
-        tasks[1].state = workspace::TaskState::Partial;
-        assert!(
-            followed
-                .completed_task(true, 7, &draft, &tasks, &draft.input)
-                .is_some()
-        );
-    }
-
-    #[test]
-    fn reader_repair_opens_the_new_version_only_while_the_original_note_is_still_open() {
-        let (_, mut tasks) = submitted_recovery_chain();
-        let original = std::path::Path::new("versions/original");
-        let follow = ConversionFollow::reader_reprocess(&tasks[1], original, 12).unwrap();
-        // Submitting a recovery is not enough: it must publish a readable result.
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, Some(original)));
-        tasks[1].artifact = Some("versions/recovery".into());
-        for state in [
-            workspace::TaskState::Complete,
-            workspace::TaskState::Partial,
-        ] {
-            tasks[1].state = state;
-            assert!(follow.completed_reader_task(
-                &tasks[1],
-                super::Page::Result,
-                12,
-                Some(original)
-            ));
-        }
-        for page in [
-            super::Page::New,
-            super::Page::Library,
-            super::Page::Task,
-            super::Page::Settings,
-        ] {
-            assert!(!follow.completed_reader_task(&tasks[1], page, 12, Some(original)));
-        }
-        // Leaving and returning to the same note has a new read generation.
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 13, Some(original)));
-        assert!(!follow.completed_reader_task(
-            &tasks[1],
-            super::Page::Result,
-            12,
-            Some(std::path::Path::new("versions/another-note")),
-        ));
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, None));
-        let mut unrelated = tasks[1].clone();
-        unrelated.id = "another-repair".into();
-        assert!(!follow.completed_reader_task(&unrelated, super::Page::Result, 12, Some(original)));
-        for state in [
-            workspace::TaskState::Running,
-            workspace::TaskState::Paused,
-            workspace::TaskState::Uncertain,
-        ] {
-            tasks[1].state = state;
-            assert!(!follow.completed_reader_task(
-                &tasks[1],
-                super::Page::Result,
-                12,
-                Some(original)
-            ));
-        }
-    }
-
-    #[test]
-    fn reader_repair_guard_excludes_exports_and_rechecks_the_note_when_loading_finishes() {
-        let (_, mut tasks) = submitted_recovery_chain();
-        let original = std::path::Path::new("versions/original");
-        let follow = ConversionFollow::reader_reprocess(&tasks[1], original, 12).unwrap();
-        assert!(follow.context_is_current(super::Page::Result, 99, 12, Some(original)));
-        assert!(!follow.context_is_current(super::Page::Result, 99, 13, Some(original)));
-        assert!(!follow.context_is_current(super::Page::Library, 99, 12, Some(original)));
-        assert!(!follow.context_is_current(
-            super::Page::Result,
-            99,
-            12,
-            Some(std::path::Path::new("versions/other")),
-        ));
-
-        let course2md::execution::Operation::Reprocess { components, .. } =
-            &mut tasks[1].plan.operation
-        else {
-            unreachable!();
-        };
-        *components = vec![course2md::execution::Component::Exports];
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some(original.to_owned());
-        assert!(ConversionFollow::reader_reprocess(&tasks[1], original, 12).is_none());
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, Some(original)));
-        // Even a spurious new artifact cannot turn an export-only task into navigation.
-        tasks[1].artifact = Some("versions/recovery".into());
-        assert!(!follow.completed_reader_task(&tasks[1], super::Page::Result, 12, Some(original)));
-        tasks[1].plan.operation = Default::default();
-        assert!(ConversionFollow::reader_reprocess(&tasks[1], original, 12).is_none());
-    }
-
-    #[test]
-    fn opening_a_reader_viewer_ends_repair_following_even_if_it_closes_before_the_read_finishes() {
-        let (_, mut tasks) = submitted_recovery_chain();
-        let original = std::path::Path::new("versions/original");
-        let captured = ConversionFollow::reader_reprocess(&tasks[1], original, 12).unwrap();
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("versions/recovery".into());
-        for read_started in [false, true] {
-            let mut active = Some(captured.clone());
-            if read_started {
-                assert!(active.as_ref().unwrap().completed_reader_task(
-                    &tasks[1],
-                    super::Page::Result,
-                    12,
-                    Some(original),
-                ));
-            }
-            ConversionFollow::interrupt_for_reader_viewer(&mut active);
-            assert!(active.is_none());
-            // Closing the viewer only restores its underlying note. The old
-            // asynchronous callback still has a ticket, but no longer owns intent.
-            assert_ne!(active.as_ref(), Some(&captured));
-            assert!(
-                !active
-                    .as_ref()
-                    .is_some_and(|follow| follow.completed_reader_task(
-                        &tasks[1],
-                        super::Page::Result,
-                        12,
-                        Some(original),
-                    ))
-            );
-        }
-        // A viewer must not cancel a distinct workbench conversion.
-        let mut input = Some(ConversionFollow::Task {
-            id: "conversion".into(),
-            source_revision: 7,
-        });
-        let expected = input.clone();
-        ConversionFollow::interrupt_for_reader_viewer(&mut input);
-        assert_eq!(input, expected);
-    }
-
-    #[test]
-    fn a_submitted_input_locks_its_options_until_the_next_video_replaces_it() {
-        let root = tempfile::tempdir().unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            root.path().join("workspace.json"),
-            root.path().join("library"),
-            Default::default(),
-        )
-        .unwrap();
-        let state = &mut workspace.state;
-        let source = source::Source {
-            input: "https://www.bilibili.com/video/BVfixture".into(),
-            identity: "video-fixture".into(),
-            online: true,
-            ..Default::default()
-        };
-        let plan = workspace::TaskPlan {
-            operation: Default::default(),
-            source: source.clone(),
-            source_id: source.identity.clone(),
-            title: "已提交的标题".into(),
-            library_id: state.default_library.clone(),
-            folder: None,
-            subtitle: None,
-            config: planned_config(),
-            asr_service: None,
-            ai_service: None,
-        };
-        // Before submission the options belong to the form.
-        let draft = state.draft_mut().unwrap();
-        draft.change_source(source.input.clone());
-        draft.source = Some(source.clone());
-        assert!(locked_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none());
-        let (id, _) = state.enqueue(plan.clone(), None).unwrap();
-        state.draft_mut().unwrap().submitted_task = Some(id.clone());
-        // Leaving for the task list and coming back home keeps an in-flight
-        // input, so the options panel must offer the next video instead of
-        // vanishing.
-        for in_flight in [
-            workspace::TaskState::Queued,
-            workspace::TaskState::Running,
-            workspace::TaskState::Pausing,
-            workspace::TaskState::Paused,
-            workspace::TaskState::NeedsAttention,
-            workspace::TaskState::Uncertain,
-        ] {
-            state.task_mut(&id).unwrap().state = in_flight;
-            let draft = state.draft().unwrap();
-            assert!(super::retired_input_task(draft, &state.tasks, &source.input).is_none());
-            assert_eq!(
-                locked_input_task(draft, &state.tasks, &source.input)
-                    .unwrap()
-                    .id,
-                id
-            );
-        }
-        for finished in [
-            workspace::TaskState::Complete,
-            workspace::TaskState::Partial,
-            workspace::TaskState::Cancelled,
-        ] {
-            state.task_mut(&id).unwrap().state = finished;
-            assert!(
-                locked_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-            );
-        }
-        // 设置下一个视频 clears the link: the next input starts from the
-        // saved defaults and the submitted task keeps its own plan.
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Running;
-        let defaults = crate::ConversionOptions {
-            summarize: !state.draft().unwrap().options.summarize,
-            ..state.draft().unwrap().options.clone()
-        };
-        assert!(state.prepare_next_import("", defaults.clone()));
-        let next = state.draft().unwrap();
-        assert!(next.submitted_task.is_none());
-        assert!(next.options == defaults);
-        assert!(locked_input_task(next, &state.tasks, "").is_none());
-        let task = state.task(&id).unwrap();
-        assert_eq!(task.state, workspace::TaskState::Running);
-        assert!(task.plan == plan);
-    }
-
-    #[test]
-    fn completion_belongs_to_the_submitted_input_and_requires_a_readable_result() {
-        let root = tempfile::tempdir().unwrap();
-        let mut workspace = workspace::Workspace::open_at_inline(
-            root.path().join("workspace.json"),
-            root.path().join("library"),
-            Default::default(),
-        )
-        .unwrap();
-        let state = &mut workspace.state;
-        let source = source::Source {
-            input: "https://www.bilibili.com/video/BVfixture".into(),
-            identity: "video-fixture".into(),
-            online: true,
-            ..Default::default()
-        };
-        let plan = workspace::TaskPlan {
-            operation: Default::default(),
-            source: source.clone(),
-            source_id: source.identity.clone(),
-            title: "已提交的标题".into(),
-            library_id: state.default_library.clone(),
-            folder: None,
-            subtitle: None,
-            config: planned_config(),
-            asr_service: None,
-            ai_service: None,
-        };
-        let (id, _) = state.enqueue(plan.clone(), None).unwrap();
-        let draft = state.draft_mut().unwrap();
-        draft.change_source(source.input.clone());
-        draft.submitted_task = Some(id.clone());
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-        );
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Complete;
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-        );
-        state.task_mut(&id).unwrap().artifact = Some(root.path().join("published-version"));
-        assert_eq!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input)
-                .unwrap()
-                .id,
-            id,
-        );
-        // The text can change before its observer replaces the submitted draft.
-        // That next input must remain visible even during this intermediate state.
-        for next in ["", "https://www.bilibili.com/video/BVnext"] {
-            assert!(completed_input_task(state.draft().unwrap(), &state.tasks, next).is_none());
-        }
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Partial;
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_some()
-        );
-        state.task_mut(&id).unwrap().state = workspace::TaskState::Complete;
-        state.prepare_next_import("https://www.bilibili.com/video/BVnext", Default::default());
-        assert!(
-            completed_input_task(state.draft().unwrap(), &state.tasks, &source.input).is_none()
-        );
-        assert!(state.task(&id).unwrap().plan == plan);
-    }
-
-    fn submitted_recovery_chain() -> (workspace::Draft, Vec<workspace::TaskRecord>) {
-        let source = source::Source {
-            input: "https://www.bilibili.com/video/BVfixture".into(),
-            identity: "video-fixture".into(),
-            online: true,
-            ..Default::default()
-        };
-        let mut draft = workspace::Draft::new(true, "library".into(), Default::default());
-        draft.change_source(source.input.clone());
-        draft.source = Some(source.clone());
-        draft.submitted_task = Some("original".into());
-        let mut original = workspace::TaskRecord {
-            id: "original".into(),
-            plan: workspace::TaskPlan {
-                operation: Default::default(),
-                source_id: source.identity.clone(),
-                source,
-                title: "已提交的课程".into(),
-                library_id: "library".into(),
-                folder: None,
-                subtitle: None,
-                config: planned_config(),
-                asr_service: None,
-                ai_service: None,
-            },
-            state: workspace::TaskState::Uncertain,
-            intent: workspace::Intent::Pause,
-            created: 0,
-            updated: 0,
-            parent: None,
-            handled_by: None,
-            work_dir: "work/original".into(),
-            events: crate::activity::JobEvents {
-                error: Some("原摘要请求结果未确认".into()),
-                ..Default::default()
-            },
-            artifact: Some("versions/original".into()),
-            unread: false,
-            resend: Vec::new(),
-        };
-        let mut recovery = original.clone();
-        recovery.id = "recovery".into();
-        recovery.parent = Some(original.id.clone());
-        recovery.state = workspace::TaskState::Queued;
-        recovery.intent = workspace::Intent::Run;
-        recovery.events.error = None;
-        recovery.artifact = None;
-        recovery.work_dir = "work/recovery".into();
-        recovery.plan.operation = course2md::execution::Operation::Reprocess {
-            base_version_dir: "versions/original".into(),
-            components: vec![course2md::execution::Component::Summary],
-            prior_work_dir: Some(original.work_dir.clone()),
-        };
-        original.handled_by = Some(recovery.id.clone());
-        (draft, vec![original, recovery])
-    }
-
-    #[test]
-    fn workbench_entry_retires_only_unchanged_terminal_inputs() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        draft.title = tasks[0].plan.title.clone();
-        for state in [
-            workspace::TaskState::Complete,
-            workspace::TaskState::Partial,
-            workspace::TaskState::Cancelled,
-        ] {
-            tasks[1].state = state;
-            tasks[1].artifact = Some("versions/recovery".into());
-            assert_eq!(
-                super::retired_input_task(&draft, &tasks, &draft.input)
-                    .unwrap()
-                    .id,
-                "recovery"
-            );
-        }
-        for state in [
-            workspace::TaskState::Queued,
-            workspace::TaskState::Running,
-            workspace::TaskState::Pausing,
-            workspace::TaskState::Paused,
-            workspace::TaskState::NeedsAttention,
-            workspace::TaskState::Uncertain,
-        ] {
-            tasks[1].state = state;
-            assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        }
-        tasks[1].state = workspace::TaskState::Partial;
-        let unchanged = draft.clone();
-        draft.title = "尚未提交的新名称".into();
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        draft = unchanged.clone();
-        draft.options.keep_video = !draft.options.keep_video;
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        // Vision without proofreading has no effect, so the plan does not record it.
-        draft = unchanged.clone();
-        draft.options.vision = !draft.options.vision;
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_some());
-        draft = unchanged.clone();
-        draft.folder = Some(42);
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        draft = unchanged;
-        assert!(super::retired_input_task(&draft, &tasks, "新视频").is_none());
-        tasks[1].events.blocked.push(workspace::BlockedRequest {
-            reason: course2md::progress::BlockReason::Uncertain,
-            request_id: Some("pending-summary".into()),
-            purpose: Some("summary".into()),
-            description: "摘要".into(),
-            kind: Some(course2md::artifact::FailureKind::Uncertain),
-            message: "结果未知".into(),
-        });
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[1].events.blocked.clear();
-        tasks[1].artifact = None;
-        assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
-    }
-
-    #[test]
-    fn workbench_follows_the_same_recovery_for_queued_running_and_completed_results() {
-        let (draft, mut tasks) = submitted_recovery_chain();
-        let original = tasks[0].clone();
-        for state in [workspace::TaskState::Queued, workspace::TaskState::Running] {
-            tasks[1].state = state;
-            assert_eq!(
-                submitted_input_task(&draft, &tasks, &draft.input)
-                    .unwrap()
-                    .id,
-                "recovery"
-            );
-            assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        }
-        tasks[1].state = workspace::TaskState::Complete;
-        assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[1].artifact = Some("versions/recovery".into());
-        assert_eq!(
-            completed_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "recovery"
-        );
-
-        let mut final_attempt = tasks[1].clone();
-        final_attempt.id = "final-attempt".into();
-        final_attempt.parent = Some("recovery".into());
-        final_attempt.state = workspace::TaskState::Running;
-        final_attempt.artifact = None;
-        tasks[1].state = workspace::TaskState::Uncertain;
-        tasks[1].handled_by = Some(final_attempt.id.clone());
-        tasks.push(final_attempt);
-        assert_eq!(
-            submitted_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "final-attempt"
-        );
-        assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        tasks[2].state = workspace::TaskState::Complete;
-        tasks[2].artifact = Some("versions/final-attempt".into());
-        assert_eq!(
-            completed_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "final-attempt"
-        );
-        // A cancelled recovery still belongs to this input for inline feedback,
-        // but must not fall back to an older readable result or follow new input.
-        tasks[2].state = workspace::TaskState::Cancelled;
-        tasks[2].artifact = None;
-        assert_eq!(
-            submitted_input_task(&draft, &tasks, &draft.input)
-                .unwrap()
-                .id,
-            "final-attempt"
-        );
-        assert!(completed_input_task(&draft, &tasks, &draft.input).is_none());
-        assert!(submitted_input_task(&draft, &tasks, "another-video").is_none());
-        assert!(tasks[0] == original);
-        assert_eq!(draft.submitted_task.as_deref(), Some("original"));
-    }
-
-    #[test]
-    fn recovery_lookup_rejects_broken_cycles_or_unrelated_task_links() {
-        for case in [
-            "missing",
-            "self-cycle",
-            "cycle",
-            "wrong-parent",
-            "other-source",
-            "inconsistent-source",
-            "other-kind",
-            "duplicate-id",
-            "unrelated-submission",
-        ] {
-            let (mut draft, mut tasks) = submitted_recovery_chain();
-            match case {
-                "missing" => tasks[0].handled_by = Some("missing".into()),
-                "self-cycle" => {
-                    tasks[0].handled_by = Some("original".into());
-                    tasks[0].parent = Some("original".into());
-                }
-                "cycle" => {
-                    tasks[1].handled_by = Some("original".into());
-                    tasks[0].parent = Some("recovery".into());
-                }
-                "wrong-parent" => tasks[1].parent = Some("unrelated".into()),
-                "other-source" => {
-                    tasks[1].plan.source_id = "other-video".into();
-                    tasks[1].plan.source.identity = "other-video".into();
-                }
-                "inconsistent-source" => tasks[1].plan.source.identity = "other-video".into(),
-                "other-kind" => tasks[1].plan.source.online = false,
-                "duplicate-id" => tasks.push(tasks[1].clone()),
-                "unrelated-submission" => {
-                    tasks[1].plan.source_id = "other-video".into();
-                    tasks[1].plan.source.identity = "other-video".into();
-                    draft.submitted_task = Some("recovery".into());
-                }
-                _ => unreachable!(),
-            }
-            assert!(
-                submitted_input_task(&draft, &tasks, &draft.input).is_none(),
-                "{case}"
-            );
-            assert!(
-                completed_input_task(&draft, &tasks, &draft.input).is_none(),
-                "{case}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_recovered_result_cannot_replace_new_or_changed_input() {
-        let (mut draft, mut tasks) = submitted_recovery_chain();
-        tasks[1].state = workspace::TaskState::Complete;
-        tasks[1].artifact = Some("versions/recovery".into());
-        for input in ["", "https://www.bilibili.com/video/BVnext"] {
-            assert!(submitted_input_task(&draft, &tasks, input).is_none());
-            assert!(completed_input_task(&draft, &tasks, input).is_none());
-        }
-        draft.source.as_mut().unwrap().identity = "newly-inspected-content".into();
-        assert!(submitted_input_task(&draft, &tasks, &draft.input).is_none());
-        draft.source = None;
-        draft.input = "https://www.bilibili.com/video/BVnext".into();
-        assert!(submitted_input_task(&draft, &tasks, &draft.input).is_none());
-    }
-
-    #[test]
-    fn automatic_mode_uses_speech_after_login_or_download_failure() {
-        let track = course2md::subtitle::file_track("lesson.srt".into(), None);
-        for metadata_failed in [true, false] {
-            let mut source = source::Source {
-                subtitles: if metadata_failed {
-                    SubtitleEvidence::Failed {
-                        message: "WARNING: subtitles require login".into(),
-                    }
-                } else {
-                    SubtitleEvidence::Found {
-                        tracks: vec![track.clone()],
-                        warning: None,
-                    }
-                },
-                subtitle_request: (!metadata_failed).then(|| track.clone()),
-                subtitle_read_error: (!metadata_failed).then(|| SubtitleReadError::Failed {
-                    message: "字幕文件没有下载成功".into(),
-                }),
-                ..Default::default()
-            };
-            assert!(automatic_subtitle_fallback(
-                &mut source,
-                TranscriptSource::Auto,
-                None
-            ));
-            assert!(uses_speech(&source, TranscriptSource::Auto));
-            assert!(!subtitle_needs_confirmation(
-                &source,
-                TranscriptSource::Auto
-            ));
-            assert!(source.subtitle_request.is_none());
-            assert!(source.subtitle_read_error.is_none());
-        }
-    }
-
-    #[test]
-    fn explicit_subtitle_and_cancelled_reads_never_fall_back_to_speech() {
-        let mut source = source::Source {
-            subtitles: SubtitleEvidence::Failed {
-                message: "字幕需要登录".into(),
-            },
-            subtitle_read_error: Some(SubtitleReadError::Failed {
-                message: "字幕需要登录".into(),
-            }),
-            ..Default::default()
-        };
-        let original = source.clone();
-        assert!(!automatic_subtitle_fallback(
-            &mut source,
-            TranscriptSource::Subtitle,
-            None
-        ));
-        assert_eq!(source, original);
-        assert!(subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Subtitle
-        ));
-
-        source.subtitle_read_error = Some(SubtitleReadError::Cancelled);
-        let cancelled = source.clone();
-        assert!(!automatic_subtitle_fallback(
-            &mut source,
-            TranscriptSource::Auto,
-            None
-        ));
-        assert_eq!(source, cancelled);
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-    }
-
-    #[test]
-    fn pending_or_failed_subtitles_remain_required_even_with_cached_text() {
-        let track = course2md::subtitle::file_track("lesson.srt".into(), None);
-        let mut source = source::Source {
-            identity: "lesson".into(),
-            subtitles: SubtitleEvidence::Found {
-                tracks: vec![track.clone()],
-                warning: None,
-            },
-            ..Default::default()
-        };
-        assert!(subtitle_needs_confirmation(&source, TranscriptSource::Auto));
-        source.selected_subtitle = Some(CachedSubtitle {
-            source_identity: source.identity.clone(),
-            track_id: track.id.clone(),
-            label: "已读取字幕".into(),
-            path: "lesson.srt".into(),
-            events: Vec::new(),
-        });
-        assert!(!subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Auto
-        ));
-
-        source.subtitle_request = Some(track);
-        assert!(subtitle_needs_confirmation(&source, TranscriptSource::Auto));
-        source.subtitle_request = None;
-        source.subtitle_read_error = Some(SubtitleReadError::Failed {
-            message: "无法读取新字幕，原正文仍保留".into(),
-        });
-        assert!(subtitle_needs_confirmation(&source, TranscriptSource::Auto));
-
-        // Cancelling the replacement or choosing the cached text restores the
-        // confirmed source without opening unrelated generation preferences.
-        source.subtitle_read_error = None;
-        assert!(!subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Subtitle
-        ));
-        source.selected_subtitle = None;
-        assert!(subtitle_needs_confirmation(
-            &source,
-            TranscriptSource::Subtitle
-        ));
-        assert!(!subtitle_needs_confirmation(&source, TranscriptSource::Asr));
-    }
-
-    #[test]
-    fn caption_intent_and_unconfirmed_reads_never_imply_speech_recognition() {
-        let mut source = source::Source {
-            subtitles: SubtitleEvidence::NoneFound,
-            ..Default::default()
-        };
-        assert!(uses_speech(&source, TranscriptSource::Auto));
-        assert!(!uses_speech(&source, TranscriptSource::Subtitle));
-        source.subtitle_request = Some(course2md::subtitle::file_track("lesson.srt".into(), None));
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-        assert!(!uses_speech(&source, TranscriptSource::Subtitle));
-        source.subtitle_request = None;
-        source.subtitle_read_error = Some(SubtitleReadError::Failed {
-            message: "字幕文件无法读取".into(),
-        });
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-        assert!(uses_speech(&source, TranscriptSource::Asr));
-        source.subtitle_read_error = None;
-        source.subtitles = SubtitleEvidence::Unchecked;
-        assert!(!uses_speech(&source, TranscriptSource::Auto));
-        source.subtitles = SubtitleEvidence::Failed {
-            message: "请求失败".into(),
-        };
-        assert!(uses_speech(&source, TranscriptSource::Auto));
-        assert!(!uses_speech(&source, TranscriptSource::Subtitle));
     }
 }

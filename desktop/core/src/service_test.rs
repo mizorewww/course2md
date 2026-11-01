@@ -14,8 +14,8 @@ use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-const SPEECH_SAMPLE: &[u8] = include_bytes!("../assets/tests/service-speech.wav");
-const BLUE_CARD: &[u8] = include_bytes!("../assets/tests/service-blue-card.png");
+const SPEECH_SAMPLE: &[u8] = include_bytes!("../../assets/tests/service-speech.wav");
+const BLUE_CARD: &[u8] = include_bytes!("../../assets/tests/service-blue-card.png");
 const MAX_RESPONSE: u64 = 128 * 1024;
 
 pub fn test_notice() -> &'static str {

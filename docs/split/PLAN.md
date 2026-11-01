@@ -108,7 +108,8 @@ No `tr!` in them. Check name availability before creating a repository.
 
 `crates/` holds `c2m-i18n`, `c2m-core`, `c2m-process`, `c2m-protocol`, `c2m-config`,
 `c2m-source`, `c2m-ai`, `c2m-asr`, `c2m-artifact`, `c2m-engine`, and the `course2md`
-binary; `desktop/` splits into `desktop-core`, `desktop-ui` and `course2md-desktop`.
+binary; `desktop/` holds `desktop-core` (`desktop/core`), `desktop-ui` (`desktop/ui`) and
+`course2md-desktop` (`desktop/src`).
 Assignment is in `AUDIT.md`. The root and `desktop` become one Cargo workspace with
 one lock file. CI, `package.py`, `release.yml` and the docs must follow.
 

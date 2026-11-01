@@ -7,6 +7,7 @@ use crate::{
     reader_images::{Loaded, ReaderImages, Size},
     reader_navigation as nav, source, symbols, ui, workspace,
 };
+use desktop_core::reader::*;
 use gpui::{prelude::*, *};
 use gpui_base::{
     TextSelection, h_flex,
@@ -63,140 +64,6 @@ actions!(
     ]
 );
 
-#[derive(Clone)]
-struct FrameImage {
-    path: PathBuf,
-    width: u32,
-    height: u32,
-}
-#[derive(Clone)]
-struct Frame {
-    anchor: String,
-    /// `None` when the file is missing or cannot be decoded.
-    image: Option<FrameImage>,
-    seconds: f64,
-    transcript: String,
-    /// Lowercased transcript and time that gallery search matches against.
-    search_text: String,
-    /// The section heading this screenshot belongs to.
-    body_index: Option<usize>,
-}
-impl Frame {
-    fn new(
-        anchor: String,
-        path: Option<PathBuf>,
-        seconds: f64,
-        transcript: String,
-        body_index: Option<usize>,
-    ) -> Self {
-        let image = path.and_then(|path| {
-            let (width, height) = image::image_dimensions(&path)
-                .ok()
-                .filter(|(width, height)| *width > 0 && *height > 0)?;
-            Some(FrameImage {
-                path,
-                width,
-                height,
-            })
-        });
-        let search_text = format!(
-            "{}\n{}",
-            course2md::render::fmt_ts(seconds),
-            transcript.to_lowercase()
-        );
-        Self {
-            anchor,
-            image,
-            seconds,
-            transcript,
-            search_text,
-            body_index,
-        }
-    }
-}
-#[derive(Clone)]
-struct Version {
-    course: Course,
-    label: String,
-}
-#[derive(Default)]
-struct ReaderData {
-    frames: Vec<Frame>,
-    frame_by_path: HashMap<PathBuf, usize>,
-    versions: Vec<Version>,
-    issues: Vec<String>,
-    export_folder: Option<PathBuf>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-enum OfflineVideo {
-    #[default]
-    NotRequested,
-    Missing,
-    Available(PathBuf),
-}
-
-#[derive(Clone)]
-struct OfflineVideoRequest {
-    library_root: PathBuf,
-    task_id: String,
-    work_dir: PathBuf,
-    version_dir: PathBuf,
-}
-
-impl OfflineVideoRequest {
-    fn for_version(
-        course: &Course,
-        task: &workspace::TaskRecord,
-        library: &workspace::LibraryLocation,
-    ) -> Option<Self> {
-        let manifest = course.manifest.as_ref()?;
-        if !task.plan.source.online
-            || !task.plan.options().keep_video
-            || task.id != manifest.task_id
-            || task.plan.source_id != manifest.source_id
-            || task.artifact.as_ref() != Some(&course.dir)
-            || task.plan.library_id != library.id
-        {
-            return None;
-        }
-        Some(Self {
-            library_root: library.root.clone(),
-            task_id: task.id.clone(),
-            work_dir: task.work_dir.clone(),
-            version_dir: course.dir.clone(),
-        })
-    }
-
-    /// Called only by reader workers, including the final check before opening.
-    fn inspect(&self) -> OfflineVideo {
-        self.checked_path()
-            .map(OfflineVideo::Available)
-            .unwrap_or(OfflineVideo::Missing)
-    }
-
-    fn checked_path(&self) -> Option<PathBuf> {
-        let mut components = std::path::Path::new(&self.task_id).components();
-        if !matches!(components.next(), Some(std::path::Component::Normal(_)))
-            || components.next().is_some()
-        {
-            return None;
-        }
-        let root = self.library_root.canonicalize().ok()?;
-        let work = self.work_dir.canonicalize().ok()?;
-        if work != root.join(".course2md/work").join(&self.task_id)
-            || !self.version_dir.canonicalize().ok()?.starts_with(&root)
-        {
-            return None;
-        }
-        let media = work.join("media.mp4").canonicalize().ok()?;
-        let metadata = media.metadata().ok()?;
-        // The system player is started through the shell, which rejects `\\?\` paths.
-        (media.parent() == Some(work.as_path()) && metadata.is_file() && metadata.len() > 0)
-            .then(|| course2md::config::simplify_verbatim(media))
-    }
-}
-
 /// The screenshot viewer. It outlives closing, so the dialog can play its exit.
 struct ImageViewer {
     open: bool,
@@ -217,73 +84,6 @@ struct ImageViewer {
 
 const ZOOM_STEP_IN: f32 = 1.25;
 const ZOOM_STEP_OUT: f32 = 0.8;
-const ZOOM_MIN: f32 = 0.1;
-const ZOOM_MAX: f32 = 4.;
-
-fn zoomed(scale: f32, factor: f32) -> f32 {
-    (scale * factor).clamp(ZOOM_MIN, ZOOM_MAX)
-}
-
-#[derive(Clone)]
-struct ExportFeedback {
-    title: String,
-    format: course2md::config::OutputFormat,
-    result: Result<PathBuf, String>,
-}
-
-#[derive(Default)]
-struct ExportState {
-    generation: u64,
-    pending: Option<(u64, PathBuf)>,
-    feedback: BTreeMap<PathBuf, ExportFeedback>,
-}
-
-impl ExportState {
-    fn begin(&mut self, version: PathBuf) -> Option<u64> {
-        if self.pending.is_some() {
-            return None;
-        }
-        self.generation = self.generation.wrapping_add(1);
-        self.pending = Some((self.generation, version));
-        Some(self.generation)
-    }
-
-    fn is_pending(&self, generation: u64, version: &std::path::Path) -> bool {
-        self.pending
-            .as_ref()
-            .is_some_and(|(current, source)| *current == generation && source == version)
-    }
-
-    fn cancel(&mut self, generation: u64, version: &std::path::Path) -> bool {
-        if !self.is_pending(generation, version) {
-            return false;
-        }
-        self.pending = None;
-        true
-    }
-
-    fn finish(
-        &mut self,
-        generation: u64,
-        version: &std::path::Path,
-        feedback: ExportFeedback,
-    ) -> bool {
-        if !self.cancel(generation, version) {
-            return false;
-        }
-        self.feedback.insert(version.to_path_buf(), feedback);
-        true
-    }
-}
-
-fn exported_file_label(path: &std::path::Path) -> String {
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| course2md::tr!("导出文件").into());
-    course2md::tr!("已导出 · {}", name)
-}
-
 /// A tooltip naming an icon button.
 fn tool(
     button: IconButton,
@@ -416,7 +216,7 @@ impl State {
                 let query = this.reader_ui.find.input.read(cx).value();
                 this.reader_ui.find.open |= !query.trim().is_empty();
                 this.update_reader_matches(cx);
-                if this.result_tab == 0 {
+                if this.opened.result_tab == 0 {
                     this.move_reader_match(0, cx);
                 }
             }
@@ -565,68 +365,6 @@ impl State {
     }
 }
 
-fn block_anchor(block: &PreviewBlock, index: usize) -> String {
-    match block {
-        PreviewBlock::Heading { anchor, .. }
-        | PreviewBlock::Paragraph { anchor, .. }
-        | PreviewBlock::Translation { anchor, .. } => anchor.clone(),
-        PreviewBlock::Image(path) => format!(
-            "image:{index}:{}",
-            path.file_name().unwrap_or_default().to_string_lossy()
-        ),
-    }
-}
-/// Position-store key for a manifest course at one tab (`:0` is the note
-/// tab). The library's "继续阅读" probe and the reader's save/restore build
-/// identical keys through this function.
-pub(crate) fn manifest_reading_key(course_id: &str, version_id: &str, tab: usize) -> String {
-    format!("{course_id}:{version_id}:{tab}")
-}
-/// A saved position away from the document top names the block it was read
-/// at; the top itself is stored as the default position.
-pub(crate) fn has_reading_position(position: &workspace::ReadingPosition) -> bool {
-    position.paragraph.is_some() || position.seconds.is_some_and(|seconds| seconds > 0.)
-}
-fn block_time(blocks: &[PreviewBlock], index: usize) -> Option<f64> {
-    for block in blocks.iter().take(index + 1).rev() {
-        // An explicitly untimed heading ends the previous time's scope.
-        if let PreviewBlock::Heading { seconds, .. } = block {
-            return *seconds;
-        }
-    }
-    None
-}
-fn heading_times(blocks: &[PreviewBlock]) -> impl Iterator<Item = (usize, Option<f64>)> + '_ {
-    blocks.iter().enumerate().map(|(index, block)| {
-        (
-            index,
-            match block {
-                PreviewBlock::Heading { seconds, .. } => *seconds,
-                _ => None,
-            },
-        )
-    })
-}
-fn note_position_index(
-    blocks: &[PreviewBlock],
-    position: &workspace::ReadingPosition,
-) -> Option<usize> {
-    position
-        .paragraph
-        .as_ref()
-        .and_then(|anchor| {
-            blocks
-                .iter()
-                .enumerate()
-                .position(|(index, block)| block_anchor(block, index) == *anchor)
-        })
-        .or_else(|| {
-            position.seconds.and_then(|seconds| {
-                nav::nearest_time(heading_times(blocks), seconds).map(|(index, _)| index)
-            })
-        })
-}
-
 /// The address of the note's opening: its facts, notices and details.
 const HEAD_BLOCK: &str = "reader:head";
 const FIGURE_BLOCK: &str = "figure:";
@@ -737,203 +475,12 @@ impl NoteDocument {
     }
 }
 
-/// The contents entry that holds `block`: the last heading at or before it.
-fn outline_current(outline: &[(usize, String, Option<f64>)], block: usize) -> Option<usize> {
-    outline
-        .iter()
-        .rev()
-        .find(|(index, _, _)| *index <= block)
-        .map(|(index, _, _)| *index)
-}
-
-/// One item of the virtualized screenshot gallery.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum GalleryItem {
-    /// The note's opening and the gallery's loading, empty or no-match state.
-    Header,
-    /// One grid row: a range of the matching screenshots.
-    Row(Range<usize>),
-}
-
-/// The gallery as list items: the header, then rows of `columns` screenshots.
-fn gallery_items(matches: usize, columns: usize) -> Vec<GalleryItem> {
-    let columns = columns.max(1);
-    std::iter::once(GalleryItem::Header)
-        .chain(
-            (0..matches)
-                .step_by(columns)
-                .map(|start| GalleryItem::Row(start..(start + columns).min(matches))),
-        )
-        .collect()
-}
-
-/// The row now holding screenshot `frame`.
-fn gallery_row_of(items: &[GalleryItem], matches: &[usize], frame: usize) -> Option<usize> {
-    let at = matches.iter().position(|index| *index == frame)?;
-    items
-        .iter()
-        .position(|item| matches!(item, GalleryItem::Row(row) if row.contains(&at)))
-}
-
 /// The first screenshot of the gallery's top row.
 fn gallery_top_frame(items: &[GalleryItem], matches: &[usize], list: &ListState) -> Option<usize> {
     let GalleryItem::Row(row) = items.get(list.logical_scroll_top().item_ix)? else {
         return None;
     };
     matches.get(row.start).copied()
-}
-
-fn frame_label(frame: &Frame) -> String {
-    course2md::tr!("{} 的截图", course2md::render::fmt_ts(frame.seconds))
-}
-
-fn matching_frames(frames: &[Frame], query: &str) -> Vec<usize> {
-    let query = query.trim().to_lowercase();
-    frames
-        .iter()
-        .enumerate()
-        .filter(|(_, frame)| frame.search_text.contains(&query))
-        .map(|(index, _)| index)
-        .collect()
-}
-
-/// How far a card excerpt moves its cut to reach a word boundary.
-const EXCERPT_WORD_SLACK: usize = 24;
-/// What a card shows of a screenshot's text without a match to centre on.
-const EXCERPT_GRAPHEMES: usize = 160;
-
-fn frame_excerpt(frame: &Frame, query: &str) -> String {
-    use unicode_segmentation::UnicodeSegmentation;
-    let text = frame.transcript.as_str();
-    let found = nav::text_matches(text, query).into_iter().next();
-    if found.is_none() && text.trim().is_empty() {
-        return course2md::tr!("这张截图没有对应文字").into();
-    }
-    let (mut start, end) = match &found {
-        Some(found) => {
-            // Step back by whole characters, so an emoji sequence or a letter
-            // with combining marks is never split.
-            let mut start = text[..found.start]
-                .grapheme_indices(true)
-                .rev()
-                .nth(15)
-                .map(|(index, _)| index)
-                .unwrap_or(0);
-            // Start at a word boundary, but within a few characters, so a match
-            // after a very long token (a URL) still falls within the excerpt's
-            // three lines; such a token is cut, after the leading ellipsis.
-            let mut walked = 0;
-            while start > 0
-                && walked < EXCERPT_WORD_SLACK
-                && text.as_bytes()[start].is_ascii_alphanumeric()
-                && text.as_bytes()[start - 1].is_ascii_alphanumeric()
-            {
-                start -= 1;
-                walked += 1;
-            }
-            if walked == EXCERPT_WORD_SLACK {
-                start += walked;
-            }
-            (start, found.end)
-        }
-        None => (0, 0),
-    };
-    let wanted = if found.is_some() {
-        100
-    } else {
-        EXCERPT_GRAPHEMES
-    };
-    let mut end = text[end..]
-        .grapheme_indices(true)
-        .nth(wanted)
-        .map(|(index, _)| end + index)
-        .unwrap_or(text.len());
-    let mut walked = 0;
-    while end < text.len()
-        && walked < EXCERPT_WORD_SLACK
-        && text.as_bytes()[end - 1].is_ascii_alphanumeric()
-        && text.as_bytes()[end].is_ascii_alphanumeric()
-    {
-        end += 1;
-        walked += 1;
-    }
-    // A formula is shown whole or not at all.
-    for (range, piece) in note_text::piece_sources(text) {
-        if matches!(piece, crate::math::Piece::Math { .. }) {
-            if range.start < start && start < range.end {
-                start = range.start;
-            }
-            if range.start < end && end < range.end {
-                end = range.end;
-            }
-        }
-    }
-    format!(
-        "{}{}{}",
-        if start > 0 { "…" } else { "" },
-        text[start..end].trim(),
-        if end < text.len() { "…" } else { "" },
-    )
-}
-
-/// Chapter titles from the summary outline, keyed by the section heading where
-/// each chapter begins. A heading belongs to the last outline entry that does
-/// not start after it; screenshot times rarely coincide with outline times.
-fn chapter_starts(blocks: &[PreviewBlock], outline: &[(f64, String)]) -> HashMap<usize, String> {
-    let mut starts = HashMap::new();
-    let mut previous: Option<&String> = None;
-    for (index, block) in blocks.iter().enumerate() {
-        let PreviewBlock::Heading {
-            seconds: Some(seconds),
-            ..
-        } = block
-        else {
-            continue;
-        };
-        let Some((_, chapter)) = outline
-            .iter()
-            .filter(|(time, _)| *time <= seconds + 1.5)
-            .max_by(|(a, _), (b, _)| a.total_cmp(b))
-        else {
-            continue;
-        };
-        if previous != Some(chapter) {
-            starts.insert(index, chapter.clone());
-        }
-        previous = Some(chapter);
-    }
-    starts
-}
-
-fn summary_outline(preview: &notes::Preview) -> Vec<(f64, String)> {
-    preview
-        .document
-        .summary
-        .iter()
-        .flat_map(|summary| &summary.outline)
-        .map(|item| (item.t, item.title.clone()))
-        .collect()
-}
-
-fn reader_outline(preview: &notes::Preview) -> Vec<(usize, String, Option<f64>)> {
-    let headings = preview
-        .blocks
-        .iter()
-        .enumerate()
-        .filter_map(|(index, block)| {
-            if let PreviewBlock::Heading { text, seconds, .. } = block {
-                Some((
-                    index,
-                    text.to_string(),
-                    *seconds,
-                    block.is_timestamp_heading(),
-                ))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    nav::content_outline(&headings, &summary_outline(preview))
 }
 
 /// A screenshot in its 16:9 slot: the image, its placeholder, or that it cannot be read.
@@ -1069,7 +616,7 @@ impl Desktop {
 
     /// The list of the current view.
     fn reader_list(&self) -> &ListState {
-        if self.result_tab == 0 {
+        if self.opened.result_tab == 0 {
             &self.reader_ui.note.list
         } else {
             &self.reader_ui.gallery.list
@@ -1083,11 +630,13 @@ impl Desktop {
         cx.notify();
     }
     fn reading_key(&self) -> Option<String> {
-        let preview = self.preview.as_ref()?;
+        let preview = self.opened.preview.as_ref()?;
         Some(match &preview.course.manifest {
-            Some(manifest) => {
-                manifest_reading_key(&manifest.course_id, &manifest.version_id, self.result_tab)
-            }
+            Some(manifest) => manifest_reading_key(
+                &manifest.course_id,
+                &manifest.version_id,
+                self.opened.result_tab,
+            ),
             None => {
                 let identity = self
                     .course_location(&preview.course)
@@ -1100,15 +649,15 @@ impl Desktop {
                             .map(|relative| format!("{}:{}", library.id, relative.display()))
                     })
                     .unwrap_or_else(|| preview.course.dir.display().to_string());
-                format!("{identity}:{}", self.result_tab)
+                format!("{identity}:{}", self.opened.result_tab)
             }
         })
     }
     /// The current view's top block and how far into it the view starts.
     fn capture_reading_position(&self) -> Option<workspace::ReadingPosition> {
-        let preview = self.preview.as_ref()?;
+        let preview = self.opened.preview.as_ref()?;
         let top = self.reader_list().logical_scroll_top();
-        let (paragraph, seconds) = if self.result_tab == 0 {
+        let (paragraph, seconds) = if self.opened.result_tab == 0 {
             let index = self.reader_ui.note.document.block_at(top.item_ix)?;
             // Above the first block the note draws, the note reads from its top.
             if self
@@ -1157,8 +706,8 @@ impl Desktop {
     }
     pub fn save_reading_position(&mut self, cx: &mut Context<Self>) {
         if self.page != Page::Result
-            || self.reading
-            || (self.result_tab == 1 && self.reader_ui.gallery.search_position.is_some())
+            || self.opened.reading
+            || (self.opened.result_tab == 1 && self.reader_ui.gallery.search_position.is_some())
             || self.reader_ui.restore.active
             || self.reader_ui.restore.pending.is_some()
         {
@@ -1227,8 +776,8 @@ impl Desktop {
     }
     fn schedule_reader_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.reader_ui.restore.pending.is_none()
-            || (self.result_tab == 1 && self.reader_ui.data_loading)
-            || (self.result_tab == 0 && !self.note_is_current(cx))
+            || (self.opened.result_tab == 1 && self.reader_ui.data_loading)
+            || (self.opened.result_tab == 0 && !self.note_is_current(cx))
         {
             return;
         }
@@ -1252,8 +801,8 @@ impl Desktop {
     }
     /// Where the current view's list shows `position`.
     fn reader_list_target(&self, position: &workspace::ReadingPosition) -> ListOffset {
-        let item = if self.result_tab == 0 {
-            self.preview.as_ref().and_then(|preview| {
+        let item = if self.opened.result_tab == 0 {
+            self.opened.preview.as_ref().and_then(|preview| {
                 let block = note_position_index(&preview.blocks, position)?;
                 self.reader_ui.note.document.item_of(block)
             })
@@ -1271,7 +820,7 @@ impl Desktop {
         }
     }
     pub(crate) fn ensure_reader_data(&mut self, cx: &mut Context<Self>) {
-        let Some(preview) = self.preview.clone() else {
+        let Some(preview) = self.opened.preview.clone() else {
             return;
         };
         if self.reader_ui.loaded.as_ref() == Some(&preview.course.dir) {
@@ -1361,7 +910,7 @@ impl Desktop {
     /// A search keeps the position it left, to return to when it is cleared.
     fn gallery_search_changed(&mut self, cx: &mut Context<Self>) {
         self.update_gallery_matches(cx);
-        if self.result_tab != 1 {
+        if self.opened.result_tab != 1 {
             return;
         }
         let searching = !self
@@ -1409,6 +958,7 @@ impl Desktop {
         // The blocking closure below needs an owned, Send preview; data loads
         // are per open/reload, not per frame, so this clone is not the hot path.
         let Some(preview) = self
+            .opened
             .preview
             .as_ref()
             .map(|preview| preview.as_ref().clone())
@@ -1459,13 +1009,14 @@ impl Desktop {
             let _ = this.update(cx, |this, cx| {
                 if this.reader_ui.generation != generation
                     || this
+                        .opened
                         .preview
                         .as_ref()
                         .is_none_or(|preview| preview.course.dir != path)
                 {
                     return;
                 }
-                let top = (this.result_tab == 1
+                let top = (this.opened.result_tab == 1
                     && this.reader_ui.restore.pending.is_none()
                     && !this.reader_ui.restore.active)
                     .then(|| this.capture_reading_position())
@@ -1489,7 +1040,7 @@ impl Desktop {
         .detach();
     }
     fn reader_source_key(&self) -> Option<String> {
-        let preview = self.preview.as_ref()?;
+        let preview = self.opened.preview.as_ref()?;
         Some(
             preview
                 .course
@@ -1506,7 +1057,7 @@ impl Desktop {
         )
     }
     fn reader_offline_video_request(&self) -> Option<OfflineVideoRequest> {
-        let course = &self.preview.as_ref()?.course;
+        let course = &self.opened.preview.as_ref()?.course;
         let manifest = course.manifest.as_ref()?;
         let state = &self.workspace.as_ref()?.state;
         let task = state.task(&manifest.task_id)?;
@@ -1531,6 +1082,7 @@ impl Desktop {
             let _ = this.update(cx, |this, cx| {
                 if this.reader_ui.generation != generation
                     || this
+                        .opened
                         .preview
                         .as_ref()
                         .is_none_or(|preview| preview.course.dir != version)
@@ -1559,7 +1111,7 @@ impl Desktop {
         {
             return Some(nav::SourceTarget::Local(path.clone()));
         }
-        let meta = &self.preview.as_ref()?.document.meta;
+        let meta = &self.opened.preview.as_ref()?.document.meta;
         nav::source_target(&meta.webpage_url, meta.is_local())
     }
     fn open_reader_source(&mut self, cx: &mut Context<Self>) {
@@ -1650,23 +1202,23 @@ impl Desktop {
     }
     /// The search input of the current view.
     fn reader_find_input(&self) -> Entity<InputState> {
-        if self.result_tab == 0 {
+        if self.opened.result_tab == 0 {
             self.reader_ui.find.input.clone()
         } else {
             self.reader_ui.gallery.find.clone()
         }
     }
     pub fn open_reader_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.preview.is_none() {
+        if self.opened.preview.is_none() {
             return;
         }
         if !self.reader_ui.find.open {
             self.reader_ui.find.return_focus = window.focused(cx);
         }
-        self.reader_ui.find.open |= self.result_tab == 0;
+        self.reader_ui.find.open |= self.opened.result_tab == 0;
         self.reader_find_input()
             .update(cx, |input, cx| input.focus(window, cx));
-        if self.result_tab == 0 {
+        if self.opened.result_tab == 0 {
             self.update_reader_matches(cx);
         }
         cx.notify();
@@ -1724,7 +1276,7 @@ impl Desktop {
         });
     }
     fn move_reader_match(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if self.result_tab != 0 {
+        if self.opened.result_tab != 0 {
             return;
         }
         let count = self.reader_ui.find.matches.len();
@@ -1743,11 +1295,11 @@ impl Desktop {
     }
     /// Shows note block `index` at the top of the note tab.
     fn jump_reader_block(&mut self, index: usize, cx: &mut Context<Self>) {
-        if self.result_tab != 0 {
+        if self.opened.result_tab != 0 {
             self.save_reading_position(cx);
-            self.result_tab = 0;
+            self.opened.result_tab = 0;
         }
-        let Some(preview) = &self.preview else {
+        let Some(preview) = &self.opened.preview else {
             return;
         };
         let Some(block) = preview.blocks.get(index) else {
@@ -1764,9 +1316,10 @@ impl Desktop {
         self.load_reader_version(Rc::unwrap_or_clone(course.into()), false, cx);
     }
     fn load_reader_version(&mut self, course: Course, refresh: bool, cx: &mut Context<Self>) {
-        if self.reading
+        if self.opened.reading
             || (!refresh
                 && self
+                    .opened
                     .preview
                     .as_ref()
                     .is_some_and(|preview| preview.course.dir == course.dir))
@@ -1775,10 +1328,10 @@ impl Desktop {
         }
         self.save_reading_position(cx);
         let position = self.capture_reading_position();
-        let tab = self.result_tab;
-        self.read_generation += 1;
-        let generation = self.read_generation;
-        self.reading = true;
+        let tab = self.opened.result_tab;
+        self.opened.read_generation += 1;
+        let generation = self.opened.read_generation;
+        self.opened.reading = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = crate::spawn_blocking_io(move || notes::read_preview(course))
@@ -1786,15 +1339,15 @@ impl Desktop {
                 .await
                 .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("打开时意外中断，请重试"))));
             let _ = this.update(cx, |this, cx| {
-                if this.read_generation != generation {
+                if this.opened.read_generation != generation {
                     return;
                 }
-                this.reading = false;
+                this.opened.reading = false;
                 match result {
                     Ok(mut preview) => {
-                        preview.course.title = this.course_display_title(&preview.course);
-                        this.preview = Some(Rc::new(preview));
-                        this.result_tab = tab;
+                        preview.course.title = this.library.course_display_title(&preview.course);
+                        this.opened.preview = Some(Rc::new(preview));
+                        this.opened.result_tab = tab;
                         if refresh {
                             this.reader_ui.loaded = None;
                         }
@@ -1813,7 +1366,7 @@ impl Desktop {
                             && !has_saved_position
                             && let Some(seconds) = position.and_then(|position| position.seconds)
                         {
-                            let blocks = &this.preview.as_ref().unwrap().blocks;
+                            let blocks = &this.opened.preview.as_ref().unwrap().blocks;
                             let nearest = nav::nearest_time(heading_times(blocks), seconds);
                             if let Some((index, exact)) = nearest {
                                 this.reader_ui.restore.pending = Some(workspace::ReadingPosition {
@@ -1885,6 +1438,7 @@ impl Desktop {
             return;
         };
         let found = self
+            .library
             .courses
             .iter()
             .find(|course| {
@@ -1910,7 +1464,7 @@ impl Desktop {
                 "find" => self.reader_ui.find.open = true,
                 "info" => self.reader_ui.details_open = true,
                 "toc" => self.reader_ui.toc_open = true,
-                "images" => self.result_tab = 1,
+                "images" => self.opened.result_tab = 1,
                 _ => {}
             }
         }
@@ -1919,12 +1473,14 @@ impl Desktop {
     /// The note version at `dir`: the library's shared copy, or the open note
     /// when the library has not listed it yet. Copies only when it must.
     pub(crate) fn note_at(&self, dir: &std::path::Path) -> Option<Rc<Course>> {
-        self.courses
+        self.library
+            .courses
             .iter()
             .find(|course| course.dir == dir)
             .cloned()
             .or_else(|| {
-                self.preview
+                self.opened
+                    .preview
                     .as_ref()
                     .filter(|preview| preview.course.dir == dir)
                     .map(|preview| Rc::new(preview.course.clone()))
@@ -1942,7 +1498,7 @@ impl Desktop {
         let Some(generation) = self.reader_ui.export_state.begin(version.clone()) else {
             return;
         };
-        let title = self.course_display_title(&course);
+        let title = self.library.course_display_title(&course);
         // The engine's file-name rules: also control characters, trailing dots,
         // device names such as `CON` and over-long titles.
         let stem = course2md::config::sanitize_filename_with_fallback(&title, "course");
@@ -2143,9 +1699,9 @@ impl Desktop {
     }
 
     fn select_reader_view(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if self.result_tab != index {
+        if self.opened.result_tab != index {
             self.save_reading_position(cx);
-            self.result_tab = index;
+            self.opened.result_tab = index;
             let searching = !self
                 .reader_ui
                 .gallery
@@ -2171,7 +1727,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (AnyElement, Option<AnyElement>) {
-        let Some(preview) = self.preview.clone() else {
+        let Some(preview) = self.opened.preview.clone() else {
             return (self.reader_opening(cx), None);
         };
         self.reader_ui.images.next_frame();
@@ -2184,9 +1740,12 @@ impl Desktop {
         let metrics = ReaderMetrics::new(window, !self.reader_ui.outline.is_empty());
         let tools = self.reader_tools(&preview, metrics, window, cx);
         let strip = self.reader_strip(&preview, cx);
+        let attention = (!metrics.short)
+            .then(|| self.reader_attention(&preview, cx))
+            .flatten();
         let tabs = (!metrics.short).then(|| self.reader_tabs(&preview, metrics, cx));
         let find = self.reader_find_bar(cx);
-        let view = if self.result_tab == 0 {
+        let view = if self.opened.result_tab == 0 {
             self.reader_article(&preview, metrics, cx)
         } else {
             self.reader_gallery(&preview, metrics, window, cx)
@@ -2247,12 +1806,13 @@ impl Desktop {
                     .min_h_0()
                     .w_full()
                     // A note alone keeps its views at its own measure.
-                    .when(self.result_tab == 0 && !metrics.toc_beside, |page| {
+                    .when(self.opened.result_tab == 0 && !metrics.toc_beside, |page| {
                         page.max_w(ARTICLE_MAX).mx_auto()
                     })
                     .pb(rem(16.))
                     .gap(rem(12.))
                     .children(strip)
+                    .children(attention)
                     .children(tabs)
                     .children(find)
                     .child(view)
@@ -2280,7 +1840,7 @@ impl Desktop {
                         .variant(IconButtonVariant::Tonal)
                         .tone(ButtonTone::Neutral)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.navigate(this.result_origin, cx);
+                            this.navigate(this.opened.result_origin, cx);
                         })),
                     "reader-loading-back-tip",
                     label,
@@ -2313,7 +1873,7 @@ impl Desktop {
     ) -> Option<Div> {
         let feedback = self.course_export_feedback(&preview.course, cx);
         let loading = course2md::tr!("正在切换版本…");
-        let switching = self.reading.then(|| {
+        let switching = self.opened.reading.then(|| {
             motion::enter(
                 "reader-version-loading",
                 h_flex()
@@ -2367,9 +1927,9 @@ impl Desktop {
                                 },
                             ),
                         ])
-                        .icon("note", symbols::article())
+                        .icon("note", symbols::description())
                         .icon("images", symbols::image())
-                        .selected(if self.result_tab == 0 {
+                        .selected(if self.opened.result_tab == 0 {
                             "note"
                         } else {
                             "images"
@@ -2392,7 +1952,7 @@ impl Desktop {
         metrics: ReaderMetrics,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.result_tab != 0 || self.reader_ui.outline.is_empty() || metrics.toc_beside {
+        if self.opened.result_tab != 0 || self.reader_ui.outline.is_empty() || metrics.toc_beside {
             return None;
         }
         let label = course2md::tr!("阅读目录");
@@ -2443,7 +2003,7 @@ impl Desktop {
                 // Copying from the note leaves its figures behind.
                 .capture_action(|_: &CopyText, window, cx| {
                     let text = TextSelection::selected_text(window, cx);
-                    let text = note_text::copied_text(&text);
+                    let text = copied_text(&text);
                     if !text.is_empty() {
                         cx.write_to_clipboard(ClipboardItem::new_string(text));
                         cx.stop_propagation();
@@ -2596,7 +2156,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let preview = self.preview.clone();
+        let preview = self.opened.preview.clone();
         if let (Some(preview), Some(block)) = (
             &preview,
             address
@@ -2666,13 +2226,26 @@ impl Desktop {
         let platform = if meta.is_local() {
             Some(course2md::tr!("本地视频"))
         } else {
-            crate::views::video_site_name(&meta.webpage_url)
+            source::video_site_name(&meta.webpage_url)
         };
+        // Where it comes from and who made it are one fact, marked by the platform's icon.
+        let origin: Vec<&str> = platform
+            .into_iter()
+            .chain(Some(meta.uploader.trim()).filter(|uploader| !uploader.is_empty()))
+            .collect();
+        let origin = (!origin.is_empty()).then(|| {
+            status_chip(StatusKind::Neutral)
+                .child(
+                    Icon::from(if meta.is_local() {
+                        symbols::movie()
+                    } else {
+                        symbols::tv()
+                    })
+                    .size(rem(16.)),
+                )
+                .child(origin.join(" · "))
+        });
         let mut facts: Vec<String> = Vec::new();
-        facts.extend(platform.map(str::to_owned));
-        if !meta.uploader.trim().is_empty() {
-            facts.push(meta.uploader.trim().to_owned());
-        }
         if meta.duration > 0. {
             facts.push(course2md::render::fmt_ts(meta.duration));
         }
@@ -2691,6 +2264,7 @@ impl Desktop {
                     .items_center()
                     .gap_x(rem(12.))
                     .gap_y(rem(8.))
+                    .children(origin)
                     .children(
                         facts
                             .into_iter()
@@ -2701,6 +2275,11 @@ impl Desktop {
             .children(self.reader_obstacles(cx))
             .children(self.reader_details(preview, cx))
             .children(self.reader_notices(preview, cx))
+            // Where the views have no line of their own, the page has none to spare either.
+            .when(
+                ReaderMetrics::new(window, !self.reader_ui.outline.is_empty()).short,
+                |head| head.children(self.reader_attention(preview, cx)),
+            )
     }
 
     /// The other versions of this note, when it has any; its revision and date otherwise
@@ -2729,7 +2308,7 @@ impl Desktop {
         let trigger = material_button("choose-note-version", ButtonVariant::Text)
             .icon(symbols::keyboard_arrow_down())
             .icon_position(ButtonIconPosition::Trailing)
-            .disabled(self.reading)
+            .disabled(self.opened.reading)
             .child(course2md::tr!(
                 "第 {} 版 · {} 生成",
                 manifest.revision,
@@ -2907,7 +2486,18 @@ impl Desktop {
         ))
     }
 
-    /// New-version, incomplete-processing and file-reload notices.
+    /// What is unfinished about this note: it concerns the note and its screenshots
+    /// alike, so it heads the page above the views.
+    fn reader_attention(
+        &mut self,
+        preview: &Rc<notes::Preview>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let notice = processing_notice(&preview.processing_issues)?;
+        Some(self.reader_processing_notice(preview, notice, cx))
+    }
+
+    /// New-version and file-reload notices.
     fn reader_notices(
         &mut self,
         preview: &Rc<notes::Preview>,
@@ -2916,8 +2506,9 @@ impl Desktop {
         let mut notices = Vec::new();
         if let Some(current) = &preview.course.manifest
             && let Some(newer) = self
-                .library_view_cache
-                .newer_version(&self.courses, current)
+                .library
+                .view_cache
+                .newer_version(&self.library.courses, current)
         {
             notices.push(motion::enter(
                 "reader-new-version-notice",
@@ -2937,9 +2528,6 @@ impl Desktop {
                 ),
             ));
         }
-        if let Some(notice) = processing_notice(&preview.processing_issues) {
-            notices.push(self.reader_processing_notice(preview, notice, cx));
-        }
         if files_need_reload(preview, &self.reader_ui.issues, &self.reader_ui.frames) {
             let course = preview.course.clone();
             let issues: Vec<&str> = preview
@@ -2953,7 +2541,7 @@ impl Desktop {
             } else {
                 issues.join("\n")
             };
-            let reading = self.reading;
+            let reading = self.opened.reading;
             notices.push(motion::enter(
                 "reader-file-notice",
                 notice_banner("reader-file-notice-text", NoticeKind::Danger, text).child(
@@ -2984,7 +2572,8 @@ impl Desktop {
             .manifest
             .as_ref()
             .and_then(|manifest| self.workspace.as_ref()?.state.task(&manifest.task_id));
-        let requires_repair = task.is_some_and(crate::task_ui::task_requires_service_repair);
+        let requires_repair =
+            task.is_some_and(desktop_core::task_view::task_requires_service_repair);
         let can_retry = task.is_some_and(|task| {
             task.handled_by.is_none()
                 && !matches!(
@@ -3026,7 +2615,7 @@ impl Desktop {
         if let Some(id) = id {
             if can_retry && !components.is_empty() {
                 let retry = id.clone();
-                let label = crate::task_ui::retry_components_label(&components);
+                let label = desktop_core::task_view::retry_components_label(&components);
                 actions = actions.child(
                     material_button("reader-retry-incomplete", ButtonVariant::Outlined)
                         .tone(ButtonTone::Accent)
@@ -3121,6 +2710,10 @@ impl Desktop {
         motion::enter(
             "reader-processing-notice",
             notice_banner("reader-incomplete-processing", NoticeKind::Warning, notice)
+                .flex_shrink_0()
+                .rounded(RADIUS_HERO)
+                .px(rem(20.))
+                .py(rem(16.))
                 .child(actions)
                 .child(motion::disclosure(
                     "reader-processing-detail-panel",
@@ -3140,7 +2733,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let icon_only = is_compact(window);
-        let reading_note = self.result_tab == 0;
+        let reading_note = self.opened.result_tab == 0;
         let shortcut = if cfg!(target_os = "macos") {
             "⌘F"
         } else {
@@ -3151,7 +2744,7 @@ impl Desktop {
             let (icon, label) = if reading_note {
                 (symbols::image(), course2md::tr!("截图"))
             } else {
-                (symbols::article(), course2md::tr!("笔记"))
+                (symbols::description(), course2md::tr!("笔记"))
             };
             tool(
                 IconButton::new("reader-view-toggle", icon, label).on_click(cx.listener(
@@ -3395,7 +2988,7 @@ impl Desktop {
         // A web source opens on its site; the title bar may be playing the kept copy.
         let source_label = match &source {
             _ if missing_local => course2md::tr!("找到原视频…").to_owned(),
-            Some(nav::SourceTarget::Web(url)) => match crate::views::video_site_name(url) {
+            Some(nav::SourceTarget::Web(url)) => match source::video_site_name(url) {
                 Some(site) => course2md::tr!("在 {} 打开", site),
                 None => course2md::tr!("在浏览器中打开").to_owned(),
             },
@@ -3468,7 +3061,7 @@ impl Desktop {
     /// Finding in the current view. The note's bar comes when asked for and shows where
     /// in the matches it is; the screenshots' stays and narrows them.
     fn reader_find_bar(&mut self, cx: &mut Context<Self>) -> Option<Div> {
-        let reading_note = self.result_tab == 0;
+        let reading_note = self.opened.result_tab == 0;
         if (reading_note && !self.reader_ui.find.open)
             || (!reading_note && self.reader_ui.frames.is_empty())
         {
@@ -3696,7 +3289,7 @@ impl Desktop {
                     .child(
                         material_button("empty-images-to-note", ButtonVariant::Outlined)
                             .tone(ButtonTone::Accent)
-                            .icon(symbols::article())
+                            .icon(symbols::description())
                             .child(course2md::tr!("阅读笔记"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.select_reader_view(0, window, cx)
@@ -3797,7 +3390,7 @@ impl Desktop {
                             row.child(tool(
                                 IconButton::new(
                                     ("frame-to-body", index),
-                                    symbols::article(),
+                                    symbols::description(),
                                     to_note,
                                 )
                                 .button_size(ButtonSize::ExtraSmall)
@@ -3845,7 +3438,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.preview.is_none()
+        if self.opened.preview.is_none()
             || self.reader_viewer_open()
             || self
                 .reader_ui
@@ -3855,7 +3448,7 @@ impl Desktop {
         {
             return;
         }
-        let filtered = self.result_tab == 1
+        let filtered = self.opened.result_tab == 1
             && !self
                 .reader_ui
                 .gallery
@@ -3864,7 +3457,7 @@ impl Desktop {
                 .value()
                 .trim()
                 .is_empty();
-        let visible: Vec<usize> = if self.result_tab == 1 {
+        let visible: Vec<usize> = if self.opened.result_tab == 1 {
             self.reader_ui.gallery.matches.to_vec()
         } else {
             (0..self.reader_ui.frames.len()).collect()
@@ -3872,8 +3465,8 @@ impl Desktop {
         let Some(viewer_index) = visible.iter().position(|candidate| *candidate == index) else {
             return;
         };
-        crate::import_ui::ConversionFollow::interrupt_for_reader_viewer(
-            &mut self.following_conversion,
+        desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
+            &mut self.import.following_conversion,
         );
         self.reader_ui.viewer = Some(ImageViewer {
             open: true,
@@ -4263,7 +3856,7 @@ impl Desktop {
         let to_note = body_index.map(|block| {
             action(
                 "image-to-body",
-                symbols::article(),
+                symbols::description(),
                 course2md::tr!("在笔记中查看"),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -4299,7 +3892,7 @@ impl Desktop {
                 if text_only {
                     symbols::image()
                 } else {
-                    symbols::article()
+                    symbols::description()
                 },
                 if text_only {
                     course2md::tr!("返回图片")
@@ -4341,7 +3934,7 @@ impl Desktop {
                 .flex_1()
                 .min_h(rem(112.))
                 .w_full()
-                .rounded(RADIUS_CARD)
+                .rounded(RADIUS_LARGE)
                 .into_any_element()
         };
         let Some(viewer) = &self.reader_ui.viewer else {
@@ -4408,7 +4001,7 @@ impl Desktop {
             .bg(color(INSET))
             .border_1()
             .border_color(color(OUTLINE_VARIANT))
-            .rounded(RADIUS_CARD)
+            .rounded(RADIUS_LARGE)
             .flex_1()
             .min_h(rem(112.))
             .w_full()
@@ -4495,7 +4088,7 @@ impl Desktop {
 
     /// Where the reader returns to, named for its crumb in the title bar.
     pub(crate) fn reader_origin_label(&self) -> &'static str {
-        match self.result_origin {
+        match self.opened.result_origin {
             Page::New => course2md::tr!("主页"),
             Page::Task => course2md::tr!("任务"),
             Page::Settings => course2md::tr!("设置"),
@@ -4513,6 +4106,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> gpui_kit_material::components::TitleBar {
         let title = self
+            .opened
             .preview
             .as_ref()
             .map(|preview| preview.course.title.clone())
@@ -4521,7 +4115,7 @@ impl Desktop {
         // The crumb names where the note lives, however it was reached; the
         // return button names the origin.
         let library = course2md::tr!("笔记库");
-        let crumb = match &self.preview {
+        let crumb = match &self.opened.preview {
             Some(preview) => {
                 let folder = self.folder_context(Some(preview.course.dir.clone()));
                 match folder.load_error {
@@ -4541,9 +4135,9 @@ impl Desktop {
                         IconButton::new("reader-back", symbols::arrow_back(), back.clone())
                             .variant(IconButtonVariant::Tonal)
                             .tone(ButtonTone::Neutral)
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.navigate(this.result_origin, cx)),
-                            ),
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.navigate(this.opened.result_origin, cx)
+                            })),
                         "reader-back-tip",
                         back,
                     )),
@@ -4572,277 +4166,13 @@ impl Desktop {
     }
 }
 
-fn load_reader_data(preview: &notes::Preview) -> ReaderData {
-    let mut data = ReaderData::default();
-    let dir = &preview.course.dir;
-    data.export_folder = existing_export_folder(dir, &preview.outputs);
-    let Some(manifest) = &preview.course.manifest else {
-        return data;
-    };
-    let headings: HashMap<usize, usize> = preview
-        .blocks
-        .iter()
-        .enumerate()
-        .filter_map(|(index, block)| block.section_index().map(|section| (section, index)))
-        .collect();
-    for (index, frame) in manifest.frames.iter().enumerate() {
-        let section = preview
-            .document
-            .sections
-            .iter()
-            .enumerate()
-            .find(|(_, section)| section.image == frame.image);
-        let transcript = section
-            .map(|(_, section)| {
-                section
-                    .speech
-                    .iter()
-                    .map(|speech| speech.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            })
-            .unwrap_or_default();
-        let body_index = section
-            .and_then(|(section, _)| headings.get(&section))
-            .copied()
-            .or_else(|| nav::nearest_time(heading_times(&preview.blocks), frame.t).map(|(i, _)| i));
-        let frame = Frame::new(
-            format!("frame:{index}:{}", frame.image),
-            course2md::artifact::safe_asset_path(dir, &frame.image).ok(),
-            frame.t,
-            transcript,
-            body_index,
-        );
-        if let Some(image) = &frame.image {
-            data.frame_by_path
-                .entry(image.path.clone())
-                .or_insert(index);
-        }
-        data.frames.push(frame);
-    }
-    let parent = dir
-        .parent()
-        .filter(|parent| parent.file_name().is_some_and(|name| name == "versions"));
-    let Some(parent) = parent else {
-        return data;
-    };
-    match std::fs::read_dir(parent) {
-        Ok(entries) => {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_dir() || !path.join("manifest.json").is_file() {
-                    continue;
-                }
-                match course2md::artifact::read_manifest(&path.join("manifest.json")) {
-                    Ok(other) if other.course_id == manifest.course_id => {
-                        let mut course = preview.course.clone();
-                        course.dir = path;
-                        course.title = other.title.clone();
-                        course.slides = other.frames.len();
-                        let label = course2md::tr!(
-                            "第 {} 版 · {}{}",
-                            other.revision,
-                            nav::timestamp_local(other.created_at_ms),
-                            if notes::has_incomplete_content(&other) {
-                                course2md::tr!(" · 部分完成")
-                            } else {
-                                ""
-                            }
-                        );
-                        course.manifest = Some(other);
-                        data.versions.push(Version { course, label });
-                    }
-                    Err(_) => data
-                        .issues
-                        .push(course2md::tr!("有一个旧版本无法读取").into()),
-                    _ => {}
-                }
-            }
-            data.versions.sort_by_key(|version| {
-                std::cmp::Reverse(
-                    version
-                        .course
-                        .manifest
-                        .as_ref()
-                        .map(|manifest| (manifest.revision, manifest.created_at_ms))
-                        .unwrap_or_default(),
-                )
-            });
-        }
-        Err(error) => data
-            .issues
-            .push(course2md::tr!("其他版本暂时无法读取：{}", error)),
-    }
-    data
-}
-
-fn existing_export_folder(dir: &std::path::Path, outputs: &[String]) -> Option<PathBuf> {
-    let folder = course2md::artifact::safe_asset_path(dir, "exports").ok()?;
-    let has_file = outputs.iter().any(|output| {
-        std::path::Path::new(output).starts_with("exports")
-            && course2md::artifact::safe_asset_path(dir, output).is_ok_and(|path| path.is_file())
-    });
-    has_file.then_some(folder)
-}
-fn processing_notice(issues: &[notes::ProcessingIssue]) -> Option<String> {
-    if issues.is_empty() {
-        return None;
-    }
-    Some(course2md::tr!(
-        "{}未完成",
-        issues
-            .iter()
-            .map(|issue| issue.stage.label())
-            .collect::<Vec<_>>()
-            .join(course2md::tr!("、"))
-    ))
-}
-fn files_need_reload(preview: &notes::Preview, issues: &[String], frames: &[Frame]) -> bool {
-    !preview.issues.is_empty()
-        || !issues.is_empty()
-        || frames.iter().any(|frame| frame.image.is_none())
-}
-
-/// The text's scroll offset (zero or negative) after moving `delta` pixels
-/// further down, kept within its `max` scroll distance.
-fn image_text_offset(offset: f32, max: f32, delta: f32) -> f32 {
-    (offset - delta).clamp(-max.max(0.), 0.)
-}
-
-/// Preserve the image point under the viewport center while either axis grows
-/// from a centered preview into scrollable content, or returns to a fitted image.
-fn image_zoom_offset(viewport: f32, old_extent: f32, new_extent: f32, offset: f32) -> f32 {
-    if viewport <= 0. || old_extent <= 0. {
-        return 0.;
-    }
-    let old_margin = (viewport - old_extent).max(0.) * 0.5;
-    let image_position = ((viewport * 0.5 - offset - old_margin) / old_extent).clamp(0., 1.);
-    let new_margin = (viewport - new_extent).max(0.) * 0.5;
-    (viewport * 0.5 - new_margin - image_position * new_extent)
-        .clamp(-(new_extent - viewport).max(0.), 0.)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportFeedback, ExportState, Frame, GalleryItem, NoteDocument, OfflineVideo,
-        OfflineVideoRequest, PreviewBlock, block_time, existing_export_folder, files_need_reload,
-        frame_excerpt, gallery_items, gallery_row_of, gallery_top_frame, image_text_offset,
-        image_zoom_offset, load_reader_data, matching_frames, outline_current, processing_notice,
+        GalleryItem, NoteDocument, PreviewBlock, gallery_items, gallery_row_of, gallery_top_frame,
     };
-    use crate::{notes::Course, source, workspace};
     use gpui::{AppContext as _, ListAlignment, ListOffset, ListState, TestAppContext, px};
     use std::collections::HashMap;
-
-    #[test]
-    fn keys_scroll_the_screenshot_text_within_its_range() {
-        // Down moves the content up (a more negative offset), up returns it.
-        assert_eq!(image_text_offset(0., 500., 90.), -90.);
-        assert_eq!(image_text_offset(-90., 500., -90.), 0.);
-        // Home and End go to either end; nothing scrolls past them.
-        assert_eq!(image_text_offset(-200., 500., f32::INFINITY), -500.);
-        assert_eq!(image_text_offset(-200., 500., f32::NEG_INFINITY), 0.);
-        assert_eq!(image_text_offset(0., 0., 90.), 0.);
-    }
-
-    #[test]
-    fn saved_export_folder_requires_a_listed_file_inside_the_version() {
-        let temp = tempfile::tempdir().unwrap();
-        let exports = temp.path().join("exports");
-        let outputs = vec!["exports/course.html".into()];
-        assert!(existing_export_folder(temp.path(), &outputs).is_none());
-        std::fs::create_dir(&exports).unwrap();
-        assert!(existing_export_folder(temp.path(), &outputs).is_none());
-        std::fs::write(exports.join("course.html"), "<p>笔记</p>").unwrap();
-        assert_eq!(existing_export_folder(temp.path(), &outputs), Some(exports));
-        assert!(existing_export_folder(temp.path(), &[]).is_none());
-        assert!(existing_export_folder(temp.path(), &["exports/../course.html".into()]).is_none());
-    }
-
-    #[test]
-    fn export_feedback_stays_with_its_version_and_ignores_cancelled_callbacks() {
-        let old = std::path::PathBuf::from("/library/old-note/versions/one");
-        let other = std::path::PathBuf::from("/library/other-note/versions/two");
-        let path = std::path::PathBuf::from("/exports/old-note.html");
-        let success = || ExportFeedback {
-            title: "旧笔记".into(),
-            format: course2md::config::OutputFormat::Html,
-            result: Ok(path.clone()),
-        };
-        let mut state = ExportState::default();
-        let cancelled = state.begin(old.clone()).unwrap();
-        assert!(state.cancel(cancelled, &old));
-        assert!(state.feedback.is_empty());
-        let next = state.begin(other.clone()).unwrap();
-        assert!(!state.finish(cancelled, &old, success()));
-        assert!(state.is_pending(next, &other));
-        assert!(state.finish(
-            next,
-            &other,
-            ExportFeedback {
-                title: "另一份笔记".into(),
-                format: course2md::config::OutputFormat::Html,
-                result: Err("保存位置不可写".into()),
-            }
-        ));
-        let cancelled_retry = state.begin(other.clone()).unwrap();
-        assert!(state.cancel(cancelled_retry, &other));
-        assert!(state.feedback[&other].result.is_err());
-        let completed = state.begin(old.clone()).unwrap();
-        assert!(state.finish(completed, &old, success()));
-        assert_eq!(state.feedback[&old].result.as_ref().unwrap(), &path);
-        assert!(state.feedback[&other].result.is_err());
-    }
-
-    #[test]
-    fn gallery_search_matches_its_own_text_and_preserves_frame_identity() {
-        let frame = |index: usize, transcript: &str| {
-            Frame::new(
-                format!("frame-{index}"),
-                None,
-                index as f64 * 10.,
-                transcript.into(),
-                Some(index),
-            )
-        };
-        let frames = vec![
-            frame(0, "结构与分组"),
-            frame(1, "OpenAI 与模型"),
-            frame(2, "结语"),
-        ];
-        assert_eq!(matching_frames(&frames, "  OPENAI  "), vec![1]);
-        assert_eq!(matching_frames(&frames, "00:20"), vec![2]);
-        assert!(matching_frames(&frames, "不存在的内容").is_empty());
-        assert_eq!(matching_frames(&frames, ""), vec![0, 1, 2]);
-        let phrase = frame(
-            3,
-            "Some introductory words. OpenAI said that Buckmaster offered terms.",
-        );
-        assert!(frame_excerpt(&phrase, "Buckmaster").starts_with("…OpenAI said that Buckmaster"));
-        // An excerpt around a match never cuts a formula in half.
-        let formula = frame(
-            4,
-            "前文前文前文前文 $a + b + c + d + e + f + g + h$ 后文 match",
-        );
-        let excerpt = frame_excerpt(&formula, "match");
-        assert!(
-            excerpt.contains("$a + b + c + d + e + f + g + h$"),
-            "{excerpt}"
-        );
-        // A match after a very long token starts close to the match.
-        let url = format!("链接 https://example.com/{}/end?q=x 结尾", "a".repeat(300));
-        let excerpt = frame_excerpt(&frame(5, &url), "end");
-        let before = excerpt.find("/end").unwrap();
-        assert!(excerpt.starts_with('…') && before < 60, "{excerpt}");
-        // The step back counts whole characters, so an emoji sequence stays whole.
-        let family = "👨\u{200d}👩\u{200d}👧\u{200d}👦";
-        let emoji = frame(
-            6,
-            &format!("前文{family}一二三四五六七八九十一二三四 zebra"),
-        );
-        let excerpt = frame_excerpt(&emoji, "zebra");
-        assert!(excerpt.starts_with(&format!("…{family}")), "{excerpt}");
-    }
 
     #[test]
     fn a_gallery_resize_keeps_the_same_screenshot() {
@@ -4869,240 +4199,6 @@ mod tests {
         let narrow = gallery_items(matches.len(), 2);
         assert_eq!(gallery_row_of(&narrow, &matches, 3), Some(2));
         assert_eq!(gallery_row_of(&narrow, &matches, 99), None);
-    }
-
-    #[test]
-    fn image_zoom_keeps_the_visible_center_and_all_edges_reachable() {
-        // A centered small image grows around its midpoint, then fits again.
-        assert_eq!(image_zoom_offset(1000., 640., 1280., 0.), -140.);
-        assert_eq!(image_zoom_offset(1000., 1280., 640., -140.), 0.);
-        // A panned image preserves the same content at the viewport center.
-        assert_eq!(image_zoom_offset(1000., 2000., 4000., -400.), -1300.);
-        // Shrinking near an edge clamps to reachable bounds without hiding it.
-        assert_eq!(image_zoom_offset(1000., 2000., 1200., -1000.), -200.);
-        assert_eq!(image_zoom_offset(1000., 2000., 1200., 0.), 0.);
-    }
-
-    #[test]
-    fn an_untimed_heading_ends_the_preceding_time_scope() {
-        let blocks = vec![
-            PreviewBlock::Heading {
-                text: "0:10".into(),
-                anchor: "a".into(),
-                seconds: Some(10.),
-            },
-            PreviewBlock::Paragraph {
-                text: "第一段".into(),
-                anchor: "b".into(),
-            },
-            PreviewBlock::Heading {
-                text: "补充主题".into(),
-                anchor: "c".into(),
-                seconds: None,
-            },
-            PreviewBlock::Paragraph {
-                text: "第二段".into(),
-                anchor: "d".into(),
-            },
-        ];
-        assert_eq!(block_time(&blocks, 1), Some(10.));
-        assert_eq!(block_time(&blocks, 3), None);
-    }
-    fn fixture_version(
-        root: &std::path::Path,
-        revision: u64,
-        times: &[f64],
-    ) -> crate::notes::Course {
-        crate::notes::fixtures::published_note(root, revision, times, Default::default())
-    }
-    fn offline_task_fixture(
-        root: &std::path::Path,
-        course: &Course,
-    ) -> (workspace::TaskRecord, workspace::LibraryLocation) {
-        let manifest = course.manifest.as_ref().unwrap();
-        let library = workspace::LibraryLocation {
-            id: "offline-library".into(),
-            name: "Offline library".into(),
-            root: root.to_owned(),
-            previous_roots: Vec::new(),
-        };
-        let task = workspace::TaskRecord {
-            id: manifest.task_id.clone(),
-            plan: workspace::TaskPlan {
-                operation: Default::default(),
-                source: source::Source {
-                    input: "https://www.bilibili.com/video/BVfixture?p=2".into(),
-                    identity: manifest.source_id.clone(),
-                    online: true,
-                    ..Default::default()
-                },
-                source_id: manifest.source_id.clone(),
-                title: course.title.clone(),
-                library_id: library.id.clone(),
-                folder: None,
-                subtitle: None,
-                config: course2md::settings::ConfigFile {
-                    defaults: course2md::settings::Defaults {
-                        keep_video: Some(true),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                asr_service: None,
-                ai_service: None,
-            },
-            state: workspace::TaskState::Complete,
-            intent: workspace::Intent::Run,
-            created: 0,
-            updated: 0,
-            parent: None,
-            handled_by: None,
-            work_dir: root.join(".course2md/work").join(&manifest.task_id),
-            events: crate::activity::JobEvents {
-                error: None,
-                ..Default::default()
-            },
-            artifact: Some(course.dir.clone()),
-            unread: false,
-            resend: Vec::new(),
-        };
-        (task, library)
-    }
-
-    #[test]
-    fn offline_video_uses_its_version_task_and_rechecks_removed_media() {
-        let root = tempfile::tempdir().unwrap();
-        let first = fixture_version(root.path(), 1, &[10.]);
-        let second = fixture_version(root.path(), 2, &[20.]);
-        let (task, library) = offline_task_fixture(root.path(), &first);
-        std::fs::create_dir_all(&task.work_dir).unwrap();
-        let media = task.work_dir.join("media.mp4");
-        std::fs::write(&media, "retained first video").unwrap();
-        let request = OfflineVideoRequest::for_version(&first, &task, &library).unwrap();
-        assert_eq!(
-            request.inspect(),
-            OfflineVideo::Available(course2md::config::canonicalize(&media).unwrap())
-        );
-        assert!(OfflineVideoRequest::for_version(&second, &task, &library).is_none());
-        let mut changed = task.clone();
-        changed.artifact = Some(second.dir.clone());
-        assert!(OfflineVideoRequest::for_version(&first, &changed, &library).is_none());
-        changed = task.clone();
-        changed.plan.source_id = "another-video".into();
-        assert!(OfflineVideoRequest::for_version(&first, &changed, &library).is_none());
-        changed = task.clone();
-        changed.plan.config.defaults.keep_video = Some(false);
-        assert!(OfflineVideoRequest::for_version(&first, &changed, &library).is_none());
-        std::fs::remove_file(media).unwrap();
-        assert_eq!(request.inspect(), OfflineVideo::Missing);
-    }
-
-    #[test]
-    fn offline_video_refuses_other_task_paths_and_files_outside_its_library() {
-        let root = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let course = fixture_version(root.path(), 1, &[10.]);
-        let (mut task, library) = offline_task_fixture(root.path(), &course);
-        let expected_work = task.work_dir.clone();
-        std::fs::write(outside.path().join("media.mp4"), "unrelated video").unwrap();
-        task.work_dir = outside.path().to_owned();
-        let request = OfflineVideoRequest::for_version(&course, &task, &library).unwrap();
-        assert_eq!(request.inspect(), OfflineVideo::Missing);
-        task.work_dir = expected_work;
-        std::fs::create_dir_all(&task.work_dir).unwrap();
-        let mut request = OfflineVideoRequest::for_version(&course, &task, &library).unwrap();
-        std::fs::write(task.work_dir.join("media.mp4"), "retained video").unwrap();
-        request.version_dir = outside.path().to_owned();
-        assert_eq!(request.inspect(), OfflineVideo::Missing);
-
-        #[cfg(unix)]
-        {
-            std::fs::remove_file(task.work_dir.join("media.mp4")).unwrap();
-            std::os::unix::fs::symlink(
-                outside.path().join("media.mp4"),
-                task.work_dir.join("media.mp4"),
-            )
-            .unwrap();
-            let request = OfflineVideoRequest::for_version(&course, &task, &library).unwrap();
-            assert_eq!(request.inspect(), OfflineVideo::Missing);
-        }
-    }
-
-    #[test]
-    fn summary_failure_keeps_body_readable_and_does_not_offer_file_reload() {
-        let root = tempfile::tempdir().unwrap();
-        let detail = "摘要尚未完成，已保留正文 / Summary incomplete; body retained";
-        let course = crate::notes::fixtures::published_note(
-            root.path(),
-            1,
-            &[10.],
-            course2md::artifact::Outcomes {
-                transcript: course2md::artifact::Outcome::succeeded(),
-                screenshots: course2md::artifact::Outcome::succeeded(),
-                summary: course2md::artifact::Outcome::failed(detail),
-                ..Default::default()
-            },
-        );
-        let preview = crate::notes::read_preview(course.clone()).unwrap();
-        let data = load_reader_data(&preview);
-        assert!(preview.plain_text.contains("10 秒的正文"));
-        assert!(preview.issues.is_empty());
-        assert_eq!(
-            processing_notice(&preview.processing_issues).as_deref(),
-            Some("摘要未完成")
-        );
-        assert_eq!(
-            preview.processing_issues[0].outcome.message.as_deref(),
-            Some(detail)
-        );
-        assert_eq!(preview.course.manifest.as_ref().unwrap().task_id, "task-1");
-        assert!(!files_need_reload(&preview, &data.issues, &data.frames));
-
-        std::fs::remove_file(course.dir.join("frames/frame-0.png")).unwrap();
-        let damaged = crate::notes::read_preview(course).unwrap();
-        let data = load_reader_data(&damaged);
-        assert!(files_need_reload(&damaged, &data.issues, &data.frames));
-        assert_eq!(
-            processing_notice(&damaged.processing_issues).as_deref(),
-            Some("摘要未完成")
-        );
-    }
-    #[test]
-    fn a_missing_earlier_frame_does_not_shift_later_times_or_mix_versions() {
-        let root = tempfile::tempdir().unwrap();
-        let old = fixture_version(root.path(), 1, &[10., 20., 30.]);
-        let new = fixture_version(root.path(), 2, &[40.]);
-        std::fs::remove_file(old.dir.join("frames/frame-0.png")).unwrap();
-        let old_preview = crate::notes::read_preview(old.clone()).unwrap();
-        assert!(
-            old_preview
-                .issues
-                .iter()
-                .any(|issue| issue.starts_with("00:10"))
-        );
-        let old_data = load_reader_data(&old_preview);
-        assert_eq!(old_data.frames.len(), 3);
-        assert!(old_data.frames[0].image.is_none());
-        assert_eq!(old_data.frames[1].seconds, 20.);
-        assert!(old_data.frames[1].transcript.contains("20 秒"));
-        let body = old_data.frames[1].body_index.unwrap();
-        assert!(matches!(
-            &old_preview.blocks[body],
-            PreviewBlock::Heading { anchor, .. } if anchor == "section-1"
-        ));
-        assert_eq!(old_data.frame_by_path.len(), 2);
-        assert_eq!(old_data.versions.len(), 2);
-        let new_data = load_reader_data(&crate::notes::read_preview(new.clone()).unwrap());
-        assert_eq!(new_data.frames.len(), 1);
-        assert_eq!(new_data.frames[0].seconds, 40.);
-        assert!(
-            new_data.frames[0]
-                .image
-                .as_ref()
-                .unwrap()
-                .path
-                .starts_with(&new.dir)
-        );
     }
 
     fn section(index: usize) -> PreviewBlock {
@@ -5242,14 +4338,5 @@ mod tests {
             );
             assert_eq!(text.source(), document.markdown);
         });
-    }
-
-    #[test]
-    fn the_contents_follow_the_last_heading_at_or_before_the_top() {
-        let outline = vec![(2, "一".to_owned(), None), (6, "二".to_owned(), None)];
-        assert_eq!(outline_current(&outline, 0), None);
-        assert_eq!(outline_current(&outline, 2), Some(2));
-        assert_eq!(outline_current(&outline, 5), Some(2));
-        assert_eq!(outline_current(&outline, 9), Some(6));
     }
 }

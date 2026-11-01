@@ -2038,3 +2038,4 @@ Intel NPU 不再支持 Qwen3 模型。可用：{}	Intel NPU 不再支持 Qwen3 �
 AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
 第 {} 步，共 {} 步	第 {} 步，共 {} 步	Step {} of {}	第 {} 步，共 {} 步	ステップ {} / {}
 音频的处理位置	音频的处理位置	Where audio is processed	音訊的處理位置	音声の処理場所
+清空链接，选项恢复为默认设置	清空链接，选项恢复为默认设置	Clears the link and returns the options to your defaults	清空連結，選項恢復為預設設定	リンクを消去し、オプションを既定の設定に戻します

@@ -5,7 +5,8 @@ use gpui_kit_material::{
     icons::Icon,
     prelude::{
         ButtonVariant, ExposedDropdown, ListDensity, ListItem, ListLeading, MaterialDialog,
-        TextField, TextFieldShape, TextFieldVariant, material_button, rem, segmented_list,
+        TextField, TextFieldShape, TextFieldVariant, TileScale, material_button, rem,
+        segmented_list,
     },
 };
 use std::{
@@ -37,6 +38,40 @@ pub(crate) enum NameTarget {
         root: PathBuf,
         storage: PathBuf,
     },
+}
+
+/// The library page's own view state: its dialogs, folder tree and virtualized list.
+pub(crate) struct LibraryUi {
+    pub name_dialog: Option<NameDialog>,
+    pub move_dialog: Option<MoveDialog>,
+    pub folder_picker_open: bool,
+    /// The folder navigation's sheet on narrow windows.
+    pub places_open: bool,
+    /// Tree nodes the person toggled: opened folders, or closed library tops (id 0).
+    pub folder_tree_open: HashSet<(PathBuf, u64)>,
+    pub folder_tree_scroll: ScrollHandle,
+    /// The virtualized notes: the list, and the identity and focus of what it describes.
+    pub list: ListState,
+    pub keys: Vec<String>,
+    pub focus: Vec<FocusHandle>,
+    pub rem: f32,
+}
+
+impl LibraryUi {
+    pub fn new() -> Self {
+        Self {
+            name_dialog: None,
+            move_dialog: None,
+            folder_picker_open: false,
+            places_open: false,
+            folder_tree_open: HashSet::new(),
+            folder_tree_scroll: ScrollHandle::new(),
+            list: ListState::new(0, ListAlignment::Top, px(1000.)),
+            keys: Vec::new(),
+            focus: Vec::new(),
+            rem: f32::NAN,
+        }
+    }
 }
 
 /// The dialog naming a new folder, a folder or a note. It outlives its answer, so it
@@ -85,32 +120,7 @@ impl Desktop {
     }
 
     pub fn invalidate_source(&mut self) {
-        self.pending_conversion = None;
-        if let Some(cancel) = self.preview_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        if let Some(cancel) = self.subtitle_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        if let Some(cancel) = self.source_covers_cancel.take() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        self.preview_generation = self.preview_generation.wrapping_add(1);
-        self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
-        self.source_preview = None;
-        self.source_editor_open = false;
-        self.source_candidates.clear();
-        self.source_candidate_covers.clear();
-        self.source_collection_title = None;
-        self.source_collection_name = None;
-        self.selected_candidates.clear();
-        self.subtitle_loading = false;
-        self.subtitle_error = None;
-        self.preview_error = None;
-        self.source_validation = None;
-        self.title_required = false;
-        self.show_preview_details = false;
-        self.expanded_subtitle_issue = None;
+        self.import.invalidate_source();
     }
 
     pub fn inspect_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -118,14 +128,16 @@ impl Desktop {
         if !self.prepare_next_import(&input, window, cx) {
             return;
         }
-        if self.preview_cancel.is_some() && self.draft().is_some_and(|draft| draft.input == input) {
+        if self.import.preview_cancel.is_some()
+            && self.draft().is_some_and(|draft| draft.input == input)
+        {
             return;
         }
-        let previous_source = self.source_preview.clone();
-        self.completed_source = None;
+        let previous_source = self.import.source_preview.clone();
+        self.import.completed_source = None;
         self.invalidate_source();
         if input.is_empty() {
-            self.source_validation = Some(
+            self.import.source_validation = Some(
                 if self.online() {
                     course2md::tr!("先粘贴视频链接")
                 } else {
@@ -145,7 +157,7 @@ impl Desktop {
         if self.online() {
             let links = source::video_links(&input);
             if links.len() > 1 {
-                self.source_candidates = links
+                self.import.source_candidates = links
                     .into_iter()
                     .map(|input| {
                         let mut candidate = source::SourceCandidate {
@@ -159,7 +171,7 @@ impl Desktop {
                         candidate
                     })
                     .collect();
-                self.source_collection_title =
+                self.import.source_collection_title =
                     Some(course2md::tr!("分享内容中有多个链接，请选择一个视频").into());
                 self.save_current_draft(cx);
                 cx.notify();
@@ -174,7 +186,7 @@ impl Desktop {
                 input = link;
             }
             if let Err(error) = source::validate_url(&input) {
-                self.source_validation = Some(error.to_string());
+                self.import.source_validation = Some(error.to_string());
                 cx.notify();
                 return;
             }
@@ -187,11 +199,11 @@ impl Desktop {
             .as_ref()
             .and_then(|workspace| workspace.state.draft())
             .map(|draft| (draft.id.clone(), draft.revision));
-        let generation = self.preview_generation;
+        let generation = self.import.preview_generation;
         let request_input = input.clone();
-        self.preview_workers += 1;
+        self.import.preview_workers += 1;
         let cancel = Arc::new(AtomicBool::new(false));
-        self.preview_cancel = Some(cancel.clone());
+        self.import.preview_cancel = Some(cancel.clone());
         let online = self.online();
         let handle = window.window_handle();
         // probe is blocking network/subprocess work; see crate::spawn_blocking_io.
@@ -203,17 +215,17 @@ impl Desktop {
                 .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
             // Always return the worker count, window or not (request_close waits for zero).
             let _ = this.update(cx, |this, _| {
-                this.preview_workers = this.preview_workers.saturating_sub(1);
+                this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
             });
             {
                 let _ = cx.update_window(handle, |_, window, cx| this.update(cx, |this, cx| {
-                    if this.preview_generation != generation || this.value(Field::Source, cx) != request_input { return; }
+                    if this.import.preview_generation != generation || this.value(Field::Source, cx) != request_input { return; }
                     if let Some((id, revision)) = &token
                         && !this.workspace.as_ref().is_some_and(|workspace| workspace.state.matches_input(id, *revision))
                     {
                         return;
                     }
-                    this.preview_cancel = None;
+                    this.import.preview_cancel = None;
                     match result {
                         Ok(source::SourceProbe::Single(source)) => {
                             let mut source = *source;
@@ -232,34 +244,34 @@ impl Desktop {
                             if let Some(previous) = previous_source { source.selected_subtitle = previous.selected_subtitle.clone(); }
                             if wanted.is_some() && default_track.is_none() {
                                 let message = course2md::tr!("原来选择的字幕无法读取，请重新选择文字来源").to_owned();
-                                this.subtitle_error = Some(message.clone());
+                                this.import.subtitle_error = Some(message.clone());
                                 source.subtitle_read_error = Some(course2md::subtitle::SubtitleReadError::Failed { message });
                             }
-                            this.source_preview = Some(source);
+                            this.import.source_preview = Some(source);
                             this.save_current_draft(cx);
                             if this.task_options().source_mode != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
                                 this.confirm_subtitle(track, false, cx);
                             }
                         }
                         Ok(source::SourceProbe::Collection { title, candidates, unavailable_entries }) => {
-                            this.source_collection_name = (!title.is_empty()).then(|| title.clone());
-                            this.source_collection_title = Some(if title.is_empty() { course2md::tr!("请选择本次处理的视频").into() } else { title });
+                            this.import.source_collection_name = (!title.is_empty()).then(|| title.clone());
+                            this.import.source_collection_title = Some(if title.is_empty() { course2md::tr!("请选择本次处理的视频").into() } else { title });
                             this.start_source_cover_fetch(&candidates, generation, window, cx);
-                            this.source_candidates = candidates
+                            this.import.source_candidates = candidates
                                 .into_iter()
                                 .map(|mut candidate| {
                                     candidate.identity = course2md::fetch::candidate_identity(&candidate);
                                     candidate
                                 })
                                 .collect();
-                            if this.source_candidates.is_empty() {
-                                this.preview_error = Some(course2md::tr!("还无法确定要处理哪个视频。请复制具体视频的链接。").into());
+                            if this.import.source_candidates.is_empty() {
+                                this.import.preview_error = Some(course2md::tr!("还无法确定要处理哪个视频。请复制具体视频的链接。").into());
                             } else if unavailable_entries > 0 {
-                                this.preview_error = Some(course2md::tr!("另有 {} 个条目无法确认", unavailable_entries));
+                                this.import.preview_error = Some(course2md::tr!("另有 {} 个条目无法确认", unavailable_entries));
                             }
                         }
-                        Ok(source::SourceProbe::Unresolved { message }) => this.preview_error = Some(message),
-                        Err(error) => this.preview_error = Some(format!("{error:#}")),
+                        Ok(source::SourceProbe::Unresolved { message }) => this.import.preview_error = Some(message),
+                        Err(error) => this.import.preview_error = Some(format!("{error:#}")),
                     }
                     this.advance_conversion(window, cx);
                     cx.notify();
@@ -293,11 +305,11 @@ impl Desktop {
         if groups.is_empty() {
             return;
         }
-        if let Some(cancel) = self.source_covers_cancel.take() {
+        if let Some(cancel) = self.import.source_covers_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
         let cancel = Arc::new(AtomicBool::new(false));
-        self.source_covers_cancel = Some(cancel.clone());
+        self.import.source_covers_cancel = Some(cancel.clone());
         let workers = groups.len().min(4);
         let queue = Arc::new(std::sync::Mutex::new(
             groups
@@ -331,11 +343,12 @@ impl Desktop {
                 let keep = cx
                     .update_window(handle, |_, _window, cx| {
                         this.update(cx, |this, cx| {
-                            if this.preview_generation != generation {
+                            if this.import.preview_generation != generation {
                                 return false;
                             }
                             for input in inputs.iter() {
-                                this.source_candidate_covers
+                                this.import
+                                    .source_candidate_covers
                                     .insert(input.clone(), path.clone());
                             }
                             cx.notify();
@@ -356,6 +369,7 @@ impl Desktop {
             None => course2md::tr!("未分类").into(),
             Some(id) => self
                 .library
+                .current
                 .folders
                 .get(&id)
                 .cloned()
@@ -372,7 +386,7 @@ impl Desktop {
         {
             return (library.root.clone(), Some(draft.id.clone()));
         }
-        (self.library_root.clone(), None)
+        (self.library.root.clone(), None)
     }
 
     pub fn begin_folder(&mut self, id: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
@@ -418,7 +432,7 @@ impl Desktop {
         let name = match &target {
             NameTarget::NewFolder { .. } => String::new(),
             NameTarget::Folder { root, id } => {
-                let Some(library) = self.library_indexes.get(root) else {
+                let Some(library) = self.library.indexes.get(root) else {
                     self.message = Some(folders_unavailable().into());
                     cx.notify();
                     return;
@@ -426,6 +440,7 @@ impl Desktop {
                 library.folders.get(id).cloned().unwrap_or_default()
             }
             NameTarget::Note { storage, .. } => self
+                .library
                 .courses
                 .iter()
                 .find(|course| &course.storage_dir() == storage)
@@ -436,7 +451,7 @@ impl Desktop {
             self.navigate(Page::Library, cx);
         }
         self.inputs[&Field::Name].update(cx, |state, cx| state.set_value(name, window, cx));
-        self.name_dialog = Some(NameDialog {
+        self.library_ui.name_dialog = Some(NameDialog {
             target,
             error: None,
             saving: false,
@@ -447,7 +462,7 @@ impl Desktop {
     }
 
     pub(crate) fn close_name_dialog(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = &mut self.name_dialog {
+        if let Some(dialog) = &mut self.library_ui.name_dialog {
             dialog.open = false;
         }
         cx.notify();
@@ -455,7 +470,7 @@ impl Desktop {
 
     /// The name changed: an earlier failure no longer applies.
     pub(crate) fn name_edited(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = &mut self.name_dialog {
+        if let Some(dialog) = &mut self.library_ui.name_dialog {
             dialog.error = None;
         }
         cx.notify();
@@ -514,17 +529,18 @@ impl Desktop {
     }
 
     pub(crate) fn store_folders(&mut self, root: &Path, library: organize::Library) {
-        if self.library_root == root {
-            self.library = library.clone();
-            self.library_error = None;
+        if self.library.root == root {
+            self.library.current = library.clone();
+            self.library.error = None;
         }
-        self.library_indexes.insert(root.to_owned(), library);
+        self.library.indexes.insert(root.to_owned(), library);
     }
 
     /// Saves the dialog's name. Pressing Return in its field lands here too.
     pub fn save_name(&mut self, cx: &mut Context<Self>) {
         let name = self.value(Field::Name, cx);
         let Some(dialog) = self
+            .library_ui
             .name_dialog
             .as_mut()
             .filter(|dialog| dialog.open && !dialog.saving && !name.is_empty())
@@ -569,7 +585,12 @@ impl Desktop {
         target: &NameTarget,
         cx: &mut Context<Self>,
     ) {
-        let Some(dialog) = self.name_dialog.as_mut().filter(|dialog| dialog.open) else {
+        let Some(dialog) = self
+            .library_ui
+            .name_dialog
+            .as_mut()
+            .filter(|dialog| dialog.open)
+        else {
             return;
         };
         dialog.saving = false;
@@ -597,7 +618,7 @@ impl Desktop {
                         }
                         Ok(())
                     })
-                    && let Some(dialog) = &mut self.name_dialog
+                    && let Some(dialog) = &mut self.library_ui.name_dialog
                 {
                     dialog.error = Some(course2md::tr!(
                         "文件夹已创建，保存位置尚未更新：{}",
@@ -628,7 +649,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let input = self.inputs[&Field::Name].clone();
-        let dialog = self.name_dialog.as_mut()?;
+        let dialog = self.library_ui.name_dialog.as_mut()?;
         if std::mem::take(&mut dialog.focus_field) {
             let input = input.clone();
             window.on_next_frame(move |window, cx| {
@@ -668,15 +689,19 @@ impl Desktop {
                 .container(ColorRole::SURFACE)
                 .headline(headline)
                 .content(
-                    div().px(rem(24.)).child(
-                        TextField::new("name-field", &input)
-                            .label(label)
-                            .outlined()
-                            .shape(TextFieldShape::Rounded)
-                            .w_full()
-                            .error(error.is_some())
-                            .when_some(error, |field, error| field.supporting_text(error)),
-                    ),
+                    v_flex()
+                        .px(rem(24.))
+                        .gap(rem(8.))
+                        .child(TileScale::Regular.support("name-field-label", label))
+                        .child(
+                            TextField::new("name-field", &input)
+                                .placeholder(label)
+                                .outlined()
+                                .shape(TextFieldShape::Rounded)
+                                .w_full()
+                                .error(error.is_some())
+                                .when_some(error, |field, error| field.supporting_text(error)),
+                        ),
                 )
                 .action(
                     material_button("name-cancel", ButtonVariant::Text)
@@ -704,7 +729,7 @@ impl Desktop {
     }
 
     pub(crate) fn begin_move(&mut self, root: PathBuf, moving: Moving, cx: &mut Context<Self>) {
-        self.move_dialog = Some(MoveDialog {
+        self.library_ui.move_dialog = Some(MoveDialog {
             root,
             moving,
             open: true,
@@ -713,7 +738,7 @@ impl Desktop {
     }
 
     fn close_move_dialog(&mut self, cx: &mut Context<Self>) {
-        if let Some(dialog) = &mut self.move_dialog {
+        if let Some(dialog) = &mut self.library_ui.move_dialog {
             dialog.open = false;
         }
         cx.notify();
@@ -722,13 +747,14 @@ impl Desktop {
     /// The dialog choosing a destination, drawn by the shell. A list of folders can
     /// outgrow a menu, and a folder cannot move inside itself.
     pub(crate) fn move_dialog_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.move_dialog.as_ref()?;
-        let library = self.library_indexes.get(&dialog.root)?;
+        let dialog = self.library_ui.move_dialog.as_ref()?;
+        let library = self.library.indexes.get(&dialog.root)?;
         let (top, top_icon, current, inside) = match &dialog.moving {
             Moving::Note(storage) => (
                 course2md::tr!("未分类").to_owned(),
                 symbols::inbox(),
-                self.library_view_cache
+                self.library
+                    .view_cache
                     .locations
                     .get(storage)
                     .and_then(|location| library.folder_key(&location.relative)),
@@ -736,7 +762,7 @@ impl Desktop {
             ),
             Moving::Folder(id) => (
                 self.library_name(&dialog.root),
-                symbols::storage(),
+                symbols::database(),
                 library.parent(*id),
                 library.subtree(*id),
             ),
@@ -808,7 +834,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let library = self.library_indexes.get(&root);
+        let library = self.library.indexes.get(&root);
         let name = library
             .and_then(|library| library.folders.get(&id))
             .cloned()
@@ -843,13 +869,17 @@ impl Desktop {
                         // Drafts keep the deleted folder so their next submission
                         // asks for a deliberate destination.
                         Ok(()) => {
-                            let removed = this.folder_filter.folder_id().is_some_and(|folder| {
-                                this.library_indexes
-                                    .get(&removed_root)
-                                    .is_none_or(|library| !library.folders.contains_key(&folder))
-                            });
-                            if this.library_root == removed_root && removed {
-                                this.folder_filter = FolderFilter::Unfiled;
+                            let removed =
+                                this.library
+                                    .folder_filter
+                                    .folder_id()
+                                    .is_some_and(|folder| {
+                                        this.library.indexes.get(&removed_root).is_none_or(
+                                            |library| !library.folders.contains_key(&folder),
+                                        )
+                                    });
+                            if this.library.root == removed_root && removed {
+                                this.library.folder_filter = FolderFilter::Unfiled;
                             }
                         }
                         Err(error) => {
@@ -867,7 +897,8 @@ impl Desktop {
 
     pub(crate) fn folder_context(&self, course: Option<PathBuf>) -> FolderContext {
         let storage = course.as_ref().map(|path| {
-            self.courses
+            self.library
+                .courses
                 .iter()
                 .find(|course| &course.dir == path || &course.storage_dir() == path)
                 .map(|course| course.storage_dir())
@@ -875,21 +906,23 @@ impl Desktop {
         });
         let (root, draft_id) = match &storage {
             Some(path) => (
-                self.library_view_cache
+                self.library
+                    .view_cache
                     .locations
                     .get(path)
                     .map(|location| location.root.clone())
-                    .unwrap_or_else(|| self.library_root.clone()),
+                    .unwrap_or_else(|| self.library.root.clone()),
                 None,
             ),
             None => self.current_folder_origin(),
         };
-        let loaded = self.library_indexes.get(&root);
-        let checking = loaded.is_none() && self.loading;
+        let loaded = self.library.indexes.get(&root);
+        let checking = loaded.is_none() && self.library.loading;
         let load_error = (loaded.is_none() && !checking).then(|| folders_unavailable().to_owned());
         let folder = match &storage {
             Some(path) => self
-                .library_view_cache
+                .library
+                .view_cache
                 .locations
                 .get(path)
                 .filter(|location| location.root == root)
@@ -941,19 +974,19 @@ impl Desktop {
                     .chain(context.folders.into_iter().map(|(_, path)| path)),
             )
             .selected(selected)
-            .width(320.)
-            .open(self.folder_picker_open)
-            .disabled(self.loading || context.load_error.is_some())
+            .full_width()
+            .open(self.library_ui.folder_picker_open)
+            .disabled(self.library.loading || context.load_error.is_some())
             .error(context.load_error.is_some())
             .when_some(context.load_error, |picker, error| {
                 picker.supporting_text(error)
             })
             .on_open_change(cx.listener(|this, open: &bool, _, cx| {
-                this.folder_picker_open = *open;
+                this.library_ui.folder_picker_open = *open;
                 cx.notify();
             }))
             .on_select(cx.listener(move |this, index: &usize, _, cx| {
-                this.folder_picker_open = false;
+                this.library_ui.folder_picker_open = false;
                 let current = this
                     .workspace
                     .as_ref()

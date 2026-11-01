@@ -12,7 +12,7 @@ use gpui_kit_material::{
     icons::SymbolIcon,
     motion,
     prelude::{ButtonSize, CaptionButtons, accessible_text, color, is_compact, rem},
-    theme::{advance_component_theme, init_component_theme, scheme as current_scheme, system_dark},
+    theme::{advance_component_theme, init_component_theme, system_dark},
 };
 
 const SHELL_GUTTER: f32 = 24.;
@@ -249,6 +249,13 @@ fn shell_column_at(width: AbsoluteLength) -> Div {
         .px(px(SHELL_GUTTER))
 }
 
+/// The running theme transition's frames.
+#[derive(Default)]
+pub(crate) struct ThemeFrame {
+    /// One pending next-frame callback advances a running theme transition.
+    pub pending: bool,
+}
+
 impl Desktop {
     /// Keep task results reachable while the user is on another page.
     fn shell_topbar(
@@ -259,7 +266,7 @@ impl Desktop {
     ) -> AppBar {
         let (task_count, tasks_need_attention) =
             self.workspace.as_ref().map_or((0, false), |workspace| {
-                crate::task_ui::task_navigation_summary(&workspace.state.tasks)
+                desktop_core::task_view::task_navigation_summary(&workspace.state.tasks)
             });
         let page = self.page;
         let bar = h_flex()
@@ -318,11 +325,11 @@ impl Desktop {
         let library = nav_destination(
             "nav-library",
             matches!(page, Page::Library | Page::Result),
-            symbols::library_books(),
+            symbols::newsstand(),
             course2md::tr!("笔记库"),
             shown(course2md::tr!("笔记库")),
             cx.listener(|this, _, _, cx| {
-                this.folder_filter = crate::FolderFilter::All;
+                this.library.folder_filter = crate::FolderFilter::All;
                 this.navigate(Page::Library, cx);
             }),
         );
@@ -392,11 +399,15 @@ impl Desktop {
                     && task.unread
                     && task.handled_by.is_none()
                     && visible_task != Some(task.id.as_str())
-                    && !(self.reading
+                    && !(self.opened.reading
                         && self.page == Page::New
-                        && self.following_conversion.as_ref().is_some_and(|follow| {
-                            follow.follows(&task.id, self.preview_generation)
-                        }))
+                        && self
+                            .import
+                            .following_conversion
+                            .as_ref()
+                            .is_some_and(|follow| {
+                                follow.follows(&task.id, self.import.preview_generation)
+                            }))
             })
             .max_by_key(|task| task.updated)?;
         let id = task.id.clone();
@@ -531,17 +542,12 @@ impl Desktop {
     pub(crate) fn prepare_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (scheme, scale) = self.theme_target(cx);
         let running = advance_component_theme(scheme, scale, window, cx);
-        let painted = (current_scheme(), scale);
-        if self.unprojected_paint != Some(painted) {
-            self.unprojected_paint = Some(painted);
-            theme::sync_unprojected(scale, cx);
-        }
-        if running && !self.theme_frame_pending {
-            self.theme_frame_pending = true;
+        if running && !self.theme_frame.pending {
+            self.theme_frame.pending = true;
             let view = cx.weak_entity();
             window.on_next_frame(move |window, cx| {
                 let _ = view.update(cx, |this, cx| {
-                    this.theme_frame_pending = false;
+                    this.theme_frame.pending = false;
                     this.prepare_theme(window, cx);
                 });
             });
@@ -598,9 +604,9 @@ impl Render for Desktop {
             )
             .when(
                 // The workbench card already shows a followed result opening.
-                self.reading
+                self.opened.reading
                     && !matches!(self.page, Page::Library | Page::Result)
-                    && !(self.page == Page::New && self.following_conversion.is_some()),
+                    && !(self.page == Page::New && self.import.following_conversion.is_some()),
                 |v| {
                     v.child(
                         h_flex()
@@ -660,7 +666,7 @@ impl Render for Desktop {
                                 material_button("retry-workspace-records", ButtonVariant::Tonal)
                                     .icon(symbols::refresh())
                                     .child(course2md::tr!("重试"))
-                                    .disabled(self.job.is_some() || self.storage_ui.busy)
+                                    .disabled(self.work.job.is_some() || self.storage_ui.busy)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.retry_workspace_records(window, cx)
                                     })),
@@ -673,7 +679,7 @@ impl Render for Desktop {
                                     )
                                     .icon(symbols::restart_alt())
                                     .child(course2md::tr!("备份并重建任务记录"))
-                                    .disabled(self.job.is_some() || self.storage_ui.busy)
+                                    .disabled(self.work.job.is_some() || self.storage_ui.busy)
                                     .on_click(cx.listener(
                                         |this, _, window, cx| {
                                             this.rebuild_workspace_records(window, cx)
@@ -766,15 +772,5 @@ impl Render for Desktop {
             .children(crate::ui::confirm_host(cx))
             .child(self.storage_dialog(window, cx))
             .into_any_element()
-    }
-}
-
-/// Display name of a known video site, shared by the workbench preview and the
-/// reader header.
-pub fn video_site_name(url: &str) -> Option<&'static str> {
-    match course2md::config::known_video_site(url) {
-        Some("bilibili") => Some("Bilibili"),
-        Some("youtube") => Some("YouTube"),
-        _ => None,
     }
 }

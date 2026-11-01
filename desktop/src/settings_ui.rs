@@ -10,8 +10,8 @@ pub(crate) mod service_form;
 
 use crate::credentials::Secret;
 use crate::preferences::{
-    self, ApplicationPreferences, Authentication, BindingScope, GenerationPreferences,
-    PreferenceGroup, ServiceDraft, ServiceProtocol, ServicePurpose, ServiceVersion,
+    self, ApplicationPreferences, Authentication, GenerationPreferences, PreferenceGroup,
+    ServiceDraft, ServiceProtocol, ServicePurpose, ServiceVersion,
 };
 use crate::service_test::{self, TestKind};
 use crate::{ConversionOptions, Desktop, Page, symbols, ui};
@@ -20,11 +20,10 @@ use course2md::execution::Component;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit::component::{
-    ActiveTheme as _,
     input::{InputEvent, InputState, TextareaState},
-    menu::{ContextMenuExt, PopupMenuItem},
     scroll::Scrollbar,
 };
+use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     icons::{Icon, SymbolIcon},
     motion,
@@ -200,91 +199,6 @@ impl State {
 pub(crate) fn dialog_body_height(window: &Window) -> Pixels {
     let chrome = rem(152.).to_pixels(window.rem_size()) + px(48.);
     (window.viewport_size().height - chrome).max(px(120.))
-}
-
-/// One thing the person keeps (an account or a service): what it is, how it stands
-/// and its commands. A long name wraps within its column; when the column and the
-/// commands no longer fit side by side, the commands wrap below as one group.
-pub(crate) struct Resource {
-    pub(crate) id: SharedString,
-    pub(crate) icon: Icon,
-    pub(crate) tint: Tint,
-    pub(crate) title: SharedString,
-    pub(crate) status: Vec<(StatusKind, &'static str)>,
-    pub(crate) busy: bool,
-    /// Lines under the name, and whether each is a failure.
-    pub(crate) lines: Vec<(String, bool)>,
-    /// The lines are data such as a path, set in the monospaced face.
-    pub(crate) mono: bool,
-    /// What else belongs under the name: a problem and its repairs.
-    pub(crate) below: Vec<AnyElement>,
-    pub(crate) actions: Vec<AnyElement>,
-}
-
-impl Resource {
-    pub(crate) fn row(self, cx: &App) -> Div {
-        let id = self.id;
-        let child = |name: &'static str| ElementId::Name(format!("{id}-{name}").into());
-        let scale = TileScale::Regular;
-        let mut text = v_flex().flex_1().min_w_0().gap(rem(2.)).child(
-            h_flex()
-                .min_w_0()
-                .flex_wrap()
-                .gap(rem(8.))
-                .items_center()
-                .child(scale.label(child("title"), self.title))
-                .when(self.busy, |row| {
-                    row.child(spinner(child("busy"), course2md::tr!("正在检查"), cx))
-                })
-                .children(
-                    self.status
-                        .into_iter()
-                        .map(|(kind, label)| status_chip(kind).child(label)),
-                ),
-        );
-        for (index, (line, failed)) in self.lines.into_iter().enumerate() {
-            let line_id = ElementId::NamedChild(Arc::new(child("line")), index.to_string().into());
-            text = text.child(if failed {
-                error_text(line_id, line).min_w_0().whitespace_normal()
-            } else {
-                scale.support(line_id, line).when(self.mono, |line| {
-                    line.font_family(cx.theme().mono_font_family.clone())
-                })
-            });
-        }
-        let text = text.children(self.below);
-        h_flex()
-            .w_full()
-            .min_w_0()
-            .flex_wrap()
-            .items_center()
-            .gap(rem(12.))
-            .child(
-                h_flex()
-                    .flex_1()
-                    .flex_basis(rem(240.))
-                    .min_w_0()
-                    .gap(rem(16.))
-                    .items_center()
-                    .child(tinted_icon(self.icon, self.tint, ui::RESOURCE_ICON))
-                    .child(text),
-            )
-            .when(!self.actions.is_empty(), |row| {
-                row.child(
-                    h_flex()
-                        .flex_shrink_0()
-                        .max_w_full()
-                        .ml_auto()
-                        .flex_wrap()
-                        .items_center()
-                        .gap(rem(8.))
-                        // A command in a row that opens something does only its command.
-                        .id(child("actions"))
-                        .on_click(|_, _, cx| cx.stop_propagation())
-                        .children(self.actions),
-                )
-            })
-    }
 }
 
 /// Settings categories in navigation order.
@@ -598,7 +512,7 @@ impl Desktop {
             && self.codex.status.is_none()
             && !self.codex.busy()
         {
-            self.codex_refresh_status(crate::codex_ui::CodexSurface::Settings, cx);
+            self.codex_refresh_status(desktop_core::codex::CodexSurface::Settings, cx);
         }
     }
 
@@ -1017,7 +931,7 @@ impl Desktop {
         if protocol == ServiceProtocol::CodexResponses {
             lines.extend(
                 self.codex
-                    .notice_on(crate::codex_ui::CodexSurface::Settings),
+                    .notice_on(desktop_core::codex::CodexSurface::Settings),
             );
         }
         lines.extend(
@@ -1049,32 +963,15 @@ impl Desktop {
             )
             .on_click(ui::menu_key_toggle(&menu_id, window, cx)),
         );
-        let items = actions.iter().map(|action| {
-            let (kind, version) = (action.kind, version.clone());
-            let icon = Icon::from(action.icon);
-            MaterialMenuItem::new(action.label)
-                .leading(if action.danger {
-                    icon.color(color(ColorRole::ERROR))
-                } else {
-                    icon
-                })
-                .disabled(action.disabled)
-                .divider(action.divider)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.run_service_action(kind, &version, window, cx)
-                }))
-        });
         let menu = ui::menu(
             menu_id,
             trigger,
-            MaterialMenu::new(SharedString::from(format!("service-action-items-{id}")))
-                .width(MENU_WIDTH)
-                .items(items),
+            service_action_menu(&id, &actions, version, &cx.weak_entity()),
             window,
             cx,
         )
         .anchor(Anchor::TopRight);
-        let row = Resource {
+        let row = ui::Resource {
             id: SharedString::from(format!("saved-service-{id}")),
             icon: service_form::protocol_icon(protocol).into(),
             tint: if purpose == ServicePurpose::Ai {
@@ -1093,6 +990,7 @@ impl Desktop {
         .row(cx);
         let this = cx.weak_entity();
         let context_version = version.clone();
+        let context_id = id.clone();
         let open_version = id.clone();
         let open = cx.listener(move |this, _, window, cx| {
             this.open_settings_service_editor(purpose, Some(open_version.clone()), window, cx);
@@ -1100,35 +998,19 @@ impl Desktop {
         ui::Field::tile(format!("saved-service-row-{id}"), move |outer| {
             div()
                 .id(SharedString::from(format!("service-context-{id}")))
+                .relative()
                 .w_full()
                 .min_w_0()
+                .child(MaterialContextMenu::new(
+                    SharedString::from(format!("service-context-menu-{id}")),
+                    move |_, _| service_action_menu(&context_id, &actions, &context_version, &this),
+                ))
                 .child(
                     TileScale::Regular
                         .button(SharedString::from(format!("saved-service-{id}")), outer)
                         .on_click(open)
                         .child(row),
                 )
-                .context_menu(move |menu, _, _| {
-                    actions.iter().fold(menu, |menu, action| {
-                        let (kind, version, this) =
-                            (action.kind, context_version.clone(), this.clone());
-                        let item = menu.item(
-                            PopupMenuItem::new(action.label)
-                                .icon(action.icon.component())
-                                .disabled(action.disabled)
-                                .on_click(move |_, window, cx| {
-                                    let _ = this.update(cx, |this, cx| {
-                                        this.run_service_action(kind, &version, window, cx)
-                                    });
-                                }),
-                        );
-                        if action.divider {
-                            item.separator()
-                        } else {
-                            item
-                        }
-                    })
-                })
                 .into_any_element()
         })
     }
@@ -1222,7 +1104,7 @@ impl Desktop {
                 self.confirm_default_service(version.id.clone(), window, cx)
             }
             ServiceCommand::SignOut => {
-                self.codex_logout(crate::codex_ui::CodexSurface::Settings, cx)
+                self.codex_logout(desktop_core::codex::CodexSurface::Settings, cx)
             }
             ServiceCommand::Delete => {
                 self.confirm_delete_service(version.service_id.clone(), window, cx)
@@ -1257,7 +1139,7 @@ impl Desktop {
         tests: &[(TestKind, &preferences::ServiceTestEvidence)],
     ) -> (StatusKind, &'static str) {
         if version.config.protocol == ServiceProtocol::CodexResponses {
-            return self.codex.badge();
+            return crate::codex_ui::codex_badge(&self.codex);
         }
         if tests.is_empty() {
             (StatusKind::Neutral, course2md::tr!("尚未测试"))
@@ -1985,12 +1867,6 @@ impl Desktop {
     /// Service editor drafts are deliberately excluded: an existing published service
     /// continues to be usable. An unapplied failed ordinary commit must never be silently
     /// replaced by the older effective defaults when submitting a task.
-    pub fn ordinary_preferences_ready_for_submit(&self) -> Result<()> {
-        if let Some(issue) = self.ordinary_preferences_submit_issue() {
-            return Err(anyhow!(issue.message));
-        }
-        Ok(())
-    }
     pub fn ordinary_preferences_submit_issue(&self) -> Option<OrdinaryPreferenceIssue> {
         let group = PreferenceGroup::Generation;
         if self.preferences.is_blocked(PreferenceGroup::Generation) {
@@ -2106,7 +1982,7 @@ impl Desktop {
         if let Some(previous) = previous {
             messages.insert(previous);
         }
-        for error in [&mut self.source_validation, &mut self.message] {
+        for error in [&mut self.import.source_validation, &mut self.message] {
             if error.as_ref().is_some_and(|error| messages.contains(error)) {
                 *error = None;
             }
@@ -2190,6 +2066,34 @@ struct ServiceAction {
     disabled: bool,
     divider: bool,
     danger: bool,
+}
+
+/// A saved service's commands, on a right press and behind its ⋮ button.
+fn service_action_menu(
+    id: &str,
+    actions: &[ServiceAction],
+    version: &ServiceVersion,
+    desktop: &WeakEntity<Desktop>,
+) -> MaterialMenu {
+    MaterialMenu::new(SharedString::from(format!("service-action-items-{id}")))
+        .width(MENU_WIDTH)
+        .items(actions.iter().map(|action| {
+            let (kind, version, desktop) = (action.kind, version.clone(), desktop.clone());
+            let icon = Icon::from(action.icon);
+            MaterialMenuItem::new(action.label)
+                .leading(if action.danger {
+                    icon.color(color(ColorRole::ERROR))
+                } else {
+                    icon
+                })
+                .disabled(action.disabled)
+                .divider(action.divider)
+                .on_click(move |_, window, cx| {
+                    let _ = desktop.update(cx, |this, cx| {
+                        this.run_service_action(kind, &version, window, cx)
+                    });
+                })
+        }))
 }
 
 #[cfg(test)]

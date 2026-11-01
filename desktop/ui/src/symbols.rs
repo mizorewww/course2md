@@ -7,7 +7,7 @@
 //!
 //! ```ignore
 //! // assets/symbols.txt:  bookmark
-//! IconButton::new("save-note", symbols::bookmark(), course2md::tr!("收藏"));
+//! IconButton::new("save-note", symbols::bookmark(), c2m_i18n::tr!("收藏"));
 //! MaterialButton::new("add").icon(symbols::add());
 //! ListItem::new("x", label).leading(ListLeading::Icon(symbols::folder().into()));
 //! ```
@@ -24,18 +24,18 @@ include!(concat!(env!("OUT_DIR"), "/symbols.rs"));
 const FILES: &[(&str, &[u8])] = &[
     (
         "images/course2md.png",
-        include_bytes!("../assets/128x128@2x.png"),
+        include_bytes!("../../assets/128x128@2x.png"),
     ),
     (
         "icons/bilibili.svg",
-        include_bytes!("../assets/brands/bilibili.svg"),
+        include_bytes!("../../assets/brands/bilibili.svg"),
     ),
 ];
 
 const FONTS: [&[u8]; 3] = [
-    include_bytes!("../assets/fonts/roboto/Roboto-Regular.ttf"),
-    include_bytes!("../assets/fonts/roboto/Roboto-Medium.ttf"),
-    include_bytes!("../assets/fonts/roboto/Roboto-SemiBold.ttf"),
+    include_bytes!("../../assets/fonts/roboto/Roboto-Regular.ttf"),
+    include_bytes!("../../assets/fonts/roboto/Roboto-Medium.ttf"),
+    include_bytes!("../../assets/fonts/roboto/Roboto-SemiBold.ttf"),
 ];
 
 /// The faces of the kit's type scale. CJK text falls back to the system's fonts.

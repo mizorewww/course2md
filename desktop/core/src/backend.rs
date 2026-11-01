@@ -35,13 +35,13 @@ impl Event {
 
 /// `CREATE_NO_WINDOW`: helper processes never flash a console window.
 #[cfg(windows)]
-pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// A child process reaped on its own thread. `kill` cannot reach a recycled
 /// PID: on Unix the reaper first waits without reaping (`WNOWAIT`), so the
 /// zombie keeps its PID reserved until the reaper marks it reaped under the
 /// same lock `kill` takes; on Windows the open process handle reserves it.
-pub(crate) struct Watched {
+pub struct Watched {
     shared: std::sync::Arc<WatchedProcess>,
 }
 struct WatchedProcess {
@@ -58,7 +58,7 @@ struct WatchState {
 impl Watched {
     /// Reaps `child` on a dedicated thread and then calls `on_exit` there with
     /// its status and whether `kill` stopped it.
-    pub(crate) fn spawn(
+    pub fn spawn(
         mut child: std::process::Child,
         group: bool,
         on_exit: impl FnOnce(std::io::Result<std::process::ExitStatus>, bool) + Send + 'static,
@@ -102,7 +102,7 @@ impl Watched {
 
     /// Stops the process unless it has already been reaped. Returns whether
     /// it was still running.
-    pub(crate) fn kill(&self) -> bool {
+    pub fn kill(&self) -> bool {
         let mut state = course2md::runtime::lock_recover(&self.shared.state);
         if state.reaped {
             return false;
@@ -546,7 +546,7 @@ fn compute_tool_path() -> std::ffi::OsString {
 }
 /// Presence of a llama.cpp runtime is independent of `--list-devices` succeeding.
 /// That flag can fail on CPU-only builds or older binaries that are still installed.
-pub(crate) fn llama_binary_on_path(path: &std::ffi::OsStr) -> bool {
+pub fn llama_binary_on_path(path: &std::ffi::OsStr) -> bool {
     // The working directory only matters for names with a path in them; these have none.
     ["llama-server", "llama-cli"]
         .iter()
@@ -570,7 +570,7 @@ pub fn resolve_cli() -> Result<PathBuf> {
     // A development build runs beside the workspace's own engine build; an
     // older engine on PATH cannot read today's task format.
     if cfg!(debug_assertions) {
-        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target");
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
         candidates.extend(["debug", "release"].map(|profile| workspace.join(profile).join(&name)));
     }
     candidates.extend(std::env::split_paths(&tool_path()).map(|dir| dir.join(&name)));

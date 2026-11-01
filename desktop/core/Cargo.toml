@@ -1,0 +1,42 @@
+[package]
+name = "desktop-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The course2md desktop's state, persistence, preferences and task logic, without GPUI"
+publish = false
+
+[features]
+# What the binary's own tests build their fixtures from.
+test-support = []
+
+[dependencies]
+course2md = { path = "../../crates/course2md" }
+gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86", features = ["serde"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+smol = "2"
+tempfile = "3"
+url = "2"
+ureq = { version = "2", features = ["json"] }
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+same-file = "1.0.6"
+which = "8.0.6"
+zeroize = "1"
+base64 = "0.22"
+chrono = "0.4"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+pulldown-cmark = "0.13"
+unicode-segmentation = "1"
+trash = "5"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+keyring = "4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"

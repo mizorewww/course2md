@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-pub use course2md::math::{Piece, pieces};
+pub use c2m_artifact::math::{Piece, piece_sources, pieces};
 
 /// A typeset formula: its asset path and its box in em, with the baseline
 /// `height` below the top.
@@ -58,7 +58,7 @@ pub fn formula(latex: &str, display: bool) -> Option<Formula> {
     if let Some(found) = CACHE.lock().ok()?.formulas.get(&key) {
         return found.clone();
     }
-    let typeset = course2md::math::typeset(latex, display);
+    let typeset = c2m_artifact::math::typeset(latex, display);
     let mut cache = CACHE.lock().ok()?;
     cache.reset_if_full();
     let formula = typeset.map(|typeset| {

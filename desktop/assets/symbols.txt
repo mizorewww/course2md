@@ -13,7 +13,7 @@ arrow_upward
 article fill
 auto_awesome
 auto_fix_high
-book
+book_2
 cancel
 chat_bubble
 check
@@ -50,7 +50,6 @@ info fill
 keyboard_arrow_down
 keyboard_arrow_up
 language
-library_books
 light_mode
 link
 list
@@ -61,6 +60,7 @@ menu_book
 mic
 more_vert
 movie fill
+newsstand
 notes
 open_in_full
 open_in_new

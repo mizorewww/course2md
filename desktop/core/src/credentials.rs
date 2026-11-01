@@ -213,6 +213,13 @@ pub struct KeyringCredentialVault {
 }
 
 #[cfg(not(target_os = "macos"))]
+impl Default for KeyringCredentialVault {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
 impl KeyringCredentialVault {
     pub fn new() -> Self {
         Self {

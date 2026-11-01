@@ -673,7 +673,7 @@ pub fn gpu_devices(bin: &Path) -> Result<Vec<String>> {
 }
 
 /// `--list-devices` 也会报告 BLAS/Accelerate 这类 CPU 后端行；只有这些前缀才是 GPU。
-/// 桌面端（desktop/src/backend.rs）共用同一判定，避免两处白名单漂移。
+/// 桌面端（desktop/core/src/backend.rs）共用同一判定，避免两处白名单漂移。
 pub fn is_gpu_device_id(id: &str) -> bool {
     ["MTL", "CUDA", "Vulkan", "SYCL", "ROCm"]
         .iter()

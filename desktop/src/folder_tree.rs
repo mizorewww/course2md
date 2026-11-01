@@ -4,10 +4,8 @@
 use super::*;
 use crate::library_ui::Moving;
 use crate::symbols;
-use gpui_kit::component::{
-    menu::{ContextMenuExt, PopupMenu, PopupMenuItem},
-    scroll::Scrollbar,
-};
+use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     color::ColorRole,
     icons::{Icon, SymbolIcon},
@@ -18,7 +16,7 @@ use gpui_kit_material::{
     },
     tokens::shape::RADIUS_CARD,
 };
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 /// Width of the folder navigation beside the notes.
 pub(crate) const FOLDER_SIDEBAR: f32 = 256.;
@@ -51,7 +49,7 @@ pub(crate) struct FolderDrag {
 impl Render for NoteDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         AssistChip::new("note-drag", self.title.clone())
-            .icon(symbols::article())
+            .icon(symbols::description())
             .elevated(true)
     }
 }
@@ -67,7 +65,7 @@ impl Render for FolderDrag {
 type CommandRun = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// One command of a note's or folder's menu. The list draws both behind the ⋮ button
-/// (the kit's menu) and on right-click (Kit's, which `context_menu` requires).
+/// and on a right press.
 #[derive(Clone)]
 pub(crate) struct Command {
     label: SharedString,
@@ -134,25 +132,16 @@ pub(crate) fn command_menu(id: impl Into<ElementId>, commands: Vec<Command>) -> 
         }))
 }
 
-/// The commands as a right-click menu.
-pub(crate) fn command_popup(mut menu: PopupMenu, commands: &[Command]) -> PopupMenu {
-    for command in commands {
-        let icon = command.icon.component();
-        let run = command.run.clone();
-        menu = menu.item(
-            PopupMenuItem::new(command.label.clone())
-                .icon(if command.danger {
-                    icon.text_color(color(ColorRole::ERROR))
-                } else {
-                    icon
-                })
-                .on_click(move |_, window, cx| run(window, cx)),
-        );
-        if command.ends_group {
-            menu = menu.separator();
-        }
-    }
-    menu
+/// The commands on a right press: the first child of the `relative` element they serve.
+pub(crate) fn command_context_menu(
+    id: impl Into<ElementId>,
+    commands: Vec<Command>,
+) -> MaterialContextMenu {
+    let id = id.into();
+    let items = ElementId::NamedChild(Arc::new(id.clone()), "items".into());
+    MaterialContextMenu::new(id, move |_, _| {
+        command_menu(items.clone(), commands.clone())
+    })
 }
 
 /// Note counts shown beside the navigation's places.
@@ -194,15 +183,15 @@ impl Desktop {
                 (
                     location.root.clone(),
                     location.name.clone(),
-                    self.library_indexes.get(&location.root).cloned(),
+                    self.library.indexes.get(&location.root).cloned(),
                 )
             })
             .collect();
         if libraries.is_empty() {
             vec![(
-                self.library_root.clone(),
+                self.library.root.clone(),
                 course2md::tr!("笔记库").to_owned(),
-                Some(self.library.clone()),
+                Some(self.library.current.clone()),
             )]
         } else {
             libraries
@@ -217,10 +206,10 @@ impl Desktop {
     }
 
     fn selected_target(&self) -> TreeTarget {
-        match self.folder_filter {
+        match self.library.folder_filter {
             FolderFilter::All => TreeTarget::All,
-            FolderFilter::Unfiled => TreeTarget::Root(self.library_root.clone()),
-            FolderFilter::Folder(id) => TreeTarget::Folder(self.library_root.clone(), id),
+            FolderFilter::Unfiled => TreeTarget::Root(self.library.root.clone()),
+            FolderFilter::Folder(id) => TreeTarget::Folder(self.library.root.clone(), id),
         }
     }
 
@@ -230,29 +219,31 @@ impl Desktop {
         filter: FolderFilter,
         cx: &mut Context<Self>,
     ) {
-        if let Some(organization) = self.library_indexes.get(&root) {
-            self.library = organization.clone();
+        if let Some(organization) = self.library.indexes.get(&root) {
+            self.library.current = organization.clone();
         }
         // The tree keeps the selected folder visible: its library top and
         // every folder above it open.
         if let (FolderFilter::Folder(id), Some(organization)) =
-            (filter, self.library_indexes.get(&root))
+            (filter, self.library.indexes.get(&root))
         {
             let mut parent = organization.parent(id);
             while let Some(folder) = parent {
-                self.folder_tree_open.insert((root.clone(), folder));
+                self.library_ui
+                    .folder_tree_open
+                    .insert((root.clone(), folder));
                 parent = organization.parent(folder);
             }
             // A selected folder also shows the folders it holds.
             if !organization.children(Some(id)).is_empty() {
-                self.folder_tree_open.insert((root.clone(), id));
+                self.library_ui.folder_tree_open.insert((root.clone(), id));
             }
-            self.folder_tree_open.remove(&(root.clone(), 0));
+            self.library_ui.folder_tree_open.remove(&(root.clone(), 0));
         }
-        self.library_root = root;
-        self.folder_filter = filter;
-        self.places_open = false;
-        self.library_list.scroll_to(ListOffset {
+        self.library.root = root;
+        self.library.folder_filter = filter;
+        self.library_ui.places_open = false;
+        self.library_ui.list.scroll_to(ListOffset {
             item_ix: 0,
             offset_in_item: px(0.),
         });
@@ -260,7 +251,7 @@ impl Desktop {
     }
 
     fn select_target(&mut self, target: TreeTarget, cx: &mut Context<Self>) {
-        let root = self.library_root.clone();
+        let root = self.library.root.clone();
         match target {
             TreeTarget::All => self.select_library_scope(root, FolderFilter::All, cx),
             TreeTarget::Root(root) => self.select_library_scope(root, FolderFilter::Unfiled, cx),
@@ -272,15 +263,18 @@ impl Desktop {
 
     fn toggle_tree_node(&mut self, root: &Path, id: u64, cx: &mut Context<Self>) {
         let key = (root.to_path_buf(), id);
-        if !self.folder_tree_open.remove(&key) {
-            self.folder_tree_open.insert(key);
+        if !self.library_ui.folder_tree_open.remove(&key) {
+            self.library_ui.folder_tree_open.insert(key);
         }
         cx.notify();
     }
 
     /// Library tops start open; folders open when the person opens them.
     fn tree_node_open(&self, root: &Path, id: u64) -> bool {
-        let open = self.folder_tree_open.contains(&(root.to_path_buf(), id));
+        let open = self
+            .library_ui
+            .folder_tree_open
+            .contains(&(root.to_path_buf(), id));
         if id == 0 { !open } else { open }
     }
 
@@ -293,7 +287,8 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let own_root = self
-            .library_view_cache
+            .library
+            .view_cache
             .locations
             .get(&storage)
             .map(|location| location.root.clone());
@@ -329,7 +324,7 @@ impl Desktop {
             move |this, result, cx| match result {
                 Ok(()) => {
                     if let Some(parent) = parent {
-                        this.folder_tree_open.insert((moved, parent));
+                        this.library_ui.folder_tree_open.insert((moved, parent));
                     }
                 }
                 Err(error) => {
@@ -416,14 +411,14 @@ impl Desktop {
     /// 全部笔记 is 未分类 plus the top folders and the folder page agrees.
     fn nav_counts(&self) -> NavCounts {
         let mut counts = NavCounts {
-            all: self.courses.len(),
+            all: self.library.courses.len(),
             ..NavCounts::default()
         };
-        for course in &self.courses {
+        for course in &self.library.courses {
             let Some(location) = self.course_location(course) else {
                 continue;
             };
-            let Some(library) = self.library_indexes.get(&location.root) else {
+            let Some(library) = self.library.indexes.get(&location.root) else {
                 continue;
             };
             match self.course_folder(course) {
@@ -469,7 +464,8 @@ impl Desktop {
             TreeTarget::All => (course2md::tr!("全部笔记").into(), None),
             TreeTarget::Root(root) => (course2md::tr!("未分类").into(), library_name(&root)),
             TreeTarget::Folder(root, id) => (
-                self.library_indexes
+                self.library
+                    .indexes
                     .get(&root)
                     .and_then(|library| library.folders.get(&id).cloned())
                     .unwrap_or_else(|| course2md::tr!("文件夹").into()),
@@ -577,9 +573,11 @@ impl Desktop {
         };
         let mut row = div()
             .id(SharedString::from(format!("{key}-row")))
+            .relative()
             .flex_1()
             .min_w_0()
             .on_key_down(keys)
+            .child(command_context_menu(format!("{key}-context"), commands))
             .child(
                 // A long name is cut by its row; the tooltip shows the whole.
                 MaterialTooltip::plain(SharedString::from(format!("{key}-tip")), label.clone())
@@ -599,7 +597,6 @@ impl Desktop {
             };
             row = row.on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()));
         }
-        let row = row.context_menu(move |menu, _, _| command_popup(menu, &commands));
         h_flex()
             .w_full()
             .min_w_0()
@@ -652,14 +649,19 @@ impl Desktop {
                 "folder-tree-library-{}",
                 root.display()
             )))
+            .relative()
             .w_full()
             .mt(rem(8.))
+            .child(command_context_menu(
+                SharedString::from(format!("folder-tree-library-context-{}", root.display())),
+                commands,
+            ))
             .child(
                 ListItem::new("library-header", name)
                     .density(ListDensity::Compact)
                     .container(ground)
                     .segment([true; 4])
-                    .leading(ListLeading::Icon(symbols::storage().into()))
+                    .leading(ListLeading::Icon(symbols::database().into()))
                     .trailing(ListTrailing::Icon(
                         if open {
                             symbols::keyboard_arrow_down()
@@ -672,7 +674,6 @@ impl Desktop {
                         cx.listener(move |this, _, _, cx| this.toggle_tree_node(&toggle, 0, cx)),
                     ),
             )
-            .context_menu(move |menu, _, _| command_popup(menu, &commands))
     }
 
     /// The folder navigation: every note, each library's unfiled notes and its
@@ -698,7 +699,7 @@ impl Desktop {
                 PlaceRow {
                     target: TreeTarget::All,
                     depth: 0,
-                    icon: symbols::book(),
+                    icon: symbols::book_2(),
                     label: course2md::tr!("全部笔记").into(),
                     count: Some(counts.all),
                     disclosure: None,
@@ -786,8 +787,10 @@ impl Desktop {
                 );
             }
         }
-        let (create_root, create_parent) =
-            (self.library_root.clone(), self.folder_filter.folder_id());
+        let (create_root, create_parent) = (
+            self.library.root.clone(),
+            self.library.folder_filter.folder_id(),
+        );
         v_flex().w_full().min_w_0().gap(rem(8.)).child(tree).child(
             material_button("folder-tree-new", ButtonVariant::Text)
                 .self_start()
@@ -812,11 +815,11 @@ impl Desktop {
                     .id("folder-tree-scroll")
                     .size_full()
                     .overflow_y_scroll()
-                    .track_scroll(&self.folder_tree_scroll)
+                    .track_scroll(&self.library_ui.folder_tree_scroll)
                     .pb(rem(24.))
                     .child(self.folder_tree(ColorRole::SURFACE_CONTAINER, cx)),
             )
-            .child(Scrollbar::vertical(&self.folder_tree_scroll))
+            .child(Scrollbar::vertical(&self.library_ui.folder_tree_scroll))
             .into_any_element()
     }
 
@@ -828,7 +831,7 @@ impl Desktop {
         columns: usize,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        let library = self.library_indexes.get(root)?;
+        let library = self.library.indexes.get(root)?;
         let children = library.children(parent);
         if children.is_empty() {
             return None;
@@ -850,11 +853,16 @@ impl Desktop {
                 self.drop_target(
                     div()
                         .id(SharedString::from(format!("folder-row-{id}")))
+                        .relative()
                         .min_w_0(),
                     root,
                     Some(id),
                     cx,
                 )
+                .child(command_context_menu(
+                    ("folder-context", id as usize),
+                    commands,
+                ))
                 .child(
                     ListItem::new(("folder-item", id as usize), name)
                         .leading(ListLeading::Icon(symbols::folder().into()))
@@ -870,7 +878,6 @@ impl Desktop {
                         })),
                 )
                 .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
-                .context_menu(move |menu, _, _| command_popup(menu, &commands))
             })
             .collect();
         Some(
