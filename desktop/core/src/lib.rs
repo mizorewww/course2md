@@ -7,9 +7,13 @@ pub mod backend;
 pub mod bounded_http;
 pub mod conversion;
 pub mod credentials;
+pub mod import;
+pub mod locations;
 pub mod model_discovery;
 pub mod notes;
 pub mod organize;
+pub mod page;
+pub mod plan;
 pub mod preferences;
 pub mod provider_serde;
 pub mod reader_navigation;
@@ -17,6 +21,7 @@ pub mod service_test;
 pub mod source;
 pub mod storage;
 pub mod store;
+pub mod task_view;
 pub mod workspace;
 
 /// Shown when a blocking worker ends without a result.

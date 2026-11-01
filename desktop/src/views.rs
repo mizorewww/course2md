@@ -259,7 +259,7 @@ impl Desktop {
     ) -> AppBar {
         let (task_count, tasks_need_attention) =
             self.workspace.as_ref().map_or((0, false), |workspace| {
-                crate::task_ui::task_navigation_summary(&workspace.state.tasks)
+                desktop_core::task_view::task_navigation_summary(&workspace.state.tasks)
             });
         let page = self.page;
         let bar = h_flex()
@@ -766,15 +766,5 @@ impl Render for Desktop {
             .children(crate::ui::confirm_host(cx))
             .child(self.storage_dialog(window, cx))
             .into_any_element()
-    }
-}
-
-/// Display name of a known video site, shared by the workbench preview and the
-/// reader header.
-pub fn video_site_name(url: &str) -> Option<&'static str> {
-    match course2md::config::known_video_site(url) {
-        Some("bilibili") => Some("Bilibili"),
-        Some("youtube") => Some("YouTube"),
-        _ => None,
     }
 }

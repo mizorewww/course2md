@@ -2170,9 +2170,10 @@ impl Desktop {
                 .blocked
                 .iter()
                 .any(|request| request.is_uncertain());
-        let requires_repair = !uncertain && crate::task_ui::task_requires_service_repair(&task);
+        let requires_repair =
+            !uncertain && desktop_core::task_view::task_requires_service_repair(&task);
         let partial_components = if task.state == TaskState::Partial && task.artifact.is_some() {
-            crate::task_ui::task_component_failures(&task)
+            desktop_core::task_view::task_component_failures(&task)
                 .into_iter()
                 .filter_map(|(component, _, _)| course2md::execution::Component::parse(&component))
                 .collect::<Vec<_>>()
@@ -2217,7 +2218,7 @@ impl Desktop {
             action("retry", ButtonVariant::Text)
                 .tone(ButtonTone::Neutral)
                 .icon(symbols::refresh())
-                .child(crate::task_ui::retry_components_label(&labels))
+                .child(desktop_core::task_view::retry_components_label(&labels))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.reprocess_task(
                         task_id.clone(),
@@ -2246,7 +2247,7 @@ impl Desktop {
                 }))
         });
         let scale = TileScale::Regular;
-        let summary = crate::task_ui::task_attention_summary(&task);
+        let summary = desktop_core::task_view::task_attention_summary(&task);
         list_surface(outer).child(
             v_flex()
                 .w_full()
@@ -2301,7 +2302,7 @@ impl Desktop {
                         TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Paused
                     ) || (task.state == TaskState::Partial
                         && task.artifact.is_some()
-                        && !crate::task_ui::task_component_failures(task).is_empty()))
+                        && !desktop_core::task_view::task_component_failures(task).is_empty()))
             })
             .collect();
         attention.sort_by_key(|task| std::cmp::Reverse(task.updated));

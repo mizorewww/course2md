@@ -2670,7 +2670,7 @@ impl Desktop {
         let platform = if meta.is_local() {
             Some(course2md::tr!("本地视频"))
         } else {
-            crate::views::video_site_name(&meta.webpage_url)
+            source::video_site_name(&meta.webpage_url)
         };
         // Where it comes from and who made it are one fact, marked by the platform's icon.
         let origin: Vec<&str> = platform
@@ -3015,7 +3015,8 @@ impl Desktop {
             .manifest
             .as_ref()
             .and_then(|manifest| self.workspace.as_ref()?.state.task(&manifest.task_id));
-        let requires_repair = task.is_some_and(crate::task_ui::task_requires_service_repair);
+        let requires_repair =
+            task.is_some_and(desktop_core::task_view::task_requires_service_repair);
         let can_retry = task.is_some_and(|task| {
             task.handled_by.is_none()
                 && !matches!(
@@ -3057,7 +3058,7 @@ impl Desktop {
         if let Some(id) = id {
             if can_retry && !components.is_empty() {
                 let retry = id.clone();
-                let label = crate::task_ui::retry_components_label(&components);
+                let label = desktop_core::task_view::retry_components_label(&components);
                 actions = actions.child(
                     material_button("reader-retry-incomplete", ButtonVariant::Outlined)
                         .tone(ButtonTone::Accent)
@@ -3430,7 +3431,7 @@ impl Desktop {
         // A web source opens on its site; the title bar may be playing the kept copy.
         let source_label = match &source {
             _ if missing_local => course2md::tr!("找到原视频…").to_owned(),
-            Some(nav::SourceTarget::Web(url)) => match crate::views::video_site_name(url) {
+            Some(nav::SourceTarget::Web(url)) => match source::video_site_name(url) {
                 Some(site) => course2md::tr!("在 {} 打开", site),
                 None => course2md::tr!("在浏览器中打开").to_owned(),
             },
@@ -3907,7 +3908,7 @@ impl Desktop {
         let Some(viewer_index) = visible.iter().position(|candidate| *candidate == index) else {
             return;
         };
-        crate::import_ui::ConversionFollow::interrupt_for_reader_viewer(
+        desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
             &mut self.following_conversion,
         );
         self.reader_ui.viewer = Some(ImageViewer {

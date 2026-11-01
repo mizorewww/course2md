@@ -34,6 +34,8 @@ use desktop_core::{
 
 use desktop_ui::{math, note_text, symbols, theme, ui};
 
+use desktop_core::page::{Kind, Page};
+
 use backend::{Done, EngineEvent, Event, Job};
 use conversion::ConversionOptions;
 use course2md::progress::ModelOperation;
@@ -70,19 +72,6 @@ impl FolderFilter {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Page {
-    New,
-    Task,
-    Library,
-    Settings,
-    Result,
-}
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Convert,
-    Models,
-}
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Field {
     Source,
@@ -154,7 +143,7 @@ struct Desktop {
     preferences: preferences::Store,
     settings_ui: settings_ui::State,
     onboarding: onboarding::State,
-    storage_ui: storage_ui::State,
+    storage_ui: desktop_core::locations::State,
     reader_ui: reader_ui::State,
     workspace: Option<workspace::Workspace>,
     workspace_error: Option<String>,
@@ -184,7 +173,7 @@ struct Desktop {
     preview_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     preview_generation: u64,
     pending_conversion: Option<u64>,
-    following_conversion: Option<import_ui::ConversionFollow>,
+    following_conversion: Option<desktop_core::import::ConversionFollow>,
     preview_workers: usize,
     /// A startup reconciliation of the task record is running.
     workspace_reconciling: bool,
@@ -263,8 +252,8 @@ struct Desktop {
     event_wake_tx: smol::channel::Sender<()>,
     event_wake_rx: smol::channel::Receiver<()>,
     /// The derived preview plan; an error carries whether it is only waiting
-    /// on background checks (`task_runner::PlanPending`).
-    preview_plan_cache: Option<(import_ui::PlanKey, PreviewPlan)>,
+    /// on background checks (`desktop_core::plan::PlanPending`).
+    preview_plan_cache: Option<(desktop_core::import::PlanKey, PreviewPlan)>,
     queue_keys: Vec<String>,
     queue_focus: Vec<FocusHandle>,
     queue_rem: f32,
@@ -867,7 +856,7 @@ impl Desktop {
         if page != Page::New
             || matches!(
                 self.following_conversion,
-                Some(import_ui::ConversionFollow::ReaderTask { .. })
+                Some(desktop_core::import::ConversionFollow::ReaderTask { .. })
             )
         {
             self.following_conversion = None;
@@ -1115,7 +1104,7 @@ impl Desktop {
             .location_checks
             .begin(generation, &locations);
         self.loading = true;
-        let task = storage_ui::scan_locations(locations, move |location| {
+        let task = desktop_core::locations::scan_locations(locations, move |location| {
             let scan = notes::scan_library(&location.root);
             let organization = organize::Library::load(&location.root);
             let cache = course_library::LibraryViewCache::inspect(location, scan.as_ref().ok());
@@ -1271,7 +1260,7 @@ impl Desktop {
     fn open_course_with_conversion_guard(
         &mut self,
         course: Rc<Course>,
-        follow: Option<import_ui::ConversionFollow>,
+        follow: Option<desktop_core::import::ConversionFollow>,
         cx: &mut Context<Self>,
     ) {
         // Reading needs its own copy on the worker; rendering shares the rest.
@@ -1279,7 +1268,10 @@ impl Desktop {
         self.save_reading_position(cx);
         let reader_revision = self.read_generation;
         let reader_origin = follow.as_ref().and_then(|follow| {
-            if !matches!(follow, import_ui::ConversionFollow::ReaderTask { .. }) {
+            if !matches!(
+                follow,
+                desktop_core::import::ConversionFollow::ReaderTask { .. }
+            ) {
                 return None;
             }
             let manifest = self.preview.as_ref()?.course.manifest.as_ref()?;
@@ -1315,7 +1307,7 @@ impl Desktop {
                 this.reading = false;
                 this.opening_course = None;
                 if this.reader_viewer_open() {
-                    import_ui::ConversionFollow::interrupt_for_reader_viewer(
+                    desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
                         &mut this.following_conversion,
                     );
                 }

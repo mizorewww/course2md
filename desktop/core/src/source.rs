@@ -1078,6 +1078,16 @@ pub fn save_cover(source: &Source, dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Display name of a known video site, shared by the workbench preview and the
+/// reader header.
+pub fn video_site_name(url: &str) -> Option<&'static str> {
+    match course2md::config::known_video_site(url) {
+        Some("bilibili") => Some("Bilibili"),
+        Some("youtube") => Some("YouTube"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
