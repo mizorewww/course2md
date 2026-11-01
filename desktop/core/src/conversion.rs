@@ -3,31 +3,31 @@
 
 impl ConversionOptions {
     /// Whether the options use a cloud recognition service.
-    pub(crate) fn uses_cloud_provider(&self) -> bool {
+    pub fn uses_cloud_provider(&self) -> bool {
         self.provider == Some(course2md::config::AsrProvider::Api)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ConversionOptions {
+pub struct ConversionOptions {
     #[serde(with = "crate::provider_serde")]
-    pub(crate) provider: Option<course2md::config::AsrProvider>,
+    pub provider: Option<course2md::config::AsrProvider>,
     #[serde(with = "crate::workspace::text_source_index")]
-    pub(crate) source_mode: course2md::config::TranscriptSource,
-    pub(crate) llm: bool,
+    pub source_mode: course2md::config::TranscriptSource,
+    pub llm: bool,
     #[serde(default)]
-    pub(crate) summarize: bool,
+    pub summarize: bool,
     #[serde(default)]
-    pub(crate) vision: bool,
+    pub vision: bool,
     /// Bilingual notes: target language code, or None for no translation.
     #[serde(default)]
-    pub(crate) translate: Option<String>,
-    pub(crate) keep_video: bool,
-    pub(crate) formats: [bool; 3],
+    pub translate: Option<String>,
+    pub keep_video: bool,
+    pub formats: [bool; 3],
 }
 
 impl ConversionOptions {
-    pub(crate) fn from_config(config: &course2md::settings::ConfigFile) -> Self {
+    pub fn from_config(config: &course2md::settings::ConfigFile) -> Self {
         let provider = config.defaults.provider;
         let source_mode = config.defaults.transcript_source.unwrap_or_default();
         let llm = config.llm.enabled;
@@ -69,12 +69,12 @@ impl Default for ConversionOptions {
 impl ConversionOptions {
     /// These options as a task plan records them: the configuration keeps
     /// only what takes effect (vision only with proofreading).
-    pub(crate) fn as_planned(&self) -> Self {
+    pub fn as_planned(&self) -> Self {
         let mut config = course2md::settings::ConfigFile::default();
         self.apply_to(&mut config);
         Self::from_config(&config)
     }
-    pub(crate) fn apply_to(&self, config: &mut course2md::settings::ConfigFile) {
+    pub fn apply_to(&self, config: &mut course2md::settings::ConfigFile) {
         use course2md::config::OutputFormat;
         config.defaults.provider = self.provider;
         config.defaults.transcript_source = Some(self.source_mode);

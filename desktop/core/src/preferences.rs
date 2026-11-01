@@ -66,7 +66,7 @@ pub enum PreferenceGroup {
 }
 
 impl PreferenceGroup {
-    pub(crate) fn filename(self) -> &'static str {
+    pub fn filename(self) -> &'static str {
         match self {
             Self::Generation => "generation.json",
             Self::Application => "application.json",
@@ -276,7 +276,7 @@ impl InterfaceLanguage {
 pub struct ApplicationPreferences {
     pub desktop: DesktopSettings,
     pub font_scale: f32,
-    pub appearance: gpui_kit_material::color::ThemePreferences,
+    pub appearance: gpui_kit_material_color::ThemePreferences,
     /// Interface language; `System` follows the operating system at launch.
     pub language: InterfaceLanguage,
 }
@@ -2444,7 +2444,7 @@ mod tests {
 
     #[test]
     fn saved_theme_preferences_keep_their_form() {
-        use gpui_kit_material::color::{Appearance, PaletteId, ThemePreferences, palette::ALL};
+        use gpui_kit_material_color::{Appearance, PaletteId, ThemePreferences, palette::ALL};
         let saved = r#"{"mode":"dark","light":"catppuccin_latte","dark":"tokyo_night"}"#;
         let parsed: ThemePreferences = serde_json::from_str(saved).unwrap();
         assert_eq!(parsed.mode, Appearance::Dark);
@@ -2456,7 +2456,7 @@ mod tests {
 
     #[test]
     fn theme_changes_survive_restart_without_changing_generation_defaults() {
-        use gpui_kit_material::color::{Appearance, PaletteId};
+        use gpui_kit_material_color::{Appearance, PaletteId};
         let (directory, mut store) = isolated();
         let generation = store.generation().clone();
         let mut app = store.application().clone();
@@ -2479,7 +2479,7 @@ mod tests {
 
     #[test]
     fn failed_theme_save_preserves_active_palette() {
-        use gpui_kit_material::color::PaletteId;
+        use gpui_kit_material_color::PaletteId;
         let (directory, mut store) = isolated();
         store.save_application(store.application().clone()).unwrap();
         std::fs::remove_file(directory.path().join("application.json")).unwrap();
@@ -2502,7 +2502,7 @@ mod tests {
         assert!(app.desktop.reduce_motion);
         assert_eq!(
             app.appearance,
-            gpui_kit_material::color::ThemePreferences::default()
+            gpui_kit_material_color::ThemePreferences::default()
         );
     }
 

@@ -101,7 +101,7 @@ pub struct JobEvents {
     #[serde(skip)]
     pub loaded: bool,
     #[serde(skip)]
-    pub(crate) tokens: (u64, u64),
+    pub tokens: (u64, u64),
 }
 
 /// A record's identity is what it saves: the rest is derived.
@@ -793,7 +793,7 @@ pub fn title(stage: &Stage) -> String {
 }
 
 /// 准备阶段文案：结构化 phase 来自引擎，缺失时退化为阶段标题。
-pub(crate) fn model_transfer_phase(stage: &Stage, phase: Option<Phase>) -> String {
+pub fn model_transfer_phase(stage: &Stage, phase: Option<Phase>) -> String {
     // Only Apple preparation names its phase in the title; model files keep
     // their own title and word their phase in the detail.
     match phase {
@@ -805,7 +805,7 @@ pub(crate) fn model_transfer_phase(stage: &Stage, phase: Option<Phase>) -> Strin
     }
 }
 
-pub(crate) fn bytes(value: u64) -> String {
+pub fn bytes(value: u64) -> String {
     if value >= 1024 * 1024 * 1024 {
         format!("{:.2} GB", value as f64 / (1024. * 1024. * 1024.))
     } else if value >= 1024 * 1024 {

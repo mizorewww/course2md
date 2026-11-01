@@ -2,10 +2,10 @@
 use crate::backend::Done;
 use anyhow::{Context, Result};
 use course2md::artifact;
-use gpui::SharedString;
 use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
+    sync::Arc,
     time::SystemTime,
 };
 
@@ -78,7 +78,7 @@ impl Course {
 }
 /// Optional file exports describe a task's output, not the completeness of its note.
 /// Published manifests stay immutable when a later task successfully repairs exports.
-pub(crate) fn has_incomplete_content(manifest: &artifact::Manifest) -> bool {
+pub fn has_incomplete_content(manifest: &artifact::Manifest) -> bool {
     !processing_issues(manifest).is_empty()
 }
 pub struct LibraryScan {
@@ -237,17 +237,17 @@ pub fn default_output() -> PathBuf {
 pub enum PreviewBlock {
     Image(PathBuf),
     Heading {
-        text: SharedString,
+        text: Arc<str>,
         anchor: String,
         seconds: Option<f64>,
     },
     Paragraph {
-        text: SharedString,
+        text: Arc<str>,
         anchor: String,
     },
     /// A bilingual note's translation of the paragraph before it.
     Translation {
-        text: SharedString,
+        text: Arc<str>,
         anchor: String,
     },
 }
@@ -501,8 +501,8 @@ fn whole_line(text: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize
 }
 
 /// Published notes for tests: one frame and one paragraph per time.
-#[cfg(test)]
-pub(crate) mod fixtures {
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures {
     use super::Course;
     use course2md::{
         artifact,
@@ -511,7 +511,7 @@ pub(crate) mod fixtures {
     };
     use std::path::Path;
 
-    pub(crate) fn published_note(
+    pub fn published_note(
         root: &Path,
         revision: u64,
         times: &[f64],
@@ -521,7 +521,7 @@ pub(crate) mod fixtures {
     }
 
     /// A published note whose paragraphs carry `translation`.
-    pub(crate) fn published_note_translated(
+    pub fn published_note_translated(
         root: &Path,
         revision: u64,
         times: &[f64],

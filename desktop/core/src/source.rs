@@ -159,7 +159,7 @@ pub fn is_local_identity(identity: &str) -> bool {
 /// Stored messages keep the tool's own lines, which are what this matches.
 /// Legacy stored subtitle text predates typed causes. New code must carry
 /// [`FailureKind`] from the probe; this helper is only for old workspace strings.
-pub(crate) fn legacy_login_failure_from_text(message: &str) -> bool {
+pub fn legacy_login_failure_from_text(message: &str) -> bool {
     failure_kind(message) == FailureKind::LoginRequired
 }
 
@@ -618,7 +618,7 @@ pub fn prune_cache() {
     }
 }
 
-pub(crate) fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
+pub fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
     check_cancel(cancel)?;
     let target = cache_file("covers", url, "jpg")?;
     if cache_hit(&target) {

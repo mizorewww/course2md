@@ -20,7 +20,7 @@ fn legacy(index: u8) -> Option<AsrProvider> {
     }
 }
 
-pub(crate) fn serialize<S>(value: &Option<AsrProvider>, serializer: S) -> Result<S::Ok, S::Error>
+pub fn serialize<S>(value: &Option<AsrProvider>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -30,7 +30,7 @@ where
     }
 }
 
-pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Option<AsrProvider>, D::Error>
+pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<AsrProvider>, D::Error>
 where
     D: Deserializer<'de>,
 {

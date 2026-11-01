@@ -1605,32 +1605,21 @@ name = "course2md-desktop"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "chrono",
  "course2md",
+ "desktop-core",
  "embed-resource",
  "gpui-base",
  "gpui-kit",
  "gpui-kit-material",
  "gpui-material-symbols",
  "image",
- "keyring",
  "libc",
- "pulldown-cmark",
- "same-file",
- "security-framework",
- "serde",
  "serde_json",
  "smol",
  "tempfile",
- "trash",
  "unicode-segmentation",
- "ureq 2.12.1",
  "url",
- "uuid",
- "walkdir",
- "which",
- "zeroize",
 ]
 
 [[package]]
@@ -1776,6 +1765,34 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "desktop-core"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "course2md",
+ "gpui-kit-material-color",
+ "image",
+ "keyring",
+ "libc",
+ "pulldown-cmark",
+ "same-file",
+ "security-framework",
+ "serde",
+ "serde_json",
+ "smol",
+ "tempfile",
+ "trash",
+ "ureq 2.12.1",
+ "url",
+ "uuid",
+ "walkdir",
+ "which",
+ "zeroize",
 ]
 
 [[package]]

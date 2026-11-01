@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::credentials::Secret;
 
 /// 无重定向的 JSON agent。各超时独立传入——探测与测试的预算不同。
-pub(crate) fn json_agent(
+pub fn json_agent(
     connect: Duration,
     read: Duration,
     write: Option<Duration>,
@@ -26,7 +26,7 @@ pub(crate) fn json_agent(
 }
 
 /// Accept: application/json；有密钥才加 Bearer 头。
-pub(crate) fn json_call(call: ureq::Request, authorization: Option<&Secret>) -> ureq::Request {
+pub fn json_call(call: ureq::Request, authorization: Option<&Secret>) -> ureq::Request {
     let call = call.set("Accept", "application/json");
     match authorization {
         Some(secret) => {
@@ -39,16 +39,13 @@ pub(crate) fn json_call(call: ureq::Request, authorization: Option<&Secret>) -> 
 
 /// 有界读取的失败分类：网络/IO 错误与响应体超限分开。
 /// 调用方把 Network 统一映射为自己的网络错误。
-pub(crate) enum BoundedReadError {
+pub enum BoundedReadError {
     Network,
     TooLarge,
 }
 
 /// 按 max+1 读取；超过 max 报 TooLarge，IO 失败报 Network。
-pub(crate) fn read_bounded(
-    response: ureq::Response,
-    max: u64,
-) -> Result<Vec<u8>, BoundedReadError> {
+pub fn read_bounded(response: ureq::Response, max: u64) -> Result<Vec<u8>, BoundedReadError> {
     use std::io::Read;
     let mut body = Vec::new();
     response

@@ -6,40 +6,25 @@ extern crate gpui_kit as gpui;
 mod a11y;
 mod about;
 mod account_ui;
-mod activity;
 mod appearance_ui;
-mod backend;
-mod bounded_http;
 #[cfg(feature = "capture")]
 mod capture;
 mod codex_ui;
-mod conversion;
 mod course_library;
-mod credentials;
 mod folder_tree;
 mod i18n;
 mod import_ui;
 mod library_ui;
 mod math;
-mod model_discovery;
 mod note_text;
-mod notes;
 mod ollama_ui;
 mod onboarding;
-mod organize;
 #[cfg(feature = "performance")]
 mod performance;
-mod preferences;
-mod provider_serde;
 mod reader_images;
-mod reader_navigation;
 mod reader_ui;
-mod service_test;
 mod settings_ui;
-mod source;
-mod storage;
 mod storage_ui;
-mod store;
 mod symbols;
 mod task_runner;
 mod task_ui;
@@ -47,7 +32,11 @@ mod task_ui;
 mod theme;
 mod ui;
 mod views;
-mod workspace;
+
+use desktop_core::{
+    activity, backend, conversion, credentials, interrupted, model_discovery, notes, organize,
+    preferences, reader_navigation, service_test, source, spawn_blocking_io, storage, workspace,
+};
 
 use backend::{Done, EngineEvent, Event, Job};
 use conversion::ConversionOptions;
@@ -115,33 +104,6 @@ fn providers() -> [(&'static str, &'static str); 6] {
         ("npu", "Intel NPU"),
         ("api", course2md::tr!("云端服务")),
     ]
-}
-
-/// Shown when a blocking worker ends without a result.
-pub(crate) fn interrupted() -> &'static str {
-    course2md::tr!("操作意外中断，请重试")
-}
-
-/// Runs blocking IO on smol's blocking thread pool and delivers the result through a
-/// channel. The work runs to completion even if the receiver is dropped.
-///
-/// This is the one way the desktop leaves the UI thread for blocking work: file and
-/// process IO, keychain access, synchronous HTTP. GPUI's background executor dispatches
-/// to GCD global queues, and macOS may run those blocks on the main thread via queue
-/// override; `cx.spawn` always polls on the main thread. Blocking syscalls — keychain
-/// reads that can wait on an authorization dialog, synchronous HTTP — therefore must
-/// never run inside executor tasks. smol's pool is separate from GPUI's executor and
-/// reuses its threads, so short operations do not each start a thread. Code that wants
-/// a future instead of a channel may await `smol::unblock` directly; it is the same pool.
-pub(crate) fn spawn_blocking_io<T: Send + 'static>(
-    work: impl FnOnce() -> T + Send + 'static,
-) -> smol::channel::Receiver<T> {
-    let (tx, rx) = smol::channel::bounded(1);
-    smol::unblock(move || {
-        let _ = tx.send_blocking(work());
-    })
-    .detach();
-    rx
 }
 
 /// Choice id of a recognition engine, as in `providers()`; automatic
