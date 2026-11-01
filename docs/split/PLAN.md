@@ -42,7 +42,8 @@ directory when the project is accepted.
 12. **No new engine patches, and no PRs to Longbridge or Zed.** Nothing from this project
     is added to the kit's `vendor/` to serve the app. The upstream ends at
     `gpui-kit-material`. Removing patches from `vendor/` is welcome where the audit shows
-    they aren't needed.
+    they aren't needed. Exception (owner, 2026-11-01): `TextView` block styling for the reader's
+    summary panel goes into the kit's `vendor/gpui-base` by PR to `gpui-kit-material`.
 
 13. **Code reduction targets (owner, 2026-10-31).** Componentization removes about 20%
     as a first target (adjustable if not achievable); removing wheels removes more;
