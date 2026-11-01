@@ -1336,49 +1336,46 @@ impl Desktop {
         }
         let active = self.is_running_task(id);
         Some(
-            v_flex()
-                .w_full()
-                .min_w_0()
-                .gap(rem(8.))
-                .p(rem(12.))
-                .rounded(RADIUS_LARGE)
-                .bg(color(ColorRole::WARNING_BG))
-                .text_size(TEXT_BODY)
-                .children(uncertain.iter().enumerate().map(|(index, blocked)| {
-                    accessible_text(
-                        SharedString::from(format!("unknown-scope-{id}-{index}")),
-                        request_scope(blocked),
-                    )
-                    .whitespace_normal()
-                }))
-                .child(
-                    accessible_text(
-                        SharedString::from(format!("unknown-effect-{id}")),
-                        course2md::tr!("服务可能已处理这些内容，重新发送可能产生额外费用"),
-                    )
-                    .font_weight(FontWeight::MEDIUM)
-                    .whitespace_normal(),
-                )
-                .when(active, |view| {
-                    view.child(accessible_text(
-                        SharedString::from(format!("unknown-saving-{id}")),
-                        course2md::tr!("正在保存当前结果…"),
-                    ))
-                })
-                .child(
-                    material_button(
-                        SharedString::from(format!("resend-{id}")),
-                        ButtonVariant::Filled,
-                    )
-                    .self_start()
-                    .icon(symbols::refresh())
-                    .child(course2md::tr!("重新发送以上内容"))
-                    .disabled(active)
-                    .on_click(cx.listener({
-                        let id = id.clone();
-                        move |this, _, _, cx| this.resend_uncertain(id.clone(), cx)
-                    })),
-                ),
+            notice_banner(
+                SharedString::from(format!("unknown-effect-{id}")),
+                NoticeKind::Warning,
+                course2md::tr!("服务可能已处理这些内容，重新发送可能产生额外费用"),
+            )
+            .rounded(RADIUS_LARGE)
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(8.))
+                    .text_size(TEXT_BODY)
+                    .children(uncertain.iter().enumerate().map(|(index, blocked)| {
+                        accessible_text(
+                            SharedString::from(format!("unknown-scope-{id}-{index}")),
+                            request_scope(blocked),
+                        )
+                        .whitespace_normal()
+                    }))
+                    .when(active, |view| {
+                        view.child(accessible_text(
+                            SharedString::from(format!("unknown-saving-{id}")),
+                            course2md::tr!("正在保存当前结果…"),
+                        ))
+                    })
+                    .child(
+                        material_button(
+                            SharedString::from(format!("resend-{id}")),
+                            ButtonVariant::Filled,
+                        )
+                        .self_start()
+                        .icon(symbols::refresh())
+                        .child(course2md::tr!("重新发送以上内容"))
+                        .disabled(active)
+                        .on_click(cx.listener({
+                            let id = id.clone();
+                            move |this, _, _, cx| this.resend_uncertain(id.clone(), cx)
+                        })),
+                    ),
+            ),
         )
     }
 

@@ -974,7 +974,7 @@ impl Desktop {
                     .chain(context.folders.into_iter().map(|(_, path)| path)),
             )
             .selected(selected)
-            .width(320.)
+            .full_width()
             .open(self.library_ui.folder_picker_open)
             .disabled(self.library.loading || context.load_error.is_some())
             .error(context.load_error.is_some())
