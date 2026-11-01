@@ -340,6 +340,7 @@ impl Field {
             Control::Switch(on, on_change) => Self::inline_row(
                 outer,
                 h_flex()
+                    .flex_1()
                     .min_w_0()
                     .gap(rem(16.))
                     .children(icon.map(|icon| {
