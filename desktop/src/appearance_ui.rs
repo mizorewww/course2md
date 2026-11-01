@@ -124,6 +124,7 @@ impl Desktop {
         );
         let dark = palette.is_dark();
         MaterialCard::new(("palette", palette as usize), CardVariant::Outlined)
+            .rounded(RADIUS_LARGE)
             .w_full()
             .overflow_hidden()
             .accessibility_label(course2md::tr!(
@@ -145,7 +146,7 @@ impl Desktop {
                 next.appearance.select(palette);
                 this.commit_application(next, cx);
             }))
-            .child(sample(palette, rem(120.)).rounded_t(RADIUS_CARD))
+            .child(sample(palette, rem(120.)).rounded_t(RADIUS_LARGE))
             .child(
                 h_flex()
                     .w_full()

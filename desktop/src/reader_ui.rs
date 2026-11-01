@@ -4376,7 +4376,7 @@ impl Desktop {
                 .flex_1()
                 .min_h(rem(112.))
                 .w_full()
-                .rounded(RADIUS_CARD)
+                .rounded(RADIUS_LARGE)
                 .into_any_element()
         };
         let Some(viewer) = &self.reader_ui.viewer else {
@@ -4443,7 +4443,7 @@ impl Desktop {
             .bg(color(INSET))
             .border_1()
             .border_color(color(OUTLINE_VARIANT))
-            .rounded(RADIUS_CARD)
+            .rounded(RADIUS_LARGE)
             .flex_1()
             .min_h(rem(112.))
             .w_full()

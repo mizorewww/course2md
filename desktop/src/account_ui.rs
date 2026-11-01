@@ -661,7 +661,7 @@ impl Desktop {
             .flex_shrink_0()
             .items_center()
             .justify_center()
-            .rounded(RADIUS_CARD)
+            .rounded(RADIUS_LARGE)
             .bg(color(tone.1));
         let visual = if let Some(modules) = self.account.modules.clone() {
             // A real QR code keeps its high-contrast white scanning surface.

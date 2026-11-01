@@ -879,7 +879,7 @@ fn log_box(id: &str, text: String) -> Stateful<Div> {
         .max_h(rem(224.))
         .overflow_y_scroll()
         .p(rem(16.))
-        .rounded(RADIUS_CARD)
+        .rounded(RADIUS_LARGE)
         .bg(color(ColorRole::INSET))
         .child(
             accessible_text(SharedString::from(format!("task-log-text-{id}")), text)
@@ -2131,7 +2131,7 @@ impl Desktop {
                 .min_w_0()
                 .gap(rem(8.))
                 .p(rem(12.))
-                .rounded(RADIUS_CARD)
+                .rounded(RADIUS_LARGE)
                 .bg(color(ColorRole::WARNING_BG))
                 .text_size(TEXT_BODY)
                 .children(uncertain.iter().enumerate().map(|(index, blocked)| {
