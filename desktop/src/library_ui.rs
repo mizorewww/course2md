@@ -741,7 +741,7 @@ impl Desktop {
             ),
             Moving::Folder(id) => (
                 self.library_name(&dialog.root),
-                symbols::storage(),
+                symbols::database(),
                 library.parent(*id),
                 library.subtree(*id),
             ),

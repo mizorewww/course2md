@@ -616,7 +616,7 @@ impl TaskAction {
             Self::Retry(component) => (retry_component_label(component), symbols::refresh(), false),
             Self::Reassociate(_) => (
                 tr!("重新关联此保存位置"),
-                symbols::storage(),
+                symbols::database(),
                 desktop.storage_ui.busy,
             ),
             Self::Resend => (tr!("重新发送以上内容"), symbols::refresh(), false),

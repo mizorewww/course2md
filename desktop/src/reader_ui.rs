@@ -2371,7 +2371,7 @@ impl Desktop {
                                 },
                             ),
                         ])
-                        .icon("note", symbols::article())
+                        .icon("note", symbols::description())
                         .icon("images", symbols::image())
                         .selected(if self.result_tab == 0 {
                             "note"
@@ -3186,7 +3186,7 @@ impl Desktop {
             let (icon, label) = if reading_note {
                 (symbols::image(), course2md::tr!("截图"))
             } else {
-                (symbols::article(), course2md::tr!("笔记"))
+                (symbols::description(), course2md::tr!("笔记"))
             };
             tool(
                 IconButton::new("reader-view-toggle", icon, label).on_click(cx.listener(
@@ -3731,7 +3731,7 @@ impl Desktop {
                     .child(
                         material_button("empty-images-to-note", ButtonVariant::Outlined)
                             .tone(ButtonTone::Accent)
-                            .icon(symbols::article())
+                            .icon(symbols::description())
                             .child(course2md::tr!("阅读笔记"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.select_reader_view(0, window, cx)
@@ -3832,7 +3832,7 @@ impl Desktop {
                             row.child(tool(
                                 IconButton::new(
                                     ("frame-to-body", index),
-                                    symbols::article(),
+                                    symbols::description(),
                                     to_note,
                                 )
                                 .button_size(ButtonSize::ExtraSmall)
@@ -4298,7 +4298,7 @@ impl Desktop {
         let to_note = body_index.map(|block| {
             action(
                 "image-to-body",
-                symbols::article(),
+                symbols::description(),
                 course2md::tr!("在笔记中查看"),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -4334,7 +4334,7 @@ impl Desktop {
                 if text_only {
                     symbols::image()
                 } else {
-                    symbols::article()
+                    symbols::description()
                 },
                 if text_only {
                     course2md::tr!("返回图片")

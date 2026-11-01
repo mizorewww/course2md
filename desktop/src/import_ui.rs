@@ -3074,7 +3074,7 @@ impl Desktop {
                 button(
                     "reassociate-import-location",
                     ButtonVariant::Outlined,
-                    symbols::storage(),
+                    symbols::database(),
                     course2md::tr!("重新关联此保存位置"),
                 )
                 .disabled(self.storage_ui.busy)

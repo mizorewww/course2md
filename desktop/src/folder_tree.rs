@@ -51,7 +51,7 @@ pub(crate) struct FolderDrag {
 impl Render for NoteDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         AssistChip::new("note-drag", self.title.clone())
-            .icon(symbols::article())
+            .icon(symbols::description())
             .elevated(true)
     }
 }
@@ -659,7 +659,7 @@ impl Desktop {
                     .density(ListDensity::Compact)
                     .container(ground)
                     .segment([true; 4])
-                    .leading(ListLeading::Icon(symbols::storage().into()))
+                    .leading(ListLeading::Icon(symbols::database().into()))
                     .trailing(ListTrailing::Icon(
                         if open {
                             symbols::keyboard_arrow_down()
@@ -698,7 +698,7 @@ impl Desktop {
                 PlaceRow {
                     target: TreeTarget::All,
                     depth: 0,
-                    icon: symbols::book(),
+                    icon: symbols::book_2(),
                     label: course2md::tr!("全部笔记").into(),
                     count: Some(counts.all),
                     disclosure: None,

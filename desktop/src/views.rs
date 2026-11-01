@@ -318,7 +318,7 @@ impl Desktop {
         let library = nav_destination(
             "nav-library",
             matches!(page, Page::Library | Page::Result),
-            symbols::library_books(),
+            symbols::newsstand(),
             course2md::tr!("笔记库"),
             shown(course2md::tr!("笔记库")),
             cx.listener(|this, _, _, cx| {

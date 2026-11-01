@@ -1471,7 +1471,7 @@ impl Desktop {
         let query = self.value(Field::Search, cx);
         let (icon, heading) = match self.folder_filter {
             _ if !query.is_empty() => (symbols::search(), course2md::tr!("没有匹配的笔记")),
-            FolderFilter::All => (symbols::book(), course2md::tr!("还没有笔记")),
+            FolderFilter::All => (symbols::book_2(), course2md::tr!("还没有笔记")),
             FolderFilter::Unfiled => (symbols::inbox(), course2md::tr!("没有未分类的笔记")),
             FolderFilter::Folder(_) => (symbols::folder(), course2md::tr!("这个文件夹还没有笔记")),
         };
@@ -1493,7 +1493,7 @@ impl Desktop {
         } else {
             material_button("empty-folder-all-notes", ButtonVariant::Outlined)
                 .tone(ButtonTone::Accent)
-                .icon(symbols::book())
+                .icon(symbols::book_2())
                 .child(course2md::tr!("浏览全部笔记"))
                 .on_click(cx.listener(|this, _, _, cx| {
                     let root = this.library_root.clone();

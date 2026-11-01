@@ -1328,7 +1328,7 @@ impl Desktop {
             },
             LocationAction {
                 label: course2md::tr!("移动笔记库…"),
-                icon: symbols::storage(),
+                icon: symbols::database(),
                 enabled: !repair && !busy,
                 run: Rc::new(move |this, window, cx| {
                     this.begin_library_move(move_id.clone(), window, cx)
@@ -1400,7 +1400,7 @@ impl Desktop {
                         repair_button(
                             "reassociate-storage-location",
                             ButtonVariant::Tonal,
-                            symbols::storage(),
+                            symbols::database(),
                             course2md::tr!("重新关联…"),
                         )
                         .on_click(cx.listener(
