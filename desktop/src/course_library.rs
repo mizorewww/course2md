@@ -286,110 +286,20 @@ impl RenderOnce for CommandsButton {
 }
 
 impl Desktop {
-    fn library_issue_messages(
-        &self,
-        root: &std::path::Path,
-        kind: LibraryIssueKind,
-    ) -> Vec<String> {
-        self.library
-            .issues
-            .iter()
-            .filter(|issue| issue.kind == kind && issue.root == root)
-            .map(|issue| issue.message.clone())
-            .collect()
-    }
-
     /// Notes already made from the video with this identity.
     pub(crate) fn notes_for_source(&self, identity: &str) -> impl Iterator<Item = &Course> {
         self.library.notes_for_source(identity)
     }
 
-    fn index_note_sources(&mut self) {
-        let mut notes_by_source: std::collections::HashMap<String, Vec<usize>> = Default::default();
-        for (index, course) in self.library.courses.iter().enumerate() {
-            if let Some(manifest) = &course.manifest {
-                notes_by_source
-                    .entry(manifest.source_id.clone())
-                    .or_default()
-                    .push(index);
-            }
-        }
-        self.library.view_cache.notes_by_source = notes_by_source;
-        let mut newest: std::collections::HashMap<String, usize> = Default::default();
-        for (index, course) in self.library.courses.iter().enumerate() {
-            let Some(manifest) = &course.manifest else {
-                continue;
-            };
-            let current = newest.entry(manifest.course_id.clone()).or_insert(index);
-            let revision = |i: usize| {
-                self.library.courses[i]
-                    .manifest
-                    .as_ref()
-                    .map(|m| m.revision)
-            };
-            if revision(*current) < Some(manifest.revision) {
-                *current = index;
-            }
-        }
-        self.library.view_cache.newest_by_course = newest;
-        let wanted: std::collections::HashSet<&str> = self
-            .library
-            .courses
-            .iter()
-            .filter_map(|course| Some(course.manifest.as_ref()?.task_id.as_str()))
-            .collect();
-        self.library.view_cache.sources = self
-            .workspace
-            .as_ref()
-            .map(|workspace| {
-                workspace
-                    .state
-                    .tasks
-                    .iter()
-                    .filter(|task| wanted.contains(task.id.as_str()))
-                    .map(|task| {
-                        let source = &task.plan.source;
-                        (
-                            task.id.clone(),
-                            NoteSource {
-                                author: source.author.clone(),
-                                duration: (source.duration.is_finite() && source.duration > 0.)
-                                    .then_some(source.duration),
-                                local: !source.online,
-                                link: source.online.then(|| source.input.clone()),
-                            },
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-    }
-
-    fn note_source(&self, course: &Course) -> Option<&NoteSource> {
-        self.library
-            .view_cache
-            .sources
-            .get(&course.manifest.as_ref()?.task_id)
-    }
-
-    pub fn course_display_title(&self, course: &Course) -> String {
-        self.library
-            .courses
-            .iter()
-            .find(|item| item.storage_dir() == course.storage_dir())
-            .map(|item| item.title.clone())
-            .unwrap_or_else(|| course.title.clone())
-    }
-
     /// Apply the names already read by the library worker. The UI does no I/O.
     pub fn apply_course_title_aliases(&mut self) {
-        self.index_note_sources();
-        // 幂等合并：不重复追加同一条诊断（打开笔记路径会再次调用本函数）
-        for issue in self.library.view_cache.alias_issues.clone() {
-            if !self.library.issues.contains(&issue) {
-                self.library.issues.push(issue);
-            }
-        }
+        let tasks = self
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.state.tasks.as_slice())
+            .unwrap_or_default();
+        self.library.index_note_sources(tasks);
+        self.library.merge_alias_issues();
         for course in &mut self.library.courses {
             if let Some(location) = self.library.view_cache.locations.get(&course.storage_dir())
                 && let Some(name) = self
@@ -407,7 +317,7 @@ impl Desktop {
             .opened
             .preview
             .as_ref()
-            .map(|preview| self.course_display_title(&preview.course));
+            .map(|preview| self.library.course_display_title(&preview.course));
         if let (Some(preview), Some(title)) = (self.opened.preview.as_mut(), title) {
             Rc::make_mut(preview).course.title = title;
         }
@@ -464,7 +374,7 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let title = self.course_display_title(&course);
+        let title = self.library.course_display_title(&course);
         let trash = organize::trash_name();
         ui::Confirm::new(
             course2md::tr!("删除笔记"),
@@ -485,7 +395,7 @@ impl Desktop {
     }
 
     fn delete_course(&mut self, root: PathBuf, course: Course, cx: &mut Context<Self>) {
-        let title = self.course_display_title(&course);
+        let title = self.library.course_display_title(&course);
         let dir = course.storage_dir();
         let worker_dir = dir.clone();
         self.in_background(
@@ -525,6 +435,7 @@ impl Desktop {
         let desktop = cx.weak_entity();
         let path = course.storage_dir();
         let link = self
+            .library
             .note_source(course)
             .and_then(|source| source.link.clone());
         let on_course =
@@ -691,7 +602,7 @@ impl Desktop {
     ) -> Option<Div> {
         let workspace = self.workspace.as_ref()?;
         let details = |prefix: &str, id: &str, kind, root: &std::path::Path| {
-            let messages = self.library_issue_messages(root, kind);
+            let messages = self.library.issue_messages(root, kind);
             (!messages.is_empty()).then(|| IssueDetails::new(format!("{prefix}:{id}"), messages))
         };
         let mut notices = Vec::new();
@@ -1557,7 +1468,7 @@ impl Desktop {
                 _ => {}
             }
         }
-        if let Some(source) = self.note_source(course).filter(|_| !card) {
+        if let Some(source) = self.library.note_source(course).filter(|_| !card) {
             if !source.author.trim().is_empty() {
                 parts.push(source.author.clone());
             }
@@ -1795,6 +1706,7 @@ impl Desktop {
             .collect();
         let open = course.clone();
         let duration = self
+            .library
             .note_source(course)
             .and_then(|source| source.duration)
             .filter(|_| home)

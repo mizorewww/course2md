@@ -1345,7 +1345,7 @@ impl Desktop {
                 this.opened.reading = false;
                 match result {
                     Ok(mut preview) => {
-                        preview.course.title = this.course_display_title(&preview.course);
+                        preview.course.title = this.library.course_display_title(&preview.course);
                         this.opened.preview = Some(Rc::new(preview));
                         this.opened.result_tab = tab;
                         if refresh {
@@ -1498,7 +1498,7 @@ impl Desktop {
         let Some(generation) = self.reader_ui.export_state.begin(version.clone()) else {
             return;
         };
-        let title = self.course_display_title(&course);
+        let title = self.library.course_display_title(&course);
         // The engine's file-name rules: also control characters, trailing dots,
         // device names such as `CON` and over-long titles.
         let stem = course2md::config::sanitize_filename_with_fallback(&title, "course");

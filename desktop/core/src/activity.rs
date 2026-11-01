@@ -212,7 +212,7 @@ impl JobEvents {
     fn stage(&mut self, stage: &Stage) -> &mut Activity {
         self.stages
             .entry(stage.clone())
-            .or_insert_with(Activity::new)
+            .or_default()
     }
 
     /// A new run of the same job: finished stages stay, its result and counters do not.
@@ -235,6 +235,12 @@ impl JobEvents {
         for stage in self.stages.values_mut().filter(|stage| stage.done) {
             stage.finished = Some(stage.created);
         }
+    }
+}
+
+impl Default for Activity {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

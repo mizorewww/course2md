@@ -65,9 +65,9 @@ pub struct LibraryViewCache {
     pub locations: BTreeMap<PathBuf, CourseLocation>,
     /// Task id → its video, for the notes in the library.
     pub sources: std::collections::HashMap<String, NoteSource>,
-    /// Source identity → indices into `Desktop::courses` of its notes.
+    /// Source identity → indices into `LibraryState::courses` of its notes.
     pub notes_by_source: std::collections::HashMap<String, Vec<usize>>,
-    /// Course identity → index into `Desktop::courses` of its newest version.
+    /// Course identity → index into `LibraryState::courses` of its newest version.
     pub newest_by_course: std::collections::HashMap<String, usize>,
     pub recovery: BTreeMap<PathBuf, organize::Recovery>,
     pub title_recovery: BTreeMap<PathBuf, organize::Recovery>,
@@ -344,6 +344,94 @@ impl LibraryState {
             .flatten()
             .filter_map(|index| self.courses.get(*index).map(|course| &**course))
     }
+
+    pub fn issue_messages(&self, root: &std::path::Path, kind: LibraryIssueKind) -> Vec<String> {
+        self.issues
+            .iter()
+            .filter(|issue| issue.kind == kind && issue.root == root)
+            .map(|issue| issue.message.clone())
+            .collect()
+    }
+
+    pub fn index_note_sources(&mut self, tasks: &[workspace::TaskRecord]) {
+        let mut notes_by_source: std::collections::HashMap<String, Vec<usize>> = Default::default();
+        for (index, course) in self.courses.iter().enumerate() {
+            if let Some(manifest) = &course.manifest {
+                notes_by_source
+                    .entry(manifest.source_id.clone())
+                    .or_default()
+                    .push(index);
+            }
+        }
+        self.view_cache.notes_by_source = notes_by_source;
+        let mut newest: std::collections::HashMap<String, usize> = Default::default();
+        for (index, course) in self.courses.iter().enumerate() {
+            let Some(manifest) = &course.manifest else {
+                continue;
+            };
+            let current = newest.entry(manifest.course_id.clone()).or_insert(index);
+            let revision = |i: usize| self.courses[i].manifest.as_ref().map(|m| m.revision);
+            if revision(*current) < Some(manifest.revision) {
+                *current = index;
+            }
+        }
+        self.view_cache.newest_by_course = newest;
+        let wanted: std::collections::HashSet<&str> = self
+            .courses
+            .iter()
+            .filter_map(|course| Some(course.manifest.as_ref()?.task_id.as_str()))
+            .collect();
+        self.view_cache.sources = tasks
+            .iter()
+            .filter(|task| wanted.contains(task.id.as_str()))
+            .map(|task| {
+                let source = &task.plan.source;
+                (
+                    task.id.clone(),
+                    NoteSource {
+                        author: source.author.clone(),
+                        duration: (source.duration.is_finite() && source.duration > 0.)
+                            .then_some(source.duration),
+                        local: !source.online,
+                        link: source.online.then(|| source.input.clone()),
+                    },
+                )
+            })
+            .collect();
+    }
+
+    pub fn note_source(&self, course: &Course) -> Option<&NoteSource> {
+        self.view_cache
+            .sources
+            .get(&course.manifest.as_ref()?.task_id)
+    }
+
+    pub fn course_display_title(&self, course: &Course) -> String {
+        self.courses
+            .iter()
+            .find(|item| item.storage_dir() == course.storage_dir())
+            .map(|item| item.title.clone())
+            .unwrap_or_else(|| course.title.clone())
+    }
+
+    /// Reports a note's unreadable titles once, however often the names are applied.
+    pub fn merge_alias_issues(&mut self) {
+        for issue in self.view_cache.alias_issues.clone() {
+            if !self.issues.contains(&issue) {
+                self.issues.push(issue);
+            }
+        }
+    }
+
+    /// The note made from `identity` to show first: one saved where the input would save.
+    pub fn preferred_note(
+        &self,
+        identity: &str,
+        preferred: Option<&std::path::Path>,
+    ) -> Option<&Course> {
+        self.notes_for_source(identity)
+            .min_by_key(|course| !preferred.is_some_and(|root| course.dir.starts_with(root)))
+    }
 }
 
 #[cfg(test)]
@@ -398,7 +486,7 @@ mod tests {
                 .issues
                 .iter()
                 .any(|issue| issue.kind == LibraryIssueKind::Folders
-                    && issue.root == PathBuf::from("/b"))
+                    && issue.root == std::path::Path::new("/b"))
         );
         state.apply_scan(vec![scanned("/a", true)]);
         assert_eq!(state.issues.len(), 1);

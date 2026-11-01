@@ -18,10 +18,7 @@ use gpui_kit_material::{
 };
 use std::{
     path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, atomic::AtomicBool},
 };
 
 /// The workbench's one column.
@@ -2260,9 +2257,8 @@ impl Desktop {
                     .draft()
                     .and_then(|draft| workspace.state.library(&draft.library_id))
             })
-            .map(|library| &library.root);
-        self.notes_for_source(&source.identity)
-            .min_by_key(|course| !preferred.is_some_and(|root| course.dir.starts_with(root)))
+            .map(|library| library.root.as_path());
+        self.library.preferred_note(&source.identity, preferred)
     }
 
     fn can_start_input(&self, cx: &App) -> bool {
@@ -2312,6 +2308,7 @@ impl Desktop {
     /// once at startup and previews it, so preview states can be rendered.
     #[cfg(feature = "capture")]
     fn capture_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use std::sync::atomic::Ordering;
         static DONE: AtomicBool = AtomicBool::new(false);
         let Ok(link) = std::env::var("COURSE2MD_CAPTURE_SOURCE") else {
             return;

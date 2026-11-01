@@ -377,7 +377,7 @@ pub enum TaskSurface {
     Home,
 }
 
-/// One thing a person can do to a task. [`Desktop::task_actions`] says which apply;
+/// One thing a person can do to a task. [`task_actions`] says which apply;
 /// every button and menu item is drawn from it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TaskAction {
@@ -679,6 +679,226 @@ impl StageStatus {
     }
 }
 
+/// One step of a task, as a row or a chip says it.
+pub struct TaskStage {
+    pub id: String,
+    pub title: String,
+    pub status: StageStatus,
+    pub detail: String,
+    /// The measurement as one line for a compact card.
+    pub compact_detail: String,
+    pub fraction: Option<f32>,
+}
+
+/// What a task's actions depend on beyond its own record.
+pub struct TaskFacts<'a> {
+    /// It holds the running job.
+    pub active: bool,
+    /// Its details are open.
+    pub expanded: bool,
+    pub library: Option<&'a workspace::LibraryLocation>,
+    pub needs_reassociation: bool,
+    /// The waiting tasks, in order.
+    pub queue: Vec<&'a str>,
+}
+
+/// What can be done to `task` right now, in the order `surface` draws it.
+pub fn task_actions(
+    task: &TaskRecord,
+    surface: TaskSurface,
+    facts: &TaskFacts<'_>,
+) -> Vec<TaskAction> {
+    use TaskAction::*;
+    let active = facts.active;
+    let uncertain = task.has_uncertain();
+    let running = matches!(task.state, TaskState::Running | TaskState::Pausing);
+    let queued = task.state == TaskState::Queued;
+    let has_note = task.artifact.is_some();
+    let has_log = task_log_text(task).is_some();
+    let mut recovery = Vec::new();
+    if let Some(next) = &task.handled_by {
+        recovery.push(Followup(next.clone()));
+    } else {
+        let repair = task_requires_service_repair(task);
+        if repair && has_note {
+            recovery.push(Repair);
+        }
+        if matches!(task.state, TaskState::Paused | TaskState::NeedsAttention) && !uncertain {
+            recovery.push(Resume);
+        }
+        if !uncertain {
+            recovery.extend(
+                task_note_failures(task)
+                    .into_iter()
+                    .filter(|(component, ..)| !repair || ai_component(component).is_none())
+                    .map(|(component, ..)| Retry(component)),
+            );
+        }
+        if let Some(library) = facts.library.filter(|_| facts.needs_reassociation) {
+            recovery.push(Reassociate(library.id.clone()));
+        }
+        if !running && !queued {
+            recovery.push(Adjust);
+        }
+    }
+    let mut actions = Vec::new();
+    match surface {
+        TaskSurface::Menu => {
+            if has_note {
+                actions.extend([Read, OpenNoteFolder]);
+            }
+            if facts
+                .library
+                .is_some_and(|location| !workspace::task_export_files(task, location).is_empty())
+            {
+                actions.push(OpenExports);
+            }
+            if task.plan.source.online {
+                actions.extend([OpenSource, CopyLink]);
+            }
+            if !running {
+                actions.push(Details);
+            }
+            if has_log {
+                actions.push(Log);
+            }
+            if task.handled_by.is_some() {
+                actions.extend(recovery);
+                return actions;
+            }
+            actions.extend(task_moves(task, &facts.queue));
+            if (running && task.intent != Intent::Cancel) || (queued && !active) {
+                actions.push(Pause);
+            }
+            actions.extend(recovery);
+            if uncertain && !active {
+                actions.push(Resend);
+            }
+            if !task.state.finished() {
+                actions.push(Cancel);
+            }
+        }
+        TaskSurface::Card if running || (queued && active) => {
+            if has_log {
+                actions.push(Log);
+            }
+            actions.push(Cancel);
+            if task.intent != Intent::Cancel {
+                actions.push(Pause);
+            }
+        }
+        // A queued task has produced nothing to keep, so it offers only cancel.
+        TaskSurface::Card if queued => actions.push(Cancel),
+        TaskSurface::Card => {
+            actions.extend(recovery);
+            if has_note {
+                actions.push(Read);
+            }
+            actions.push(Details);
+            if has_log && facts.expanded {
+                actions.push(Log);
+            }
+        }
+        TaskSurface::Home => {
+            if running || queued {
+                actions.push(Cancel);
+            } else {
+                if has_note {
+                    actions.push(Read);
+                }
+                // The rest stays behind ⋯: this card is one step of the workbench.
+                if recovery.len() > 1 {
+                    recovery.retain(|action| *action != Adjust);
+                }
+                actions.extend(recovery);
+            }
+            actions.push(ViewTask);
+            if runs_in_card(task) {
+                actions.push(NextVideo);
+            }
+        }
+    }
+    actions
+}
+
+/// Moves within the queue, for those who don't drag.
+fn task_moves(task: &TaskRecord, queue: &[&str]) -> Vec<TaskAction> {
+    let Some(position) = queue.iter().position(|queued| *queued == task.id) else {
+        return Vec::new();
+    };
+    let last = queue.len() - 1;
+    let step = |label, up, to, can: bool| TaskAction::Move {
+        label,
+        up,
+        to: can.then_some(to),
+    };
+    vec![
+        step(course2md::tr!("移到最前"), true, 0, position > 0),
+        step(
+            course2md::tr!("上移"),
+            true,
+            position.saturating_sub(1),
+            position > 0,
+        ),
+        step(course2md::tr!("下移"), false, position + 1, position < last),
+        step(course2md::tr!("移到最后"), false, last, position < last),
+    ]
+}
+
+/// Live and retained stages use the same labels, status column and icon slot.
+pub fn task_stage_rows(task: &TaskRecord, active: bool) -> Vec<TaskStage> {
+    // `Stage` orders by pipeline position, so the map is already sorted.
+    task.events
+        .stages
+        .iter()
+        .map(|(name, stored)| {
+            let name = name.clone();
+            let live = active
+                .then_some(stored)
+                .filter(|stage| !stage.elapsed().is_zero());
+            let done = stored.done;
+            let outcomes = if active {
+                task.events
+                    .done
+                    .as_ref()
+                    .and_then(|done| done.outcomes.as_ref())
+            } else {
+                task.events.outcomes.as_ref()
+            };
+            let status = if let Some(outcome) = ai_stage_outcome(&name, outcomes) {
+                outcome
+            } else if done {
+                StageStatus::Complete
+            } else if active {
+                match task.intent {
+                    Intent::Pause | Intent::Quit => StageStatus::Pausing,
+                    Intent::Cancel => StageStatus::Stopping,
+                    Intent::Run => StageStatus::Running,
+                }
+            } else {
+                match task.state {
+                    TaskState::Paused | TaskState::Pausing => StageStatus::Paused,
+                    TaskState::Uncertain => StageStatus::Uncertain,
+                    TaskState::Cancelled => StageStatus::Cancelled,
+                    TaskState::Queued => StageStatus::Waiting,
+                    _ => StageStatus::Failed,
+                }
+            };
+            let (current, total) = (stored.current, stored.total);
+            let (detail, fraction) = task_stage_progress(&name, done, live, current, total);
+            let (compact_detail, _) = stage_progress(&name, done, live, current, total, true);
+            TaskStage {
+                id: format!("task-stage-{}-{name}", task.id),
+                title: activity::title(&name),
+                status,
+                detail,
+                compact_detail,
+                fraction,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -721,6 +941,27 @@ mod tests {
     }
 
     use crate::workspace::{Intent, TaskState};
+
+    #[test]
+    fn a_waiting_task_offers_the_moves_its_place_allows() {
+        use super::{TaskAction, task_moves};
+        let task = task_record("b");
+        let moves = |queue: &[&str]| -> Vec<Option<usize>> {
+            task_moves(&task, queue)
+                .into_iter()
+                .map(|action| match action {
+                    TaskAction::Move { to, .. } => to,
+                    _ => panic!("only moves"),
+                })
+                .collect()
+        };
+        assert_eq!(
+            moves(&["a", "b", "c"]),
+            [Some(0), Some(0), Some(2), Some(2)]
+        );
+        assert_eq!(moves(&["b", "c"]), [None, None, Some(1), Some(1)]);
+        assert!(moves(&["a"]).is_empty());
+    }
 
     #[test]
     fn one_action_is_filled_and_an_unconfirmed_request_leaves_the_card_without_one() {
