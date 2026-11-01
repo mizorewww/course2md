@@ -1747,7 +1747,18 @@ impl Desktop {
         let on_home_running = matches!(place, CardPlace::Home) && runs_in_card(task);
         let chip = (!on_home_running
             && (task.state != TaskState::Queued || !matches!(place, CardPlace::Row { .. })))
-        .then(|| status_chip(task_status_kind(task.state)).child(task_status_label(task)));
+        .then(|| {
+            // A running title already says what is being generated; the chip only
+            // carries the state.
+            let generating = task.state == TaskState::Running && task.intent == Intent::Run;
+            status_chip(task_status_kind(task.state)).child(
+                if generating && matches!(place, CardPlace::Open { .. }) {
+                    course2md::tr!("处理中").to_owned()
+                } else {
+                    task_status_label(task)
+                },
+            )
+        });
         let context_menu = self.task_menu(task, cx);
         // The running card's progress and actions stay in its text column.
         let inner = on_home_running.then(|| self.task_body(task, place, window, cx));
