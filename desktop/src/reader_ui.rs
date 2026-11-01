@@ -2184,6 +2184,9 @@ impl Desktop {
         let metrics = ReaderMetrics::new(window, !self.reader_ui.outline.is_empty());
         let tools = self.reader_tools(&preview, metrics, window, cx);
         let strip = self.reader_strip(&preview, cx);
+        let attention = (!metrics.short)
+            .then(|| self.reader_attention(&preview, cx))
+            .flatten();
         let tabs = (!metrics.short).then(|| self.reader_tabs(&preview, metrics, cx));
         let find = self.reader_find_bar(cx);
         let view = if self.result_tab == 0 {
@@ -2253,6 +2256,7 @@ impl Desktop {
                     .pb(rem(16.))
                     .gap(rem(12.))
                     .children(strip)
+                    .children(attention)
                     .children(tabs)
                     .children(find)
                     .child(view)
@@ -2668,11 +2672,24 @@ impl Desktop {
         } else {
             crate::views::video_site_name(&meta.webpage_url)
         };
+        // Where it comes from and who made it are one fact, marked by the platform's icon.
+        let origin: Vec<&str> = platform
+            .into_iter()
+            .chain(Some(meta.uploader.trim()).filter(|uploader| !uploader.is_empty()))
+            .collect();
+        let origin = (!origin.is_empty()).then(|| {
+            status_chip(StatusKind::Neutral)
+                .child(
+                    Icon::from(if meta.is_local() {
+                        symbols::movie()
+                    } else {
+                        symbols::tv()
+                    })
+                    .size(rem(16.)),
+                )
+                .child(origin.join(" · "))
+        });
         let mut facts: Vec<String> = Vec::new();
-        facts.extend(platform.map(str::to_owned));
-        if !meta.uploader.trim().is_empty() {
-            facts.push(meta.uploader.trim().to_owned());
-        }
         if meta.duration > 0. {
             facts.push(course2md::render::fmt_ts(meta.duration));
         }
@@ -2691,6 +2708,7 @@ impl Desktop {
                     .items_center()
                     .gap_x(rem(12.))
                     .gap_y(rem(8.))
+                    .children(origin)
                     .children(
                         facts
                             .into_iter()
@@ -2701,6 +2719,11 @@ impl Desktop {
             .children(self.reader_obstacles(cx))
             .children(self.reader_details(preview, cx))
             .children(self.reader_notices(preview, cx))
+            // Where the views have no line of their own, the page has none to spare either.
+            .when(
+                ReaderMetrics::new(window, !self.reader_ui.outline.is_empty()).short,
+                |head| head.children(self.reader_attention(preview, cx)),
+            )
     }
 
     /// The other versions of this note, when it has any; its revision and date otherwise
@@ -2907,7 +2930,18 @@ impl Desktop {
         ))
     }
 
-    /// New-version, incomplete-processing and file-reload notices.
+    /// What is unfinished about this note: it concerns the note and its screenshots
+    /// alike, so it heads the page above the views.
+    fn reader_attention(
+        &mut self,
+        preview: &Rc<notes::Preview>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let notice = processing_notice(&preview.processing_issues)?;
+        Some(self.reader_processing_notice(preview, notice, cx))
+    }
+
+    /// New-version and file-reload notices.
     fn reader_notices(
         &mut self,
         preview: &Rc<notes::Preview>,
@@ -2936,9 +2970,6 @@ impl Desktop {
                         })),
                 ),
             ));
-        }
-        if let Some(notice) = processing_notice(&preview.processing_issues) {
-            notices.push(self.reader_processing_notice(preview, notice, cx));
         }
         if files_need_reload(preview, &self.reader_ui.issues, &self.reader_ui.frames) {
             let course = preview.course.clone();
@@ -3121,6 +3152,10 @@ impl Desktop {
         motion::enter(
             "reader-processing-notice",
             notice_banner("reader-incomplete-processing", NoticeKind::Warning, notice)
+                .flex_shrink_0()
+                .rounded(RADIUS_HERO)
+                .px(rem(20.))
+                .py(rem(16.))
                 .child(actions)
                 .child(motion::disclosure(
                     "reader-processing-detail-panel",
