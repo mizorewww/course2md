@@ -274,7 +274,12 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
             let _ = cx.update(|window, cx| {
                 match Keystroke::parse_with_os(key, cx.platform_info().os) {
                     Ok(keystroke) => {
-                        window.dispatch_keystroke(keystroke, cx);
+                        window.dispatch_keystroke(keystroke.clone(), cx);
+                        // Controls that act on release need the key to come up too.
+                        window.dispatch_event(
+                            PlatformInput::KeyUp(gpui::KeyUpEvent { keystroke }),
+                            cx,
+                        );
                     }
                     Err(error) => eprintln!("capture input {step}: {error}"),
                 }

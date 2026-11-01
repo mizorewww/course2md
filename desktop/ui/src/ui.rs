@@ -93,13 +93,7 @@ pub fn menu(
     let (open, set_open) = keyed_open(&id, window, cx);
     MenuPopup::new(id, trigger, menu)
         .open(open)
-        // The kit's popup takes any press over its trigger, even through a dialog on
-        // top. These menus are on pages, so none opens while a dialog holds the window.
-        .on_open_change(move |next, window, cx| {
-            if !*next || !modal_open(window, cx) {
-                set_open(next, window, cx);
-            }
-        })
+        .on_open_change(set_open)
 }
 
 /// A menu trigger's click handler: a pointer press already reached the popup, a key
@@ -966,16 +960,15 @@ mod tests {
             MaterialDialog::new("chooser")
                 .container(gpui_kit_material::color::ColorRole::SURFACE)
                 .headline("Chooser")
-                .content(div().occlude().w_full().h(px(200.)))
+                .content(div().w_full().h(px(200.)))
                 .modal(true)
                 .on_dismiss(move |_, _| dismissed.set(true))
         }
     }
 
-    /// The kit's dialog surface does not block the pointer: only what occludes keeps
-    /// a press off its scrim, and pressing the scrim itself still dismisses.
+    /// A press in the dialog stays there; pressing the scrim itself dismisses.
     #[gpui::test]
-    fn an_occluded_dialog_body_keeps_a_press_off_the_scrim(cx: &mut TestAppContext) {
+    fn a_press_in_a_dialog_stays_off_its_scrim(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             gpui_kit_material::init(cx);
