@@ -4,7 +4,12 @@
 use crate::symbols;
 use gpui::{prelude::*, *};
 use gpui_base::{active_focus_trap, h_flex, v_flex};
-use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*, tokens::shape::OuterCorners};
+use gpui_kit_material::{
+    color::ColorRole,
+    icons::{Icon, SymbolIcon},
+    prelude::*,
+    tokens::shape::OuterCorners,
+};
 use std::{rc::Rc, sync::Arc};
 
 fn child_id(id: &ElementId, name: impl Into<SharedString>) -> ElementId {
@@ -188,6 +193,7 @@ pub struct Field {
     id: SharedString,
     label: SharedString,
     hint: Option<SharedString>,
+    icon: Option<SymbolIcon>,
     disabled: bool,
     control: Control,
 }
@@ -198,6 +204,7 @@ impl Field {
             id: id.into(),
             label: label.into(),
             hint: None,
+            icon: None,
             disabled: false,
             control,
         }
@@ -287,6 +294,12 @@ impl Field {
         self
     }
 
+    /// An icon leading a switch row's text, where it says what the switch is for.
+    pub fn icon(mut self, icon: SymbolIcon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
     /// Dims a switch or menu row. An inline or below control disables itself.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
@@ -318,6 +331,7 @@ impl Field {
             id,
             label,
             hint,
+            icon,
             disabled,
             control,
         } = self;
@@ -325,7 +339,15 @@ impl Field {
         match control {
             Control::Switch(on, on_change) => Self::inline_row(
                 outer,
-                scale.text(text_id, label.clone(), hint),
+                h_flex()
+                    .min_w_0()
+                    .gap(rem(16.))
+                    .children(icon.map(|icon| {
+                        div()
+                            .flex_shrink_0()
+                            .child(Icon::from(icon).color(color(ColorRole::ON_SURFACE_VARIANT)))
+                    }))
+                    .child(scale.text(text_id, label.clone(), hint).flex_1()),
                 MaterialSwitch::new(ElementId::Name(id), label)
                     .checked(on)
                     .icons(SwitchIcons::Both)

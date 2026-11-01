@@ -1278,10 +1278,6 @@ impl Desktop {
                         .w_full()
                         .min_w_0()
                         .gap(rem(4.))
-                        .child(TileScale::Regular.support(
-                            SharedString::from(format!("setup-model-label-{suffix}")),
-                            course2md::tr!("模型"),
-                        ))
                         .child(self.service_model_field(
                             owner,
                             if purpose == ServicePurpose::Ai {
@@ -1313,6 +1309,7 @@ impl Desktop {
                                 cx.notify();
                             }),
                         )
+                        .icon(symbols::auto_fix_high())
                         .disabled(busy),
                         ui::Field::switch(
                             "setup-ai-summary",
@@ -1323,6 +1320,7 @@ impl Desktop {
                                 cx.notify();
                             }),
                         )
+                        .icon(symbols::notes())
                         .disabled(busy),
                     ],
                 ))
