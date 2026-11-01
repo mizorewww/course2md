@@ -9,5 +9,4 @@ extern crate gpui_kit as gpui;
 pub mod math;
 pub mod note_text;
 pub mod symbols;
-pub mod theme;
 pub mod ui;

@@ -12,7 +12,7 @@ use gpui_kit_material::{
     icons::SymbolIcon,
     motion,
     prelude::{ButtonSize, CaptionButtons, accessible_text, color, is_compact, rem},
-    theme::{advance_component_theme, init_component_theme, scheme as current_scheme, system_dark},
+    theme::{advance_component_theme, init_component_theme, system_dark},
 };
 
 const SHELL_GUTTER: f32 = 24.;
@@ -254,8 +254,6 @@ fn shell_column_at(width: AbsoluteLength) -> Div {
 pub(crate) struct ThemeFrame {
     /// One pending next-frame callback advances a running theme transition.
     pub pending: bool,
-    /// The paint the unprojected Kit theme fields were last written for.
-    pub unprojected: Option<(gpui_kit_material::color::Scheme, f32)>,
 }
 
 impl Desktop {
@@ -544,11 +542,6 @@ impl Desktop {
     pub(crate) fn prepare_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (scheme, scale) = self.theme_target(cx);
         let running = advance_component_theme(scheme, scale, window, cx);
-        let painted = (current_scheme(), scale);
-        if self.theme_frame.unprojected != Some(painted) {
-            self.theme_frame.unprojected = Some(painted);
-            theme::sync_unprojected(scale, cx);
-        }
         if running && !self.theme_frame.pending {
             self.theme_frame.pending = true;
             let view = cx.weak_entity();

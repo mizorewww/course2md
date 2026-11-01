@@ -32,7 +32,7 @@ use desktop_core::{
     preferences, reader_navigation, service_test, source, spawn_blocking_io, storage, workspace,
 };
 
-use desktop_ui::{note_text, symbols, theme, ui};
+use desktop_ui::{note_text, symbols, ui};
 
 use desktop_core::conversion::{provider_from_id, provider_label, providers};
 use desktop_core::job::{earliest_deadline, job_exit_status};
