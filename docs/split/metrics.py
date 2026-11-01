@@ -16,7 +16,9 @@ for path in root.rglob("*.rs"):
         text = text[: match.start()]
     if "test_" in rel.name:
         continue
-    key = rel.parts[0] if rel.parts[0] != "crates" else "/".join(rel.parts[:2])
+    # Crates under crates/ and desktop/ report one per line; the desktop binary is `desktop`.
+    nested = rel.parts[0] == "crates" or rel.parts[:2] in (("desktop", "core"), ("desktop", "ui"))
+    key = "/".join(rel.parts[:2]) if nested else rel.parts[0]
     total[key] = total.get(key, 0) + text.count("\n")
 for key, lines in sorted(total.items()):
     print(f"{lines:7d} {key}")

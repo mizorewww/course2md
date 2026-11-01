@@ -14,6 +14,8 @@ Recipes are rendered from `packaging/homebrew/` and `packaging/aur/`. Change the
 
 ## Bundled tools
 
+The desktop is the `course2md-desktop` binary in `desktop/`, over `desktop-core` (`desktop/core`) and `desktop-ui` (`desktop/ui`); the scripts build and license it through `desktop/Cargo.toml`, which reaches both.
+
 Desktop archives are self-contained. Pins and build options live in `desktop/scripts/` (`ffmpeg_bundle.py`, `ytdlp_bundle.py`, `prebuilt.py`, `package.py`).
 
 | Tool | Platforms | Notes |
