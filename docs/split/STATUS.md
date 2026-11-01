@@ -2,12 +2,16 @@
 
 Update this file in the same commit as the work it records.
 
-**Current phase:** Wave 2 (see `PLAN.md` § Phases). P0, P1, P2 are finished; D12 goes with the kit scrollbar.
-**Dependency form:** git, kit `a5acb0c`, six `[patch]` entries, enough on all three platforms (desktop run 41160350984).
+**Current phase:** Wave 3 (see `PLAN.md` § Phases). Waves 1 and 2 and the engine crates are merged; the desktop crates and the rest of `DESIGN-RESTORE.md` are next.
+**Dependency form:** git, kit `401bb47` on branch `course2md-design`, six `[patch]` entries at the root. This pin is temporary: repin to kit `main` once PRs #2 to #14 are merged, before acceptance.
+
+## Wave 2 and 3 metrics
+
+`python3 docs/split/metrics.py` at `29cdd24`: 61,992 lines, against the 78,518 baseline. Desktop 44,340, engine about 17,650 across `crates/`. The engine split itself added 195 lines. `theme.rs` keeps only `sync_unprojected`.
 
 ## Done
 
-- P0: branch `split/workspace`, kit worktree `course2md-integration`, documents, scaffold residue removed.
+- P0: branch `split/workspace`, documents, scaffold residue removed. A kit worktree is created from `origin/main` when needed.
 - P1: the desktop builds and runs on the `gpui-kit-material` stack: `gpui-kit` facade, `gpui-base`,
   `gpui-kit-material`, the kit's `[patch]` tables, `gpui-fast`, toolchain 1.99.1. Source pinning
   (`sources.py`, `sources.lock.json`, `patches/`, `.deps`) is gone.
