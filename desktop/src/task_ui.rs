@@ -961,7 +961,13 @@ impl Desktop {
         let inner = on_home_running.then(|| self.task_body(task, place, window, cx));
         let (outer, head, body) = match place {
             CardPlace::Row { outer, number } => {
-                let head = self.task_row_head(task, number, chip, more, cx);
+                // An open row's details continue its surface below it.
+                let corners = if expanded {
+                    [outer[0], outer[1], false, false]
+                } else {
+                    outer
+                };
+                let head = self.task_row_head(task, number, corners, chip, more, cx);
                 (outer, head.into_any_element(), expanded)
             }
             CardPlace::Open { outer } => {
@@ -1005,83 +1011,97 @@ impl Desktop {
     }
 
     /// A row of its group: the grip for queued work, the row that folds details out,
-    /// and what it says and offers at its trailing edge.
+    /// and what it says and offers at its trailing edge. The whole row is one tile
+    /// button, grip and commands included, with the inset cover of a note row (U21, V6).
     fn task_row_head(
         &self,
         task: &TaskRecord,
         number: Option<usize>,
+        corners: OuterCorners,
         chip: Option<Div>,
         more: AnyElement,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let id = task.id.clone();
-        let cover = self.task_cover(task);
         let waiting = number.map(|_| task.state);
-        let thumbnail = match cover {
-            Some(cover) => img(cover)
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element(),
-            None => h_flex()
-                .size_full()
-                .justify_center()
-                .child(
-                    Icon::from(match waiting {
-                        Some(TaskState::Paused) => symbols::pause(),
-                        Some(_) => symbols::schedule(),
-                        None => symbols::movie(),
+        let scale = TileScale::Regular;
+        let cover = crate::course_library::row_cover(
+            self.task_cover(task),
+            match waiting {
+                Some(TaskState::Paused) => symbols::pause(),
+                Some(_) => symbols::schedule(),
+                None => symbols::movie(),
+            },
+        );
+        let row = scale
+            .button(SharedString::from(format!("select-{id}")), corners)
+            .accessibility_label(task.plan.title.clone())
+            .on_click(cx.listener({
+                let id = id.clone();
+                move |this, _, _, cx| this.toggle_task_row(&id, cx)
+            }))
+            .child(
+                scale
+                    .row()
+                    // At narrow widths or large text the commands move under the identity.
+                    .flex_wrap()
+                    .when(number.is_some(), |row| {
+                        row.child(h_flex().flex_shrink_0().cursor_grab().child(
+                            Icon::from(symbols::drag_indicator()).color(color(ColorRole::OUTLINE)),
+                        ))
                     })
-                    .color(color(ColorRole::ON_SURFACE_VARIANT)),
-                )
-                .into_any_element(),
-        };
-        let row = ListItem::new(
-            SharedString::from(format!("select-{id}")),
-            task.plan.title.clone(),
-        )
-        .supporting(self.task_destination(task))
-        .leading(ListLeading::Video(Some(thumbnail)))
-        .on_click(cx.listener({
-            let id = id.clone();
-            move |this, _, _, cx| this.toggle_task_row(&id, cx)
-        }));
-        let head =
-            h_flex()
-                .id(SharedString::from(format!("task-row-{id}")))
-                .w_full()
-                .min_w_0()
-                .items_center()
-                .flex_wrap()
-                .when(number.is_some(), |row| {
-                    row.child(h_flex().flex_shrink_0().pl(rem(12.)).cursor_grab().child(
-                        Icon::from(symbols::drag_indicator()).color(color(ColorRole::OUTLINE)),
-                    ))
-                })
-                .child(div().flex_1().flex_basis(rem(300.)).min_w_0().child(row))
-                // At narrow widths or large text the commands move under the identity.
-                .child(
-                    h_flex()
-                        .flex_shrink_0()
-                        .ml_auto()
-                        .px(rem(8.))
-                        .gap(rem(8.))
-                        .items_center()
-                        .children(chip)
-                        .when(
-                            task.artifact.is_some() && task_group(task) != TaskGroup::Queued,
-                            |row| {
-                                row.child(
-                                    material_button(
-                                        SharedString::from(format!("task-read-{id}")),
-                                        ButtonVariant::Text,
+                    .child(cover)
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .flex_basis(rem(200.))
+                            .min_w_0()
+                            .gap(rem(2.))
+                            .child(
+                                scale
+                                    .label(
+                                        SharedString::from(format!("task-row-title-{id}")),
+                                        task.plan.title.clone(),
                                     )
-                                    .child(course2md::tr!("阅读笔记"))
-                                    .on_click(TaskAction::Read.click(cx.weak_entity(), id.clone())),
-                                )
-                            },
-                        )
-                        .child(more),
-                );
+                                    .whitespace_normal()
+                                    .line_clamp(2)
+                                    .text_ellipsis(),
+                            )
+                            .child(scale.support(
+                                SharedString::from(format!("task-row-place-{id}")),
+                                self.task_destination(task),
+                            )),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_shrink_0()
+                            .ml_auto()
+                            .gap(rem(8.))
+                            .items_center()
+                            .children(chip)
+                            .when(
+                                task.artifact.is_some() && task_group(task) != TaskGroup::Queued,
+                                |row| {
+                                    row.child(
+                                        material_button(
+                                            SharedString::from(format!("task-read-{id}")),
+                                            ButtonVariant::Text,
+                                        )
+                                        .child(course2md::tr!("阅读笔记"))
+                                        .on_click(
+                                            TaskAction::Read.click(cx.weak_entity(), id.clone()),
+                                        ),
+                                    )
+                                },
+                            )
+                            .child(more),
+                    ),
+            );
+        let head = div()
+            .id(SharedString::from(format!("task-row-{id}")))
+            .w_full()
+            .min_w_0()
+            .child(row);
         match number {
             Some(number) => {
                 let drag = QueueDrag {

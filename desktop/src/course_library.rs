@@ -60,7 +60,7 @@ fn cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
 }
 
 /// The cover of a note or task row.
-fn row_cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
+pub(crate) fn row_cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
     cover(image, icon)
         .w(rem(ROW_COVER))
         .max_w(relative(ROW_COVER_SHARE))
