@@ -53,6 +53,8 @@ impl TaskGroup {
 pub fn task_group(task: &TaskRecord) -> TaskGroup {
     if task.handled_by.is_some() {
         TaskGroup::History
+    } else if task.held {
+        TaskGroup::Running
     } else {
         match task.state {
             // A task the person paused keeps its place in the queue.
@@ -278,10 +280,14 @@ pub fn task_failure_summary(state: TaskState, error: Option<&str>) -> Option<Str
                     && !line.starts_with("panic")
             })
             .unwrap_or_default();
+        // A long cause (a tool's own error line) is cut, not replaced: the start
+        // of the real reason helps more than a generic one.
         if summary.chars().count() <= 140 {
             summary.into()
-        } else {
+        } else if summary.is_empty() {
             course2md::tr!("转换未完成").into()
+        } else {
+            format!("{}…", summary.chars().take(139).collect::<String>())
         }
     })
 }
@@ -533,6 +539,10 @@ pub fn task_status_label(task: &TaskRecord) -> String {
     if task.handled_by.is_some() {
         return course2md::tr!("已有后续处理任务").into();
     }
+    // What the folder holds is not known until the earlier worker lets go.
+    if task.held {
+        return TaskState::Pausing.label().into();
+    }
     if task.has_uncertain() {
         let purpose: std::collections::BTreeSet<_> = task
             .events
@@ -710,8 +720,8 @@ pub fn task_actions(
 ) -> Vec<TaskAction> {
     use TaskAction::*;
     let active = facts.active;
-    let uncertain = task.has_uncertain();
-    let running = matches!(task.state, TaskState::Running | TaskState::Pausing);
+    let uncertain = task.has_uncertain() && !task.held;
+    let running = matches!(task.state, TaskState::Running | TaskState::Pausing) || task.held;
     let queued = task.state == TaskState::Queued;
     let has_note = task.artifact.is_some();
     let has_log = task_log_text(task).is_some();
@@ -929,6 +939,7 @@ mod tests {
             updated: 0,
             parent: None,
             handled_by: None,
+            held: false,
             work_dir: "work".into(),
             events: crate::activity::JobEvents {
                 error: None,
@@ -1170,6 +1181,19 @@ mod tests {
         };
         assert!(!message.contains("ERROR"));
         assert!(!message.contains("Traceback"));
+        // A download's own reason leads, even when long; the hint follows on its own line.
+        let cause = format!(
+            "yt-dlp: [BiliBili] BV1: {}",
+            "Unable to download ".repeat(12)
+        );
+        let summary = task_failure_summary(
+            TaskState::NeedsAttention,
+            Some(&format!("{cause}\n提示：若视频需要登录…\nyt-dlp 运行失败")),
+        )
+        .unwrap();
+        assert!(summary.starts_with("yt-dlp: [BiliBili] BV1: Unable"));
+        assert!(summary.ends_with('…'));
+        assert_eq!(summary.chars().count(), 140);
     }
 
     #[test]
@@ -1217,6 +1241,7 @@ mod tests {
             updated: 0,
             parent: None,
             handled_by: None,
+            held: false,
             work_dir: "work".into(),
             events: crate::activity::JobEvents {
                 outcomes: Some(outcomes.clone()),

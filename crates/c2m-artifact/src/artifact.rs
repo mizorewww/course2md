@@ -83,13 +83,43 @@ impl Target {
     }
 }
 
+/// A pointer or manifest written by a newer app. Unlike damage, it is neither read
+/// as this app's nor replaced.
+#[derive(Debug)]
+pub struct NewerSchema;
+
+impl std::fmt::Display for NewerSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(tr!(
+            "此笔记版本需要其他版本的软件 / Unsupported manifest schema"
+        ))
+    }
+}
+
+impl std::error::Error for NewerSchema {}
+
+fn check_schema(schema: u32) -> Result<()> {
+    if schema > 1 {
+        return Err(NewerSchema.into());
+    }
+    anyhow::ensure!(
+        schema == 1,
+        tr!("此笔记版本需要其他版本的软件 / Unsupported manifest schema")
+    );
+    Ok(())
+}
+
 pub fn read_manifest(path: &Path) -> Result<Manifest> {
     let value: Manifest = serde_json::from_slice(&std::fs::read(path)?)
         .context(tr!("笔记清单损坏 / Invalid note manifest"))?;
-    anyhow::ensure!(
-        value.schema == 1,
-        tr!("此笔记版本需要其他版本的软件 / Unsupported manifest schema")
-    );
+    check_schema(value.schema)?;
+    Ok(value)
+}
+
+/// A course's `current.json`, refused when a newer app wrote it.
+pub fn read_current(path: &Path) -> Result<CurrentVersion> {
+    let value: CurrentVersion = serde_json::from_slice(&std::fs::read(path)?)?;
+    check_schema(value.schema)?;
     Ok(value)
 }
 
@@ -346,8 +376,7 @@ pub fn publish(
         })
     })?;
     let revision = if target.course_dir.join("current.json").exists() {
-        let current: CurrentVersion =
-            serde_json::from_slice(&std::fs::read(target.course_dir.join("current.json"))?)?;
+        let current = read_current(&target.course_dir.join("current.json"))?;
         read_manifest(&safe_asset_path(&target.course_dir, &current.manifest)?)?
             .revision
             .saturating_add(1)
@@ -390,7 +419,7 @@ pub fn publish(
 fn commit_current(target: &Target, manifest: &Manifest) -> Result<()> {
     let path = target.course_dir.join("current.json");
     if path.is_file() {
-        let current: CurrentVersion = serde_json::from_slice(&std::fs::read(&path)?)?;
+        let current = read_current(&path)?;
         anyhow::ensure!(
             current.course_id == target.course_id,
             tr!("课程位置已被其他课程使用 / Course identity conflict")
@@ -541,6 +570,65 @@ mod tests {
         let current: CurrentVersion =
             serde_json::from_slice(&std::fs::read(pointer).unwrap()).unwrap();
         assert_eq!(current.version_id, "v2");
+    }
+
+    /// A pointer from a newer app is neither read as this app's nor replaced.
+    #[tokio::test]
+    async fn publishing_leaves_a_newer_apps_pointer_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let mut target = Target {
+            task_id: "task-1".into(),
+            course_id: "course".into(),
+            source_id: "video:part1".into(),
+            version_id: "v1".into(),
+            course_dir: dir.path().join("course"),
+        };
+        let meta = VideoMeta {
+            title: "Title".into(),
+            uploader: String::new(),
+            duration: 1.,
+            webpage_url: "https://example.com/video".into(),
+            extractor: "example".into(),
+            id: "video:part1".into(),
+        };
+        let sections = vec![Section {
+            t: 0.,
+            end: 1.,
+            image: String::new(),
+            speech: vec![TranscriptEvent {
+                start: 0.,
+                end: 1.,
+                text: "Readable text".into(),
+                raw: None,
+                translation: None,
+            }],
+        }];
+        let publish_now = |target: &Target| {
+            publish(
+                target,
+                &work,
+                &meta,
+                &sections,
+                None,
+                &[],
+                Outcomes::default(),
+                &TaskControl::default(),
+            )
+        };
+        publish_now(&target).unwrap();
+        let pointer = target.course_dir.join("current.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&pointer).unwrap()).unwrap();
+        value["schema"] = 2.into();
+        let newer = serde_json::to_vec(&value).unwrap();
+        std::fs::write(&pointer, &newer).unwrap();
+        target.task_id = "task-2".into();
+        target.version_id = "v2".into();
+        let error = publish_now(&target).unwrap_err();
+        assert!(error.is::<NewerSchema>(), "{error:#}");
+        assert_eq!(std::fs::read(&pointer).unwrap(), newer);
     }
 
     #[tokio::test]

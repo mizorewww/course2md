@@ -32,6 +32,7 @@ pub mod storage;
 pub mod store;
 pub mod task_view;
 pub mod workspace;
+pub mod youtube;
 
 /// Shown when a blocking worker ends without a result.
 pub fn interrupted() -> &'static str {

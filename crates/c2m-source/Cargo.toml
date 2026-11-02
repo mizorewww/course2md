@@ -14,8 +14,14 @@ c2m-i18n = { path = "../c2m-i18n" }
 c2m-process = { path = "../c2m-process" }
 c2m-protocol = { path = "../c2m-protocol" }
 anyhow.workspace = true
+base64.workspace = true
+getrandom.workspace = true
 indexmap.workspace = true
+open.workspace = true
 qrcode.workspace = true
+# The passport encrypts a password with RSA-PKCS#1 v1.5 under its one-time public
+# key; only the public-key operation is used.
+rsa = { version = "0.9", features = ["getrandom"] }
 serde.workspace = true
 serde_json.workspace = true
 subtitle-parse.workspace = true
@@ -28,3 +34,7 @@ tracing.workspace = true
 # not pick up a runtime libssl dependency.
 ureq = { workspace = true, features = ["native-tls", "vendored"] }
 url.workspace = true
+zeroize = "1"
+
+[dev-dependencies]
+c2m-test-http = { path = "../c2m-test-http" }

@@ -15,6 +15,7 @@ mod folder_tree;
 mod i18n;
 mod import_ui;
 mod library_ui;
+mod login_ui;
 mod ollama_ui;
 mod onboarding;
 #[cfg(feature = "performance")]
@@ -26,6 +27,7 @@ mod storage_ui;
 mod task_runner;
 mod task_ui;
 mod views;
+mod youtube_ui;
 
 use desktop_core::{
     activity, backend, conversion, credentials, interrupted, model_discovery, notes, organize,
@@ -65,6 +67,18 @@ enum Field {
     Name,
     Search,
 }
+
+impl Field {
+    /// What an empty field says, in the interface language.
+    fn placeholder(self) -> &'static str {
+        match self {
+            Self::Source => course2md::tr!("粘贴 YouTube 或 Bilibili 视频链接"),
+            Self::Search => course2md::tr!("搜索笔记标题"),
+            Self::Title | Self::Name => "",
+        }
+    }
+}
+
 /// Debug builds: open a note in a given reader state at startup, so native
 /// layout can be checked without synthetic input. Release builds ignore it.
 struct ValidationOpen {
@@ -108,6 +122,9 @@ struct Desktop {
     transient_task_result: Option<(String, Instant)>,
     draft_deadline: Option<Instant>,
     account: desktop_core::account::AccountUi,
+    /// The password and SMS login fields, made when the login dialog first opens.
+    login_inputs: Option<login_ui::LoginInputs>,
+    youtube: desktop_core::youtube::YoutubeUi,
     codex: desktop_core::codex::CodexUi,
     ollama: desktop_core::ollama::OllamaUi,
     /// A startup reconciliation of the task record is running.
@@ -251,8 +268,11 @@ impl Desktop {
         // Fresh installs bootstrap managed local storage so the welcome screen does not
         // synchronously access a protected Documents folder before the user chooses a location.
         let output = configuration_directory.join("desktop-local-library");
+        let preferences_root = configuration_directory.join("desktop-preferences");
+        // What opening the settings reports about them reads in the saved language.
+        i18n::apply(preferences::Store::saved_language(&preferences_root));
         let preferences = preferences::Store::open(
-            configuration_directory.join("desktop-preferences"),
+            preferences_root,
             credentials::system_vault(configuration_directory.join("desktop-credentials.json")),
         );
         // Inputs and the first frame read the catalog immediately, so the
@@ -260,26 +280,12 @@ impl Desktop {
         i18n::apply(preferences.application().language);
         let mut config = preferences.defaults_config();
         config.defaults.out = Some(output.clone());
-        let fields = [
-            (
-                Field::Source,
-                course2md::tr!("粘贴 YouTube 或 Bilibili 视频链接"),
-                String::new(),
-            ),
-            (Field::Title, "", String::new()),
-            (Field::Search, course2md::tr!("搜索笔记标题"), String::new()),
-            (Field::Name, "", String::new()),
-        ];
-        let inputs: BTreeMap<_, _> = fields
+        let inputs: BTreeMap<_, _> = [Field::Source, Field::Title, Field::Search, Field::Name]
             .into_iter()
-            .map(|(field, placeholder, value)| {
+            .map(|field| {
                 (
                     field,
-                    cx.new(|cx| {
-                        InputState::new(window, cx)
-                            .placeholder(placeholder)
-                            .default_value(value)
-                    }),
+                    cx.new(|cx| InputState::new(window, cx).placeholder(field.placeholder())),
                 )
             })
             .collect();
@@ -424,6 +430,8 @@ impl Desktop {
             import_submit_focus: cx.focus_handle(),
             root_focus: Self::install_root_focus(window, cx),
             account: desktop_core::account::AccountUi::default(),
+            login_inputs: None,
+            youtube: desktop_core::youtube::YoutubeUi::default(),
             codex: desktop_core::codex::CodexUi::default(),
             ollama: desktop_core::ollama::OllamaUi::default(),
             window: window.window_handle(),
@@ -451,8 +459,11 @@ impl Desktop {
         this.prepare_workbench_input(window, cx);
         this.restore_storage_state(cx);
         std::thread::spawn(source::prune_cache);
+        // A YouTube check a crash or force quit interrupted left cookies behind.
+        std::thread::spawn(course2md::auth::youtube::remove_stale_checks);
         cx.set_reduce_motion(this.desktop_settings.reduce_motion);
         this.refresh_account(cx);
+        this.load_youtube(cx);
         this.refresh_environment(cx);
         this.refresh_library(cx);
         this.poll_workspace(cx);
@@ -738,6 +749,10 @@ impl Desktop {
         }
         if self.storage_ui.resume_ready() {
             deadline = earliest_deadline(deadline, Some(Instant::now()));
+        }
+        // A worker that outlived an earlier session is waited for.
+        if let Some(workspace) = &self.workspace {
+            deadline = earliest_deadline(deadline, workspace.held_check_due());
         }
         deadline
     }
@@ -1253,23 +1268,51 @@ fn main() {
             secondary_binding("secondary-n", ImportVideo, None, cx),
             secondary_binding("secondary-f", SearchContent, None, cx),
         ]);
-        cx.set_menus([
-            gpui::Menu::new("course2md").items([
-                gpui::MenuItem::action(course2md::tr!("关于 course2md"), OpenAbout),
-                gpui::MenuItem::action(course2md::tr!("设置…"), OpenSettings),
-                gpui::MenuItem::action(course2md::tr!("退出 course2md"), Quit),
-            ]),
-            gpui::Menu::new(course2md::tr!("文件")).items([gpui::MenuItem::action(
-                course2md::tr!("导入视频"),
-                ImportVideo,
-            )]),
-            gpui::Menu::new(course2md::tr!("查找")).items([gpui::MenuItem::action(
-                course2md::tr!("搜索笔记"),
-                SearchContent,
-            )]),
-        ]);
+        install_menus(cx);
         cx.activate(true);
     });
+}
+
+/// The menu bar, in the interface language; installed again when it changes.
+fn install_menus(cx: &mut App) {
+    cx.set_menus([
+        gpui::Menu::new("course2md").items([
+            gpui::MenuItem::action(course2md::tr!("关于 course2md"), OpenAbout),
+            gpui::MenuItem::action(course2md::tr!("设置…"), OpenSettings),
+            gpui::MenuItem::action(course2md::tr!("退出 course2md"), Quit),
+        ]),
+        gpui::Menu::new(course2md::tr!("文件")).items([gpui::MenuItem::action(
+            course2md::tr!("导入视频"),
+            ImportVideo,
+        )]),
+        gpui::Menu::new(course2md::tr!("查找")).items([gpui::MenuItem::action(
+            course2md::tr!("搜索笔记"),
+            SearchContent,
+        )]),
+    ]);
+}
+
+impl Desktop {
+    /// Switches the interface language: the catalog, then the text that was fixed when
+    /// it was created rather than drawn each frame.
+    fn apply_interface_language(
+        &mut self,
+        language: preferences::InterfaceLanguage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        i18n::apply(language);
+        for (field, input) in &self.inputs {
+            let placeholder = field.placeholder();
+            input.update(cx, |input, cx| {
+                input.set_placeholder(placeholder, window, cx)
+            });
+        }
+        self.relocalize_settings_inputs(window, cx);
+        self.relocalize_reader_inputs(window, cx);
+        install_menus(cx);
+        cx.notify();
+    }
 }
 
 #[cfg(test)]

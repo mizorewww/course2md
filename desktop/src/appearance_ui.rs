@@ -348,12 +348,11 @@ impl Desktop {
                 .into_iter()
                 .map(|language| (language, label(language))),
             &current,
-            cx.listener(|this, language: &InterfaceLanguage, _, cx| {
+            cx.listener(|this, language: &InterfaceLanguage, window, cx| {
                 let mut next = this.application_edit_base();
                 next.language = *language;
                 if this.commit_application(next, cx) {
-                    crate::i18n::apply(*language);
-                    cx.notify();
+                    this.apply_interface_language(*language, window, cx);
                 }
             }),
         )

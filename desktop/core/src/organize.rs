@@ -63,7 +63,7 @@ fn metadata_recovery<T: serde::de::DeserializeOwned>(
     if serde_json::from_slice::<T>(&bytes).is_ok() {
         return Ok(None);
     }
-    let has_backup = std::fs::read(path.with_extension("json.bak"))
+    let has_backup = crate::store::read_backup(&path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<T>(&bytes).ok())
         .is_some();
@@ -97,17 +97,12 @@ fn recover_metadata<T: serde::de::DeserializeOwned + Serialize + Default>(
         T::default()
     } else {
         serde_json::from_slice::<T>(
-            &std::fs::read(path.with_extension("json.bak"))
+            &crate::store::read_backup(&path)
                 .context(course2md::tr!("最近备份无法读取，原记录已保留"))?,
         )
         .context(course2md::tr!("最近备份也无法读取，原记录已保留"))?
     };
-    let preserved = root.join(format!(
-        "{}-damaged-{}.json",
-        filename.trim_end_matches(".json"),
-        crate::store::new_id("record")
-    ));
-    course2md::checkpoint::atomic_write(&preserved, &original)?;
+    let preserved = crate::store::set_aside(&path, &original)?;
     course2md::checkpoint::atomic_write(&path, &serde_json::to_vec_pretty(&library)?)?;
     Ok((library, preserved))
 }

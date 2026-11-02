@@ -61,15 +61,31 @@ pub async fn run(
     let stop = abandoned.0.clone();
     let slides = tokio::task::spawn_blocking(move || {
         let mut bar = None;
-        let slides = slide_detect::detect(
-            &ffmpeg,
-            &video,
-            info,
-            &params,
-            &dir,
-            &|| stop.load(Ordering::Relaxed) || control.check().is_err(),
-            &mut |event| report(event, &mut bar),
-        )?;
+        let cancelled = || stop.load(Ordering::Relaxed) || control.check().is_err();
+        let mut detect = |params: &SlideParams| {
+            slide_detect::detect(
+                &ffmpeg,
+                &video,
+                info,
+                params,
+                &dir,
+                &cancelled,
+                &mut |event| report(event, &mut bar),
+            )
+        };
+        let slides = match detect(&params) {
+            // Footage that keeps moving never holds a picture for `stable_secs`, so
+            // stable mode finds nothing in it. Take the first picture after each
+            // cooldown instead: a note of moving footage still shows what it shows.
+            Err(Error::NoFrames) if params.stable_secs > 0.0 => {
+                tracing::info!("no settled picture; sampling the first after each cooldown");
+                detect(&SlideParams {
+                    stable_secs: 0.0,
+                    ..params
+                })
+            }
+            slides => slides,
+        }?;
         bar.inspect(Bar::finish);
         progress::done(Stage::ScenesExtract);
         Ok::<_, Error>(slides)

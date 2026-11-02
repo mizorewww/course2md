@@ -450,8 +450,13 @@ fn copy_file(
             total,
         });
     }
+    let metadata = std::fs::metadata(source)?;
+    // The copy carries its original's time, so a restart can tell it is still that version.
+    if let Ok(modified) = metadata.modified() {
+        output.as_file().set_modified(modified)?;
+    }
     output.as_file().sync_all()?;
-    std::fs::set_permissions(output.path(), std::fs::metadata(source)?.permissions())?;
+    std::fs::set_permissions(output.path(), metadata.permissions())?;
     output
         .persist(destination)
         .map_err(|error| error.error)
@@ -462,7 +467,7 @@ fn copy_file(
 /// Copies the source tree and switches nothing unless, afterwards, the source is unchanged
 /// and the copy has the same files at the same sizes. The journal only changes with the
 /// phase: a copy that stops is started over, skipping files already finished, which sit at
-/// their final names and are no older than their originals.
+/// their final names with their originals' size and modification time.
 fn copy_library(
     path: PathBuf,
     mut journal: Journal,
@@ -517,7 +522,11 @@ fn copy_library(
             let target = journal.destination.join(&file.path);
             // A previous pass may already have rewritten this binding for the new root.
             let finished = std::fs::metadata(&target).is_ok_and(|copy| {
-                (copy.len() == file.bytes && copy.modified().ok() >= *modified)
+                // Equal, not merely newer: a sync tool or a restore can bring back an
+                // edited file stamped earlier than the copy.
+                (copy.len() == file.bytes
+                    && modified.is_some()
+                    && copy.modified().ok() == *modified)
                     || file
                         .path
                         .file_name()
@@ -938,6 +947,27 @@ mod tests {
             std::fs::read_to_string(original).unwrap(),
             "written after the interruption"
         );
+    }
+
+    /// A sync tool or a restore can bring back a same-size file stamped earlier than the copy.
+    #[test]
+    fn a_restart_recopies_a_same_size_source_stamped_earlier_than_its_copy() {
+        let (_dir, prepared) = fixture();
+        interrupted(&prepared);
+        let original = prepared.journal.source.join("notes/course.md");
+        let copy = prepared.journal.destination.join("notes/course.md");
+        std::fs::write(&original, "user-EDITED notes").unwrap();
+        let earlier = std::fs::metadata(&copy).unwrap().modified().unwrap()
+            - std::time::Duration::from_secs(3600);
+        std::fs::File::options()
+            .write(true)
+            .open(&original)
+            .unwrap()
+            .set_modified(earlier)
+            .unwrap();
+        let resumed = resume_move(&prepared.path, &AtomicBool::new(false), &|_| {}).unwrap();
+        assert_eq!(resumed.journal.phase, Phase::Verified);
+        assert_eq!(std::fs::read_to_string(copy).unwrap(), "user-EDITED notes");
     }
 
     #[test]

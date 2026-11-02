@@ -1161,6 +1161,29 @@ impl Desktop {
                                     )
                                 },
                             )
+                            .when(
+                                self.online()
+                                    && needs_login
+                                    && course2md::auth::is_youtube_url(
+                                        &self.value(Field::Source, cx),
+                                    ),
+                                |row| {
+                                    row.child(
+                                        material_button(
+                                            "source-youtube-repair",
+                                            ButtonVariant::Outlined,
+                                        )
+                                        .tone(ButtonTone::Accent)
+                                        .icon(symbols::smart_display())
+                                        .child(course2md::tr!("连接 YouTube"))
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.open_youtube_dialog(window, cx)
+                                            }),
+                                        ),
+                                    )
+                                },
+                            )
                             .child(details_toggle("source-error-details", open).on_click(
                                 cx.listener(|this, _, _, cx| {
                                     this.import.show_preview_details =

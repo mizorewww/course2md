@@ -151,7 +151,7 @@ impl State {
         let local_model = text_input(EditField::LocalModel, window, cx);
         let search = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder(course2md::tr!("搜索设置"))
+                .placeholder(search_placeholder())
                 .clean_on_escape()
         });
         subscriptions.push(cx.subscribe_in(&search, window, |this, _, event, _, cx| {
@@ -355,11 +355,12 @@ impl Desktop {
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> [AnyElement; 3] {
+    ) -> [AnyElement; 4] {
         [
             self.service_editor_dialog(window, cx),
             self.palette_dialog(window, cx),
             self.account_dialog(window, cx),
+            self.youtube_dialog(window, cx),
         ]
     }
 
@@ -861,10 +862,14 @@ impl Desktop {
     fn services_settings_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let mut view = v_flex().w_full().min_w_0().gap(rem(28.));
         let account = self.account_row(course2md::tr!("Bilibili 账号"), window, cx);
+        let youtube = self.youtube_row(window, cx);
         view = view.child(self.settings_fields(
             "account-settings-heading",
             course2md::tr!("来源账号"),
-            vec![ui::Field::content("bilibili-account-row", account)],
+            vec![
+                ui::Field::content("bilibili-account-row", account),
+                ui::Field::content("youtube-account-row", youtube),
+            ],
         ));
         let latest = self.preferences.latest_versions();
         for (purpose, heading_id, heading, add_label) in [
@@ -1289,6 +1294,17 @@ impl Desktop {
 
     /// Forgets credentials no configuration uses, off the UI thread. A
     /// failure leaves an orphaned entry that no configuration refers to.
+    /// The settings search says what it does in the interface language.
+    pub(crate) fn relocalize_settings_inputs(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_ui.search.update(cx, |input, cx| {
+            input.set_placeholder(search_placeholder(), window, cx)
+        });
+    }
+
     pub(crate) fn forget_credentials(&self, references: Vec<crate::credentials::CredentialRef>) {
         if references.is_empty() {
             return;
@@ -2119,6 +2135,10 @@ fn service_action_menu(
                     });
                 })
         }))
+}
+
+fn search_placeholder() -> &'static str {
+    course2md::tr!("搜索设置")
 }
 
 #[cfg(test)]

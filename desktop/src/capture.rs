@@ -26,7 +26,11 @@
 //! Dialogs open over their page: `service-editor:<ai|speech|dialog|confirm>`
 //! over Settings › 服务与账号, and `dialog:<name>` for `palette`, `rename`,
 //! `delete`, `move`, `confirm` (a `ui::Confirm`) and `image` (the newest note; give it a longer
-//! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage` and `login`. Each
+//! `COURSE2MD_CAPTURE_DELAY_MS`), `folder`, `storage`, `login` and `youtube`.
+//! `dialog:login~<password|sms|phone>[-captcha|-working|-error|-sent]` and
+//! `dialog:login~success` show the Bilibili login's other methods and steps, and
+//! `dialog:youtube~<checking|signedout|failed|connected|empty>` the YouTube
+//! connection's, with fixture text and no request. Each
 //! capture first closes the dialogs an earlier one opened, so one shot shows
 //! one dialog. Nothing a dialog would change is saved unless its action is
 //! taken.
@@ -340,6 +344,18 @@ impl Desktop {
                 self.capture_library_state(category, window, cx);
             }
             "tasks" => self.navigate(Page::Task, cx),
+            // `language:<code>` chooses an interface language the way settings does,
+            // on whatever page is open.
+            "language" => {
+                let language: crate::preferences::InterfaceLanguage =
+                    serde_json::from_value(serde_json::Value::String(category.into()))
+                        .unwrap_or_else(|_| panic!("unknown capture language {category}"));
+                let mut next = self.application_edit_base();
+                next.language = language;
+                if self.commit_application(next, cx) {
+                    self.apply_interface_language(language, window, cx);
+                }
+            }
             "settings" => {
                 self.open_settings(window, cx);
                 let tab = match category {
@@ -423,6 +439,10 @@ impl Desktop {
                 self.select_settings_tab(tab, window, cx);
             }
             "login" => self.navigate(Page::New, cx),
+            "youtube" => {
+                self.open_settings(window, cx);
+                self.select_settings_tab(SettingsTab::Services, window, cx);
+            }
             "image" => {}
             _ => self.navigate(Page::Library, cx),
         }
@@ -440,7 +460,14 @@ impl Desktop {
                 match name.as_str() {
                     "palette" => this.open_palette_picker(false, cx),
                     "storage" => this.capture_storage_operation(&detail, window, cx),
-                    "login" => this.open_account_dialog(window, cx),
+                    "login" => {
+                        this.open_account_dialog(window, cx);
+                        this.capture_login_state(&detail, window, cx);
+                    }
+                    "youtube" => {
+                        this.open_youtube_dialog(window, cx);
+                        this.capture_youtube_state(&detail, cx);
+                    }
                     "image" => {
                         if let Some(course) = newest {
                             this.open_course(course, cx);
