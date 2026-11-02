@@ -74,6 +74,43 @@ directory when the project is accepted.
     the page uses it; it is neither flattened to the kit default nor hand-painted in the page.
     `DESIGN-RESTORE.md` lists what wave 2 lost and how each item is restored.
 
+## Decisions
+
+Taken by reading the code, against decisions 11 and 13. Each states what would reopen it.
+
+- **Library sidebar: the app's `folder_tree.rs`, not the kit's `Tree`.** The kit's `Tree`
+  (`vendor/gpui-base/src/tree.rs`) is an unstyled `uniform_list` of `TreeItem`s whose expansion it owns,
+  and a full click on a folder both selects and toggles it. The sidebar selects a place on click and
+  toggles only by its arrow, mixes rows of different heights (all notes, a library heading, a section
+  title, folders), and draws everything itself: the drag source and drop outline, the right-click menu,
+  the tooltip for a cut name, the indent per level and the note counts. All of that would stay in the
+  app's render callback; `Tree` would remove only the dozen lines that skip a closed folder's children,
+  while adding a mirror of `organize::Library` into `TreeItem`s and changing what a click does. Reopen if
+  the kit gains a Material tree with a separate disclosure target.
+- **Catalog test: keep the hand scanner, no `syn`.** `crates/course2md/tests/i18n_catalog.rs` is test
+  code, outside the primary metric. `syn` (or `proc-macro2`'s tokenizer) would replace the literal scanner
+  (about 130 lines), but the test still needs its own code for what it checks beyond literals: joining a
+  multi-line `///` help text into the one key clap looks up, and the `about`/`help` attributes. Reopen if
+  the scanner misreads a literal.
+- **Credentials: Keychain through `security-framework` on macOS, `keyring` elsewhere.** Consolidating on
+  `keyring` 4 would save about 70 lines in `desktop/core/src/credentials.rs`, but the Keychain status code
+  that every error message shows would have to be dug out of `keyring`'s platform error, and it must read items that 2.0.1's signed app wrote (the audit's
+  caveat), which cannot be tested here without that signed build. Reopen when a signed build can test it.
+- **No `toml_edit`.** `c2m-config` rewrites `config.toml` from its struct and keeps the previous file as
+  `config.toml.bak`; the CLI's own template is written whole. `toml_edit` would keep a person's comments
+  across `llm setup` and `--login ollama`, which no feature asks for, and adds code rather than removing it.
+- **No `apple-asr-sys`.** The sherpa-onnx spike rejected one engine (`REDUCTION.md` § Decisions applied),
+  so the Swift module stays. As a published crate it would only move `apple.rs` (614 lines, tied to
+  `c2m-protocol`'s progress events and `tr!`), the Swift build in `c2m-asr/build.rs` and
+  `native/apple-asr` to another repository: relocation, counted by the secondary metric, with no deletion.
+  It is already isolated as part of `c2m-asr`.
+- **Lever 10, desktop half: not done.** Its two items stay in this repository. The screenshot cache and
+  viewer (`desktop/src/reader_images.rs`, 472 lines) is written against `Desktop` and GPUI's `RenderImage`;
+  the form primitives became `desktop-ui` (`desktop/ui/src/ui.rs`), a workspace crate, after the looks
+  they lacked went to the kit (PRs #8 to #14). Publishing either would be relocation. Open question for the
+  owner: whether a sized, budgeted image cache belongs in `gpui-kit-material`; recommended no, until a
+  second app needs it.
+
 ## Locations
 
 | What | Where | Branch |
@@ -100,7 +137,7 @@ Working names; check availability before creating a repository.
 | `subtitle-parse` | Parser half of `subtitle.rs` | Local `Cue` type |
 | `slide-detect` | `scene.rs` | `SlideParams`, local event type, progress callback, injected ffmpeg |
 | `model-fetch` | `download.rs`, `hub.rs` | `Cancel`/`Progress` traits, no `tr!`, injected tool locator, opt-in IP lookup |
-| `apple-asr-sys` (conditional) | `native/apple-asr`, `build.rs`, `apple.rs` | Decided by the sherpa-onnx spike |
+| ~~`apple-asr-sys`~~ | `native/apple-asr`, `build.rs`, `apple.rs` | Not created; see § Decisions |
 
 Rule: published libraries return typed errors and events; only the app translates.
 No `tr!` in them. Check name availability before creating a repository.

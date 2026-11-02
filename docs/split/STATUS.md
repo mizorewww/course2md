@@ -54,6 +54,8 @@ waits on #19 and #22 to #27. Then decide P1 and P2 with the owner (re-estimate t
   in the app needs frames while occluded (`on_next_frame` is only used for focus and scroll
   restoration, which can wait), and the fallback would draw synchronously on the main thread, against
   the kit's rule. Port it only if a frozen window is ever observed.
+- The decisions on `Tree`, `syn`, `keyring`, `toml_edit`, `apple-asr-sys` and lever 10's desktop half are in
+  `PLAN.md` § Decisions.
 
 ## Debts for the Material work
 
