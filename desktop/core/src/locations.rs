@@ -290,7 +290,7 @@ pub fn relocate_preview(preview: &mut crate::notes::Preview, old: &Path, new: &P
 #[cfg(test)]
 mod tests {
     use super::{LocationChecks, inspect_location, relocate_preview, scan_locations};
-    use crate::{conversion::ConversionOptions, source, storage, workspace};
+    use crate::{conversion::ConversionOptions, storage, workspace};
     use std::{path::PathBuf, sync::atomic::AtomicBool};
 
     fn inspect_relocation(
@@ -375,7 +375,7 @@ mod tests {
         )
         .unwrap();
         let id = workspace.state.default_library.clone();
-        let source = source::Source {
+        let source = workspace::Source {
             input: old.join("video.mp4").display().to_string(),
             identity: "local:original-video".into(),
             title: "Original title".into(),
@@ -758,7 +758,7 @@ mod tests {
         )
         .unwrap();
         let library_id = workspace.state.default_library.clone();
-        let mut source = source::Source {
+        let mut source = workspace::Source {
             input: old.join("media/video.mp4").display().to_string(),
             title: "My confirmed title".into(),
             identity: "local:content-stays-the-same".into(),

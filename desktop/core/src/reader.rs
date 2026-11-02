@@ -731,7 +731,7 @@ pub fn note_read_failure(error: &anyhow::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{notes::Course, source};
+    use crate::notes::Course;
 
     #[test]
     fn returning_from_a_note_goes_where_the_person_came_from() {
@@ -773,7 +773,7 @@ mod tests {
             id: manifest.task_id.clone(),
             plan: workspace::TaskPlan {
                 operation: Default::default(),
-                source: source::Source {
+                source: crate::workspace::Source {
                     input: "https://www.bilibili.com/video/BVfixture?p=2".into(),
                     identity: manifest.source_id.clone(),
                     online: true,

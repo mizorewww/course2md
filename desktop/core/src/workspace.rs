@@ -33,6 +33,31 @@ pub fn course_dir_name(source_id: &str) -> String {
     )
 }
 
+/// Where a draft or task's video comes from, as the import preview found it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Source {
+    pub input: String,
+    pub title: String,
+    pub author: String,
+    pub duration: f64,
+    pub cover: Option<PathBuf>,
+    pub cover_error: Option<String>,
+    /// Stable extractor identity (including a part ID), or verified local content identity.
+    #[serde(default)]
+    pub identity: String,
+    #[serde(default)]
+    pub online: bool,
+    #[serde(default)]
+    pub subtitles: course2md::subtitle::SubtitleEvidence,
+    #[serde(default)]
+    pub selected_subtitle: Option<course2md::subtitle::CachedSubtitle>,
+    #[serde(default)]
+    pub original_language: Option<String>,
+    #[serde(default)]
+    pub subtitle_request: Option<course2md::subtitle::SubtitleTrack>,
+    #[serde(default)]
+    pub subtitle_read_error: Option<course2md::subtitle::SubtitleReadError>,
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LibraryLocation {
     pub id: String,
@@ -65,7 +90,7 @@ pub struct Draft {
     pub input: String,
     /// Subtitle events live in a separate file beside the workspace record.
     #[serde(default, serialize_with = "serialize_draft_source")]
-    pub source: Option<crate::source::Source>,
+    pub source: Option<Source>,
     pub title: String,
     pub custom_title: bool,
     pub library_id: String,
@@ -204,7 +229,7 @@ impl Draft {
     }
 }
 
-impl crate::source::Source {
+impl Source {
     fn relocate(&mut self, old: &Path, new: &Path) {
         if !self.online {
             let mut path = PathBuf::from(&self.input);
@@ -257,7 +282,7 @@ fn serialize_public_config<S: serde::Serializer>(
     public_config(config).serialize(serializer)
 }
 fn serialize_draft_source<S: serde::Serializer>(
-    source: &Option<crate::source::Source>,
+    source: &Option<Source>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     match source {
@@ -294,7 +319,7 @@ pub fn public_config(config: &ConfigFile) -> ConfigFile {
 pub struct TaskPlan {
     #[serde(default)]
     pub operation: course2md::execution::Operation,
-    pub source: crate::source::Source,
+    pub source: Source,
     pub source_id: String,
     pub title: String,
     pub library_id: String,
@@ -2618,7 +2643,7 @@ impl Workspace {
 
 /// Apply a preview result the way the import page does, for tests.
 #[cfg(any(test, feature = "test-support"))]
-pub fn accept_source(draft: &mut Draft, revision: u64, source: crate::source::Source) -> bool {
+pub fn accept_source(draft: &mut Draft, revision: u64, source: Source) -> bool {
     if draft.revision != revision {
         return false;
     }
@@ -2635,7 +2660,7 @@ mod tests {
     use super::*;
     use course2md::execution::Component;
     use course2md::progress::Stage;
-    fn source(input: &str, title: &str) -> crate::source::Source {
+    fn source(input: &str, title: &str) -> Source {
         serde_json::from_value(serde_json::json!({"input":input,"title":title,"author":"","duration":60.0,"cover":null,"cover_error":null})).unwrap()
     }
     fn plan(library: &str) -> TaskPlan {

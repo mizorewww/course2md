@@ -16,30 +16,7 @@ const PREVIEW_TIMEOUT: Duration = Duration::from_secs(45);
 /// Cached covers and subtitles unused for this long are removed.
 const CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct Source {
-    pub input: String,
-    pub title: String,
-    pub author: String,
-    pub duration: f64,
-    pub cover: Option<PathBuf>,
-    pub cover_error: Option<String>,
-    /// Stable extractor identity (including a part ID), or verified local content identity.
-    #[serde(default)]
-    pub identity: String,
-    #[serde(default)]
-    pub online: bool,
-    #[serde(default)]
-    pub subtitles: course2md::subtitle::SubtitleEvidence,
-    #[serde(default)]
-    pub selected_subtitle: Option<course2md::subtitle::CachedSubtitle>,
-    #[serde(default)]
-    pub original_language: Option<String>,
-    #[serde(default)]
-    pub subtitle_request: Option<course2md::subtitle::SubtitleTrack>,
-    #[serde(default)]
-    pub subtitle_read_error: Option<course2md::subtitle::SubtitleReadError>,
-}
+pub use crate::workspace::Source;
 pub use course2md::fetch::SourceCandidate;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
