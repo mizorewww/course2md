@@ -4091,7 +4091,7 @@ impl Desktop {
         let Some(viewer) = &self.reader_ui.viewer else {
             return div().into_any_element();
         };
-        div()
+        let viewport = div()
             .on_children_prepainted(move |_, window, cx| {
                 let size = viewport_scroll.bounds().size;
                 let owner = owner.clone();
@@ -4108,12 +4108,7 @@ impl Desktop {
             })
             .id("image-viewport")
             .bg(color(INSET))
-            .border_1()
-            .border_color(color(OUTLINE_VARIANT))
-            .rounded(RADIUS_LARGE)
-            .flex_1()
-            .min_h(rem(112.))
-            .w_full()
+            .size_full()
             .overflow_x_scroll()
             .overflow_y_scroll()
             .track_scroll(&viewer.viewport_scroll)
@@ -4191,7 +4186,15 @@ impl Desktop {
                             .aria_label(label)
                             .child(picture),
                     ),
-            )
+            );
+        // The kit's outlined card surface frames the image: its outline and corners.
+        CardSurface::new(CardVariant::Outlined)
+            .rounded(RADIUS_LARGE)
+            .flex_1()
+            .min_h(rem(112.))
+            .w_full()
+            .overflow_hidden()
+            .child(viewport)
             .into_any_element()
     }
 
