@@ -108,7 +108,13 @@ fn nav_destination(
                 ButtonVariant::Text
             },
         )
-        .tone(ButtonTone::Neutral)
+        // Neutral at rest, so the current destination's secondary container is the one
+        // tint in the bar.
+        .tone(if selected {
+            ButtonTone::Standard
+        } else {
+            ButtonTone::Neutral
+        })
         .button_size(ButtonSize::Small)
         .icon(icon)
         .accessibility_label(label.clone())

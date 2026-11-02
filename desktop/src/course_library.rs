@@ -1394,7 +1394,13 @@ impl Desktop {
                                 ButtonVariant::Outlined
                             },
                         )
-                        .tone(ButtonTone::Neutral)
+                        // On, it is tonal in the secondary container; off, an outlined
+                        // action with a primary label (L6).
+                        .tone(if group_on && can_group {
+                            ButtonTone::Standard
+                        } else {
+                            ButtonTone::Accent
+                        })
                         .icon(if group_on && can_group {
                             symbols::check()
                         } else {
