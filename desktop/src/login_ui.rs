@@ -118,26 +118,47 @@ impl Desktop {
         done: impl FnOnce(&mut Self, anyhow::Result<R>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let generation = self.account.generation;
         let cancel = self.account.form.watch();
-        self.account.form.step = FormStep::Captcha { url: None };
-        self.account.form.error = None;
-        let passport = self.account.passport.take();
         let (url_tx, url_rx) = smol::channel::bounded::<String>(1);
-        let task = crate::spawn_blocking_io(move || {
-            let mut passport = passport.unwrap_or_else(Passport::new);
-            let result = (|| {
-                let captcha = captcha(&mut passport)?;
+        self.run_with_passport(
+            FormStep::Captcha { url: None },
+            Some(url_rx),
+            move |passport| {
+                let captcha = captcha(passport)?;
                 let page = CaptchaPage::start(&captcha)?;
                 let _ = url_tx.send_blocking(page.url());
                 let solution = page.wait(&cancel, CAPTCHA_TIMEOUT)?;
                 drop(page);
-                step(&mut passport, &captcha, &solution)
-            })();
+                step(passport, &captcha, &solution)
+            },
+            done,
+            cx,
+        );
+    }
+
+    /// Runs `work` with the attempt's connection off the UI thread, showing `step`
+    /// meanwhile; a human check's page opens when its address arrives on `check_url`.
+    fn run_with_passport<R: Send + 'static>(
+        &mut self,
+        step: FormStep,
+        check_url: Option<smol::channel::Receiver<String>>,
+        work: impl FnOnce(&mut Passport) -> anyhow::Result<R> + Send + 'static,
+        done: impl FnOnce(&mut Self, anyhow::Result<R>, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let generation = self.account.generation;
+        self.account.form.step = step;
+        self.account.form.error = None;
+        let passport = self.account.passport.take();
+        let task = crate::spawn_blocking_io(move || {
+            let mut passport = passport.unwrap_or_else(Passport::new);
+            let result = work(&mut passport);
             (passport, result)
         });
         cx.spawn(async move |this, cx| {
-            if let Ok(url) = url_rx.recv().await {
+            if let Some(check_url) = check_url
+                && let Ok(url) = check_url.recv().await
+            {
                 let _ = this.update(cx, |this, cx| {
                     if this.account.current(generation) && this.account.form.busy() {
                         cx.open_url(&url);
@@ -146,44 +167,6 @@ impl Desktop {
                     }
                 });
             }
-            let received = task.recv().await;
-            let _ = this.update(cx, |this, cx| {
-                if !this.account.current(generation) {
-                    return;
-                }
-                let result = match received {
-                    Ok((passport, result)) => {
-                        this.account.passport = Some(passport);
-                        result
-                    }
-                    Err(_) => Err(anyhow::anyhow!(crate::interrupted())),
-                };
-                this.account.form.step = FormStep::Entry;
-                done(this, result, cx);
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    /// Runs one request with the attempt's connection, off the UI thread.
-    fn with_passport<R: Send + 'static>(
-        &mut self,
-        step: impl FnOnce(&mut Passport) -> anyhow::Result<R> + Send + 'static,
-        done: impl FnOnce(&mut Self, anyhow::Result<R>, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) {
-        let generation = self.account.generation;
-        self.account.form.step = FormStep::Working;
-        self.account.form.error = None;
-        let passport = self.account.passport.take();
-        let task = crate::spawn_blocking_io(move || {
-            let mut passport = passport.unwrap_or_else(Passport::new);
-            let result = step(&mut passport);
-            (passport, result)
-        });
-        cx.spawn(async move |this, cx| {
             let received = task.recv().await;
             let _ = this.update(cx, |this, cx| {
                 if !this.account.current(generation) {
@@ -342,7 +325,9 @@ impl Desktop {
         }
         self.clear_login_field(|inputs| &inputs.code, window, cx);
         if let Some(check) = self.account.risk.clone() {
-            self.with_passport(
+            self.run_with_passport(
+                FormStep::Working,
+                None,
                 move |passport| passport.risk_verify(&check, &code),
                 |this, result, cx| match result {
                     Ok(login) => this.login_reply(Ok(LoginOutcome::Authenticated(login)), cx),
@@ -357,7 +342,9 @@ impl Desktop {
             cx.notify();
             return;
         };
-        self.with_passport(
+        self.run_with_passport(
+            FormStep::Working,
+            None,
             move |passport| {
                 let mut outcome = passport.login_sms(&ticket, &code)?;
                 if let LoginOutcome::VerifyPhone(check) = &mut outcome {
