@@ -1523,9 +1523,9 @@ impl Desktop {
                 .w_full()
                 .min_w_0()
                 .gap(rem(12.))
-                .pt(rem(12.))
-                .border_t_1()
-                .border_color(color(ColorRole::OUTLINE_VARIANT))
+                .child(MaterialDivider::new(SharedString::from(format!(
+                    "task-detail-divider-{id}"
+                ))))
                 .children(self.task_plan_rows(task, false))
                 .children(
                     self.task_stage_rows(task)

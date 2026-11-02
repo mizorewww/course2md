@@ -826,11 +826,11 @@ impl Desktop {
                     )
                     .child(Scrollbar::vertical(&self.onboarding.scroll)),
             )
-            .child(footer.pt(rem(16.)).pb(rem(20.)).when(scrollable, |footer| {
-                footer
-                    .border_t_1()
-                    .border_color(color(ColorRole::OUTLINE_VARIANT))
-            }));
+            // A hairline parts the actions from a step that scrolls under them.
+            .when(scrollable, |column| {
+                column.child(MaterialDivider::new("setup-footer-divider"))
+            })
+            .child(footer.pt(rem(16.)).pb(rem(20.)));
         v_flex()
             .flex_1()
             .w_full()
