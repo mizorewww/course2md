@@ -1166,14 +1166,15 @@ impl Desktop {
             .flex_wrap()
             .gap(rem(16.))
             .map(|head| {
-                // A task that needs the person leads with that, not its video.
+                // A task that needs the person leads with that, not its video. Only a
+                // failure is red: a paused, partial or uncertain task is a warning.
                 if !home && needs_person(task) {
                     head.child(tinted_icon(
                         symbols::warning(),
-                        if task.state == TaskState::Paused {
-                            Tint::Amber
-                        } else {
+                        if task.state == TaskState::NeedsAttention {
                             Tint::Danger
+                        } else {
+                            Tint::Amber
                         },
                         ui::RESOURCE_ICON,
                     ))
@@ -1196,10 +1197,15 @@ impl Desktop {
                             .map(|row| {
                                 if !home && needs_person(task) {
                                     row.child(
+                                        // It shrinks before the menu beside it, and a long
+                                        // title ends in an ellipsis on its second line.
                                         TileScale::Regular
                                             .label(format!("task-title-{id}"), title.clone())
                                             .flex_1()
-                                            .whitespace_normal(),
+                                            .min_w_0()
+                                            .whitespace_normal()
+                                            .text_ellipsis()
+                                            .line_clamp(2),
                                     )
                                 } else {
                                     row.child(
