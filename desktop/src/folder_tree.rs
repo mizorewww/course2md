@@ -555,7 +555,8 @@ impl Desktop {
             .density(ListDensity::Minus3)
             .leading(ListLeading::Icon(icon.into()))
             .container(ground)
-            .segment([true; 4])
+            // A sidebar destination's selection is a pill (L1).
+            .pill(true)
             .selected(self.selected_target() == target)
             .when_some(count, |item, count| item.trailing_text(count.to_string()))
             .on_click(cx.listener({
