@@ -129,7 +129,8 @@ fn resolve_asr_api(opts: &RunOpts, file: &settings::ConfigFile) -> crate::settin
     a
 }
 
-#[derive(Args, Clone, Debug, Default)]
+// No Debug: the options carry API keys (E11).
+#[derive(Args, Clone, Default)]
 pub struct RunOpts {
     /// 输出根目录（按平台/标题/ID 建目录）/ Output root (platform/title/ID)
     #[arg(short, long)]
