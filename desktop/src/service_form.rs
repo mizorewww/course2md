@@ -2,8 +2,9 @@
 //! draft, inputs, field errors, model discovery and key visibility. Each surface
 //! lays the controls out in its own form; behavior and choices live here once.
 use super::*;
+use crate::credentials::CredentialRef;
 use crate::model_discovery;
-use crate::preferences::FieldError;
+use crate::preferences::{BindingScope, FieldError, ServiceTestEvidence};
 use desktop_accounts::codex::CodexSurface;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -62,6 +63,8 @@ pub(crate) struct ServiceForm {
     pub(crate) errors: Vec<FieldError>,
     pub(crate) models: model_discovery::State,
     pub(crate) show_key: bool,
+    /// A key is being stored in, or checked against, the system vault.
+    pub(crate) vault_busy: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -97,6 +100,7 @@ impl ServiceForm {
             errors: Vec::new(),
             models: Default::default(),
             show_key: false,
+            vault_busy: false,
             _subscriptions: subscriptions,
         };
         form.load(draft, window, cx);
@@ -129,6 +133,15 @@ impl ServiceForm {
         draft
     }
 
+    /// The result was for what the form shows now, with no new key typed.
+    pub(crate) fn fits(&self, evidence: &ServiceTestEvidence, cx: &App) -> bool {
+        self.typed_key(cx).is_empty()
+            && self
+                .current_draft(cx)
+                .configuration()
+                .is_ok_and(|config| config.fingerprint(&evidence.contract) == evidence.fingerprint)
+    }
+
     /// A service is called with a key exactly when it has one: a saved key or
     /// one typed now. Keyless types never send one.
     fn authentication(&self, cx: &App) -> Authentication {
@@ -158,6 +171,7 @@ impl ServiceForm {
         self.errors.clear();
         self.models.invalidate();
         self.show_key = false;
+        self.vault_busy = false;
     }
     pub(crate) fn clear_key(&self, window: &mut Window, cx: &mut App) {
         self.inputs[&FormField::Key].update(cx, |input, cx| input.set_value("", window, cx));
@@ -282,6 +296,83 @@ impl Desktop {
         }
     }
 
+    fn form_of_draft(&mut self, owner: FormOwner, id: &str) -> Option<&mut ServiceForm> {
+        self.service_form_mut(owner)
+            .filter(|form| form.draft.id == id)
+    }
+
+    /// Stores a secret in the vault off the UI thread and commits `draft` with it. If the
+    /// form moved to another draft or closed meanwhile, or the commit fails, nothing
+    /// refers to the stored key.
+    pub(crate) fn store_form_secret(
+        &mut self,
+        owner: FormOwner,
+        draft: ServiceDraft,
+        secret: Secret,
+        commit: impl FnOnce(&mut Self, ServiceDraft, CredentialRef) -> Result<ServiceDraft> + 'static,
+        then: impl FnOnce(&mut Self, Result<ServiceDraft>, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let id = draft.id.clone();
+        if let Some(form) = self.service_form_mut(owner) {
+            form.vault_busy = true;
+        }
+        self.run_vault_step(
+            cx,
+            move |vault| vault.insert(secret),
+            move |this, stored, window, cx| {
+                let Some(form) = this.form_of_draft(owner, &id) else {
+                    if let Ok(reference) = stored {
+                        this.forget_credentials(vec![reference]);
+                    }
+                    return;
+                };
+                form.vault_busy = false;
+                let committed = stored.and_then(|reference| {
+                    commit(this, draft, reference.clone())
+                        .inspect_err(|_| this.forget_credentials(vec![reference]))
+                });
+                then(this, committed, window, cx);
+            },
+        );
+    }
+
+    /// Publishes the form's committed draft. Publication first confirms the draft's
+    /// credential is in the vault, which can block; only that check leaves the UI thread.
+    pub(crate) fn publish_form_draft(
+        &mut self,
+        owner: FormOwner,
+        scope: BindingScope,
+        then: impl FnOnce(&mut Self, Result<ServiceVersion>, &mut Window, &mut Context<Self>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(id) = self.service_form(owner).map(|form| form.draft.id.clone()) else {
+            return;
+        };
+        let reference = match self.preferences.publication_credential(&id) {
+            Ok(reference) => reference,
+            Err(error) => return then(self, Err(error), window, cx),
+        };
+        if let Some(form) = self.service_form_mut(owner) {
+            form.vault_busy = true;
+        }
+        self.run_vault_step(
+            cx,
+            move |vault| preferences::Store::verify_credential(vault, reference),
+            move |this, verified, window, cx| {
+                let Some(form) = this.form_of_draft(owner, &id) else {
+                    return;
+                };
+                form.vault_busy = false;
+                let published = verified
+                    .and_then(|verified| this.preferences.commit_publication(&id, scope, verified));
+                then(this, published, window, cx);
+            },
+        );
+        cx.notify();
+    }
+
     /// An edit invalidates what the surface derived from the old values.
     /// A name change does not affect test results.
     fn service_form_edited(&mut self, owner: FormOwner, affects_tests: bool) {
@@ -378,14 +469,15 @@ impl Desktop {
     }
 
     /// A text input of a service form: labelled, with its error or `hint` below.
-    /// While `read_only` the value can be selected but not changed.
+    /// While `locked` the editor's value can be selected but not changed, and
+    /// setup's is disabled; setup's inputs show no placeholder.
     pub(crate) fn service_text_field(
         &self,
         owner: FormOwner,
         field: FormField,
         label: &'static str,
         hint: Option<String>,
-        read_only: bool,
+        locked: bool,
         cx: &mut Context<Self>,
     ) -> Option<TextField> {
         let form = self.service_form(owner)?;
@@ -411,8 +503,10 @@ impl Desktop {
                 .w_full()
                 .label(label)
                 .float_label(true)
-                .placeholder(placeholder)
-                .read_only(read_only)
+                .map(|field| match owner {
+                    FormOwner::Editor => field.placeholder(placeholder).read_only(locked),
+                    FormOwner::Setup(_) => field.disabled(locked),
+                })
                 .error(error.is_some())
                 .when_some(support, |field, support| field.supporting_text(support))
                 .when_some(trailing, |field, trailing| field.trailing_icon(trailing)),
@@ -458,7 +552,8 @@ impl Desktop {
             .into_any_element()
     }
 
-    /// The model input with its discovery and field error.
+    /// The model input with its discovery and field error. The input remains editable
+    /// in every discovery state; candidates list below it, however many a service returns.
     pub(crate) fn service_model_field(
         &self,
         owner: FormOwner,
@@ -466,42 +561,146 @@ impl Desktop {
         disabled: bool,
         cx: &mut Context<Self>,
     ) -> Div {
+        use model_discovery::ModelFieldEvent::{self, *};
         let Some(form) = self.service_form(owner) else {
             return div();
         };
-        model_field(
-            id,
-            form.input(FormField::Model),
+        let (state, input, error) = (
             &form.models,
-            disabled,
+            form.input(FormField::Model),
             form.error(FormField::Model),
-            cx.listener(
-                move |this, event: &model_discovery::ModelFieldEvent, window, cx| {
-                    use model_discovery::ModelFieldEvent::*;
-                    match event {
-                        Fetch => this.fetch_service_models(owner, cx),
-                        ToggleChoices => {
-                            if let Some(form) = this.service_form_mut(owner) {
-                                form.models.choices_open = !form.models.choices_open;
-                            }
-                        }
-                        // A value set from here emits no change event, so this is the edit.
-                        Choose(model) => {
-                            if let Some(form) = this.service_form_mut(owner) {
-                                form.models.choices_open = false;
-                                form.errors.clear();
-                                form.input(FormField::Model).update(cx, |input, cx| {
-                                    input.set_value(model.clone(), window, cx)
+        );
+        let child = |name: &str| SharedString::from(format!("{id}-{name}"));
+        let this = cx.weak_entity();
+        let send = |event: ModelFieldEvent| {
+            let this = this.clone();
+            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                let _ = this.update(cx, |this, cx| {
+                    this.service_model_event(owner, event.clone(), window, cx)
+                });
+            }
+        };
+        let fetch_label = if matches!(state.status(), model_discovery::Status::Ready(_)) {
+            course2md::tr!("刷新模型列表")
+        } else {
+            course2md::tr!("获取模型列表")
+        };
+        let trailing = if state.loading() {
+            icon_spinner(child("fetching"), fetch_label, rem(20.), cx)
+        } else {
+            MaterialTooltip::plain(child("fetch-tip"), fetch_label)
+                .trigger(
+                    IconButton::new(child("fetch"), symbols::refresh(), fetch_label)
+                        .button_size(ButtonSize::Small)
+                        .disabled(disabled)
+                        .on_click(send(Fetch)),
+                )
+                .into_any_element()
+        };
+        let field = TextField::new(child("input"), input)
+            .outlined()
+            .shape(TextFieldShape::Rounded)
+            .w_full()
+            .label(course2md::tr!("模型"))
+            .float_label(true)
+            .placeholder(course2md::tr!("模型 ID，或从服务获取列表"))
+            .disabled(disabled)
+            .trailing_icon(trailing)
+            .error(error.is_some())
+            .when_some(error, |field, error| {
+                field.supporting_text(error.to_owned())
+            });
+        let status = match state.status() {
+            // Idle needs no words: the field and its button say what can be done.
+            model_discovery::Status::Idle => ui::AsyncStatus::Idle,
+            model_discovery::Status::Loading => {
+                ui::AsyncStatus::Busy(course2md::tr!("正在获取模型列表…").into())
+            }
+            model_discovery::Status::Ready(models) if models.is_empty() => {
+                ui::AsyncStatus::Warning(course2md::tr!("服务未返回模型").into())
+            }
+            model_discovery::Status::Ready(models) => {
+                ui::AsyncStatus::Success(course2md::tr!("找到 {} 个模型", models.len()).into())
+            }
+            model_discovery::Status::Failed(error) => {
+                ui::AsyncStatus::Failed(error.message().into())
+            }
+        };
+        let toggle = (!state.models().is_empty()).then(|| {
+            material_button(child("choose"), ButtonVariant::Text)
+                .child(if state.choices_open {
+                    course2md::tr!("收起模型列表")
+                } else {
+                    course2md::tr!("选择模型")
+                })
+                .disabled(disabled)
+                .on_click(send(ToggleChoices))
+                .into_any_element()
+        });
+        let choices = (state.choices_open && !disabled && !state.models().is_empty()).then(|| {
+            let models = state.models().to_vec();
+            let count = models.len();
+            let selected = input.read(cx).value().to_string();
+            let this = this.clone();
+            uniform_list(child("choices"), count, move |range, _, _| {
+                range
+                    .map(|index| {
+                        let (model, this) = (models[index].clone(), this.clone());
+                        ListItem::new(("model-choice", index), model.clone())
+                            .density(ListDensity::Compact)
+                            .selected(model == selected)
+                            .on_click(move |_, window, cx| {
+                                let _ = this.update(cx, |this, cx| {
+                                    this.service_model_event(
+                                        owner,
+                                        Choose(model.clone()),
+                                        window,
+                                        cx,
+                                    )
                                 });
-                            }
-                            this.service_form_edited(owner, true);
-                        }
-                    }
-                    cx.notify();
-                },
-            ),
-            cx,
-        )
+                            })
+                    })
+                    .collect()
+            })
+            .h(rem(200.))
+            .w_full()
+        });
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(8.))
+            .child(field)
+            .children(ui::async_status(child("status"), &status, toggle, cx))
+            .children(choices)
+    }
+
+    fn service_model_event(
+        &mut self,
+        owner: FormOwner,
+        event: model_discovery::ModelFieldEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use model_discovery::ModelFieldEvent::*;
+        match event {
+            Fetch => self.fetch_service_models(owner, cx),
+            ToggleChoices => {
+                if let Some(form) = self.service_form_mut(owner) {
+                    form.models.choices_open = !form.models.choices_open;
+                }
+            }
+            // A value set from here emits no change event, so this is the edit.
+            Choose(model) => {
+                if let Some(form) = self.service_form_mut(owner) {
+                    form.models.choices_open = false;
+                    form.errors.clear();
+                    form.input(FormField::Model)
+                        .update(cx, |input, cx| input.set_value(model, window, cx));
+                }
+                self.service_form_edited(owner, true);
+            }
+        }
+        cx.notify();
     }
 
     fn fetch_service_models(&mut self, owner: FormOwner, cx: &mut Context<Self>) {
@@ -554,7 +753,7 @@ impl Desktop {
     }
 
     /// The form a Codex result belongs to, while it still edits a Codex service.
-    fn codex_form(&mut self, surface: CodexSurface) -> Option<&mut ServiceForm> {
+    pub(crate) fn codex_form(&mut self, surface: CodexSurface) -> Option<&mut ServiceForm> {
         let owner = match surface {
             CodexSurface::Editor => FormOwner::Editor,
             CodexSurface::Onboarding => FormOwner::Setup(ServicePurpose::Ai),
@@ -562,154 +761,9 @@ impl Desktop {
         };
         self.service_form_mut(owner).filter(|form| form.is_codex())
     }
-    pub(crate) fn codex_form_needs_catalog(&mut self, surface: CodexSurface) -> bool {
-        self.codex_form(surface)
-            .is_some_and(|form| form.models.models().is_empty() && !form.models.loading())
-    }
-    pub(crate) fn codex_form_models_loading(&mut self, surface: CodexSurface) -> bool {
-        self.codex_form(surface)
-            .map(|form| form.models.begin_external())
-            .is_some()
-    }
     pub(crate) fn codex_form_models_failed(&mut self, surface: CodexSurface, message: String) {
         if let Some(form) = self.codex_form(surface) {
             form.models.reject(model_discovery::Error::Custom(message));
         }
     }
-    /// Candidates only: a suggestion fills an empty model input and changes nothing saved.
-    pub(crate) fn codex_form_catalog(
-        &mut self,
-        surface: CodexSurface,
-        models: Vec<String>,
-        suggested: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        let window = self.window;
-        if let Some(form) = self.codex_form(surface) {
-            form.models.prime(models);
-            let input = form.input(FormField::Model).clone();
-            crate::codex_ui::autofill_input(window, input, suggested, cx);
-        }
-    }
-    pub(crate) fn codex_forms_logged_out(&mut self) {
-        for surface in [CodexSurface::Editor, CodexSurface::Onboarding] {
-            if let Some(form) = self.codex_form(surface) {
-                form.models.invalidate();
-            }
-        }
-    }
-}
-
-/// Shared settings/setup model control. The input remains editable in every discovery
-/// state. Candidates list below the field, however many a service returns.
-pub fn model_field(
-    id: &'static str,
-    input: &gpui::Entity<gpui_kit::component::input::InputState>,
-    state: &model_discovery::State,
-    disabled: bool,
-    error: Option<&str>,
-    on_event: impl Fn(&model_discovery::ModelFieldEvent, &mut gpui::Window, &mut gpui::App) + 'static,
-    cx: &mut gpui::App,
-) -> gpui::Div {
-    use crate::{symbols, ui};
-    use gpui::{SharedString, prelude::*};
-    use gpui_base::v_flex;
-    use gpui_kit_material::prelude::*;
-
-    let child = |name: &str| SharedString::from(format!("{id}-{name}"));
-    let on_event = std::rc::Rc::new(on_event);
-    let send = |event: fn() -> model_discovery::ModelFieldEvent| {
-        let on_event = on_event.clone();
-        move |_: &gpui::ClickEvent, window: &mut gpui::Window, cx: &mut gpui::App| {
-            on_event(&event(), window, cx)
-        }
-    };
-    let fetch_label = if matches!(state.status(), model_discovery::Status::Ready(_)) {
-        course2md::tr!("刷新模型列表")
-    } else {
-        course2md::tr!("获取模型列表")
-    };
-    let trailing = if state.loading() {
-        icon_spinner(child("fetching"), fetch_label, rem(20.), cx)
-    } else {
-        MaterialTooltip::plain(child("fetch-tip"), fetch_label)
-            .trigger(
-                IconButton::new(child("fetch"), symbols::refresh(), fetch_label)
-                    .button_size(ButtonSize::Small)
-                    .disabled(disabled)
-                    .on_click(send(|| model_discovery::ModelFieldEvent::Fetch)),
-            )
-            .into_any_element()
-    };
-    let field = TextField::new(child("input"), input)
-        .outlined()
-        .shape(TextFieldShape::Rounded)
-        .w_full()
-        .label(course2md::tr!("模型"))
-        .float_label(true)
-        .placeholder(course2md::tr!("模型 ID，或从服务获取列表"))
-        .disabled(disabled)
-        .trailing_icon(trailing)
-        .error(error.is_some())
-        .when_some(error, |field, error| {
-            field.supporting_text(error.to_owned())
-        });
-    let status = match state.status() {
-        // Idle needs no words: the field and its button say what can be done.
-        model_discovery::Status::Idle => ui::AsyncStatus::Idle,
-        model_discovery::Status::Loading => {
-            ui::AsyncStatus::Busy(course2md::tr!("正在获取模型列表…").into())
-        }
-        model_discovery::Status::Ready(models) if models.is_empty() => {
-            ui::AsyncStatus::Warning(course2md::tr!("服务未返回模型").into())
-        }
-        model_discovery::Status::Ready(models) => {
-            ui::AsyncStatus::Success(course2md::tr!("找到 {} 个模型", models.len()).into())
-        }
-        model_discovery::Status::Failed(error) => ui::AsyncStatus::Failed(error.message().into()),
-    };
-    let toggle = (!state.models().is_empty()).then(|| {
-        material_button(child("choose"), ButtonVariant::Text)
-            .child(if state.choices_open {
-                course2md::tr!("收起模型列表")
-            } else {
-                course2md::tr!("选择模型")
-            })
-            .disabled(disabled)
-            .on_click(send(|| model_discovery::ModelFieldEvent::ToggleChoices))
-            .into_any_element()
-    });
-    let choices = (state.choices_open && !disabled && !state.models().is_empty()).then(|| {
-        let models = state.models().to_vec();
-        let count = models.len();
-        let selected = input.read(cx).value().to_string();
-        let on_event = on_event.clone();
-        gpui::uniform_list(child("choices"), count, move |range, _, _| {
-            range
-                .map(|index| {
-                    let model = models[index].clone();
-                    let on_event = on_event.clone();
-                    ListItem::new(("model-choice", index), model.clone())
-                        .density(ListDensity::Compact)
-                        .selected(model == selected)
-                        .on_click(move |_, window, cx| {
-                            on_event(
-                                &model_discovery::ModelFieldEvent::Choose(model.clone()),
-                                window,
-                                cx,
-                            )
-                        })
-                })
-                .collect()
-        })
-        .h(rem(200.))
-        .w_full()
-    });
-    v_flex()
-        .w_full()
-        .min_w_0()
-        .gap(rem(8.))
-        .child(field)
-        .children(ui::async_status(child("status"), &status, toggle, cx))
-        .children(choices)
 }

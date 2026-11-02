@@ -71,8 +71,6 @@ struct ServiceEditor {
     saved_configuration: Option<ServiceVersion>,
     test_details_open: bool,
     save_failed: bool,
-    /// A credential is being written to or checked in the system vault.
-    vault_busy: bool,
 }
 
 pub struct OrdinaryPreferenceIssue {
@@ -585,20 +583,31 @@ impl Desktop {
 
     /// The leading pane: the way back, the 设置 title, search and the categories as
     /// segmented lists grouped by relationship. It scrolls on its own.
-    fn settings_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
-        let visible = self.visible_settings_tabs(cx);
-        let groups: [&[SettingsTab]; 3] = [
-            &[SettingsTab::Appearance, SettingsTab::Generation],
-            &[SettingsTab::Services, SettingsTab::Storage],
-            &[SettingsTab::Application],
-        ];
+    /// The categories with the title and search. A narrow window keeps them in a rail
+    /// beside the content: the same tinted circles and selection, with the short names (S1).
+    fn settings_navigation(&self, rail: bool, cx: &mut Context<Self>) -> AnyElement {
+        let visible = if rail {
+            SettingsTab::ALL.to_vec()
+        } else {
+            self.visible_settings_tabs(cx)
+        };
+        let groups: [&[SettingsTab]; 3] = if rail {
+            [&SettingsTab::ALL, &[], &[]]
+        } else {
+            [
+                &[SettingsTab::Appearance, SettingsTab::Generation],
+                &[SettingsTab::Services, SettingsTab::Storage],
+                &[SettingsTab::Application],
+            ]
+        };
         let lists = groups.into_iter().filter_map(|tabs| {
             let items: Vec<_> = tabs
                 .iter()
                 .filter(|tab| visible.contains(tab))
                 .map(|&tab| {
-                    ListItem::new(("settings-tab", tab.index()), tab.label())
-                        .supporting(tab.subtitle())
+                    let label = if rail { tab.short_label() } else { tab.label() };
+                    ListItem::new(("settings-tab", tab.index()), label)
+                        .when(!rail, |item| item.supporting(tab.subtitle()))
                         .leading(ListLeading::Tinted(tab.icon().into(), tab.tint(), 40.))
                         .selected(self.settings_tab == tab)
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -626,6 +635,36 @@ impl Desktop {
                         .px(ITEM_INSET),
                 )
             });
+        let search = (!rail).then(|| {
+            SearchField::new(&self.settings_ui.search)
+                .id("settings-search")
+                .field_style(SearchFieldStyle::Surface)
+                .leading(
+                    Icon::from(symbols::search())
+                        .size(rem(24.))
+                        .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                )
+                .when(
+                    !self.settings_ui.search.read(cx).value().is_empty(),
+                    |field| {
+                        field.trailing(
+                            IconButton::new(
+                                "settings-search-clear",
+                                symbols::close(),
+                                course2md::tr!("清除搜索"),
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    this.settings_ui
+                                        .search
+                                        .update(cx, |state, cx| state.set_value("", window, cx));
+                                    this.settings_search_changed(cx);
+                                },
+                            )),
+                        )
+                    },
+                )
+        });
         div()
             .id("settings-navigation")
             .size_full()
@@ -643,41 +682,14 @@ impl Desktop {
                             .items_center()
                             .gap(rem(16.))
                             .child(self.settings_back_button(cx))
-                            .child(ui::page_title(
-                                "settings-page-title",
-                                course2md::tr!("设置"),
-                            )),
+                            .when(!rail, |row| {
+                                row.child(ui::page_title(
+                                    "settings-page-title",
+                                    course2md::tr!("设置"),
+                                ))
+                            }),
                     )
-                    .child(
-                        SearchField::new(&self.settings_ui.search)
-                            .id("settings-search")
-                            .field_style(SearchFieldStyle::Surface)
-                            .leading(
-                                Icon::from(symbols::search())
-                                    .size(rem(24.))
-                                    .color(color(ColorRole::ON_SURFACE_VARIANT)),
-                            )
-                            .when(
-                                !self.settings_ui.search.read(cx).value().is_empty(),
-                                |field| {
-                                    field.trailing(
-                                        IconButton::new(
-                                            "settings-search-clear",
-                                            symbols::close(),
-                                            course2md::tr!("清除搜索"),
-                                        )
-                                        .on_click(
-                                            cx.listener(|this, _, window, cx| {
-                                                this.settings_ui.search.update(cx, |state, cx| {
-                                                    state.set_value("", window, cx)
-                                                });
-                                                this.settings_search_changed(cx);
-                                            }),
-                                        ),
-                                    )
-                                },
-                            ),
-                    )
+                    .children(search)
                     .child(list),
             )
             .into_any_element()
@@ -704,51 +716,6 @@ impl Desktop {
                     this.select_settings_tab(*last, window, cx)
                 }
             }))
-    }
-
-    /// Narrow windows keep the categories in a narrow list beside the content: the
-    /// same tinted circles and selection as the wide list, with the short names (S1).
-    fn settings_rail(&self, cx: &mut Context<Self>) -> AnyElement {
-        let items: Vec<_> = SettingsTab::ALL
-            .into_iter()
-            .map(|tab| {
-                ListItem::new(("settings-tab", tab.index()), tab.short_label())
-                    .leading(ListLeading::Tinted(tab.icon().into(), tab.tint(), 40.))
-                    .selected(self.settings_tab == tab)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_settings_tab(tab, window, cx)
-                    }))
-            })
-            .collect();
-        div()
-            .id("settings-navigation")
-            .size_full()
-            .min_h_0()
-            .overflow_y_scroll()
-            .child(
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(rem(16.))
-                    .pb(rem(64.))
-                    .child(
-                        h_flex()
-                            .min_h(rem(56.))
-                            .items_center()
-                            .child(self.settings_back_button(cx)),
-                    )
-                    .child(
-                        self.settings_tab_keys(
-                            v_flex()
-                                .id("settings-categories")
-                                .w_full()
-                                .min_w_0()
-                                .child(segmented_list(items)),
-                            cx,
-                        ),
-                    ),
-            )
-            .into_any_element()
     }
 
     /// What is wrong with this category's saves, and a way to the others' failures.
@@ -794,13 +761,9 @@ impl Desktop {
 
     pub fn settings_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         // Rendering has no side effects: hydration and diagnostics run from event entries such as
-        // open_settings, select_settings_tab and restore_settings_group.
+        // open_settings, select_settings_tab and restore_ordinary_preferences.
         let compact = is_compact(window);
-        let navigation = if compact {
-            self.settings_rail(cx)
-        } else {
-            self.settings_navigation(cx)
-        };
+        let navigation = self.settings_navigation(compact, cx);
         let content = match self.settings_tab {
             SettingsTab::Generation => self.generation_settings_page(window, cx),
             SettingsTab::Services => self.services_settings_page(window, cx),
@@ -1442,7 +1405,7 @@ impl Desktop {
                     .icon(symbols::refresh())
                     .child(course2md::tr!("保留原文件并重置这些设置"))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.restore_settings_group(group, window, cx);
+                        this.restore_ordinary_preferences(group, window, cx);
                     })),
             )
         });
@@ -1767,7 +1730,7 @@ impl Desktop {
         {
             fields.push(ui::Field::content(
                 "diagnostic-engine-obstacle-row",
-                self.engine_obstacle_with("diagnostic-engine-obstacle", issue, false, cx),
+                self.engine_obstacle("diagnostic-engine-obstacle", issue, false, cx),
             ));
         }
         if !e.engine {
@@ -1962,17 +1925,6 @@ impl Desktop {
     }
     /// Only the explicitly named group is reset; the form and its source stay in place.
     pub fn restore_ordinary_preferences(
-        &mut self,
-        group: PreferenceGroup,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if group == PreferenceGroup::Services {
-            return false;
-        }
-        self.restore_settings_group(group, window, cx)
-    }
-    fn restore_settings_group(
         &mut self,
         group: PreferenceGroup,
         window: &mut Window,

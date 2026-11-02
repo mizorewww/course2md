@@ -390,14 +390,7 @@ impl Desktop {
                             }
                             QrPollResult::Expired => (QrDialogState::Expired, false),
                             QrPollResult::Authenticated(Ok(profile)) => {
-                                this.account.status_generation =
-                                    this.account.status_generation.wrapping_add(1);
-                                this.account.checking = false;
-                                this.account.has_saved_login = true;
-                                this.account.status =
-                                    Some(AccountStatus::Connected(profile.clone()));
-                                this.account.status_error = None;
-                                this.account.logout_failed = false;
+                                this.account.signed_in(profile.clone());
                                 (QrDialogState::Success(profile), false)
                             }
                             QrPollResult::Authenticated(Err(_)) => (

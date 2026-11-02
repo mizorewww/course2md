@@ -940,14 +940,9 @@ impl Store {
     }
     // Vault access. The vault may wait on a system authorization dialog (macOS
     // Keychain), so every operation that touches it is split in two: a blocking
-    // step (`insert_credential`, `verify_credential`, `remove_credentials`) that
+    // step (`CredentialVault::insert`, `verify_credential`, `remove_credentials`) that
     // only talks to the vault and runs through `crate::spawn_blocking_io`, and a
     // commit on the store.
-
-    /// Blocking step: stores a secret under a new vault identity.
-    pub fn insert_credential(vault: &dyn CredentialVault, secret: Secret) -> Result<CredentialRef> {
-        vault.insert(secret)
-    }
 
     /// Blocking step: confirms a credential is present before publication.
     pub fn verify_credential(
@@ -1237,7 +1232,7 @@ impl Store {
 
     /// Incomplete text is a valid draft, and a stale editor cannot overwrite a newer
     /// revision. Touches no vault: `new_credential` is a key the caller already stored
-    /// with `insert_credential`; when this returns an error the caller removes it again
+    /// with `CredentialVault::insert`; when this returns an error the caller removes it again
     /// with `remove_credentials`.
     pub fn commit_service_draft(
         &mut self,
@@ -1793,7 +1788,7 @@ mod tests {
         ) -> Result<ServiceDraft> {
             self.check_draft_edit(&draft)?;
             let created = new_key
-                .map(|secret| Self::insert_credential(self.vault.as_ref(), secret))
+                .map(|secret| self.vault.insert(secret))
                 .transpose()?;
             self.commit_service_draft(draft, created.clone())
                 .inspect_err(|_| Self::remove_credentials(self.vault.as_ref(), created.as_slice()))
@@ -2765,14 +2760,14 @@ mod tests {
         let mut draft = ServiceDraft::new(ServicePurpose::Ai);
         draft.address = "https://example.test/v1".into();
         draft.model = "split-model".into();
-        let key = Store::insert_credential(&vault, Secret::new("split-secret")).unwrap();
+        let key = vault.insert(Secret::new("split-secret")).unwrap();
         let draft = store
             .commit_service_draft(draft, Some(key.clone()))
             .unwrap();
         let credential = store.publication_credential(&draft.id).unwrap();
         assert_eq!(credential.as_ref(), Some(&key));
         // Verifying a different credential cannot publish this draft.
-        let other = Store::insert_credential(&vault, Secret::new("other")).unwrap();
+        let other = vault.insert(Secret::new("other")).unwrap();
         let wrong = Store::verify_credential(&vault, Some(other)).unwrap();
         assert!(
             store

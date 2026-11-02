@@ -488,7 +488,6 @@ impl Desktop {
             saved_configuration: None,
             test_details_open: false,
             save_failed: false,
-            vault_busy: false,
         });
         match draft_protocol {
             ServiceProtocol::CodexResponses => {
@@ -570,7 +569,7 @@ impl Desktop {
                 (false, true) => course2md::tr!("编辑 AI 服务"),
             }
         };
-        let busy = editor.test_running.is_some() || editor.vault_busy;
+        let busy = editor.test_running.is_some() || editor.form.vault_busy;
         let awaiting_binding = editor.pending_binding.is_some();
         let configuration_saved = editor.saved_configuration.is_some() || awaiting_binding;
         let repairing = editor.repair_task.is_some();
@@ -622,8 +621,8 @@ impl Desktop {
             } else {
                 course2md::tr!("保存")
             })
-            .loading(editor.vault_busy, course2md::tr!("正在保存密钥…"))
-            .disabled(editor.vault_busy || repairing && (busy || repair_refusal.is_some()))
+            .loading(editor.form.vault_busy, course2md::tr!("正在保存密钥…"))
+            .disabled(editor.form.vault_busy || repairing && (busy || repair_refusal.is_some()))
             .on_click(
                 cx.listener(|this, _, window, cx| this.publish_service_editor(true, window, cx)),
             );
@@ -663,7 +662,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let busy = editor.test_running.is_some() || editor.vault_busy;
+        let busy = editor.test_running.is_some() || editor.form.vault_busy;
         let awaiting_binding = editor.pending_binding.is_some();
         let protocol = editor.form.draft.protocol;
         let reveal = |id: &'static str, part: AnyElement| {
@@ -752,7 +751,7 @@ impl Desktop {
                         material_button(("capture-environment-key", index), ButtonVariant::Text)
                             .icon(symbols::content_copy())
                             .child(course2md::tr!("使用环境变量 {}", name))
-                            .disabled(awaiting_binding || editor.vault_busy)
+                            .disabled(awaiting_binding || editor.form.vault_busy)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.use_environment_credential(name, cx)
                             }))
@@ -893,7 +892,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let ai = editor.form.draft.protocol.purpose() == ServicePurpose::Ai;
-        let busy = editor.test_running.is_some() || editor.vault_busy;
+        let busy = editor.test_running.is_some() || editor.form.vault_busy;
         if !ai && !busy && editor.evidence.is_none() {
             return None;
         }
@@ -1043,7 +1042,7 @@ impl Desktop {
         let Some(editor) = &self.settings_ui.editor else {
             return;
         };
-        if editor.vault_busy {
+        if editor.form.vault_busy {
             return;
         }
         if editor.pending_binding.is_some() || editor.saved_configuration.is_some() {
@@ -1067,10 +1066,10 @@ impl Desktop {
             return;
         };
         if let Some(editor) = &mut self.settings_ui.editor {
-            editor.vault_busy = true;
             editor.status = Some(course2md::tr!("正在保存密钥…").into());
         }
-        self.store_editor_secret(
+        self.store_form_secret(
+            FormOwner::Editor,
             draft,
             Secret::new(key),
             |this, draft, reference| {
@@ -1083,47 +1082,6 @@ impl Desktop {
             cx,
         );
         cx.notify();
-    }
-
-    /// Stores a secret in the vault off the UI thread and commits `draft` with it. If the
-    /// editor closed meanwhile, or the commit fails, nothing refers to the stored key.
-    fn store_editor_secret(
-        &self,
-        draft: ServiceDraft,
-        secret: Secret,
-        commit: impl FnOnce(
-            &mut Self,
-            ServiceDraft,
-            crate::credentials::CredentialRef,
-        ) -> Result<ServiceDraft>
-        + 'static,
-        then: impl FnOnce(&mut Self, Result<ServiceDraft>, &mut Window, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) {
-        let id = draft.id.clone();
-        self.run_vault_step(
-            cx,
-            move |vault| preferences::Store::insert_credential(vault, secret),
-            move |this, stored, window, cx| {
-                let open = this
-                    .settings_ui
-                    .editor
-                    .as_mut()
-                    .filter(|editor| editor.form.draft.id == id);
-                let Some(editor) = open else {
-                    if let Ok(reference) = stored {
-                        this.forget_credentials(vec![reference]);
-                    }
-                    return;
-                };
-                editor.vault_busy = false;
-                let committed = stored.and_then(|reference| {
-                    commit(this, draft, reference.clone())
-                        .inspect_err(|_| this.forget_credentials(vec![reference]))
-                });
-                then(this, committed, window, cx);
-            },
-        );
     }
 
     fn finish_service_draft(
@@ -1168,7 +1126,7 @@ impl Desktop {
             match after {
                 AfterDraftSaved::Test => self.run_service_test(cx),
                 AfterDraftSaved::Publish { continue_repair } => {
-                    self.publish_saved_draft(continue_repair, cx)
+                    self.publish_saved_draft(continue_repair, window, cx)
                 }
             }
         }
@@ -1298,7 +1256,12 @@ impl Desktop {
         self.save_service_draft_then(AfterDraftSaved::Publish { continue_repair }, window, cx);
     }
 
-    fn publish_saved_draft(&mut self, continue_repair: bool, cx: &mut Context<Self>) {
+    fn publish_saved_draft(
+        &mut self,
+        continue_repair: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(editor) = &self.settings_ui.editor else {
             return;
         };
@@ -1314,7 +1277,6 @@ impl Desktop {
         }
         let scope = publish_scope(repairing, target.is_some(), editor.also_default);
         let plan = PublishPlan {
-            draft_id: editor.form.draft.id.clone(),
             continue_repair,
             target,
             repair_task,
@@ -1329,49 +1291,13 @@ impl Desktop {
             self.finish_service_publish(Ok(version), plan, cx);
             return;
         }
-        // Publication first confirms the draft's credential is in the vault,
-        // which can block; only that check leaves the UI thread.
-        let reference = match self.preferences.publication_credential(&plan.draft_id) {
-            Ok(reference) => reference,
-            Err(error) => {
-                self.finish_service_publish(Err(error), plan, cx);
-                return;
-            }
-        };
-        if reference.is_none() {
-            let result =
-                preferences::Store::verify_credential(self.preferences.vault().as_ref(), None)
-                    .and_then(|verified| {
-                        self.preferences
-                            .commit_publication(&plan.draft_id, plan.scope, verified)
-                    });
-            self.finish_service_publish(result, plan, cx);
-            return;
-        }
-        if let Some(editor) = &mut self.settings_ui.editor {
-            editor.vault_busy = true;
-        }
-        self.run_vault_step(
+        self.publish_form_draft(
+            FormOwner::Editor,
+            scope,
+            move |this, published, _, cx| this.finish_service_publish(published, plan, cx),
+            window,
             cx,
-            move |vault| preferences::Store::verify_credential(vault, reference),
-            move |this, verified, _, cx| {
-                let open = this
-                    .settings_ui
-                    .editor
-                    .as_mut()
-                    .filter(|editor| editor.form.draft.id == plan.draft_id);
-                let Some(editor) = open else {
-                    return;
-                };
-                editor.vault_busy = false;
-                let result = verified.and_then(|verified| {
-                    this.preferences
-                        .commit_publication(&plan.draft_id, plan.scope, verified)
-                });
-                this.finish_service_publish(result, plan, cx);
-            },
         );
-        cx.notify();
     }
 
     /// Takes a key from an environment variable into the vault for this draft.
@@ -1388,8 +1314,8 @@ impl Desktop {
                 return;
             }
         };
-        editor.vault_busy = true;
-        self.store_editor_secret(
+        self.store_form_secret(
+            FormOwner::Editor,
             draft,
             secret,
             move |this, draft, reference| {
