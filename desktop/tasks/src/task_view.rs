@@ -75,6 +75,40 @@ pub fn task_group(task: &TaskRecord) -> TaskGroup {
     }
 }
 
+/// The task page header's chips. Each task counts once, in the group it is shown
+/// in: a task held by a worker from an earlier session is still `Queued` in its
+/// record, but it is being processed, not waiting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TaskCounts {
+    pub running: usize,
+    pub attention: usize,
+    pub queued: usize,
+    pub resumable: usize,
+    /// Work still meant to run that this session can pause: not a held task, whose
+    /// worker it does not command.
+    pub pausable: usize,
+}
+
+pub fn task_counts(tasks: &[TaskRecord]) -> TaskCounts {
+    tasks
+        .iter()
+        .fold(TaskCounts::default(), |mut counts, task| {
+            let group = task_group(task);
+            counts.running += usize::from(group == TaskGroup::Running);
+            counts.attention += usize::from(group == TaskGroup::Attention);
+            counts.queued +=
+                usize::from(group == TaskGroup::Queued && task.state == TaskState::Queued);
+            counts.resumable += usize::from(resumable(task));
+            counts.pausable += usize::from(
+                matches!(task.state, TaskState::Running | TaskState::Queued)
+                    && task.intent == Intent::Run
+                    && task.handled_by.is_none()
+                    && !task.held,
+            );
+            counts
+        })
+}
+
 /// What the app bar shows for the task page, in one pass over the tasks: how
 /// many still need doing, and whether one needs the person.
 pub fn task_navigation_summary(tasks: &[TaskRecord]) -> (usize, bool) {
@@ -1048,6 +1082,34 @@ mod tests {
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(!actions.contains(&Action::PrepareModel));
+    }
+
+    /// A task held by a worker from an earlier session is still queued in its record;
+    /// the header counts it once, as processing, and offers no pause for it.
+    #[test]
+    fn a_held_task_counts_once_as_processing() {
+        use super::{TaskCounts, task_counts};
+        let mut held = task_record("held");
+        held.state = TaskState::Queued;
+        held.held = true;
+        let mut waiting = task_record("waiting");
+        waiting.state = TaskState::Queued;
+        assert_eq!(
+            task_counts(&[held.clone()]),
+            TaskCounts {
+                running: 1,
+                ..TaskCounts::default()
+            }
+        );
+        assert_eq!(
+            task_counts(&[held, waiting]),
+            TaskCounts {
+                running: 1,
+                queued: 1,
+                pausable: 1,
+                ..TaskCounts::default()
+            }
+        );
     }
 
     #[test]
