@@ -352,8 +352,12 @@ fn by_simplified() -> &'static HashMap<&'static str, Entry> {
 fn simplified_templates() -> &'static [(Vec<&'static str>, Entry)] {
     static INDEX: OnceLock<Vec<(Vec<&'static str>, Entry)>> = OnceLock::new();
     INDEX.get_or_init(|| {
-        let mut templates: Vec<(Vec<&'static str>, Entry)> = by_simplified()
+        // Both a row's key and its Simplified Chinese text, since a worker may write
+        // either; the longest template wins, so a bilingual key beats its shorter
+        // Chinese display.
+        let mut templates: Vec<(Vec<&'static str>, Entry)> = catalog()
             .iter()
+            .chain(by_simplified().iter())
             .filter(|(zh, _)| zh.contains("{}") && !zh.contains("{{"))
             .map(|(zh, entry)| (zh.split("{}").collect::<Vec<_>>(), *entry))
             // A template of little more than its values would match any text.
@@ -366,6 +370,7 @@ fn simplified_templates() -> &'static [(Vec<&'static str>, Entry)] {
             let len = |pieces: &[&str]| pieces.iter().map(|piece| piece.len()).sum::<usize>();
             len(b).cmp(&len(a)).then_with(|| a.cmp(b))
         });
+        templates.dedup_by(|(a, _), (b, _)| a == b);
         templates
     })
 }
@@ -518,11 +523,17 @@ mod tests {
             ),
             "Error: Apple model download failed (qwen3-1.7b): denied"
         );
-        // A bilingual value no row names gives the half the reader reads.
         let raw = "错误：Apple 模型下载失败 / Apple model download failed (x): denied";
         assert_eq!(
             engine_message_for(raw, Lang::ZhHant),
-            "錯誤：Apple 模型下载失败"
+            "錯誤：Apple 模型下載失敗 (x): denied"
+        );
+        // A bilingual value no row names gives the half the reader reads.
+        let raw = "错误：某工具失败 / Some tool failed: denied";
+        assert_eq!(engine_message_for(raw, Lang::ZhHant), "錯誤：某工具失败");
+        assert_eq!(
+            engine_message_for(raw, Lang::En),
+            "Error: Some tool failed: denied"
         );
         // Text the catalog does not know stays as it is.
         assert_eq!(
