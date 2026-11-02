@@ -1204,6 +1204,8 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let source = self.import.source_preview.clone()?;
+        // First, so the start action below sees this frame's plan.
+        let recovery = self.conversion_recovery(cx);
         let duration = (source.duration.is_finite() && source.duration > 0.)
             .then(|| course2md::render::fmt_ts(source.duration));
         let details_open = self.import.show_preview_details;
@@ -1341,7 +1343,6 @@ impl Desktop {
             )
             .child(self.text_source_control(&source, window, cx))
             .child(actions);
-        let recovery = self.conversion_recovery(cx);
         Some(motion::state_enter(
             "import-selected-source-enter",
             tile([true, true, false, false])
@@ -2304,6 +2305,7 @@ impl Desktop {
             && (self.online() || !self.value(Field::Source, cx).is_empty())
             && self.import.preview_error.is_none()
             && self.existing_source_note().is_none()
+            && !self.has_matching_task()
             && self.current_input_task(cx).is_none_or(|task| {
                 matches!(
                     task.state,
@@ -2317,6 +2319,16 @@ impl Desktop {
                             follow.follows(&task.id, self.import.preview_generation)
                         }))
             })
+    }
+
+    /// Whether the plan shown has a task already doing its work: then 查看任务 is the
+    /// one way forward, and starting again would only lead there.
+    fn has_matching_task(&self) -> bool {
+        self.import
+            .preview_plan_cache
+            .as_ref()
+            .and_then(|(_, plan)| plan.as_ref().ok())
+            .is_some_and(|plan| self.matching_task(plan).is_some())
     }
 
     pub(super) fn current_input_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {

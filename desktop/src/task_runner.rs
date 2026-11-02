@@ -395,11 +395,12 @@ impl Desktop {
         self.build_plan(PlanValidation::Preview)
     }
 
-    /// An unfinished task already doing the same work as `plan`.
+    /// An unfinished task already doing the same work as `plan`; the task the
+    /// current input retries is not one.
     pub fn matching_task(&self, plan: &TaskPlan) -> Option<&TaskRecord> {
-        self.workspace.as_ref()?.state.tasks.iter().find(|task| {
-            !task.state.finished() && task.handled_by.is_none() && task.plan.same_work(plan)
-        })
+        let state = &self.workspace.as_ref()?.state;
+        let parent = state.draft().and_then(|draft| draft.retry_of.as_deref());
+        state.duplicate_of(plan, parent)
     }
 
     pub fn enqueue_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -824,6 +824,18 @@ impl State {
         Ok(())
     }
 
+    /// An unfinished task already doing `plan`'s work, which `enqueue` would return
+    /// instead of a new one. The attempt `parent` names, the one `plan` replaces, is
+    /// not a duplicate of it.
+    pub fn duplicate_of(&self, plan: &TaskPlan, parent: Option<&str>) -> Option<&TaskRecord> {
+        self.tasks.iter().find(|t| {
+            !t.state.finished()
+                && t.handled_by.is_none()
+                && parent != Some(t.id.as_str())
+                && t.plan.same_work(plan)
+        })
+    }
+
     pub fn enqueue(&mut self, plan: TaskPlan, parent: Option<String>) -> Result<(String, bool)> {
         ensure!(
             !plan.source_id.is_empty() && !plan.title.trim().is_empty(),
@@ -849,13 +861,7 @@ impl State {
         let location = self
             .library(&plan.library_id)
             .context(c2m_i18n::tr!("所选保存位置未登记"))?;
-        if let Some(existing) = self.tasks.iter().find(|t| {
-            // The attempt this one replaces is not a duplicate of it.
-            !t.state.finished()
-                && t.handled_by.is_none()
-                && parent.as_deref() != Some(t.id.as_str())
-                && t.plan.same_work(&plan)
-        }) {
+        if let Some(existing) = self.duplicate_of(&plan, parent.as_deref()) {
             return Ok((existing.id.clone(), false));
         }
         let id = new_id("task");
@@ -3908,6 +3914,12 @@ mod tests {
         let library = ws.state.default_library.clone();
         let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Uncertain;
+        // The workbench's notice asks the same question before the retry is started.
+        assert!(ws.state.duplicate_of(&plan(&library), Some(&id)).is_none());
+        assert_eq!(
+            ws.state.duplicate_of(&plan(&library), None).map(|t| &t.id),
+            Some(&id)
+        );
         let (retry, created) = ws.state.enqueue(plan(&library), Some(id.clone())).unwrap();
         assert!(created);
         assert_ne!(retry, id);
