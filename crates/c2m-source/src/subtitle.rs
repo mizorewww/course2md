@@ -183,16 +183,21 @@ pub fn file_track(path: PathBuf, language: Option<String>) -> SubtitleTrack {
     SubtitleTrack::file(path, language)
 }
 
-/// 在已有目录中挑一个字幕文件（中文优先、其次英文）。新调用方会把确定的一条字幕抓取到
+/// 在已有目录中挑一个字幕文件（界面语言优先、其次英文）。新调用方会把确定的一条字幕抓取到
 /// 独立目录；这里绝不能选中属于其他来源的产物。
 pub fn pick_subtitle_file(dir: &Path) -> Option<PathBuf> {
-    best_file(subtitle_parse::files_in(dir), &[], "zh", Some("en"))
+    preferred_file(subtitle_parse::files_in(dir), c2m_i18n::i18n::lang().code())
 }
 
 /// 本地视频的同名字幕 sidecar（`lecture.srt`、`lecture.zh.vtt` 等，与桌面端同一发现规则），
-/// 中文优先、其次英文。
+/// 界面语言优先、其次英文。A task that has its transcript keeps it, so this choice
+/// never changes under a resumed task.
 pub fn sidecar_subtitle(video: &Path) -> Option<PathBuf> {
-    best_file(sidecar_tracks(video), &[], "zh", Some("en"))
+    preferred_file(sidecar_tracks(video), c2m_i18n::i18n::lang().code())
+}
+
+fn preferred_file(tracks: Vec<SubtitleTrack>, interface_language: &str) -> Option<PathBuf> {
+    best_file(tracks, &[], interface_language, Some("en"))
 }
 
 #[cfg(test)]
@@ -248,14 +253,28 @@ mod tests {
     }
 
     #[test]
-    fn the_defaults_prefer_chinese_then_english() {
+    fn files_prefer_the_interface_language_then_english() {
         let dir = tempfile::tempdir().unwrap();
         for name in ["sub.en.srt", "sub.zh-Hans.srt", "sub.ja.srt"] {
             std::fs::write(dir.path().join(name), b"x").unwrap();
         }
-        let picked = pick_subtitle_file(dir.path()).unwrap();
-        assert_eq!(picked.file_name().unwrap(), "sub.zh-Hans.srt");
         let video = dir.path().join("sub.mp4");
-        assert_eq!(sidecar_subtitle(&video).unwrap(), picked);
+        for (language, expected) in [
+            ("zh-Hans", "sub.zh-Hans.srt"),
+            ("zh-Hant", "sub.zh-Hans.srt"),
+            ("ja", "sub.ja.srt"),
+            ("en", "sub.en.srt"),
+            ("ko", "sub.en.srt"),
+        ] {
+            let picked = preferred_file(subtitle_parse::files_in(dir.path()), language).unwrap();
+            assert_eq!(picked.file_name().unwrap(), expected, "{language}");
+            let sidecar = preferred_file(sidecar_tracks(&video), language).unwrap();
+            assert_eq!(sidecar, picked, "{language}");
+        }
+        // The process language is Simplified Chinese here, as for --json and run-task.
+        assert_eq!(
+            pick_subtitle_file(dir.path()).unwrap(),
+            dir.path().join("sub.zh-Hans.srt")
+        );
     }
 }
