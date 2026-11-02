@@ -469,14 +469,15 @@ impl Desktop {
     }
 
     /// A text input of a service form: labelled, with its error or `hint` below.
-    /// While `read_only` the value can be selected but not changed.
+    /// While `locked` the editor's value can be selected but not changed, and
+    /// setup's is disabled; setup's inputs show no placeholder.
     pub(crate) fn service_text_field(
         &self,
         owner: FormOwner,
         field: FormField,
         label: &'static str,
         hint: Option<String>,
-        read_only: bool,
+        locked: bool,
         cx: &mut Context<Self>,
     ) -> Option<TextField> {
         let form = self.service_form(owner)?;
@@ -502,8 +503,10 @@ impl Desktop {
                 .w_full()
                 .label(label)
                 .float_label(true)
-                .placeholder(placeholder)
-                .read_only(read_only)
+                .map(|field| match owner {
+                    FormOwner::Editor => field.placeholder(placeholder).read_only(locked),
+                    FormOwner::Setup(_) => field.disabled(locked),
+                })
                 .error(error.is_some())
                 .when_some(support, |field, support| field.supporting_text(support))
                 .when_some(trailing, |field, trailing| field.trailing_icon(trailing)),

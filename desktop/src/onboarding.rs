@@ -1020,35 +1020,14 @@ impl Desktop {
         field: FormField,
         label: &'static str,
         cx: &mut Context<Self>,
-    ) -> RevealFocus {
+    ) -> Option<RevealFocus> {
         let service = self.onboarding.service(purpose);
-        let form = &service.form;
-        let id = format!("setup-{}-{field:?}", purpose as usize);
-        let error = form.error(field);
-        let kept = field == FormField::Key && form.draft.credential.is_some();
-        let input = TextField::new(SharedString::from(id.clone()), form.input(field))
-            .outlined()
-            .shape(TextFieldShape::Rounded)
-            .label(label)
-            // The input owns its placeholder: the label stays clear of it.
-            .float_label(true)
-            .w_full()
-            .disabled(service.busy())
-            .error(error.is_some())
-            .when_some(
-                error
-                    .map(str::to_owned)
-                    .or(kept.then(|| course2md::tr!("已保存密钥，留空则保留").to_owned())),
-                |input, text| input.supporting_text(text),
-            )
-            .when(field == FormField::Key, |input| {
-                input.trailing_icon(self.service_key_visibility(
-                    FormOwner::Setup(purpose),
-                    format!("setup-key-visibility-{}", purpose as usize),
-                    cx,
-                ))
-            });
-        self.setup_reveal(SharedString::from(format!("{id}-reveal")), input)
+        let kept = (field == FormField::Key && service.form.draft.credential.is_some())
+            .then(|| course2md::tr!("已保存密钥，留空则保留").to_owned());
+        let owner = FormOwner::Setup(purpose);
+        let input = self.service_text_field(owner, field, label, kept, service.busy(), cx)?;
+        let id = format!("setup-{}-{field:?}-reveal", purpose as usize);
+        Some(self.setup_reveal(SharedString::from(id), input))
     }
 
     fn setup_service_content(
@@ -1076,7 +1055,7 @@ impl Desktop {
                 ),
             ))
             .when(!codex, |form| {
-                form.child(self.setup_field(
+                form.children(self.setup_field(
                     purpose,
                     FormField::Address,
                     course2md::tr!("服务地址"),
@@ -1084,7 +1063,7 @@ impl Desktop {
                 ))
             })
             .when(!keyless, |form| {
-                form.child(self.setup_field(purpose, FormField::Key, "API Key", cx))
+                form.children(self.setup_field(purpose, FormField::Key, "API Key", cx))
             })
             .when(codex, |form| {
                 form.child(self.codex_account_section(CodexSurface::Onboarding, busy, cx))
