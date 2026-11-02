@@ -825,7 +825,7 @@ impl Desktop {
     /// Where a task saves, as its supporting line.
     fn task_destination(&self, task: &TaskRecord) -> String {
         match self.task_library(task) {
-            Some(location) => course2md::tr!("保存到 {}", location.name),
+            Some(location) => course2md::tr!("保存到 {}", location.label()),
             None => course2md::tr!("保存位置暂时不可用").to_owned(),
         }
     }
@@ -891,7 +891,7 @@ impl Desktop {
             })
             .unwrap_or_else(|| course2md::tr!("未分类").to_owned());
         let destination = match library {
-            Some(library) => format!("{} · {folder}", library.name),
+            Some(library) => format!("{} · {folder}", library.label()),
             None => folder,
         };
         let id = &task.id;

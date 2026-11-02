@@ -1060,7 +1060,7 @@ impl Desktop {
         let more = CommandsButton {
             id: ("storage-location-menu", index).into(),
             label: course2md::tr!("笔记库操作").into(),
-            subject: Some(course2md::tr!("{} 操作", library.name).into()),
+            subject: Some(course2md::tr!("{} 操作", library.label()).into()),
             commands: actions.clone(),
             width: None,
             tonal: false,
@@ -1161,7 +1161,7 @@ impl Desktop {
             icon: symbols::folder().into(),
             tint: Tint::Amber,
             mono: true,
-            title: library.name.clone().into(),
+            title: library.label().into(),
             status: status.into_iter().flatten().collect(),
             busy: false,
             lines: vec![(path.display().to_string(), false)],

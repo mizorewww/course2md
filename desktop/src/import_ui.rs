@@ -2008,12 +2008,12 @@ impl Desktop {
         let library_name = libraries
             .iter()
             .find(|library| Some(&library.id) == current.as_ref())
-            .map(|library| library.name.clone())
+            .map(|library| library.label())
             .unwrap_or_else(|| course2md::tr!("选择保存位置").to_owned());
         let library_items = libraries.iter().map(|library| {
             (
                 Some(library.id.clone()),
-                format!("{} · {}", library.name, library.root.display()),
+                format!("{} · {}", library.label(), library.root.display()),
             )
         });
         let mut fields = vec![
@@ -2649,7 +2649,7 @@ impl Desktop {
             .ok()
             .and_then(|plan| self.matching_task(plan))
             .map(|task| {
-                let location = self.task_library(task).map(|library| library.name.clone());
+                let location = self.task_library(task).map(|library| library.label());
                 (task.id.clone(), task.plan.title.clone(), location)
             });
         let preferences_issue = self.ordinary_preferences_submit_issue();
@@ -2786,7 +2786,7 @@ impl Desktop {
         } else if let Some(course) = self.existing_source_note().cloned() {
             let location = self
                 .course_location(&course)
-                .map(|library| library.name.clone())
+                .map(|library| library.label())
                 .unwrap_or_else(|| course2md::tr!("笔记库").into());
             facts.push(
                 supporting_info(

@@ -119,7 +119,7 @@ impl LibraryViewCache {
                 kind: LibraryIssueKind::Titles,
                 message: c2m_i18n::tr!(
                     "{}的显示名称尚未读取：{}",
-                    location.name,
+                    location.label(),
                     format!("{error:#}")
                 ),
             }),
@@ -279,7 +279,11 @@ impl LibraryState {
                 Err(error) => self.issues.push(LibraryIssue {
                     root: location.root.clone(),
                     kind: LibraryIssueKind::Scan,
-                    message: c2m_i18n::tr!("{}读取失败：{}", location.name, format!("{error:#}")),
+                    message: c2m_i18n::tr!(
+                        "{}读取失败：{}",
+                        location.label(),
+                        format!("{error:#}")
+                    ),
                 }),
             }
             match organization {
@@ -291,7 +295,7 @@ impl LibraryState {
                     kind: LibraryIssueKind::Folders,
                     message: c2m_i18n::tr!(
                         "{}的文件夹信息已损坏：{}",
-                        location.name,
+                        location.label(),
                         format!("{error:#}")
                     ),
                 }),

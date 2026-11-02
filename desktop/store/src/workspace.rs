@@ -67,6 +67,28 @@ pub struct LibraryLocation {
     pub previous_roots: Vec<PathBuf>,
 }
 
+impl LibraryLocation {
+    /// The name to show. The built-in default was saved in whatever language the app
+    /// spoke when the library was made; it reads in today's. A name the person chose is
+    /// shown as saved, and nothing renames the stored record.
+    pub fn label(&self) -> String {
+        label_in(&self.name, c2m_i18n::i18n::lang())
+    }
+}
+
+fn label_in(name: &str, lang: c2m_i18n::i18n::Lang) -> String {
+    use c2m_i18n::i18n::{Lang, t_for};
+    let default = "笔记库";
+    let built_in = [Lang::En, Lang::ZhHans, Lang::ZhHant, Lang::Ja]
+        .into_iter()
+        .any(|each| t_for(default, each) == name);
+    if built_in {
+        t_for(default, lang).to_owned()
+    } else {
+        name.to_owned()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum Override {
@@ -2720,6 +2742,24 @@ mod tests {
     use super::*;
     use c2m_engine::execution::Component;
     use c2m_protocol::progress::Stage;
+
+    #[test]
+    fn the_default_library_name_reads_in_the_interface_language() {
+        use c2m_i18n::i18n::Lang;
+        // Saved under Chinese, English or Japanese, the built-in name follows the app.
+        for saved in ["笔记库", "Library", "ノートライブラリ"] {
+            assert_eq!(super::label_in(saved, Lang::En), "Library", "{saved}");
+            assert_eq!(
+                super::label_in(saved, Lang::Ja),
+                "ノートライブラリ",
+                "{saved}"
+            );
+            assert_eq!(super::label_in(saved, Lang::ZhHans), "笔记库", "{saved}");
+            assert_eq!(super::label_in(saved, Lang::ZhHant), "筆記庫", "{saved}");
+        }
+        // A name the person chose stays theirs.
+        assert_eq!(super::label_in("课程资料", Lang::En), "课程资料");
+    }
     fn source(input: &str, title: &str) -> Source {
         serde_json::from_value(serde_json::json!({"input":input,"title":title,"author":"","duration":60.0,"cover":null,"cover_error":null})).unwrap()
     }

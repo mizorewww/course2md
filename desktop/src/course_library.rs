@@ -606,7 +606,7 @@ impl Desktop {
         for (index, location) in workspace.state.libraries.iter().enumerate() {
             let root = &location.root;
             if access.unavailable.contains(root) {
-                let message = course2md::tr!("{} 暂时无法访问", location.name);
+                let message = course2md::tr!("{} 暂时无法访问", location.label());
                 notices.push(
                     notice_banner(("library-unavailable", index), NoticeKind::Info, message).child(
                         material_button(("retry-library-location", index), ButtonVariant::Tonal)
@@ -620,7 +620,7 @@ impl Desktop {
             }
             if let Some(recovery) = self.library.view_cache.recovery.get(root) {
                 let (restore, rebuild, folder) = (root.clone(), root.clone(), root.clone());
-                let message = course2md::tr!("{} 的文件夹信息已损坏", location.name);
+                let message = course2md::tr!("{} 的文件夹信息已损坏", location.label());
                 notices.push(
                     notice_banner(
                         ("classification-recovery", index),
@@ -701,7 +701,7 @@ impl Desktop {
                             this.recover_note_titles(root.clone(), reset, cx)
                         }))
                     });
-                let message = course2md::tr!("{} 的笔记名称记录无法读取", location.name);
+                let message = course2md::tr!("{} 的笔记名称记录无法读取", location.label());
                 notices.push(
                     notice_banner(("title-recovery", index), NoticeKind::Danger, message)
                         .children(actions)
@@ -967,8 +967,8 @@ impl Desktop {
             };
             let name = if state.is_some_and(|s| s.libraries.len() > 1) {
                 let library = location
-                    .map(|lib| lib.name.as_str())
-                    .unwrap_or(course2md::tr!("笔记库"));
+                    .map(|lib| lib.label())
+                    .unwrap_or_else(|| course2md::tr!("笔记库").to_owned());
                 format!("{library} · {folder_name}")
             } else {
                 folder_name
