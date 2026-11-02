@@ -104,14 +104,30 @@ fn escape_inline(line: &str, dollars: bool, out: &mut String) {
 }
 
 /// `$…$`. Inside it a backslash is no escape, so a `\$` would end it: then `$$…$$`.
+/// The formula stays on one line: a line inside it would be parsed for blocks before
+/// the formula is found, so a line opening with `#`, `>` or a surface fence would
+/// start one. LaTeX reads a line break as a space.
 fn inline_formula(latex: &str, display: bool, out: &mut String) {
     let fence = if display || latex.contains('$') {
         "$$"
     } else {
         "$"
     };
+    // A dollar beside the fence would lengthen it.
+    let pad = if latex.starts_with('$') || latex.ends_with('$') {
+        " "
+    } else {
+        ""
+    };
     out.push_str(fence);
-    out.push_str(latex);
+    out.push_str(pad);
+    for (index, line) in latex.lines().enumerate() {
+        if index > 0 {
+            out.push(' ');
+        }
+        out.push_str(line.trim());
+    }
+    out.push_str(pad);
     out.push_str(fence);
 }
 
@@ -586,6 +602,21 @@ mod tests {
         );
         // A formula holding a dollar cannot use one as its fence.
         assert_eq!(blocks("设 $a\\$b$ 为"), ["设 $$a\\$b$$ 为"]);
+        assert_eq!(blocks("设 $a\\$$ 为"), ["设 $$ a\\$ $$ 为"]);
+    }
+
+    #[test]
+    fn a_formula_keeps_to_one_line_so_its_lines_open_no_block() {
+        // A line of a formula starting a block, such as a surface's fence, would end
+        // the formula and the paragraph around it.
+        assert_eq!(
+            blocks("设 $a\n<!-- /surface -->$ 为"),
+            ["设 $a <!-- /surface -->$ 为"]
+        );
+        assert_eq!(
+            blocks("如下\n$$a\n# b$$\n，以及"),
+            ["如下  \n$$a # b$$，以及"]
+        );
     }
 
     #[test]
