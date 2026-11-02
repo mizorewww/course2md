@@ -10,12 +10,7 @@ use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
 use desktop_core::import::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
-use gpui_kit_material::{
-    color::ColorRole,
-    icons::{Icon, SymbolIcon},
-    motion,
-    prelude::*,
-};
+use gpui_kit_material::{color::ColorRole, icons::Icon, motion, prelude::*};
 use std::{
     path::PathBuf,
     sync::{Arc, atomic::AtomicBool},
@@ -111,17 +106,6 @@ fn details_toggle(id: impl Into<ElementId>, open: bool) -> MaterialButton {
         } else {
             course2md::tr!("技术详情")
         })
-}
-
-/// An icon-only action; its tooltip names it.
-fn tip_button(
-    id: &'static str,
-    icon: SymbolIcon,
-    label: &'static str,
-    configure: impl FnOnce(IconButton) -> IconButton,
-) -> MaterialTooltip {
-    MaterialTooltip::plain(SharedString::from(format!("{id}-tooltip")), label)
-        .trigger(configure(IconButton::new(id, icon, label)))
 }
 
 /// The first line of a message when it is already readable. A raw download
@@ -894,7 +878,7 @@ impl Desktop {
                                             .min_w_0()
                                             .whitespace_normal(),
                                         )
-                                        .child(tip_button(
+                                        .child(ui::tip_button(
                                             "cancel-source-read",
                                             symbols::close(),
                                             label,
@@ -1248,7 +1232,7 @@ impl Desktop {
             .items_center()
             .flex_wrap()
             .when(self.online(), |row| {
-                row.child(tip_button(
+                row.child(ui::tip_button(
                     "reread-source",
                     symbols::refresh(),
                     course2md::tr!("重新读取"),
@@ -1324,7 +1308,7 @@ impl Desktop {
                                     .when(!metadata.is_empty(), |row| {
                                         row.child(supporting("import-source-meta", metadata))
                                     })
-                                    .child(tip_button(
+                                    .child(ui::tip_button(
                                         "source-details",
                                         if details_open {
                                             symbols::keyboard_arrow_up()
@@ -1344,7 +1328,7 @@ impl Desktop {
                                     )),
                             ),
                     )
-                    .child(tip_button(
+                    .child(ui::tip_button(
                         "clear-source-preview",
                         symbols::close(),
                         course2md::tr!("移除预览"),
@@ -2081,7 +2065,7 @@ impl Desktop {
                 .gap(rem(8.))
                 .items_center()
                 .child(div().flex_1().min_w_0().child(self.folder_picker(cx)))
-                .child(tip_button(
+                .child(ui::tip_button(
                     "import-new-folder",
                     symbols::create_new_folder(),
                     course2md::tr!("新建文件夹"),
@@ -2424,7 +2408,6 @@ impl Desktop {
             cx.notify();
             return false;
         }
-        self.import.completed_source = None;
         self.invalidate_source();
         self.restore_draft(window, cx);
         self.import.source_editor_open = true;
