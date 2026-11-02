@@ -171,7 +171,7 @@ A `restore` verdict states the intent. These are not there yet:
 | # | What remains |
 | --- | --- |
 | G17 | `ui::page_title` asks for headline medium 28/36 but measures 24: `page_heading` sets its size on an inner element. Kit PR #20 lets the caller's size through; repin after it merges |
-| L1 | Sidebar items 44 tall with a pill selection: kit PR #21 adds `ListDensity::Navigation` and `ListItem::pill`; the sidebar takes both after it merges |
+| L1 | Sidebar items 44 tall with a pill selection: kit PR #21 (a −3 density) and its pill split-off; the sidebar takes both after they merge. Rows were 60: 56 plus a 2px transparent drop border on each side, now an inset outline that adds no height, so rows are 56 until then |
 | R9 | Contents as flat pills: the same `ListItem::pill`, without the surface container |
 | S1 | The compact settings rail draws plain icons rather than the tinted circles, and paints its own band (U18): the kit's `NavigationRail` has neither a tinted icon nor a ground option; kit PR requested |
 | S11 | Palette picker: the kit's largest dialog is 720 against the baseline's 918, so names wrap at four across; the selected card has no ring. Both need a kit capability |

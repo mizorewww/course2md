@@ -129,6 +129,10 @@ Each line names the commit by subject; evidence is under the session scratchpad 
   and a selected card. U20, U21, U23 were not reproduced at the capture size (1280 wide). U2: load average 29 to 37
   throughout, so not measured.
 
+- U10/L1 (part), `desktop: the sidebar's drop outline adds no height`: rows measured 60 as 56 plus a transparent
+  2px drop border on each side; the outline is now drawn inside the row (`l1/l-click`, rows at a 56 pitch, click and
+  hover still reach the item). The 44 height and pill wait on kit #21 and its pill split-off.
+
 ## Plan conformance (after the three fix agents)
 
 | ID | Sev | Finding |
