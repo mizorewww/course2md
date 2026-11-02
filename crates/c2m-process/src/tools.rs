@@ -48,7 +48,7 @@ pub(crate) fn file_name(name: &str) -> String {
 }
 
 /// `COURSE2MD_FFMPEG` for `ffmpeg`, `COURSE2MD_ARIA2C` for `aria2c`.
-pub fn override_var(name: &str) -> String {
+pub(crate) fn override_var(name: &str) -> String {
     format!("COURSE2MD_{}", name.to_ascii_uppercase().replace('-', "_"))
 }
 
@@ -76,7 +76,7 @@ pub const LLAMA_DIR: &str = "llama.cpp";
 /// Where archives keep yt-dlp's onedir build (the `yt-dlp` executable beside
 /// its `_internal` directory): beside the executable, or in a macOS bundle's
 /// `Contents/Resources`.
-pub const YTDLP_DIR: &str = "yt-dlp";
+pub(crate) const YTDLP_DIR: &str = "yt-dlp";
 
 /// The desktop executable: an app package keeps it beside the engine, which
 /// tells a package's own directory apart from one the CLI shares with other
@@ -86,7 +86,7 @@ const DESKTOP: &str = "course2md-desktop";
 /// Directories that hold tools shipped with the app whose executable is
 /// `exe`: none outside an app package. A macOS bundle also has
 /// `Contents/Resources/bin`, looked at only from inside `Contents/MacOS`.
-pub fn bundled_dirs_for(exe: &Path) -> Vec<PathBuf> {
+pub(crate) fn bundled_dirs_for(exe: &Path) -> Vec<PathBuf> {
     let Some(dir) = exe.parent() else {
         return Vec::new();
     };

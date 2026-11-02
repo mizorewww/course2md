@@ -68,7 +68,7 @@ pub fn asr_provider() -> impl clap::builder::TypedValueParser<Value = config::As
 }
 
 /// 内置默认输出格式。settings 的展示与配置模板也由它渲染，避免第二份真相。
-pub fn default_formats() -> Vec<config::OutputFormat> {
+pub(crate) fn default_formats() -> Vec<config::OutputFormat> {
     vec![config::OutputFormat::Md, config::OutputFormat::Html]
 }
 

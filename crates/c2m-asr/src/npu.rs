@@ -348,7 +348,10 @@ impl Drop for NpuWorker {
 }
 
 /// Prepare the exact NPU model through the normal worker; no media is sent.
-pub fn prepare_npu_model(model_id: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
+pub(crate) fn prepare_npu_model(
+    model_id: &str,
+    control: &crate::dispatch::TaskControl,
+) -> Result<()> {
     NpuWorker::start(model_id, control).map(drop)
 }
 

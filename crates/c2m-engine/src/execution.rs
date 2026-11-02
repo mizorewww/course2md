@@ -14,7 +14,7 @@ pub use crate::digest::{digest, file_digest, file_digest_cancellable, hex};
 pub use crate::job::Job;
 
 pub const REQUEST_SCHEMA: u32 = 1;
-pub const MAX_REQUEST_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_REQUEST_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -322,7 +322,7 @@ pub fn valid_id(value: &str) -> bool {
         && !crate::config::windows_reserved_name(value)
 }
 
-pub fn validate_events(events: &[TranscriptEvent]) -> Result<()> {
+pub(crate) fn validate_events(events: &[TranscriptEvent]) -> Result<()> {
     anyhow::ensure!(
         events.iter().all(|e| e.start.is_finite()
             && e.end.is_finite()
@@ -338,7 +338,7 @@ pub fn validate_events(events: &[TranscriptEvent]) -> Result<()> {
 }
 
 /// Holds a task's work directory: the process lock and the task's job.
-pub struct WorkDir {
+pub(crate) struct WorkDir {
     job: Job,
     _lock: crate::runtime::FileLock,
 }
@@ -352,7 +352,7 @@ impl WorkDir {
 /// Enters a task's work directory in one order for every entry point: create
 /// it, take the task lock, check the identity it was bound to, then open the
 /// request ledger.
-pub fn enter_work_dir(
+pub(crate) fn enter_work_dir(
     work_dir: &Path,
     binding: &serde_json::Value,
     source: crate::dispatch::ControlSource,
@@ -371,7 +371,7 @@ pub fn enter_work_dir(
 }
 
 /// A mismatch is evidence that this is a different task; preserve both old work and error.
-pub fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()> {
+pub(crate) fn bind_work_dir(work_dir: &Path, binding: &serde_json::Value) -> Result<()> {
     std::fs::create_dir_all(work_dir)?;
     let path = work_dir.join("task-identity.json");
     if path.exists() {

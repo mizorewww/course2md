@@ -106,7 +106,7 @@ fn desktop_catalog(tokens: &CodexTokens) -> DesktopCatalog {
 
 /// course2md 自有的 codex 凭据副本。
 #[derive(Clone, Serialize, Deserialize)]
-pub struct CodexTokens {
+pub(crate) struct CodexTokens {
     pub access_token: String,
     pub refresh_token: String,
     #[serde(default)]
@@ -132,7 +132,7 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-pub fn credential_path() -> PathBuf {
+pub(crate) fn credential_path() -> PathBuf {
     crate::config::config_dir().join("auth/codex.json")
 }
 
@@ -144,7 +144,7 @@ fn codex_cli_auth_path() -> PathBuf {
         .join("auth.json")
 }
 
-pub fn load_tokens() -> Result<Option<CodexTokens>> {
+pub(crate) fn load_tokens() -> Result<Option<CodexTokens>> {
     let path = credential_path();
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,

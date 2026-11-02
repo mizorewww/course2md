@@ -155,7 +155,7 @@ fn last_error() -> String {
 }
 
 /// Silero VAD（CoreML）。返回 (start, end) 语音段（秒）。
-pub fn vad(wav: &Path, min_speech: f64, min_silence: f64) -> Result<Vec<(f64, f64)>> {
+pub(crate) fn vad(wav: &Path, min_speech: f64, min_silence: f64) -> Result<Vec<(f64, f64)>> {
     let path = CString::new(wav.to_string_lossy().as_bytes())?;
     let mut starts: *mut f64 = std::ptr::null_mut();
     let mut ends: *mut f64 = std::ptr::null_mut();
@@ -191,7 +191,7 @@ pub fn vad(wav: &Path, min_speech: f64, min_silence: f64) -> Result<Vec<(f64, f6
     Ok(out)
 }
 
-pub struct CoremlAsr {
+pub(crate) struct CoremlAsr {
     handle: *mut std::ffi::c_void,
 }
 
@@ -321,7 +321,7 @@ impl CoremlAsr {
 }
 
 /// Verify prepared files using the same offline loaders as transcription, with no user media.
-pub fn prepare_model(model: &str) -> Result<()> {
+pub(crate) fn prepare_model(model: &str) -> Result<()> {
     ensure_metallib()?;
     let _asr = CoremlAsr::load(model)?;
     // VAD is a separate required model; load it directly so readiness never depends
@@ -369,7 +369,7 @@ pub fn prepare_cache_here(model: &str) -> Result<()> {
 /// multi-threaded process's environment is unsound, so a mirror attempt runs
 /// in a child process started with that endpoint. An explicit HF_ENDPOINT is
 /// left alone.
-pub fn prepare_cache(model: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
+pub(crate) fn prepare_cache(model: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
     let mirror = if std::env::var_os("HF_ENDPOINT").is_none() {
         crate::hub::endpoints().hub_override()
     } else {

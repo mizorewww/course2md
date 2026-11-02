@@ -105,7 +105,7 @@ impl std::fmt::Display for SubtitleReadError {
 
 impl std::error::Error for SubtitleReadError {}
 
-pub fn language_label(language: &str) -> String {
+pub(crate) fn language_label(language: &str) -> String {
     match normalize_language(language).as_str() {
         "zh" => crate::tr!("中文").into(),
         "zh-hans" | "zh-cn" | "zh-sg" => crate::tr!("简体中文").into(),

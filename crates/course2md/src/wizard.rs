@@ -8,7 +8,10 @@ use anyhow::Result;
 
 /// 是否首次运行：用户没显式传 --provider && 交互终端 &&
 ///（配置文件不存在，或配置存在但未设置 provider——例如只运行过 config init）。
-pub fn is_first_run(opts_provider_is_none: bool, file: &crate::settings::ConfigFile) -> bool {
+pub(crate) fn is_first_run(
+    opts_provider_is_none: bool,
+    file: &crate::settings::ConfigFile,
+) -> bool {
     opts_provider_is_none && crate::runtime::interactive() && file.defaults.provider.is_none()
 }
 

@@ -232,7 +232,7 @@ pub fn unsupported_model_error(provider: AsrProvider, raw: &str) -> anyhow::Erro
 /// Qwen3 models the NPU backend offered until 2.0.0. Their OpenVINO exports
 /// (the dseditor repositories) never loaded in OpenVINO GenAI, so a saved
 /// choice of one is dropped in favour of the NPU default.
-pub fn retired_npu_model(raw: &str) -> bool {
+pub(crate) fn retired_npu_model(raw: &str) -> bool {
     let lower = raw.trim().to_ascii_lowercase();
     !lower.is_empty()
         && (matches!(model_alias(&lower), Some(id) if id == QWEN3_1_7B.id || id == QWEN3_0_6B.id)
@@ -358,7 +358,7 @@ pub enum OutputFormat {
 }
 
 /// A credential in `Debug` output: shows whether it is set, never its value.
-pub struct Redacted<'a>(pub &'a str);
+pub(crate) struct Redacted<'a>(pub &'a str);
 
 impl std::fmt::Debug for Redacted<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

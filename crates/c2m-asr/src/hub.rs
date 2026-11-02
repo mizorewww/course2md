@@ -32,7 +32,7 @@ fn ip_lookup_allowed() -> bool {
 }
 
 /// The endpoints for this process, resolved once on first use.
-pub fn endpoints() -> &'static Endpoints {
+pub(crate) fn endpoints() -> &'static Endpoints {
     static RESOLVED: OnceLock<Endpoints> = OnceLock::new();
     RESOLVED.get_or_init(|| {
         let configured = std::env::var("HF_ENDPOINT").ok();

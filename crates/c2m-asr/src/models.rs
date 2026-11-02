@@ -164,7 +164,7 @@ const LLAMA_MMPROJ: crate::download::Remote = crate::download::Remote {
 };
 
 /// 当前 llama GGUF 模型的身份字符串（checkpoint/日志用），与模型目录同源。
-pub fn llama_gguf_identity() -> String {
+pub(crate) fn llama_gguf_identity() -> String {
     format!("{LLAMA_MODEL_SLUG}-gguf")
 }
 
@@ -218,7 +218,7 @@ fn file_complete(path: &Path) -> bool {
 }
 
 /// 没有模型就下载；下载过程请保持进程运行。
-pub async fn ensure_llama_or_download(
+pub(crate) async fn ensure_llama_or_download(
     root: &Path,
     control: &crate::dispatch::TaskControl,
 ) -> Result<LlamaAsr> {

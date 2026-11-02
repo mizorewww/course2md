@@ -32,7 +32,7 @@ struct LoginTip(&'static str);
 
 /// Keep the original failure visible and recognisable: login is a suggested next
 /// step, not a diagnosis, so markers in `error` still answer to `downcast_ref`.
-pub fn with_bilibili_login_tip(url: &str, error: anyhow::Error) -> anyhow::Error {
+pub(crate) fn with_bilibili_login_tip(url: &str, error: anyhow::Error) -> anyhow::Error {
     if !is_bilibili_url(url) || error.downcast_ref::<LoginTip>().is_some() {
         return error;
     }

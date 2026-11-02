@@ -33,7 +33,7 @@ fn home() -> PathBuf {
 
 /// The directory holding `qwen3-speech`, the Apple models' cache: `QWEN3_CACHE_DIR`
 /// (or its older name), else `$HOME/Library/Caches`.
-pub fn apple_cache_root() -> PathBuf {
+pub(crate) fn apple_cache_root() -> PathBuf {
     env_path(["QWEN3_CACHE_DIR", "QWEN3_ASR_CACHE_DIR"])
         .unwrap_or_else(|| home().join("Library/Caches"))
 }
@@ -78,7 +78,7 @@ pub fn inspect(provider: AsrProvider, model: &str, root: &Path) -> Result<LocalM
 }
 
 /// 合并上次加载验证的结果（指纹与版本一致时才把 Cached 提升为 Loaded）。
-pub fn with_receipt(mut status: LocalModelStatus) -> LocalModelStatus {
+pub(crate) fn with_receipt(mut status: LocalModelStatus) -> LocalModelStatus {
     if let Ok(bytes) = fs::read(receipt_path(&status))
         && let Ok(receipt) = serde_json::from_slice::<Receipt>(&bytes)
     {
@@ -171,7 +171,7 @@ pub(crate) fn apple_parts(model: &str) -> Option<&'static [ApplePart]> {
 }
 
 /// Explicit roots make cache checks testable without inspecting the user's model directory.
-pub fn inspect_at(
+pub(crate) fn inspect_at(
     provider: AsrProvider,
     model: &str,
     root: &Path,
@@ -506,7 +506,11 @@ fn receipt_path(status: &LocalModelStatus) -> PathBuf {
         .join(format!("{}.json", hex(&Sha256::digest(key))))
 }
 
-pub fn record_result(status: &LocalModelStatus, loaded: bool, error: Option<String>) -> Result<()> {
+pub(crate) fn record_result(
+    status: &LocalModelStatus,
+    loaded: bool,
+    error: Option<String>,
+) -> Result<()> {
     let receipt = Receipt {
         fingerprint: status.fingerprint.clone(),
         loaded_at: loaded.then(|| {

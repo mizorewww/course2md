@@ -117,7 +117,7 @@ fn extractor_name(info: &ExtractorInfo) -> &str {
 
 /// Including the complete extractor ID preserves Bilibili `_pN` and interactive
 /// segment IDs. Display titles and URL tracking parameters are not identity.
-pub fn online_identity(extractor: &str, id: &str) -> Option<String> {
+pub(crate) fn online_identity(extractor: &str, id: &str) -> Option<String> {
     let extractor = extractor.trim().to_ascii_lowercase();
     let id = id.trim();
     if extractor.is_empty() || id.is_empty() {
@@ -539,7 +539,7 @@ pub async fn probe_video(url: &str, control: &crate::dispatch::TaskControl) -> R
 }
 
 /// Metadata and all available subtitle channels only; no media/AI requests.
-pub async fn probe_online(
+pub(crate) async fn probe_online(
     url: &str,
     control: &crate::dispatch::TaskControl,
 ) -> Result<OnlineProbe> {
@@ -621,7 +621,7 @@ pub fn exact_subtitle_language(key: &str) -> String {
 }
 
 /// Fetch only the confirmed online track, rejecting a changed video identity.
-pub async fn fetch_selected_subtitle(
+pub(crate) async fn fetch_selected_subtitle(
     url: &str,
     source_identity: &str,
     track: &crate::subtitle::SubtitleTrack,
@@ -802,7 +802,7 @@ fn bilibili_retry_delay_steps(retries: usize) -> Option<std::time::Duration> {
 }
 
 /// Machine consumers (the desktop task protocol) get desktop-specific guidance.
-pub fn bilibili_hint(error: anyhow::Error) -> anyhow::Error {
+pub(crate) fn bilibili_hint(error: anyhow::Error) -> anyhow::Error {
     if crate::progress::is_json() {
         error.context(BILIBILI_412_DESKTOP_HINT)
     } else {
@@ -813,12 +813,12 @@ pub fn bilibili_hint(error: anyhow::Error) -> anyhow::Error {
 /// Marker in the error chain: yt-dlp was rejected by Bilibili with HTTP 412.
 #[derive(Debug, thiserror::Error)]
 #[error("bilibili http 412")]
-pub struct Bilibili412;
+pub(crate) struct Bilibili412;
 
 pub const BILIBILI_412_DESKTOP_HINT: &str =
     "B 站暂时限制了访问。请稍后重试；若持续失败，请在设置的账号中重新登录 B 站，或改用本地视频。";
 
-pub const BILIBILI_412_HINT: &str = "B 站暂时限制了访问。请稍后重试；若持续失败，运行 course2md --login bilibili 重新登录，或导入本地视频。 / Bilibili is temporarily limiting access. Retry later; if it keeps failing, run course2md --login bilibili to log in again, or import a local video.";
+pub(crate) const BILIBILI_412_HINT: &str = "B 站暂时限制了访问。请稍后重试；若持续失败，运行 course2md --login bilibili 重新登录，或导入本地视频。 / Bilibili is temporarily limiting access. Retry later; if it keeps failing, run course2md --login bilibili to log in again, or import a local video.";
 
 /// What a failed yt-dlp run suggests. A stopped task did not fail, and a 412
 /// already carries its own advice, so neither is told to log in.

@@ -291,7 +291,7 @@ impl EmptyResults {
 }
 
 /// 清洗 Qwen3 转写中的提示词残留。
-pub fn sanitize_qwen_text(s: &str) -> String {
+pub(crate) fn sanitize_qwen_text(s: &str) -> String {
     let mut t = s.trim();
     if let Some(p) = t.find("</asr_text>") {
         t = t[..p].trim();
@@ -857,7 +857,7 @@ pub(crate) fn wav_duration(wav: &Path) -> Result<f64> {
 
 /// 最终送入 ASR 的分段：`start/end` 是事件时间（用于时间线），`cut_*` 是切音频范围（含静音填充）。
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Seg {
+pub(crate) struct Seg {
     pub start: f64,
     pub end: f64,
     pub cut_start: f64,
