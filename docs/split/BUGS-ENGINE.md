@@ -48,7 +48,7 @@ Status of `AUDIT.md` § Bugs, E1–E22, T1–T6 and T8, on branch `split/bugs`.
 
 ## Desktop side
 
-- `desktop/core/src/service_test.rs:255-263` reads the `llm::test_connection` chain as `course2md::llm::RequestError` (`Status(u16)`, `Transport(String)`), so a connection test keeps the status. Its remaining `ureq::Error` matches are the desktop's own requests, on the workspace's ureq 3.
+- `desktop/prefs/src/service_test.rs:255-263` reads the `llm::test_connection` chain as `c2m_ai::llm::RequestError` (`Status(u16)`, `Transport(String)`), so a connection test keeps the status. Its remaining `ureq::Error` matches are the desktop's own requests, on the workspace's ureq 3.
 - One `Cargo.lock` at the root covers the desktop since the workspaces merged.
 - `runtime::http_agent` and `runtime::receive` (now in `c2m-process`, public to the engine crates) have no desktop callers.
 

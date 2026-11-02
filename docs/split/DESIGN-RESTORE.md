@@ -74,7 +74,7 @@ accent tint. A straight swap would have painted the settings navigation one colo
 | H4 | Hero spacing | Title 20 above a 72 field; 24 to the hint | Title touches the label notch | restore | App-side; follows H1 |
 | H5 | Options panel | One card: header, hairline, quiet section titles and content inside. `home-preview` | Header card, then separate cards with titles outside | restore | It is one thing, and the skill says so; app-side |
 | H6 | Options group | 52 tall, hint with info icon below. `import_ui.rs` | 40 tall, hint as row support | restore | `ButtonSize::Medium`, app-side |
-| H7 | Speech choice in options | Outlined field with label, value and trailing CPU. `home` | Row with chevron and menu | keep new | Decision 14: a row opening a menu holds the same state and reflows better; the field radius restored by G8 where a field remains |
+| H7 | Speech choice in options | Outlined field with label, value and trailing CPU. `home` | Row with chevron and menu | restore | Owner ruling at acceptance round 1: choosing a value is an M3 `ExposedDropdown`, which overrides decision 14 here. Done with U1 (kit #18, #19) |
 | H8 | Video card | Cover radius 18 with 16 inset, filled movie glyph, duration chip, larger actions. `import_ui.rs:3247`, `home-preview` | Radius from `ListLeading`, outline glyph | restore | App-side |
 | H9 | Start action | `ButtonSize::Medium` filled, with `Outlined` 更换视频 beside it. `home-preview` | Small | restore | The region's main action lost its weight; app-side |
 | H10 | Reading state | Skeleton of the card: cover block and two bars. `import_ui.rs:1226`, `home-reading` | One bar | restore | The result replaced it in place; app-side |
@@ -143,7 +143,7 @@ accent tint. A straight swap would have painted the settings navigation one colo
 | S10 | Theme cards | Overline role above the palette name. `set-appearance` | Role as title, name as support | restore | App-side |
 | S11 | Palette picker | Four across, wide dialog, selected caption tonal with ring. `appearance_ui.rs:149`, `dlg-palette` | Three across, selected caption gray | restore | `.width` and role, app-side |
 | S12 | Recognition mode | Row with 「自动」 chip. `set-generation` | Two-option group | keep new | Decision 14: two short peers |
-| S13 | AI service choice | Outlined field with icon. `set-generation-2` | Row and menu | keep new | Same as H7 |
+| S13 | AI service choice | Outlined field with icon. `set-generation-2` | Row and menu | restore | Same as H7 |
 | S14 | Service editor | Inline page with breadcrumb. `svc-ai` | Dialog | keep new | The baseline used the same form in a dialog already (`svc-dialog`); one form, one place |
 | S15 | Service type | Dropdown with description. `svc-dialog` | Radio tiles | keep new | Decision 14: few options that each need an explanation; retains the description |
 
@@ -170,7 +170,7 @@ A `restore` verdict states the intent. These are not there yet:
 
 | # | What remains |
 | --- | --- |
-| R6 | The reader bar has its breadcrumb over the note title again, in a 64 bar rather than the baseline's 56; centring is not yet confirmed in the running app (acceptance U15 to U25) |
+| R6 | The reader bar is 64 tall rather than the baseline's 56 (`TITLE_BAR_HEIGHT` in `reader_ui.rs`) |
 
 ## Finished after the audit
 
@@ -207,5 +207,6 @@ The rows above state the verdict; this says what the last pass did.
 | L1 | Sidebar rows are 44 tall pills (`ListDensity::Minus3`, `ListItem::pill`, kit #21 and #26); the drop outline is drawn inside the row |
 | R9 | The contents are flat pills on what they sit on (kit #26) |
 | S11 | The palette picker is full width up to 920 (kit #23), four previews across; the cards are a kit `CardGroup` whose selected card has the secondary outline, tint and check (kit #22) |
-| U1 | Every value choice is an outlined `ExposedDropdown` at its row's end, named by the row (kit #18), with the caller's menu (kit #19) |
+| U1 | Every value choice is an outlined `ExposedDropdown` at its row's end, named by the row (kit #18), with the caller's menu (kit #19); this restores H7 and S13 |
+| R6 | The breadcrumb sits over the note title again, and both centre on the back button within 1pt at 1600 wide (U20); the bar's height is under Not finished |
 | G25 | The image viewer's frame is the kit's outlined `CardSurface`; the workbench's drop zones are the kit's `drop_target` (kit #24) |

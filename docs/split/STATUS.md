@@ -17,8 +17,12 @@ and kit #28 (a menu opens above its field when there is no room below), ready fo
 `crates/`; desktop 46,867 (`desktop` 29,451, `prefs` 4,454, `store` 6,112, `tasks` 3,653, `reader-core` 946,
 `accounts` 493, `ui` 1,758).
 
-Secondary metric (decision 13): `gpui-kit-material` PRs #1 to #27 add about 3,950 net Rust lines (upper bound, as
-counted at `5863f22` plus the then-open PRs); `model-fetch`, `slide-detect` and `subtitle-parse` hold 2,343.
+Secondary metric (decision 13): the merged `gpui-kit-material` PRs #1 to #27 add **5,677** net Rust lines
+(`gh pr view <n> --json files`, `.rs` files only): 2,833 in tests and the gallery (`tests/`, `gallery/`, `*_tests.rs`)
+and 2,844 elsewhere. The 2,844 still holds any inline `#[cfg(test)]` module. #28, open, would add 454 (321 of them
+tests). `model-fetch`, `slide-detect` and `subtitle-parse` hold 2,343. Across all the owner's repositories the
+net reduction is about 11,750 − 2,343 − 2,844 = **6,563** lines (−8.4% of the baseline), beside the −15.0% inside this
+repository.
 
 The reduction was re-estimated by reading every desktop file over 400 lines and every engine crate (finding P1):
 about 3,500 lines looked removable with every feature kept. Done by chunk, the reductions came to engine and
