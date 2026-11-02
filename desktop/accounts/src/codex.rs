@@ -30,7 +30,6 @@ pub enum CodexWork {
 
 #[derive(Default)]
 pub struct CodexUi {
-    pub generation: u64,
     pub status: Option<LoginStatus>,
     pub working: Option<CodexWork>,
     /// The visible result of the last action; the bool marks a failure (shown in the danger color).
@@ -40,18 +39,13 @@ pub struct CodexUi {
 }
 
 impl CodexUi {
-    pub fn begin(&mut self, surface: CodexSurface, work: CodexWork) -> u64 {
-        self.generation = self.generation.wrapping_add(1);
+    pub fn begin(&mut self, surface: CodexSurface, work: CodexWork) {
         self.surface = Some(surface);
         self.working = Some(work);
         // A status check follows other actions and must not hide their result.
         if work != CodexWork::Checking {
             self.notice = None;
         }
-        self.generation
-    }
-    pub fn current(&self, generation: u64, work: CodexWork) -> bool {
-        self.generation == generation && self.working == Some(work)
     }
     pub fn busy(&self) -> bool {
         self.working.is_some()

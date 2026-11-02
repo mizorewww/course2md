@@ -12,8 +12,6 @@ impl Desktop {
             return;
         }
         self.ollama.working = true;
-        self.ollama.generation = self.ollama.generation.wrapping_add(1);
-        let generation = self.ollama.generation;
         // The engine error names `ollama serve`; the page offers its own action.
         let task = crate::spawn_blocking_io(|| {
             course2md::login::ollama::discover_for_desktop()
@@ -24,9 +22,6 @@ impl Desktop {
                 .await
                 .unwrap_or_else(|| Err(crate::interrupted().to_owned()));
             let _ = this.update(cx, |this, cx| {
-                if this.ollama.generation != generation {
-                    return;
-                }
                 this.ollama.working = false;
                 this.ollama.status = Some(result);
                 this.ollama_apply_catalog(cx);

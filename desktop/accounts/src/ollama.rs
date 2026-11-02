@@ -1,7 +1,6 @@
 //! What local Ollama discovery has found.
 #[derive(Default)]
 pub struct OllamaUi {
-    pub generation: u64,
     pub working: bool,
     /// Ok((address, models)) when found; Err(explanation) when not; None before the first check.
     pub status: Option<Result<(String, Vec<String>), String>>,
