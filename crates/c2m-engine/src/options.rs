@@ -640,7 +640,12 @@ mod tests {
 
     #[test]
     fn template_writes_lists_as_2_0_1_did() {
-        assert!(template().contains("\n#formats = [\"md\", \"html\"]\n"));
+        // Line by line: a Windows checkout gives the template CRLF endings.
+        assert!(
+            template()
+                .lines()
+                .any(|line| line == "#formats = [\"md\", \"html\"]")
+        );
     }
 
     #[test]
