@@ -233,8 +233,8 @@ impl Desktop {
             &self.value(Field::Source, cx),
             !self.onboarding.active
                 && matches!(self.page, Page::New)
-                && self.online()
-                && (self.import.preview_error.is_some() || self.subtitle_attention_required()),
+                && self.online(cx)
+                && (self.import.preview_error.is_some() || self.subtitle_attention_required(cx)),
         )
     }
 
@@ -283,8 +283,8 @@ impl Desktop {
         }
         self.account.retry_source = (!self.onboarding.active
             && matches!(self.page, Page::New)
-            && self.online()
-            && (self.import.preview_error.is_some() || self.subtitle_attention_required())
+            && self.online(cx)
+            && (self.import.preview_error.is_some() || self.subtitle_attention_required(cx))
             && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx)))
         .then(|| {
             (

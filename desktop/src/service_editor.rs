@@ -3,15 +3,18 @@ use super::*;
 use desktop_prefs::service_binding::*;
 
 impl Desktop {
-    pub fn selected_task_service(&self, purpose: ServicePurpose) -> Option<ServiceVersion> {
-        let fixed = self
-            .workspace
-            .as_ref()
-            .and_then(|w| w.state.draft())
-            .and_then(|draft| match purpose {
-                ServicePurpose::Speech => draft.asr_service.clone(),
-                ServicePurpose::Ai => draft.ai_service.clone(),
-            });
+    pub fn selected_task_service(
+        &self,
+        purpose: ServicePurpose,
+        cx: &App,
+    ) -> Option<ServiceVersion> {
+        let fixed =
+            self.workspace(cx)
+                .and_then(|w| w.state.draft())
+                .and_then(|draft| match purpose {
+                    ServicePurpose::Speech => draft.asr_service.clone(),
+                    ServicePurpose::Ai => draft.ai_service.clone(),
+                });
         let defaults = self.preferences.default_refs();
         let id = fixed.or(match purpose {
             ServicePurpose::Speech => defaults.asr,
@@ -31,7 +34,7 @@ impl Desktop {
     ) -> (Option<ServiceVersion>, Option<SharedString>, MaterialMenu) {
         let refs = self.preferences.default_refs();
         let current = if current_task {
-            self.selected_task_service(purpose).map(|v| v.id)
+            self.selected_task_service(purpose, cx).map(|v| v.id)
         } else {
             match purpose {
                 ServicePurpose::Speech => refs.asr,
@@ -261,8 +264,7 @@ impl Desktop {
             );
         }
         let bound = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|w| w.state.draft())
             .is_some_and(|draft| match purpose {
                 ServicePurpose::Speech => draft.asr_service.is_some(),
@@ -311,21 +313,20 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> bool {
         let result = if current_task {
-            self.workspace
-                .as_mut()
-                .ok_or_else(|| anyhow!(course2md::tr!("当前笔记信息暂时不可用")))
-                .and_then(|workspace| {
-                    workspace.transaction(|state| {
-                        let draft = state
-                            .draft_mut()
-                            .context(course2md::tr!("找不到当前笔记"))?;
-                        match purpose {
-                            ServicePurpose::Speech => draft.asr_service = id,
-                            ServicePurpose::Ai => draft.ai_service = id,
-                        };
-                        Ok(())
-                    })
+            self.with_workspace(cx, |workspace| {
+                workspace.transaction(|state| {
+                    let draft = state
+                        .draft_mut()
+                        .context(course2md::tr!("找不到当前笔记"))?;
+                    match purpose {
+                        ServicePurpose::Speech => draft.asr_service = id,
+                        ServicePurpose::Ai => draft.ai_service = id,
+                    };
+                    Ok(())
                 })
+            })
+            .ok_or_else(|| anyhow!(course2md::tr!("当前笔记信息暂时不可用")))
+            .and_then(|saved| saved)
         } else {
             self.preferences.set_default_service(purpose, id.as_deref())
         };
@@ -357,15 +358,14 @@ impl Desktop {
             return;
         }
         let Some(target) = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|w| w.state.draft())
             .map(|d| d.id.clone())
         else {
             return;
         };
         let draft = self
-            .selected_task_service(purpose)
+            .selected_task_service(purpose, cx)
             .filter(|version| {
                 !self
                     .preferences
@@ -383,8 +383,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let Some(task) = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| workspace.state.tasks.iter().find(|task| task.id == task_id))
         else {
             self.workspace_error =
@@ -1215,8 +1214,7 @@ impl Desktop {
         }
         let config = editor.form.current_draft(cx).configuration().ok()?;
         let uses_vision = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| {
                 workspace
                     .state
@@ -1390,10 +1388,7 @@ impl Desktop {
         }
         if let Some(target) = target {
             let binding = self
-                .workspace
-                .as_mut()
-                .ok_or_else(|| anyhow!(course2md::tr!("当前笔记信息暂时不可用")))
-                .and_then(|workspace| {
+                .with_workspace(cx, |workspace| {
                     workspace.transaction(|state| {
                         let draft = state
                             .drafts
@@ -1409,7 +1404,9 @@ impl Desktop {
                         };
                         Ok(())
                     })
-                });
+                })
+                .ok_or_else(|| anyhow!(course2md::tr!("当前笔记信息暂时不可用")))
+                .and_then(|saved| saved);
             if let Err(error) = binding {
                 if let Some(editor) = &mut self.settings_ui.editor {
                     editor.pending_binding = Some(version);
@@ -1538,7 +1535,7 @@ impl Desktop {
             .map(|v| v.id.clone())
             .collect();
         let uses = |id: &Option<String>| id.as_ref().is_some_and(|id| version_ids.contains(id));
-        let affected = self.workspace.as_ref().map_or(0, |w| {
+        let affected = self.workspace(cx).map_or(0, |w| {
             w.state
                 .tasks
                 .iter()
@@ -1630,15 +1627,18 @@ impl Desktop {
         self.settings_options = ConversionOptions::from_config(&self.config);
         self.desktop_settings = self.preferences.application().desktop.clone();
         let defaults = self.settings_options.clone();
-        if let Some(workspace) = &mut self.workspace {
-            match workspace.transaction(|state| {
+        let inherited = self.with_workspace(cx, |workspace| {
+            workspace.transaction(|state| {
                 for draft in &mut state.drafts {
                     if draft.submitted_task.is_none() {
                         draft.inherit(&defaults);
                     }
                 }
                 Ok(())
-            }) {
+            })
+        });
+        if let Some(result) = inherited {
+            match result {
                 Ok(()) => {
                     if self.preference_defaults_pending {
                         self.preference_defaults_pending = false;

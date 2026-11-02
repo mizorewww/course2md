@@ -8,5 +8,6 @@ pub mod locations;
 pub mod notes;
 pub mod organize;
 pub mod page;
+pub mod records;
 pub mod storage;
 pub mod workspace;

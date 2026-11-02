@@ -130,7 +130,7 @@ impl Desktop {
             self.opened.stop_reading();
         }
         let input = self.value(Field::Source, cx);
-        if self.draft().is_some_and(|draft| draft.input != input) {
+        if self.draft(cx).is_some_and(|draft| draft.input != input) {
             if !self.prepare_next_import(&input, window, cx) {
                 return;
             }
@@ -139,14 +139,14 @@ impl Desktop {
         }
         if input.is_empty() {
             self.import.source_validation = Some(
-                if self.online() {
+                if self.online(cx) {
                     course2md::tr!("先粘贴视频链接")
                 } else {
                     course2md::tr!("先选择一个视频")
                 }
                 .into(),
             );
-            if self.online() {
+            if self.online(cx) {
                 self.inputs[&Field::Source].update(cx, |input, cx| input.focus(window, cx));
             }
             cx.notify();
@@ -184,7 +184,7 @@ impl Desktop {
             return;
         };
         let reading = self.import.reading();
-        let source_mode = self.task_options().source_mode;
+        let source_mode = self.task_options(cx).source_mode;
         if generation == self.import.preview_generation
             && !reading
             && let Some(source) = &mut self.import.source_preview
@@ -205,10 +205,10 @@ impl Desktop {
             current_revision: self.import.preview_generation,
             reading,
             has_source: self.import.source_preview.is_some(),
-            needs_text_choice: self.subtitle_attention_required(),
+            needs_text_choice: self.subtitle_attention_required(cx),
             environment_ready: self.environment.is_some(),
-            library_ready: !self.library.loading,
-            existing_note: self.existing_source_note().is_some(),
+            library_ready: !self.library(cx).loading,
+            existing_note: self.existing_source_note(cx).is_some(),
         }) {
             ConversionGate::Wait => cx.notify(),
             ConversionGate::Stop => {
@@ -219,15 +219,14 @@ impl Desktop {
         }
     }
 
-    fn import_base_config(&self) -> course2md::settings::ConfigFile {
-        self.workspace
-            .as_ref()
+    fn import_base_config(&self, cx: &App) -> course2md::settings::ConfigFile {
+        self.workspace(cx)
             .and_then(|workspace| workspace.state.draft())
             .and_then(|draft| draft.base_config.clone())
             .unwrap_or_else(|| self.preferences.defaults_config())
     }
 
-    fn subtitle_read_is_current(&self, read: &SubtitleRead) -> bool {
+    fn subtitle_read_is_current(&self, read: &SubtitleRead, cx: &App) -> bool {
         self.import.subtitle_generation == read.generation
             && self.import.preview_generation == read.source_generation
             && self
@@ -236,8 +235,7 @@ impl Desktop {
                 .as_ref()
                 .is_some_and(|source| source.identity == read.identity)
             && read.input.as_ref().is_none_or(|(id, revision)| {
-                self.workspace
-                    .as_ref()
+                self.workspace(cx)
                     .is_some_and(|workspace| workspace.state.matches_input(id, *revision))
             })
     }
@@ -271,8 +269,7 @@ impl Desktop {
             source_generation: self.import.preview_generation,
             identity: source.identity.clone(),
             input: self
-                .workspace
-                .as_ref()
+                .workspace(cx)
                 .and_then(|workspace| workspace.state.draft())
                 .map(|draft| (draft.id.clone(), draft.revision)),
         };
@@ -282,7 +279,7 @@ impl Desktop {
             let result = task.await.unwrap_or_else(lost);
             let _ = this.update(cx, |this, cx| {
                 this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
-                if !this.subtitle_read_is_current(&read) {
+                if !this.subtitle_read_is_current(&read, cx) {
                     return;
                 }
                 this.import.subtitle_loading = false;
@@ -547,7 +544,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.online() {
+        if self.online(cx) {
             self.switch_source_kind(false, window, cx);
         }
         match files {
@@ -581,11 +578,11 @@ impl Desktop {
         }
     }
 
-    pub(super) fn subtitle_attention_required(&self) -> bool {
+    pub(super) fn subtitle_attention_required(&self, cx: &App) -> bool {
         self.import.subtitle_loading
             || self.import.subtitle_error.is_some()
             || self.import.source_preview.as_ref().is_some_and(|source| {
-                subtitle_needs_confirmation(source, self.task_options().source_mode)
+                subtitle_needs_confirmation(source, self.task_options(cx).source_mode)
             })
     }
 
@@ -598,12 +595,12 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let saved = self.update_task_options(edit, cx);
-        if !self.task_options().uses_cloud_provider()
+        if !self.task_options(cx).uses_cloud_provider()
             // The options panel shows this model's status.
-            && (self.import_uses_speech()
-                || self.task_options().source_mode != TranscriptSource::Subtitle)
+            && (self.import_uses_speech(cx)
+                || self.task_options(cx).source_mode != TranscriptSource::Subtitle)
         {
-            let (provider, model, root) = self.import_model_request();
+            let (provider, model, root) = self.import_model_request(cx);
             self.ensure_model_diagnostic(provider, Some(&model), &root, cx);
         }
         if saved {
@@ -614,7 +611,7 @@ impl Desktop {
 
     /// The link and what can be done with it, or the local file in its place.
     fn source_input(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let local = (!self.online()).then(|| self.local_source_input(cx));
+        let local = (!self.online(cx)).then(|| self.local_source_input(cx));
         if let Some(local) = local {
             return v_flex()
                 .w_full()
@@ -901,21 +898,24 @@ impl Desktop {
         )
     }
 
-    fn candidate_has_note(&self, candidate: &source::SourceCandidate) -> bool {
+    fn candidate_has_note(&self, candidate: &source::SourceCandidate, cx: &App) -> bool {
         candidate
             .identity
             .as_deref()
-            .is_some_and(|identity| self.notes_for_source(identity).next().is_some())
+            .is_some_and(|identity| self.notes_for_source(identity, cx).next().is_some())
     }
 
     /// Candidates that can be checked for a batch: identified, without a note yet.
-    fn selectable_candidates(&self) -> impl Iterator<Item = &source::SourceCandidate> {
-        let batch = self.online();
+    fn selectable_candidates<'a>(
+        &'a self,
+        cx: &'a App,
+    ) -> impl Iterator<Item = &'a source::SourceCandidate> {
+        let batch = self.online(cx);
         self.import
             .source_candidates
             .iter()
             .filter(move |candidate| {
-                batch && candidate.identity.is_some() && !self.candidate_has_note(candidate)
+                batch && candidate.identity.is_some() && !self.candidate_has_note(candidate, cx)
             })
     }
 
@@ -923,10 +923,10 @@ impl Desktop {
     /// with a confirmed identity can be checked; the rest, and dropped local files
     /// (a local identity needs a content hash), open one at a time.
     fn candidate_list(&self, title: &str, cx: &mut Context<Self>) -> Stateful<Div> {
-        let batch = self.online();
-        let selectable = self.selectable_candidates().count();
+        let batch = self.online(cx);
+        let selectable = self.selectable_candidates(cx).count();
         let selectable_selected = self
-            .selectable_candidates()
+            .selectable_candidates(cx)
             .filter(|candidate| self.import.selected_candidates.contains(&candidate.input))
             .count();
         // A checked candidate that already has a note gets a new version; say so beside the action.
@@ -935,7 +935,7 @@ impl Desktop {
             .source_candidates
             .iter()
             .filter(|candidate| {
-                self.candidate_has_note(candidate)
+                self.candidate_has_note(candidate, cx)
                     && self.import.selected_candidates.contains(&candidate.input)
             })
             .count();
@@ -990,7 +990,7 @@ impl Desktop {
                                         this.import.selected_candidates.clear();
                                     } else {
                                         let inputs: Vec<String> = this
-                                            .selectable_candidates()
+                                            .selectable_candidates(cx)
                                             .map(|candidate| candidate.input.clone())
                                             .collect();
                                         this.import.selected_candidates.extend(inputs);
@@ -1071,7 +1071,7 @@ impl Desktop {
             .supporting(duration.unwrap_or_else(|| candidate.input.clone()));
         if batch && candidate.identity.is_some() {
             let selected = self.import.selected_candidates.contains(&input);
-            row.when(self.candidate_has_note(candidate), |row| {
+            row.when(self.candidate_has_note(candidate, cx), |row| {
                 row.trailing_text(course2md::tr!("已有笔记"))
             })
             .trailing(ListTrailing::Checkbox(selected))
@@ -1129,7 +1129,7 @@ impl Desktop {
                                     })),
                             )
                             .when(
-                                self.online()
+                                self.online(cx)
                                     && needs_login
                                     && course2md::auth::is_bilibili_url(
                                         &self.value(Field::Source, cx),
@@ -1152,7 +1152,7 @@ impl Desktop {
                                 },
                             )
                             .when(
-                                self.online()
+                                self.online(cx)
                                     && needs_login
                                     && course2md::auth::is_youtube_url(
                                         &self.value(Field::Source, cx),
@@ -1235,7 +1235,7 @@ impl Desktop {
             .gap(rem(8.))
             .items_center()
             .flex_wrap()
-            .when(self.online(), |row| {
+            .when(self.online(cx), |row| {
                 row.child(ui::tip_button(
                     "reread-source",
                     symbols::refresh(),
@@ -1258,7 +1258,7 @@ impl Desktop {
                             .tone(ButtonTone::Accent)
                             .child(course2md::tr!("更换视频"))
                             .on_click(cx.listener(|this, _, window, cx| {
-                                if this.online() {
+                                if this.online(cx) {
                                     // A new link replaces this preview once it is read.
                                     this.inputs[&Field::Source]
                                         .update(cx, |input, cx| input.focus(window, cx));
@@ -1378,8 +1378,8 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let speech = self.import_uses_speech();
-        let mode = self.task_options().source_mode;
+        let speech = self.import_uses_speech(cx);
+        let mode = self.task_options(cx).source_mode;
         // A read error of this input, or the source's own failed read.
         let read_error = self.import.subtitle_error.as_deref();
         let source_failure = match &source.subtitles {
@@ -1494,7 +1494,7 @@ impl Desktop {
 
     /// The tracks, speech recognition, and the ways to get more subtitles.
     fn text_source_menu(&self, source: &source::Source, cx: &mut Context<Self>) -> MaterialMenu {
-        let speech = self.import_uses_speech();
+        let speech = self.import_uses_speech(cx);
         let cached = source
             .selected_subtitle
             .as_ref()
@@ -1669,7 +1669,7 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> ui::FieldTable {
-        let mode = self.task_options().source_mode;
+        let mode = self.task_options(cx).source_mode;
         let hint = match mode {
             TranscriptSource::Subtitle => course2md::tr!("只使用视频自带的字幕"),
             TranscriptSource::Asr => course2md::tr!("将使用语音识别"),
@@ -1727,9 +1727,9 @@ impl Desktop {
     /// AI 处理: one switch per step, then the translation target and the service
     /// the text is sent to.
     fn import_ai_options(&self, window: &mut Window, cx: &mut Context<Self>) -> ui::FieldTable {
-        let custom_rule = self.task_options().llm
+        let custom_rule = self.task_options(cx).llm
             && self
-                .import_base_config()
+                .import_base_config(cx)
                 .llm
                 .prompt
                 .as_ref()
@@ -1741,7 +1741,7 @@ impl Desktop {
         ]
         .into_iter()
         .map(|option| {
-            let vision_off = option == ConversionAiOption::Vision && !self.task_options().llm;
+            let vision_off = option == ConversionAiOption::Vision && !self.task_options(cx).llm;
             let hint = if option == ConversionAiOption::Proofread && custom_rule {
                 course2md::tr!("使用自定义校对规则")
             } else if vision_off {
@@ -1753,7 +1753,7 @@ impl Desktop {
             ui::Field::switch(
                 format!("import-ai-option-{option:?}"),
                 conversion_ai_option_label(option),
-                conversion_ai_option_enabled(self.task_options(), option),
+                conversion_ai_option_enabled(self.task_options(cx), option),
                 cx.listener(move |this, enabled: &bool, _, cx| {
                     let enabled = *enabled;
                     this.set_task_option(|o| apply_conversion_ai_option(o, option, enabled), cx);
@@ -1766,7 +1766,7 @@ impl Desktop {
         // Bilingual translation is a per-task choice; the global default is only
         // the starting value inherited by this input.
         let translated = self
-            .task_options()
+            .task_options(cx)
             .translate
             .as_deref()
             .and_then(course2md::language::target);
@@ -1797,13 +1797,13 @@ impl Desktop {
                 ""
             }),
         );
-        if self.task_uses_ai() {
+        if self.task_uses_ai(cx) {
             let consequence = self
-                .selected_task_service(ServicePurpose::Ai)
+                .selected_task_service(ServicePurpose::Ai, cx)
                 .map(|selected| {
                     course2md::tr!(
                         "{}会发送到 {}",
-                        if self.task_options().llm && self.task_options().vision {
+                        if self.task_options(cx).llm && self.task_options(cx).vision {
                             course2md::tr!("文字及对应截图")
                         } else {
                             course2md::tr!("文字")
@@ -1848,6 +1848,7 @@ impl Desktop {
                         .reset_ai_overrides(&defaults);
                     Ok(())
                 },
+                cx,
             )
             .is_some()
         {
@@ -1859,18 +1860,18 @@ impl Desktop {
     /// Where speech recognition runs, and the service or model that takes.
     fn import_speech_options(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<ui::Field> {
         use course2md::config::AsrProvider;
-        let cloud = self.task_options().uses_cloud_provider();
-        let (provider, model, root) = self.import_model_request();
+        let cloud = self.task_options(cx).uses_cloud_provider();
+        let (provider, model, root) = self.import_model_request(cx);
         let shown = if cloud {
             course2md::tr!("语音识别服务").to_owned()
         } else {
             format!(
                 "{} · {}",
                 course2md::tr!("本机 · {}", course2md::config::model_label(&model)),
-                self.local_engine_name()
+                self.local_engine_name(cx)
             )
         };
-        let current = self.task_options().provider;
+        let current = self.task_options(cx).provider;
         let locations: Vec<_> = crate::providers()
             .iter()
             .filter_map(|(id, label)| {
@@ -1928,55 +1929,56 @@ impl Desktop {
         vec![location, route]
     }
 
-    fn import_uses_speech(&self) -> bool {
+    fn import_uses_speech(&self, cx: &App) -> bool {
         self.import
             .source_preview
             .as_ref()
-            .is_some_and(|source| uses_speech(source, self.task_options().source_mode))
+            .is_some_and(|source| uses_speech(source, self.task_options(cx).source_mode))
     }
 
     /// Proofreading, a summary or a bilingual translation sends text to the AI service.
-    fn task_uses_ai(&self) -> bool {
-        self.task_options().llm
-            || self.task_options().summarize
+    fn task_uses_ai(&self, cx: &App) -> bool {
+        self.task_options(cx).llm
+            || self.task_options(cx).summarize
             || self
-                .task_options()
+                .task_options(cx)
                 .translate
                 .as_deref()
                 .and_then(course2md::language::target)
                 .is_some()
     }
 
-    fn missing_import_service(&self) -> Option<ServicePurpose> {
-        let separate_subtitle = self.task_options().source_mode != TranscriptSource::Asr
+    fn missing_import_service(&self, cx: &App) -> Option<ServicePurpose> {
+        let separate_subtitle = self.task_options(cx).source_mode != TranscriptSource::Asr
             && self
-                .workspace
-                .as_ref()
+                .workspace(cx)
                 .and_then(|workspace| workspace.state.draft())
                 .is_some_and(|draft| draft.subtitle.is_some());
         [
             (
                 ServicePurpose::Speech,
-                self.task_options().uses_cloud_provider()
-                    && self.import_uses_speech()
+                self.task_options(cx).uses_cloud_provider()
+                    && self.import_uses_speech(cx)
                     && !separate_subtitle,
             ),
-            (ServicePurpose::Ai, self.task_uses_ai()),
+            (ServicePurpose::Ai, self.task_uses_ai(cx)),
         ]
         .into_iter()
         .find_map(|(purpose, required)| {
             (required
-                && self.selected_task_service(purpose).is_none_or(|version| {
-                    self.preferences
-                        .service_retired_in_snapshot(&version.service_id)
-                }))
+                && self
+                    .selected_task_service(purpose, cx)
+                    .is_none_or(|version| {
+                        self.preferences
+                            .service_retired_in_snapshot(&version.service_id)
+                    }))
             .then_some(purpose)
         })
     }
 
-    fn import_model_request(&self) -> (course2md::config::AsrProvider, String, PathBuf) {
-        let provider = self.actual_local_provider();
-        let mut config = self.import_base_config();
+    fn import_model_request(&self, cx: &App) -> (course2md::config::AsrProvider, String, PathBuf) {
+        let provider = self.actual_local_provider(cx);
+        let mut config = self.import_base_config(cx);
         // The plan builders' rule: an empty model takes the engine's default (NPU resolves its own).
         desktop_tasks::plan::fill_default_asr_model(&mut config, provider);
         let model = config.defaults.asr_model.unwrap_or_default();
@@ -1984,25 +1986,24 @@ impl Desktop {
         (provider, model, root)
     }
 
-    fn actual_local_provider(&self) -> course2md::config::AsrProvider {
+    fn actual_local_provider(&self, cx: &App) -> course2md::config::AsrProvider {
         use course2md::config::AsrProvider;
-        self.task_options()
+        self.task_options(cx)
             .provider
             .filter(|provider| *provider != AsrProvider::Api)
             .unwrap_or_else(|| self.recommended_local_provider())
     }
 
-    fn local_engine_name(&self) -> &'static str {
-        crate::provider_label(Some(self.actual_local_provider()))
+    fn local_engine_name(&self, cx: &App) -> &'static str {
+        crate::provider_label(Some(self.actual_local_provider(cx)))
     }
 
     /// 保存: the library, the note's name and folder, extra exports and
     /// whether the original video is kept.
     fn import_destination(&self, cx: &mut Context<Self>) -> ui::FieldTable {
-        let current = self.draft().map(|draft| draft.library_id.clone());
+        let current = self.draft(cx).map(|draft| draft.library_id.clone());
         let libraries = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .map(|workspace| workspace.state.libraries.clone())
             .unwrap_or_default();
         let library_name = libraries
@@ -2085,7 +2086,7 @@ impl Desktop {
                 ChipSetItem::new(
                     ("import-export-item", index),
                     FilterChip::new(("import-export", index), label)
-                        .selected(self.task_options().formats[index])
+                        .selected(self.task_options(cx).formats[index])
                         .on_toggle(cx.listener(move |this, on: &bool, _, cx| {
                             let on = *on;
                             this.update_task_options(|o| o.formats[index] = on, cx);
@@ -2098,12 +2099,12 @@ impl Desktop {
             course2md::tr!("同时导出"),
             ChipSet::new("import-export-chips", course2md::tr!("同时导出")).items(chips),
         ));
-        if self.online() {
+        if self.online(cx) {
             fields.push(
                 ui::Field::switch(
                     "import-keep-video",
                     course2md::tr!("保留原视频"),
-                    self.task_options().keep_video,
+                    self.task_options(cx).keep_video,
                     cx.listener(|this, value: &bool, _, cx| {
                         let value = *value;
                         this.update_task_options(|o| o.keep_video = value, cx);
@@ -2121,13 +2122,17 @@ impl Desktop {
             return;
         }
         if self
-            .transact(course2md::tr!("保存位置尚未更新：{}"), |state| {
-                if let Some(draft) = state.draft_mut() {
-                    draft.library_id = id;
-                    draft.folder = None;
-                }
-                Ok(())
-            })
+            .transact(
+                course2md::tr!("保存位置尚未更新：{}"),
+                |state| {
+                    if let Some(draft) = state.draft_mut() {
+                        draft.library_id = id;
+                        draft.folder = None;
+                    }
+                    Ok(())
+                },
+                cx,
+            )
             .is_some()
         {
             self.advance_conversion_when_ready(cx);
@@ -2167,8 +2172,8 @@ impl Desktop {
     /// The submitted task that owns the current input: still in flight, or
     /// shown in the video card's place (its result opening, or a result that
     /// needs attention). Its options were fixed when it was submitted.
-    fn owning_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
-        let state = &self.workspace.as_ref()?.state;
+    fn owning_task<'a>(&'a self, cx: &'a App) -> Option<&'a workspace::TaskRecord> {
+        let state = &self.workspace(cx)?.state;
         let input = self.value(Field::Source, cx);
         state
             .draft()
@@ -2265,7 +2270,7 @@ impl Desktop {
                     .min_w_0()
                     .gap(rem(12.))
                     .p(ITEM_INSET)
-                    .children(self.task_plan_rows(task, true)),
+                    .children(self.task_plan_rows(task, true, cx)),
                 None => v_flex()
                     .w_full()
                     .min_w_0()
@@ -2287,11 +2292,10 @@ impl Desktop {
             .child(motion::disclosure("generation-options-body", open, body))
     }
 
-    fn existing_source_note(&self) -> Option<&Course> {
+    fn existing_source_note<'a>(&self, cx: &'a App) -> Option<&'a Course> {
         let source = self.import.source_preview.as_ref()?;
         let preferred = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| {
                 workspace
                     .state
@@ -2299,17 +2303,17 @@ impl Desktop {
                     .and_then(|draft| workspace.state.library(&draft.library_id))
             })
             .map(|library| library.root.as_path());
-        self.library.preferred_note(&source.identity, preferred)
+        self.library(cx).preferred_note(&source.identity, preferred)
     }
 
     fn can_start_input(&self, cx: &App) -> bool {
         // While candidates show, batch and single actions live in the list's own action area; the input row's
         // 「开始转换」 would always fail for a collection link, so two primary actions never share the screen.
         self.import.source_collection_title.is_none()
-            && (self.online() || !self.value(Field::Source, cx).is_empty())
+            && (self.online(cx) || !self.value(Field::Source, cx).is_empty())
             && self.import.preview_error.is_none()
-            && self.existing_source_note().is_none()
-            && !self.has_matching_task()
+            && self.existing_source_note(cx).is_none()
+            && !self.has_matching_task(cx)
             && self.current_input_task(cx).is_none_or(|task| {
                 matches!(
                     task.state,
@@ -2327,21 +2331,24 @@ impl Desktop {
 
     /// Whether the plan shown has a task already doing its work: then 查看任务 is the
     /// one way forward, and starting again would only lead there.
-    fn has_matching_task(&self) -> bool {
+    fn has_matching_task(&self, cx: &App) -> bool {
         self.import
             .preview_plan_cache
             .as_ref()
             .and_then(|(_, plan)| plan.as_ref().ok())
-            .is_some_and(|plan| self.matching_task(plan).is_some())
+            .is_some_and(|plan| self.matching_task(plan, cx).is_some())
     }
 
-    pub(super) fn current_input_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
-        let state = &self.workspace.as_ref()?.state;
+    pub(super) fn current_input_task<'a>(
+        &'a self,
+        cx: &'a App,
+    ) -> Option<&'a workspace::TaskRecord> {
+        let state = &self.workspace(cx)?.state;
         submitted_input_task(state.draft()?, &state.tasks, &self.value(Field::Source, cx))
     }
 
     /// The source card and hero share one definition of the submitted task.
-    fn workbench_linked_task(&self, cx: &App) -> Option<&workspace::TaskRecord> {
+    fn workbench_linked_task<'a>(&'a self, cx: &'a App) -> Option<&'a workspace::TaskRecord> {
         let opening_result = self.opened.reading && self.import.following_conversion.is_some();
         self.current_input_task(cx).filter(|task| {
             (opening_result
@@ -2386,7 +2393,7 @@ impl Desktop {
             return true;
         }
         let input = self.value(Field::Source, cx);
-        let has_old_result = self.workspace.as_ref().is_some_and(|workspace| {
+        let has_old_result = self.workspace(cx).is_some_and(|workspace| {
             workspace.state.draft().is_some_and(|draft| {
                 retired_input_task(draft, &workspace.state.tasks, &input).is_some()
             })
@@ -2398,8 +2405,8 @@ impl Desktop {
             return false;
         }
         let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
-        let online = self.online();
-        let Some(workspace) = &self.workspace else {
+        let online = self.online(cx);
+        let Some(workspace) = &self.records.read(cx).workspace else {
             return true;
         };
         let Some(draft) = workspace.state.draft() else {
@@ -2421,6 +2428,7 @@ impl Desktop {
                 state.reset_input(online, defaults, destination);
                 Ok(())
             },
+            cx,
         );
         if reset.is_none() {
             cx.notify();
@@ -2597,11 +2605,10 @@ impl Desktop {
 
     /// Derived once per change of what the plan reads, not on every render. A result that
     /// outlived a check it waited for would turn the wait into a failure in red.
-    fn cached_preview_plan(&mut self) -> Result<workspace::TaskPlan, (String, bool)> {
+    fn cached_preview_plan(&mut self, cx: &mut App) -> Result<workspace::TaskPlan, (String, bool)> {
         let key = PlanKey {
             workspace: self
-                .workspace
-                .as_ref()
+                .workspace(cx)
                 .map_or(0, |workspace| workspace.state.revision),
             preferences: self
                 .preferences
@@ -2611,15 +2618,15 @@ impl Desktop {
             reading: self.import.reading(),
             subtitle_failed: self.import.subtitle_error.is_some(),
             environment_ready: self.environment.is_some(),
-            library: self.library.generation,
-            library_loading: self.library.loading,
+            library: self.library(cx).generation,
+            library_loading: self.library(cx).loading,
         };
         if let Some((cached, plan)) = &self.import.preview_plan_cache
             && *cached == key
         {
             return plan.clone();
         }
-        let plan = self.preview_plan().map_err(|error| {
+        let plan = self.preview_plan(cx).map_err(|error| {
             let pending = error
                 .downcast_ref::<desktop_tasks::plan::PlanPending>()
                 .is_some();
@@ -2633,7 +2640,7 @@ impl Desktop {
     /// way forward. Only unresolved choices interrupt a submitted conversion.
     fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Option<Div> {
         let busy = self.work.job.is_some()
-            || self.workspace.as_ref().is_some_and(|workspace| {
+            || self.workspace(cx).is_some_and(|workspace| {
                 workspace.state.tasks.iter().any(|task| {
                     matches!(
                         task.state,
@@ -2642,14 +2649,14 @@ impl Desktop {
                 })
             });
         let reading = self.import.reading();
-        let preview_plan = self.cached_preview_plan();
+        let preview_plan = self.cached_preview_plan(cx);
         let plan_pending = matches!(&preview_plan, Err((_, true)));
         let matching_task = preview_plan
             .as_ref()
             .ok()
-            .and_then(|plan| self.matching_task(plan))
+            .and_then(|plan| self.matching_task(plan, cx))
             .map(|task| {
-                let location = self.task_library(task).map(|library| library.label());
+                let location = self.task_library(task, cx).map(|library| library.label());
                 (task.id.clone(), task.plan.title.clone(), location)
             });
         let preferences_issue = self.ordinary_preferences_submit_issue();
@@ -2660,7 +2667,7 @@ impl Desktop {
             .or_else(|| {
                 let settled = self.import.source_preview.is_some()
                     && !reading
-                    && !self.subtitle_attention_required();
+                    && !self.subtitle_attention_required(cx);
                 preview_plan
                     .as_ref()
                     .err()
@@ -2684,7 +2691,7 @@ impl Desktop {
             !environment.engine
                 || !environment.ffmpeg
                 || !environment.ffprobe
-                || (self.online() && !environment.ytdlp)
+                || (self.online(cx) && !environment.ytdlp)
         }) {
             actions.push(
                 button(
@@ -2732,8 +2739,7 @@ impl Desktop {
             );
         }
         if let Some(library) = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| {
                 workspace
                     .state
@@ -2783,9 +2789,9 @@ impl Desktop {
                     cx.notify();
                 })),
             );
-        } else if let Some(course) = self.existing_source_note().cloned() {
+        } else if let Some(course) = self.existing_source_note(cx).cloned() {
             let location = self
-                .course_location(&course)
+                .course_location(&course, cx)
                 .map(|library| library.label())
                 .unwrap_or_else(|| course2md::tr!("笔记库").into());
             facts.push(
@@ -2824,14 +2830,19 @@ impl Desktop {
                     course2md::tr!("生成新版笔记"),
                 )
                 .track_focus(&self.import_submit_focus)
-                .disabled(reading || checking || self.workspace.is_none() || preferences_blocked)
+                .disabled(
+                    reading
+                        || checking
+                        || self.records.read(cx).workspace.is_none()
+                        || preferences_blocked,
+                )
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.import.following_conversion =
                         Some(ConversionFollow::Preparing(this.import.preview_generation));
                     this.enqueue_current(window, cx);
                 })),
             );
-        } else if let Some(purpose) = self.missing_import_service() {
+        } else if let Some(purpose) = self.missing_import_service(cx) {
             actions.push(
                 button(
                     "configure-conversion-service",
@@ -2849,8 +2860,8 @@ impl Desktop {
         }
         if self.import.pending_conversion.is_some() && !reading {
             if self.import.source_validation.is_some()
-                && self.missing_import_service().is_none()
-                && self.existing_source_note().is_none()
+                && self.missing_import_service(cx).is_none()
+                && self.existing_source_note(cx).is_none()
                 && !has_match
             {
                 actions.push(

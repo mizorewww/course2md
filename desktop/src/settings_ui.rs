@@ -1481,8 +1481,8 @@ impl Desktop {
                 .and_then(|value| value.to_str())
                 .unwrap_or(course2md::tr!("笔记库"))
                 .to_owned();
-            let lists = this.update(cx, |this, _| {
-                let libraries = &this.workspace.as_ref()?.state.libraries;
+            let lists = this.update(cx, |this, cx| {
+                let libraries = &this.workspace(cx)?.state.libraries;
                 Some((
                     libraries.iter().map(|l| l.root.clone()).collect::<Vec<_>>(),
                     libraries.iter().map(|l| l.id.clone()).collect::<Vec<_>>(),
@@ -1497,11 +1497,10 @@ impl Desktop {
             .await;
             let _ = this.update(cx, |this, cx| {
                 let registered = prepared.and_then(|prepared| {
-                    let workspace = this
-                        .workspace
-                        .as_mut()
-                        .ok_or_else(|| anyhow!(course2md::tr!("笔记库记录暂时不可用")))?;
-                    workspace.register_prepared_library(&prepared)?;
+                    this.with_workspace(cx, |workspace| {
+                        workspace.register_prepared_library(&prepared)
+                    })
+                    .ok_or_else(|| anyhow!(course2md::tr!("笔记库记录暂时不可用")))??;
                     Ok(prepared.duplicate)
                 });
                 match registered {

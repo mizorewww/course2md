@@ -262,7 +262,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AppBar {
         let (task_count, tasks_need_attention) =
-            self.workspace.as_ref().map_or((0, false), |workspace| {
+            self.workspace(cx).map_or((0, false), |workspace| {
                 desktop_tasks::task_view::task_navigation_summary(&workspace.state.tasks)
             });
         let page = self.page;
@@ -326,7 +326,9 @@ impl Desktop {
             course2md::tr!("笔记库"),
             shown(course2md::tr!("笔记库")),
             cx.listener(|this, _, _, cx| {
-                this.library.folder_filter = crate::FolderFilter::All;
+                this.records.update(cx, |records, _| {
+                    records.library.folder_filter = crate::FolderFilter::All
+                });
                 this.navigate(Page::Library, cx);
             }),
         );
@@ -386,8 +388,7 @@ impl Desktop {
             None
         };
         let task = self
-            .workspace
-            .as_ref()?
+            .workspace(cx)?
             .state
             .tasks
             .iter()
@@ -469,14 +470,14 @@ impl Desktop {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.transient_task_result = None;
-                        if let Some(workspace) = &mut this.workspace
-                            && let Err(error) = workspace.transaction(|state| {
+                        if let Some(Err(error)) = this.with_workspace(cx, |workspace| {
+                            workspace.transaction(|state| {
                                 if let Some(task) = state.task_mut(&dismiss_id) {
                                     task.unread = false;
                                 }
                                 Ok(())
                             })
-                        {
+                        }) {
                             this.workspace_error = Some(course2md::tr!(
                                 "提示关闭状态未能保存：{}",
                                 format!("{error:#}")
@@ -672,7 +673,7 @@ impl Render for Desktop {
                                         this.retry_workspace_records(window, cx)
                                     })),
                             )
-                            .when(self.workspace.is_none(), |row| {
+                            .when(self.records.read(cx).workspace.is_none(), |row| {
                                 row.child(
                                     material_button(
                                         "rebuild-workspace-records",

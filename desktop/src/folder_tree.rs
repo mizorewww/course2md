@@ -189,8 +189,10 @@ struct PlaceRow {
 
 impl Desktop {
     /// Every library with its folder record, when that record has loaded.
-    fn tree_libraries(&self) -> Vec<(PathBuf, String, Option<organize::Library>)> {
+    fn tree_libraries(&self, cx: &App) -> Vec<(PathBuf, String, Option<organize::Library>)> {
         let libraries: Vec<_> = self
+            .records
+            .read(cx)
             .workspace
             .iter()
             .flat_map(|workspace| &workspace.state.libraries)
@@ -198,15 +200,15 @@ impl Desktop {
                 (
                     location.root.clone(),
                     location.label(),
-                    self.library.indexes.get(&location.root).cloned(),
+                    self.library(cx).indexes.get(&location.root).cloned(),
                 )
             })
             .collect();
         if libraries.is_empty() {
             vec![(
-                self.library.root.clone(),
+                self.library(cx).root.clone(),
                 course2md::tr!("笔记库").to_owned(),
-                Some(self.library.current.clone()),
+                Some(self.library(cx).current.clone()),
             )]
         } else {
             libraries
@@ -220,11 +222,11 @@ impl Desktop {
             >= FOLDER_SIDEBAR_MIN_CONTENT * scale
     }
 
-    fn selected_target(&self) -> TreeTarget {
-        match self.library.folder_filter {
+    fn selected_target(&self, cx: &App) -> TreeTarget {
+        match self.library(cx).folder_filter {
             FolderFilter::All => TreeTarget::All,
-            FolderFilter::Unfiled => TreeTarget::Root(self.library.root.clone()),
-            FolderFilter::Folder(id) => TreeTarget::Folder(self.library.root.clone(), id),
+            FolderFilter::Unfiled => TreeTarget::Root(self.library(cx).root.clone()),
+            FolderFilter::Folder(id) => TreeTarget::Folder(self.library(cx).root.clone(), id),
         }
     }
 
@@ -234,13 +236,15 @@ impl Desktop {
         filter: FolderFilter,
         cx: &mut Context<Self>,
     ) {
-        if let Some(organization) = self.library.indexes.get(&root) {
-            self.library.current = organization.clone();
-        }
+        self.records.update(cx, |records, _| {
+            if let Some(organization) = records.library.indexes.get(&root) {
+                records.library.current = organization.clone();
+            }
+        });
         // The tree keeps the selected folder visible: its library top and
         // every folder above it open.
         if let (FolderFilter::Folder(id), Some(organization)) =
-            (filter, self.library.indexes.get(&root))
+            (filter, self.library(cx).indexes.get(&root))
         {
             let mut parent = organization.parent(id);
             while let Some(folder) = parent {
@@ -255,8 +259,10 @@ impl Desktop {
             }
             self.library_ui.folder_tree_open.remove(&(root.clone(), 0));
         }
-        self.library.root = root;
-        self.library.folder_filter = filter;
+        self.records.update(cx, |records, _| {
+            records.library.root = root;
+            records.library.folder_filter = filter;
+        });
         self.library_ui.places_open = false;
         self.library_ui.list.scroll_to(ListOffset {
             item_ix: 0,
@@ -266,7 +272,7 @@ impl Desktop {
     }
 
     fn select_target(&mut self, target: TreeTarget, cx: &mut Context<Self>) {
-        let root = self.library.root.clone();
+        let root = self.library(cx).root.clone();
         match target {
             TreeTarget::All => self.select_library_scope(root, FolderFilter::All, cx),
             TreeTarget::Root(root) => self.select_library_scope(root, FolderFilter::Unfiled, cx),
@@ -302,7 +308,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let own_root = self
-            .library
+            .library(cx)
             .view_cache
             .locations
             .get(&storage)
@@ -424,19 +430,19 @@ impl Desktop {
     /// Notes per place for the navigation: every note, each library's
     /// unfiled notes and each folder's notes including its subfolders', so
     /// 全部笔记 is 未分类 plus the top folders and the folder page agrees.
-    fn nav_counts(&self) -> NavCounts {
+    fn nav_counts(&self, cx: &App) -> NavCounts {
         let mut counts = NavCounts {
-            all: self.library.courses.len(),
+            all: self.library(cx).courses.len(),
             ..NavCounts::default()
         };
-        for course in &self.library.courses {
-            let Some(location) = self.course_location(course) else {
+        for course in &self.library(cx).courses {
+            let Some(location) = self.course_location(course, cx) else {
                 continue;
             };
-            let Some(library) = self.library.indexes.get(&location.root) else {
+            let Some(library) = self.library(cx).indexes.get(&location.root) else {
                 continue;
             };
-            match self.course_folder(course) {
+            match self.course_folder(course, cx) {
                 Some(folder) => {
                     let mut current = Some(folder);
                     while let Some(id) = current {
@@ -454,8 +460,8 @@ impl Desktop {
     }
 
     /// A folder's notes, its subfolders' included, as its navigation row counts them.
-    pub(crate) fn folder_note_count(&self, root: &Path, id: u64) -> usize {
-        self.nav_counts()
+    pub(crate) fn folder_note_count(&self, root: &Path, id: u64, cx: &App) -> usize {
+        self.nav_counts(cx)
             .folders
             .get(&(root.to_path_buf(), id))
             .copied()
@@ -464,8 +470,8 @@ impl Desktop {
 
     /// The selected place's name for the page title, and the library it is
     /// in when several libraries are listed.
-    pub(crate) fn library_place(&self) -> (String, Option<String>) {
-        let libraries = self.tree_libraries();
+    pub(crate) fn library_place(&self, cx: &App) -> (String, Option<String>) {
+        let libraries = self.tree_libraries(cx);
         let library_name = |root: &Path| {
             (libraries.len() > 1).then(|| {
                 libraries
@@ -475,11 +481,11 @@ impl Desktop {
                     .unwrap_or_else(|| course2md::tr!("笔记库").into())
             })
         };
-        match self.selected_target() {
+        match self.selected_target(cx) {
             TreeTarget::All => (course2md::tr!("全部笔记").into(), None),
             TreeTarget::Root(root) => (course2md::tr!("未分类").into(), library_name(&root)),
             TreeTarget::Folder(root, id) => (
-                self.library
+                self.library(cx)
                     .indexes
                     .get(&root)
                     .and_then(|library| library.folders.get(&id).cloned())
@@ -490,8 +496,8 @@ impl Desktop {
     }
 
     /// A library's name, standing for its top level.
-    pub(crate) fn library_name(&self, root: &Path) -> String {
-        self.tree_libraries()
+    pub(crate) fn library_name(&self, root: &Path, cx: &App) -> String {
+        self.tree_libraries(cx)
             .into_iter()
             .find(|(candidate, _, _)| candidate == root)
             .map(|(_, name, _)| name)
@@ -573,7 +579,7 @@ impl Desktop {
             .container(ground)
             // A sidebar destination's selection is a pill (L1).
             .pill(true)
-            .selected(self.selected_target() == target)
+            .selected(self.selected_target(cx) == target)
             .when_some(count, |item, count| item.trailing_text(count.to_string()))
             .on_click(cx.listener({
                 let target = target.clone();
@@ -711,8 +717,8 @@ impl Desktop {
     /// The folder navigation: every note, each library's unfiled notes and its
     /// nested folders, then a new-folder action. `ground` is the surface it sits on.
     pub(crate) fn folder_tree(&self, ground: ColorRole, cx: &mut Context<Self>) -> Div {
-        let counts = self.nav_counts();
-        let libraries = self.tree_libraries();
+        let counts = self.nav_counts(cx);
+        let libraries = self.tree_libraries(cx);
         let several = libraries.len() > 1;
         let nested = libraries.iter().any(|(_, _, library)| {
             library.as_ref().is_some_and(|library| {
@@ -820,8 +826,8 @@ impl Desktop {
             }
         }
         let (create_root, create_parent) = (
-            self.library.root.clone(),
-            self.library.folder_filter.folder_id(),
+            self.library(cx).root.clone(),
+            self.library(cx).folder_filter.folder_id(),
         );
         v_flex().w_full().min_w_0().gap(rem(8.)).child(tree).child(
             material_button("folder-tree-new", ButtonVariant::Text)
@@ -863,12 +869,12 @@ impl Desktop {
         columns: usize,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        let library = self.library.indexes.get(root)?;
+        let library = self.library(cx).indexes.get(root)?.clone();
         let children = library.children(parent);
         if children.is_empty() {
             return None;
         }
-        let counts = self.nav_counts().folders;
+        let counts = self.nav_counts(cx).folders;
         let rows: Vec<_> = children
             .into_iter()
             .map(|id| {

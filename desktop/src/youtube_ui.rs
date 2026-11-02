@@ -36,7 +36,7 @@ impl Desktop {
         }
         self.youtube.retry_source = (!self.onboarding.active
             && matches!(self.page, Page::New)
-            && self.online()
+            && self.online(cx)
             && self.import.preview_error.is_some()
             && course2md::auth::is_youtube_url(&self.value(Field::Source, cx)))
         .then(|| {

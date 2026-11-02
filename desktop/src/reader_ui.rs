@@ -666,7 +666,7 @@ impl Desktop {
         self.reading_position_moved(cx);
         cx.notify();
     }
-    fn reading_key(&self) -> Option<String> {
+    fn reading_key(&self, cx: &App) -> Option<String> {
         let preview = self.opened.preview.as_ref()?;
         Some(match &preview.course.manifest {
             Some(manifest) => manifest_reading_key(
@@ -676,7 +676,7 @@ impl Desktop {
             ),
             None => {
                 let identity = self
-                    .course_location(&preview.course)
+                    .course_location(&preview.course, cx)
                     .and_then(|library| {
                         preview
                             .course
@@ -750,19 +750,19 @@ impl Desktop {
         {
             return;
         }
-        let (Some(key), Some(position)) = (self.reading_key(), self.capture_reading_position())
+        let (Some(key), Some(position)) = (self.reading_key(cx), self.capture_reading_position())
         else {
             return;
         };
         if self.reader_ui.restore.last_position.as_ref() == Some(&(key.clone(), position.clone())) {
             return;
         }
-        if let Some(workspace) = &mut self.workspace
-            && let Err(error) = workspace.transaction(|state| {
+        if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
+            workspace.transaction(|state| {
                 state.positions.insert(key.clone(), position.clone());
                 Ok(())
             })
-        {
+        }) {
             self.workspace_error =
                 Some(course2md::tr!("阅读位置尚未保存：{}", format!("{error:#}")));
             cx.notify();
@@ -773,8 +773,8 @@ impl Desktop {
     pub fn restore_reading_position(&mut self, cx: &mut Context<Self>) {
         self.ensure_reader_data(cx);
         let saved = self
-            .reading_key()
-            .and_then(|key| self.workspace.as_ref()?.state.positions.get(&key))
+            .reading_key(cx)
+            .and_then(|key| self.workspace(cx)?.state.positions.get(&key))
             .cloned()
             .unwrap_or_default();
         self.return_reader_to(saved, cx);
@@ -823,10 +823,10 @@ impl Desktop {
         };
         self.reader_ui.restore.active = true;
         let generation = self.reader_ui.restore.generation;
-        let key = self.reading_key();
+        let key = self.reading_key(cx);
         // After this frame has laid out what it just received.
         cx.on_next_frame(window, move |this, _, cx| {
-            if this.reader_ui.restore.generation != generation || this.reading_key() != key {
+            if this.reader_ui.restore.generation != generation || this.reading_key(cx) != key {
                 return;
             }
             let target = this.reader_list_target(&position);
@@ -913,7 +913,7 @@ impl Desktop {
 
     /// The note's document and contents follow the loaded note.
     fn rebuild_note_document(&mut self, preview: &notes::Preview, cx: &mut Context<Self>) {
-        let source = self.unmapped_reader_source();
+        let source = self.unmapped_reader_source(cx);
         let chapters = chapter_starts(&preview.blocks, &summary_outline(preview));
         let document = NoteDocument::new(&preview.course.title, &preview.blocks, &chapters, |at| {
             nav::seek_url(source.as_ref()?, at)
@@ -1007,11 +1007,10 @@ impl Desktop {
             return;
         };
         let path = preview.course.dir.clone();
-        let source = self.unmapped_reader_source();
-        let offline_request = self.reader_offline_video_request();
+        let source = self.unmapped_reader_source(cx);
+        let offline_request = self.reader_offline_video_request(cx);
         let locations = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .map(|workspace| {
                 workspace
                     .state
@@ -1096,10 +1095,10 @@ impl Desktop {
                 .unwrap_or_else(|| preview.course.storage_dir().display().to_string()),
         )
     }
-    fn reader_offline_video_request(&self) -> Option<OfflineVideoRequest> {
+    fn reader_offline_video_request(&self, cx: &App) -> Option<OfflineVideoRequest> {
         let course = &self.opened.preview.as_ref()?.course;
         let manifest = course.manifest.as_ref()?;
-        let state = &self.workspace.as_ref()?.state;
+        let state = &self.workspace(cx)?.state;
         let task = state.task(&manifest.task_id)?;
         let library = state.library(&task.plan.library_id)?;
         OfflineVideoRequest::for_version(course, task, library)
@@ -1108,7 +1107,7 @@ impl Desktop {
         if self.reader_ui.offline_opening {
             return;
         }
-        let Some(request) = self.reader_offline_video_request() else {
+        let Some(request) = self.reader_offline_video_request(cx) else {
             return;
         };
         let version = request.version_dir.clone();
@@ -1143,10 +1142,10 @@ impl Desktop {
         .detach();
         cx.notify();
     }
-    fn unmapped_reader_source(&self) -> Option<nav::SourceTarget> {
+    fn unmapped_reader_source(&self, cx: &App) -> Option<nav::SourceTarget> {
         if let Some(path) = self
             .reader_source_key()
-            .and_then(|key| self.workspace.as_ref()?.state.reader_sources.get(&key))
+            .and_then(|key| self.workspace(cx)?.state.reader_sources.get(&key))
         {
             return Some(nav::SourceTarget::Local(path.clone()));
         }
@@ -1217,15 +1216,16 @@ impl Desktop {
                 this.reader_ui.source_loading = false;
                 this.reader_ui.source_probe_cancel = None;
                 let result = checked.and_then(|_| {
-                    this.workspace
-                        .as_mut()
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(course2md::tr!("暂时无法保存原视频位置，请重试"))
-                        })?
-                        .transaction(|state| {
+                    this.with_workspace(cx, |workspace| {
+                        workspace.transaction(|state| {
                             state.reader_sources.insert(key, path.clone());
                             Ok(())
                         })
+                    })
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(course2md::tr!("暂时无法保存原视频位置，请重试"))
+                    })
+                    .and_then(|saved| saved)
                 });
                 this.message = Some(match result {
                     Ok(()) => {
@@ -1383,7 +1383,8 @@ impl Desktop {
                 this.opened.reading = false;
                 match result {
                     Ok(mut preview) => {
-                        preview.course.title = this.library.course_display_title(&preview.course);
+                        preview.course.title =
+                            this.library(cx).course_display_title(&preview.course);
                         this.opened.preview = Some(Rc::new(preview));
                         this.opened.result_tab = tab;
                         if refresh {
@@ -1391,8 +1392,8 @@ impl Desktop {
                         }
                         // The event path loads the data; rendering no longer does.
                         this.ensure_reader_data(cx);
-                        let has_saved_position = this.reading_key().is_some_and(|key| {
-                            this.workspace.as_ref().is_some_and(|workspace| {
+                        let has_saved_position = this.reading_key(cx).is_some_and(|key| {
+                            this.workspace(cx).is_some_and(|workspace| {
                                 workspace.state.positions.contains_key(&key)
                             })
                         });
@@ -1472,7 +1473,7 @@ impl Desktop {
             return;
         };
         let found = self
-            .library
+            .library(cx)
             .courses
             .iter()
             .find(|course| {
@@ -1506,19 +1507,14 @@ impl Desktop {
 
     /// The note version at `dir`: the library's shared copy, or the open note
     /// when the library has not listed it yet. Copies only when it must.
-    pub(crate) fn note_at(&self, dir: &std::path::Path) -> Option<Rc<Course>> {
-        self.library
-            .courses
-            .iter()
-            .find(|course| course.dir == dir)
-            .cloned()
-            .or_else(|| {
-                self.opened
-                    .preview
-                    .as_ref()
-                    .filter(|preview| preview.course.dir == dir)
-                    .map(|preview| Rc::new(preview.course.clone()))
-            })
+    pub(crate) fn note_at(&self, dir: &std::path::Path, cx: &App) -> Option<Rc<Course>> {
+        self.records.read(cx).note_at(dir).or_else(|| {
+            self.opened
+                .preview
+                .as_ref()
+                .filter(|preview| preview.course.dir == dir)
+                .map(|preview| Rc::new(preview.course.clone()))
+        })
     }
 
     pub fn export_course(
@@ -1532,9 +1528,9 @@ impl Desktop {
         let Some(generation) = self.reader_ui.export_state.begin(version.clone()) else {
             return;
         };
-        let title = self.library.course_display_title(&course);
+        let title = self.library(cx).course_display_title(&course);
         let suggested = export_file_name(&title, format);
-        let receiver = cx.prompt_for_new_path(&self.output(), Some(&suggested));
+        let receiver = cx.prompt_for_new_path(&self.output(cx), Some(&suggested));
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
             let path = match receiver.await {
@@ -1683,7 +1679,7 @@ impl Desktop {
                                     .child(course2md::tr!("重试导出"))
                                     .disabled(self.reader_exporting())
                                     .on_click(cx.listener(move |this, _, window, cx| {
-                                        if let Some(course) = this.note_at(&retry) {
+                                        if let Some(course) = this.note_at(&retry, cx) {
                                             this.export_course(course, feedback.format, window, cx);
                                         }
                                     })),
@@ -2461,7 +2457,7 @@ impl Desktop {
             .course
             .manifest
             .as_ref()
-            .and_then(|manifest| self.workspace.as_ref()?.state.task(&manifest.task_id));
+            .and_then(|manifest| self.workspace(cx)?.state.task(&manifest.task_id));
         if let Some(task) = task {
             let defaults = &task.plan.config.defaults;
             if let Some(subtitle) = &task.plan.source.selected_subtitle {
@@ -2554,9 +2550,9 @@ impl Desktop {
         let mut notices = Vec::new();
         if let Some(current) = &preview.course.manifest
             && let Some(newer) = self
-                .library
+                .library(cx)
                 .view_cache
-                .newer_version(&self.library.courses, current)
+                .newer_version(&self.library(cx).courses, current)
         {
             notices.push(motion::enter(
                 "reader-new-version-notice",
@@ -2619,7 +2615,7 @@ impl Desktop {
             .course
             .manifest
             .as_ref()
-            .and_then(|manifest| self.workspace.as_ref()?.state.task(&manifest.task_id));
+            .and_then(|manifest| self.workspace(cx)?.state.task(&manifest.task_id));
         let requires_repair =
             task.is_some_and(desktop_tasks::task_view::task_requires_service_repair);
         let can_retry = task.is_some_and(|task| {
@@ -2984,7 +2980,7 @@ impl Desktop {
                     .leading(Icon::from(icon))
                     .disabled(exporting)
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(course) = this.note_at(&version) {
+                        if let Some(course) = this.note_at(&version, cx) {
                             this.export_course(course, format, window, cx);
                         }
                     })),
@@ -4198,7 +4194,7 @@ impl Desktop {
         let library = course2md::tr!("笔记库");
         let crumb = match &self.opened.preview {
             Some(preview) => {
-                let folder = self.folder_context(Some(preview.course.dir.clone()));
+                let folder = self.folder_context(Some(preview.course.dir.clone()), cx);
                 match folder.load_error {
                     None => format!("{library} · {}", folder.label),
                     Some(_) => library.to_owned(),

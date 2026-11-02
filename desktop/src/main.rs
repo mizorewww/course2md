@@ -112,7 +112,8 @@ struct Desktop {
     /// Reading the move records; a newer read replaces it.
     storage_records: Option<Task<()>>,
     reader_ui: reader_ui::State,
-    workspace: Option<workspace::Workspace>,
+    /// The workspace record and the libraries' notes, which every page reads.
+    records: Entity<desktop_store::records::Records>,
     workspace_error: Option<String>,
     import: desktop_tasks::import::ImportSession,
     /// The running job: a task's or a model's.
@@ -121,7 +122,6 @@ struct Desktop {
     opened: desktop_reader_core::reader::OpenedNote,
     task_list: task_ui::TaskListUi,
     theme_frame: views::ThemeFrame,
-    library: desktop_store::library::LibraryState,
     library_ui: library_ui::LibraryUi,
     preference_defaults_pending: bool,
     transient_task_result: Option<(String, Instant)>,
@@ -230,12 +230,12 @@ impl Desktop {
         }
         self.save_reading_position(cx);
         self.cancel_storage_for_close();
-        if let Some(workspace) = &mut self.workspace
-            && let Err(error) = workspace.transaction(|state| {
+        if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
+            workspace.transaction(|state| {
                 state.stop_session();
                 Ok(())
             })
-        {
+        }) {
             self.workspace_error = Some(course2md::tr!(
                 "无法保存退出前的状态，窗口暂不关闭：{}",
                 format!("{error:#}")
@@ -253,7 +253,7 @@ impl Desktop {
         {
             job.cancel();
         }
-        if let Some(workspace) = &self.workspace
+        if let Some(workspace) = &self.records.read(cx).workspace
             && let Err(error) = workspace.save()
         {
             self.workspace_error = Some(course2md::tr!(
@@ -306,7 +306,7 @@ impl Desktop {
                         let value = this.value(Field::Source, cx);
                         // The draft records the input once autosave or a
                         // preview accepts it; anything else is a new edit.
-                        if this.draft().is_some_and(|draft| draft.input != value) {
+                        if this.draft(cx).is_some_and(|draft| draft.input != value) {
                             this.import.following_conversion = None;
                             if this.opened.reading && this.page == Page::New {
                                 this.opened.stop_reading();
@@ -344,7 +344,7 @@ impl Desktop {
             |this: &mut Self, _, event, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. })
                     && this.page == Page::New
-                    && this.online()
+                    && this.online(cx)
                 {
                     this.inspect_source(window, cx);
                 }
@@ -379,8 +379,8 @@ impl Desktop {
         let options = ConversionOptions::from_config(&config);
         let poll = cx.spawn_in(window, async |this, cx| {
             loop {
-                let Ok((wake, deadline)) = this.update_in(cx, |this, _, _| {
-                    (this.event_wake_rx.clone(), this.next_poll_deadline())
+                let Ok((wake, deadline)) = this.update_in(cx, |this, _, cx| {
+                    (this.event_wake_rx.clone(), this.next_poll_deadline(cx))
                 }) else {
                     break;
                 };
@@ -419,14 +419,18 @@ impl Desktop {
             onboarding,
             reader_ui,
             storage_ui: Default::default(),
-            workspace,
+            records: cx.new(|_| {
+                desktop_store::records::Records::new(
+                    workspace,
+                    desktop_store::library::LibraryState::new(output),
+                )
+            }),
             workspace_error,
             import: Default::default(),
             work: desktop_tasks::job::WorkState::new(),
             opened: Default::default(),
             task_list: task_ui::TaskListUi::new(),
             theme_frame: Default::default(),
-            library: desktop_store::library::LibraryState::new(output),
             library_ui: library_ui::LibraryUi::new(),
             storage_records: None,
             preference_defaults_pending: false,
@@ -483,7 +487,7 @@ impl Desktop {
     /// Reports record writes that failed after the event loop moved on, and
     /// reconciles a freshly opened record with the libraries off the UI thread.
     fn poll_workspace(&mut self, cx: &mut Context<Self>) {
-        let Some(workspace) = &self.workspace else {
+        let Some(workspace) = &self.records.read(cx).workspace else {
             return;
         };
         if let Some(failure) = workspace.take_write_error() {
@@ -503,14 +507,15 @@ impl Desktop {
         if self.workspace_reconciling {
             return;
         }
-        let Some(workspace) = &mut self.workspace else {
+        let wake = self.event_wake_tx.clone();
+        let Some(Some(reconciliation)) = self.with_workspace(cx, |workspace| {
+            let reconciliation = workspace.reconciliation()?;
+            // A record reopened elsewhere needs the wake sender too.
+            workspace.set_wake_sender(wake);
+            Some(reconciliation)
+        }) else {
             return;
         };
-        let Some(reconciliation) = workspace.reconciliation() else {
-            return;
-        };
-        // A record reopened elsewhere needs the wake sender too.
-        workspace.set_wake_sender(self.event_wake_tx.clone());
         self.workspace_reconciling = true;
         let task = spawn_blocking_io(move || reconciliation.run());
         cx.spawn(async move |this, cx| {
@@ -523,8 +528,8 @@ impl Desktop {
                     return;
                 };
                 this.workspace_reconciling = false;
-                if let Some(workspace) = &mut this.workspace
-                    && let Err(error) = workspace.apply_reconciliation(reconciled)
+                if let Some(Err(error)) =
+                    this.with_workspace(cx, |workspace| workspace.apply_reconciliation(reconciled))
                 {
                     this.workspace_error =
                         Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
@@ -589,7 +594,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> bool {
         let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
-        let Some(workspace) = &mut self.workspace else {
+        let Some(workspace) = &self.records.read(cx).workspace else {
             return false;
         };
         if !workspace
@@ -599,7 +604,10 @@ impl Desktop {
         {
             return true;
         }
-        match workspace.transaction(|state| Ok(state.prepare_next_import(value, defaults))) {
+        let prepared = self.with_workspace(cx, |workspace| {
+            workspace.transaction(|state| Ok(state.prepare_next_import(value, defaults)))
+        });
+        match prepared.unwrap_or(Ok(false)) {
             Ok(true) => {
                 self.invalidate_source();
                 self.message = None;
@@ -623,7 +631,7 @@ impl Desktop {
         }
         self.import.source_editor_open = true;
         self.navigate(Page::New, cx);
-        if self.online() {
+        if self.online(cx) {
             self.inputs[&Field::Source].update(cx, |input, cx| input.focus(window, cx));
         }
     }
@@ -668,7 +676,7 @@ impl Desktop {
             self.refresh_library(cx);
         }
         if page == Page::Task {
-            let visible_unread = self.workspace.as_ref().and_then(|workspace| {
+            let visible_unread = self.workspace(cx).and_then(|workspace| {
                 let id = workspace.state.selected_task.as_ref()?;
                 workspace
                     .state
@@ -685,12 +693,25 @@ impl Desktop {
     fn value(&self, field: Field, cx: &App) -> String {
         self.inputs[&field].read(cx).value().trim().to_string()
     }
-    fn output(&self) -> PathBuf {
-        self.workspace
-            .as_ref()
-            .and_then(|w| w.state.library(&w.state.default_library))
-            .map(|l| l.root.clone())
-            .unwrap_or_else(|| self.library.root.clone())
+    /// The workspace record, when it could be read.
+    fn workspace<'a>(&self, cx: &'a App) -> Option<&'a workspace::Workspace> {
+        self.records.read(cx).workspace.as_ref()
+    }
+    /// The libraries' notes as last scanned.
+    fn library<'a>(&self, cx: &'a App) -> &'a desktop_store::library::LibraryState {
+        &self.records.read(cx).library
+    }
+    /// Changes the workspace record, when it could be read.
+    fn with_workspace<R>(
+        &self,
+        cx: &mut App,
+        change: impl FnOnce(&mut workspace::Workspace) -> R,
+    ) -> Option<R> {
+        self.records
+            .update(cx, |records, _| records.workspace.as_mut().map(change))
+    }
+    fn output(&self, cx: &App) -> PathBuf {
+        self.records.read(cx).output()
     }
     fn pick_video(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prompt = cx.prompt_for_paths(PathPromptOptions {
@@ -750,7 +771,7 @@ impl Desktop {
     }
     /// The next instant the UI must run `poll` even without a job event.
     /// Returning `None` lets the loop sleep until an explicit wake.
-    fn next_poll_deadline(&self) -> Option<Instant> {
+    fn next_poll_deadline(&self, cx: &App) -> Option<Instant> {
         let mut deadline = earliest_deadline(self.draft_deadline, self.work.quit_deadline);
         if let Some((_, shown)) = &self.transient_task_result {
             deadline = earliest_deadline(deadline, Some(*shown + Duration::from_secs(8)));
@@ -764,7 +785,7 @@ impl Desktop {
         }
         // A worker that outlived an earlier session is waited for. A check in flight
         // wakes the loop itself when it ends.
-        if let Some(workspace) = &self.workspace
+        if let Some(workspace) = &self.records.read(cx).workspace
             && !self.workspace_reconciling
         {
             deadline = earliest_deadline(deadline, workspace.held_check_due(Instant::now()));
@@ -840,16 +861,19 @@ impl Desktop {
                         event,
                         EngineEvent::Error { .. } | EngineEvent::Blocked { .. }
                     );
-                    self.workspace
-                        .as_mut()
-                        .and_then(|workspace| workspace.state.task_mut(id))
-                        .is_some_and(|task| task.apply_event(&event))
+                    self.with_workspace(cx, |workspace| {
+                        workspace
+                            .state
+                            .task_mut(id)
+                            .is_some_and(|task| task.apply_event(&event))
+                    })
+                    .unwrap_or(false)
                 }
                 None => self.work.job_events.apply(&event),
             };
         }
         if commit
-            && let Some(workspace) = &self.workspace
+            && let Some(workspace) = &self.records.read(cx).workspace
             && let Err(error) = workspace.commit()
         {
             self.workspace_error =
@@ -879,8 +903,10 @@ impl Desktop {
         }
     }
     pub(crate) fn refresh_library(&mut self, cx: &mut Context<Self>) {
-        let locations = self.registered_storage_locations();
-        let generation = self.library.begin_scan();
+        let locations = self.registered_storage_locations(cx);
+        let generation = self
+            .records
+            .update(cx, |records, _| records.library.begin_scan());
         self.storage_ui
             .location_checks
             .begin(generation, &locations);
@@ -894,10 +920,10 @@ impl Desktop {
         cx.spawn(async move |this, cx| {
             let results = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.library.generation != generation {
+                if this.library(cx).generation != generation {
                     return;
                 }
-                let current = this.registered_storage_locations();
+                let current = this.registered_storage_locations(cx);
                 let checks = results
                     .iter()
                     .map(|(location, check, _)| (location.clone(), check.clone()))
@@ -911,26 +937,30 @@ impl Desktop {
                     return;
                 }
                 // Tasks of a library that has come back can read their events now.
-                if let Some(workspace) = &mut this.workspace {
+                let reconciling = this.with_workspace(cx, |workspace| {
                     for (location, check, _) in &results {
                         if check.available && !check.needs_reassociation && check.problem.is_none()
                         {
                             workspace.recheck_library(&location.id);
                         }
                     }
-                    if workspace.state.reconciling {
-                        this.wake_poll();
-                    }
+                    workspace.state.reconciling
+                });
+                if reconciling == Some(true) {
+                    this.wake_poll();
                 }
-                this.library.apply_scan(results);
-                this.apply_course_title_aliases();
+                this.records
+                    .update(cx, |records, _| records.library.apply_scan(results));
+                this.apply_course_title_aliases(cx);
                 this.open_validation_note(cx);
-                let registered = this
-                    .workspace
-                    .as_ref()
-                    .map(|workspace| workspace.state.libraries.as_slice())
-                    .unwrap_or_default();
-                this.library.settle_root(registered);
+                this.records.update(cx, |records, _| {
+                    let registered = records
+                        .workspace
+                        .as_ref()
+                        .map(|workspace| workspace.state.libraries.as_slice())
+                        .unwrap_or_default();
+                    records.library.settle_root(registered);
+                });
                 this.advance_conversion_when_ready(cx);
                 cx.notify();
             });
@@ -938,13 +968,15 @@ impl Desktop {
         .detach();
     }
 
-    fn course_location(&self, course: &Course) -> Option<&workspace::LibraryLocation> {
-        self.library
-            .course_location(&self.workspace.as_ref()?.state.libraries, course)
+    fn course_location<'a>(
+        &self,
+        course: &Course,
+        cx: &'a App,
+    ) -> Option<&'a workspace::LibraryLocation> {
+        self.records.read(cx).course_location(course)
     }
-    fn course_folder(&self, course: &Course) -> Option<u64> {
-        self.library
-            .course_folder(&self.workspace.as_ref()?.state.libraries, course)
+    fn course_folder(&self, course: &Course, cx: &App) -> Option<u64> {
+        self.records.read(cx).course_folder(course)
     }
     fn open_course(&mut self, course: impl Into<Rc<Course>>, cx: &mut Context<Self>) {
         self.import.following_conversion = None;
@@ -1027,9 +1059,9 @@ impl Desktop {
                         if reader_origin.is_some() {
                             this.save_reading_position(cx);
                         }
-                        if let Some(workspace) = &mut this.workspace {
-                            let artifact = preview.course.dir.clone();
-                            if let Err(error) = workspace.transaction(|state| {
+                        let artifact = preview.course.dir.clone();
+                        let saved = this.with_workspace(cx, |workspace| {
+                            workspace.transaction(|state| {
                                 // A repair publishes a new version of the same note.
                                 // Carry its existing anchors into both reading modes;
                                 // the reader resolves changed paragraphs by timestamp.
@@ -1048,12 +1080,11 @@ impl Desktop {
                                     }
                                 }
                                 Ok(())
-                            }) {
-                                this.workspace_error = Some(course2md::tr!(
-                                    "阅读进度未能保存：{}",
-                                    format!("{error:#}")
-                                ));
-                            }
+                            })
+                        });
+                        if let Some(Err(error)) = saved {
+                            this.workspace_error =
+                                Some(course2md::tr!("阅读进度未能保存：{}", format!("{error:#}")));
                         }
                         settle_reader_notice(
                             &mut this.message,
@@ -1064,7 +1095,7 @@ impl Desktop {
                         }
                         this.opened.preview = Some(Rc::new(preview));
                         this.ensure_reader_data(cx);
-                        this.apply_course_title_aliases();
+                        this.apply_course_title_aliases(cx);
                         this.restore_reading_position(cx);
                         this.page = Page::Result;
                         this.show_validation_panels();

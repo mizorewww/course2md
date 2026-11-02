@@ -382,7 +382,7 @@ impl Desktop {
                     }
                 }
                 let course = self
-                    .library
+                    .library(cx)
                     .courses
                     .iter()
                     .find(|course| title.is_empty() || course.title.contains(title))
@@ -393,9 +393,7 @@ impl Desktop {
                 // positions so an earlier `~end` shot or a review session does
                 // not leak in.
                 self.save_reading_position(cx);
-                if let Some(workspace) = &mut self.workspace {
-                    workspace.state.positions.clear();
-                }
+                self.with_workspace(cx, |workspace| workspace.state.positions.clear());
                 if let Some(course) = course {
                     self.open_course(course, cx);
                 }
@@ -447,7 +445,7 @@ impl Desktop {
                 .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 let newest = this
-                    .library
+                    .library(cx)
                     .courses
                     .first()
                     .map(|course| (**course).clone());
@@ -476,7 +474,7 @@ impl Desktop {
                     "folder" => this.begin_folder(window, cx),
                     "move" => {
                         if let Some(course) = newest {
-                            let root = this.folder_context(Some(course.dir.clone())).root;
+                            let root = this.folder_context(Some(course.dir.clone()), cx).root;
                             this.begin_move(
                                 root,
                                 crate::library_ui::Moving::Note(course.storage_dir()),
@@ -556,7 +554,7 @@ impl Desktop {
             self.desktop_settings.library_cards,
             self.desktop_settings.library_group_folders,
         ) = saved;
-        let root = self.library.root.clone();
+        let root = self.library(cx).root.clone();
         self.select_library_scope(root, crate::FolderFilter::All, cx);
         self.inputs[&crate::Field::Search].update(cx, |input, cx| input.set_value("", window, cx));
         for state in states.split(',').filter(|state| !state.is_empty()) {
@@ -565,12 +563,12 @@ impl Desktop {
                 "list" => self.desktop_settings.library_cards = false,
                 "group" => self.desktop_settings.library_group_folders = true,
                 "unfiled" => {
-                    let root = self.library.root.clone();
+                    let root = self.library(cx).root.clone();
                     self.select_library_scope(root, crate::FolderFilter::Unfiled, cx);
                 }
                 "folder" => {
-                    let root = self.library.root.clone();
-                    let found = self.library.indexes.get(&root).and_then(|library| {
+                    let root = self.library(cx).root.clone();
+                    let found = self.library(cx).indexes.get(&root).and_then(|library| {
                         library
                             .folders
                             .iter()

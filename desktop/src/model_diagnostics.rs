@@ -369,8 +369,7 @@ impl Desktop {
     fn resume_tasks_awaiting_model(&mut self, request: &Request, cx: &mut Context<Self>) {
         let fallback = self.recommended_local_provider();
         let ids = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .map(|workspace| {
                 desktop_tasks::task_view::tasks_awaiting_model(
                     &workspace.state.tasks,
