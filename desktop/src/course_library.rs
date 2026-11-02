@@ -585,106 +585,91 @@ impl Desktop {
         })
     }
 
-    /// One library's obstacle: what is wrong, what can be done and the details.
-    fn recovery_notice(
-        id: SharedString,
-        kind: NoticeKind,
-        message: String,
-        actions: Vec<AnyElement>,
-        details: Option<IssueDetails>,
-    ) -> Div {
-        notice_banner(id, kind, message)
-            .children(actions)
-            .children(details)
-    }
-
     fn library_recovery_view(
         &self,
         access: &crate::storage::LibraryAccess,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let workspace = self.workspace.as_ref()?;
-        let details = |prefix: &str, id: &str, kind, root: &std::path::Path| {
-            let messages = self.library.issue_messages(root, kind);
-            (!messages.is_empty()).then(|| IssueDetails::new(format!("{prefix}:{id}"), messages))
+        let details = |prefix: &str, location: &crate::workspace::LibraryLocation, kind| {
+            let messages = self.library.issue_messages(&location.root, kind);
+            (!messages.is_empty())
+                .then(|| IssueDetails::new(format!("{prefix}:{}", location.id), messages))
         };
         let mut notices = Vec::new();
         for (index, location) in workspace.state.libraries.iter().enumerate() {
-            if access.unavailable.contains(&location.root) {
-                notices.push(Self::recovery_notice(
-                    format!("library-unavailable-{index}").into(),
-                    NoticeKind::Info,
-                    course2md::tr!("{} 暂时无法访问", location.name),
-                    vec![
+            let root = &location.root;
+            if access.unavailable.contains(root) {
+                let message = course2md::tr!("{} 暂时无法访问", location.name);
+                notices.push(
+                    notice_banner(("library-unavailable", index), NoticeKind::Info, message).child(
                         material_button(("retry-library-location", index), ButtonVariant::Tonal)
                             .icon(symbols::refresh())
                             .child(course2md::tr!("重新检查保存位置"))
                             .loading(self.library.loading, course2md::tr!("重新检查保存位置"))
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx)))
-                            .into_any_element(),
-                    ],
-                    None,
-                ));
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
+                    ),
+                );
                 continue;
             }
-            if let Some(recovery) = self.library.view_cache.recovery.get(&location.root) {
-                let mut actions = Vec::new();
-                let rebuild = location.root.clone();
-                if recovery.has_backup {
-                    let restore = location.root.clone();
-                    actions.push(
-                        material_button(("restore-classification", index), ButtonVariant::Tonal)
+            if let Some(recovery) = self.library.view_cache.recovery.get(root) {
+                let (restore, rebuild, folder) = (root.clone(), root.clone(), root.clone());
+                let message = course2md::tr!("{} 的文件夹信息已损坏", location.name);
+                notices.push(
+                    notice_banner(
+                        ("classification-recovery", index),
+                        NoticeKind::Danger,
+                        message,
+                    )
+                    .when(recovery.has_backup, |notice| {
+                        notice.child(
+                            material_button(
+                                ("restore-classification", index),
+                                ButtonVariant::Tonal,
+                            )
                             .icon(symbols::history())
                             .child(course2md::tr!("恢复最近备份"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.recover_library_folders(restore.clone(), false, cx)
-                            }))
-                            .into_any_element(),
-                    );
-                }
-                actions.push(
-                    material_button(
-                        ("rebuild-classification", index),
-                        if recovery.has_backup {
-                            ButtonVariant::Text
-                        } else {
-                            ButtonVariant::Tonal
-                        },
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.recover_library_folders(restore.clone(), false, cx)
+                                },
+                            )),
+                        )
+                    })
+                    .child(
+                        material_button(
+                            ("rebuild-classification", index),
+                            if recovery.has_backup {
+                                ButtonVariant::Text
+                            } else {
+                                ButtonVariant::Tonal
+                            },
+                        )
+                        .icon(symbols::refresh())
+                        .child(course2md::tr!("重新开始整理（保留损坏文件）"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.recover_library_folders(rebuild.clone(), true, cx)
+                        })),
                     )
-                    .icon(symbols::refresh())
-                    .child(course2md::tr!("重新开始整理（保留损坏文件）"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.recover_library_folders(rebuild.clone(), true, cx)
-                    }))
-                    .into_any_element(),
-                );
-                let folder = location.root.clone();
-                actions.push(
-                    material_button(("show-classification-files", index), ButtonVariant::Text)
-                        .icon(symbols::folder_open())
-                        .child(course2md::tr!("打开保存位置"))
-                        .on_click(move |_, _, cx| cx.open_with_system(&folder))
-                        .into_any_element(),
-                );
-                notices.push(Self::recovery_notice(
-                    format!("classification-recovery-{index}").into(),
-                    NoticeKind::Danger,
-                    course2md::tr!("{} 的文件夹信息已损坏", location.name),
-                    actions,
-                    details(
+                    .child(
+                        material_button(("show-classification-files", index), ButtonVariant::Text)
+                            .icon(symbols::folder_open())
+                            .child(course2md::tr!("打开保存位置"))
+                            .on_click(move |_, _, cx| cx.open_with_system(&folder)),
+                    )
+                    .children(details(
                         "folders",
-                        &location.id,
+                        location,
                         LibraryIssueKind::Folders,
-                        &location.root,
-                    ),
-                ));
+                    )),
+                );
             }
-            if let Some(recovery) = self.library.view_cache.title_recovery.get(&location.root) {
+            if let Some(recovery) = self.library.view_cache.title_recovery.get(root) {
                 let actions = [false, true]
                     .into_iter()
                     .filter(|reset| *reset || recovery.has_backup)
                     .map(|reset| {
-                        let root = location.root.clone();
+                        let root = root.clone();
                         material_button(
                             (
                                 if reset {
@@ -709,21 +694,13 @@ impl Desktop {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.recover_note_titles(root.clone(), reset, cx)
                         }))
-                        .into_any_element()
-                    })
-                    .collect();
-                notices.push(Self::recovery_notice(
-                    format!("title-recovery-{index}").into(),
-                    NoticeKind::Danger,
-                    course2md::tr!("{} 的笔记名称记录无法读取", location.name),
-                    actions,
-                    details(
-                        "names",
-                        &location.id,
-                        LibraryIssueKind::Titles,
-                        &location.root,
-                    ),
-                ));
+                    });
+                let message = course2md::tr!("{} 的笔记名称记录无法读取", location.name);
+                notices.push(
+                    notice_banner(("title-recovery", index), NoticeKind::Danger, message)
+                        .children(actions)
+                        .children(details("names", location, LibraryIssueKind::Titles)),
+                );
             }
         }
         (!notices.is_empty()).then(|| v_flex().gap(rem(12.)).children(notices))
@@ -1434,18 +1411,10 @@ impl Desktop {
             )
     }
 
-    /// Where a note lives and came from, on one line. Its folder is named only where
-    /// the place does not already say it; source identity helps recognize a note;
-    /// routine revision numbers remain in the reader's version history.
-    fn note_meta(&self, course: &Course) -> String {
-        self.note_line(course, false)
-    }
-
-    /// A card's shorter line: where the note lives and when it was made.
-    fn note_card_meta(&self, course: &Course) -> String {
-        self.note_line(course, true)
-    }
-
+    /// Where a note lives and came from, on one line; a card's shorter line leaves out
+    /// where it came from. Its folder is named only where the place does not already
+    /// say it; source identity helps recognize a note; routine revision numbers remain
+    /// in the reader's version history.
     fn note_line(&self, course: &Course, card: bool) -> String {
         use chrono::Datelike;
         let ms = course
@@ -1672,7 +1641,10 @@ impl Desktop {
                             )
                             .child(
                                 scale
-                                    .support(("note-card-meta", index), self.note_card_meta(course))
+                                    .support(
+                                        ("note-card-meta", index),
+                                        self.note_line(course, true),
+                                    )
                                     .truncate(),
                             ),
                     ),
@@ -1757,7 +1729,9 @@ impl Desktop {
                                     .line_clamp(2)
                                     .text_ellipsis(),
                             )
-                            .child(scale.support(("note-meta", index), self.note_meta(course))),
+                            .child(
+                                scale.support(("note-meta", index), self.note_line(course, false)),
+                            ),
                     )
                     .children(self.note_status(course))
                     .map(|row| {
