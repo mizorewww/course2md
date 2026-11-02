@@ -63,7 +63,7 @@ fn metadata_recovery<T: serde::de::DeserializeOwned>(
     if serde_json::from_slice::<T>(&bytes).is_ok() {
         return Ok(None);
     }
-    let has_backup = crate::store::read_backup(&path)
+    let has_backup = desktop_prefs::store::read_backup(&path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<T>(&bytes).ok())
         .is_some();
@@ -97,12 +97,12 @@ fn recover_metadata<T: serde::de::DeserializeOwned + Serialize + Default>(
         T::default()
     } else {
         serde_json::from_slice::<T>(
-            &crate::store::read_backup(&path)
+            &desktop_prefs::store::read_backup(&path)
                 .context(course2md::tr!("最近备份无法读取，原记录已保留"))?,
         )
         .context(course2md::tr!("最近备份也无法读取，原记录已保留"))?
     };
-    let preserved = crate::store::set_aside(&path, &original)?;
+    let preserved = desktop_prefs::store::set_aside(&path, &original)?;
     course2md::checkpoint::atomic_write(&path, &serde_json::to_vec_pretty(&library)?)?;
     Ok((library, preserved))
 }
@@ -153,7 +153,7 @@ pub fn rename_course(root: &Path, course: &Path, name: &str) -> Result<()> {
     let _lock = course2md::runtime::lock_file(&root.join(".course2md-titles.lock"))?;
     let mut names = title_aliases(root)?;
     names.insert(key, name.to_owned());
-    crate::store::save(
+    desktop_prefs::store::save(
         &root.join(TITLES),
         &serde_json::to_vec_pretty(&Titles { names })?,
     )
@@ -212,7 +212,7 @@ fn delete_course_with(
     let _lock = course2md::runtime::lock_file(&root.join(".course2md-titles.lock"))?;
     let mut names = title_aliases(root)?;
     if names.remove(&key).is_some() {
-        crate::store::save(
+        desktop_prefs::store::save(
             &root.join(TITLES),
             &serde_json::to_vec_pretty(&Titles { names })?,
         )?;
@@ -259,12 +259,12 @@ impl Library {
         let mut library = Self::load(root)?;
         let parents = library.parents.clone();
         change(&mut library)?;
-        crate::store::save(&root.join(FILE), &serde_json::to_vec_pretty(&library)?)?;
+        desktop_prefs::store::save(&root.join(FILE), &serde_json::to_vec_pretty(&library)?)?;
         if library.parents != parents {
             library.parents.retain(|id, parent| {
                 library.folders.contains_key(id) && library.folders.contains_key(parent)
             });
-            crate::store::save(
+            desktop_prefs::store::save(
                 &root.join(TREE),
                 &serde_json::to_vec_pretty(&library.parents)?,
             )?;

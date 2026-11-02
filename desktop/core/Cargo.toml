@@ -14,23 +14,21 @@ test-support = []
 course2md = { path = "../../crates/course2md", default-features = false }
 desktop-prefs = { path = "../prefs" }
 desktop-accounts = { path = "../accounts" }
+desktop-store = { path = "../store" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 smol.workspace = true
 tempfile.workspace = true
 url.workspace = true
-walkdir.workspace = true
-same-file.workspace = true
 zeroize.workspace = true
 chrono.workspace = true
 image = { workspace = true, features = ["webp"] }
-pulldown-cmark.workspace = true
 unicode-segmentation.workspace = true
-trash.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]
+desktop-store = { path = "../store", features = ["test-support"] }
 desktop-prefs = { path = "../prefs", features = ["test-support"] }

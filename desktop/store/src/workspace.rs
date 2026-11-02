@@ -1,9 +1,9 @@
 //! Durable user work. Views never supply the identity or settings of a retry.
-use crate::conversion::ConversionOptions;
 use anyhow::{Context, Result, bail, ensure};
 use course2md::execution::Component;
 use course2md::progress::BlockReason;
 use course2md::settings::ConfigFile;
+use desktop_prefs::conversion::ConversionOptions;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -12,7 +12,7 @@ use std::{
 };
 
 pub use crate::activity::{BlockedRequest, JobEvents};
-pub use crate::store::{new_id, now};
+pub use desktop_prefs::store::{new_id, now};
 
 const SCHEMA: u32 = 2;
 /// Parsed subtitle text of a submitted task, kept in its work directory so the
@@ -98,7 +98,7 @@ pub struct Draft {
     pub options: ConversionOptions,
     /// Remember the local branch when temporarily choosing a speech service.
     #[serde(default)]
-    #[serde(with = "crate::provider_serde")]
+    #[serde(with = "desktop_prefs::provider_serde")]
     pub local_provider: Option<course2md::config::AsrProvider>,
     #[serde(default)]
     pub overrides: BTreeSet<Override>,
@@ -1354,7 +1354,7 @@ impl LibraryWrites {
     fn queue(&self, path: PathBuf, bytes: Vec<u8>, mirror_of: Option<LibraryLocation>) {
         course2md::runtime::lock_recover(&self.pending).insert(path, (bytes, mirror_of));
         let this = self.clone();
-        crate::spawn_blocking_io(move || this.drain());
+        desktop_prefs::spawn_blocking_io(move || this.drain());
     }
 
     /// Performs everything queued so far, waiting for any write already running.
@@ -1472,7 +1472,7 @@ fn pause_recovered_control(task: &TaskRecord) -> Result<()> {
     }
     let path = task.work_dir.join("control.json");
     let mut control = if path.is_file() {
-        let bytes = crate::store::read(&path)?;
+        let bytes = desktop_prefs::store::read(&path)?;
         course2md::checkpoint::atomic_write(
             &task
                 .work_dir
@@ -1745,11 +1745,12 @@ const OLD_MIRROR_FILE: &str = "task-record-v1.json";
 
 /// The events a task saved, read back: what an older mirror held, then its stream.
 fn read_task_events(task: &TaskRecord) -> Result<JobEvents> {
-    let old_mirror: Option<TaskMirror> = crate::store::read(&task.work_dir.join(OLD_MIRROR_FILE))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let old_mirror: Option<TaskMirror> =
+        desktop_prefs::store::read(&task.work_dir.join(OLD_MIRROR_FILE))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok());
     let mut events = old_mirror.map_or_else(JobEvents::default, |mirror| mirror.task.events);
-    match crate::store::read(&task.work_dir.join(TASK_EVENTS_FILE)) {
+    match desktop_prefs::store::read(&task.work_dir.join(TASK_EVENTS_FILE)) {
         Ok(bytes) => events.replay(&bytes),
         Err(error)
             if error
@@ -1772,7 +1773,7 @@ fn read_task_events(task: &TaskRecord) -> Result<JobEvents> {
 /// said, once the record has been rewritten: it moves aside rather than be overwritten.
 fn keep_old_mirror(directory: &Path) -> Result<()> {
     let path = directory.join("task-record.json");
-    let Ok(bytes) = crate::store::read(&path) else {
+    let Ok(bytes) = desktop_prefs::store::read(&path) else {
         return Ok(());
     };
     #[derive(Deserialize)]
@@ -1872,7 +1873,7 @@ fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskF
 }
 
 impl Reconciliation {
-    /// Blocking: run through `crate::spawn_blocking_io`.
+    /// Blocking: run through `desktop_prefs::spawn_blocking_io`.
     pub fn run(self) -> Reconciled {
         Reconciled {
             workspace: self.workspace,
@@ -1930,7 +1931,7 @@ pub fn read_library_tasks(location: &LibraryLocation) -> (Vec<TaskRecord>, Vec<S
         if entry.file_type().is_ok_and(|kind| kind.is_symlink()) || !snapshot.is_file() {
             continue;
         }
-        let restored = crate::store::read(&snapshot).and_then(|bytes| {
+        let restored = desktop_prefs::store::read(&snapshot).and_then(|bytes| {
             let value: serde_json::Value = serde_json::from_slice(&bytes)?;
             let mirror: TaskMirror = serde_json::from_value(value.clone())?;
             ensure!(
@@ -2017,7 +2018,9 @@ pub fn task_subtitle_events(
     }
     let path = task.work_dir.join(TASK_SUBTITLE_FILE);
     if path.is_file() {
-        return Ok(Some(serde_json::from_slice(&crate::store::read(&path)?)?));
+        return Ok(Some(serde_json::from_slice(&desktop_prefs::store::read(
+            &path,
+        )?)?));
     }
     ensure!(
         matches!(
@@ -2036,7 +2039,7 @@ fn draft_subtitle_path(record: &Path) -> PathBuf {
 /// Restore the draft's subtitle events from the file beside the record. A
 /// missing or mismatched file leaves the subtitle to be read again.
 fn hydrate_draft_subtitles(state: &mut State, record: &Path) {
-    let stored = crate::store::read(&draft_subtitle_path(record))
+    let stored = desktop_prefs::store::read(&draft_subtitle_path(record))
         .ok()
         .and_then(|bytes| {
             serde_json::from_slice::<course2md::subtitle::CachedSubtitle>(&bytes).ok()
@@ -2079,7 +2082,7 @@ fn write_record(path: &Path, previous: &State, next: &State) -> Result<()> {
             &serde_json::to_vec(&selected)?,
         )?;
     }
-    crate::store::save(path, &serde_json::to_vec(next)?)
+    desktop_prefs::store::save(path, &serde_json::to_vec(next)?)
 }
 
 /// A list salvaged from a record that no longer reads as a whole.
@@ -2108,11 +2111,11 @@ impl Workspace {
             .parent()
             .context(course2md::tr!("任务记录缺少保存目录"))?;
         std::fs::create_dir_all(parent)?;
-        let backup = crate::store::backup_path(&path);
+        let backup = desktop_prefs::store::backup_path(&path);
         let originals: Vec<_> = [&path, &backup]
             .into_iter()
             .filter(|p| p.exists())
-            .map(|p| Ok((p.clone(), crate::store::read(p)?)))
+            .map(|p| Ok((p.clone(), desktop_prefs::store::read(p)?)))
             .collect::<Result<_>>()?;
         ensure!(
             !originals.is_empty(),
@@ -2235,7 +2238,7 @@ impl Workspace {
     pub fn open_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
         let mut recovery = None;
         if path.is_file()
-            && let Ok(bytes) = crate::store::read(&path)
+            && let Ok(bytes) = desktop_prefs::store::read(&path)
             && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
             && value
                 .get("schema")
@@ -2248,7 +2251,7 @@ impl Workspace {
         }
         // The first rewrite drops what the record used to carry for each task, and its
         // mirror in the library normally holds the same. This copy covers the rest.
-        if crate::store::read(&path)
+        if desktop_prefs::store::read(&path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
             .is_some_and(|record| record["schema"] == 1)
@@ -2258,32 +2261,32 @@ impl Workspace {
         let mut state = if path.exists() {
             match Self::read(&path) {
                 Ok(state) => state,
-                Err(error) => {
-                    match Self::read(&crate::store::backup_path(&path)) {
-                        Ok(mut state) => {
-                            std::fs::read(&path)
-                                .map_err(anyhow::Error::from)
-                                .and_then(|damaged| crate::store::set_aside(&path, &damaged))
-                                .context(course2md::tr!("无法保留损坏的任务记录"))?;
-                            recovery = Some(
-                                course2md::tr!("已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。")
-                                    .into(),
-                            );
-                            for task in &mut state.tasks {
-                                if !task.state.finished() {
-                                    task.intent = Intent::Pause;
-                                    task.state = TaskState::Paused;
-                                    task.resend.clear();
-                                }
+                Err(error) => match Self::read(&desktop_prefs::store::backup_path(&path)) {
+                    Ok(mut state) => {
+                        std::fs::read(&path)
+                            .map_err(anyhow::Error::from)
+                            .and_then(|damaged| desktop_prefs::store::set_aside(&path, &damaged))
+                            .context(course2md::tr!("无法保留损坏的任务记录"))?;
+                        recovery = Some(
+                            course2md::tr!(
+                                "已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。"
+                            )
+                            .into(),
+                        );
+                        for task in &mut state.tasks {
+                            if !task.state.finished() {
+                                task.intent = Intent::Pause;
+                                task.state = TaskState::Paused;
+                                task.resend.clear();
                             }
-                            state
                         }
-                        Err(_) => {
-                            return Err(error)
-                                .context(course2md::tr!("输入和任务记录无法读取，原文件已保留"));
-                        }
+                        state
                     }
-                }
+                    Err(_) => {
+                        return Err(error)
+                            .context(course2md::tr!("输入和任务记录无法读取，原文件已保留"));
+                    }
+                },
             }
         } else {
             let mut initial = State::initial(root.clone(), options.clone());
@@ -2421,7 +2424,8 @@ impl Workspace {
 
     fn read(path: &Path) -> Result<State> {
         let mut state: State = serde_json::from_slice(
-            &crate::store::read(path).with_context(|| course2md::tr!("读取 {}", path.display()))?,
+            &desktop_prefs::store::read(path)
+                .with_context(|| course2md::tr!("读取 {}", path.display()))?,
         )?;
         ensure!(
             state.schema <= SCHEMA,
@@ -2462,7 +2466,7 @@ impl Workspace {
 
     /// Saves the state as it stands, for direct edits such as a job's own events.
     pub fn commit(&self) -> Result<()> {
-        crate::store::save(&self.path, &serde_json::to_vec(&self.state)?)?;
+        desktop_prefs::store::save(&self.path, &serde_json::to_vec(&self.state)?)?;
         self.queue_mirrors(self.state.tasks.iter());
         Ok(())
     }
@@ -2762,7 +2766,7 @@ mod tests {
         );
         assert_eq!(restored.state.task(&id).unwrap().state, TaskState::Queued);
         assert_eq!(restored.state.draft().unwrap().input, "B.mp4");
-        for path in [file.clone(), crate::store::backup_path(&file)] {
+        for path in [file.clone(), desktop_prefs::store::backup_path(&file)] {
             assert!(
                 !std::fs::read_to_string(path)
                     .unwrap()
@@ -3156,7 +3160,7 @@ mod tests {
             .unwrap()
             .remove("translate");
         std::fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
-        let _ = std::fs::remove_file(crate::store::backup_path(&file));
+        let _ = std::fs::remove_file(desktop_prefs::store::backup_path(&file));
 
         let defaults = ConversionOptions {
             summarize: false,
@@ -4333,7 +4337,7 @@ mod tests {
         .unwrap();
         std::fs::write(ws.storage_path(), b"{broken primary").unwrap();
         std::fs::write(
-            crate::store::backup_path(ws.storage_path()),
+            desktop_prefs::store::backup_path(ws.storage_path()),
             b"{broken backup",
         )
         .unwrap();
@@ -4479,7 +4483,7 @@ mod tests {
             child.plan.config.defaults.formats,
             Some(vec![OutputFormat::Html])
         );
-        let refs = crate::preferences::ServiceRefs {
+        let refs = desktop_prefs::preferences::ServiceRefs {
             asr: Some("stopped-asr".into()),
             llm: Some("stopped-ai".into()),
         };

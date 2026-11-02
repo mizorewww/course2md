@@ -290,7 +290,8 @@ pub fn relocate_preview(preview: &mut crate::notes::Preview, old: &Path, new: &P
 #[cfg(test)]
 mod tests {
     use super::{LocationChecks, inspect_location, relocate_preview, scan_locations};
-    use crate::{conversion::ConversionOptions, storage, workspace};
+    use crate::{storage, workspace};
+    use desktop_prefs::conversion::ConversionOptions;
     use std::{path::PathBuf, sync::atomic::AtomicBool};
 
     fn inspect_relocation(

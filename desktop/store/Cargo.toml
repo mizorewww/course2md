@@ -1,0 +1,25 @@
+[package]
+name = "desktop-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The course2md desktop's workspace: tasks, libraries, their folders and published notes"
+publish = false
+
+[features]
+# Workspace and note fixtures that other crates' tests build on.
+test-support = []
+
+[dependencies]
+course2md = { path = "../../crates/course2md", default-features = false }
+desktop-prefs = { path = "../prefs" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+smol.workspace = true
+tempfile.workspace = true
+walkdir.workspace = true
+same-file.workspace = true
+image = { workspace = true, features = ["webp"] }
+pulldown-cmark.workspace = true
+trash.workspace = true

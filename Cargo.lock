@@ -1821,18 +1821,15 @@ dependencies = [
  "course2md",
  "desktop-accounts",
  "desktop-prefs",
+ "desktop-store",
  "image",
  "libc",
- "pulldown-cmark",
- "same-file",
  "serde",
  "serde_json",
  "smol",
  "tempfile",
- "trash",
  "unicode-segmentation",
  "url",
- "walkdir",
  "zeroize",
 ]
 
@@ -1857,6 +1854,24 @@ dependencies = [
  "uuid",
  "which",
  "zeroize",
+]
+
+[[package]]
+name = "desktop-store"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "course2md",
+ "desktop-prefs",
+ "image",
+ "pulldown-cmark",
+ "same-file",
+ "serde",
+ "serde_json",
+ "smol",
+ "tempfile",
+ "trash",
+ "walkdir",
 ]
 
 [[package]]

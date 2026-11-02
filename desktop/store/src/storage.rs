@@ -277,11 +277,11 @@ pub fn prepare_move(
     let (source, destination) = validate_destination(source, destination)?;
     let journal = Journal {
         schema: 1,
-        id: crate::store::new_id("move"),
+        id: desktop_prefs::store::new_id("move"),
         library_id,
         source,
         destination,
-        created: crate::store::now(),
+        created: desktop_prefs::store::now(),
         phase: Phase::Copying,
         files: Vec::new(),
         directories: Vec::new(),
