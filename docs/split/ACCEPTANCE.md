@@ -156,6 +156,11 @@ Each line names the commit by subject; evidence is under the session scratchpad 
   drop zones on `drop_target` (source only: the capture build cannot drag files from outside); U1 dropdowns
   (`u1/gopen`, `u1/ho`, `u1/ad`). U17 is the kit's palette change (#27): every palette's error colours follow it.
 
+- U20, `desktop: the reader bar's breadcrumb and title centre on the back button`: within 1pt at 1600 wide
+  (`u20/r`). Dropdown menus covering their own field in a short window: a kit bug (the popover clamps instead of
+  switching sides); draft kit #28 opens them above, or scrolls on the roomier side. U2: load 21 to 51 while
+  attempted, not measured.
+
 ## Plan conformance (after the three fix agents)
 
 | ID | Sev | Finding |
