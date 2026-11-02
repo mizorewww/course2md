@@ -1484,6 +1484,9 @@ impl Desktop {
                     })
                     .child(
                         material_button("setup-next", variant)
+                            .when(variant == ButtonVariant::Outlined, |button| {
+                                button.tone(ButtonTone::Accent)
+                            })
                             .icon(symbols::arrow_forward())
                             .child(label)
                             .disabled(busy)

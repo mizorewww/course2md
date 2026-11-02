@@ -1104,6 +1104,9 @@ impl Desktop {
         let (id, reassociate_id) = (library.id.clone(), library.id.clone());
         let repair_button = |name: &'static str, variant, icon, label: &'static str| {
             material_button((name, index), variant)
+                .when(variant == ButtonVariant::Outlined, |button| {
+                    button.tone(ButtonTone::Accent)
+                })
                 .icon(icon)
                 .child(label)
                 .disabled(busy)

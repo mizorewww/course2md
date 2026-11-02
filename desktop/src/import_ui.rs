@@ -745,6 +745,9 @@ impl Desktop {
         let input = self.value(Field::Source, cx);
         let choose = |id: &'static str, variant, label: &'static str, cx: &mut Context<Self>| {
             material_button(id, variant)
+                .when(variant == ButtonVariant::Outlined, |button| {
+                    button.tone(ButtonTone::Accent)
+                })
                 .icon(symbols::folder_open())
                 .child(label)
                 .on_click(cx.listener(|this, _, window, cx| this.pick_video(window, cx)))
@@ -2611,8 +2614,14 @@ impl Desktop {
         let checking = !preferences_blocked && (self.environment.is_none() || plan_pending);
         let mut facts: Vec<AnyElement> = Vec::new();
         let mut actions: Vec<MaterialButton> = Vec::new();
+        // An outlined action reads as live: its label is primary (G3).
         let button = |id: &'static str, variant, icon, label: &'static str| {
-            material_button(id, variant).icon(icon).child(label)
+            material_button(id, variant)
+                .when(variant == ButtonVariant::Outlined, |button| {
+                    button.tone(ButtonTone::Accent)
+                })
+                .icon(icon)
+                .child(label)
         };
         if self.environment.as_ref().is_some_and(|environment| {
             !environment.engine
