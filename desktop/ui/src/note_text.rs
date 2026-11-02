@@ -220,16 +220,13 @@ fn formula_image(formula: &Formula, em: Pixels, ink: Hsla, window: &Window) -> A
     h_flex()
         .flex_none()
         .items_start()
-        .children((0..tiles).filter_map(|tile| {
-            let path = math::tile(&formula.path, tile, tiles)?;
-            Some(
-                svg()
-                    .path(path)
-                    .flex_none()
-                    .w(width / tiles as f32)
-                    .h(height)
-                    .text_color(ink),
-            )
+        .children((0..tiles).map(|tile| {
+            svg()
+                .path(math::tile(&formula.path, tile, tiles))
+                .flex_none()
+                .w(width / tiles as f32)
+                .h(height)
+                .text_color(ink)
         }))
         .into_any_element()
 }
