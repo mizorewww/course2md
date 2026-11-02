@@ -1724,37 +1724,47 @@ impl Desktop {
                 )
                 .child(*label)
             });
-        let summary = v_flex()
+        // The circle leads; the conclusion, its recheck and the chips share one ruler
+        // beside it, so whatever wraps lines up with the text (U23).
+        let summary = h_flex()
             .w_full()
             .min_w_0()
+            .items_start()
             .gap(rem(16.))
+            .child(tinted_icon(summary_icon, summary_tint, ui::RESOURCE_ICON))
             .child(
-                h_flex()
-                    .w_full()
+                v_flex()
+                    .flex_1()
                     .min_w_0()
-                    .items_center()
-                    .flex_wrap()
                     .gap(rem(16.))
-                    .child(tinted_icon(summary_icon, summary_tint, ui::RESOURCE_ICON))
                     .child(
-                        TileScale::Regular
-                            .text(
-                                "diagnostic-summary",
-                                summary_title,
-                                Some(summary_detail.into()),
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .min_h(ui::RESOURCE_ICON)
+                            .items_center()
+                            .flex_wrap()
+                            .gap(rem(16.))
+                            .child(
+                                TileScale::Regular
+                                    .text(
+                                        "diagnostic-summary",
+                                        summary_title,
+                                        Some(summary_detail.into()),
+                                    )
+                                    .flex_1()
+                                    .flex_basis(rem(200.)),
                             )
-                            .flex_basis(rem(200.)),
+                            .child(recheck),
                     )
-                    .child(recheck),
-            )
-            .child(
-                h_flex()
-                    .w_full()
-                    .min_w_0()
-                    .pl(rem(ui::RESOURCE_ICON_SIZE + 16.))
-                    .gap(rem(8.))
-                    .flex_wrap()
-                    .children(chips),
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .gap(rem(8.))
+                            .flex_wrap()
+                            .children(chips),
+                    ),
             );
         let mut fields = vec![ui::Field::content("diagnostic-conclusion", summary)];
         if !speech_service
