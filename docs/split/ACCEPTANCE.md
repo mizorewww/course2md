@@ -309,3 +309,28 @@ tree), after this branch. B5 ran under `sandbox-exec` with only loopback reachab
 - **B9.** `ad13bf4f`. 2.0.1 ignored the proxy variables too (ureq 2, `try_proxy_from_env` never set). Agents now use
   them with `NO_PROXY`, loopback always direct. Test `an_environment_proxy_leaves_loopback_and_no_proxy_hosts_direct`.
   `model-fetch` downloads are outside these agents.
+
+Follow-ups, branch `split/app3`. Native runs of the capture build under an isolated `HOME`/`XDG_*`/`TMPDIR`/`QWEN3_CACHE_DIR`
+and `sandbox-exec` with only loopback reachable; a local video with speech recognition (CPU) and a fake `llama-server`;
+no AI service, no model host. Before is `36e40f03`'s tree.
+
+- **B9 rest.** `5a3ca191`, model-fetch `b7e0682` (mizorewww/model-fetch#1, merged on green CI). Model downloads
+  (built-in client and aria2) and the opt-in country lookup follow the same rule as the app's agents: `ALL_PROXY`,
+  `HTTPS_PROXY` or `HTTP_PROXY` with `NO_PROXY`, loopback always direct, `NO_PROXY=*` off. aria2 gets the route in its
+  private config file with its own proxy variables cleared; it speaks only to HTTP proxies, so behind SOCKS or HTTPS the
+  built-in client takes over. Tests (model-fetch) `an_environment_proxy_leaves_loopback_and_no_proxy_hosts_direct`,
+  `remote_hosts_go_through_the_proxy_and_loopback_does_not` (a fake CONNECT proxy), `a_real_aria2_uses_the_proxy`,
+  `aria2_is_told_the_same_route`, `aria2_cannot_use_a_socks_proxy`. No release: release-plz there is `git_only`,
+  `publish = false`.
+- **B5 rest.** `835ee58c`. A preparation started from a task's 下载并准备模型 continues, once it succeeds, the tasks
+  stopped for that same model (`tasks_awaiting_model`); one paused, cancelled or continued meanwhile has left Needs
+  attention and is not touched, nor one waiting for another model; a preparation from settings or the guide, or one
+  that fails or is paused, resumes nothing. Test `tasks_stopped_for_a_model_continue_once_it_is_ready`. Native: the task
+  stopped with "The speech model qwen3-1.7b is not downloaded yet"; model files were put in place (no download), one
+  click on "Download and prepare the model", and without Continue the task ran on through slides and audio to the
+  fake engine's own failure.
+- **Held count.** `9e62b141`. A held task's record is still Queued, so the header counted it under both chips. The
+  header counts each task in the group it is drawn in (`task_counts`), and 全部暂停 leaves out a held task. Test
+  `a_held_task_counts_once_as_processing`. Native (app `kill -9`ed mid-run, the task's lock held by another process,
+  relaunched): before, "1 processing", "1 queued" and "Pause all"; after, "1 processing" alone. The card's own Pause
+  on a held task is unchanged.
