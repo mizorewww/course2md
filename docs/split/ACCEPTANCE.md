@@ -40,6 +40,7 @@ Resolutions (branch `split/engine-fixes`; evidence under the session scratchpad 
 | C4 | `config: the OpenAI-compatible provider shows its 2.0.1 name` | `Display` and `as_str` give `openai-compatible` again; serde keeps `open-ai-compatible`, which 2.0.1 also wrote to files. Unit test on both forms |
 | C5 | `http: JSON request bodies are compact again` | `runtime::send_json` serializes with `serde_json::to_vec`; the AI requests, the connection test, the Codex refresh and the NPU worker use it. Ledger ids hash the value, not the bytes, so they do not change. `prompt_identity` asserts every body equals its compact form |
 | C6 | `cli: config output, log events and Japanese help read as in 2.0.1` | `config show` prints numbers as Rust does (`1`, `10`, `20`; `max_speech` from its f32); the template spaces lists (`["md", "html"]`, unit test); `api vad` (with `endpoint`, `model`), `npu vad`, `vad` with `engine=silero-coreml` per backend again; `ssim scan done` has `mode` again; the new `asr ready` timing moves to debug; Japanese `コマンド：`, `オプション：` and `--help を参照してください` restored in the catalog |
+| C7 | `cli: RUST_LOG=course2md=... covers the engine crates again` | Each `course2md` directive is repeated for the eleven `c2m_*` crates (`course2md::asr=debug` also becomes `c2m_asr::asr=debug`). `RUST_LOG=warn,course2md=info` on a subtitle run prints the same four INFO lines as 2.0.1 (`d89579d`: one); unit test |
 
 ## Desktop behaviour (agent: desktop-logic)
 

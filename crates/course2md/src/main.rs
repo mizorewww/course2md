@@ -18,7 +18,10 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
     let filter = if quiet {
         EnvFilter::new("error")
     } else {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| default.into())
+        std::env::var(EnvFilter::DEFAULT_ENV)
+            .ok()
+            .and_then(|spec| EnvFilter::try_new(engine_targets(&spec)).ok())
+            .unwrap_or_else(|| default.into())
     };
     if json {
         // NDJSON 模式：stdout 只出 {"type":"log",...} 行（其余事件由各阶段显式 emit）
@@ -44,6 +47,37 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
             .compact()
             .init();
     }
+}
+
+/// The engine's crates, which log under their own targets since the split.
+const ENGINE_CRATES: [&str; 11] = [
+    "c2m_ai",
+    "c2m_artifact",
+    "c2m_asr",
+    "c2m_config",
+    "c2m_core",
+    "c2m_dispatch",
+    "c2m_engine",
+    "c2m_i18n",
+    "c2m_process",
+    "c2m_protocol",
+    "c2m_source",
+];
+
+/// A `RUST_LOG` written for 2.0.1, where every engine module logged under
+/// `course2md`: each `course2md` directive also covers the engine crates
+/// (`course2md::asr=debug` becomes `c2m_*::asr=debug` too).
+fn engine_targets(spec: &str) -> String {
+    let mut directives = Vec::new();
+    for directive in spec.split(',').filter(|d| !d.trim().is_empty()) {
+        directives.push(directive.to_owned());
+        let rest = directive.trim().strip_prefix("course2md");
+        if let Some(rest) = rest.filter(|rest| rest.is_empty() || rest.starts_with(['=', ':', '[']))
+        {
+            directives.extend(ENGINE_CRATES.iter().map(|name| format!("{name}{rest}")));
+        }
+    }
+    directives.join(",")
 }
 
 fn main() -> std::process::ExitCode {
@@ -673,4 +707,24 @@ fn normalize_source(source: &str) -> anyhow::Result<String> {
         tr!("找不到视频文件或无法识别链接：{}", source),
         tr!("请检查路径；含空格的路径需加引号")
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn course2md_log_directives_cover_the_engine_crates() {
+        let spec = super::engine_targets("warn,course2md=debug");
+        assert!(spec.starts_with("warn,course2md=debug,c2m_ai=debug,"));
+        assert!(spec.contains(",c2m_source=debug"));
+        let spec = super::engine_targets("course2md::asr=trace");
+        assert!(spec.contains("c2m_asr::asr=trace"));
+        assert_eq!(
+            super::engine_targets("course2md_other=info"),
+            "course2md_other=info"
+        );
+        assert_eq!(super::engine_targets("info"), "info");
+        let filter =
+            tracing_subscriber::EnvFilter::try_new(super::engine_targets("course2md=debug"));
+        assert!(filter.is_ok());
+    }
 }
