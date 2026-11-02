@@ -311,16 +311,14 @@ impl Transport for HttpTransport {
         );
         let call = agent
             .post(&request.endpoint)
-            .set("Content-Type", &request.content_type);
+            .header("Content-Type", &request.content_type);
         let call = crate::bounded_http::json_call(call, request.authorization.as_ref());
-        // A nonempty POST body is non-retryable in ureq 2. Each test creates a fresh agent,
-        // so a recycled connection cannot trigger a hidden resend either.
-        let response = match call.send_bytes(&request.body) {
-            Ok(response) => response,
-            Err(ureq::Error::Status(_, response)) => response,
-            Err(ureq::Error::Transport(_)) => return Err(TransportFailure::Unknown),
+        // Each test creates a fresh agent with an empty pool, so a stale recycled
+        // connection cannot make ureq resend the request behind our back.
+        let Ok(response) = call.send(&request.body[..]) else {
+            return Err(TransportFailure::Unknown);
         };
-        let status = response.status();
+        let status = response.status().as_u16();
         let body =
             crate::bounded_http::read_bounded(response, MAX_RESPONSE).map_err(
                 |error| match error {

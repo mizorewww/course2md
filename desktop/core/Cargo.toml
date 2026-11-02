@@ -19,7 +19,7 @@ serde_json = "1"
 smol = "2"
 tempfile = "3"
 url = "2"
-ureq = { version = "2", features = ["json"] }
+ureq.workspace = true
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
 same-file = "1.0.6"
@@ -40,3 +40,6 @@ keyring = "4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.7"
+
+[dev-dependencies]
+c2m-test-http = { path = "../../crates/c2m-test-http" }

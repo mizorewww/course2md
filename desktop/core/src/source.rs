@@ -624,15 +624,18 @@ pub fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
     if cache_hit(&target) {
         return Ok(target);
     }
-    let response = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(3))
-        .timeout_read(Duration::from_secs(2))
-        .timeout(Duration::from_secs(6))
+    // Covers come from the video site's CDN, which may redirect to a mirror.
+    let response = course2md::runtime::agent_builder()
+        .max_redirects(5)
+        .timeout_connect(Some(Duration::from_secs(3)))
+        .timeout_per_read(Some(Duration::from_secs(2)))
+        .timeout_global(Some(Duration::from_secs(6)))
         .build()
+        .new_agent()
         .get(url)
         .call()?;
     use std::io::Read;
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     let mut bytes = Vec::new();
     let mut buffer = [0; 32 * 1024];
     loop {
