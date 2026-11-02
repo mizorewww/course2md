@@ -13,6 +13,7 @@
 //! Call sites use the [`tr!`] macro: a bare literal becomes a translated
 //! `&str`, and extra arguments fill `{}` placeholders in the translated text.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::OnceLock;
@@ -346,18 +347,87 @@ fn by_simplified() -> &'static HashMap<&'static str, Entry> {
     })
 }
 
-/// One part of an engine message in `lang`, if the catalog or the part's own
-/// bilingual halves know it.
-fn engine_part(part: &str, lang: Lang) -> Option<&str> {
+/// Rows whose Simplified Chinese text has `{}` values, split at them, longest literal
+/// text first: "校对 00:00–00:17 的文字" is a row with its values filled in.
+fn simplified_templates() -> &'static [(Vec<&'static str>, Entry)] {
+    static INDEX: OnceLock<Vec<(Vec<&'static str>, Entry)>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut templates: Vec<(Vec<&'static str>, Entry)> = by_simplified()
+            .iter()
+            .filter(|(zh, _)| zh.contains("{}") && !zh.contains("{{"))
+            .map(|(zh, entry)| (zh.split("{}").collect::<Vec<_>>(), *entry))
+            // A template of little more than its values would match any text.
+            .filter(|(pieces, _)| {
+                let literal = pieces.concat();
+                literal.chars().count() >= 2 && contains_cjk(&literal)
+            })
+            .collect();
+        templates.sort_by(|(a, _), (b, _)| {
+            let len = |pieces: &[&str]| pieces.iter().map(|piece| piece.len()).sum::<usize>();
+            len(b).cmp(&len(a)).then_with(|| a.cmp(b))
+        });
+        templates
+    })
+}
+
+/// The values in `text` when it is `pieces` joined around them.
+fn match_template<'a>(pieces: &[&str], text: &'a str) -> Option<Vec<&'a str>> {
+    let (first, rest) = pieces.split_first()?;
+    let mut remaining = text.strip_prefix(first)?;
+    let mut values = Vec::with_capacity(rest.len());
+    for (index, piece) in rest.iter().enumerate() {
+        if index + 1 == rest.len() {
+            values.push(remaining.strip_suffix(piece)?);
+            remaining = "";
+        } else {
+            if piece.is_empty() {
+                return None;
+            }
+            let at = remaining.find(piece)?;
+            values.push(&remaining[..at]);
+            remaining = &remaining[at + piece.len()..];
+        }
+    }
+    remaining.is_empty().then_some(values)
+}
+
+/// One part of an engine message in `lang`, if the catalog (a row, or a row with its
+/// values filled in) or the part's own bilingual halves know it.
+fn engine_part(part: &str, lang: Lang, depth: u8) -> Option<Cow<'static, str>> {
     if let Some(entry) = catalog().get(part) {
-        return Some(entry[lang as usize]);
+        return Some(Cow::Borrowed(entry[lang as usize]));
     }
     if let Some(entry) = by_simplified().get(part) {
-        return Some(entry[lang as usize]);
+        return Some(Cow::Borrowed(entry[lang as usize]));
     }
-    bilingual_halves(part).map(|(zh, en)| match lang {
-        Lang::ZhHans | Lang::ZhHant => zh,
-        Lang::En | Lang::Ja => en,
+    if depth < 2 {
+        for (pieces, entry) in simplified_templates() {
+            if let Some(values) = match_template(pieces, part) {
+                // Each value is itself an engine text ("错误：{}" wraps another).
+                let values: Vec<String> = values
+                    .into_iter()
+                    .map(|value| engine_message_in(value, lang, depth + 1))
+                    .collect();
+                let mut out = String::new();
+                let mut values = values.iter();
+                let mut literal = entry[lang as usize].split("{}");
+                out.push_str(literal.next().unwrap_or_default());
+                for piece in literal {
+                    out.push_str(values.next().map_or("", String::as_str));
+                    out.push_str(piece);
+                }
+                return Some(Cow::Owned(out));
+            }
+        }
+    }
+    bilingual_halves(part).map(|(zh, en)| {
+        Cow::Owned(
+            match lang {
+                Lang::ZhHans | Lang::ZhHant => zh,
+                Lang::En | Lang::Ja => en,
+            }
+            .to_owned(),
+        )
     })
 }
 
@@ -366,6 +436,10 @@ fn engine_part(part: &str, lang: Lang) -> Option<&str> {
 /// ": "; each known part is translated, the longest first, and the rest (a tool's
 /// or the system's own words) is kept as written.
 pub fn engine_message_for(text: &str, lang: Lang) -> String {
+    engine_message_in(text, lang, 0)
+}
+
+fn engine_message_in(text: &str, lang: Lang, depth: u8) -> String {
     let bounds: Vec<usize> = text
         .match_indices(": ")
         .map(|(index, _)| index)
@@ -378,10 +452,10 @@ pub fn engine_message_for(text: &str, lang: Lang) -> String {
             .iter()
             .rev()
             .filter(|end| **end > start)
-            .find_map(|end| engine_part(&text[start..*end], lang).map(|part| (*end, part)));
+            .find_map(|end| engine_part(&text[start..*end], lang, depth).map(|part| (*end, part)));
         let end = match found {
             Some((end, part)) => {
-                out.push_str(part);
+                out.push_str(&part);
                 end
             }
             None => {
@@ -421,6 +495,42 @@ pub fn catalog_keys() -> impl Iterator<Item = &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A worker writes Simplified Chinese; the desktop shows it in its own language.
+    #[test]
+    fn engine_text_with_values_reads_in_the_interface_language() {
+        assert_eq!(
+            engine_message_for("此笔记版本需要其他版本的软件", Lang::En),
+            "Unsupported manifest schema"
+        );
+        assert_eq!(
+            engine_message_for("校对 00:00–00:17 的文字", Lang::En),
+            "Proofread transcript 00:00–00:17"
+        );
+        assert_eq!(
+            engine_message_for("校对 00:00–00:17 的文字", Lang::ZhHant),
+            "校對 00:00–00:17 的文字"
+        );
+        assert_eq!(
+            engine_message_for(
+                "错误：Apple 模型下载失败 / Apple model download failed (qwen3-1.7b): denied",
+                Lang::En
+            ),
+            "Error: Apple model download failed (qwen3-1.7b): denied"
+        );
+        // A bilingual value no row names gives the half the reader reads.
+        let raw = "错误：Apple 模型下载失败 / Apple model download failed (x): denied";
+        assert_eq!(
+            engine_message_for(raw, Lang::ZhHant),
+            "錯誤：Apple 模型下载失败"
+        );
+        // Text the catalog does not know stays as it is.
+        assert_eq!(
+            engine_message_for("EOF while parsing", Lang::En),
+            "EOF while parsing"
+        );
+        assert_eq!(engine_message_for("", Lang::En), "");
+    }
 
     #[test]
     fn language_codes_round_trip() {

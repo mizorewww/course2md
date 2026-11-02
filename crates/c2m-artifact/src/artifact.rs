@@ -123,6 +123,25 @@ pub fn read_current(path: &Path) -> Result<CurrentVersion> {
     Ok(value)
 }
 
+/// Refuses before any work when the note's current version was written by a newer
+/// app: publishing beside it would fail only after the requests were paid for.
+pub fn refuse_newer(target: &Target) -> Result<()> {
+    let path = target.course_dir.join("current.json");
+    if !path.is_file() {
+        return Ok(());
+    }
+    let check = || -> Result<()> {
+        let current = read_current(&path)?;
+        read_manifest(&safe_asset_path(&target.course_dir, &current.manifest)?)?;
+        Ok(())
+    };
+    match check() {
+        Err(error) if error.is::<NewerSchema>() => Err(error),
+        // Damage is publishing's to report; it may still replace what is broken.
+        _ => Ok(()),
+    }
+}
+
 pub fn published(target: &Target) -> Result<Option<Manifest>> {
     let dir = target.version_dir();
     if !dir.exists() {
@@ -617,7 +636,9 @@ mod tests {
                 &TaskControl::default(),
             )
         };
+        assert!(refuse_newer(&target).is_ok(), "no note yet");
         publish_now(&target).unwrap();
+        assert!(refuse_newer(&target).is_ok(), "this app's note");
         let pointer = target.course_dir.join("current.json");
         let mut value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&pointer).unwrap()).unwrap();
@@ -626,6 +647,9 @@ mod tests {
         std::fs::write(&pointer, &newer).unwrap();
         target.task_id = "task-2".into();
         target.version_id = "v2".into();
+        // Refused up front, before a task does paid work, and again at publishing.
+        let early = refuse_newer(&target).unwrap_err();
+        assert!(early.is::<NewerSchema>(), "{early:#}");
         let error = publish_now(&target).unwrap_err();
         assert!(error.is::<NewerSchema>(), "{error:#}");
         assert_eq!(std::fs::read(&pointer).unwrap(), newer);

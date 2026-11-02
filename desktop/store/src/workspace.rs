@@ -824,6 +824,18 @@ impl State {
         Ok(())
     }
 
+    /// An unfinished task already doing `plan`'s work, which `enqueue` would return
+    /// instead of a new one. The attempt `parent` names, the one `plan` replaces, is
+    /// not a duplicate of it.
+    pub fn duplicate_of(&self, plan: &TaskPlan, parent: Option<&str>) -> Option<&TaskRecord> {
+        self.tasks.iter().find(|t| {
+            !t.state.finished()
+                && t.handled_by.is_none()
+                && parent != Some(t.id.as_str())
+                && t.plan.same_work(plan)
+        })
+    }
+
     pub fn enqueue(&mut self, plan: TaskPlan, parent: Option<String>) -> Result<(String, bool)> {
         ensure!(
             !plan.source_id.is_empty() && !plan.title.trim().is_empty(),
@@ -849,13 +861,7 @@ impl State {
         let location = self
             .library(&plan.library_id)
             .context(c2m_i18n::tr!("所选保存位置未登记"))?;
-        if let Some(existing) = self.tasks.iter().find(|t| {
-            // The attempt this one replaces is not a duplicate of it.
-            !t.state.finished()
-                && t.handled_by.is_none()
-                && parent.as_deref() != Some(t.id.as_str())
-                && t.plan.same_work(&plan)
-        }) {
+        if let Some(existing) = self.duplicate_of(&plan, parent.as_deref()) {
             return Ok((existing.id.clone(), false));
         }
         let id = new_id("task");
@@ -1309,6 +1315,9 @@ pub struct Workspace {
     identity: u64,
     /// When held tasks were last checked; see `held_check_due`.
     held_checked: Option<std::time::Instant>,
+    /// A reconciliation was handed out and its findings are not applied yet. While
+    /// it runs no held check is due: its result is what the next check waits for.
+    checking: bool,
 }
 
 /// How often a task held by a worker from an earlier session is checked again.
@@ -2225,6 +2234,7 @@ impl Workspace {
             library_writes: LibraryWrites::default(),
             identity: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             held_checked: None,
+            checking: false,
         }
     }
 
@@ -2327,13 +2337,23 @@ impl Workspace {
     }
 
     /// The checks still owed, to run on a blocking thread. A running task is telling
-    /// the app what it is doing, and has nothing to read back.
-    pub fn reconciliation(&self) -> Option<Reconciliation> {
-        let held = !self.state.reconciling
-            && self
-                .held_check_due()
-                .is_some_and(|due| due <= std::time::Instant::now());
-        (self.state.reconciling || held).then(|| Reconciliation {
+    /// the app what it is doing, and has nothing to read back. Until its findings are
+    /// applied no other check is handed out.
+    pub fn reconciliation(&mut self) -> Option<Reconciliation> {
+        self.reconciliation_at(std::time::Instant::now())
+    }
+
+    /// `reconciliation` as of `now`.
+    pub fn reconciliation_at(&mut self, now: std::time::Instant) -> Option<Reconciliation> {
+        // `held_check_due` is `None` while a check runs, so a held one is never handed
+        // out twice; the startup checks may be, for a record that was replaced.
+        let held =
+            !self.state.reconciling && self.held_check_due(now).is_some_and(|due| due <= now);
+        if !(self.state.reconciling || held) {
+            return None;
+        }
+        self.checking = true;
+        Some(Reconciliation {
             workspace: self.identity,
             tasks: self
                 .state
@@ -2354,13 +2374,12 @@ impl Workspace {
         })
     }
 
-    /// When a task held by a worker from an earlier session is next checked, if any is.
-    pub fn held_check_due(&self) -> Option<std::time::Instant> {
-        self.state.tasks.iter().any(|task| task.held).then(|| {
+    /// When a task held by a worker from an earlier session is next checked, if any
+    /// is: a second after the last check, never while one runs. `now` when none ran yet.
+    pub fn held_check_due(&self, now: std::time::Instant) -> Option<std::time::Instant> {
+        (!self.checking && self.state.tasks.iter().any(|task| task.held)).then(|| {
             self.held_checked
-                .map_or_else(std::time::Instant::now, |checked| {
-                    checked + HELD_CHECK_INTERVAL
-                })
+                .map_or(now, |checked| checked + HELD_CHECK_INTERVAL)
         })
     }
 
@@ -2391,6 +2410,7 @@ impl Workspace {
             state.reconciling = false;
         }
         self.held_checked = Some(std::time::Instant::now());
+        self.checking = false;
         let mirror_failed: BTreeSet<String> = reconciled
             .facts
             .iter()
@@ -3812,7 +3832,7 @@ mod tests {
         assert!(held.held && !held.has_uncertain(), "not judged yet");
         assert_ne!(held.state, TaskState::Uncertain);
         assert!(reopened.state.next_task().is_none(), "not run beside it");
-        assert!(reopened.held_check_due().is_some());
+        assert!(reopened.held_check_due(std::time::Instant::now()).is_some());
         reopened.held_checked = None;
         reopened.reconcile_now();
         assert!(reopened.state.task(&id).unwrap().held, "still held");
@@ -3825,7 +3845,64 @@ mod tests {
         assert!(!task.held && !task.has_uncertain());
         assert_eq!(task.state, TaskState::Queued);
         assert_eq!(reopened.state.next_task().unwrap().id, id);
-        assert!(reopened.held_check_due().is_none());
+        assert!(reopened.held_check_due(std::time::Instant::now()).is_none());
+    }
+
+    /// The app's event loop sleeps until `held_check_due`. A check handed out to a
+    /// blocking thread must not leave that instant in the past while it runs: the loop
+    /// would wake at once, again and again, and never let the check's result in.
+    #[test]
+    fn a_held_check_in_flight_is_not_due_again_until_its_findings_are_applied() {
+        use std::time::{Duration, Instant};
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let id = ws
+            .state
+            .enqueue(plan(&ws.state.default_library), None)
+            .unwrap()
+            .0;
+        ws.transaction(|state| {
+            state.task_mut(&id).unwrap().state = TaskState::Running;
+            Ok(())
+        })
+        .unwrap();
+        let task = ws.state.task(&id).unwrap().clone();
+        std::fs::create_dir_all(&task.work_dir).unwrap();
+        drop(ws);
+        let worker = c2m_process::runtime::lock_file(&task.work_dir.join(".task.lock")).unwrap();
+        let mut reopened = test_workspace(dir.path());
+        assert!(reopened.state.task(&id).unwrap().held);
+
+        let t0 = Instant::now();
+        reopened.held_checked = Some(t0);
+        assert_eq!(reopened.held_check_due(t0), Some(t0 + HELD_CHECK_INTERVAL));
+        assert!(reopened.reconciliation_at(t0).is_none(), "not due yet");
+
+        // Due: the check is handed out, and while it runs nothing else is due, however
+        // long it takes.
+        let later = t0 + HELD_CHECK_INTERVAL;
+        let check = reopened.reconciliation_at(later).expect("due");
+        for elapsed in [0, 1, 5, 60] {
+            let now = later + Duration::from_secs(elapsed);
+            assert_eq!(reopened.held_check_due(now), None);
+            assert!(reopened.reconciliation_at(now).is_none());
+        }
+
+        // Its findings applied (the worker still holds the folder), the next check is a
+        // second later, not in the past.
+        let applied = Instant::now();
+        reopened.apply_reconciliation(check.run()).unwrap();
+        assert!(reopened.state.task(&id).unwrap().held);
+        let due = reopened.held_check_due(applied).unwrap();
+        assert!(due >= applied + HELD_CHECK_INTERVAL);
+
+        // Once the worker lets go, the next check frees the task.
+        drop(worker);
+        let check = reopened.reconciliation_at(due).expect("due again");
+        reopened.apply_reconciliation(check.run()).unwrap();
+        assert!(!reopened.state.task(&id).unwrap().held);
+        assert_eq!(reopened.held_check_due(due), None);
+        assert_eq!(reopened.state.next_task().unwrap().id, id);
     }
 
     /// Adjusting and retrying an uncertain task unchanged starts a new attempt; the
@@ -3837,6 +3914,12 @@ mod tests {
         let library = ws.state.default_library.clone();
         let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         ws.state.task_mut(&id).unwrap().state = TaskState::Uncertain;
+        // The workbench's notice asks the same question before the retry is started.
+        assert!(ws.state.duplicate_of(&plan(&library), Some(&id)).is_none());
+        assert_eq!(
+            ws.state.duplicate_of(&plan(&library), None).map(|t| &t.id),
+            Some(&id)
+        );
         let (retry, created) = ws.state.enqueue(plan(&library), Some(id.clone())).unwrap();
         assert!(created);
         assert_ne!(retry, id);

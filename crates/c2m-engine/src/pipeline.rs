@@ -129,6 +129,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         if let Some(error) = local_duration_error {
             return Err(error);
         }
+        task.refuse_newer_note().await?;
         task.generate(&meta, SubtitleInput::Discover(probed), Credentials::Cli)
             .await
     })
@@ -178,6 +179,7 @@ pub(crate) async fn run_task(
         started,
     };
     task.recording_failure(&platform, &request.source_id, async {
+        task.refuse_newer_note().await?;
         if let execution::Operation::Reprocess {
             base_version_dir,
             components,
@@ -247,6 +249,12 @@ impl Task<'_> {
     /// Any failure once the work directory is known leaves a diagnostic run.json:
     /// version, source, provider, asr_model, error text, elapsed time. A failed write
     /// only warns, since the original error is the outcome.
+    /// Nothing is fetched or sent for a note this app could not publish.
+    async fn refuse_newer_note(&self) -> Result<()> {
+        let target = self.target.clone();
+        blocking(move || artifact::refuse_newer(&target)).await
+    }
+
     async fn recording_failure(
         &self,
         platform: &str,
@@ -943,15 +951,28 @@ impl Task<'_> {
         }
         if needs_speech && cfg.provider != config::AsrProvider::Api {
             progress::start(Stage::ModelPrepare);
-            crate::models::ensure_cache(
-                cfg.provider,
-                cfg.asr_model
-                    .as_deref()
-                    .unwrap_or(config::default_model(cfg.provider)),
-                &cfg.model_dir,
-                &self.job.control,
-            )
-            .await?;
+            let model = cfg
+                .asr_model
+                .as_deref()
+                .unwrap_or(config::default_model(cfg.provider));
+            match credentials {
+                Credentials::Cli => {
+                    crate::models::ensure_cache(
+                        cfg.provider,
+                        model,
+                        &cfg.model_dir,
+                        &self.job.control,
+                    )
+                    .await?
+                }
+                // A task never downloads a model on the way: the person agrees to that
+                // download first, when the app asks them to prepare it.
+                Credentials::Task { .. } => {
+                    let (provider, root) = (cfg.provider, cfg.model_dir.clone());
+                    let model = model.to_owned();
+                    blocking(move || crate::models::require_cache(provider, &model, &root)).await?
+                }
+            }
             progress::done(Stage::ModelPrepare);
         }
         Ok(())

@@ -855,6 +855,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 找不到此服务	找不到此服务	This service cannot be found	找不到此服務	このサービスは見つかりません
 找不到此服务的凭据，请重新保存 API Key	找不到此服务的凭据，请重新保存 API Key	Credentials not found for this service, please save the API Key again	找不到此服務的憑證，請重新儲存 API Key	このサービスの認証情報が見つかりません。API キーを再度保存してください
 找不到视频文件或无法识别链接：{}	找不到视频文件或无法识别链接：{}	Video file not found or URL not recognized: {}	找不到影片檔案或無法辨識連結：{}	動画ファイルが見つからないか、リンクを認識できません: {}
+找到 1 个模型	找到 1 个模型	Found 1 model	找到 1 個模型	1 個のモデルが見つかりました
 找到 {} 个模型	找到 {} 个模型	Found {} models	找到 {} 個模型	{} 個のモデルが見つかりました
 找到 {} 篇笔记	找到 {} 篇笔记	Found {} notes	找到 {} 篇筆記	{} 件のノートが見つかりました
 找到但无法运行：{}	找到但无法运行：{}	Found but failed to run: {}	找到但無法執行：{}	見つかりましたが実行できません：{}
@@ -1655,6 +1656,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 设置目录：{}\n{}	设置目录：{}\n{}	Settings directory: {}\n{}	設定資料夾：{}\n{}	設定フォルダー：{}\n{}
 设置记录无法解析	设置记录无法解析	Settings record cannot be parsed	設定記錄無法解析	設定レコードを解析できません
 设置语音识别服务	设置语音识别服务	Set up speech recognition	設定語音辨識服務	音声認識を設定
+识别模型 {} 尚未下载，请先下载并准备模型，再继续 / The speech model {} is not downloaded yet; prepare it, then continue	识别模型 {} 尚未下载，请先下载并准备模型，再继续	The speech model {} is not downloaded yet; prepare it, then continue	辨識模型 {} 尚未下載，請先下載並準備模型，再繼續	音声認識モデル {} はまだダウンロードされていません。準備してから続けてください
 识别方式	识别方式	Recognition method	辨識方式	認識方式
 识别方式 / Speech backend	识别方式	Speech backend	辨識方式	認識方式
 识别时使用 {} · {}	识别时使用 {} · {}	Transcribe with {} · {}	辨識時使用 {} · {}	認識に {} · {} を使用
