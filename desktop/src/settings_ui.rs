@@ -606,30 +606,16 @@ impl Desktop {
                 .collect();
             (!items.is_empty()).then(|| segmented_list(items))
         });
-        let list = v_flex()
-            .id("settings-categories")
-            .w_full()
-            .min_w_0()
-            .gap(rem(16.))
-            .key_context("SettingsTabs")
-            .track_focus(&self.settings_ui.navigation_focus)
-            .tab_stop(false)
-            .on_action(cx.listener(|this, _: &NextSettingsTab, window, cx| {
-                this.step_settings_tab(true, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &PreviousSettingsTab, window, cx| {
-                this.step_settings_tab(false, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FirstSettingsTab, window, cx| {
-                if let Some(first) = this.visible_settings_tabs(cx).first() {
-                    this.select_settings_tab(*first, window, cx)
-                }
-            }))
-            .on_action(cx.listener(|this, _: &LastSettingsTab, window, cx| {
-                if let Some(last) = this.visible_settings_tabs(cx).last() {
-                    this.select_settings_tab(*last, window, cx)
-                }
-            }))
+        let lists: Vec<_> = lists.collect();
+        let list = self
+            .settings_tab_keys(
+                v_flex()
+                    .id("settings-categories")
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(16.)),
+                cx,
+            )
             .children(lists)
             .when(visible.is_empty(), |list| {
                 list.child(
@@ -695,28 +681,71 @@ impl Desktop {
             .into_any_element()
     }
 
-    /// Narrow windows keep the categories in a navigation rail beside the content.
-    fn settings_rail(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = self.settings_tab;
-        NavigationRail::new("settings-rail", course2md::tr!("设置分类"))
-            .menu(self.settings_back_button(cx))
-            .items(SettingsTab::ALL.map(|tab| {
-                NavItem::new(
-                    tab.index().to_string(),
-                    tab.short_label(),
-                    NavIcon::symbol(tab.icon().symbol()),
-                )
+    /// The categories' keyboard: arrows and Home/End choose, as in a list.
+    fn settings_tab_keys(&self, list: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+        list.key_context("SettingsTabs")
+            .track_focus(&self.settings_ui.navigation_focus)
+            .tab_stop(false)
+            .on_action(cx.listener(|this, _: &NextSettingsTab, window, cx| {
+                this.step_settings_tab(true, window, cx);
             }))
-            .selected(current.index().to_string())
-            .on_change(cx.listener(|this, value: &SharedString, window, cx| {
-                let tab = value
-                    .parse::<usize>()
-                    .ok()
-                    .and_then(|index| SettingsTab::ALL.get(index));
-                if let Some(tab) = tab {
-                    this.select_settings_tab(*tab, window, cx);
+            .on_action(cx.listener(|this, _: &PreviousSettingsTab, window, cx| {
+                this.step_settings_tab(false, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FirstSettingsTab, window, cx| {
+                if let Some(first) = this.visible_settings_tabs(cx).first() {
+                    this.select_settings_tab(*first, window, cx)
                 }
             }))
+            .on_action(cx.listener(|this, _: &LastSettingsTab, window, cx| {
+                if let Some(last) = this.visible_settings_tabs(cx).last() {
+                    this.select_settings_tab(*last, window, cx)
+                }
+            }))
+    }
+
+    /// Narrow windows keep the categories in a narrow list beside the content: the
+    /// same tinted circles and selection as the wide list, with the short names (S1).
+    fn settings_rail(&self, cx: &mut Context<Self>) -> AnyElement {
+        let items: Vec<_> = SettingsTab::ALL
+            .into_iter()
+            .map(|tab| {
+                ListItem::new(("settings-tab", tab.index()), tab.short_label())
+                    .leading(ListLeading::Tinted(tab.icon().into(), tab.tint(), 40.))
+                    .selected(self.settings_tab == tab)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select_settings_tab(tab, window, cx)
+                    }))
+            })
+            .collect();
+        div()
+            .id("settings-navigation")
+            .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(16.))
+                    .pb(rem(64.))
+                    .child(
+                        h_flex()
+                            .min_h(rem(56.))
+                            .items_center()
+                            .child(self.settings_back_button(cx)),
+                    )
+                    .child(
+                        self.settings_tab_keys(
+                            v_flex()
+                                .id("settings-categories")
+                                .w_full()
+                                .min_w_0()
+                                .child(segmented_list(items)),
+                            cx,
+                        ),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -846,10 +875,11 @@ impl Desktop {
             .min_h_0()
             .items_start()
             .pt(rem(8.))
-            .gap(rem(if compact { 8. } else { 40. }))
+            .gap(rem(if compact { 16. } else { 40. }))
             .child(
                 div()
-                    .when(!compact, |pane| pane.w(rem(320.)))
+                    // Narrow, the list keeps its circles and short names.
+                    .w(rem(if compact { 184. } else { 320. }))
                     .flex_shrink_0()
                     .h_full()
                     .min_h_0()
