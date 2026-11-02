@@ -8,27 +8,17 @@
 //!
 //! Asking public services for this machine's country is more accurate behind a VPN
 //! or on an unusual system, but it tells them the address of everyone who downloads
-//! a model. It happens only when chosen: [`allow_ip_lookup`] for an application,
-//! `COURSE2MD_IP_LOOKUP=1` for a person. Then it runs only when files are missing.
+//! a model. It happens only when chosen with `COURSE2MD_IP_LOOKUP=1`, and then only
+//! when files are missing.
 
 use model_fetch::{Reason, local_country, lookup_country, normalize_endpoint, system_time_zone};
 use std::sync::OnceLock;
 
 pub use model_fetch::{Endpoints, MIRROR, ORIGIN};
 
-static IP_LOOKUP: OnceLock<bool> = OnceLock::new();
-
-/// An application's decision about public IP lookups, made before the first
-/// [`endpoints`] call. Returns false if the decision was already taken.
-pub fn allow_ip_lookup(allowed: bool) -> bool {
-    IP_LOOKUP.set(allowed).is_ok()
-}
-
 fn ip_lookup_allowed() -> bool {
-    *IP_LOOKUP.get_or_init(|| {
-        std::env::var("COURSE2MD_IP_LOOKUP")
-            .is_ok_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
-    })
+    std::env::var("COURSE2MD_IP_LOOKUP")
+        .is_ok_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
 }
 
 /// The endpoints for this process, resolved once on first use.
