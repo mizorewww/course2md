@@ -553,11 +553,12 @@ impl Desktop {
             TreeTarget::Root(root) => format!("folder-tree-root-{}", root.display()),
             TreeTarget::Folder(root, id) => format!("folder-tree-{}-{id}", root.display()),
         };
-        let (root, id) = match &target {
-            TreeTarget::All => (None, 0),
-            TreeTarget::Root(root) => (Some(root.clone()), 0),
-            TreeTarget::Folder(root, id) => (Some(root.clone()), *id),
+        let (root, folder) = match &target {
+            TreeTarget::All => (None, None),
+            TreeTarget::Root(root) => (Some(root.clone()), None),
+            TreeTarget::Folder(root, id) => (Some(root.clone()), Some(*id)),
         };
+        let id = folder.unwrap_or(0);
         // A sidebar row is 44 tall, as before the migration (L1).
         let item = ListItem::new(SharedString::from(key.clone()), label.clone())
             .density(ListDensity::Minus3)
@@ -608,7 +609,7 @@ impl Desktop {
                     .trigger(item),
             );
         row = match &root {
-            Some(root) => self.drop_target(row, root, folder_of(&target), cx),
+            Some(root) => self.drop_target(row, root, folder, cx),
             None => row,
         };
         if let TreeTarget::Folder(root, id) = &target {
@@ -910,13 +911,6 @@ impl Desktop {
                 .gap(rem(8.))
                 .children(rows),
         )
-    }
-}
-
-fn folder_of(target: &TreeTarget) -> Option<u64> {
-    match target {
-        TreeTarget::Folder(_, id) => Some(*id),
-        _ => None,
     }
 }
 

@@ -368,18 +368,6 @@ impl Desktop {
         })
         .detach();
     }
-    fn folder_name(&self, id: Option<u64>) -> String {
-        match id.filter(|id| *id != 0) {
-            None => course2md::tr!("未分类").into(),
-            Some(id) => self
-                .library
-                .current
-                .folders
-                .get(&id)
-                .cloned()
-                .unwrap_or_else(|| course2md::tr!("已删除的文件夹").into()),
-        }
-    }
 
     /// The library a new folder goes in, and the draft it is for on the workbench.
     fn current_folder_origin(&self) -> (PathBuf, Option<String>) {
@@ -393,17 +381,19 @@ impl Desktop {
         (self.library.root.clone(), None)
     }
 
-    pub fn begin_folder(&mut self, id: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
+    /// A new top-level folder in the current library, for the workbench's draft there.
+    pub fn begin_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (root, draft) = self.current_folder_origin();
-        let target = match id {
-            Some(id) => NameTarget::Folder { root, id },
-            None => NameTarget::NewFolder {
+        let parent = None;
+        self.begin_naming(
+            NameTarget::NewFolder {
                 root,
-                parent: None,
+                parent,
                 draft,
             },
-        };
-        self.begin_naming(target, window, cx)
+            window,
+            cx,
+        )
     }
 
     /// Rename folder `id`, or create a folder inside `parent`, in the library at `root`.
@@ -836,10 +826,12 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let library = self.library.indexes.get(&root);
-        let name = library
-            .and_then(|library| library.folders.get(&id))
+        let name = [library, Some(&self.library.current)]
+            .into_iter()
+            .flatten()
+            .find_map(|library| library.folders.get(&id))
             .cloned()
-            .unwrap_or_else(|| self.folder_name(Some(id)));
+            .unwrap_or_else(|| course2md::tr!("已删除的文件夹").into());
         let nested = library.map_or(0, |library| library.subtree(id).len() - 1);
         let detail = if nested > 0 {
             course2md::tr!(

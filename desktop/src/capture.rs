@@ -487,7 +487,7 @@ impl Desktop {
                             .text("The note moves to the Trash. You can restore it from there.")
                             .ask(|_, _, _| {}, window, cx)
                     }
-                    "folder" => this.begin_folder(None, window, cx),
+                    "folder" => this.begin_folder(window, cx),
                     "move" => {
                         if let Some(course) = newest {
                             let root = this.folder_context(Some(course.dir.clone())).root;
