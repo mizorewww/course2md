@@ -568,21 +568,9 @@ fn online_metadata(
     with_subtitles: bool,
     cancel: &AtomicBool,
 ) -> Result<CommandOutput> {
-    let mut args = vec![
-        "--ignore-config",
-        "--simulate",
-        "--dump-single-json",
-        "--flat-playlist",
-        "--socket-timeout",
-        "12",
-        "--retries",
-        "1",
-    ];
-    if with_subtitles {
-        // --simulate prevents writing either media or subtitle files while these
-        // flags ask extractors to actually inspect both caption channels.
-        args.extend(["--write-subs", "--write-auto-subs", "--sub-langs", "all"]);
-    }
+    let socket_timeout = course2md::fetch::YTDLP_SOCKET_TIMEOUT;
+    let mut args = vec!["--ignore-config", "--socket-timeout", socket_timeout];
+    args.extend(course2md::fetch::probe_args(with_subtitles));
     args.extend(["--", input]);
     command_output("yt-dlp", &args, cancel)
 }
