@@ -24,7 +24,10 @@ use std::{
 /// The workbench's one column.
 const WORKBENCH_WIDTH: Rems = rem(760.);
 /// Rhythm inside the column: title, link, video and options.
-const HERO_GAP: Rems = rem(16.);
+/// The hero title to the link field (H4).
+const HERO_GAP: Rems = rem(20.);
+/// The link field to the line under it: the drop hint or the source switch (H4).
+const HERO_HINT_GAP: Rems = rem(24.);
 
 fn workbench_column() -> Div {
     div()
@@ -119,11 +122,6 @@ fn tip_button(
 ) -> MaterialTooltip {
     MaterialTooltip::plain(SharedString::from(format!("{id}-tooltip")), label)
         .trigger(configure(IconButton::new(id, icon, label)))
-}
-
-/// The Bilibili brand mark, for the login that recovers a read.
-fn bilibili_mark() -> Icon {
-    Icon::new("icons/bilibili.svg").color(rgb(0x00a1d6))
 }
 
 /// The first line of a message when it is already readable. A raw download
@@ -637,7 +635,7 @@ impl Desktop {
             return v_flex()
                 .w_full()
                 .min_w_0()
-                .gap(HERO_GAP)
+                .gap(HERO_HINT_GAP)
                 .child(
                     h_flex().w_full().justify_center().child(
                         ConnectedButtonGroup::new("source-kind", course2md::tr!("视频来源"))
@@ -702,7 +700,7 @@ impl Desktop {
         v_flex()
             .w_full()
             .min_w_0()
-            .gap(HERO_GAP)
+            .gap(HERO_HINT_GAP)
             .child(
                 TextField::new("source-link", &self.inputs[&Field::Source])
                     .w_full()
@@ -1151,7 +1149,7 @@ impl Desktop {
                                             ButtonVariant::Outlined,
                                         )
                                         .tone(ButtonTone::Accent)
-                                        .icon(bilibili_mark())
+                                        .icon(symbols::bilibili())
                                         .child(course2md::tr!("登录 Bilibili"))
                                         .on_click(
                                             cx.listener(|this, _, window, cx| {
@@ -1459,6 +1457,22 @@ impl Desktop {
             .min_w_0()
             .gap(rem(8.))
             .child(h_flex().min_w_0().child(chip))
+            // A confirmed subtitle is good news, in the success role as before (U16).
+            .when(
+                !speech
+                    && !pending
+                    && !self.import.subtitle_loading
+                    && failure.is_none()
+                    && source.selected_subtitle.is_some(),
+                |view| {
+                    view.children(ui::async_status(
+                        "subtitle-confirmed",
+                        &ui::AsyncStatus::Success(course2md::tr!("有字幕，将直接使用").into()),
+                        None,
+                        cx,
+                    ))
+                },
+            )
             .when_some(notice, |view, notice| {
                 view.child(supporting_info("import-subtitle-message", notice))
             })
@@ -1631,7 +1645,7 @@ impl Desktop {
                         row.child(
                             material_button("login-for-subtitles", ButtonVariant::Outlined)
                                 .tone(ButtonTone::Accent)
-                                .icon(bilibili_mark())
+                                .icon(symbols::bilibili())
                                 .child(course2md::tr!("登录 Bilibili"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.open_account_dialog(window, cx)
@@ -1814,7 +1828,9 @@ impl Desktop {
         fields.push(ui::Field::inline(
             "reset-task-overrides-field",
             course2md::tr!("恢复 AI 默认"),
+            // A quiet reset: ink, not the primary of the panel's actions (G4).
             material_button("reset-task-overrides", ButtonVariant::Text)
+                .tone(ButtonTone::Neutral)
                 .icon(symbols::restart_alt())
                 .child(course2md::tr!("恢复默认"))
                 .on_click(cx.listener(|this, _, _, cx| this.reset_task_ai_overrides(cx))),

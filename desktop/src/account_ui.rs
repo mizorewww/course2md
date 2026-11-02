@@ -83,7 +83,7 @@ impl Desktop {
             actions.push(
                 material_button("account-login", ButtonVariant::Outlined)
                     .tone(ButtonTone::Accent)
-                    .icon(Icon::new("icons/bilibili.svg").color(rgb(0x00a1d6)))
+                    .icon(symbols::bilibili())
                     .child(login)
                     .on_click(
                         cx.listener(|this, _, window, cx| this.open_account_dialog(window, cx)),

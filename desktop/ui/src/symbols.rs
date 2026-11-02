@@ -21,6 +21,12 @@ use std::borrow::Cow;
 
 include!(concat!(env!("OUT_DIR"), "/symbols.rs"));
 
+/// The Bilibili mark in its brand blue: a brand's own color, not a theme role, so it
+/// reads the same in every palette.
+pub fn bilibili() -> gpui_kit_material::icons::Icon {
+    gpui_kit_material::icons::Icon::new("icons/bilibili.svg").color(gpui::rgb(0x00a1d6))
+}
+
 const FILES: &[(&str, &[u8])] = &[
     (
         "images/course2md.png",

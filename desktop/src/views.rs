@@ -81,6 +81,7 @@ fn brand(wordmark: bool) -> Div {
                 div()
                     .text_size(rem(20.))
                     .text_color(color(ColorRole::ON_SURFACE))
+                    .font_weight(FontWeight::MEDIUM)
                     .child("course2md"),
             )
         })

@@ -1271,10 +1271,10 @@ impl Desktop {
             .update(cx, |view, cx| view.clear_range_highlights(cx));
         self.reader_find_input()
             .update(cx, |input, cx| input.set_value("", window, cx));
-        match self.reader_ui.find.return_focus.take() {
-            Some(focus) => focus.focus(window, cx),
-            None => self.reader_ui.focus.focus(window, cx),
-        }
+        // Back to the note, where the reading goes on. What held focus before find
+        // opened may be a menu's trigger that a pointer last touched.
+        self.reader_ui.find.return_focus = None;
+        self.reader_ui.focus.focus(window, cx);
         cx.notify();
     }
     fn update_reader_matches(&mut self, cx: &mut Context<Self>) {
@@ -3042,6 +3042,8 @@ impl Desktop {
                 } else {
                     label
                 })
+                // It opens a menu, as its chevron says.
+                .child(Icon::from(symbols::keyboard_arrow_down()).size(rem(18.)))
                 .loading(current, label)
                 .disabled(exporting)
                 .into_any_element()

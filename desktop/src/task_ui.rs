@@ -1464,8 +1464,10 @@ impl Desktop {
                 .when(variant == ButtonVariant::Outlined, |b| {
                     b.tone(ButtonTone::Accent)
                 })
+                // What only shows more of the task is quieter than what acts on it (G4).
                 .when(
-                    surface == TaskSurface::Home && *action == TaskAction::Cancel,
+                    (surface == TaskSurface::Home && *action == TaskAction::Cancel)
+                        || matches!(action, TaskAction::Details | TaskAction::Log),
                     |b| b.tone(ButtonTone::Neutral),
                 )
                 .icon(icon)

@@ -968,6 +968,8 @@ impl Desktop {
         let draft_id = context.draft_id;
         ExposedDropdown::new("folder-picker", course2md::tr!("保存到"))
             .variant(TextFieldVariant::Outlined)
+            // A form's field rounds with its surfaces (G8).
+            .shape(TextFieldShape::Rounded)
             .leading_icon(Icon::from(symbols::folder()))
             .options(
                 std::iter::once(course2md::tr!("未分类").to_owned())

@@ -492,11 +492,23 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let (note_root, folder_root) = (root.to_path_buf(), root.to_path_buf());
-        row.border_2()
-            .border_color(gpui::transparent_black())
+        // The drop outline is drawn inside the row, so showing it adds no height.
+        row.relative()
             .rounded(RADIUS_CARD)
-            .drag_over::<NoteDrag>(|style, _, _, _| style.border_color(color(ColorRole::PRIMARY)))
-            .drag_over::<FolderDrag>(|style, _, _, _| style.border_color(color(ColorRole::PRIMARY)))
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .rounded(RADIUS_CARD)
+                    .border_2()
+                    .border_color(gpui::transparent_black())
+                    .drag_over::<NoteDrag>(|style, _, _, _| {
+                        style.border_color(color(ColorRole::PRIMARY))
+                    })
+                    .drag_over::<FolderDrag>(|style, _, _, _| {
+                        style.border_color(color(ColorRole::PRIMARY))
+                    }),
+            )
             .on_drop(cx.listener(move |this, drag: &NoteDrag, _, cx| {
                 this.file_note(note_root.clone(), drag.storage.clone(), folder, cx)
             }))
@@ -586,8 +598,7 @@ impl Desktop {
             );
         row = match &root {
             Some(root) => self.drop_target(row, root, folder_of(&target), cx),
-            // Keeps its width with the rows that can show a drop.
-            None => row.border_2().border_color(gpui::transparent_black()),
+            None => row,
         };
         if let TreeTarget::Folder(root, id) = &target {
             let drag = FolderDrag {
