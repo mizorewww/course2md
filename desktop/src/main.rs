@@ -31,7 +31,7 @@ mod youtube_ui;
 
 use desktop_prefs::{
     conversion, credentials, environment, interrupted, model_discovery, preferences, service_test,
-    spawn_blocking_io,
+    spawn_blocking_io, spawn_blocking_result,
 };
 use desktop_reader_core::reader_navigation;
 use desktop_store::{activity, notes, organize, storage, workspace};
@@ -109,6 +109,8 @@ struct Desktop {
     settings_ui: settings_ui::State,
     onboarding: onboarding::State,
     storage_ui: desktop_store::locations::State,
+    /// Reading the move records; a newer read replaces it.
+    storage_records: Option<Task<()>>,
     reader_ui: reader_ui::State,
     workspace: Option<workspace::Workspace>,
     workspace_error: Option<String>,
@@ -425,6 +427,7 @@ impl Desktop {
             theme_frame: Default::default(),
             library: desktop_store::library::LibraryState::new(output),
             library_ui: library_ui::LibraryUi::new(),
+            storage_records: None,
             preference_defaults_pending: false,
             transient_task_result: None,
             draft_deadline: None,
@@ -506,9 +509,9 @@ impl Desktop {
         self.workspace_reconciling = true;
         let task = spawn_blocking_io(move || reconciliation.run());
         cx.spawn(async move |this, cx| {
-            let reconciled = task.recv().await;
+            let reconciled = task.await;
             let _ = this.update(cx, |this, cx| {
-                let Ok(reconciled) = reconciled else {
+                let Some(reconciled) = reconciled else {
                     // Leave dispatch held: the checks did not finish.
                     this.workspace_error = Some(interrupted().into());
                     cx.notify();
@@ -533,7 +536,7 @@ impl Desktop {
         // so it runs off the executor; see spawn_blocking_io.
         let task = spawn_blocking_io(environment::Environment::detect);
         cx.spawn(async move |this, cx| {
-            let Ok(environment) = task.recv().await else {
+            let Some(environment) = task.await else {
                 return;
             };
             let _ = this.update(cx, |this, cx| {
@@ -970,9 +973,8 @@ impl Desktop {
         let task = spawn_blocking_io(move || notes::read_preview(course));
         cx.spawn(async move |this, cx| {
             let result = task
-                .recv()
                 .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("读取笔记时出错，请重试"))));
+                .unwrap_or_else(|| Err(anyhow::anyhow!(course2md::tr!("读取笔记时出错，请重试"))));
             let _ = this.update(cx, |this, cx| {
                 if this.opened.read_generation != generation || this.page != origin {
                     return;

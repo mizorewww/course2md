@@ -1237,7 +1237,7 @@ impl Desktop {
         let task = crate::spawn_blocking_io(move || work(vault.as_ref()));
         let handle = self.window;
         cx.spawn(async move |this, cx| {
-            let Ok(result) = task.recv().await else {
+            let Some(result) = task.await else {
                 return;
             };
             let _ = cx.update_window(handle, |_, window, cx| {
@@ -1473,13 +1473,10 @@ impl Desktop {
             let Ok(Some((roots, ids))) = lists else {
                 return;
             };
-            let task = crate::spawn_blocking_io(move || {
+            let prepared = crate::spawn_blocking_result(move || {
                 crate::workspace::Workspace::prepare_library(path, name, false, &roots, &ids)
-            });
-            let prepared = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow!(crate::interrupted())));
+            })
+            .await;
             let _ = this.update(cx, |this, cx| {
                 let registered = prepared.and_then(|prepared| {
                     let workspace = this

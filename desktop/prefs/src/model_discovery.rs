@@ -259,7 +259,7 @@ pub async fn discover(
         )
     });
     before_deadline(
-        async move { work.recv().await.unwrap_or(Err(Error::Network)) },
+        async move { work.await.unwrap_or(Err(Error::Network)) },
         deadline,
     )
     .await

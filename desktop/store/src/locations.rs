@@ -39,7 +39,6 @@ pub struct State {
     pub pending: Vec<(PathBuf, Journal)>,
     /// Move records that could not be read; their files are left in place.
     pub corrupt_records: Vec<PathBuf>,
-    pub records_generation: u64,
     pub resume_task: Option<String>,
     /// Closed or signalled when the job a move waits for exits.
     pub job_exit: Option<smol::channel::Sender<()>>,

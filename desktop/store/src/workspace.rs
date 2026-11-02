@@ -1350,7 +1350,7 @@ impl LibraryWrites {
     fn queue(&self, path: PathBuf, bytes: Vec<u8>, mirror_of: Option<LibraryLocation>) {
         c2m_process::runtime::lock_recover(&self.pending).insert(path, (bytes, mirror_of));
         let this = self.clone();
-        desktop_prefs::spawn_blocking_io(move || this.drain());
+        drop(desktop_prefs::spawn_blocking_io(move || this.drain()));
     }
 
     /// Performs everything queued so far, waiting for any write already running.

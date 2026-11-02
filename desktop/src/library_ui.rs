@@ -17,14 +17,6 @@ use std::{
     },
 };
 
-/// What a blocking worker returned; one that ended without a result was interrupted.
-pub(crate) async fn worker_result<T>(
-    worker: smol::channel::Receiver<anyhow::Result<T>>,
-) -> anyhow::Result<T> {
-    let result = worker.recv().await;
-    result.unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())))
-}
-
 fn folders_unavailable() -> &'static str {
     course2md::tr!("文件夹暂不可用，请重新扫描笔记库。")
 }
@@ -214,9 +206,9 @@ impl Desktop {
         let online = self.online();
         let handle = window.window_handle();
         // probe is blocking network/subprocess work; see crate::spawn_blocking_io.
-        let task = crate::spawn_blocking_io(move || source::probe(input, online, cancel));
+        let task = crate::spawn_blocking_result(move || source::probe(input, online, cancel));
         cx.spawn(async move |this, cx| {
-            let result = worker_result(task).await;
+            let result = task.await;
             // Always return the worker count, window or not (request_close waits for zero).
             let _ = this.update(cx, |this, _| {
                 this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
@@ -477,9 +469,9 @@ impl Desktop {
         done: impl FnOnce(&mut Self, anyhow::Result<T>, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        let task = crate::spawn_blocking_io(work);
+        let task = crate::spawn_blocking_result(work);
         cx.spawn(async move |this, cx| {
-            let result = worker_result(task).await;
+            let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 done(this, result, cx);
                 cx.notify();

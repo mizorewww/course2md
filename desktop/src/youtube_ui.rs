@@ -13,17 +13,16 @@ const YOUTUBE_DIALOG_WIDTH: f32 = 480.;
 impl Desktop {
     /// Reads the saved browser choice; no browser is touched until the person asks.
     pub(crate) fn load_youtube(&mut self, cx: &mut Context<Self>) {
-        let task = crate::spawn_blocking_io(youtube::saved_choice);
+        let task = crate::spawn_blocking_result(youtube::saved_choice);
         cx.spawn(async move |this, cx| {
-            let result = task.recv().await;
+            let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok(Ok(choice)) => {
+                    Ok(choice) => {
                         this.youtube.choice = choice;
                         this.youtube.load_error = None;
                     }
-                    Ok(Err(error)) => this.youtube.load_error = Some(format!("{error:#}")),
-                    Err(_) => this.youtube.load_error = Some(crate::interrupted().into()),
+                    Err(error) => this.youtube.load_error = Some(format!("{error:#}")),
                 }
                 cx.notify();
             });
@@ -85,7 +84,7 @@ impl Desktop {
             self.youtube.checking = true;
             self.youtube.recheck = Some(generation);
         }
-        let task = crate::spawn_blocking_io(move || {
+        let task = crate::spawn_blocking_result(move || {
             let program = course2md::ytdlp::resolve_in(Some(&crate::environment::tool_path()))
                 .ok_or_else(|| {
                     anyhow::anyhow!(course2md::tr!(
@@ -98,7 +97,7 @@ impl Desktop {
             anyhow::Ok((choice, session))
         });
         cx.spawn(async move |this, cx| {
-            let result = task.recv().await;
+            let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 if !save {
                     // Even a stale re-check ends its own busy state.
@@ -110,20 +109,20 @@ impl Desktop {
                 }
                 let result = match result {
                     // A small atomic write, once the person is still waiting for it.
-                    Ok(Ok((choice, Session::SignedIn))) if save => {
-                        Ok(youtube::save_choice(&choice).map(|()| (choice, Session::SignedIn)))
+                    Ok((choice, Session::SignedIn)) if save => {
+                        youtube::save_choice(&choice).map(|()| (choice, Session::SignedIn))
                     }
                     other => other,
                 };
                 let step = match result {
-                    Ok(Ok((choice, Session::SignedIn))) => {
+                    Ok((choice, Session::SignedIn)) => {
                         if save {
                             this.youtube.choice = Some(choice);
                         }
                         YoutubeStep::Connected
                     }
-                    Ok(Ok((_, Session::SignedOut))) => YoutubeStep::SignedOut,
-                    Ok(Err(error)) => match error.downcast::<youtube::BrowserReadError>() {
+                    Ok((_, Session::SignedOut)) => YoutubeStep::SignedOut,
+                    Err(error) => match error.downcast::<youtube::BrowserReadError>() {
                         Ok(read) => YoutubeStep::Failed {
                             summary: read.summary,
                             detail: read.detail,
@@ -132,10 +131,6 @@ impl Desktop {
                             summary: format!("{error:#}"),
                             detail: String::new(),
                         },
-                    },
-                    Err(_) => YoutubeStep::Failed {
-                        summary: crate::interrupted().into(),
-                        detail: String::new(),
                     },
                 };
                 if save && let Some(dialog) = &mut this.youtube.dialog {
@@ -153,10 +148,10 @@ impl Desktop {
         self.youtube.generation = self.youtube.generation.wrapping_add(1);
         let task = crate::spawn_blocking_io(youtube::clear_youtube_login);
         cx.spawn(async move |this, cx| {
-            let result = task.recv().await;
+            let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok(Ok(_)) => {
+                    Some(Ok(_)) => {
                         this.youtube.choice = None;
                         this.youtube.status = None;
                         this.youtube.load_error = None;

@@ -1026,7 +1026,6 @@ impl Desktop {
                         .unwrap_or_default();
                     (load_reader_data(&preview), source, available, offline_video)
                 })
-                .recv()
                 .await
                 .unwrap_or_default();
             let _ = this.update(cx, |this, cx| {
@@ -1099,7 +1098,6 @@ impl Desktop {
         self.reader_ui.offline_opening = true;
         cx.spawn(async move |this, cx| {
             let status = crate::spawn_blocking_io(move || request.inspect())
-                .recv()
                 .await
                 .unwrap_or_default();
             let _ = this.update(cx, |this, cx| {
@@ -1192,7 +1190,7 @@ impl Desktop {
                 );
                 Ok::<_, anyhow::Error>(())
             });
-            let checked = checked.recv().await.unwrap_or_else(|_| {
+            let checked = checked.await.unwrap_or_else(|| {
                 Err(anyhow::anyhow!(course2md::tr!(
                     "检查视频时意外中断，请重试"
                 )))
@@ -1358,9 +1356,8 @@ impl Desktop {
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = crate::spawn_blocking_io(move || notes::read_preview(course))
-                .recv()
                 .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("打开时意外中断，请重试"))));
+                .unwrap_or_else(|| Err(anyhow::anyhow!(course2md::tr!("打开时意外中断，请重试"))));
             let _ = this.update(cx, |this, cx| {
                 if this.opened.read_generation != generation {
                     return;
@@ -1597,9 +1594,8 @@ impl Desktop {
                 course2md::portable::export(&source, format, &file)?;
                 Ok(std::fs::rename(&file, &target)?)
             })
-            .recv()
             .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("导出时意外中断，请重试"))));
+            .unwrap_or_else(|| Err(anyhow::anyhow!(course2md::tr!("导出时意外中断，请重试"))));
             let _ = this.update(cx, |this, cx| {
                 let result = exported
                     .map(|()| path.clone())

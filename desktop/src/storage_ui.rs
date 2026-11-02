@@ -3,7 +3,6 @@ use crate::{
     Desktop,
     course_library::CommandsButton,
     folder_tree::{Command, command_context_menu},
-    library_ui::worker_result,
     storage::{self, Phase, Progress},
     symbols,
     ui::{self, AsyncStatus, Resource},
@@ -182,9 +181,9 @@ impl Desktop {
         self.open_storage_dialog(cx);
         cx.spawn_in(window, async move |this, cx| {
             let worker_cancel = cancel.clone();
-            let inspected = worker_result(crate::spawn_blocking_io(move || {
+            let inspected = crate::spawn_blocking_result(move || {
                 storage::inspect_link(&state, &library_id, &folder, &worker_cancel)
-            }))
+            })
             .await;
             let _ = this.update_in(cx, |this, window, cx| match inspected {
                 Err(error) => this.finish_link(generation, Err(error), cx),
@@ -218,9 +217,8 @@ impl Desktop {
                 let tasks = storage::finish_link(&link);
                 (link, tasks)
             })
-            .recv()
             .await
-            .unwrap_or_else(|_| unreachable!("the blocking pool outlives this task"));
+            .unwrap_or_else(|| unreachable!("the blocking pool outlives this task"));
             let _ = this.update_in(cx, |this, window, cx| {
                 let result = finished.and_then(|tasks| {
                     ensure!(
@@ -317,22 +315,14 @@ impl Desktop {
                 )
             })
             .unwrap_or_default();
-        self.storage_ui.records_generation = self.storage_ui.records_generation.wrapping_add(1);
-        let generation = self.storage_ui.records_generation;
         let task = crate::spawn_blocking_io(move || {
             storage::read_records(&directory, &libraries, &backups)
         });
-        cx.spawn(async move |this, cx| {
-            let Ok(records) = task.recv().await else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                if this.storage_ui.records_generation == generation {
-                    this.apply_storage_records(records, cx);
-                }
-            });
-        })
-        .detach();
+        self.storage_records = Some(cx.spawn(async move |this, cx| {
+            if let Some(records) = task.await {
+                let _ = this.update(cx, |this, cx| this.apply_storage_records(records, cx));
+            }
+        }));
     }
 
     fn apply_storage_records(&mut self, records: storage::Records, cx: &mut Context<Self>) {
@@ -368,14 +358,16 @@ impl Desktop {
         {
             self.storage_ui.error = Some(backup_list_stale().into());
         }
-        crate::spawn_blocking_io(move || storage::settle_records(&records));
+        drop(crate::spawn_blocking_io(move || {
+            storage::settle_records(&records)
+        }));
         cx.notify();
     }
 
     fn abandon_library_move(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        let task = crate::spawn_blocking_io(move || storage::abandon_move(&path));
+        let task = crate::spawn_blocking_result(move || storage::abandon_move(&path));
         cx.spawn(async move |this, cx| {
-            let result = worker_result(task).await;
+            let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 if let Err(error) = result {
                     this.storage_ui.error =
@@ -399,7 +391,7 @@ impl Desktop {
         let probe =
             crate::spawn_blocking_io(move || tempfile::NamedTempFile::new_in(&root).map(drop));
         cx.spawn(async move |this, cx| {
-            let writable = matches!(probe.recv().await, Ok(Ok(())));
+            let writable = matches!(probe.await, Some(Ok(())));
             let _ = this.update(cx, |this, cx| {
                 let Some(workspace) = &mut this.workspace else {
                     return;
@@ -470,11 +462,11 @@ impl Desktop {
             move |_, destination, window, cx| {
                 let root = location.root.clone();
                 // canonicalize and read_dir can stall on a network or removable disk
-                let checked = crate::spawn_blocking_io(move || {
+                let checked = crate::spawn_blocking_result(move || {
                     storage::validate_destination(&root, &destination)
                 });
                 cx.spawn_in(window, async move |this, cx| {
-                    let checked = worker_result(checked).await;
+                    let checked = checked.await;
                     let _ = this.update_in(cx, |this, window, cx| {
                         match checked {
                             Ok((source, destination)) => this.start_library_move(
@@ -563,7 +555,7 @@ impl Desktop {
             let (report, reports) = smol::channel::unbounded();
             let worker_cancel = cancel.clone();
             // Moving is a large amount of blocking file I/O; see crate::spawn_blocking_io.
-            let worker = crate::spawn_blocking_io(move || {
+            let worker = crate::spawn_blocking_result(move || {
                 let sent = std::cell::Cell::new(None::<Instant>);
                 let report = |value: Progress| {
                     let now = Instant::now();
@@ -599,7 +591,7 @@ impl Desktop {
                     }
                 });
             }
-            let result = worker_result(worker).await;
+            let result = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.storage_ui.generation != generation {
                     return;
@@ -1292,11 +1284,11 @@ impl Desktop {
             .collect::<Vec<_>>();
         let id = backup.id.clone();
         // Cleaning up deletes files synchronously; see crate::spawn_blocking_io.
-        let worker = crate::spawn_blocking_io(move || {
+        let worker = crate::spawn_blocking_result(move || {
             storage::cleanup_backup(&backup, &roots, &worker_cancel)
         });
         cx.spawn_in(window, async move |this, cx| {
-            let result = worker_result(worker).await;
+            let result = worker.await;
             let _ = this.update(cx, |this, cx| {
                 this.storage_idle();
                 this.storage_ui.progress = Progress::default();

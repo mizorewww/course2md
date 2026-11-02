@@ -48,8 +48,8 @@ pub(crate) fn codex_badge(codex: &CodexUi) -> (StatusKind, &'static str) {
 }
 
 impl Desktop {
-    /// Runs one account action off the UI thread. Its result returns only while it is
-    /// still the current action; a busy account starts nothing.
+    /// Runs one account action off the UI thread; a busy account starts nothing, so
+    /// the result always belongs to the action that is running.
     fn codex_work<T: Send + 'static>(
         &mut self,
         surface: CodexSurface,
@@ -61,17 +61,11 @@ impl Desktop {
         if self.codex.busy() {
             return;
         }
-        let generation = self.codex.begin(surface, work);
-        let task = crate::spawn_blocking_io(action);
+        self.codex.begin(surface, work);
+        let task = crate::spawn_blocking_result(action);
         cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                if !this.codex.current(generation, work) {
-                    return;
-                }
                 this.codex.working = None;
                 this.codex.authorize_cancel = None;
                 then(this, result, cx);

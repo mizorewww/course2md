@@ -1162,7 +1162,7 @@ impl Desktop {
             service_test::test_service_blocking(&config, kind, vault.as_ref(), &cancel)
         });
         cx.spawn(async move |this, cx| {
-            let Ok(evidence) = task.recv().await else {
+            let Some(evidence) = task.await else {
                 return;
             };
             let _ = this.update(cx, |this, cx| {

@@ -279,7 +279,7 @@ impl Desktop {
         self.import.preview_workers += 1;
         let task = crate::spawn_blocking_io(move || work(&source, cancel));
         cx.spawn(async move |this, cx| {
-            let result = task.recv().await.unwrap_or_else(|_| lost());
+            let result = task.await.unwrap_or_else(lost);
             let _ = this.update(cx, |this, cx| {
                 this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
                 if !this.subtitle_read_is_current(&read) {
