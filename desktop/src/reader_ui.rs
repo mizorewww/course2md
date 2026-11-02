@@ -2398,10 +2398,7 @@ impl Desktop {
         };
         let mut obstacles = Vec::new();
         let offline = matches!(self.reader_ui.offline_video, OfflineVideo::Available(_));
-        if matches!(self.reader_ui.source, Some(nav::SourceTarget::Local(_)))
-            && !offline
-            && !self.reader_ui.source_available
-        {
+        if self.reader_source_missing() && !offline {
             obstacles.push(obstacle(
                 "missing-original-video",
                 course2md::tr!("原视频不可用"),
@@ -2869,11 +2866,13 @@ impl Desktop {
     /// local file while it is still there.
     fn reader_can_play(&self) -> bool {
         matches!(self.reader_ui.offline_video, OfflineVideo::Available(_))
-            || match &self.reader_ui.source {
-                Some(nav::SourceTarget::Web(_)) => true,
-                Some(nav::SourceTarget::Local(_)) => self.reader_ui.source_available,
-                None => false,
-            }
+            || (self.reader_ui.source.is_some() && !self.reader_source_missing())
+    }
+
+    /// Whether the note's local video is no longer where it was.
+    fn reader_source_missing(&self) -> bool {
+        matches!(self.reader_ui.source, Some(nav::SourceTarget::Local(_)))
+            && !self.reader_ui.source_available
     }
 
     /// Watches the video, the kept offline copy first.
@@ -3049,8 +3048,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let source = self.reader_ui.source.clone();
-        let missing_local =
-            matches!(source, Some(nav::SourceTarget::Local(_))) && !self.reader_ui.source_available;
+        let missing_local = self.reader_source_missing();
         // A web source opens on its site; the title bar may be playing the kept copy.
         let source_label = match &source {
             _ if missing_local => course2md::tr!("找到原视频…").to_owned(),
