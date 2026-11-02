@@ -48,6 +48,11 @@ impl TaskGroup {
             Self::History => course2md::tr!("此前处理记录"),
         }
     }
+
+    /// Finished work and earlier records, which fold behind one tile.
+    pub fn settled(self) -> bool {
+        matches!(self, Self::Finished | Self::History)
+    }
 }
 
 pub fn task_group(task: &TaskRecord) -> TaskGroup {

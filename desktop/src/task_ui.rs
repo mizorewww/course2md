@@ -294,9 +294,7 @@ impl Desktop {
         }
         let completed_state = window.use_keyed_state("task-history-open", cx, |_, _| false);
         let queue_open = window.use_keyed_state("task-queue-open", cx, |_, _| false);
-        let done = |task: &TaskRecord| {
-            matches!(task_group(task), TaskGroup::Finished | TaskGroup::History)
-        };
+        let done = |task: &TaskRecord| task_group(task).settled();
         // Finished work and earlier records fold behind one tile; a task the
         // person went to (from the library or a notice) stays visible.
         let expanded_done = self
@@ -305,6 +303,7 @@ impl Desktop {
             .as_ref()
             .is_some_and(|id| tasks.iter().any(|task| &task.id == id && done(task)));
         let completed_open = *completed_state.read(cx) || expanded_done;
+        let count = tasks.iter().filter(|task| done(task)).count();
         for group in TaskGroup::ORDER {
             let members: Vec<usize> = tasks
                 .iter()
@@ -312,7 +311,6 @@ impl Desktop {
                 .filter(|(_, task)| task_group(task) == group)
                 .map(|(index, _)| index)
                 .collect();
-            let count = tasks.iter().filter(|task| done(task)).count();
             if group == TaskGroup::Finished && count > 0 {
                 items.push(QueueItem::CompletedToggle {
                     count,
@@ -320,8 +318,7 @@ impl Desktop {
                     state: completed_state.clone(),
                 });
             }
-            let folded = matches!(group, TaskGroup::Finished | TaskGroup::History);
-            if members.is_empty() || (folded && !completed_open) {
+            if members.is_empty() || (group.settled() && !completed_open) {
                 continue;
             }
             // The fold tile just above already names finished work.
@@ -694,12 +691,8 @@ impl Desktop {
                     if open
                         && let Some(id) = this.task_list.expanded.clone()
                         && this
-                            .workspace
-                            .as_ref()
-                            .and_then(|workspace| workspace.state.task(&id))
-                            .is_some_and(|task| {
-                                matches!(task_group(task), TaskGroup::Finished | TaskGroup::History)
-                            })
+                            .task(&id)
+                            .is_some_and(|task| task_group(task).settled())
                     {
                         this.close_task_details(&id);
                         this.task_list.expanded = None;
@@ -722,32 +715,31 @@ impl Desktop {
     ) -> impl Fn(&mut Window, &mut App) -> MaterialMenu + 'static {
         let entity = cx.weak_entity();
         let id = task.id.clone();
-        let items: Vec<_> = self
-            .task_actions(task, TaskSurface::Menu)
-            .into_iter()
-            .map(|action| (action.present(task, self), action))
+        let actions = self.task_actions(task, TaskSurface::Menu);
+        // A divider ends each menu section.
+        let items: Vec<_> = actions
+            .iter()
+            .enumerate()
+            .map(|(index, action)| {
+                let ends = actions
+                    .get(index + 1)
+                    .is_some_and(|next| next.group() != action.group());
+                (action.present(task, self), ends, action.clone())
+            })
             .collect();
         move |_, _| {
-            let groups: Vec<u8> = items.iter().map(|(_, action)| action.group()).collect();
             MaterialMenu::new(SharedString::from(format!("task-more-items-{id}"))).items(
-                items
-                    .iter()
-                    .enumerate()
-                    .map(|(index, ((text, icon, disabled), action))| {
-                        let danger = *action == TaskAction::Cancel;
-                        MaterialMenuItem::new(*text)
-                            .leading(
-                                Icon::from(*icon)
-                                    .when(danger, |icon| icon.color(color(ColorRole::ERROR))),
-                            )
-                            .disabled(*disabled)
-                            .divider(
-                                groups
-                                    .get(index + 1)
-                                    .is_some_and(|next| *next != groups[index]),
-                            )
-                            .on_click(action.clone().click(entity.clone(), id.clone()))
-                    }),
+                items.iter().map(|((text, icon, disabled), ends, action)| {
+                    let danger = *action == TaskAction::Cancel;
+                    MaterialMenuItem::new(*text)
+                        .leading(
+                            Icon::from(*icon)
+                                .when(danger, |icon| icon.color(color(ColorRole::ERROR))),
+                        )
+                        .disabled(*disabled)
+                        .divider(*ends)
+                        .on_click(action.clone().click(entity.clone(), id.clone()))
+                }),
             )
         }
     }
@@ -1150,11 +1142,7 @@ impl Desktop {
         } else {
             import_ui::cover_width(window)
         };
-        let step = if home {
-            self.task_home_step_line(task)
-        } else {
-            self.task_step_line(task)
-        };
+        let step = self.task_step_line(task, home);
         // A running task's status ends its title; one that waits says so below it.
         let (title_chip, line_chip) = if home || needs_person(task) {
             (None, chip)
@@ -1243,24 +1231,17 @@ impl Desktop {
     }
 
     /// The step a running task is on. Later steps depend on what the video turns out
-    /// to need, so the position counts the steps reached so far, without a total.
-    fn task_step_line(&self, task: &TaskRecord) -> Option<String> {
+    /// to need, so the position counts the steps reached so far, without a total. The
+    /// workbench says the step and its measure instead, above the bar.
+    fn task_step_line(&self, task: &TaskRecord, home: bool) -> Option<String> {
         let stages = self.task_stage_rows(task);
-        stages
-            .iter()
-            .position(|stage| stage.status.running())
-            .map(|index| course2md::tr!("第 {} 步 · {}", index + 1, stages[index].title))
-            .or_else(|| self.task_wait(task).map(|wait| wait.label().to_owned()))
-    }
-
-    /// The workbench says the step and its measure on one line, above the bar.
-    fn task_home_step_line(&self, task: &TaskRecord) -> Option<String> {
-        let stages = self.task_stage_rows(task);
-        stages
-            .iter()
-            .find(|stage| stage.status.running())
-            .map(|stage| {
-                if stage.detail.is_empty() {
+        let index = stages.iter().position(|stage| stage.status.running());
+        index
+            .map(|index| {
+                let stage = &stages[index];
+                if !home {
+                    course2md::tr!("第 {} 步 · {}", index + 1, stage.title)
+                } else if stage.detail.is_empty() {
                     stage.title.clone()
                 } else {
                     format!("{} · {}", stage.title, stage.detail)
@@ -1698,12 +1679,7 @@ impl TaskActionView for TaskAction {
     }
 
     fn run(&self, id: &str, this: &mut Desktop, window: &mut Window, cx: &mut Context<Desktop>) {
-        let Some(task) = this
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.task(id))
-            .cloned()
-        else {
+        let Some(task) = this.task(id).cloned() else {
             return;
         };
         let id = id.to_owned();
