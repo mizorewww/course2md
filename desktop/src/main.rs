@@ -109,6 +109,8 @@ struct Desktop {
     settings_ui: settings_ui::State,
     onboarding: onboarding::State,
     storage_ui: desktop_store::locations::State,
+    /// Reading the move records; a newer read replaces it.
+    storage_records: Option<Task<()>>,
     reader_ui: reader_ui::State,
     workspace: Option<workspace::Workspace>,
     workspace_error: Option<String>,
@@ -425,6 +427,7 @@ impl Desktop {
             theme_frame: Default::default(),
             library: desktop_store::library::LibraryState::new(output),
             library_ui: library_ui::LibraryUi::new(),
+            storage_records: None,
             preference_defaults_pending: false,
             transient_task_result: None,
             draft_deadline: None,

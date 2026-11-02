@@ -315,22 +315,14 @@ impl Desktop {
                 )
             })
             .unwrap_or_default();
-        self.storage_ui.records_generation = self.storage_ui.records_generation.wrapping_add(1);
-        let generation = self.storage_ui.records_generation;
         let task = crate::spawn_blocking_io(move || {
             storage::read_records(&directory, &libraries, &backups)
         });
-        cx.spawn(async move |this, cx| {
-            let Some(records) = task.await else {
-                return;
-            };
-            let _ = this.update(cx, |this, cx| {
-                if this.storage_ui.records_generation == generation {
-                    this.apply_storage_records(records, cx);
-                }
-            });
-        })
-        .detach();
+        self.storage_records = Some(cx.spawn(async move |this, cx| {
+            if let Some(records) = task.await {
+                let _ = this.update(cx, |this, cx| this.apply_storage_records(records, cx));
+            }
+        }));
     }
 
     fn apply_storage_records(&mut self, records: storage::Records, cx: &mut Context<Self>) {
