@@ -11,7 +11,7 @@ const SUMMARY_END: &str = "<!-- /course2md:summary -->";
 
 /// 生成插入 course.md 的摘要区块（markdown，哨兵注释包裹）。
 /// 有意信任 LLM 输出（markdown 语义直通），不做转义。
-pub fn render_md_block(sm: &Summary) -> String {
+pub(crate) fn render_md_block(sm: &Summary) -> String {
     let mut out = format!("\n{SUMMARY_BEGIN}\n\n## 📝 {}\n\n", tr!("视频摘要"));
     out.push_str(&format!("> {}\n", sm.tldr));
     if !sm.key_points.is_empty() {
@@ -36,7 +36,7 @@ pub fn render_md_block(sm: &Summary) -> String {
 }
 
 /// 生成插入 course.html 的摘要区块（HTML，哨兵注释包裹）。
-pub fn render_html_block(sm: &Summary) -> String {
+pub(crate) fn render_html_block(sm: &Summary) -> String {
     let mut out = format!(
         "{SUMMARY_BEGIN}<section class=\"summary\"><h2>📝 {}</h2>",
         crate::render::esc(tr!("视频摘要"))
@@ -93,12 +93,12 @@ fn insert_block(doc: &str, block: &str, position: Option<usize>) -> String {
 }
 
 /// 首次插入定位到元信息之后、首个字幕小节（## [mm:ss]）之前。
-pub fn insert_into_md(md: &str, sm: &Summary) -> String {
+pub(crate) fn insert_into_md(md: &str, sm: &Summary) -> String {
     insert_block(md, &render_md_block(sm), md.find("\n## ["))
 }
 
 /// 首次插入定位到 </header> 之后（兜底 </body> 前 / 文末）。
-pub fn insert_into_html(html: &str, sm: &Summary) -> String {
+pub(crate) fn insert_into_html(html: &str, sm: &Summary) -> String {
     let position = html
         .find("</header>")
         .map(|at| at + "</header>".len())

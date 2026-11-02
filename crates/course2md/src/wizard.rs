@@ -8,7 +8,10 @@ use anyhow::Result;
 
 /// 是否首次运行：用户没显式传 --provider && 交互终端 &&
 ///（配置文件不存在，或配置存在但未设置 provider——例如只运行过 config init）。
-pub fn is_first_run(opts_provider_is_none: bool, file: &crate::settings::ConfigFile) -> bool {
+pub(crate) fn is_first_run(
+    opts_provider_is_none: bool,
+    file: &crate::settings::ConfigFile,
+) -> bool {
     opts_provider_is_none && crate::runtime::interactive() && file.defaults.provider.is_none()
 }
 
@@ -87,7 +90,7 @@ fn run_wizard(
                     model_dir_override.or(cfg.defaults.model_dir.as_deref()),
                 );
                 if crate::models::llama_ready(&root) {
-                    println!(
+                    crate::println_tr!(
                         "使用已下载模型 / Using downloaded models: {}",
                         root.display()
                     );
@@ -136,7 +139,7 @@ fn run_wizard(
 
     let path = crate::settings::save(&cfg)?;
     println!();
-    println!("✓ 已保存配置 / Configuration saved: {}", path.display());
+    crate::println_tr!("✓ 已保存配置 / Configuration saved: {}", path.display());
     println_tr!("开始处理视频… / Processing your video…");
     Ok(cfg)
 }

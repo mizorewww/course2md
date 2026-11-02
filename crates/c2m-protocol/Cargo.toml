@@ -7,10 +7,8 @@ license.workspace = true
 publish = false
 
 [dependencies]
-c2m-config = { path = "../c2m-config" }
 c2m-core = { path = "../c2m-core" }
 c2m-i18n = { path = "../c2m-i18n" }
-c2m-process = { path = "../c2m-process" }
 anyhow.workspace = true
 indicatif.workspace = true
 serde.workspace = true

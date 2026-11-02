@@ -311,11 +311,14 @@ impl Transport for HttpTransport {
             budget,
         );
         let call = crate::bounded_http::json_call(agent.get(endpoint), authorization);
-        let response = match call.timeout(remaining(self.deadline)?).call() {
-            Ok(response) | Err(ureq::Error::Status(_, response)) => response,
-            Err(ureq::Error::Transport(_)) => return Err(Error::Network),
+        let call = call
+            .config()
+            .timeout_global(Some(remaining(self.deadline)?))
+            .build();
+        let Ok(response) = call.call() else {
+            return Err(Error::Network);
         };
-        let status = response.status();
+        let status = response.status().as_u16();
         let body =
             crate::bounded_http::read_bounded(response, MAX_RESPONSE).map_err(
                 |error| match error {

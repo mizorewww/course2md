@@ -164,7 +164,7 @@ const LLAMA_MMPROJ: crate::download::Remote = crate::download::Remote {
 };
 
 /// 当前 llama GGUF 模型的身份字符串（checkpoint/日志用），与模型目录同源。
-pub fn llama_gguf_identity() -> String {
+pub(crate) fn llama_gguf_identity() -> String {
     format!("{LLAMA_MODEL_SLUG}-gguf")
 }
 
@@ -218,7 +218,7 @@ fn file_complete(path: &Path) -> bool {
 }
 
 /// 没有模型就下载；下载过程请保持进程运行。
-pub async fn ensure_llama_or_download(
+pub(crate) async fn ensure_llama_or_download(
     root: &Path,
     control: &crate::dispatch::TaskControl,
 ) -> Result<LlamaAsr> {
@@ -292,7 +292,7 @@ pub async fn download_models(root: &Path, control: &crate::dispatch::TaskControl
 
 pub fn list_models(root: &Path) {
     let p = llama_paths(root);
-    println!(
+    crate::println_tr!(
         "gpu/cpu 模型目录 / gpu/cpu model directory: {}",
         root.display()
     );
@@ -305,7 +305,7 @@ pub fn list_models(root: &Path) {
         println!("  {name} {state} {}", path.display());
     }
     if !llama_ready(root) {
-        println!(
+        crate::println_tr!(
             "下载或修复 / Download or repair: course2md models download --dir \"{}\"",
             root.display()
         );

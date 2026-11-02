@@ -18,7 +18,7 @@ use std::fmt::Display;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-pub const LANGUAGES: [Lang; 4] = [Lang::En, Lang::ZhHans, Lang::ZhHant, Lang::Ja];
+pub(crate) const LANGUAGES: [Lang; 4] = [Lang::En, Lang::ZhHans, Lang::ZhHant, Lang::Ja];
 
 /// In the order of [`LANGUAGES`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

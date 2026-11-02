@@ -1,6 +1,6 @@
 //! A local speech model's state on disk, as progress events report it.
 
-use crate::config::AsrProvider;
+use crate::speech::AsrProvider;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

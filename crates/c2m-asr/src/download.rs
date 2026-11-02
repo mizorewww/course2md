@@ -18,7 +18,7 @@ pub(crate) const MODEL_BAR: &str =
 /// Downloads the files of one model preparation. Nothing is resolved until a file
 /// is actually missing: choosing hosts may announce itself or wait on the network.
 #[derive(Default)]
-pub struct Downloader(OnceLock<model_fetch::Downloader>);
+pub(crate) struct Downloader(OnceLock<model_fetch::Downloader>);
 
 impl Downloader {
     pub fn new() -> Self {
