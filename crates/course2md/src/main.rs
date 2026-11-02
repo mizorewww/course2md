@@ -80,12 +80,32 @@ fn engine_targets(spec: &str) -> String {
     directives.join(",")
 }
 
+/// `course2md ... | head` closes the pipe early, and `println!` then panics. A reader
+/// that stops reading is not an error: end as a program killed by SIGPIPE would.
+fn end_quietly_on_closed_pipe() {
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or_default();
+        let closed = message.contains("os error 32)") || message.contains("os error 232)");
+        if message.starts_with("failed printing to std") && closed {
+            std::process::exit(141);
+        }
+        report(info);
+    }));
+}
+
 fn main() -> std::process::ExitCode {
     // SAFETY: the first statement of main, before any thread exists.
     #[cfg(apple_native)]
     unsafe {
         course2md::apple::pin_cache_dir()
     };
+    end_quietly_on_closed_pipe();
     let mut args: Vec<_> = std::env::args_os().collect();
     let lang_arg = course2md::cli::take_lang_arg(&mut args);
     // 近似扫描（先于 clap 解析，解析失败也要走对输出模式）：把值恰为 "--json"/
