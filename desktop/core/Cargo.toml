@@ -13,6 +13,7 @@ test-support = []
 [dependencies]
 course2md = { path = "../../crates/course2md", default-features = false }
 desktop-prefs = { path = "../prefs" }
+desktop-accounts = { path = "../accounts" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

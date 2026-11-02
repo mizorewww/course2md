@@ -1804,12 +1804,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "desktop-accounts"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "course2md",
+ "desktop-prefs",
+]
+
+[[package]]
 name = "desktop-core"
 version = "2.0.1"
 dependencies = [
  "anyhow",
  "chrono",
  "course2md",
+ "desktop-accounts",
  "desktop-prefs",
  "image",
  "libc",
