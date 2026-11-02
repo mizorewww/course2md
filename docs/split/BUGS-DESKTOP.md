@@ -20,7 +20,7 @@ Status of `AUDIT.md` § Bugs → Desktop, the find field keys, and the gaps left
 | D11 hash | fixed | 61e3059 | Unit test against a fixed SHA-256 value. Old cache files are not reused and age out |
 | D11 `math.rs` | fixed | 9f94b60 | Unit test: slices stay within the limit |
 | D11 writes during read | fixed | 8349fcc | Unit test: `read_records` leaves the journal unchanged |
-| D11 newer schema | fixed in part | 0e0e8b6 | Unit test. Pointer schema only: `read_manifest` has no typed error, so a newer manifest under a current pointer still falls back |
+| D11 newer schema | fixed | 0e0e8b6, b464307 | Unit tests. `c2m-artifact` returns `NewerSchema` for a pointer or manifest above schema 1: publishing stops instead of replacing a newer pointer, and a newer manifest under a current pointer becomes a library issue instead of falling back to an older version (`publishing_leaves_a_newer_apps_pointer_alone`, `a_newer_manifest_under_a_current_pointer_is_not_replaced_by_an_older_version`; acceptance A12) |
 | D11 lock `.expect` | fixed | 25bc804 | Existing tests; poisoning itself is not tested |
 | D11 unzeroized copies | fixed | 7b0590a | By reading. `serde_json` parsing can still leave transient copies, and escapes beyond the reserved size can reallocate |
 | D11 doc comments | fixed | 70a8cb3 | By reading |
