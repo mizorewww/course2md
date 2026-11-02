@@ -3,14 +3,14 @@
 //! Tests inject `MemoryCredentialVault`; they never access the user's Keychain.
 
 use anyhow::{Result, anyhow, bail};
-#[cfg(any(test, not(target_os = "macos")))]
+#[cfg(any(test, feature = "test-support", not(target_os = "macos")))]
 use std::collections::BTreeMap;
 use std::fmt;
 #[cfg(any(test, not(target_os = "macos")))]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use std::sync::Mutex;
 use zeroize::Zeroizing;
 
@@ -54,18 +54,18 @@ fn new_reference() -> String {
 
 /// A store answered, and it does not hold this reference. Anything else (a locked
 /// store, an unreadable file) leaves the question open.
-#[cfg(any(test, not(target_os = "macos")))]
+#[cfg(any(test, feature = "test-support", not(target_os = "macos")))]
 #[derive(Debug)]
 struct NotStored(&'static str);
 
-#[cfg(any(test, not(target_os = "macos")))]
+#[cfg(any(test, feature = "test-support", not(target_os = "macos")))]
 impl fmt::Display for NotStored {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.0)
     }
 }
 
-#[cfg(any(test, not(target_os = "macos")))]
+#[cfg(any(test, feature = "test-support", not(target_os = "macos")))]
 impl std::error::Error for NotStored {}
 
 #[cfg(any(test, not(target_os = "macos")))]
@@ -83,20 +83,20 @@ fn validate_reference(reference: &str) -> Result<()> {
 
 /// In-memory isolated store for tests and caller-controlled temporary use.
 /// It intentionally does not provide a plaintext file fallback.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Default)]
 pub struct MemoryCredentialVault {
     values: Mutex<BTreeMap<CredentialRef, Zeroizing<String>>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl MemoryCredentialVault {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl CredentialVault for MemoryCredentialVault {
     fn insert(&self, secret: Secret) -> Result<CredentialRef> {
         if secret.is_empty() {

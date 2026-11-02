@@ -1808,27 +1808,43 @@ name = "desktop-core"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "base64 0.23.1",
- "c2m-test-http",
  "chrono",
  "course2md",
- "gpui-kit-material-color",
+ "desktop-prefs",
  "image",
- "keyring",
  "libc",
  "pulldown-cmark",
  "same-file",
- "security-framework",
  "serde",
  "serde_json",
  "smol",
  "tempfile",
  "trash",
  "unicode-segmentation",
+ "url",
+ "walkdir",
+ "zeroize",
+]
+
+[[package]]
+name = "desktop-prefs"
+version = "2.0.1"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "c2m-test-http",
+ "chrono",
+ "course2md",
+ "gpui-kit-material-color",
+ "keyring",
+ "security-framework",
+ "serde",
+ "serde_json",
+ "smol",
+ "tempfile",
  "ureq",
  "url",
  "uuid",
- "walkdir",
  "which",
  "zeroize",
 ]

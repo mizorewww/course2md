@@ -5,59 +5,25 @@
 pub mod account;
 pub mod activity;
 pub mod backend;
-pub mod bounded_http;
 pub mod codex;
-pub mod conversion;
-pub mod credentials;
-pub mod environment;
 pub mod import;
 pub mod job;
 pub mod library;
 pub mod locations;
-pub mod model_discovery;
-pub mod model_status;
 pub mod notes;
 pub mod ollama;
 pub mod organize;
 pub mod page;
 pub mod plan;
-pub mod preferences;
-pub mod provider_serde;
 pub mod reader;
 pub mod reader_navigation;
-pub mod service_binding;
-pub mod service_test;
-pub mod setup;
 pub mod source;
 pub mod storage;
-pub mod store;
 pub mod task_view;
 pub mod workspace;
 pub mod youtube;
 
-/// Shown when a blocking worker ends without a result.
-pub fn interrupted() -> &'static str {
-    course2md::tr!("操作意外中断，请重试")
-}
-
-/// Runs blocking IO on smol's blocking thread pool and delivers the result through a
-/// channel. The work runs to completion even if the receiver is dropped.
-///
-/// This is the one way the desktop leaves the UI thread for blocking work: file and
-/// process IO, keychain access, synchronous HTTP. GPUI's background executor dispatches
-/// to GCD global queues, and macOS may run those blocks on the main thread via queue
-/// override; `cx.spawn` always polls on the main thread. Blocking syscalls — keychain
-/// reads that can wait on an authorization dialog, synchronous HTTP — therefore must
-/// never run inside executor tasks. smol's pool is separate from GPUI's executor and
-/// reuses its threads, so short operations do not each start a thread. Code that wants
-/// a future instead of a channel may await `smol::unblock` directly; it is the same pool.
-pub fn spawn_blocking_io<T: Send + 'static>(
-    work: impl FnOnce() -> T + Send + 'static,
-) -> smol::channel::Receiver<T> {
-    let (tx, rx) = smol::channel::bounded(1);
-    smol::unblock(move || {
-        let _ = tx.send_blocking(work());
-    })
-    .detach();
-    rx
-}
+pub use desktop_prefs::{
+    bounded_http, conversion, credentials, environment, interrupted, model_discovery, model_status,
+    preferences, provider_serde, service_binding, service_test, setup, spawn_blocking_io, store,
+};
