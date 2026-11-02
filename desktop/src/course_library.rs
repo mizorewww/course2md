@@ -248,15 +248,15 @@ impl RenderOnce for IssueDetails {
     }
 }
 
-/// A note or task's commands behind a ⋮ button, as one element so it can reach the window.
+/// A thing's commands behind a ⋮ button, as one element so it can reach the window.
 #[derive(gpui::IntoElement)]
 pub(crate) struct CommandsButton {
-    id: ElementId,
+    pub(crate) id: ElementId,
     /// The tooltip, and what the button is called; `subject` says whose commands.
-    label: SharedString,
-    subject: Option<SharedString>,
-    commands: Vec<Command>,
-    tonal: bool,
+    pub(crate) label: SharedString,
+    pub(crate) subject: Option<SharedString>,
+    pub(crate) commands: Vec<Command>,
+    pub(crate) tonal: bool,
 }
 
 impl RenderOnce for CommandsButton {
@@ -264,6 +264,7 @@ impl RenderOnce for CommandsButton {
         let button = ElementId::NamedChild(Arc::new(self.id.clone()), "button".into());
         let tip = ElementId::NamedChild(Arc::new(self.id.clone()), "tip".into());
         let items = ElementId::NamedChild(Arc::new(self.id.clone()), "items".into());
+        let key_toggle = ui::menu_key_toggle(&self.id, window, cx);
         ui::menu(
             self.id,
             MaterialTooltip::plain(tip, self.label.clone()).trigger(
@@ -276,7 +277,8 @@ impl RenderOnce for CommandsButton {
                     button
                         .variant(IconButtonVariant::Tonal)
                         .tone(ButtonTone::Neutral)
-                }),
+                })
+                .on_click(key_toggle),
             ),
             command_menu(items, self.commands),
             window,

@@ -1,6 +1,8 @@
 //! Controlled library migration and explicit cleanup of verified old-location backups.
 use crate::{
     Desktop,
+    course_library::CommandsButton,
+    folder_tree::{Command, command_context_menu},
     storage::{self, Phase, Progress},
     symbols,
     ui::{self, AsyncStatus, Resource},
@@ -10,11 +12,7 @@ use anyhow::{Context as _, Result, ensure};
 use desktop_store::locations::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
-use gpui_kit_material::components::MaterialContextMenu;
-use gpui_kit_material::{
-    icons::{Icon, SymbolIcon},
-    prelude::*,
-};
+use gpui_kit_material::prelude::*;
 use std::{
     path::{Path, PathBuf},
     rc::Rc,
@@ -1026,42 +1024,45 @@ impl Desktop {
         })
     }
 
-    /// One action of a location, for its menu and its right-click.
+    /// A location's commands, for its menu and its right-click.
     fn location_actions(
         &self,
         library: &workspace::LibraryLocation,
         repair: bool,
         offline: bool,
         default: bool,
-    ) -> Vec<LocationAction> {
+        cx: &mut Context<Self>,
+    ) -> Vec<Command> {
         let busy = self.storage_ui.busy;
+        let desktop = cx.weak_entity();
         let root = library.root.clone();
         let (default_id, move_id) = (library.id.clone(), library.id.clone());
         vec![
-            LocationAction {
-                label: course2md::tr!("打开位置"),
-                icon: symbols::folder_open(),
-                enabled: !offline,
-                run: Rc::new(move |_, _, cx| open_location(&root, cx)),
-            },
-            LocationAction {
-                label: if default {
+            Command::global(
+                course2md::tr!("打开位置"),
+                symbols::folder_open(),
+                move |_, cx| open_location(&root, cx),
+            )
+            .disabled(offline)
+            .ends_group(),
+            Command::new(
+                if default {
                     course2md::tr!("已是默认保存位置")
                 } else {
                     course2md::tr!("设为默认保存位置")
                 },
-                icon: symbols::check_circle(),
-                enabled: !default && !repair && !busy,
-                run: Rc::new(move |this, _, cx| this.set_default_library(default_id.clone(), cx)),
-            },
-            LocationAction {
-                label: course2md::tr!("移动笔记库…"),
-                icon: symbols::database(),
-                enabled: !repair && !busy,
-                run: Rc::new(move |this, window, cx| {
-                    this.begin_library_move(move_id.clone(), window, cx)
-                }),
-            },
+                symbols::check_circle(),
+                &desktop,
+                move |this, _, cx| this.set_default_library(default_id.clone(), cx),
+            )
+            .disabled(default || repair || busy),
+            Command::new(
+                course2md::tr!("移动笔记库…"),
+                symbols::database(),
+                &desktop,
+                move |this, window, cx| this.begin_library_move(move_id.clone(), window, cx),
+            )
+            .disabled(repair || busy),
         ]
     }
 
@@ -1073,7 +1074,6 @@ impl Desktop {
         library: &workspace::LibraryLocation,
         several: bool,
         default: bool,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let busy = self.storage_ui.busy;
@@ -1083,24 +1083,14 @@ impl Desktop {
         let reassociate = check.is_some_and(|check| check.needs_reassociation);
         let repair = reassociate || relocate;
         let path = course2md::config::simplify_verbatim(library.root.clone());
-        let actions = self.location_actions(library, repair, offline, default);
-        let entity = cx.weak_entity();
-        let more = ui::menu(
-            ("storage-location-menu", index),
-            MaterialTooltip::plain(
-                ("storage-location-actions-tip", index),
-                course2md::tr!("笔记库操作"),
-            )
-            .trigger(IconButton::new(
-                ("storage-location-actions", index),
-                symbols::more_vert(),
-                course2md::tr!("{} 操作", library.name),
-            )),
-            location_menu(index, &actions, &entity),
-            window,
-            cx,
-        )
-        .anchor(Anchor::TopRight);
+        let actions = self.location_actions(library, repair, offline, default, cx);
+        let more = CommandsButton {
+            id: ("storage-location-menu", index).into(),
+            label: course2md::tr!("笔记库操作").into(),
+            subject: Some(course2md::tr!("{} 操作", library.name).into()),
+            commands: actions.clone(),
+            tonal: false,
+        };
         let (id, reassociate_id) = (library.id.clone(), library.id.clone());
         let repair_button = |name: &'static str, variant, icon, label: &'static str| {
             material_button((name, index), variant)
@@ -1212,9 +1202,9 @@ impl Desktop {
             .min_w_0()
             .px(ITEM_INSET)
             .py(rem(16.))
-            .child(MaterialContextMenu::new(
+            .child(command_context_menu(
                 ("storage-location-context", index),
-                move |_, _| location_menu(index, &actions, &entity),
+                actions,
             ))
             .child(row)
             .into_any_element()
@@ -1222,11 +1212,7 @@ impl Desktop {
 
     /// Storage locations listed in the settings page; per-location operations
     /// live in this module alongside the migration flow.
-    pub(super) fn storage_settings_page(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn storage_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut locations =
             TileGroup::new("storage-locations-heading", course2md::tr!("笔记库位置"));
         if let Some(workspace) = &self.workspace {
@@ -1234,8 +1220,8 @@ impl Desktop {
             let several = workspace.state.libraries.len() > 1;
             for (index, library) in workspace.state.libraries.iter().enumerate() {
                 let default = workspace.state.default_library == library.id;
-                locations = locations
-                    .child(self.location_row(index, library, several, default, window, cx));
+                locations =
+                    locations.child(self.location_row(index, library, several, default, cx));
             }
         }
         let add = cx.listener(|this, _, window, cx| this.register_storage_location(window, cx));
@@ -1364,15 +1350,6 @@ impl Desktop {
     }
 }
 
-type LocationRun = Rc<dyn Fn(&mut Desktop, &mut Window, &mut Context<Desktop>)>;
-
-struct LocationAction {
-    label: &'static str,
-    icon: SymbolIcon,
-    enabled: bool,
-    run: LocationRun,
-}
-
 fn open_location(root: &Path, cx: &mut App) {
     cx.open_with_system(&course2md::config::simplify_verbatim(root.to_owned()));
 }
@@ -1397,23 +1374,4 @@ fn storage_item<const N: usize>(
                 .flex_wrap()
                 .children(actions),
         )
-}
-/// A library location's commands, on a right press and behind its ⋮ button.
-fn location_menu(
-    index: usize,
-    actions: &[LocationAction],
-    entity: &WeakEntity<Desktop>,
-) -> MaterialMenu {
-    MaterialMenu::new(("storage-location-items", index)).items(actions.iter().enumerate().map(
-        |(position, action)| {
-            let (run, entity) = (action.run.clone(), entity.clone());
-            MaterialMenuItem::new(action.label)
-                .leading(Icon::from(action.icon))
-                .disabled(!action.enabled)
-                .divider(position == 0)
-                .on_click(move |_, window, cx| {
-                    let _ = entity.update(cx, |this, cx| run(this, window, cx));
-                })
-        },
-    ))
 }

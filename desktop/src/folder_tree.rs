@@ -64,14 +64,15 @@ impl Render for FolderDrag {
 
 type CommandRun = Rc<dyn Fn(&mut Window, &mut App)>;
 
-/// One command of a note's or folder's menu. The list draws both behind the ⋮ button
-/// and on a right press.
+/// One command of a note's, folder's, library location's or service's menu. The list
+/// draws both behind the ⋮ button and on a right press.
 #[derive(Clone)]
 pub(crate) struct Command {
     label: SharedString,
     icon: SymbolIcon,
     danger: bool,
     ends_group: bool,
+    disabled: bool,
     run: CommandRun,
 }
 
@@ -100,6 +101,7 @@ impl Command {
             icon,
             danger: false,
             ends_group: false,
+            disabled: false,
             run: Rc::new(run),
         }
     }
@@ -111,6 +113,11 @@ impl Command {
 
     pub(crate) fn ends_group(mut self) -> Self {
         self.ends_group = true;
+        self
+    }
+
+    pub(crate) fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 }
@@ -128,6 +135,7 @@ pub(crate) fn command_menu(id: impl Into<ElementId>, commands: Vec<Command>) -> 
                     icon
                 })
                 .divider(command.ends_group)
+                .disabled(command.disabled)
                 .on_click(move |_, window, cx| (command.run)(window, cx))
         }))
 }
