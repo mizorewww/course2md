@@ -208,8 +208,8 @@ impl Desktop {
         self.draft_deadline = None;
         self.update_draft(
             |draft| {
-                let (options, folder) = (draft.options.clone(), draft.folder);
-                update_input_form(draft, input, title, source, options, folder, scroll);
+                update_draft_source_title(draft, input, title, source);
+                draft.scroll = scroll;
             },
             cx,
         )

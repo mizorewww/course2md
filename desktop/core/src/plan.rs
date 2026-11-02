@@ -129,31 +129,6 @@ pub fn update_draft_source_title(
     }
 }
 
-/// Apply the visible form without treating a save attempt as a user edit.
-/// Navigation often calls this with identical values; keep timestamps and disk
-/// records unchanged unless an actual input or option changed.
-pub fn update_input_form(
-    draft: &mut workspace::Draft,
-    input: String,
-    title: String,
-    source: Option<source::Source>,
-    options: ConversionOptions,
-    folder: Option<u64>,
-    scroll: f32,
-) -> bool {
-    let previous = draft.clone();
-    update_draft_source_title(draft, input, title, source);
-    apply_draft_options(draft, options);
-    draft.folder = folder;
-    draft.scroll = scroll;
-    draft.updated = previous.updated;
-    if *draft == previous {
-        return false;
-    }
-    draft.updated = workspace::now();
-    true
-}
-
 /// Replace the draft's processing options, recording each changed choice as an
 /// explicit override so later default changes no longer reach it.
 pub fn apply_draft_options(draft: &mut workspace::Draft, options: ConversionOptions) {
@@ -366,8 +341,16 @@ pub struct PlanInputs<'a> {
 }
 
 impl PlanInputs<'_> {
-    /// The plan builders' shared preamble: the workspace and draft they both require.
-    pub fn plan_draft(&self) -> Result<(&workspace::Workspace, &workspace::Draft)> {
+    /// What both plan builders require first: no unsynced or invalid preferences, then
+    /// the workspace and its draft. `unsynced` is the builder's own wording.
+    fn plan_draft(
+        &self,
+        unsynced: &'static str,
+    ) -> Result<(&workspace::Workspace, &workspace::Draft)> {
+        if let Some(issue) = &self.preferences_issue {
+            anyhow::bail!("{issue}");
+        }
+        ensure!(!self.defaults_pending, unsynced);
         let workspace = self
             .workspace
             .context(course2md::tr!("输入与任务记录尚未恢复"))?;
@@ -381,7 +364,7 @@ impl PlanInputs<'_> {
     /// The plan builders' shared tool check: the engine and FFmpeg always; an `online` source also needs
     /// yt-dlp (batch plans are always online; a single plan follows its confirmed source).
     /// A check still in progress is [`PlanPending`], not a failure.
-    pub fn ensure_plan_environment(&self, online: bool) -> Result<&Environment> {
+    fn ensure_plan_environment(&self, online: bool) -> Result<&Environment> {
         let environment = plan_environment(self.environment)?;
         ensure!(environment.engine, course2md::tr!("生成引擎无法启动"));
         ensure!(
@@ -395,13 +378,14 @@ impl PlanInputs<'_> {
         Ok(environment)
     }
 
-    /// The destination is still a registered, writable library; both plan builders share these checks and messages.
-    pub fn ensure_plan_storage(
+    /// The destination is still a registered, writable library; then the configuration
+    /// the draft's options make of its base, with the model directory normalized.
+    fn plan_storage_and_config(
         &self,
         workspace: &workspace::Workspace,
         draft: &workspace::Draft,
         validation: PlanValidation,
-    ) -> Result<()> {
+    ) -> Result<course2md::settings::ConfigFile> {
         let library = workspace
             .state
             .library(&draft.library_id)
@@ -413,11 +397,6 @@ impl PlanInputs<'_> {
             self.locations.get(library),
             self.library.indexes.get(&library.root),
         )?;
-        Ok(())
-    }
-
-    /// Draft options override the base config and normalize the model directory; both plan builders build it this way.
-    pub fn plan_config(&self, draft: &workspace::Draft) -> course2md::settings::ConfigFile {
         let mut config = draft
             .base_config
             .clone()
@@ -426,27 +405,80 @@ impl PlanInputs<'_> {
         config.defaults.model_dir = Some(course2md::config::model_dir_from(
             config.defaults.model_dir.as_deref(),
         ));
-        config
+        Ok(config)
     }
 
-    /// The draft's service references, falling back to the default services.
-    pub fn plan_refs(&self, draft: &workspace::Draft) -> ServiceRefs {
+    /// Local recognition: the engine checked (with `fallback` as the reason it is
+    /// needed, when it is only a fallback) and its default model filled in.
+    fn plan_asr(
+        &self,
+        config: &mut course2md::settings::ConfigFile,
+        environment: &Environment,
+        fallback: Option<&'static str>,
+    ) -> Result<()> {
+        let provider = config
+            .defaults
+            .provider
+            .unwrap_or_else(|| recommended_local_provider(self.environment));
+        let capability = ensure_asr_capability(environment, provider);
+        match fallback {
+            Some(reason) => capability.context(reason)?,
+            None => capability?,
+        }
+        config.defaults.provider = Some(provider);
+        fill_default_asr_model(config, provider);
+        Ok(())
+    }
+
+    /// What both builders end with: the draft's services (or the defaults) resolved
+    /// into the configuration, which is then validated for `source`.
+    fn finish_plan(
+        &self,
+        draft: &workspace::Draft,
+        config: course2md::settings::ConfigFile,
+        validation: PlanValidation,
+        source: source::Source,
+        title: String,
+    ) -> Result<TaskPlan> {
         let defaults = self.preferences.default_refs();
-        ServiceRefs {
+        let refs = ServiceRefs {
             asr: draft.asr_service.clone().or(defaults.asr),
             llm: draft.ai_service.clone().or(defaults.llm),
+        };
+        let config = match validation {
+            PlanValidation::Preview => self.preferences.config_for_preview(&config, &refs)?,
+            PlanValidation::Submission => self.preferences.config_for_refs(&config, &refs)?,
+        };
+        let mut validation_config = config.clone();
+        validation_config
+            .defaults
+            .provider
+            .get_or_insert_with(|| recommended_local_provider(self.environment));
+        validate_plan_config(&source.input, &validation_config)?;
+        if validation == PlanValidation::Submission && !source.online {
+            ensure!(
+                std::path::Path::new(&source.input).is_file(),
+                course2md::tr!("原视频已移动或无法读取，请重新选择视频")
+            );
         }
+        Ok(TaskPlan {
+            operation: Default::default(),
+            source_id: source.identity.clone(),
+            source,
+            title,
+            library_id: draft.library_id.clone(),
+            folder: draft.folder,
+            subtitle: None,
+            config,
+            asr_service: refs.asr,
+            ai_service: refs.llm,
+        })
     }
 
     pub fn build_plan(&self, validation: PlanValidation) -> Result<TaskPlan> {
-        if let Some(issue) = &self.preferences_issue {
-            anyhow::bail!("{issue}");
-        }
-        ensure!(
-            !self.defaults_pending,
-            course2md::tr!("默认设置已保存，当前视频的选项尚未同步。请重试。")
-        );
-        let (workspace, draft) = self.plan_draft()?;
+        let (workspace, draft) = self.plan_draft(course2md::tr!(
+            "默认设置已保存，当前视频的选项尚未同步。请重试。"
+        ))?;
         ensure!(
             !draft.input.is_empty(),
             if draft.online {
@@ -484,8 +516,7 @@ impl PlanInputs<'_> {
         if draft.title.trim().is_empty() {
             return Err(TitleRequired.into());
         }
-        self.ensure_plan_storage(workspace, draft, validation)?;
-        let mut config = self.plan_config(draft);
+        let mut config = self.plan_storage_and_config(workspace, draft, validation)?;
         let using_subtitle = draft.options.source_mode != TranscriptSource::Asr
             && (source.selected_subtitle.is_some() || draft.subtitle.is_some());
         if using_subtitle {
@@ -495,7 +526,7 @@ impl PlanInputs<'_> {
                     course2md::tr!("所选字幕与当前视频不匹配，请重新读取字幕")
                 );
             }
-            config.defaults.transcript_source = Some(course2md::config::TranscriptSource::Subtitle);
+            config.defaults.transcript_source = Some(TranscriptSource::Subtitle);
         } else {
             use course2md::subtitle::SubtitleEvidence;
             ensure!(
@@ -509,43 +540,13 @@ impl PlanInputs<'_> {
                         )),
                 course2md::tr!("字幕还未确认。请读取字幕，或明确选择语音识别。")
             );
-            config.defaults.transcript_source = Some(course2md::config::TranscriptSource::Asr);
-            let provider = config
-                .defaults
-                .provider
-                .unwrap_or_else(|| recommended_local_provider(self.environment));
-            ensure_asr_capability(environment, provider)?;
-            config.defaults.provider = Some(provider);
-            fill_default_asr_model(&mut config, provider);
+            config.defaults.transcript_source = Some(TranscriptSource::Asr);
+            self.plan_asr(&mut config, environment, None)?;
         }
-        let refs = self.plan_refs(draft);
-        let config = match validation {
-            PlanValidation::Preview => self.preferences.config_for_preview(&config, &refs)?,
-            PlanValidation::Submission => self.preferences.config_for_refs(&config, &refs)?,
-        };
-        let mut validation_config = config.clone();
-        validation_config
-            .defaults
-            .provider
-            .get_or_insert_with(|| recommended_local_provider(self.environment));
-        validate_plan_config(&source.input, &validation_config)?;
-        if validation == PlanValidation::Submission && !source.online {
-            ensure!(
-                std::path::Path::new(&source.input).is_file(),
-                course2md::tr!("原视频已移动或无法读取，请重新选择视频")
-            );
-        }
+        let plan = self.finish_plan(draft, config, validation, source, draft.title.clone())?;
         Ok(TaskPlan {
-            operation: Default::default(),
-            source_id: source.identity.clone(),
-            source,
-            title: draft.title.clone(),
-            library_id: draft.library_id.clone(),
-            folder: draft.folder,
             subtitle: draft.subtitle.clone(),
-            config,
-            asr_service: refs.asr,
-            ai_service: refs.llm,
+            ..plan
         })
     }
 
@@ -557,72 +558,38 @@ impl PlanInputs<'_> {
         candidate: &source::SourceCandidate,
         title: String,
     ) -> Result<TaskPlan> {
-        if let Some(issue) = &self.preferences_issue {
-            anyhow::bail!("{issue}");
-        }
-        ensure!(
-            !self.defaults_pending,
-            course2md::tr!("默认设置已保存，当前选项尚未同步。请重试。")
-        );
-        let (workspace, draft) = self.plan_draft()?;
+        let (workspace, draft) =
+            self.plan_draft(course2md::tr!("默认设置已保存，当前选项尚未同步。请重试。"))?;
         let identity = course2md::fetch::candidate_identity(candidate)
             .context(course2md::tr!("还无法确认这个视频的身份，请单独打开后转换"))?;
         let environment = self.ensure_plan_environment(true)?;
-        self.ensure_plan_storage(workspace, draft, PlanValidation::Submission)?;
-        let mut config = self.plan_config(draft);
+        let mut config =
+            self.plan_storage_and_config(workspace, draft, PlanValidation::Submission)?;
         // Subtitles-only never reaches speech recognition; other modes may fall back to ASR at run time,
         // so, as in build_plan, check local recognition and fill in the default model first.
         if draft.options.source_mode != TranscriptSource::Subtitle {
-            let provider = config
-                .defaults
-                .provider
-                .unwrap_or_else(|| recommended_local_provider(self.environment));
-            let capability = ensure_asr_capability(environment, provider);
-            if draft.options.source_mode == TranscriptSource::Auto {
-                capability.context(course2md::tr!(
-                    "部分视频可能没有字幕，需要语音识别能力作为后备"
-                ))?;
-            } else {
-                capability?;
-            }
-            config.defaults.provider = Some(provider);
-            fill_default_asr_model(&mut config, provider);
+            let fallback = (draft.options.source_mode == TranscriptSource::Auto).then_some(
+                course2md::tr!("部分视频可能没有字幕，需要语音识别能力作为后备"),
+            );
+            self.plan_asr(&mut config, environment, fallback)?;
         }
-        let refs = self.plan_refs(draft);
-        let config = self.preferences.config_for_refs(&config, &refs)?;
-        let mut validation_config = config.clone();
-        validation_config
-            .defaults
-            .provider
-            .get_or_insert_with(|| recommended_local_provider(self.environment));
-        validate_plan_config(&candidate.input, &validation_config)?;
-        Ok(TaskPlan {
-            operation: Default::default(),
-            source_id: identity.clone(),
-            source: source::Source {
-                input: candidate.input.clone(),
-                title: title.clone(),
-                duration: candidate
-                    .duration
-                    .filter(|value| value.is_finite() && *value > 0.)
-                    .unwrap_or_default(),
-                cover: self
-                    .import
-                    .source_candidate_covers
-                    .get(&candidate.input)
-                    .cloned(),
-                identity,
-                online: true,
-                ..source::Source::default()
-            },
-            title,
-            library_id: draft.library_id.clone(),
-            folder: draft.folder,
-            subtitle: None,
-            config,
-            asr_service: refs.asr,
-            ai_service: refs.llm,
-        })
+        let source = source::Source {
+            input: candidate.input.clone(),
+            title: title.clone(),
+            duration: candidate
+                .duration
+                .filter(|value| value.is_finite() && *value > 0.)
+                .unwrap_or_default(),
+            cover: self
+                .import
+                .source_candidate_covers
+                .get(&candidate.input)
+                .cloned(),
+            identity,
+            online: true,
+            ..source::Source::default()
+        };
+        self.finish_plan(draft, config, PlanValidation::Submission, source, title)
     }
 }
 
@@ -630,7 +597,7 @@ impl PlanInputs<'_> {
 pub mod tests {
     use super::{
         PlanValidation, apply_draft_options, batch_note_title, edit_current_draft,
-        update_draft_source_title, update_input_form, validate_plan_config, validate_plan_storage,
+        update_draft_source_title, validate_plan_config, validate_plan_storage,
     };
 
     #[test]
@@ -850,7 +817,7 @@ pub mod tests {
     }
 
     #[test]
-    fn unchanged_form_values_do_not_request_a_save_or_update_the_timestamp() {
+    fn unchanged_form_values_leave_the_draft_as_it_was() {
         let mut input = crate::workspace::Draft::new(true, "library".into(), Default::default());
         let source = source("https://example.test/a", "课程 A");
         update_draft_source_title(
@@ -860,62 +827,28 @@ pub mod tests {
             Some(source),
         );
         input.updated = 123;
-        input.folder = Some(7);
-        input.scroll = -42.;
         let expected = input.clone();
         for _ in 0..8 {
-            assert!(!update_input_form(
+            update_draft_source_title(
                 &mut input,
                 expected.input.clone(),
                 expected.title.clone(),
                 expected.source.clone(),
-                expected.options.clone(),
-                expected.folder,
-                expected.scroll,
-            ));
+            );
+            apply_draft_options(&mut input, expected.options.clone());
             assert_eq!(input, expected);
         }
         let mut options = expected.options.clone();
         options.formats[0] = !options.formats[0];
-        assert!(update_input_form(
-            &mut input,
-            expected.input,
-            expected.title,
-            expected.source,
-            options.clone(),
-            expected.folder,
-            expected.scroll,
-        ));
+        options.translate = Some("en".into());
+        apply_draft_options(&mut input, options.clone());
         assert_eq!(input.options, options);
-        assert!(
-            input
-                .overrides
-                .contains(&crate::workspace::Override::Formats)
-        );
-        assert_ne!(input.updated, 123);
-
-        let input_text = input.input.clone();
-        let title = input.title.clone();
-        let source_value = input.source.clone();
-        let folder = input.folder;
-        let scroll = input.scroll;
-        let mut translated = input.options.clone();
-        translated.translate = Some("en".into());
-        assert!(update_input_form(
-            &mut input,
-            input_text,
-            title,
-            source_value,
-            translated,
-            folder,
-            scroll,
-        ));
-        assert_eq!(input.options.translate.as_deref(), Some("en"));
-        assert!(
-            input
-                .overrides
-                .contains(&crate::workspace::Override::Translate)
-        );
+        for field in [
+            crate::workspace::Override::Formats,
+            crate::workspace::Override::Translate,
+        ] {
+            assert!(input.overrides.contains(&field));
+        }
     }
 
     #[test]
@@ -924,29 +857,13 @@ pub mod tests {
         draft.change_source("video".into());
         let mut options = draft.options.clone();
         options.provider = Some(course2md::config::AsrProvider::Cpu);
-        update_input_form(
-            &mut draft,
-            "video".into(),
-            "".into(),
-            None,
-            options.clone(),
-            None,
-            0.,
-        );
+        apply_draft_options(&mut draft, options.clone());
         assert_eq!(
             draft.local_provider,
             Some(course2md::config::AsrProvider::Cpu)
         );
         options.provider = Some(course2md::config::AsrProvider::Api);
-        update_input_form(
-            &mut draft,
-            "video".into(),
-            "".into(),
-            None,
-            options,
-            None,
-            0.,
-        );
+        apply_draft_options(&mut draft, options);
         assert_eq!(
             draft.options.provider,
             Some(course2md::config::AsrProvider::Api)
