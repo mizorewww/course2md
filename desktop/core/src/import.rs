@@ -80,11 +80,7 @@ pub fn text_source_choices() -> [(TranscriptSource, &'static str); 3] {
 }
 
 pub fn text_source_id(mode: TranscriptSource) -> &'static str {
-    match mode {
-        TranscriptSource::Auto => "auto",
-        TranscriptSource::Subtitle => "subtitle",
-        TranscriptSource::Asr => "asr",
-    }
+    mode.into()
 }
 
 pub fn uses_speech(source: &source::Source, source_mode: TranscriptSource) -> bool {
@@ -483,18 +479,14 @@ impl ImportSession {
     /// Forgets the source: running reads stop, their late results no longer count.
     pub fn invalidate_source(&mut self) {
         self.pending_conversion = None;
-        for cancel in [
-            self.preview_cancel.take(),
-            self.subtitle_cancel.take(),
-            self.source_covers_cancel.take(),
-        ]
-        .into_iter()
-        .flatten()
+        self.stop_subtitle_read();
+        for cancel in [self.preview_cancel.take(), self.source_covers_cancel.take()]
+            .into_iter()
+            .flatten()
         {
             cancel.store(true, Ordering::Relaxed);
         }
         self.preview_generation = self.preview_generation.wrapping_add(1);
-        self.subtitle_generation = self.subtitle_generation.wrapping_add(1);
         self.source_preview = None;
         self.source_editor_open = false;
         self.source_candidates.clear();
@@ -502,7 +494,6 @@ impl ImportSession {
         self.source_collection_title = None;
         self.source_collection_name = None;
         self.selected_candidates.clear();
-        self.subtitle_loading = false;
         self.subtitle_error = None;
         self.preview_error = None;
         self.source_validation = None;
