@@ -470,3 +470,25 @@ fn trace_logging_never_shows_the_api_key() {
         }
     }
 }
+
+/// Password and SMS login type into a terminal; without one the error says what
+/// to do instead, in the interface language, before anything is sent.
+#[test]
+fn password_login_without_a_terminal_explains_what_to_do() {
+    let cli = CliTest::new();
+    for method in ["password", "sms"] {
+        for (lang, expected) in [
+            ("en", "Password and SMS login need a terminal to type in."),
+            (
+                "ja",
+                "パスワードと SMS のログインにはターミナルでの入力が必要です。",
+            ),
+        ] {
+            let output = cli.run_with_lang(&["--login", "bilibili", "--method", method], lang);
+            assert!(!output.status.success());
+            let text = stderr(&output);
+            assert!(text.contains(expected), "{method} {lang}: {text}");
+            assert!(!text.contains("not a terminal"), "{text}");
+        }
+    }
+}

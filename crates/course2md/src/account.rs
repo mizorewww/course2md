@@ -22,6 +22,12 @@ pub enum LoginMethod {
 }
 
 pub fn login_bilibili(method: LoginMethod) -> Result<()> {
+    anyhow::ensure!(
+        method == LoginMethod::Qr || crate::runtime::interactive(),
+        tr!(
+            "密码和短信登录需要在终端中输入。请在终端运行 course2md --login bilibili --method password 或 --method sms，或改用扫码登录：course2md --login bilibili / Password and SMS login need a terminal to type in. Run course2md --login bilibili --method password or --method sms in a terminal, or sign in with a QR code: course2md --login bilibili"
+        )
+    );
     match method {
         LoginMethod::Qr => crate::auth::login_bilibili(),
         LoginMethod::Password => {
