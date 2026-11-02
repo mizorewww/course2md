@@ -1,11 +1,74 @@
 //! CLI 与桌面端共享的配置合并规则。
 use crate::{config, llm, println_tr, settings, tr};
 use anyhow::Result;
-use clap::Args;
 use std::path::PathBuf;
 
+#[cfg(feature = "clap")]
+/// Parses a configuration enum from its configuration name, the way clap's
+/// `ValueEnum` would, without the configuration crate depending on clap.
+/// `help` describes a value in `--help`, as a variant's doc comment did.
+pub fn choice<T>(
+    help: fn(T) -> Option<&'static str>,
+) -> impl clap::builder::TypedValueParser<Value = T>
+where
+    T: strum::VariantArray + Into<&'static str> + Copy + Send + Sync + 'static,
+{
+    use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser as _};
+    let name = |value: &T| -> &'static str { (*value).into() };
+    PossibleValuesParser::new(
+        T::VARIANTS
+            .iter()
+            .map(move |value| PossibleValue::new(name(value)).help(help(*value))),
+    )
+    .map(move |chosen| {
+        *T::VARIANTS
+            .iter()
+            .find(|value| name(value) == chosen)
+            .expect("clap passes only a listed value")
+    })
+}
+
+#[cfg(feature = "clap")]
+fn no_help<T>(_: T) -> Option<&'static str> {
+    None
+}
+
+#[cfg(feature = "clap")]
+/// What `--help` says about each value, as the variants' doc comments said in 2.0.1.
+fn asr_api_mode_help(mode: settings::AsrApiMode) -> Option<&'static str> {
+    Some(match mode {
+        settings::AsrApiMode::Transcriptions => {
+            "POST {base_url}/audio/transcriptions（OpenAI 兼容转录端点，如 OpenRouter 的 qwen3-asr）"
+        }
+        settings::AsrApiMode::Chat => {
+            "POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）"
+        }
+    })
+}
+
+#[cfg(feature = "clap")]
+fn transcript_source_help(source: config::TranscriptSource) -> Option<&'static str> {
+    Some(match source {
+        config::TranscriptSource::Auto => {
+            "优先字幕，无字幕时识别语音 / Prefer subtitles; transcribe speech if unavailable"
+        }
+        config::TranscriptSource::Subtitle => {
+            "仅字幕；本地需同名 .srt/.vtt / Subtitles only; local files need a matching .srt/.vtt"
+        }
+        config::TranscriptSource::Asr => {
+            "使用所选后端识别，不查字幕 / Transcribe with the selected backend; skip subtitles"
+        }
+    })
+}
+
+#[cfg(feature = "clap")]
+/// `--provider`, shared by conversions and `models`.
+pub fn asr_provider() -> impl clap::builder::TypedValueParser<Value = config::AsrProvider> {
+    choice(no_help)
+}
+
 /// 内置默认输出格式。settings 的展示与配置模板也由它渲染，避免第二份真相。
-pub fn default_formats() -> Vec<config::OutputFormat> {
+pub(crate) fn default_formats() -> Vec<config::OutputFormat> {
     vec![config::OutputFormat::Md, config::OutputFormat::Html]
 }
 
@@ -129,222 +192,224 @@ fn resolve_asr_api(opts: &RunOpts, file: &settings::ConfigFile) -> crate::settin
     a
 }
 
-#[derive(Args, Clone, Debug, Default)]
+// No Debug: the options carry API keys (E11).
+#[derive(Clone, Default)]
+#[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct RunOpts {
     /// 输出根目录（按平台/标题/ID 建目录）/ Output root (platform/title/ID)
-    #[arg(short, long)]
-    #[arg(help_heading = "输入与输出 / Input and output")]
+    #[cfg_attr(feature = "clap", arg(short, long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "输入与输出 / Input and output"))]
     pub out: Option<PathBuf>,
 
     /// 画面相似度阈值 (0,1]，越高截图越多 / Similarity threshold; higher captures more slides
-    #[arg(long)]
-    #[arg(help_heading = "截图 / Slides")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "截图 / Slides"))]
     pub similarity: Option<f64>,
 
     /// 画面采样间隔（秒）/ Frame sampling interval in seconds
-    #[arg(long)]
-    #[arg(help_heading = "截图 / Slides")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "截图 / Slides"))]
     pub sample_interval: Option<f64>,
 
     /// 截图最短间隔（秒）/ Minimum seconds between screenshots
-    #[arg(long)]
-    #[arg(help_heading = "截图 / Slides")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "截图 / Slides"))]
     pub cooldown: Option<f64>,
 
     /// 下载视频最大高度（推荐 1080）/ Maximum download height (1080 recommended)
-    #[arg(long)]
-    #[arg(help_heading = "截图 / Slides")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "截图 / Slides"))]
     pub max_height: Option<u32>,
 
     /// 截图时机：first 立即，stable 等画面稳定 / Capture immediately or wait for stable slides
-    #[arg(long, value_enum)]
-    #[arg(help_heading = "截图 / Slides")]
+    #[cfg_attr(feature = "clap", arg(long, value_parser = choice::<config::SlideMode>(no_help)))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "截图 / Slides"))]
     pub slide_mode: Option<config::SlideMode>,
 
     /// stable 模式的画面稳定时间（秒）/ Seconds to wait for a stable frame
-    #[arg(long)]
-    #[arg(help_heading = "截图 / Slides")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "截图 / Slides"))]
     pub stable_secs: Option<f64>,
 
     /// 只看画面的某块区域判断翻页，格式：左%,上%-右%,下% / Detect slide changes in a region: left%,top%-right%,bottom%
-    #[arg(long)]
-    #[arg(help_heading = "截图 / Slides")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "截图 / Slides"))]
     pub roi: Option<String>,
 
     /// 语音识别线程数（至少 1）/ Speech recognition threads (minimum 1)
-    #[arg(long)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub threads: Option<i32>,
 
     /// 识别后端：coreml（Apple 芯片）、gpu、cpu、npu（Intel）、api（云端）/ Speech backend: coreml (Apple Silicon), gpu, cpu, npu (Intel), api (cloud)
-    #[arg(long, value_enum)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long, value_parser = asr_provider()))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub provider: Option<config::AsrProvider>,
 
     /// 识别模型（需与后端兼容）/ Speech model (must match the backend)
     /// gpu/cpu: qwen3-1.7b；coreml: qwen3-1.7b、qwen3-0.6b、whisper；npu: whisper 或 Hugging Face 仓库名 / or a Hugging Face repository
-    #[arg(long)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub asr_model: Option<String>,
 
     /// 云端识别地址 / Cloud speech API base URL (OpenAI-compatible)
-    #[arg(long)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub asr_api_base_url: Option<String>,
 
     /// 云端识别密钥；建议改用 COURSE2MD_ASR_API_KEY 环境变量，避免留在命令历史 / Cloud API key; prefer COURSE2MD_ASR_API_KEY to keep it out of shell history
-    #[arg(long)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub asr_api_key: Option<String>,
 
     /// 云端识别模型名称 / Cloud speech model name
-    #[arg(long)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub asr_api_model: Option<String>,
 
     /// 云端请求方式 / Cloud request mode: transcriptions (default) or chat (audio-capable models)
-    #[arg(long, value_enum)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long, value_parser = choice(asr_api_mode_help)))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub asr_api_mode: Option<crate::settings::AsrApiMode>,
 
     /// 文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别 / Transcript source: auto, subtitle, asr
-    #[arg(long, value_enum)]
-    #[arg(help_heading = "输入与输出 / Input and output")]
+    #[cfg_attr(feature = "clap", arg(long, value_parser = choice(transcript_source_help)))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "输入与输出 / Input and output"))]
     pub transcript_source: Option<crate::config::TranscriptSource>,
 
     /// 放到 GPU 上运行的层数（0–99，默认全部）；核显不稳定时调低 / Layers run on the GPU (0–99, all by default); lower on unstable integrated GPUs
-    #[arg(long, value_parser = clap::value_parser!(u32).range(0..=99))]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long, value_parser = clap::value_parser!(u32).range(0..=99)))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub gpu_layers: Option<u32>,
 
     /// 音频编码部分也用 GPU（默认）/ Also run the audio encoder on the GPU (default)
-    #[arg(long)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub mmproj_offload: bool,
 
     /// 音频编码部分改用 CPU（显存不足时）/ Run the audio encoder on the CPU (when GPU memory is low)
-    #[arg(long, conflicts_with = "mmproj_offload")]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long, conflicts_with = "mmproj_offload"))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub no_mmproj_offload: bool,
 
     /// 每段语音最长秒数 (1–600) / Maximum speech segment length in seconds
-    #[arg(long)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub max_speech: Option<f32>,
 
     /// 输出格式，逗号分隔 / Output formats, comma-separated: md,html,json
-    #[arg(long, value_delimiter = ',', value_enum)]
-    #[arg(help_heading = "输入与输出 / Input and output")]
+    #[cfg_attr(feature = "clap", arg(long, value_delimiter = ',', value_parser = choice::<config::OutputFormat>(no_help)))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "输入与输出 / Input and output"))]
     pub formats: Option<Vec<crate::config::OutputFormat>>,
 
     /// 本地模型目录（默认使用系统缓存）/ Local model directory (default: platform cache)
-    #[arg(long)]
-    #[arg(help_heading = "语音识别 / Speech recognition")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "语音识别 / Speech recognition"))]
     pub model_dir: Option<PathBuf>,
 
     /// 保留下载的视频 / Keep the downloaded video
-    #[arg(long)]
-    #[arg(help_heading = "输入与输出 / Input and output")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "输入与输出 / Input and output"))]
     pub keep_video: bool,
 
     /// 成功后删除本次下载的视频 / Delete newly downloaded video after success
-    #[arg(long, conflicts_with = "keep_video")]
-    #[arg(help_heading = "输入与输出 / Input and output")]
+    #[cfg_attr(feature = "clap", arg(long, conflicts_with = "keep_video"))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "输入与输出 / Input and output"))]
     pub no_keep_video: bool,
 
     /// 不重新下载，使用上次下载的视频 / Reuse the previously downloaded video
-    #[arg(long)]
-    #[arg(help_heading = "输入与输出 / Input and output")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "输入与输出 / Input and output"))]
     pub no_download: bool,
 
     /// 本次启用 AI 校对 / Enable AI proofreading for this run
-    #[arg(long)]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub llm: bool,
 
     /// 本次禁用 AI 校对 / Disable AI proofreading for this run
-    #[arg(long, conflicts_with = "llm")]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long, conflicts_with = "llm"))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub no_llm: bool,
 
     /// AI 校对服务地址 / AI proofreading base URL (OpenAI-compatible)
-    #[arg(long)]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub llm_base_url: Option<String>,
 
     /// AI 校对密钥（建议用 llm setup 设置，避免留在命令历史）/ AI proofreading key (prefer llm setup to keep it out of shell history)
-    #[arg(long)]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub llm_api_key: Option<String>,
 
     /// AI 校对模型名称 / AI proofreading model name
-    #[arg(long)]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub llm_model: Option<String>,
 
     /// AI 校对提示词 / AI proofreading instructions
-    #[arg(long)]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub llm_prompt: Option<String>,
 
     /// 附截图辅助校对（需要视觉模型）/ Attach slides for proofreading (requires image support)
-    #[arg(long, conflicts_with = "no_llm_vision")]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long, conflicts_with = "no_llm_vision"))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub llm_vision: bool,
 
     /// 本次禁用截图辅助校对 / Disable image-assisted proofreading
-    #[arg(long, conflicts_with = "llm_vision")]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long, conflicts_with = "llm_vision"))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub no_llm_vision: bool,
 
     /// 隐藏完成后的 AI 校对提示 / Hide the optional AI proofreading tip
-    #[arg(long)]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub no_llm_hint: bool,
 
     /// 本次生成视频摘要并写入笔记 / Generate a video summary and add it to the notes
-    #[arg(long)]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub summarize: bool,
 
     /// 本次禁用视频摘要 / Disable video summary for this run
-    #[arg(long, conflicts_with = "summarize")]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long, conflicts_with = "summarize"))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub no_summarize: bool,
 
     /// 双语笔记：把文字翻译为该语言（zh-Hans、zh-Hant、en、ja、ko、fr、de、es） / Bilingual notes: translate the text into this language (zh-Hans, zh-Hant, en, ja, ko, fr, de, es)
-    #[arg(long, value_name = "LANG", conflicts_with = "no_translate", value_parser = parse_translation_target)]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long, value_name = "LANG", conflicts_with = "no_translate", value_parser = parse_translation_target))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub translate: Option<String>,
 
     /// 本次不翻译 / Do not translate this run
-    #[arg(long)]
-    #[arg(help_heading = "AI 校对 / AI proofreading")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "AI 校对 / AI proofreading"))]
     pub no_translate: bool,
 
     /// 显示诊断日志；-vv 显示调试细节 / Diagnostic logs; -vv for debug details
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    #[arg(help_heading = "终端输出 / Terminal output")]
+    #[cfg_attr(feature = "clap", arg(short, long, action = clap::ArgAction::Count))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "终端输出 / Terminal output"))]
     pub verbose: u8,
 
     /// 继续上次中断的识别（默认开启）/ Continue interrupted transcription (on by default)
-    #[arg(long)]
-    #[arg(help_heading = "输入与输出 / Input and output")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "输入与输出 / Input and output"))]
     pub resume: bool,
 
     /// 从头重新识别 / Transcribe again from the start
-    #[arg(long, conflicts_with = "resume")]
-    #[arg(help_heading = "输入与输出 / Input and output")]
+    #[cfg_attr(feature = "clap", arg(long, conflicts_with = "resume"))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "输入与输出 / Input and output"))]
     pub no_resume: bool,
 
     /// 静默模式，仅报告错误 / Quiet mode: report errors only
-    #[arg(short, long)]
-    #[arg(help_heading = "终端输出 / Terminal output")]
+    #[cfg_attr(feature = "clap", arg(short, long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "终端输出 / Terminal output"))]
     pub quiet: bool,
 
     /// 以 NDJSON 输出进度，禁用交互 / Stream NDJSON progress without prompts
-    #[arg(long)]
-    #[arg(help_heading = "终端输出 / Terminal output")]
+    #[cfg_attr(feature = "clap", arg(long))]
+    #[cfg_attr(feature = "clap", arg(help_heading = "终端输出 / Terminal output"))]
     pub json: bool,
 }
 
@@ -369,7 +434,15 @@ pub fn template() -> String {
         ("asr_api.", &defaults["asr_api"]),
     ] {
         for (key, value) in values.as_object().into_iter().flatten() {
-            text = text.replace(&format!("{{{prefix}{key}}}"), &value.to_string());
+            // Arrays as TOML writers space them: `["md", "html"]`.
+            let literal = match value {
+                serde_json::Value::Array(items) => {
+                    let items: Vec<String> = items.iter().map(ToString::to_string).collect();
+                    format!("[{}]", items.join(", "))
+                }
+                other => other.to_string(),
+            };
+            text = text.replace(&format!("{{{prefix}{key}}}"), &literal);
         }
     }
     text
@@ -382,7 +455,7 @@ const TEMPLATE: &str = include_str!("config_template.toml");
 pub fn print_effective(cfg: &settings::ConfigFile) -> Result<()> {
     let d = &cfg.defaults;
     let r = resolve(String::new(), &RunOpts::default(), cfg)?;
-    println!(
+    println_tr!(
         "配置文件 / Configuration: {}",
         settings::config_path().display()
     );
@@ -401,6 +474,11 @@ pub fn print_effective(cfg: &settings::ConfigFile) -> Result<()> {
                 .collect();
             items.join(",")
         }
+        // As Rust prints the number, which 2.0.1 showed: `1`, not JSON's `1.0`.
+        serde_json::Value::Number(number) => number
+            .as_f64()
+            .filter(|_| number.is_f64())
+            .map_or_else(|| number.to_string(), |float| float.to_string()),
         other => other.to_string(),
     };
     println!("[defaults]");
@@ -432,7 +510,13 @@ pub fn print_effective(cfg: &settings::ConfigFile) -> Result<()> {
         "gpu_layers",
         "mmproj_offload",
     ] {
-        println!("  {key:<17}: {}", plain(&values[key]));
+        // An f32 widened to JSON's f64 would print 0.800000011920929 for 0.8.
+        let value = if key == "max_speech" {
+            r.max_speech.to_string()
+        } else {
+            plain(&values[key])
+        };
+        println!("  {key:<17}: {value}");
     }
     let hidden = |key: &str| {
         if key.is_empty() {
@@ -465,6 +549,7 @@ pub fn print_effective(cfg: &settings::ConfigFile) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "clap")]
 fn parse_translation_target(value: &str) -> Result<String, String> {
     crate::language::target(value)
         .map(str::to_owned)
@@ -582,6 +667,11 @@ mod tests {
         let quoted = toml::Value::String(r"C:\Users\me\models".into()).to_string();
         let parsed: toml::Table = toml::from_str(&format!("model_dir = {quoted}")).unwrap();
         assert_eq!(parsed["model_dir"].as_str(), Some(r"C:\Users\me\models"));
+    }
+
+    #[test]
+    fn template_writes_lists_as_2_0_1_did() {
+        assert!(template().contains("\n#formats = [\"md\", \"html\"]\n"));
     }
 
     #[test]

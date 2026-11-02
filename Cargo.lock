@@ -902,7 +902,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
- "ureq 3.5.0",
+ "ureq",
  "url",
 ]
 
@@ -953,7 +953,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "ureq 3.5.0",
+ "ureq",
  "walkdir",
  "which",
 ]
@@ -965,7 +965,6 @@ dependencies = [
  "anyhow",
  "c2m-core",
  "c2m-i18n",
- "clap",
  "serde",
  "serde_json",
  "strum 0.27.2",
@@ -984,6 +983,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "strum 0.27.2",
  "tempfile",
  "thiserror 2.0.21",
 ]
@@ -1003,7 +1003,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "ureq 3.5.0",
 ]
 
 [[package]]
@@ -1053,12 +1052,13 @@ dependencies = [
  "dialoguer",
  "getrandom 0.4.3",
  "libc",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
- "ureq 3.5.0",
+ "ureq",
  "which",
 ]
 
@@ -1067,10 +1067,8 @@ name = "c2m-protocol"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "c2m-config",
  "c2m-core",
  "c2m-i18n",
- "c2m-process",
  "indicatif",
  "serde",
  "serde_json",
@@ -1104,7 +1102,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
- "ureq 3.5.0",
+ "ureq",
  "url",
  "zeroize",
 ]
@@ -1636,7 +1634,6 @@ dependencies = [
  "serde_json",
  "smol",
  "tempfile",
- "unicode-segmentation",
  "url",
 ]
 
@@ -1811,7 +1808,8 @@ name = "desktop-core"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
+ "c2m-test-http",
  "chrono",
  "course2md",
  "gpui-kit-material-color",
@@ -1827,7 +1825,7 @@ dependencies = [
  "tempfile",
  "trash",
  "unicode-segmentation",
- "ureq 2.12.1",
+ "ureq",
  "url",
  "uuid",
  "walkdir",
@@ -4866,7 +4864,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
- "ureq 3.5.0",
+ "ureq",
  "url",
 ]
 
@@ -8448,24 +8446,6 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "ureq"
-version = "2.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
-dependencies = [
- "base64 0.22.1",
- "flate2",
- "log",
- "once_cell",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "url",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
-name = "ureq"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cde93ff05758a36a851a398a772b0b79a82fbe3c186a46f2696baaeaf84c966b"
@@ -8484,7 +8464,7 @@ dependencies = [
  "ureq-proto",
  "utf8-zero",
  "webpki-root-certs",
- "webpki-roots 1.0.11",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -8922,15 +8902,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a"
 dependencies = [
  "rustls-pki-types",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "0.26.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
-dependencies = [
- "webpki-roots 1.0.11",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 //! Apple 原生后端（仅 `apple_native` 构建生效）：
 //! Silero VAD（CoreML/ANE）+ Qwen3-ASR（CoreML，来自 speech-swift）。
-//! 模型首次使用时自动下载到 ~/Library/Caches/qwen3-speech/（HF_ENDPOINT 可换镜像）。
+//! 模型首次使用时自动下载到 $HOME/Library/Caches/qwen3-speech/ 或 QWEN3_CACHE_DIR（HF_ENDPOINT 可换镜像）。
 
 #![cfg(apple_native)]
 
@@ -38,6 +38,9 @@ mod ffi {
     }
 }
 
+/// The Swift shim's message while it loads a cached model; shown translated.
+const LOAD_MESSAGE: &str = "正在加载本机模型… / Loading local model…";
+
 // Swift downloads report through the same serialized NDJSON stream as Rust.
 #[unsafe(no_mangle)]
 extern "C" fn c2m_model_progress(
@@ -73,6 +76,11 @@ extern "C" fn c2m_model_progress(
         static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
         let percent = (fraction * 100.0) as i64;
         if LAST.swap(percent, std::sync::atomic::Ordering::Relaxed) != percent {
+            let message = if message == LOAD_MESSAGE {
+                tr!(LOAD_MESSAGE)
+            } else {
+                &message
+            };
             eprintln_tr!("模型 {}% · {}", percent, message);
         }
     }
@@ -147,7 +155,7 @@ fn last_error() -> String {
 }
 
 /// Silero VAD（CoreML）。返回 (start, end) 语音段（秒）。
-pub fn vad(wav: &Path, min_speech: f64, min_silence: f64) -> Result<Vec<(f64, f64)>> {
+pub(crate) fn vad(wav: &Path, min_speech: f64, min_silence: f64) -> Result<Vec<(f64, f64)>> {
     let path = CString::new(wav.to_string_lossy().as_bytes())?;
     let mut starts: *mut f64 = std::ptr::null_mut();
     let mut ends: *mut f64 = std::ptr::null_mut();
@@ -183,7 +191,7 @@ pub fn vad(wav: &Path, min_speech: f64, min_silence: f64) -> Result<Vec<(f64, f6
     Ok(out)
 }
 
-pub struct CoremlAsr {
+pub(crate) struct CoremlAsr {
     handle: *mut std::ffi::c_void,
 }
 
@@ -313,7 +321,7 @@ impl CoremlAsr {
 }
 
 /// Verify prepared files using the same offline loaders as transcription, with no user media.
-pub fn prepare_model(model: &str) -> Result<()> {
+pub(crate) fn prepare_model(model: &str) -> Result<()> {
     ensure_metallib()?;
     let _asr = CoremlAsr::load(model)?;
     // VAD is a separate required model; load it directly so readiness never depends
@@ -361,7 +369,7 @@ pub fn prepare_cache_here(model: &str) -> Result<()> {
 /// multi-threaded process's environment is unsound, so a mirror attempt runs
 /// in a child process started with that endpoint. An explicit HF_ENDPOINT is
 /// left alone.
-pub fn prepare_cache(model: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
+pub(crate) fn prepare_cache(model: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
     let mirror = if std::env::var_os("HF_ENDPOINT").is_none() {
         crate::hub::endpoints().hub_override()
     } else {
@@ -438,6 +446,18 @@ impl Drop for CoremlAsr {
     }
 }
 
+/// Points the Swift downloader at the cache `models inspect` reads. Left alone it
+/// takes the caches directory from the user database, not `$HOME`, and a
+/// `QWEN3_CACHE_DIR` under `/private` as given ([`crate::models::status::swift_cache_path`]).
+///
+/// # Safety
+/// Changes the process environment: call before any other thread starts.
+pub unsafe fn pin_cache_dir() {
+    let root = crate::models::status::swift_cache_path(&crate::models::status::apple_cache_root());
+    // SAFETY: the caller guarantees no other thread is running.
+    unsafe { std::env::set_var("QWEN3_CACHE_DIR", root) };
+}
+
 /// Silero VAD 分段。
 pub(crate) fn segments(wav: &Path, max_speech: f64) -> Result<Vec<crate::asr::Seg>> {
     let raw = vad(wav, 0.25, 0.35)?;
@@ -463,8 +483,8 @@ mod helper_tests {
     use super::*;
     use std::time::Instant;
 
-    /// Network test: run with `QWEN3_CACHE_DIR=<scratch dir outside /private>
-    /// cargo test --lib -- --ignored mirror_attempt` after `cargo build`.
+    /// Network test: run with `QWEN3_CACHE_DIR=<scratch dir> cargo test --lib --
+    /// --ignored mirror_attempt` after `cargo build` with the same profile and target.
     #[test]
     #[ignore = "downloads part of an Apple model from the Hub mirror"]
     fn mirror_attempt_runs_in_a_helper_and_stops_when_the_task_pauses() {
@@ -472,7 +492,9 @@ mod helper_tests {
             std::env::var_os("QWEN3_CACHE_DIR")
                 .expect("set QWEN3_CACHE_DIR to a scratch directory"),
         );
-        let program = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/course2md");
+        // This test runs from `<target>/<profile>/deps`; the binary is one level up.
+        let exe = std::env::current_exe().unwrap();
+        let program = exe.parent().unwrap().parent().unwrap().join("course2md");
         assert!(program.is_file(), "build course2md first");
         let work = tempfile::tempdir().unwrap();
         let control_path = work.path().join("control.json");

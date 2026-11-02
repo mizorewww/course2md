@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
     Default,
     PartialEq,
     Eq,
-    clap::ValueEnum,
     Serialize,
     Deserialize,
     strum::Display,
@@ -20,7 +19,9 @@ use serde::{Deserialize, Serialize};
 #[strum(serialize_all = "kebab-case")]
 pub enum LlmProvider {
     /// OpenAI 兼容 /chat/completions 端点
+    // Shown as 2.0.1 showed it; files keep serde's `open-ai-compatible`.
     #[default]
+    #[strum(serialize = "openai-compatible")]
     OpenAiCompatible,
     /// 本地 Ollama 服务（OpenAI 兼容方言，无需密钥）
     Ollama,
@@ -110,3 +111,21 @@ impl LlmSettings {
 
 /// LLM 校对默认并发数（chunk 间相互独立；可经 [llm] concurrency 调整）。
 const DEFAULT_CONCURRENCY: usize = 8;
+
+#[cfg(test)]
+mod tests {
+    use super::LlmProvider;
+
+    #[test]
+    fn providers_show_their_names_and_keep_their_file_form() {
+        assert_eq!(
+            LlmProvider::OpenAiCompatible.to_string(),
+            "openai-compatible"
+        );
+        assert_eq!(LlmProvider::Ollama.as_str(), "ollama");
+        assert_eq!(
+            serde_json::to_string(&LlmProvider::OpenAiCompatible).unwrap(),
+            r#""open-ai-compatible""#
+        );
+    }
+}

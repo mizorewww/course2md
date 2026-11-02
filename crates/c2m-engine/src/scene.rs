@@ -55,7 +55,7 @@ pub async fn run(
         video.to_path_buf(),
         job.frames_dir(),
     );
-    let control = job.control.clone();
+    let (control, mode) = (job.control.clone(), cfg.slide_mode);
     // The pipeline drops this future to stop early; the blocking work must follow.
     let abandoned = AbandonOnDrop::default();
     let stop = abandoned.0.clone();
@@ -70,7 +70,7 @@ pub async fn run(
                 params,
                 &dir,
                 &cancelled,
-                &mut |event| report(event, &mut bar),
+                &mut |event| report(event, &mut bar, mode),
             )
         };
         let slides = match detect(&params) {
@@ -118,7 +118,7 @@ impl Drop for AbandonOnDrop {
     }
 }
 
-fn report(event: Event, bar: &mut Option<Bar>) {
+fn report(event: Event, bar: &mut Option<Bar>, mode: SlideMode) {
     // Emit before the first result: the first image may take a long time.
     let started = |stage, len, template: &str| {
         let bar = Bar::new(stage, len).with_template(template);
@@ -144,7 +144,7 @@ fn report(event: Event, bar: &mut Option<Bar>) {
         }
         Event::ScanFinished { frames, slides } => {
             bar.as_ref().inspect(|bar| bar.finish());
-            tracing::info!(slides, frames, "ssim scan done");
+            tracing::info!(slides, frames, mode = %mode, "ssim scan done");
             progress::done(Stage::ScenesScan);
         }
         Event::ExtractStarted { slides } => {

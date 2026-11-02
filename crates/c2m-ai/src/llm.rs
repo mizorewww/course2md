@@ -24,20 +24,52 @@ pub const DEFAULT_PROMPT: &str = "你是视频逐字稿校对器。输入的每�
 
 /// 公式书写约定：校对与摘要输出共用，系统自动追加，自定义 prompt 无法覆盖。
 /// 阅读器与导出按 `$` / `$$` 识别公式并排版。
-pub const MATH_RULE: &str = "数学公式、符号与表达式一律写成 LaTeX：行内公式用 $...$ 包围，\
+pub(crate) const MATH_RULE: &str = "数学公式、符号与表达式一律写成 LaTeX：行内公式用 $...$ 包围，\
 独立成行的公式用 $$...$$ 包围（如 $f(x)=x^2$、$$\\int_a^b f(x)\\,dx$$）；\
 口述的公式（如“x 的平方”“从 a 到 b 积分”）同样改写为 LaTeX；没有公式时不要添加 $。\
 JSON 字符串里的反斜杠必须写成 \\\\（如 \\\\frac）。";
 
-/// 视觉校对的附加说明。
+/// The proofreading output rule and the vision note, appended to the prompt.
 ///
 /// Everything sent to a service stays one fixed text, like [`DEFAULT_PROMPT`]: the
 /// request is the ledger's identity, so a prompt that followed the interface
 /// language would make a resumed task pay for its finished requests again.
-const VISION_NOTE: &str =
-    " 消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。";
+struct ProofreadingRule {
+    rule: &'static str,
+    vision_note: &'static str,
+}
 
-/// The connection test's question; see [`VISION_NOTE`].
+const PROOFREADING_RULE: ProofreadingRule = ProofreadingRule {
+    rule: " 输出为 JSON 对象 {\"segments\":[{\"id\":序号,\"text\":校对后的文本}]}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。",
+    vision_note: " 消息附带该段对应的课件截图，仅用于校正术语拼写与专有名词，不要描述或评论图片本身。",
+};
+
+/// The rule as 2.0.1 and earlier sent it from the CLI in English, Traditional Chinese
+/// and Japanese, when it still followed the interface language. Receipts those
+/// versions saved stay valid ([`former_proofreading_bodies`]).
+const FORMER_PROOFREADING_RULES: [ProofreadingRule; 3] = [
+    ProofreadingRule {
+        rule: " Output a JSON object {\"segments\":[{\"id\":index,\"text\":proofread text}]}; each id must match the input one-to-one; for entries that contain only filler words, text is an empty string. ",
+        vision_note: " The message is accompanied by a screenshot of the courseware corresponding to the paragraph. It is only used to correct the spelling of terms and proper nouns. Do not describe or comment on the picture itself.",
+    },
+    ProofreadingRule {
+        rule: " 輸出為 JSON 物件 {\"segments\":[{\"id\":序號,\"text\":校對後的文字}]}，id 必須與輸入一一對應；純語氣詞條目的 text 為空字串。",
+        vision_note: " 訊息附帶該段對應的課件截圖，僅用於校正術語拼寫與專有名詞，不要描述或評論圖片本身。",
+    },
+    ProofreadingRule {
+        rule: " JSON オブジェクト {\"segments\":[{\"id\":番号,\"text\":校正後のテキスト}]} として出力してください。id は入力と一対一で対応させてください。フィラー（つなぎ言葉）だけの項目は text を空文字列にしてください。",
+        vision_note: " メッセージには、その段落に対応するコースウェアのスクリーンショットが添付されています。用語や固有名詞のスペルを修正するためにのみ使用されます。画像自体について説明したりコメントしたりしないでください。",
+    },
+];
+
+impl ProofreadingRule {
+    fn system(&self, prompt: &str, vision: bool) -> String {
+        let note = if vision { self.vision_note } else { "" };
+        format!("{prompt}{}{note} {MATH_RULE}", self.rule)
+    }
+}
+
+/// The connection test's question; see [`PROOFREADING_RULE`].
 const TEST_QUESTION: &str = "只回复两个字符：ok";
 
 /// 每次请求合并的语音段数。
@@ -452,11 +484,7 @@ fn build_chat_body(
     items: &[&str],
     image_b64: Option<&str>,
 ) -> Result<serde_json::Value> {
-    let vision_note = if image_b64.is_some() { VISION_NOTE } else { "" };
-    let system = format!(
-        "{} 输出为 JSON 对象 {{\"segments\":[{{\"id\":序号,\"text\":校对后的文本}}]}}，id 必须与输入一一对应；纯语气词条目的 text 为空字符串。{vision_note} {MATH_RULE}",
-        effective_prompt(s),
-    );
+    let system = PROOFREADING_RULE.system(effective_prompt(s), image_b64.is_some());
     let mut content = vec![serde_json::json!({
         "type": "text",
         "text": batch_payload(items)?,
@@ -473,6 +501,47 @@ fn build_chat_body(
         serde_json::Value::Array(content),
         CHAT_MAX_TOKENS,
     ))
+}
+
+/// The same proofreading request as earlier CLI versions sent it in another interface
+/// language: `body` with its system text in that language's wording.
+fn former_proofreading_bodies(s: &LlmSettings, body: &serde_json::Value) -> Vec<serde_json::Value> {
+    let prompt = effective_prompt(s);
+    let Some(vision) = [false, true]
+        .into_iter()
+        .find(|&vision| contains_string(body, &PROOFREADING_RULE.system(prompt, vision)))
+    else {
+        return Vec::new();
+    };
+    let current = PROOFREADING_RULE.system(prompt, vision);
+    FORMER_PROOFREADING_RULES
+        .iter()
+        .map(|rule| replace_string(body, &current, &rule.system(prompt, vision)))
+        .collect()
+}
+
+fn contains_string(value: &serde_json::Value, text: &str) -> bool {
+    match value {
+        serde_json::Value::String(value) => value == text,
+        serde_json::Value::Array(items) => items.iter().any(|item| contains_string(item, text)),
+        serde_json::Value::Object(map) => map.values().any(|item| contains_string(item, text)),
+        _ => false,
+    }
+}
+
+fn replace_string(value: &serde_json::Value, from: &str, to: &str) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(value) if value == from => to.into(),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(|item| replace_string(item, from, to))
+            .collect(),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .map(|(key, item)| (key.clone(), replace_string(item, from, to)))
+            .collect(),
+        other => other.clone(),
+    }
 }
 
 /// 从模型输出提取校对结果。约定契约为顶层对象 {"segments":[{"id":n,"text":"..."}]}
@@ -687,6 +756,11 @@ impl<'a> Chat<'a> {
         let url = crate::provider::endpoint(s);
         let headers = crate::provider::auth_headers(s).map_err(crate::dispatch::Failure::local)?;
         let sse = crate::provider::is_sse(s);
+        let former = if self.purpose == Purpose::Proofreading {
+            former_proofreading_bodies(s, body)
+        } else {
+            Vec::new()
+        };
         self.control.request(
             &crate::dispatch::RequestSpec {
                 service: "llm",
@@ -694,6 +768,7 @@ impl<'a> Chat<'a> {
                 description,
                 endpoint: &url,
                 identity: body,
+                former: &former,
                 resend: if crate::provider::free_to_resend(s) {
                     crate::dispatch::Resend::Free
                 } else {
@@ -701,14 +776,11 @@ impl<'a> Chat<'a> {
                 },
             },
             || {
-                let mut request = self
-                    .agent
-                    .post(&url)
-                    .header("Content-Type", "application/json");
+                let mut request = self.agent.post(&url);
                 for (name, value) in &headers {
                     request = request.header(name, value);
                 }
-                let response = crate::dispatch::receive(request.send_json(body))?;
+                let response = crate::runtime::receive(crate::runtime::send_json(request, body))?;
                 // Codex Responses API 只提供 SSE 流：聚合为 chat/completions 形状，
                 // 下游校验与解析不变；非 2xx 原样上交（重试/降级逻辑要看状态码）
                 if sse && (200..300).contains(&response.status) {
@@ -840,8 +912,7 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
     for (name, value) in crate::provider::auth_headers(s)? {
         request = request.header(&name, &value);
     }
-    let mut resp = request
-        .send_json(body)
+    let mut resp = crate::runtime::send_json(request, &body)
         .map_err(RequestError::from)
         .context(fail_hint)?;
     let v: serde_json::Value = if crate::provider::is_sse(s) {
@@ -991,22 +1062,22 @@ pub fn print_status(cfg: &crate::settings::ConfigFile) {
     } else {
         tr!("已设置（隐藏） / set (hidden)")
     };
-    println!(
+    println_tr!(
         "配置文件 / Configuration: {}",
         crate::settings::config_path().display()
     );
-    println!("  LLM 校对 / Transcript polish: {}", state(s.enabled));
-    println!("  服务类型 / Provider: {}", s.provider);
-    println!("  服务地址 / Base URL: {}", or_dash(&s.base_url));
-    println!("  API key: {key}");
-    println!("  模型 / Model: {}", or_dash(&s.model));
-    println!(
+    println_tr!("  LLM 校对 / Transcript polish: {}", state(s.enabled));
+    println_tr!("  服务类型 / Provider: {}", s.provider);
+    println_tr!("  服务地址 / Base URL: {}", or_dash(&s.base_url));
+    println_tr!("  API 密钥 / API key: {}", key);
+    println_tr!("  模型 / Model: {}", or_dash(&s.model));
+    println_tr!(
         "  截图辅助校对 / Slide-assisted polish: {}",
         state(s.vision)
     );
-    println!("  自动摘要 / Automatic summary: {}", state(s.summarize));
-    println!("  并发请求 / Concurrent requests: {}", s.concurrency);
-    println!("  使用提示 / Usage hint: {}", state(!s.disable_hint));
+    println_tr!("  自动摘要 / Automatic summary: {}", state(s.summarize));
+    println_tr!("  并发请求 / Concurrent requests: {}", s.concurrency);
+    println_tr!("  使用提示 / Usage hint: {}", state(!s.disable_hint));
     if !s.enabled {
         println_tr!("开启校对 / Enable transcript polish: course2md llm setup");
     }
@@ -1071,7 +1142,7 @@ mod tests {
         });
         let agent = stall_limited_agent(false, Duration::from_millis(500));
         let started = std::time::Instant::now();
-        let failure = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let failure = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
             .err()
             .expect("a stalled body is not a response");
         assert!(started.elapsed() < Duration::from_secs(10));
@@ -1087,7 +1158,7 @@ mod tests {
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").unwrap();
         });
         let agent = stall_limited_agent(false, Duration::from_millis(500));
-        let response = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let response = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
             .ok()
             .expect("waiting for the first byte is not a stall");
         assert_eq!(response.body, b"ok");
@@ -1107,7 +1178,7 @@ mod tests {
         });
         let agent = stall_limited_agent(true, Duration::from_secs(2));
         let started = std::time::Instant::now();
-        let response = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let response = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
             .ok()
             .expect("a stream that keeps sending is alive");
         assert!(started.elapsed() > Duration::from_millis(1500));
@@ -1124,7 +1195,7 @@ mod tests {
         });
         let agent = stall_limited_agent(true, Duration::from_millis(500));
         let started = std::time::Instant::now();
-        let failure = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let failure = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
             .err()
             .expect("a silent stream is stalled");
         assert!(started.elapsed() < Duration::from_secs(10));

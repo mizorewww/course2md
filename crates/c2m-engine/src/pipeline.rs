@@ -1320,7 +1320,7 @@ fn prepare_cached_media(job: &Job, no_download: bool) -> Result<bool> {
 }
 
 /// Every transcript event in document order.
-pub fn all_speech(sections: &[timeline::Section]) -> Vec<timeline::TranscriptEvent> {
+pub(crate) fn all_speech(sections: &[timeline::Section]) -> Vec<timeline::TranscriptEvent> {
     sections
         .iter()
         .flat_map(|section| section.speech.iter().cloned())

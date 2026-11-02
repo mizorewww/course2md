@@ -20,7 +20,11 @@ pub mod config {
     pub use c2m_config::config::*;
 }
 
+#[cfg(feature = "cli")]
 pub mod account;
+#[cfg(feature = "cli")]
 pub mod cli;
+#[cfg(feature = "cli")]
 pub mod doctor;
+#[cfg(feature = "cli")]
 pub mod wizard;

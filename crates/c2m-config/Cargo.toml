@@ -10,7 +10,6 @@ publish = false
 c2m-core = { path = "../c2m-core" }
 c2m-i18n = { path = "../c2m-i18n" }
 anyhow.workspace = true
-clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 strum.workspace = true

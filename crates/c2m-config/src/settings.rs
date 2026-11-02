@@ -45,8 +45,9 @@ pub struct Defaults {
     Eq,
     Serialize,
     Deserialize,
-    clap::ValueEnum,
     strum::Display,
+    strum::IntoStaticStr,
+    strum::VariantArray,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]

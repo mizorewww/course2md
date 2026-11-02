@@ -106,7 +106,7 @@ fn desktop_catalog(tokens: &CodexTokens) -> DesktopCatalog {
 
 /// course2md 自有的 codex 凭据副本。
 #[derive(Clone, Serialize, Deserialize)]
-pub struct CodexTokens {
+pub(crate) struct CodexTokens {
     pub access_token: String,
     pub refresh_token: String,
     #[serde(default)]
@@ -132,7 +132,7 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-pub fn credential_path() -> PathBuf {
+pub(crate) fn credential_path() -> PathBuf {
     crate::config::config_dir().join("auth/codex.json")
 }
 
@@ -144,7 +144,7 @@ fn codex_cli_auth_path() -> PathBuf {
         .join("auth.json")
 }
 
-pub fn load_tokens() -> Result<Option<CodexTokens>> {
+pub(crate) fn load_tokens() -> Result<Option<CodexTokens>> {
     let path = credential_path();
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
@@ -192,22 +192,22 @@ fn needs_refresh(tokens: &CodexTokens) -> bool {
 /// 刷新（refresh token 单次使用且会轮换：成功必须写回；4xx = 登录已失效）。
 fn refresh(tokens: &CodexTokens) -> Result<CodexTokens> {
     let agent = crate::runtime::http_agent(Duration::from_secs(30));
-    let mut response = agent
-        .post(TOKEN_URL)
-        .header("Content-Type", "application/json")
-        .send_json(serde_json::json!({
+    let mut response = crate::runtime::send_json(
+        agent.post(TOKEN_URL),
+        &serde_json::json!({
             "client_id": CLIENT_ID,
             "grant_type": "refresh_token",
             "refresh_token": tokens.refresh_token,
-        }))
-        .map_err(|e| match e {
-            ureq::Error::StatusCode(status) if (400..500).contains(&status) => {
-                anyhow::Error::new(CodexLoginRequired)
-            }
-            _ => anyhow::anyhow!(
-                tr!("无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later")
-            ),
-        })?;
+        }),
+    )
+    .map_err(|e| match e {
+        ureq::Error::StatusCode(status) if (400..500).contains(&status) => {
+            anyhow::Error::new(CodexLoginRequired)
+        }
+        _ => anyhow::anyhow!(tr!(
+            "无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later"
+        )),
+    })?;
     let value: Value = response.body_mut().read_json().context(tr!(
         "无法解析刷新响应 / Cannot parse the token refresh response"
     ))?;
@@ -384,7 +384,10 @@ fn parse_callback_request(request_line: &str, expected_state: &str) -> Result<St
 /// 打开系统浏览器；失败时用户可手动复制 URL。
 fn open_browser(url: &str) {
     if open::that_detached(url).is_err() {
-        println!("请手动在浏览器打开 / Open this URL in your browser:\n{url}");
+        println_tr!(
+            "请手动在浏览器打开 / Open this URL in your browser:\n{}",
+            url
+        );
     }
 }
 
@@ -651,9 +654,10 @@ pub fn login() -> Result<()> {
     );
     match crate::llm::test_connection(&cfg.llm) {
         Ok(()) => println_tr!("连接测试通过 / Connection test passed."),
-        Err(e) => bail!(
-            "登录态已保存，但连接测试失败；可用 course2md llm setup 调整模型 / Login saved, but the connection test failed; adjust the model with course2md llm setup: {e:#}"
-        ),
+        Err(e) => bail!(tr!(
+            "登录态已保存，但连接测试失败；可用 course2md llm setup 调整模型 / Login saved, but the connection test failed; adjust the model with course2md llm setup: {}",
+            format!("{e:#}")
+        )),
     }
     Ok(())
 }

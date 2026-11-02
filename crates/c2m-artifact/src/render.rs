@@ -155,7 +155,7 @@ pub fn render_markdown(meta: &VideoMeta, sections: &[Section]) -> String {
     md
 }
 
-pub fn render_html(meta: &VideoMeta, sections: &[Section]) -> String {
+pub(crate) fn render_html(meta: &VideoMeta, sections: &[Section]) -> String {
     let mut body = String::new();
     let mut details = Vec::new();
     // 本地来源的 canonicalize 每次渲染只算一次
@@ -237,11 +237,11 @@ fn document_language(sections: &[Section]) -> &'static str {
 }
 
 /// Note text with its formulas typeset; everything else escaped.
-pub fn rich(s: &str) -> String {
+pub(crate) fn rich(s: &str) -> String {
     crate::math::html(s, esc)
 }
 
-pub fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     // 单趟扫描：四趟 replace 会反复分配与搬移整串
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

@@ -6,6 +6,17 @@ description = "Turn online course videos (YouTube/Bilibili) into image+transcrip
 license.workspace = true
 publish = false
 
+[features]
+default = ["cli"]
+# The command line: its parser, setup wizard and doctor. The desktop builds the engine
+# without it.
+cli = ["dep:clap", "c2m-engine/clap"]
+
+[[bin]]
+name = "course2md"
+path = "src/main.rs"
+required-features = ["cli"]
+
 [dependencies]
 c2m-ai = { path = "../c2m-ai" }
 c2m-artifact = { path = "../c2m-artifact" }
@@ -19,7 +30,7 @@ c2m-process = { path = "../c2m-process" }
 c2m-protocol = { path = "../c2m-protocol" }
 c2m-source = { path = "../c2m-source" }
 anyhow.workspace = true
-clap.workspace = true
+clap = { workspace = true, optional = true }
 dialoguer.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

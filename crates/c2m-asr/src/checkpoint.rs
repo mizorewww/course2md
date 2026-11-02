@@ -231,7 +231,7 @@ impl Checkpoint {
     }
 
     /// 该 chunk 是否已完成（可跳过）。空文本（静音）chunk 同样算完成。
-    pub fn is_done(&self, start: f64, end: f64) -> bool {
+    pub(crate) fn is_done(&self, start: f64, end: f64) -> bool {
         self.done.contains(&key(start, end))
     }
 

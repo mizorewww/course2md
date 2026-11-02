@@ -1,7 +1,7 @@
 //! Durable external-request receipts. A lost response is never permission to resend.
 
-pub use crate::outcome::Failure;
 use crate::outcome::FailureKind;
+pub use crate::outcome::{Failure, HttpResponse, NetworkFailure};
 use crate::{
     digest::{digest, json_digest},
     fsio::atomic_write,
@@ -89,6 +89,10 @@ pub struct RequestSpec<'a> {
     pub endpoint: &'a str,
     /// The request content that identifies a repeat of the same request.
     pub identity: &'a Value,
+    /// Identities earlier versions gave this same request. A receipt saved under one
+    /// of them is this request's, and the request continues under that receipt's id,
+    /// so an upgrade never pays for a request an older version already sent.
+    pub former: &'a [Value],
     pub resend: Resend,
 }
 
@@ -152,15 +156,6 @@ fn rejects_response_format(status: u16, value: Option<&Value>) -> bool {
         ]
         .iter()
         .any(|term| message.contains(term)))
-}
-
-pub struct HttpResponse {
-    pub status: u16,
-    pub body: Vec<u8>,
-}
-pub struct NetworkFailure {
-    pub message: String,
-    pub definitely_unsent: bool,
 }
 
 struct Ledger {
@@ -460,6 +455,7 @@ impl Ledger {
             description,
             endpoint,
             identity,
+            former,
             resend,
         } = *spec;
         let service_version = self
@@ -467,7 +463,19 @@ impl Ledger {
             .get(service)
             .cloned()
             .unwrap_or_else(|| snapshot_id(&digest(endpoint.as_bytes())));
-        let stable_id = json_digest(&serde_json::json!({"service_version":service_version,"purpose":purpose,"endpoint":endpoint,"payload":identity})).map_err(Failure::local)?;
+        let id_of = |payload: &Value| {
+            json_digest(&serde_json::json!({"service_version":service_version,"purpose":purpose,"endpoint":endpoint,"payload":payload})).map_err(Failure::local)
+        };
+        let mut stable_id = id_of(identity)?;
+        if self.load(&stable_id)?.is_none() {
+            for payload in former {
+                let id = id_of(payload)?;
+                if self.load(&id)?.is_some() {
+                    stable_id = id;
+                    break;
+                }
+            }
+        }
         let lock = self
             .locks
             .lock()
@@ -651,77 +659,6 @@ impl Ledger {
     }
 }
 
-/// Whether this failure proves that no request bytes left: only then may a paid
-/// request go out again without asking. ureq reports refused connections as plain I/O
-/// errors. The two unreachable kinds are not here although connecting can fail with
-/// them, because an established connection can fail with them too, after sending.
-fn never_sent(error: &ureq::Error) -> bool {
-    use std::io::ErrorKind;
-    match error {
-        ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => true,
-        ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect) => true,
-        ureq::Error::Io(error) => matches!(
-            error.kind(),
-            ErrorKind::ConnectionRefused | ErrorKind::AddrNotAvailable
-        ),
-        _ => false,
-    }
-}
-
-/// Drain the HTTP body before recording completion; a body read error is still uncertain.
-/// Cloud callers must disable redirects: a failed connection after a redirect would not
-/// prove that the initial request was never handled.
-pub fn receive(
-    result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
-) -> std::result::Result<HttpResponse, NetworkFailure> {
-    use std::io::Read;
-    let response = match result {
-        Ok(response) => response,
-        // An agent that reports statuses as errors has dropped the body; the status
-        // still classifies the answer.
-        Err(ureq::Error::StatusCode(status)) => {
-            return Ok(HttpResponse {
-                status,
-                body: Vec::new(),
-            });
-        }
-        Err(error) => {
-            let definitely_unsent = never_sent(&error);
-            return Err(NetworkFailure {
-                message: if definitely_unsent {
-                    crate::tr!("无法连接服务，尚未提交内容 / Could not connect; request content was not submitted")
-                } else {
-                    crate::tr!("未完整收到服务响应 / Did not receive a complete service response")
-                }
-                .into(),
-                definitely_unsent,
-            });
-        }
-    };
-    let status = response.status().as_u16();
-    let mut body = Vec::new();
-    const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
-    response
-        .into_body()
-        .into_reader()
-        .take(MAX_RESPONSE_BYTES + 1)
-        .read_to_end(&mut body)
-        .map_err(|_| NetworkFailure {
-            message: crate::tr!("服务响应接收中断 / Service response was interrupted").into(),
-            definitely_unsent: false,
-        })?;
-    if body.len() as u64 > MAX_RESPONSE_BYTES {
-        return Err(NetworkFailure {
-            message: crate::tr!(
-                "服务响应超过接收上限 / Service response exceeds the receiving limit"
-            )
-            .into(),
-            definitely_unsent: false,
-        });
-    }
-    Ok(HttpResponse { status, body })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -744,6 +681,7 @@ mod tests {
                     description: purpose,
                     endpoint,
                     identity,
+                    former: &[],
                     resend: Resend::AskUser,
                 },
                 send,
@@ -942,7 +880,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ledger = Ledger::new(dir.path(), None, &Default::default()).unwrap();
         let client = crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5));
-        let send = || receive(client.post(&url).send_json(body()));
+        let send = || crate::runtime::receive(client.post(&url).send_json(body()));
         let failure = ledger
             .send("asr", "transcription", &url, &body(), send, |_| Ok(()))
             .unwrap_err();
@@ -973,7 +911,9 @@ mod tests {
             crate::runtime::http_agent(std::time::Duration::from_secs(5)),
             crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5)),
         ] {
-            let response = receive(client.post(&url).send_json(body())).ok().unwrap();
+            let response = crate::runtime::receive(client.post(&url).send_json(body()))
+                .ok()
+                .unwrap();
             assert_eq!(response.status, 307);
         }
         assert_eq!(requests.load(Ordering::SeqCst), 2);
@@ -992,39 +932,18 @@ mod tests {
             );
         });
         let client = crate::runtime::http_agent_keeping_errors(std::time::Duration::from_secs(5));
-        let response = receive(client.post(&url).send_json(body())).ok().unwrap();
+        let response = crate::runtime::receive(client.post(&url).send_json(body()))
+            .ok()
+            .unwrap();
         assert_eq!(response.status, 400);
         let value = serde_json::from_slice(&response.body).unwrap();
         assert!(rejects_response_format(400, Some(&value)));
         // An agent reporting statuses as errors still gives the status.
         let client = crate::runtime::http_agent(std::time::Duration::from_secs(5));
-        let response = receive(client.post(&url).send_json(body())).ok().unwrap();
+        let response = crate::runtime::receive(client.post(&url).send_json(body()))
+            .ok()
+            .unwrap();
         assert_eq!(response.status, 400);
-    }
-
-    #[test]
-    fn only_failures_before_sending_count_as_unsent() {
-        use std::io::{Error, ErrorKind};
-        for error in [
-            ureq::Error::HostNotFound,
-            ureq::Error::ConnectionFailed,
-            ureq::Error::Timeout(ureq::Timeout::Connect),
-            ureq::Error::Timeout(ureq::Timeout::Resolve),
-            ureq::Error::Io(Error::from(ErrorKind::ConnectionRefused)),
-        ] {
-            assert!(never_sent(&error), "{error}");
-        }
-        for error in [
-            ureq::Error::Timeout(ureq::Timeout::Global),
-            ureq::Error::Timeout(ureq::Timeout::SendBody),
-            ureq::Error::Timeout(ureq::Timeout::RecvResponse),
-            ureq::Error::Timeout(ureq::Timeout::PerRead),
-            ureq::Error::Io(Error::from(ErrorKind::ConnectionReset)),
-            ureq::Error::Io(Error::from(ErrorKind::BrokenPipe)),
-            ureq::Error::Io(Error::from(ErrorKind::HostUnreachable)),
-        ] {
-            assert!(!never_sent(&error), "{error}");
-        }
     }
 
     #[test]
@@ -1042,7 +961,7 @@ mod tests {
                 "summary",
                 &endpoint,
                 &payload,
-                || receive(client.post(&endpoint).send_json(&payload)),
+                || crate::runtime::receive(client.post(&endpoint).send_json(&payload)),
                 |_| Ok(()),
             )
             .unwrap_err();
@@ -1069,6 +988,7 @@ mod tests {
                     description: "segment",
                     endpoint: "https://example.test",
                     identity: payload,
+                    former: &[],
                     resend,
                 },
                 || {
@@ -1118,6 +1038,7 @@ mod tests {
             description: "segment",
             endpoint: "https://example.test",
             identity: &payload,
+            former: &[],
             resend: Resend::Free,
         };
         let failed = || {
@@ -1360,6 +1281,7 @@ mod ephemeral_tests {
                 description: "summary",
                 endpoint: "https://example.test",
                 identity: &serde_json::json!({"n":1}),
+                former: &[],
                 resend,
             },
             move || Ok(HttpResponse { status, body }),
@@ -1397,6 +1319,7 @@ mod ephemeral_tests {
                     description: "summary",
                     endpoint: "https://example.test",
                     identity: &serde_json::json!({"n":2}),
+                    former: &[],
                     resend: Resend::Free,
                 },
                 || {

@@ -11,32 +11,35 @@ publish = false
 test-support = []
 
 [dependencies]
-course2md = { path = "../../crates/course2md" }
-gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "79bce30bc9800a95cde66ada9ac7f7d1304cd320", features = ["serde"] }
-anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-smol = "2"
-tempfile = "3"
-url = "2"
-ureq = { version = "2", features = ["json"] }
-uuid = { version = "1", features = ["v4"] }
-walkdir = "2"
-same-file = "1.0.6"
-which = "8.0.6"
-zeroize = "1"
-base64 = "0.22"
-chrono = "0.4"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
-pulldown-cmark = "0.13"
-unicode-segmentation = "1"
-trash = "5"
+course2md = { path = "../../crates/course2md", default-features = false }
+gpui-kit-material-color.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+smol.workspace = true
+tempfile.workspace = true
+url.workspace = true
+ureq.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+walkdir.workspace = true
+same-file.workspace = true
+which.workspace = true
+zeroize.workspace = true
+base64.workspace = true
+chrono.workspace = true
+image = { workspace = true, features = ["webp"] }
+pulldown-cmark.workspace = true
+unicode-segmentation.workspace = true
+trash.workspace = true
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-keyring = "4"
+keyring.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "3.7"
+security-framework.workspace = true
+
+[dev-dependencies]
+c2m-test-http = { path = "../../crates/c2m-test-http" }

@@ -549,7 +549,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 启动 {} 失败	启动 {} 失败	Failed to start {}	啟動 {} 失敗	{} の起動に失敗しました
 呃	呃	Uh	呃	えー
 命令行 Codex 的登录已失效，请先在 Codex 中重新登录再导入，或改用浏览器授权	命令行 Codex 的登录已失效，请先在 Codex 中重新登录再导入，或改用浏览器授权	The command line Codex login has expired. Please log in again in Codex before importing, or use browser authorization instead.	命令列 Codex 的登入已失效，請先在 Codex 中重新登入再匯入，或改用瀏覽器授權	コマンド ライン Codex ログインの有効期限が切れました。インポートする前に Codex に再度ログインするか、代わりにブラウザ認証を使用してください。
-命令：	命令：	Command:	命令：	コマンド:
+命令：	命令：	Command:	命令：	コマンド：
 哦	哦	Oh	哦	おお
 唉	唉	Alas	唉	はあ
 唔	唔	Hmm	唔	うーん
@@ -744,7 +744,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 应用校对规则	应用校对规则	Apply proofreading rules	應用校對規則	校正ルールを適用する
 开启 / enabled	开启	enabled	開啟	有効
 开启后转录文字会发送到所选 AI 服务	开启后转录文字会发送到所选 AI 服务	When turned on, the transcribed text will be sent to the selected AI service	開啟後轉錄文字會傳送到所選 AI 服務	オンにすると、文字起こしされたテキストが選択した AI サービスに送信されます
-开启校对 / Enable transcript polish: course2md llm setup	开启校对	Enable transcript polish: course2md llm setup	開啟校對	校正をオンにする
+开启校对 / Enable transcript polish: course2md llm setup	开启校对：course2md llm setup	Enable transcript polish: course2md llm setup	開啟校對：course2md llm setup	校正をオンにする：course2md llm setup
 开始使用	开始使用	Get started	開始使用	始めましょう
 开始处理视频… / Processing your video…	开始处理视频…	Processing your video…	開始處理影片…	動画の処理を開始します…
 开始补做	开始补做	Start reprocessing	開始補做	再処理を開始
@@ -1084,7 +1084,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 暂时无法验证，已保存登录信息	暂时无法验证，已保存登录信息	Unable to verify temporarily, login information has been saved	暫時無法驗證，已儲存登入資訊	一時的に認証できませんでした。ログイン情報は保存されました
 暂时进入不会保存未完成的选择	暂时进入不会保存未完成的选择	Entering now won't save unfinished choices	暫時進入不會儲存未完成的選擇	今すぐ入ると、未完了の選択は保存されません
 暂时进入应用	暂时进入应用	Enter the app for now	暫時進入應用程式	ひとまずアプリに入る
-更多信息请运行 --help。	更多信息请运行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を実行してください。
+更多信息请运行 --help。	更多信息请运行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を参照してください。
 更多笔记操作	更多笔记操作	More note actions	更多筆記操作	その他のノート操作
 更快，占内存较少	更快，占内存较少	Faster, takes up less memory	更快，佔記憶體較少	より高速で、メモリ使用量が少ない
 更换视频	更换视频	Change video	更換影片	動画を変更する
@@ -1844,7 +1844,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 选择识别模型 / Choose a speech model	选择识别模型	Choose a speech model	選擇辨識模型	認識モデルを選択
 选择课程视频	选择课程视频	Select course video	選擇課程影片	コース動画を選択してください
 选择这个笔记库移动后的文件夹	选择这个笔记库移动后的文件夹	Select the folder to which this note library is moved	選擇這個筆記庫移動後的資料夾	このノートライブラリの移動先フォルダーを選択してください
-选项：	选项：	Options:	選項：	オプション:
+选项：	选项：	Options:	選項：	オプション：
 速度	速度	Speed	速度	速度
 速度 {}	速度 {}	Speed {}	速度 {}	速度 {}
 部分内容待补全	部分内容待补全	Incomplete	部分內容待補全	一部の内容は補完が必要です
@@ -2147,3 +2147,35 @@ AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
 已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	An app settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的應用程式設定，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかったアプリ設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
 已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	A settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的設定變更，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかった設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
 打开「校对文字和标点」后可用	打开「校对文字和标点」后可用	Available once “Proofread text and punctuation” is on	開啟「校對文字與標點」後可用	「文章と句読点を校正」をオンにすると使えます
+配置文件 / Configuration: {}	配置文件：{}	Configuration: {}	設定檔：{}	設定ファイル：{}
+  LLM 校对 / Transcript polish: {}	  LLM 校对：{}	  Transcript polish: {}	  LLM 校對：{}	  AI 校正：{}
+  服务类型 / Provider: {}	  服务类型：{}	  Provider: {}	  服務類型：{}	  サービスの種類：{}
+  服务地址 / Base URL: {}	  服务地址：{}	  Base URL: {}	  服務位址：{}	  サービスの URL：{}
+  API 密钥 / API key: {}	  API 密钥：{}	  API key: {}	  API 金鑰：{}	  API キー：{}
+  模型 / Model: {}	  模型：{}	  Model: {}	  模型：{}	  モデル：{}
+  截图辅助校对 / Slide-assisted polish: {}	  截图辅助校对：{}	  Slide-assisted polish: {}	  截圖輔助校對：{}	  スライドを使った校正：{}
+  自动摘要 / Automatic summary: {}	  自动摘要：{}	  Automatic summary: {}	  自動摘要：{}	  自動要約：{}
+  并发请求 / Concurrent requests: {}	  并发请求：{}	  Concurrent requests: {}	  並行請求：{}	  同時リクエスト数：{}
+  使用提示 / Usage hint: {}	  使用提示：{}	  Usage hint: {}	  使用提示：{}	  使い方のヒント：{}
+gpu/cpu 模型目录 / gpu/cpu model directory: {}	gpu/cpu 模型目录：{}	gpu/cpu model directory: {}	gpu/cpu 模型目錄：{}	gpu/cpu モデルのディレクトリ：{}
+下载或修复 / Download or repair: course2md models download --dir "{}"	下载或修复：course2md models download --dir "{}"	Download or repair: course2md models download --dir "{}"	下載或修復：course2md models download --dir "{}"	ダウンロードまたは修復：course2md models download --dir "{}"
+下载或修复 / Download or repair: course2md models prepare --provider {} --model {}	下载或修复：course2md models prepare --provider {} --model {}	Download or repair: course2md models prepare --provider {} --model {}	下載或修復：course2md models prepare --provider {} --model {}	ダウンロードまたは修復：course2md models prepare --provider {} --model {}
+模型已就绪 / Models ready: {}	模型已就绪：{}	Models ready: {}	模型已就緒：{}	モデルの準備ができました：{}
+已保存并启用 / Saved and enabled: {}	已保存并启用：{}	Saved and enabled: {}	已儲存並啟用：{}	保存して有効にしました：{}
+配置已保存，但连接测试失败；请检查服务地址、密钥和模型 / Settings saved, but connection test failed; check endpoint, key and model: {}	配置已保存，但连接测试失败；请检查服务地址、密钥和模型：{}	Settings saved, but connection test failed; check endpoint, key and model: {}	設定已儲存，但連線測試失敗；請檢查服務位址、金鑰和模型：{}	設定は保存しましたが、接続テストに失敗しました。サービスの URL、キー、モデルを確認してください：{}
+已关闭 AI 校对，凭据保留 / AI proofreading disabled; credentials kept: {}	已关闭 AI 校对，凭据保留：{}	AI proofreading disabled; credentials kept: {}	已關閉 AI 校對，憑證保留：{}	AI 校正をオフにしました（認証情報は残します）：{}
+已生成配置模板 / Configuration template created: {}	已生成配置模板：{}	Configuration template created: {}	已產生設定範本：{}	設定テンプレートを作成しました：{}
+没有需要清除的 API 配置 / No saved API settings to clear: {}	没有需要清除的 API 配置：{}	No saved API settings to clear: {}	沒有需要清除的 API 設定：{}	消去する API 設定はありません：{}
+已清除 API 配置 / Cleared API settings ({}): {}	已清除 API 配置（{}）：{}	Cleared API settings ({}): {}	已清除 API 設定（{}）：{}	API 設定を消去しました（{}）：{}
+已有摘要，笔记保持不变 / Summary already exists: {}	已有摘要，笔记保持不变：{}	Summary already exists: {}	已有摘要，筆記保持不變：{}	要約は既にあります。ノートは変更しません：{}
+已导出摘要 / Summary exported: {}	已导出摘要：{}	Summary exported: {}	已匯出摘要：{}	要約を書き出しました：{}
+摘要已作为新版笔记保存 / Summary saved as a new note version: {}	摘要已作为新版笔记保存：{}	Summary saved as a new note version: {}	摘要已作為新版筆記儲存：{}	要約をノートの新しい版として保存しました：{}
+模型 / Model: {} · {} · {}	模型：{} · {} · {}	Model: {} · {} · {}	模型：{} · {} · {}	モデル：{} · {} · {}
+占用空间 / Disk usage: {}	占用空间：{}	Disk usage: {}	佔用空間：{}	使用容量：{}
+使用已下载模型 / Using downloaded models: {}	使用已下载模型：{}	Using downloaded models: {}	使用已下載模型：{}	ダウンロード済みのモデルを使います：{}
+✓ 已保存配置 / Configuration saved: {}	✓ 已保存配置：{}	✓ Configuration saved: {}	✓ 已儲存設定：{}	✓ 設定を保存しました：{}
+请手动在浏览器打开 / Open this URL in your browser:\n{}	请手动在浏览器打开：\n{}	Open this URL in your browser:\n{}	請手動在瀏覽器開啟：\n{}	ブラウザでこの URL を開いてください：\n{}
+登录态已保存，但连接测试失败；可用 course2md llm setup 调整模型 / Login saved, but the connection test failed; adjust the model with course2md llm setup: {}	登录态已保存，但连接测试失败；可用 course2md llm setup 调整模型：{}	Login saved, but the connection test failed; adjust the model with course2md llm setup: {}	登入狀態已儲存，但連線測試失敗；可用 course2md llm setup 調整模型：{}	ログイン状態は保存しましたが、接続テストに失敗しました。course2md llm setup でモデルを調整できます：{}
+无法连接 Ollama 服务 {}；请确认已安装并正在运行（ollama serve） / Cannot reach the Ollama service at {}; make sure it is installed and running (ollama serve)	无法连接 Ollama 服务 {}；请确认已安装并正在运行（ollama serve）	Cannot reach the Ollama service at {}; make sure it is installed and running (ollama serve)	無法連線 Ollama 服務 {}；請確認已安裝並正在執行（ollama serve）	Ollama サービス {} に接続できません。インストールされ、実行中であること（ollama serve）を確認してください
+配置已保存，但连接测试失败；请确认模型 {} 可正常对话：{} / Settings saved, but the connection test failed; make sure {} can chat: {}	配置已保存，但连接测试失败；请确认模型 {} 可正常对话：{}	Settings saved, but the connection test failed; make sure {} can chat: {}	設定已儲存，但連線測試失敗；請確認模型 {} 可正常對話：{}	設定は保存しましたが、接続テストに失敗しました。モデル {} で会話できることを確認してください：{}
+正在加载本机模型… / Loading local model…	正在加载本机模型…	Loading local model…	正在載入本機模型…	ローカルモデルを読み込んでいます…

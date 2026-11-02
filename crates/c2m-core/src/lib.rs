@@ -6,6 +6,9 @@ pub mod invalid;
 pub mod meta;
 pub mod outcome;
 pub mod paths;
+pub mod speech;
+pub mod sync;
 pub mod timeline;
+pub mod tool;
 
 use c2m_i18n::tr;

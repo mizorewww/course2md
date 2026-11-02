@@ -113,6 +113,18 @@ impl Outcomes {
     }
 }
 
+/// A service's answer, read in full.
+pub struct HttpResponse {
+    pub status: u16,
+    pub body: Vec<u8>,
+}
+
+/// A request that got no complete answer, and whether it provably never left.
+pub struct NetworkFailure {
+    pub message: String,
+    pub definitely_unsent: bool,
+}
+
 #[derive(Debug)]
 pub struct Failure {
     pub status: Option<u16>,

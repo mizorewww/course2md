@@ -18,7 +18,10 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
     let filter = if quiet {
         EnvFilter::new("error")
     } else {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| default.into())
+        std::env::var(EnvFilter::DEFAULT_ENV)
+            .ok()
+            .and_then(|spec| EnvFilter::try_new(engine_targets(&spec)).ok())
+            .unwrap_or_else(|| default.into())
     };
     if json {
         // NDJSON 模式：stdout 只出 {"type":"log",...} 行（其余事件由各阶段显式 emit）
@@ -46,7 +49,63 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
     }
 }
 
+/// The engine's crates, which log under their own targets since the split.
+const ENGINE_CRATES: [&str; 11] = [
+    "c2m_ai",
+    "c2m_artifact",
+    "c2m_asr",
+    "c2m_config",
+    "c2m_core",
+    "c2m_dispatch",
+    "c2m_engine",
+    "c2m_i18n",
+    "c2m_process",
+    "c2m_protocol",
+    "c2m_source",
+];
+
+/// A `RUST_LOG` written for 2.0.1, where every engine module logged under
+/// `course2md`: each `course2md` directive also covers the engine crates
+/// (`course2md::asr=debug` becomes `c2m_*::asr=debug` too).
+fn engine_targets(spec: &str) -> String {
+    let mut directives = Vec::new();
+    for directive in spec.split(',').filter(|d| !d.trim().is_empty()) {
+        directives.push(directive.to_owned());
+        let rest = directive.trim().strip_prefix("course2md");
+        if let Some(rest) = rest.filter(|rest| rest.is_empty() || rest.starts_with(['=', ':', '[']))
+        {
+            directives.extend(ENGINE_CRATES.iter().map(|name| format!("{name}{rest}")));
+        }
+    }
+    directives.join(",")
+}
+
+/// `course2md ... | head` closes the pipe early, and `println!` then panics. A reader
+/// that stops reading is not an error: end as a program killed by SIGPIPE would.
+fn end_quietly_on_closed_pipe() {
+    let report = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or_default();
+        let closed = message.contains("os error 32)") || message.contains("os error 232)");
+        if message.starts_with("failed printing to std") && closed {
+            std::process::exit(141);
+        }
+        report(info);
+    }));
+}
+
 fn main() -> std::process::ExitCode {
+    // SAFETY: the first statement of main, before any thread exists.
+    #[cfg(apple_native)]
+    unsafe {
+        course2md::apple::pin_cache_dir()
+    };
+    end_quietly_on_closed_pipe();
     let mut args: Vec<_> = std::env::args_os().collect();
     let lang_arg = course2md::cli::take_lang_arg(&mut args);
     // 近似扫描（先于 clap 解析，解析失败也要走对输出模式）：把值恰为 "--json"/
@@ -245,7 +304,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                     status: None,
                 });
                 if !json {
-                    println!("模型已就绪 / Models ready: {}", root.display());
+                    println_tr!("模型已就绪 / Models ready: {}", root.display());
                 }
                 Ok(())
             }
@@ -271,12 +330,13 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                         disable_hint,
                     )?;
                     let path = settings::save(&cfg)?;
-                    println!("已保存并启用 / Saved and enabled: {}", path.display());
+                    println_tr!("已保存并启用 / Saved and enabled: {}", path.display());
                     match llm::test_connection(&cfg.llm) {
                         Ok(()) => println_tr!("连接测试通过 / Connection test passed."),
-                        Err(e) => anyhow::bail!(
-                            "配置已保存，但连接测试失败；请检查服务地址、密钥和模型 / Settings saved, but connection test failed; check endpoint, key and model: {e:#}"
-                        ),
+                        Err(e) => anyhow::bail!(tr!(
+                            "配置已保存，但连接测试失败；请检查服务地址、密钥和模型 / Settings saved, but connection test failed; check endpoint, key and model: {}",
+                            format!("{e:#}")
+                        )),
                     }
                 }
                 LlmCmd::Status => llm::print_status(&settings::load()?),
@@ -284,7 +344,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                     let mut cfg = settings::load()?;
                     cfg.llm.enabled = false;
                     let path = settings::save(&cfg)?;
-                    println!(
+                    println_tr!(
                         "已关闭 AI 校对，凭据保留 / AI proofreading disabled; credentials kept: {}",
                         path.display()
                     );
@@ -304,7 +364,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                         );
                     }
                     let path = course2md::options::write_template()?;
-                    println!(
+                    println_tr!(
                         "已生成配置模板 / Configuration template created: {}",
                         path.display()
                     );
@@ -361,12 +421,12 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
             }
             let path = settings::save(&cfg)?;
             if cleared.is_empty() {
-                println!(
+                println_tr!(
                     "没有需要清除的 API 配置 / No saved API settings to clear: {}",
                     path.display()
                 );
             } else {
-                println!(
+                println_tr!(
                     "已清除 API 配置 / Cleared API settings ({}): {}",
                     cleared.join(", "),
                     path.display()
@@ -502,7 +562,7 @@ fn summarize_note(
         serde_json::from_slice(&std::fs::read(dir.join(&base.document))?)?;
     if document.summary.is_some() && !force {
         if !progress::is_quiet() {
-            println!(
+            println_tr!(
                 "已有摘要，笔记保持不变 / Summary already exists: {}",
                 dir.display()
             );
@@ -581,11 +641,11 @@ fn summarize_note(
         let text = course2md::summary_doc::render_standalone_md(&saved.meta.title, &summary);
         course2md::checkpoint::atomic_write(&file, text.as_bytes())?;
         if !progress::is_quiet() {
-            println!("已导出摘要 / Summary exported: {}", file.display());
+            println_tr!("已导出摘要 / Summary exported: {}", file.display());
         }
     }
     if !progress::is_quiet() {
-        println!(
+        println_tr!(
             "摘要已作为新版笔记保存 / Summary saved as a new note version: {}",
             version.display()
         );
@@ -603,11 +663,13 @@ fn print_model_status(status: &models::status::LocalModelStatus) {
         CacheState::Loaded => tr!("已就绪 / Ready"),
         CacheState::Unsupported => tr!("不支持 / Unsupported"),
     };
-    println!(
+    println_tr!(
         "模型 / Model: {} · {} · {}",
-        status.model, status.provider, state
+        status.model,
+        status.provider,
+        state
     );
-    println!("占用空间 / Disk usage: {}", format_size(status.bytes));
+    println_tr!("占用空间 / Disk usage: {}", format_size(status.bytes));
     for part in &status.parts {
         println!("  {}: {}", part.name, part.path.display());
         for file in &part.missing {
@@ -624,9 +686,10 @@ fn print_model_status(status: &models::status::LocalModelStatus) {
                 .join(", ");
             println_tr!("该后端支持的模型：{}", available)
         }
-        _ if status.can_prepare => println!(
+        _ if status.can_prepare => println_tr!(
             "下载或修复 / Download or repair: course2md models prepare --provider {} --model {}",
-            status.provider, status.model
+            status.provider,
+            status.model
         ),
         _ => {}
     }
@@ -668,4 +731,24 @@ fn normalize_source(source: &str) -> anyhow::Result<String> {
         tr!("找不到视频文件或无法识别链接：{}", source),
         tr!("请检查路径；含空格的路径需加引号")
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn course2md_log_directives_cover_the_engine_crates() {
+        let spec = super::engine_targets("warn,course2md=debug");
+        assert!(spec.starts_with("warn,course2md=debug,c2m_ai=debug,"));
+        assert!(spec.contains(",c2m_source=debug"));
+        let spec = super::engine_targets("course2md::asr=trace");
+        assert!(spec.contains("c2m_asr::asr=trace"));
+        assert_eq!(
+            super::engine_targets("course2md_other=info"),
+            "course2md_other=info"
+        );
+        assert_eq!(super::engine_targets("info"), "info");
+        let filter =
+            tracing_subscriber::EnvFilter::try_new(super::engine_targets("course2md=debug"));
+        assert!(filter.is_ok());
+    }
 }

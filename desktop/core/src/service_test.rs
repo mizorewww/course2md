@@ -315,24 +315,27 @@ impl Transport for HttpTransport {
         );
         let call = agent
             .post(&request.endpoint)
-            .set("Content-Type", &request.content_type);
+            .header("Content-Type", &request.content_type);
         let call = crate::bounded_http::json_call(call, request.authorization.as_ref());
-        // A nonempty POST body is non-retryable in ureq 2. Each test creates a fresh agent,
-        // so a recycled connection cannot trigger a hidden resend either.
-        let response = match call.send_bytes(&request.body) {
+        // Each test creates a fresh agent with an empty pool, so a stale recycled
+        // connection cannot make ureq resend the request behind our back. A request
+        // that never reached a server was not sent and cannot have been charged.
+        let response = match call.send(&request.body[..]) {
             Ok(response) => response,
-            Err(ureq::Error::Status(_, response)) => response,
-            Err(ureq::Error::Transport(transport)) => {
-                return Err(match transport.kind() {
-                    ureq::ErrorKind::Dns
-                    | ureq::ErrorKind::ConnectionFailed
-                    | ureq::ErrorKind::InvalidUrl
-                    | ureq::ErrorKind::UnknownScheme => TransportFailure::NotSent,
-                    _ => TransportFailure::Unknown,
-                });
+            Err(
+                ureq::Error::HostNotFound
+                | ureq::Error::ConnectionFailed
+                | ureq::Error::BadUri(_)
+                | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect),
+            ) => return Err(TransportFailure::NotSent),
+            Err(ureq::Error::Io(error))
+                if error.kind() == std::io::ErrorKind::ConnectionRefused =>
+            {
+                return Err(TransportFailure::NotSent);
             }
+            Err(_) => return Err(TransportFailure::Unknown),
         };
-        let status = response.status();
+        let status = response.status().as_u16();
         let body =
             crate::bounded_http::read_bounded(response, MAX_RESPONSE).map_err(
                 |error| match error {
