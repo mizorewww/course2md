@@ -1604,6 +1604,7 @@ dependencies = [
  "c2m-process",
  "c2m-protocol",
  "c2m-source",
+ "c2m-test-http",
  "clap",
  "dialoguer",
  "serde_json",

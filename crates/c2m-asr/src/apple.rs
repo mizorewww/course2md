@@ -370,6 +370,9 @@ pub fn prepare_cache_here(model: &str) -> Result<()> {
 /// in a child process started with that endpoint. An explicit HF_ENDPOINT is
 /// left alone.
 pub(crate) fn prepare_cache(model: &str, control: &crate::dispatch::TaskControl) -> Result<()> {
+    // A component missing from this installation is no download failure: no
+    // source can supply it, so neither the mirror nor Hugging Face is tried.
+    ensure_metallib()?;
     let mirror = if std::env::var_os("HF_ENDPOINT").is_none() {
         crate::hub::endpoints().hub_override()
     } else {

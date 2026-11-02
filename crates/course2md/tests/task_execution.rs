@@ -773,6 +773,35 @@ fn summary_only_reprocessing_retries_known_failure_once_without_repeating_source
     assert_eq!(bodies[2], bodies[3]);
 }
 
+/// The desktop reads a task's log events: at trace level they must not carry
+/// the request bytes transport crates dump, the summary key among them.
+#[test]
+fn trace_log_events_never_carry_the_api_key() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    const KEY: &str = "sk-Zq8Xv3Lp9Wm2Tn7Rb4Yc6Hd5";
+    let mock = MockAi::respond_with(|_, _| Some((200, summary_response())));
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("video.mp4");
+    std::fs::write(&source, b"broken video, readable selected subtitles").unwrap();
+    let mut task = request(root.path(), &source);
+    task.config.llm.summarize = true;
+    task.config.llm.base_url = mock.url.clone();
+    task.config.llm.model = "summary-model".into();
+    task.config.llm.api_key = KEY.into();
+    let output = spawn_task(root.path(), &task, |command| {
+        command.env("RUST_LOG", "trace");
+    })
+    .wait_with_output()
+    .unwrap();
+    let events = events(&output);
+    assert!(output.status.success(), "{events:#?}");
+    assert_eq!(mock.calls.load(Ordering::SeqCst), 1);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!common::shows_part_of(&stdout, KEY), "{stdout}");
+}
+
 #[test]
 fn summarize_command_adds_a_summary_as_a_new_version() {
     if !common::ffmpeg_available() {

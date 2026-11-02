@@ -51,3 +51,12 @@ pub fn fixture_video(path: &Path, secs: u32) {
 pub fn fake_ai() -> serde_json::Value {
     serde_json::from_str(include_str!("../fixtures/fake_ai.json")).expect("valid fixture")
 }
+
+/// Whether `text` shows any six characters of `secret` in a row: a hex dump
+/// splits a secret across lines, so the whole of it never appears at once.
+pub fn shows_part_of(text: &str, secret: &str) -> bool {
+    let secret: Vec<char> = secret.chars().collect();
+    secret
+        .windows(6)
+        .any(|part| text.contains(&part.iter().collect::<String>()))
+}

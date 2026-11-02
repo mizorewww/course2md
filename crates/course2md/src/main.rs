@@ -23,30 +23,56 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
             .and_then(|spec| EnvFilter::try_new(engine_targets(&spec)).ok())
             .unwrap_or_else(|| default.into())
     };
+    use tracing_subscriber::prelude::*;
+    let logs = tracing_subscriber::registry()
+        .with(filter)
+        .with(transport_cap());
     if json {
         // NDJSON 模式：stdout 只出 {"type":"log",...} 行（其余事件由各阶段显式 emit）
-        use tracing_subscriber::prelude::*;
-        tracing_subscriber::registry()
-            .with(filter)
-            .with(progress::JsonLogLayer)
-            .init();
+        logs.with(progress::JsonLogLayer).init();
     } else if verbose >= 2 {
         // 调试档：完整格式（时间 + target）
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(std::io::stderr)
-            .with_target(true)
-            .init();
+        logs.with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_target(true),
+        )
+        .init();
     } else {
         // 默认档：个人 CLI 时间戳是纯噪音，compact 单行
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(std::io::stderr)
-            .with_target(false)
-            .without_time()
-            .compact()
-            .init();
+        logs.with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_target(false)
+                .without_time()
+                .compact(),
+        )
+        .init();
     }
+}
+
+/// HTTP and TLS crates whose debug and trace output carries what a request
+/// sends: ureq-proto dumps the raw request, `Authorization` header included,
+/// and ureq logs URLs, which can hold a login token. Logs reach the terminal
+/// and, through `--json`/`run-task`, the desktop, so these crates never log
+/// below `info` whatever `RUST_LOG` asks for.
+const TRANSPORT_CRATES: [&str; 7] = [
+    "ureq",
+    "rustls",
+    "tokio_rustls",
+    "native_tls",
+    "openssl",
+    "hyper",
+    "h2",
+];
+
+/// A filter that every log event must also pass: everything at any level,
+/// except the [`TRANSPORT_CRATES`] (and any target they prefix) above `info`.
+fn transport_cap() -> tracing_subscriber::filter::Targets {
+    use tracing_subscriber::filter::{LevelFilter, Targets};
+    Targets::new()
+        .with_default(LevelFilter::TRACE)
+        .with_targets(TRANSPORT_CRATES.map(|name| (name, LevelFilter::INFO)))
 }
 
 /// The engine's crates, which log under their own targets since the split.
@@ -186,6 +212,9 @@ fn main() -> std::process::ExitCode {
     let quiet = cli.opts.quiet
         || helper == Some(ChildProgress::Quiet)
         || matches!(&cli.command, Some(Command::Summarize(args)) if args.quiet);
+    // Content choices (the subtitle track a run reads) follow the person's
+    // language in every output mode.
+    course2md::i18n::set_person_lang(course2md::i18n::lang());
     if json {
         // Machine consumers (--json, run-task) parse message text; keep the
         // protocol's source language whatever --lang says.
@@ -214,6 +243,9 @@ fn main() -> std::process::ExitCode {
                     code: progress::ErrorCode::of(&error),
                     message,
                 });
+            } else if helper.is_some() {
+                // The parent puts the helper's words into its own error.
+                eprintln!("{message}");
             } else {
                 eprintln_tr!("错误：{}", message);
             }
@@ -750,5 +782,24 @@ mod tests {
         let filter =
             tracing_subscriber::EnvFilter::try_new(super::engine_targets("course2md=debug"));
         assert!(filter.is_ok());
+    }
+
+    #[test]
+    fn transport_crates_never_log_below_info() {
+        use tracing::Level;
+        let cap = super::transport_cap();
+        for target in [
+            "ureq",
+            "ureq_proto::util",
+            "ureq::run",
+            "rustls::conn",
+            "hyper_util",
+        ] {
+            assert!(!cap.would_enable(target, &Level::DEBUG), "{target}");
+            assert!(cap.would_enable(target, &Level::INFO), "{target}");
+        }
+        for target in ["course2md", "c2m_ai::llm", "c2m_source::fetch"] {
+            assert!(cap.would_enable(target, &Level::TRACE), "{target}");
+        }
     }
 }

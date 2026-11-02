@@ -437,3 +437,173 @@ fn an_unsupported_model_is_quoted_in_every_language() {
         );
     }
 }
+
+/// Transport crates dump what a request sends at trace level, `Authorization`
+/// header included; however `RUST_LOG` is set, the key never reaches a log.
+#[test]
+fn trace_logging_never_shows_the_api_key() {
+    const KEY: &str = "sk-Zq8Xv3Lp9Wm2Tn7Rb4Yc6Hd5";
+    for spec in ["trace", "ureq_proto=trace,ureq=trace,rustls=trace"] {
+        let cli = CliTest::new();
+        let (url, server) = c2m_test_http::serve(vec![c2m_test_http::json_response(
+            r#"{"choices":[{"message":{"content":"ok"}}]}"#,
+        )]);
+        let output = Command::new(env!("CARGO_BIN_EXE_course2md"))
+            .args(["llm", "setup", "--base-url", &url, "--model", "m"])
+            .args(["--api-key", KEY])
+            .current_dir(cli.dir.path())
+            .env("XDG_CONFIG_HOME", cli.dir.path().join("config"))
+            .env("XDG_CACHE_HOME", cli.dir.path().join("cache"))
+            .env("COURSE2MD_LANG", "en")
+            .env("RUST_LOG", spec)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].head.contains(KEY),
+            "the request must carry the key for this test to mean anything"
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        for text in [stdout(&output), stderr(&output)] {
+            assert!(!common::shows_part_of(&text, KEY), "{spec}: {text}");
+        }
+    }
+}
+
+/// An online run picks its subtitle track in the interface language, as the
+/// desktop does, in plain and `--json` output alike. A task keeps its first
+/// choice when it continues in another language, and a work folder from a
+/// version that preferred Chinese keeps Chinese, so paid requests made from
+/// the transcript keep their ids.
+#[cfg(unix)]
+#[test]
+fn online_subtitles_follow_the_interface_language_and_stay_with_the_task() {
+    use std::os::unix::fs::PermissionsExt;
+    let cli = CliTest::new();
+    let log = cli.dir.path().join("yt-dlp.log");
+    let fake = cli.dir.path().join("yt-dlp");
+    // Offers Simplified Chinese and English tracks of a French video; records
+    // the chosen track, then refuses the video download, which ends the run.
+    std::fs::write(
+        &fake,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then echo 2026.08.19; exit 0; fi
+json='{{"id":"abcdefghijk","title":"Fake lecture","duration":240,"webpage_url":"https://www.youtube.com/watch?v=abcdefghijk","extractor":"youtube","extractor_key":"Youtube","_type":"video","language":"fr","subtitles":{{"zh-Hans":[{{"ext":"vtt","url":"http://127.0.0.1:1/zh.vtt"}}],"en":[{{"ext":"vtt","url":"http://127.0.0.1:1/en.vtt"}}]}},"automatic_captions":{{}}}}'
+prev=""; langs=""; out=""; skip=""
+for arg in "$@"; do
+  [ "$prev" = "--sub-langs" ] && langs="$arg"
+  [ "$prev" = "-o" ] && out="$arg"
+  [ "$arg" = "--skip-download" ] && skip=1
+  prev="$arg"
+done
+if [ -n "$skip" ]; then
+  lang="${{langs#^}}"; lang="${{lang%$}}"
+  echo "$lang" >> "{log}"
+  printf '1\n00:00:00,000 --> 00:00:02,000\nsubtitle in %s\n' "$lang" > "$out.$lang.srt"
+  echo "$json"; exit 0
+fi
+for arg in "$@"; do [ "$arg" = "--dump-single-json" ] && {{ echo "$json"; exit 0; }}; done
+echo "ERROR: [youtube] abcdefghijk: Private video" >&2
+exit 1
+"#,
+            log = log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let run = |lang: &str, extra: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_course2md"))
+            .args(["https://www.youtube.com/watch?v=abcdefghijk"])
+            .args(["--transcript-source", "subtitle", "-o"])
+            .arg(cli.dir.path().join("out"))
+            .args(extra)
+            .current_dir(cli.dir.path())
+            .env("HOME", cli.dir.path())
+            .env("XDG_CONFIG_HOME", cli.dir.path().join("config"))
+            .env("XDG_CACHE_HOME", cli.dir.path().join("cache"))
+            .env("COURSE2MD_LANG", lang)
+            .env("COURSE2MD_YTDLP", &fake)
+            .env_remove("RUST_LOG")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let chosen = std::fs::read_to_string(&log).unwrap_or_default();
+        let _ = std::fs::remove_file(&log);
+        (chosen.trim().to_owned(), output)
+    };
+    let fresh = ["--no-resume"];
+    for (lang, extra, track) in [
+        ("en", &fresh[..], "en"),
+        ("en", &["--no-resume", "--json"][..], "en"),
+        ("zh-Hans", &fresh[..], "zh-Hans"),
+        ("zh-Hans", &["--no-resume", "--json"][..], "zh-Hans"),
+    ] {
+        let (chosen, output) = run(lang, extra);
+        assert_eq!(chosen, track, "{lang} {extra:?}: {}", stderr(&output));
+    }
+    // A task keeps its first choice when it continues in another language.
+    assert_eq!(run("en", &[]).0, "en");
+    assert_eq!(run("zh-Hans", &[]).0, "en");
+    // A work folder from before the choice was recorded preferred Chinese.
+    let work = std::fs::read_dir(cli.dir.path().join("out/youtube"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path()
+        .join(".work");
+    let mut records = 0;
+    for task in std::fs::read_dir(&work).unwrap() {
+        let record = task.unwrap().path().join(".subs/language");
+        if record.is_file() {
+            std::fs::remove_file(record).unwrap();
+            records += 1;
+        }
+    }
+    assert!(records > 0);
+    assert_eq!(run("en", &[]).0, "zh-Hans");
+}
+
+/// Password and SMS login type into a terminal; without one the error says what
+/// to do instead, in the interface language, before anything is sent.
+#[test]
+fn password_login_without_a_terminal_explains_what_to_do() {
+    let cli = CliTest::new();
+    for method in ["password", "sms"] {
+        for (lang, expected) in [
+            ("en", "Password and SMS login need a terminal to type in."),
+            (
+                "ja",
+                "パスワードと SMS のログインにはターミナルでの入力が必要です。",
+            ),
+        ] {
+            let output = cli.run_with_lang(&["--login", "bilibili", "--method", method], lang);
+            assert!(!output.status.success());
+            let text = stderr(&output);
+            assert!(text.contains(expected), "{method} {lang}: {text}");
+            assert!(!text.contains("not a terminal"), "{text}");
+        }
+    }
+}
+
+/// The values' descriptions in `--help` follow the interface language too.
+#[test]
+fn value_descriptions_in_help_are_localized() {
+    let cli = CliTest::new();
+    let help = stdout(&cli.run_with_lang(&["--help"], "en"));
+    assert!(
+        help.contains("- qr:       Scan a QR code (default)"),
+        "{help}"
+    );
+    assert!(help.contains("Prefer subtitles; transcribe speech if unavailable"));
+    let help = stdout(&cli.run_with_lang(&["--help"], "ja"));
+    assert!(help.contains("QR コードをスキャン（既定）"), "{help}");
+    assert!(help.contains("字幕を優先し、なければ音声を認識"), "{help}");
+    assert!(!help.contains("Scan a QR code"), "{help}");
+    assert!(help.contains("使用できる値："), "{help}");
+    assert!(help.contains("[使用できる値：bilibili, youtube"), "{help}");
+    assert!(!help.to_lowercase().contains("possible values"), "{help}");
+}

@@ -259,3 +259,13 @@ settings; Japanese and English for V1.
 - **Q10.** `5f49d50a`. The capture's `~end` asks the restore, which runs on the frame after the view's content
   reaches its list, instead of waiting 800 ms.
 - **R6.** `97744d7f`. The reader bar is 56; breadcrumb and title still centre on the back button.
+
+## CLI: resolutions (agent: cli2)
+
+| ID | Commit | Resolution and evidence |
+|---|---|---|
+| D1 | `b3729cc` | Every log subscriber also passes a fixed filter holding ureq (and ureq-proto), rustls, tokio-rustls, native-tls, openssl, hyper and h2 at `info`, whatever `RUST_LOG` says; the desktop installs no subscriber and logs through `run-task`. `llm setup` at `RUST_LOG=trace` and at `ureq_proto=trace,…` (plain) and a `run-task` summary at trace (NDJSON) against loopback servers: no six characters of the key in the output; both tests fail without the filter. Real run `x.mp4 --llm --llm-api-key … -vv` (plain and `--json`, no network): no key fragment, no `ureq` line, engine logs kept |
+| D2 | `29a53c7` | Online track choice passes the person's interface language, recorded before `--json`/`run-task` pin messages to Simplified Chinese, as the desktop does. The language a task's first choice used is kept in its work folder (`.subs/language`), so a continued task reads the same track and its paid ids stay; a work folder from an earlier version keeps preferring Chinese. Fake yt-dlp with zh-Hans and en tracks of a French video: en → en, zh-Hans → zh-Hans, plain and `--json`; continued in zh-Hans → en; legacy folder → zh-Hans. Local sidecars still follow the message language as in C11 |
+| D3 | `1e8bb60` | Password and SMS login check for a terminal first and say, in four languages, to run the command in a terminal or use QR login |
+| D4 | `581614f` | Not fixed text by design: it carried 2.0.1's doc comments over. `--method`, `--transcript-source` and `--asr-api-mode` value descriptions, the "Possible values:" heading and the `[possible values: …]` hint now go through the catalog |
+| D6 | `0734b09` | Preparation checks the installation's Metal library before any download, so a missing component fails at once without the mirror or Hugging Face; a helper prints its bare error, so the parent's message has one prefix. Without the library, in four languages and `--json`: one localized error, no retry |
