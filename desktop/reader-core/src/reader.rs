@@ -1,9 +1,10 @@
 //! What a note is made of for reading: its time and outline, screenshots, exports and
 //! the offline video, and the positions that outlive a repair.
-use crate::{
+use crate::reader_navigation as nav;
+use desktop_store::{
     notes::{self, Course, PreviewBlock},
     page::Page,
-    reader_navigation as nav, workspace,
+    workspace,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -731,7 +732,7 @@ pub fn note_read_failure(error: &anyhow::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notes::Course;
+    use desktop_store::notes::Course;
 
     #[test]
     fn returning_from_a_note_goes_where_the_person_came_from() {
@@ -754,8 +755,8 @@ mod tests {
         root: &std::path::Path,
         revision: u64,
         times: &[f64],
-    ) -> crate::notes::Course {
-        crate::notes::fixtures::published_note(root, revision, times, Default::default())
+    ) -> desktop_store::notes::Course {
+        desktop_store::notes::fixtures::published_note(root, revision, times, Default::default())
     }
 
     fn offline_task_fixture(
@@ -773,7 +774,7 @@ mod tests {
             id: manifest.task_id.clone(),
             plan: workspace::TaskPlan {
                 operation: Default::default(),
-                source: crate::workspace::Source {
+                source: desktop_store::workspace::Source {
                     input: "https://www.bilibili.com/video/BVfixture?p=2".into(),
                     identity: manifest.source_id.clone(),
                     online: true,
@@ -802,7 +803,7 @@ mod tests {
             handled_by: None,
             held: false,
             work_dir: root.join(".course2md/work").join(&manifest.task_id),
-            events: crate::activity::JobEvents {
+            events: desktop_store::activity::JobEvents {
                 error: None,
                 ..Default::default()
             },
@@ -1032,7 +1033,7 @@ mod tests {
     fn summary_failure_keeps_body_readable_and_does_not_offer_file_reload() {
         let root = tempfile::tempdir().unwrap();
         let detail = "摘要尚未完成，已保留正文 / Summary incomplete; body retained";
-        let course = crate::notes::fixtures::published_note(
+        let course = desktop_store::notes::fixtures::published_note(
             root.path(),
             1,
             &[10.],
@@ -1043,7 +1044,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let preview = crate::notes::read_preview(course.clone()).unwrap();
+        let preview = desktop_store::notes::read_preview(course.clone()).unwrap();
         let data = load_reader_data(&preview);
         assert!(preview.plain_text.contains("10 秒的正文"));
         assert!(preview.issues.is_empty());
@@ -1059,7 +1060,7 @@ mod tests {
         assert!(!files_need_reload(&preview, &data.issues, &data.frames));
 
         std::fs::remove_file(course.dir.join("frames/frame-0.png")).unwrap();
-        let damaged = crate::notes::read_preview(course).unwrap();
+        let damaged = desktop_store::notes::read_preview(course).unwrap();
         let data = load_reader_data(&damaged);
         assert!(files_need_reload(&damaged, &data.issues, &data.frames));
         assert_eq!(
@@ -1074,7 +1075,7 @@ mod tests {
         let old = fixture_version(root.path(), 1, &[10., 20., 30.]);
         let new = fixture_version(root.path(), 2, &[40.]);
         std::fs::remove_file(old.dir.join("frames/frame-0.png")).unwrap();
-        let old_preview = crate::notes::read_preview(old.clone()).unwrap();
+        let old_preview = desktop_store::notes::read_preview(old.clone()).unwrap();
         assert!(
             old_preview
                 .issues
@@ -1093,7 +1094,7 @@ mod tests {
         ));
         assert_eq!(old_data.frame_by_path.len(), 2);
         assert_eq!(old_data.versions.len(), 2);
-        let new_data = load_reader_data(&crate::notes::read_preview(new.clone()).unwrap());
+        let new_data = load_reader_data(&desktop_store::notes::read_preview(new.clone()).unwrap());
         assert_eq!(new_data.frames.len(), 1);
         assert_eq!(new_data.frames[0].seconds, 40.);
         assert!(
@@ -1117,7 +1118,7 @@ mod tests {
 
     #[test]
     fn repair_position_handoff_uses_the_latest_old_position_and_keeps_existing_versions() {
-        use crate::workspace::ReadingPosition;
+        use desktop_store::workspace::ReadingPosition;
         use std::collections::BTreeMap;
         let start = ReadingPosition {
             seconds: Some(12.),

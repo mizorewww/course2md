@@ -1,0 +1,20 @@
+[package]
+name = "desktop-reader-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "What the course2md desktop's reader shows of a note, without GPUI"
+publish = false
+
+[dependencies]
+course2md = { path = "../../crates/course2md", default-features = false }
+desktop-store = { path = "../store" }
+anyhow.workspace = true
+url.workspace = true
+chrono.workspace = true
+image = { workspace = true, features = ["webp"] }
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+desktop-store = { path = "../store", features = ["test-support"] }
+tempfile.workspace = true
