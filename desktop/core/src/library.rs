@@ -178,7 +178,9 @@ pub fn note_has_unfinished_task(
 ) -> bool {
     source_id.is_some_and(|source| {
         tasks.iter().any(|task| {
+            // An attempt a follow-up replaced stays unfinished, but is no longer worked on.
             !task.state.finished()
+                && task.handled_by.is_none()
                 && task.plan.source_id == source
                 && task.plan.library_id == library_id
         })
@@ -552,5 +554,16 @@ mod tests {
             "library-1",
             Some("video-a")
         ));
+        // An uncertain attempt whose resend ran in a follow-up that has finished.
+        let replaced = TaskRecord {
+            handled_by: Some("task-2".into()),
+            ..task(TaskState::Uncertain)
+        };
+        let followup = TaskRecord {
+            id: "task-2".into(),
+            parent: Some("task-1".into()),
+            ..task(TaskState::Complete)
+        };
+        assert!(!busy(&[replaced, followup], "library-1", Some("video-a")));
     }
 }
