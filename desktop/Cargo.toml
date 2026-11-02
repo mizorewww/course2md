@@ -14,7 +14,7 @@ performance = ["gpui-kit/profiler"]
 capture = ["gpui-kit/test-support"]
 
 [dependencies]
-course2md = { path = "../crates/course2md" }
+course2md = { path = "../crates/course2md", default-features = false }
 desktop-core = { path = "core" }
 desktop-ui = { path = "ui" }
 gpui-kit.workspace = true

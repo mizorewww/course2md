@@ -6,6 +6,10 @@ description = "The conversion pipeline and the task protocol"
 license.workspace = true
 publish = false
 
+[features]
+# The command line's derive of RunOpts.
+clap = ["dep:clap"]
+
 [dependencies]
 c2m-ai = { path = "../c2m-ai" }
 c2m-artifact = { path = "../c2m-artifact" }
@@ -18,7 +22,7 @@ c2m-process = { path = "../c2m-process" }
 c2m-protocol = { path = "../c2m-protocol" }
 c2m-source = { path = "../c2m-source" }
 anyhow.workspace = true
-clap.workspace = true
+clap = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 slide-detect.workspace = true

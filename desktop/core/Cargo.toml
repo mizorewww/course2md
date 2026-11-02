@@ -11,7 +11,7 @@ publish = false
 test-support = []
 
 [dependencies]
-course2md = { path = "../../crates/course2md" }
+course2md = { path = "../../crates/course2md", default-features = false }
 gpui-kit-material-color.workspace = true
 anyhow.workspace = true
 serde.workspace = true
