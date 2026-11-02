@@ -9,6 +9,22 @@ pub fn earliest_deadline(a: Option<Instant>, b: Option<Instant>) -> Option<Insta
     a.into_iter().chain(b).min()
 }
 
+/// The shortest the UI's event loop sleeps. A zero-length GPUI timer is ready at
+/// once, so a loop that slept toward a deadline already past would run again without
+/// yielding: no frame drawn, no other task (a blocking check's result) let in.
+pub const MIN_POLL_SLEEP: Duration = Duration::from_millis(15);
+/// How long the loop sleeps with nothing due; an explicit wake ends it sooner.
+pub const IDLE_POLL_SLEEP: Duration = Duration::from_secs(3600);
+
+/// How long the event loop sleeps at `now` toward `deadline`.
+pub fn poll_timeout(deadline: Option<Instant>, now: Instant) -> Duration {
+    deadline
+        .map_or(IDLE_POLL_SLEEP, |deadline| {
+            deadline.saturating_duration_since(now)
+        })
+        .max(MIN_POLL_SLEEP)
+}
+
 /// Task log/progress events coalesce into at most one repaint per interval;
 /// stage, error and completion transitions still repaint immediately.
 pub(crate) const EVENT_REPAINT_INTERVAL: Duration = Duration::from_millis(250);
@@ -128,7 +144,10 @@ pub fn job_exit_status(success: bool, cancelled: bool) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{EVENT_REPAINT_INTERVAL, WorkState, earliest_deadline};
+    use super::{
+        EVENT_REPAINT_INTERVAL, IDLE_POLL_SLEEP, MIN_POLL_SLEEP, WorkState, earliest_deadline,
+        poll_timeout,
+    };
     use std::time::{Duration, Instant};
 
     #[test]
@@ -183,5 +202,19 @@ mod tests {
             earliest_deadline(Some(now + Duration::from_secs(2)), Some(now)),
             Some(now)
         );
+    }
+
+    /// A deadline already past still sleeps on a real timer, so the loop yields.
+    #[test]
+    fn a_past_deadline_still_yields_to_the_executor() {
+        let now = Instant::now();
+        let past = now - Duration::from_secs(30);
+        assert_eq!(poll_timeout(Some(past), now), MIN_POLL_SLEEP);
+        assert_eq!(poll_timeout(Some(now), now), MIN_POLL_SLEEP);
+        assert_eq!(
+            poll_timeout(Some(now + Duration::from_secs(1)), now),
+            Duration::from_secs(1)
+        );
+        assert_eq!(poll_timeout(None, now), IDLE_POLL_SLEEP);
     }
 }

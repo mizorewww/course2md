@@ -44,7 +44,7 @@ use desktop_reader_core::reader::note_read_failure;
 use desktop_reader_core::reader::{carry_repaired_reading_positions, settle_reader_notice};
 use desktop_store::library::FolderFilter;
 use desktop_store::page::{Kind, Page};
-use desktop_tasks::job::{earliest_deadline, job_exit_status};
+use desktop_tasks::job::{earliest_deadline, job_exit_status, poll_timeout};
 
 use backend::{Done, EngineEvent, Event, Job};
 use conversion::ConversionOptions;
@@ -384,9 +384,7 @@ impl Desktop {
                 let wait = async {
                     let _ = wake.recv().await;
                 };
-                let timeout = deadline
-                    .map(|deadline| deadline.saturating_duration_since(Instant::now()))
-                    .unwrap_or(Duration::from_secs(3600));
+                let timeout = poll_timeout(deadline, Instant::now());
                 let timer = cx.background_executor().timer(timeout);
                 smol::future::or(wait, timer).await;
                 match this.update_in(cx, |this, _, cx| {
@@ -501,6 +499,9 @@ impl Desktop {
         if self.workspace_reconciling {
             return;
         }
+        let Some(workspace) = &mut self.workspace else {
+            return;
+        };
         let Some(reconciliation) = workspace.reconciliation() else {
             return;
         };
@@ -525,6 +526,8 @@ impl Desktop {
                         Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
                 }
                 this.start_next_task(cx);
+                // The loop's deadline was computed while the check ran.
+                this.wake_poll();
                 cx.notify();
             });
         })
@@ -755,9 +758,12 @@ impl Desktop {
         if self.storage_ui.resume_ready() {
             deadline = earliest_deadline(deadline, Some(Instant::now()));
         }
-        // A worker that outlived an earlier session is waited for.
-        if let Some(workspace) = &self.workspace {
-            deadline = earliest_deadline(deadline, workspace.held_check_due());
+        // A worker that outlived an earlier session is waited for. A check in flight
+        // wakes the loop itself when it ends.
+        if let Some(workspace) = &self.workspace
+            && !self.workspace_reconciling
+        {
+            deadline = earliest_deadline(deadline, workspace.held_check_due(Instant::now()));
         }
         deadline
     }
