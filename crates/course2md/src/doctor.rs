@@ -15,10 +15,7 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 fn tool_version(cmd: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Option<String> {
     let mut command = Command::new(cmd);
     command.args(args);
-    let out = crate::runtime::run_bounded("doctor", &mut command, VERSION_TIMEOUT).ok()?;
-    if !out.status.success() {
-        return None;
-    }
+    let out = crate::runtime::run_ok(&mut command, VERSION_TIMEOUT)?;
     Some(
         out.stdout
             .lines()

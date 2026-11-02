@@ -961,7 +961,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 新链接未能保存：{}	新链接未能保存：{}	New link failed to save: {}	新連結未能儲存：{}	新しいリンクを保存できませんでした: {}
 无匹配	无匹配	No match	無匹配	一致なし
 无权读取这份笔记，请检查保存位置的访问权限	无权读取这份笔记，请检查保存位置的访问权限	No permission to read this note, please check the access permissions of the save location	無權讀取這份筆記，請檢查儲存位置的存取權限	このノートを読む権限がありません。保存場所のアクセス権限を確認してください。
-无法传递任务参数	无法传递任务参数	Unable to pass task parameters	無法傳遞任務參數	タスクパラメータを渡すことができません
 无法保存恢复后的暂停指令，尚未替换原任务记录	无法保存恢复后的暂停指令，尚未替换原任务记录	The pause command after recovery cannot be saved, and the original task record has not been replaced.	無法儲存恢復後的暫停指令，尚未替換原任務記錄	回復後の一時停止コマンドは保存できず、元のタスク レコードは置き換えられていません。
 无法保存此组设置	无法保存此组设置	Unable to save this set of settings	無法儲存此組設定	この設定セットを保存できません
 无法保存此组设置的恢复副本	无法保存此组设置的恢复副本	Unable to save recovery copy of this set of settings	無法儲存此組設定的恢復副本	この設定セットのリカバリ コピーを保存できません
@@ -1585,8 +1584,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 缺少 Apple 识别所需的组件，请重新安装 course2md / Apple speech component missing; reinstall course2md	缺少 Apple 识别所需的组件，请重新安装 course2md	Apple speech component missing; reinstall course2md	缺少 Apple 辨識所需的元件，請重新安裝 course2md	Apple 音声認識に必要なコンポーネントがありません。course2md を再インストールしてください。
 缺少 Apple 识别组件，请重新安装应用或改用其他方式	缺少 Apple 识别组件，请重新安装应用或改用其他方式	The Apple transcription component is missing. Reinstall the app or use another method.	缺少 Apple 辨識元件，請重新安裝應用程式或改用其他方式	Apple 音声認識コンポーネントがありません。アプリを再インストールするか、別の方法を使用してください。
 安装 llama.cpp 后才能用 GPU 或 CPU 识别	安装 llama.cpp 后才能用 GPU 或 CPU 识别	GPU and CPU transcription need llama.cpp installed	安裝 llama.cpp 後才能用 GPU 或 CPU 辨識	GPU と CPU での認識には llama.cpp のインストールが必要です
-缺少 stderr 管道	缺少 stderr 管道	Missing stderr pipe	缺少 stderr 管道	stderr パイプがありません
-缺少 stdout 管道	缺少 stdout 管道	Missing stdout pipe	缺少 stdout 管道	stdout パイプがありません
 缺少可核验的原任务身份 / Original task identity is missing	缺少可核验的原任务身份	Original task identity is missing	缺少可核驗的原任務身份	検証可能な元のタスクの識別情報がありません
 缺少在线视频下载组件，请在设置中查看	缺少在线视频下载组件，请在设置中查看	The online video download component is missing. Check Settings.	缺少線上影片下載元件，請在設定中檢視	オンライン動画ダウンロードコンポーネントがありません。設定を確認してください。
 缺少或尚未验证：{}	缺少或尚未验证：{}	Missing or not yet verified: {}	缺少或尚未驗證：{}	欠落しているか、まだ検証されていません: {}

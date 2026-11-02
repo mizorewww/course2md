@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-/// yt-dlp 调用的 socket 超时（秒）：兜底挂死的连接，三处调用统一
-const YTDLP_SOCKET_TIMEOUT: &str = "12";
+/// yt-dlp 调用的 socket 超时（秒）：兜底挂死的连接，三处调用与桌面预览统一
+pub const YTDLP_SOCKET_TIMEOUT: &str = "12";
 /// yt-dlp 尝试次数（首次 + 2 次重试）
 const YTDLP_ATTEMPTS: u32 = 3;
 /// 网络类错误的重试间隔
@@ -600,19 +600,21 @@ pub(crate) async fn probe_online(
     control: &crate::dispatch::TaskControl,
 ) -> Result<OnlineProbe> {
     let (mut cmd, _cookies) = ytdlp_command(url)?;
-    cmd.args([
-        "--simulate",
-        "--dump-single-json",
-        "--flat-playlist",
-        "--write-subs",
-        "--write-auto-subs",
-        "--sub-langs",
-        "all",
-        "--retries",
-        "1",
-    ]);
+    cmd.args(probe_args(true));
     let out = run_ytdlp(url, &mut cmd, control, false).await?;
     parse_online_probe(&out.stdout, url, &String::from_utf8_lossy(&out.stderr))
+}
+
+/// What a read-only probe asks yt-dlp for, here and in the desktop preview: one JSON
+/// document, a playlist only listed, one retry. `--simulate` writes neither media nor
+/// subtitle files, while `with_subtitles` makes extractors inspect both caption channels.
+pub fn probe_args(with_subtitles: bool) -> Vec<&'static str> {
+    let mut args = vec!["--simulate", "--dump-single-json", "--flat-playlist"];
+    args.extend(["--retries", "1"]);
+    if with_subtitles {
+        args.extend(["--write-subs", "--write-auto-subs", "--sub-langs", "all"]);
+    }
+    args
 }
 
 /// 抓取的平台字幕（yt-dlp 产物）。

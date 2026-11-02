@@ -190,7 +190,8 @@ pub struct BoundedOutput {
 }
 
 /// 短命令执行：stdin 关闭（ffmpeg 等工具在 GUI/管道 stdin 上会挂死）、
-/// 超时强制 kill（ManagedChild 兜底）、输出经临时文件捕获（防 pipe 写满再超时）。
+/// 超时强制 kill（ManagedChild 兜底）、输出经临时文件捕获（防 pipe 写满再超时）、
+/// 不弹控制台窗口（[`hide_console`]）。
 pub fn run_bounded(
     name: &'static str,
     cmd: &mut Command,
@@ -199,7 +200,8 @@ pub fn run_bounded(
     use std::io::{Read, Seek};
     let mut stdout = tempfile::tempfile()?;
     let mut stderr = tempfile::tempfile()?;
-    cmd.stdin(Stdio::null())
+    hide_console(cmd)
+        .stdin(Stdio::null())
         .stdout(stdout.try_clone()?)
         .stderr(stderr.try_clone()?);
     let mut child = ManagedChild::spawn(name, cmd)?;
@@ -221,6 +223,12 @@ pub fn run_bounded(
         stdout: capture(&stdout)?,
         stderr: capture(&stderr)?,
     })
+}
+
+/// A check's output: `cmd` ran within `timeout` and exited successfully.
+pub fn run_ok(cmd: &mut Command, timeout: Duration) -> Option<BoundedOutput> {
+    let out = run_bounded("check", cmd, timeout).ok()?;
+    out.status.success().then_some(out)
 }
 
 /// 轮询 `{base}/health` 直到其 status 为 ok（端口可能被无关服务抢占，free_port 有
@@ -411,18 +419,34 @@ pub fn hide_console(cmd: &mut Command) -> &mut Command {
 /// process tree. Launchers such as `uv run` start the real worker as a
 /// grandchild, which killing the direct child alone would leave running.
 pub fn terminate_tree(child: &mut ManagedChild) {
-    if child.try_wait().is_some() {
-        // Reaped: its id may already belong to another process.
-        return;
+    // Reaped: its id may already belong to another process.
+    if child.try_wait().is_none() {
+        kill_process(child.id(), true, false);
     }
+}
+
+/// Stops process `pid`; with `tree`, also the process group it leads (Unix) or
+/// its descendants (Windows). `force` sends SIGKILL, and the process itself
+/// too, instead of SIGTERM; Windows always ends it with `taskkill /F`. The
+/// caller makes sure `pid` has not been reaped and reused.
+pub fn kill_process(pid: u32, tree: bool, force: bool) {
     #[cfg(unix)]
     unsafe {
-        libc::kill(-(child.id() as i32), libc::SIGTERM);
+        let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+        if tree {
+            libc::killpg(pid as i32, signal);
+        }
+        if force || !tree {
+            libc::kill(pid as i32, signal);
+        }
     }
     #[cfg(windows)]
     {
+        let _ = force;
+        let pid = pid.to_string();
         let mut cmd = Command::new(system32_program("taskkill.exe"));
-        cmd.args(["/PID", &child.id().to_string(), "/T", "/F"])
+        cmd.args(["/PID", &pid, "/F"])
+            .args(tree.then_some("/T"))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
