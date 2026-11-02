@@ -2039,3 +2039,4 @@ AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
 第 {} 步，共 {} 步	第 {} 步，共 {} 步	Step {} of {}	第 {} 步，共 {} 步	ステップ {} / {}
 音频的处理位置	音频的处理位置	Where audio is processed	音訊的處理位置	音声の処理場所
 清空链接，选项恢复为默认设置	清空链接，选项恢复为默认设置	Clears the link and returns the options to your defaults	清空連結，選項恢復為預設設定	リンクを消去し、オプションを既定の設定に戻します
+无法连接服务，尚未发送请求，请核对服务地址和网络	无法连接服务，尚未发送请求，请核对服务地址和网络	Could not connect to the service, so no request was sent. Check the service URL and the network.	無法連線服務，尚未傳送請求，請核對服務網址和網路	サービスに接続できなかったため、リクエストは送信されていません。サービス URL とネットワークを確認してください。
