@@ -354,19 +354,16 @@ fn command_once(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(crate::backend::CREATE_NO_WINDOW);
-    }
-    let child = command.spawn().map_err(|error| {
-        eprintln!("cannot start {name}: {error}");
-        anyhow::anyhow!(course2md::tr!(
-            "缺少读取视频所需的组件，请在设置中检查运行环境"
-        ))
-    })?;
+    let child = course2md::runtime::hide_console(&mut command)
+        .spawn()
+        .map_err(|error| {
+            eprintln!("cannot start {name}: {error}");
+            anyhow::anyhow!(course2md::tr!(
+                "缺少读取视频所需的组件，请在设置中检查运行环境"
+            ))
+        })?;
     let (exited, exit) = std::sync::mpsc::channel();
-    let process = crate::backend::Watched::spawn(child, true, move |status, _| {
+    let process = crate::backend::Watched::spawn(child, move |status, _| {
         let _ = exited.send(status);
     });
     // Exit is delivered the moment the reaper sees it. The caller's cancel flag

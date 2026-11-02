@@ -33,10 +33,6 @@ impl Event {
     }
 }
 
-/// `CREATE_NO_WINDOW`: helper processes never flash a console window.
-#[cfg(windows)]
-pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 /// A child process reaped on its own thread. `kill` cannot reach a recycled
 /// PID: on Unix the reaper first waits without reaping (`WNOWAIT`), so the
 /// zombie keeps its PID reserved until the reaper marks it reaped under the
@@ -46,8 +42,6 @@ pub struct Watched {
 }
 struct WatchedProcess {
     pid: u32,
-    /// Kill the whole process group (Unix) / tree (Windows).
-    group: bool,
     state: std::sync::Mutex<WatchState>,
 }
 #[derive(Default)]
@@ -56,16 +50,15 @@ struct WatchState {
     killed: bool,
 }
 impl Watched {
-    /// Reaps `child` on a dedicated thread and then calls `on_exit` there with
-    /// its status and whether `kill` stopped it.
+    /// Reaps `child`, the leader of its own process group, on a dedicated
+    /// thread and then calls `on_exit` there with its status and whether `kill`
+    /// stopped it.
     pub fn spawn(
         mut child: std::process::Child,
-        group: bool,
         on_exit: impl FnOnce(std::io::Result<std::process::ExitStatus>, bool) + Send + 'static,
     ) -> Self {
         let shared = std::sync::Arc::new(WatchedProcess {
             pid: child.id(),
-            group,
             state: Default::default(),
         });
         let reaper = std::sync::Arc::clone(&shared);
@@ -100,41 +93,16 @@ impl Watched {
         Self { shared }
     }
 
-    /// Stops the process unless it has already been reaped. Returns whether
-    /// it was still running.
+    /// Stops the process and its group (Unix) / tree (Windows) unless it has
+    /// already been reaped. Returns whether it was still running.
     pub fn kill(&self) -> bool {
         let mut state = course2md::runtime::lock_recover(&self.shared.state);
         if state.reaped {
             return false;
         }
         state.killed = true;
-        kill_pid(self.shared.pid, self.shared.group);
+        course2md::runtime::kill_process(self.shared.pid, true, true);
         true
-    }
-}
-
-fn kill_pid(pid: u32, group: bool) {
-    #[cfg(unix)]
-    unsafe {
-        if group {
-            libc::killpg(pid as i32, libc::SIGKILL);
-        }
-        libc::kill(pid as i32, libc::SIGKILL);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let pid = pid.to_string();
-        let mut args = vec!["/PID", pid.as_str(), "/F"];
-        if group {
-            args.push("/T");
-        }
-        let _ = Command::new(course2md::runtime::system32_program("taskkill.exe"))
-            .creation_flags(CREATE_NO_WINDOW)
-            .args(args)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
     }
 }
 
@@ -192,43 +160,13 @@ impl Job {
             use std::os::unix::process::CommandExt;
             command.process_group(0);
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-        let mut child = command
+        let mut child = course2md::runtime::hide_console(&mut command)
             .spawn()
             .with_context(|| course2md::tr!("启动 {} 失败", bin.display()))?;
-        let pipes = (|| {
-            Ok::<_, anyhow::Error>((
-                child
-                    .stdout
-                    .take()
-                    .context(course2md::tr!("缺少 stdout 管道"))?,
-                child
-                    .stderr
-                    .take()
-                    .context(course2md::tr!("缺少 stderr 管道"))?,
-                match &input {
-                    Some(_) => Some(
-                        child
-                            .stdin
-                            .take()
-                            .context(course2md::tr!("无法传递任务参数"))?,
-                    ),
-                    None => None,
-                },
-            ))
-        })();
-        let (stdout, stderr, stdin) = match pipes {
-            Ok(pipes) => pipes,
-            Err(error) => {
-                kill_pid(child.id(), true);
-                let _ = child.wait();
-                return Err(error);
-            }
-        };
+        // All three were set up above: stdin only with an input.
+        let stdout = child.stdout.take().expect("stdout is piped");
+        let stderr = child.stderr.take().expect("stderr is piped");
+        let stdin = child.stdin.take();
         let (tx, events) = mpsc::sync_channel(512);
         // Readers start before the request is written: a request larger than the
         // pipe buffer must not wait on an engine that is blocked writing output.
@@ -251,7 +189,7 @@ impl Job {
             wake.clone(),
             finished,
         );
-        let process = Watched::spawn(child, true, {
+        let process = Watched::spawn(child, {
             let tx = tx.clone();
             let wake = wake.clone();
             move |status, cancelled| {
@@ -690,17 +628,12 @@ impl Environment {
         });
         let llama = llama_binary_on_path(&tool_path());
         let gpu = checks.get("llama-devices").and_then(|output| {
-            output.lines().find_map(|line| {
-                let (id, description) = line.trim().split_once(':')?;
-                course2md::asr::is_gpu_device_id(id).then(|| {
-                    description
-                        .split(" (")
-                        .next()
-                        .unwrap_or(description)
-                        .trim()
-                        .to_owned()
-                })
-            })
+            let devices = course2md::asr::parse_gpu_devices(output).ok()?;
+            let (_, description) = devices.first()?.split_once(':')?;
+            let name = description
+                .split_once(" (")
+                .map_or(description, |(name, _)| name);
+            Some(name.trim().to_owned())
         });
         let apple = course2md::config::apple_native_available()
             && cli
@@ -755,44 +688,11 @@ fn vc_runtime_present() -> bool {
         .all(|dll| dirs.iter().any(|dir| dir.join(dll).is_file()))
 }
 
-/// Bounded, executable checks. Redirect output to a file so a verbose tool cannot
-/// fill a pipe while the detector waits; timed-out children are always reaped.
+/// Bounded, executable checks: the tool's output when it runs and succeeds.
 fn probe(bin: &Path, args: &[&str], timeout: Duration) -> Option<String> {
-    use std::io::{Read, Seek};
-    let mut output = tempfile::tempfile().ok()?;
     let mut command = Command::new(bin);
-    command
-        .args(args)
-        .env("PATH", tool_path())
-        .stdin(Stdio::null())
-        .stdout(output.try_clone().ok()?)
-        .stderr(output.try_clone().ok()?);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    let child = command.spawn().ok()?;
-    let (exited, exit) = mpsc::channel();
-    let process = Watched::spawn(child, false, move |status, _| {
-        let _ = exited.send(status);
-    });
-    let status = match exit.recv_timeout(timeout) {
-        Ok(status) => status.ok()?,
-        Err(_) => {
-            process.kill();
-            // The reaper reports once the killed child is gone.
-            let _ = exit.recv();
-            return None;
-        }
-    };
-    if !status.success() {
-        return None;
-    }
-    output.rewind().ok()?;
-    let mut text = String::new();
-    output.take(32 * 1024).read_to_string(&mut text).ok()?;
-    Some(text)
+    command.args(args).env("PATH", tool_path());
+    course2md::runtime::run_ok(&mut command, timeout).map(|out| out.stdout)
 }
 
 #[cfg(test)]
@@ -1099,7 +999,7 @@ mod tests {
     }
 
     #[test]
-    fn probe_reports_output_and_times_out_without_polling() {
+    fn probe_reports_output_and_times_out() {
         #[cfg(unix)]
         {
             let started = Instant::now();
