@@ -240,6 +240,9 @@ fn main() -> std::process::ExitCode {
                     code: progress::ErrorCode::of(&error),
                     message,
                 });
+            } else if helper.is_some() {
+                // The parent puts the helper's words into its own error.
+                eprintln!("{message}");
             } else {
                 eprintln_tr!("错误：{}", message);
             }
