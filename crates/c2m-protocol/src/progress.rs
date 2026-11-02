@@ -193,7 +193,7 @@ impl ErrorCode {
     /// The code a typed error carries; untyped errors are `Other`.
     pub fn of(error: &anyhow::Error) -> Self {
         use crate::outcome::FailureKind;
-        if error.downcast_ref::<crate::error::MissingTool>().is_some() {
+        if error.downcast_ref::<crate::tool::MissingTool>().is_some() {
             return Self::MissingTool;
         }
         if error
@@ -298,7 +298,7 @@ pub enum Event {
         operation: ModelOperation,
         dir: PathBuf,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        provider: Option<crate::config::AsrProvider>,
+        provider: Option<crate::speech::AsrProvider>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -391,7 +391,7 @@ pub fn stage(stage: Stage, status: StageStatus) {
 static TOKENS: Mutex<(u64, u64)> = Mutex::new((0, 0));
 
 fn reset_tokens() {
-    *crate::runtime::lock_recover(&TOKENS) = (0, 0);
+    *crate::sync::lock_recover(&TOKENS) = (0, 0);
 }
 
 /// 记录一次 LLM 响应的 token 用量并发出累计值（json 模式才有事件）。
@@ -399,7 +399,7 @@ pub fn note_tokens(stage: Stage, prompt: u64, completion: u64) {
     if prompt == 0 && completion == 0 {
         return;
     }
-    let mut guard = crate::runtime::lock_recover(&TOKENS);
+    let mut guard = crate::sync::lock_recover(&TOKENS);
     guard.0 += prompt;
     guard.1 += completion;
     emit(&Event::Tokens {
@@ -412,7 +412,7 @@ pub fn note_tokens(stage: Stage, prompt: u64, completion: u64) {
 /// 视频下载字节进度：yt-dlp 每次刷一行，这里限流后发给 GUI。
 pub fn download_progress(current: u64, total: u64) {
     static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-    let mut last = crate::runtime::lock_recover(&LAST);
+    let mut last = crate::sync::lock_recover(&LAST);
     if current != total && last.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(200))
     {
         return;
@@ -619,7 +619,7 @@ impl Bar {
     pub fn set_message(&self, msg: impl Into<String>) {
         let msg = msg.into();
         if is_json() {
-            *crate::runtime::lock_recover(&self.message) = msg;
+            *crate::sync::lock_recover(&self.message) = msg;
             let cur = self.current.load(Ordering::Relaxed);
             self.emit_progress(cur, false);
         } else {
@@ -631,8 +631,8 @@ impl Bar {
     /// shows `human` as the bar message instead.
     pub fn set_phase(&self, phase: Phase, data: &str, human: impl Into<String>) {
         if is_json() {
-            *crate::runtime::lock_recover(&self.phase) = Some(phase);
-            *crate::runtime::lock_recover(&self.message) = data.to_string();
+            *crate::sync::lock_recover(&self.phase) = Some(phase);
+            *crate::sync::lock_recover(&self.message) = data.to_string();
             self.emit_progress(self.current.load(Ordering::Relaxed), true);
         } else {
             self.bar.set_message(human.into());
@@ -647,7 +647,7 @@ impl Bar {
     }
 
     fn emit_progress(&self, current: u64, force: bool) {
-        let mut last = crate::runtime::lock_recover(&self.last_emit);
+        let mut last = crate::sync::lock_recover(&self.last_emit);
         if !force
             && current != 0
             && current != self.total
@@ -656,8 +656,8 @@ impl Bar {
             return;
         }
         *last = std::time::Instant::now();
-        let message = crate::runtime::lock_recover(&self.message).clone();
-        let phase = *crate::runtime::lock_recover(&self.phase);
+        let message = crate::sync::lock_recover(&self.message).clone();
+        let phase = *crate::sync::lock_recover(&self.phase);
         emit(&Event::Progress {
             stage: self.stage.clone(),
             current,

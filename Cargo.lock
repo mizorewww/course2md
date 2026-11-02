@@ -983,6 +983,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "strum 0.27.2",
  "tempfile",
  "thiserror 2.0.21",
 ]
@@ -1066,10 +1067,8 @@ name = "c2m-protocol"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "c2m-config",
  "c2m-core",
  "c2m-i18n",
- "c2m-process",
  "indicatif",
  "serde",
  "serde_json",
