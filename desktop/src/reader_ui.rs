@@ -401,6 +401,42 @@ impl NoteDocument {
                     .map(move |block| (block, Some(index)))
             };
             match block {
+                // The summary is one panel: its overview and its key points.
+                PreviewBlock::Heading { anchor, .. } if anchor == "summary" => {
+                    parts.append(&mut figures);
+                    if let Some(chapter) = chapters.get(&index) {
+                        let chapter = note_text::plain_inline_markdown(chapter);
+                        parts.push((format!("## {chapter}"), Some(index)));
+                    }
+                    let start = index;
+                    let mut summary = Vec::new();
+                    index += 1;
+                    while let Some(PreviewBlock::Paragraph { text, anchor }) = blocks.get(index)
+                        && (anchor == "summary-tldr" || anchor.starts_with("key-point-"))
+                    {
+                        if anchor.starts_with("key-point-") {
+                            let mut list = Vec::new();
+                            while let Some(PreviewBlock::Paragraph { text, anchor }) =
+                                blocks.get(index)
+                                && anchor.starts_with("key-point-")
+                            {
+                                list.push(format!("- {}", note_text::inline_markdown(text)));
+                                index += 1;
+                            }
+                            summary.push(list.join("\n"));
+                        } else {
+                            summary.extend(note_text::blocks(text));
+                            index += 1;
+                        }
+                    }
+                    if !summary.is_empty() {
+                        parts.push((
+                            note_text::surface(note_text::SUMMARY_SURFACE, &summary.join("\n\n")),
+                            Some(start),
+                        ));
+                    }
+                    continue;
+                }
                 PreviewBlock::Heading { text, seconds, .. } => {
                     parts.append(&mut figures);
                     if let Some(chapter) = chapters.get(&index) {
@@ -4319,7 +4355,11 @@ mod tests {
                 .markdown
                 .contains("## 问题由来\n\n### 01:00 [▶](https://video.example/?t=60)")
         );
-        assert!(document.markdown.contains("- 第一点\n- 第二点 $x$"));
+        // The summary is one panel, which names it; its text stays the note's.
+        assert!(document.markdown.contains(
+            "<!-- surface:summary -->\n\n总览 \\*不是强调\\*\n\n- 第一点\n- 第二点 $x$\n\n<!-- /surface -->"
+        ));
+        assert!(!document.markdown.contains("## 摘要"));
         assert!(document.markdown.contains("> A translation"));
         // A section's screenshot follows its paragraphs.
         assert!(
@@ -4333,8 +4373,6 @@ mod tests {
                 None,
                 None,
                 Some(0),
-                Some(1),
-                Some(2),
                 Some(4),
                 Some(4),
                 Some(6),
@@ -4346,11 +4384,11 @@ mod tests {
                 Some(8)
             ]
         );
-        assert_eq!(document.item_of(2), Some(4));
-        // A later key point is in the same list.
-        assert_eq!(document.item_of(3), Some(4));
+        // The overview and every key point are in the summary's panel.
+        assert_eq!(document.item_of(1), Some(2));
+        assert_eq!(document.item_of(3), Some(2));
         assert_eq!(document.block_at(0), Some(0));
-        assert_eq!(document.block_at(12), Some(5));
+        assert_eq!(document.block_at(10), Some(5));
         assert_eq!(document.block_at(99), None);
     }
 

@@ -14,9 +14,10 @@ use gpui_base::{
         InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
         MarkdownPlugin, TextViewStyle,
     },
+    v_flex,
 };
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
-use gpui_kit_material::{color::ColorRole, prelude::*};
+use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};
 use std::{
     ops::Range,
     sync::{
@@ -474,12 +475,54 @@ pub fn extensions(line_width: Arc<AtomicU32>) -> MarkdownExtensions {
         .plugin(DisplayFormula)
 }
 
+/// The block surface a note's summary is drawn in.
+pub const SUMMARY_SURFACE: &str = "summary";
+
+/// `blocks` as one block surface named `name`: what they hold stays the note's text.
+pub fn surface(name: &str, blocks: &str) -> String {
+    format!("<!-- surface:{name} -->\n\n{blocks}\n\n<!-- /surface -->")
+}
+
+/// The summary's panel: the secondary container, with its title and sparkle. The title
+/// is the panel's, not the note's text, so a copy or a find does not take it.
+fn summary_panel(window: &mut Window, _: &mut App) -> Div {
+    let compact = window.viewport_size().width < px(600.);
+    let title = TypeRole::TitleSmall.scale();
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .px(if compact { rem(16.) } else { rem(24.) })
+        .py(rem(20.))
+        .rounded(RADIUS_LARGE_INCREASED)
+        .bg(color(ColorRole::SECONDARY_CONTAINER))
+        .text_color(color(ColorRole::ON_SECONDARY_CONTAINER))
+        .child(
+            h_flex()
+                .gap(rem(8.))
+                .pb(rem(12.))
+                .items_center()
+                .child(
+                    Icon::from(crate::symbols::auto_awesome())
+                        .size(rem(18.))
+                        .color(color(ColorRole::ON_SECONDARY_CONTAINER)),
+                )
+                .child(
+                    accessible_text("note-summary-title", c2m_i18n::tr!("摘要"))
+                        .role(Role::Heading)
+                        .text_size(title.font_size)
+                        .line_height(title.line_height)
+                        .font_weight(FontWeight::SEMIBOLD),
+                ),
+        )
+}
+
 /// [`extensions`], plus what only a whole note holds.
 pub fn note_extensions(line_width: Arc<AtomicU32>, render: RenderBlock) -> MarkdownExtensions {
     extensions(line_width)
-        .parser_revision(2)
+        .parser_revision(3)
         .plugin(ReaderBlock { render })
         .plugin(SourceLink)
+        .block_surface(SUMMARY_SURFACE, summary_panel)
 }
 
 /// How note text reads: the kit's type roles on the note's surface.
