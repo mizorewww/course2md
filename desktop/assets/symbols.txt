@@ -17,7 +17,7 @@ book_2
 cancel
 chat_bubble
 check
-check_circle
+check_circle fill
 checklist
 chevron_left
 chevron_right

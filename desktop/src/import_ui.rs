@@ -10,12 +10,7 @@ use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
 use desktop_tasks::import::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
-use gpui_kit_material::{
-    color::ColorRole,
-    icons::{Icon, SymbolIcon},
-    motion,
-    prelude::*,
-};
+use gpui_kit_material::{color::ColorRole, icons::Icon, motion, prelude::*};
 use std::{
     path::PathBuf,
     sync::{Arc, atomic::AtomicBool},
@@ -111,17 +106,6 @@ fn details_toggle(id: impl Into<ElementId>, open: bool) -> MaterialButton {
         } else {
             course2md::tr!("技术详情")
         })
-}
-
-/// An icon-only action; its tooltip names it.
-fn tip_button(
-    id: &'static str,
-    icon: SymbolIcon,
-    label: &'static str,
-    configure: impl FnOnce(IconButton) -> IconButton,
-) -> MaterialTooltip {
-    MaterialTooltip::plain(SharedString::from(format!("{id}-tooltip")), label)
-        .trigger(configure(IconButton::new(id, icon, label)))
 }
 
 /// The first line of a message when it is already readable. A raw download
@@ -673,29 +657,29 @@ impl Desktop {
         let preview_click = cx.listener(|this, _, window, cx| this.inspect_source(window, cx));
         // A narrow window keeps the field's text: the action folds to its icon.
         let preview = if is_compact(window) {
-            let mut button =
-                IconButton::new("preview-source", symbols::visibility(), preview_label)
-                    .variant(IconButtonVariant::Tonal)
-                    .button_size(ButtonSize::Medium)
-                    .disabled(preview_disabled)
-                    .on_click(preview_click);
-            if !start_shown {
-                button = button.track_focus(&self.import_submit_focus);
-            }
-            MaterialTooltip::plain("preview-source-tooltip", preview_label)
-                .trigger(button)
-                .into_any_element()
+            ui::tip_button(
+                "preview-source",
+                symbols::visibility(),
+                preview_label,
+                |button| {
+                    button
+                        .variant(IconButtonVariant::Tonal)
+                        .button_size(ButtonSize::Medium)
+                        .disabled(preview_disabled)
+                        .on_click(preview_click)
+                        .when(!start_shown, |b| b.track_focus(&self.import_submit_focus))
+                },
+            )
+            .into_any_element()
         } else {
-            let mut button = material_button("preview-source", ButtonVariant::Tonal)
+            material_button("preview-source", ButtonVariant::Tonal)
                 .button_size(ButtonSize::Medium)
                 .icon(symbols::visibility())
                 .child(preview_label)
                 .disabled(preview_disabled)
-                .on_click(preview_click);
-            if !start_shown {
-                button = button.track_focus(&self.import_submit_focus);
-            }
-            button.into_any_element()
+                .on_click(preview_click)
+                .when(!start_shown, |b| b.track_focus(&self.import_submit_focus))
+                .into_any_element()
         };
         v_flex()
             .w_full()
@@ -752,31 +736,39 @@ impl Desktop {
         };
         if input.is_empty() {
             return Some(
-                tile([true; 4])
-                    .flex()
-                    .flex_col()
-                    .gap(rem(16.))
-                    .p(rem(32.))
-                    .items_center()
-                    .border_2()
-                    .border_dashed()
-                    .border_color(color(ColorRole::OUTLINE))
-                    .child(
-                        Icon::from(symbols::file_upload())
-                            .size(rem(32.))
-                            .color(color(ColorRole::PRIMARY)),
-                    )
-                    .child(
-                        accessible_text("import-drop-instruction", course2md::tr!("拖入本地视频"))
+                // The kit's drop target on the tile's surface: dashed at rest, primary
+                // while a file is dragged over it.
+                div().w_full().min_w_0().child(
+                    drop_target("import-drop-zone", course2md::tr!("拖入本地视频"), false)
+                        .w_full()
+                        .min_w_0()
+                        .bg(color(ColorRole::SURFACE))
+                        .rounded(TILE_RADIUS)
+                        .flex()
+                        .flex_col()
+                        .gap(rem(16.))
+                        .p(rem(32.))
+                        .items_center()
+                        .child(
+                            Icon::from(symbols::file_upload())
+                                .size(rem(32.))
+                                .color(color(ColorRole::PRIMARY)),
+                        )
+                        .child(
+                            accessible_text(
+                                "import-drop-instruction",
+                                course2md::tr!("拖入本地视频"),
+                            )
                             .text_size(TEXT_BODY)
                             .font_weight(FontWeight::MEDIUM),
-                    )
-                    .child(choose(
-                        "choose-video",
-                        ButtonVariant::Filled,
-                        course2md::tr!("选择视频"),
-                        cx,
-                    )),
+                        )
+                        .child(choose(
+                            "choose-video",
+                            ButtonVariant::Filled,
+                            course2md::tr!("选择视频"),
+                            cx,
+                        )),
+                ),
             );
         }
         if self.import.source_preview.is_some() {
@@ -886,7 +878,7 @@ impl Desktop {
                                             .min_w_0()
                                             .whitespace_normal(),
                                         )
-                                        .child(tip_button(
+                                        .child(ui::tip_button(
                                             "cancel-source-read",
                                             symbols::close(),
                                             label,
@@ -1182,13 +1174,10 @@ impl Desktop {
                                     )
                                 },
                             )
-                            .child(details_toggle("source-error-details", open).on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.import.show_preview_details =
-                                        !this.import.show_preview_details;
-                                    cx.notify();
-                                }),
-                            )),
+                            .child(
+                                details_toggle("source-error-details", open)
+                                    .on_click(cx.listener(Self::toggle_preview_details)),
+                            ),
                     ),
                 )
                 .child(motion::disclosure(
@@ -1200,6 +1189,11 @@ impl Desktop {
                     )),
                 )),
         ))
+    }
+
+    fn toggle_preview_details(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.import.show_preview_details = !self.import.show_preview_details;
+        cx.notify();
     }
 
     /// The previewed video: cover, identity, what its text will come from and the one
@@ -1240,7 +1234,7 @@ impl Desktop {
             .items_center()
             .flex_wrap()
             .when(self.online(), |row| {
-                row.child(tip_button(
+                row.child(ui::tip_button(
                     "reread-source",
                     symbols::refresh(),
                     course2md::tr!("重新读取"),
@@ -1316,7 +1310,7 @@ impl Desktop {
                                     .when(!metadata.is_empty(), |row| {
                                         row.child(supporting("import-source-meta", metadata))
                                     })
-                                    .child(tip_button(
+                                    .child(ui::tip_button(
                                         "source-details",
                                         if details_open {
                                             symbols::keyboard_arrow_up()
@@ -1325,18 +1319,14 @@ impl Desktop {
                                         },
                                         course2md::tr!("来源详情"),
                                         |button| {
-                                            button.button_size(ButtonSize::ExtraSmall).on_click(
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.import.show_preview_details =
-                                                        !this.import.show_preview_details;
-                                                    cx.notify();
-                                                }),
-                                            )
+                                            button
+                                                .button_size(ButtonSize::ExtraSmall)
+                                                .on_click(cx.listener(Self::toggle_preview_details))
                                         },
                                     )),
                             ),
                     )
-                    .child(tip_button(
+                    .child(ui::tip_button(
                         "clear-source-preview",
                         symbols::close(),
                         course2md::tr!("移除预览"),
@@ -1389,12 +1379,14 @@ impl Desktop {
     ) -> Div {
         let speech = self.import_uses_speech();
         let mode = self.task_options().source_mode;
-        let failure = self.import.subtitle_error.as_deref().or_else(|| {
-            match (&source.subtitles, subtitle_needs_confirmation(source, mode)) {
-                (SubtitleEvidence::Failed { message }, true) => Some(message.as_str()),
-                _ => None,
-            }
-        });
+        // A read error of this input, or the source's own failed read.
+        let read_error = self.import.subtitle_error.as_deref();
+        let source_failure = match &source.subtitles {
+            SubtitleEvidence::Failed { message } => Some(message.as_str()),
+            _ => None,
+        };
+        let failure =
+            read_error.or(source_failure.filter(|_| subtitle_needs_confirmation(source, mode)));
         let pending = source.subtitle_request.is_some() || source.subtitle_read_error.is_some();
         let value: SharedString = if self.import.subtitle_loading {
             course2md::tr!("正在读取字幕…").into()
@@ -1428,14 +1420,8 @@ impl Desktop {
         );
         let login = source.online
             && course2md::auth::is_bilibili_url(&source.input)
-            && self
-                .import
-                .subtitle_error
-                .as_deref()
-                .or(match &source.subtitles {
-                    SubtitleEvidence::Failed { message } => Some(message.as_str()),
-                    _ => None,
-                })
+            && read_error
+                .or(source_failure)
                 .is_some_and(source::legacy_login_failure_from_text);
         let notice = match &source.subtitles {
             _ if !speech || self.import.subtitle_loading => None,
@@ -2073,7 +2059,7 @@ impl Desktop {
                 .gap(rem(8.))
                 .items_center()
                 .child(div().flex_1().min_w_0().child(self.folder_picker(cx)))
-                .child(tip_button(
+                .child(ui::tip_button(
                     "import-new-folder",
                     symbols::create_new_folder(),
                     course2md::tr!("新建文件夹"),
@@ -2224,11 +2210,11 @@ impl Desktop {
                     ))
                     .child(disclosure_chevron(open)),
             );
-        let hairline = || {
-            div()
-                .h(px(1.))
-                .mx(ITEM_INSET)
-                .bg(color(ColorRole::OUTLINE_VARIANT))
+        let hairline = |id: &'static str| {
+            MaterialDivider::new(id)
+                .variant(DividerVariant::MiddleInset)
+                .inset_start(ITEM_INSET)
+                .inset_end(ITEM_INSET)
         };
         // The way to the next video stays visible whether or not the plan is open: a
         // running task's card carries it; otherwise it sits right under this header.
@@ -2236,30 +2222,38 @@ impl Desktop {
             .as_ref()
             .filter(|task| !desktop_tasks::task_view::runs_in_card(task))
             .map(|_| {
-                v_flex().w_full().min_w_0().child(hairline()).child(
-                    scale
-                        .button("set-up-next-video", [false, false, false, false])
-                        .accessibility_label(course2md::tr!("设置下一个视频"))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.set_up_next_video(window, cx)),
-                        )
-                        .child(
-                            scale
-                                .row()
-                                .child(Icon::from(symbols::add()).color(color(ColorRole::PRIMARY)))
-                                .child(scale.text(
-                                    "set-up-next-video-label",
-                                    course2md::tr!("设置下一个视频"),
-                                    Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
-                                )),
-                        ),
-                )
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .child(hairline("options-next-divider"))
+                    .child(
+                        scale
+                            .button("set-up-next-video", [false, false, false, false])
+                            .accessibility_label(course2md::tr!("设置下一个视频"))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.set_up_next_video(window, cx)
+                                }),
+                            )
+                            .child(
+                                scale
+                                    .row()
+                                    .child(
+                                        Icon::from(symbols::add()).color(color(ColorRole::PRIMARY)),
+                                    )
+                                    .child(scale.text(
+                                        "set-up-next-video-label",
+                                        course2md::tr!("设置下一个视频"),
+                                        Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
+                                    )),
+                            ),
+                    )
             });
         // One surface: a hairline under the header, then quiet sections inside it.
         let body = v_flex()
             .w_full()
             .min_w_0()
-            .child(hairline())
+            .child(hairline("options-header-divider"))
             .child(match &owner {
                 Some(task) => v_flex()
                     .w_full()
@@ -2416,7 +2410,6 @@ impl Desktop {
             cx.notify();
             return false;
         }
-        self.import.completed_source = None;
         self.invalidate_source();
         self.restore_draft(window, cx);
         self.import.source_editor_open = true;
@@ -2559,22 +2552,27 @@ impl Desktop {
             .bg(color(ColorRole::SURFACE_CONTAINER).opacity(0.88))
             .p(rem(24.))
             .child(
-                v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .gap(rem(16.))
-                    .rounded(RADIUS_HERO)
-                    .border_2()
-                    .border_dashed()
-                    .border_color(color(ColorRole::PRIMARY))
-                    .child(tinted_icon(symbols::file_upload(), Tint::Teal, rem(88.)))
-                    .child(
-                        div()
-                            .text_size(TEXT_HEADLINE)
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(course2md::tr!("松开以添加视频")),
-                    ),
+                // Shown only while a file is over the window, so it draws the
+                // kit's dragged-over look outright.
+                drop_target(
+                    "workbench-drop-target",
+                    course2md::tr!("松开以添加视频"),
+                    true,
+                )
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(rem(16.))
+                .rounded(RADIUS_HERO)
+                .child(tinted_icon(symbols::file_upload(), Tint::Teal, rem(88.)))
+                .child(
+                    div()
+                        .text_size(TEXT_HEADLINE)
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(course2md::tr!("松开以添加视频")),
+                ),
             )
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 this.drop_source_files(paths.paths(), window, cx);

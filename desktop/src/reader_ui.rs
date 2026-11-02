@@ -2159,10 +2159,16 @@ impl Desktop {
                         let time = seconds
                             .filter(|seconds| *label != course2md::render::fmt_ts(*seconds))
                             .map(course2md::render::fmt_ts);
+                        // Flat pills on whatever the contents sit on (R9): the page
+                        // ground beside the note, the sheet's surface over it.
                         ListItem::new(("toc-item", index), label.clone())
                             .density(ListDensity::Compact)
-                            .container(ColorRole::SURFACE_CONTAINER)
-                            .segment([true; 4])
+                            .container(if beside {
+                                ColorRole::SURFACE_CONTAINER_LOW
+                            } else {
+                                ColorRole::SURFACE_CONTAINER
+                            })
+                            .pill(true)
                             .selected(current == Some(index))
                             .when_some(time, |item, time| item.trailing_text(time))
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -4234,13 +4240,17 @@ impl Desktop {
                             accessible_text("reader-crumb", crumb)
                                 .truncate()
                                 .text_size(TEXT_AUX)
+                                .line_height(TypeRole::BodySmall.scale().line_height)
                                 .text_color(color(ON_SURFACE_VARIANT)),
                         )
                         .child(
+                            // Both lines on their roles' line heights, so the pair centres
+                            // on the back button as its ink does (U20).
                             accessible_text("reader-crumb-title", title)
                                 .role(Role::Heading)
                                 .truncate()
                                 .text_size(TEXT_TITLE)
+                                .line_height(TypeRole::TitleLarge.scale().line_height)
                                 .text_color(color(ON_SURFACE)),
                         ),
                 )

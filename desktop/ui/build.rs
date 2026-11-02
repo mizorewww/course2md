@@ -40,6 +40,9 @@ fn render_symbols() {
             Some(kit),
             fill.then(|| icon.filled(true)),
             fill.then(|| kit.filled(true)),
+            // A kit glyph drawn filled in the catalog's own style, such as a selected
+            // card's check.
+            fill.then(|| symbol.icon().filled(true)),
         ]
         .into_iter()
         .flatten()
