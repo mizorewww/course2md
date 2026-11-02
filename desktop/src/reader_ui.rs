@@ -4240,13 +4240,17 @@ impl Desktop {
                             accessible_text("reader-crumb", crumb)
                                 .truncate()
                                 .text_size(TEXT_AUX)
+                                .line_height(TypeRole::BodySmall.scale().line_height)
                                 .text_color(color(ON_SURFACE_VARIANT)),
                         )
                         .child(
+                            // Both lines on their roles' line heights, so the pair centres
+                            // on the back button as its ink does (U20).
                             accessible_text("reader-crumb-title", title)
                                 .role(Role::Heading)
                                 .truncate()
                                 .text_size(TEXT_TITLE)
+                                .line_height(TypeRole::TitleLarge.scale().line_height)
                                 .text_color(color(ON_SURFACE)),
                         ),
                 )

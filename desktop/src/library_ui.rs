@@ -134,7 +134,6 @@ impl Desktop {
             return;
         }
         let previous_source = self.import.source_preview.clone();
-        self.import.completed_source = None;
         self.invalidate_source();
         if input.is_empty() {
             self.import.source_validation = Some(

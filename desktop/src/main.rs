@@ -588,7 +588,6 @@ impl Desktop {
         }
         match workspace.transaction(|state| Ok(state.prepare_next_import(value, defaults))) {
             Ok(true) => {
-                self.import.completed_source = None;
                 self.invalidate_source();
                 self.message = None;
                 self.inputs[&Field::Title].update(cx, |state, cx| state.set_value("", window, cx));
