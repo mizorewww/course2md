@@ -65,9 +65,12 @@ notes
 open_in_full
 open_in_new
 palette fill
+password
+phone_iphone
 pause
 play_arrow
 progress_activity
+qr_code_2
 refresh
 restart_alt
 save
@@ -75,6 +78,8 @@ schedule
 science
 search
 settings
+smart_display
+sms
 storage fill
 subtitles
 summarize
@@ -84,6 +89,7 @@ tv
 visibility
 visibility_off
 warning
+web
 zoom_in
 zoom_out
 

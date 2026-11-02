@@ -15,6 +15,7 @@ mod folder_tree;
 mod i18n;
 mod import_ui;
 mod library_ui;
+mod login_ui;
 mod ollama_ui;
 mod onboarding;
 #[cfg(feature = "performance")]
@@ -26,6 +27,7 @@ mod storage_ui;
 mod task_runner;
 mod task_ui;
 mod views;
+mod youtube_ui;
 
 use desktop_core::{
     activity, backend, conversion, credentials, interrupted, model_discovery, notes, organize,
@@ -108,6 +110,9 @@ struct Desktop {
     transient_task_result: Option<(String, Instant)>,
     draft_deadline: Option<Instant>,
     account: desktop_core::account::AccountUi,
+    /// The password and SMS login fields, made when the login dialog first opens.
+    login_inputs: Option<login_ui::LoginInputs>,
+    youtube: desktop_core::youtube::YoutubeUi,
     codex: desktop_core::codex::CodexUi,
     ollama: desktop_core::ollama::OllamaUi,
     /// A startup reconciliation of the task record is running.
@@ -424,6 +429,8 @@ impl Desktop {
             import_submit_focus: cx.focus_handle(),
             root_focus: Self::install_root_focus(window, cx),
             account: desktop_core::account::AccountUi::default(),
+            login_inputs: None,
+            youtube: desktop_core::youtube::YoutubeUi::default(),
             codex: desktop_core::codex::CodexUi::default(),
             ollama: desktop_core::ollama::OllamaUi::default(),
             window: window.window_handle(),
@@ -453,6 +460,7 @@ impl Desktop {
         std::thread::spawn(source::prune_cache);
         cx.set_reduce_motion(this.desktop_settings.reduce_motion);
         this.refresh_account(cx);
+        this.load_youtube(cx);
         this.refresh_environment(cx);
         this.refresh_library(cx);
         this.poll_workspace(cx);

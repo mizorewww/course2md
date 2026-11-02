@@ -1,4 +1,5 @@
-//! Bilibili account settings and cancellable QR login. No ticket is logged or stored in UI text.
+//! Bilibili account settings and its login dialog: the cancellable QR login here, the
+//! password and SMS forms in `login_ui`. No ticket is logged or stored in UI text.
 use crate::ui::Resource;
 use crate::{Desktop, Field, Page, symbols, ui};
 use course2md::auth::{AccountStatus, QrPoll, QrSession};
@@ -290,11 +291,17 @@ impl Desktop {
                 self.value(Field::Source, cx),
             )
         });
-        self.start_account_qr(cx);
+        self.ensure_login_inputs(window, cx);
+        if self.account.method == LoginMethod::Qr {
+            self.start_account_qr(cx);
+        } else {
+            self.account.invalidate();
+            self.account.dialog = Some(QrDialogState::Generating);
+        }
         window.refresh();
     }
 
-    fn start_account_qr(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn start_account_qr(&mut self, cx: &mut Context<Self>) {
         self.account.invalidate();
         self.account.dialog = Some(QrDialogState::Generating);
         let generation = self.account.generation;
@@ -437,8 +444,9 @@ impl Desktop {
         else {
             return div().into_any_element();
         };
-        let retry = matches!(state, QrDialogState::Expired | QrDialogState::Error(_));
         let success = matches!(state, QrDialogState::Success(_));
+        let qr = self.account.method == LoginMethod::Qr || success;
+        let retry = qr && matches!(state, QrDialogState::Expired | QrDialogState::Error(_));
         let retry_source = success && self.can_retry_account_source(cx);
         let close = cx.listener(|this, _: &ClickEvent, window, cx| {
             let retry = matches!(this.account.dialog, Some(QrDialogState::Success(_)))
@@ -469,8 +477,26 @@ impl Desktop {
             .container(ColorRole::SURFACE)
             .headline(course2md::tr!("登录 Bilibili"))
             .width(DIALOG_LOGIN_WIDTH)
-            .content(self.account_dialog_content(state, window, cx))
+            .content(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(20.))
+                    // A phone check continues the login it interrupted; no method to switch.
+                    .when(!success && self.account.risk.is_none(), |content| {
+                        content.child(div().px(rem(24.)).child(self.login_method_group(cx)))
+                    })
+                    .child(if qr {
+                        self.account_dialog_content(state, window, cx)
+                    } else {
+                        self.login_form(window, cx)
+                    }),
+            )
             .action(close)
+            .when_some(
+                (!qr).then(|| self.login_form_action(cx)).flatten(),
+                |dialog, action| dialog.action(action),
+            )
             .when(retry, |dialog| {
                 dialog.action(
                     material_button("account-qr-retry", ButtonVariant::Filled)

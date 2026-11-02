@@ -263,11 +263,16 @@ fn command_output(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Comm
         {
             return result;
         }
-        if !course2md::fetch::is_bilibili_412(&message) {
+        let delay = if course2md::fetch::is_bilibili_412(&message) {
+            let Some(delay) = course2md::fetch::bilibili_retry_delay(&message, retries) else {
+                return result.context(course2md::fetch::BILIBILI_412_DESKTOP_HINT);
+            };
+            delay
+        } else if course2md::fetch::is_connection_reset(&message) && retries < 2 {
+            // The site's edge dropped the connection; the next attempt usually passes.
+            Duration::from_secs(1)
+        } else {
             return result;
-        }
-        let Some(delay) = course2md::fetch::bilibili_retry_delay(&message, retries) else {
-            return result.context(course2md::fetch::BILIBILI_412_DESKTOP_HINT);
         };
         retries += 1;
         let retry_at = Instant::now() + delay;
@@ -624,29 +629,8 @@ pub fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
     if cache_hit(&target) {
         return Ok(target);
     }
-    let response = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(3))
-        .timeout_read(Duration::from_secs(2))
-        .timeout(Duration::from_secs(6))
-        .build()
-        .get(url)
-        .call()?;
-    use std::io::Read;
-    let mut reader = response.into_reader();
-    let mut bytes = Vec::new();
-    let mut buffer = [0; 32 * 1024];
-    loop {
-        check_cancel(cancel)?;
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        bytes.extend_from_slice(&buffer[..count]);
-        ensure!(
-            bytes.len() <= 12 * 1024 * 1024,
-            course2md::tr!("封面超过读取上限")
-        );
-    }
+    // Bilibili's image CDN needs the platform TLS stack, as its pages do.
+    let bytes = course2md::fetch::read_remote(url, 12 * 1024 * 1024, cancel)?;
     check_cancel(cancel)?;
     let image = image::load_from_memory(&bytes).context(course2md::tr!("封面格式无法识别"))?;
     let file = tempfile::Builder::new().suffix(".jpg").tempfile_in(
