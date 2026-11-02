@@ -2197,10 +2197,50 @@ impl Desktop {
         let label = frame.map_or(course2md::tr!("截图").to_owned(), |frame| {
             frame_label(&self.reader_ui.frames[frame])
         });
-        let slot = screenshot_slot(("note-figure-slot", block), Some(loaded));
+        let enlarge = course2md::tr!("放大{}", label);
+        // The frame's time at one corner and the action that enlarges it at the other.
+        let slot = screenshot_slot(("note-figure-slot", block), Some(loaded)).when_some(
+            frame,
+            |slot, frame| {
+                let seconds = self.reader_ui.frames[frame].seconds;
+                slot.child(
+                    media_label(
+                        ("note-figure-time", block),
+                        course2md::render::fmt_ts(seconds),
+                    )
+                    .absolute()
+                    .left(rem(12.))
+                    .bottom(rem(12.)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .right(rem(12.))
+                        .bottom(rem(12.))
+                        .child(tool(
+                            IconButton::new(
+                                ("note-figure-enlarge", block),
+                                symbols::open_in_full(),
+                                enlarge.clone(),
+                            )
+                            .variant(IconButtonVariant::Tonal)
+                            .tone(ButtonTone::Neutral)
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    // The figure under the button opens the viewer too.
+                                    cx.stop_propagation();
+                                    this.open_reader_image(frame, window, cx)
+                                },
+                            )),
+                            ("note-figure-enlarge-tip", block),
+                            course2md::tr!("放大"),
+                        )),
+                )
+            },
+        );
         let card = MaterialCard::new(("note-figure", block), CardVariant::Filled)
             .rounded(RADIUS_LARGE_INCREASED)
-            .accessibility_label(course2md::tr!("放大{}", label))
+            .accessibility_label(enlarge)
             .w_full()
             .overflow_hidden()
             .child(slot);
