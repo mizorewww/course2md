@@ -5,9 +5,9 @@ pure Material on `gpui-kit-material`. `STATUS.md` holds progress and the next
 action; `AUDIT.md` holds the findings this plan is based on. Delete this
 directory when the project is accepted.
 
-**Resuming after a context loss:** read this file, then `STATUS.md`, then run
-`git log --oneline main..split/workspace` here and
-`git log --oneline origin/main..course2md-integration` in the kit worktree.
+**Resuming after a context loss:** read this file, then `STATUS.md` and `ACCEPTANCE.md`, then run
+`git log --oneline --first-parent main..split/workspace` here and
+`gh pr list -R mizorewww/gpui-kit-material` for the kit PRs in flight.
 
 ## Owner decisions
 
@@ -78,14 +78,14 @@ directory when the project is accepted.
 
 | What | Where | Branch |
 | --- | --- | --- |
-| App | `/Users/aac6fef/Developer/course2md` | `split/workspace` |
-| Kit worktree | `/Users/aac6fef/Developer/gpui-kit-material-course2md` | `course2md-integration` (equal to `origin/main`; for PR branches) |
+| App | `/Users/aac6fef/Developer/course2md` | `split/workspace`; agents work in sibling worktrees on `split/<topic>` |
+| Kit PR worktrees | `/Users/aac6fef/Developer/gpui-kit-material-<topic>` | One per PR, `design/<topic>` or `text/<topic>`, each from kit `origin/main` |
 | Kit main (do not touch) | `/Users/aac6fef/Developer/gpui-kit-material` | `main` |
 | Symbols (do not touch unless needed) | `/Users/aac6fef/Developer/gpui-material-symbols` | `main` |
 
-The kit worktree starts from `origin/main`, so the owner's unpushed local commits
-are not published by pushing this branch. Do not push the app's `main` or tags,
-and do not change published releases.
+Each kit worktree starts from `origin/main`, so the owner's unpushed local commits
+are not published by pushing a PR branch; remove the worktree and its branch once the PR
+merges. Do not push the app's `main` or tags, and do not change published releases.
 
 ## Target structure
 
@@ -108,18 +108,19 @@ No `tr!` in them. Check name availability before creating a repository.
 ### Workspace crates in this repository
 
 `crates/` holds `c2m-i18n`, `c2m-core`, `c2m-process`, `c2m-protocol`, `c2m-config`,
-`c2m-source`, `c2m-ai`, `c2m-asr`, `c2m-artifact`, `c2m-engine`, and the `course2md`
-binary; `desktop/` holds `desktop-core` (`desktop/core`), `desktop-ui` (`desktop/ui`) and
-`course2md-desktop` (`desktop/src`).
-Assignment is in `AUDIT.md`. The root and `desktop` become one Cargo workspace with
-one lock file. CI, `package.py`, `release.yml` and the docs must follow.
+`c2m-dispatch`, `c2m-source`, `c2m-ai`, `c2m-asr`, `c2m-artifact`, `c2m-engine`, the
+`course2md` facade and binary, and the test-only `c2m-test-http`; `desktop/` holds
+`desktop-core` (`desktop/core`), `desktop-ui` (`desktop/ui`) and `course2md-desktop` (`desktop`).
+They form one Cargo workspace with one lock file. What each holds and the allowed dependency
+directions are in `docs/CRATES.md`.
 
 ## Phases
 
 `REDUCTION.md` is the execution guide for what each lever removes. Each wave ends green and
 pushed; agents work on branches in sibling worktrees, and the coordinator merges.
 
-Done: P0 setup, P1 deps, P2 bugs, docs rewrite.
+Done: P0 setup, P1 deps, P2 bugs, docs rewrite, waves 1 to 3. Now: wave 4, fixing the findings of
+acceptance round 1 (`ACCEPTANCE.md`); `STATUS.md` has the state.
 
 **Wave 1, in parallel:**
 - `split/engine`: lever 1, engine cleanup, plus the engine wheels.
@@ -145,22 +146,25 @@ crates, merge the two Cargo workspaces, teach `tests/i18n_catalog.rs` about the 
 
 **Wave 4.** Acceptance, below.
 
-Metrics: `python3 docs/split/metrics.py` (3db4a88 reads 78,464 for `src` and `desktop/src`,
-against the 78,518 baseline). Record at each wave end in `STATUS.md`.
+Metrics: `python3 docs/split/metrics.py`, which counts every workspace crate (it reads 77,921 at
+`3db4a88`, against the 78,518 baseline counted before the crates existed). Record at each wave end
+in `STATUS.md`, beside the secondary metric.
 
 ## Checks
 
+One workspace:
+
 ```sh
 cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings      # engine; workspace-wide after P3
-cargo test
-cargo fmt --manifest-path desktop/Cargo.toml --check
-cargo clippy --manifest-path desktop/Cargo.toml --all-targets --no-deps -- -D warnings
-cargo test --manifest-path desktop/Cargo.toml  # until the workspaces merge
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo test --test i18n_catalog        # after any change to i18n/catalog.tsv or a tr! key
+cargo deny check
 ```
-Kit worktree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo test --workspace`. Before acceptance also read `.github/workflows/ci.yml` and
-`desktop.yml` and run what they run.
+Packaging scripts: `python3 -m unittest discover -s packaging -p 'test_*.py'` and the same for
+`desktop/scripts` (Python 3.11 or later). Kit worktree: `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`. Before acceptance
+also read `.github/workflows/ci.yml` and `desktop.yml` and run what they run.
 
 ## Dependency form
 
