@@ -7,7 +7,7 @@ use crate::{
 use anyhow::Context as _;
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError, SubtitleTrack};
-use desktop_core::import::*;
+use desktop_tasks::import::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{color::ColorRole, icons::Icon, motion, prelude::*};
@@ -1973,7 +1973,7 @@ impl Desktop {
         let provider = self.actual_local_provider();
         let mut config = self.import_base_config();
         // The plan builders' rule: an empty model takes the engine's default (NPU resolves its own).
-        desktop_core::plan::fill_default_asr_model(&mut config, provider);
+        desktop_tasks::plan::fill_default_asr_model(&mut config, provider);
         let model = config.defaults.asr_model.unwrap_or_default();
         let root = course2md::config::model_dir_from(config.defaults.model_dir.as_deref());
         (provider, model, root)
@@ -2220,7 +2220,7 @@ impl Desktop {
         // running task's card carries it; otherwise it sits right under this header.
         let next = owner
             .as_ref()
-            .filter(|task| !desktop_core::task_view::runs_in_card(task))
+            .filter(|task| !desktop_tasks::task_view::runs_in_card(task))
             .map(|_| {
                 v_flex()
                     .w_full()
@@ -2336,7 +2336,7 @@ impl Desktop {
                 || !task.state.finished()
                 || (task.state == workspace::TaskState::Partial
                     && task.artifact.is_some()
-                    && !desktop_core::task_view::task_component_failures(task).is_empty())
+                    && !desktop_tasks::task_view::task_component_failures(task).is_empty())
         })
     }
 
@@ -2605,7 +2605,7 @@ impl Desktop {
         }
         let plan = self.preview_plan().map_err(|error| {
             let pending = error
-                .downcast_ref::<desktop_core::plan::PlanPending>()
+                .downcast_ref::<desktop_tasks::plan::PlanPending>()
                 .is_some();
             (format!("{error:#}"), pending)
         });

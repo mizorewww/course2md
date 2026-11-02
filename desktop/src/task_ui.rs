@@ -7,7 +7,7 @@ use crate::{
     workspace::{Intent, TaskRecord, TaskState},
 };
 use course2md::execution::Component;
-use desktop_core::task_view::*;
+use desktop_tasks::task_view::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::components::MaterialContextMenu;
@@ -140,7 +140,7 @@ trait StageStatusView {
     fn icon(self) -> SymbolIcon;
 }
 
-/// How an action draws and runs; the action itself is in `desktop_core::task_view`.
+/// How an action draws and runs; the action itself is in `desktop_tasks::task_view`.
 trait TaskActionView {
     fn present(&self, task: &TaskRecord, desktop: &Desktop) -> (&'static str, SymbolIcon, bool);
     fn run(&self, id: &str, this: &mut Desktop, window: &mut Window, cx: &mut Context<Desktop>);
@@ -854,13 +854,13 @@ impl Desktop {
     pub(crate) fn task_plan_rows(&self, task: &TaskRecord, flat: bool) -> Vec<Div> {
         let options = task.plan.options();
         let mut ai: Vec<String> = [
-            desktop_core::import::ConversionAiOption::Proofread,
-            desktop_core::import::ConversionAiOption::Summary,
-            desktop_core::import::ConversionAiOption::Vision,
+            desktop_tasks::import::ConversionAiOption::Proofread,
+            desktop_tasks::import::ConversionAiOption::Summary,
+            desktop_tasks::import::ConversionAiOption::Vision,
         ]
         .into_iter()
-        .filter(|option| desktop_core::import::conversion_ai_option_enabled(&options, *option))
-        .map(|option| desktop_core::import::conversion_ai_option_label(option).to_owned())
+        .filter(|option| desktop_tasks::import::conversion_ai_option_enabled(&options, *option))
+        .map(|option| desktop_tasks::import::conversion_ai_option_label(option).to_owned())
         .collect();
         if options.translate.is_some() {
             ai.push(course2md::tr!("双语翻译").to_owned());
@@ -1126,7 +1126,7 @@ impl Desktop {
         // Where it saves, where its text comes from and which service
         // receives it, on one line; on the workbench, whose video it is.
         let support = if home {
-            desktop_core::import::source_metadata(&task.plan.source)
+            desktop_tasks::import::source_metadata(&task.plan.source)
         } else {
             [
                 self.task_destination(task),

@@ -4,7 +4,7 @@
 use super::*;
 use crate::model_discovery;
 use crate::preferences::FieldError;
-use desktop_core::codex::CodexSurface;
+use desktop_accounts::codex::CodexSurface;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum FormField {

@@ -23,7 +23,11 @@ native libraries; `--workspace` adds the desktop. Every crate inherits its versi
 | `c2m-engine` | `crates/c2m-engine` | The conversion pipeline and the task protocol (`run-task`) |
 | `course2md` | `crates/course2md` | The engine's facade for the desktop, and the `course2md` binary; the default `cli` feature adds clap, the setup wizard and `doctor` |
 | `c2m-test-http` | `crates/c2m-test-http` | A loopback HTTP server, a dev-dependency only |
-| `desktop-core` | `desktop/core` | The desktop's state, persistence, preferences and task logic, without GPUI |
+| `desktop-prefs` | `desktop/prefs` | Preferences, services and their checks, credentials, this machine's components, and how the desktop keeps a JSON record |
+| `desktop-accounts` | `desktop/accounts` | The sign-ins' state: Bilibili, YouTube, Codex and Ollama |
+| `desktop-store` | `desktop/store` | The workspace record of drafts and tasks, libraries and their folders, published notes, task activity |
+| `desktop-reader-core` | `desktop/reader-core` | What the reader shows of a note, its links and reading positions |
+| `desktop-tasks` | `desktop/tasks` | Sources, the import session, task plans, engine runs and the task view |
 | `desktop-ui` | `desktop/ui` | Shared compositions on `gpui-kit-material` (settings rows, confirm dialogs, note text, formulas, symbols), without page state |
 | `course2md-desktop` | `desktop` | The app: pages, windows and the `course2md-desktop` binary |
 
@@ -46,7 +50,9 @@ c2m-dispatch
 c2m-source    c2m-asr        c2m-ai        c2m-artifact
 c2m-engine
 course2md
-desktop-core  desktop-ui
+desktop-prefs        desktop-accounts   desktop-ui
+desktop-store
+desktop-reader-core  desktop-tasks
 course2md-desktop
 ```
 
@@ -55,11 +61,19 @@ course2md-desktop
 - `c2m-source`, `c2m-asr`, `c2m-ai` and `c2m-artifact` do not depend on each other. What two of
   them share belongs further up the list.
 - Engine crates never depend on GPUI, the kit or a desktop crate.
-- The desktop reaches the engine through the `course2md` facade, built with
-  `default-features = false` so it carries no command line. `desktop-ui` is the one exception:
-  it uses `c2m-artifact` and `c2m-i18n` directly for note rendering and `tr!`.
-- `desktop-core` has no GPUI; it may use `gpui-kit-material-color` for palettes.
-- `desktop-ui` does not depend on `desktop-core`; pages in `course2md-desktop` join the two.
+- The app, `course2md-desktop`, reaches the engine through the `course2md` facade, built with
+  `default-features = false` so it carries no command line. The desktop's library crates name
+  the `c2m-*` crates they use instead: `desktop-accounts` needs only `c2m-source`, `c2m-ai` and
+  `c2m-i18n`, `desktop-reader-core` only `c2m-artifact`, `c2m-config` and `c2m-i18n` beside
+  `desktop-store`, and `desktop-ui` `c2m-artifact` and `c2m-i18n`.
+- `desktop-prefs`, `desktop-accounts`, `desktop-store`, `desktop-reader-core` and `desktop-tasks`
+  have no GPUI; `desktop-prefs` may use `gpui-kit-material-color` for palettes.
+- Among them, `desktop-store` depends on `desktop-prefs`; `desktop-reader-core` and
+  `desktop-tasks` depend on `desktop-store` (and `desktop-tasks` on `desktop-prefs`), not on
+  each other. `desktop-accounts` depends on no desktop crate; its tests read `desktop-prefs`.
+- `desktop-ui` depends on none of them; pages in `course2md-desktop` join them.
+- The `test-support` features of `desktop-prefs` and `desktop-store` (an in-memory credential
+  vault, workspace and note fixtures) are enabled only under `[dev-dependencies]`.
 - `c2m-test-http` appears only under `[dev-dependencies]`.
 
 A change that needs an edge against these directions usually means a type sits in the wrong

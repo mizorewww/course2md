@@ -3,7 +3,7 @@
 //! app keeps only which browser to use.
 use crate::{Desktop, Field, Page, symbols, ui::Resource};
 use course2md::auth::youtube::{self, Browser, BrowserChoice, Session};
-use desktop_core::youtube::*;
+use desktop_accounts::youtube::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};
@@ -86,12 +86,12 @@ impl Desktop {
             self.youtube.recheck = Some(generation);
         }
         let task = crate::spawn_blocking_io(move || {
-            let program = course2md::ytdlp::resolve_in(Some(&desktop_core::backend::tool_path()))
+            let program = course2md::ytdlp::resolve_in(Some(&crate::environment::tool_path()))
                 .ok_or_else(|| {
-                anyhow::anyhow!(course2md::tr!(
-                    "缺少读取视频所需的组件，请在设置中检查运行环境"
-                ))
-            })?;
+                    anyhow::anyhow!(course2md::tr!(
+                        "缺少读取视频所需的组件，请在设置中检查运行环境"
+                    ))
+                })?;
             // Only the check runs here: the choice is saved below, and only
             // while the dialog that asked for it is still open.
             let session = youtube::check_session(&program, &choice)?;

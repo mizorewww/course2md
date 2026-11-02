@@ -29,19 +29,22 @@ mod task_ui;
 mod views;
 mod youtube_ui;
 
-use desktop_core::{
-    activity, backend, conversion, credentials, interrupted, model_discovery, notes, organize,
-    preferences, reader_navigation, service_test, source, spawn_blocking_io, storage, workspace,
+use desktop_prefs::{
+    conversion, credentials, environment, interrupted, model_discovery, preferences, service_test,
+    spawn_blocking_io,
 };
+use desktop_reader_core::reader_navigation;
+use desktop_store::{activity, notes, organize, storage, workspace};
+use desktop_tasks::{backend, source};
 
 use desktop_ui::{note_text, symbols, ui};
 
-use desktop_core::conversion::{provider_from_id, provider_label, providers};
-use desktop_core::job::{earliest_deadline, job_exit_status};
-use desktop_core::library::FolderFilter;
-use desktop_core::page::{Kind, Page};
-use desktop_core::reader::note_read_failure;
-use desktop_core::reader::{carry_repaired_reading_positions, settle_reader_notice};
+use desktop_prefs::conversion::{provider_from_id, provider_label, providers};
+use desktop_reader_core::reader::note_read_failure;
+use desktop_reader_core::reader::{carry_repaired_reading_positions, settle_reader_notice};
+use desktop_store::library::FolderFilter;
+use desktop_store::page::{Kind, Page};
+use desktop_tasks::job::{earliest_deadline, job_exit_status};
 
 use backend::{Done, EngineEvent, Event, Job};
 use conversion::ConversionOptions;
@@ -105,28 +108,28 @@ struct Desktop {
     preferences: preferences::Store,
     settings_ui: settings_ui::State,
     onboarding: onboarding::State,
-    storage_ui: desktop_core::locations::State,
+    storage_ui: desktop_store::locations::State,
     reader_ui: reader_ui::State,
     workspace: Option<workspace::Workspace>,
     workspace_error: Option<String>,
-    import: desktop_core::import::ImportSession,
+    import: desktop_tasks::import::ImportSession,
     /// The running job: a task's or a model's.
-    work: desktop_core::job::WorkState,
+    work: desktop_tasks::job::WorkState,
     /// The note being read, or on its way.
-    opened: desktop_core::reader::OpenedNote,
+    opened: desktop_reader_core::reader::OpenedNote,
     task_list: task_ui::TaskListUi,
     theme_frame: views::ThemeFrame,
-    library: desktop_core::library::LibraryState,
+    library: desktop_store::library::LibraryState,
     library_ui: library_ui::LibraryUi,
     preference_defaults_pending: bool,
     transient_task_result: Option<(String, Instant)>,
     draft_deadline: Option<Instant>,
-    account: desktop_core::account::AccountUi,
+    account: desktop_accounts::account::AccountUi,
     /// The password and SMS login fields, made when the login dialog first opens.
     login_inputs: Option<login_ui::LoginInputs>,
-    youtube: desktop_core::youtube::YoutubeUi,
-    codex: desktop_core::codex::CodexUi,
-    ollama: desktop_core::ollama::OllamaUi,
+    youtube: desktop_accounts::youtube::YoutubeUi,
+    codex: desktop_accounts::codex::CodexUi,
+    ollama: desktop_accounts::ollama::OllamaUi,
     /// A startup reconciliation of the task record is running.
     workspace_reconciling: bool,
     import_submit_focus: FocusHandle,
@@ -137,7 +140,7 @@ struct Desktop {
     /// Where Settings was opened from, and the control to refocus on return.
     settings_origin: Option<(Page, Option<FocusHandle>)>,
     settings_tab: settings_ui::SettingsTab,
-    environment: Option<backend::Environment>,
+    environment: Option<environment::Environment>,
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
     config: course2md::settings::ConfigFile,
@@ -416,11 +419,11 @@ impl Desktop {
             workspace,
             workspace_error,
             import: Default::default(),
-            work: desktop_core::job::WorkState::new(),
+            work: desktop_tasks::job::WorkState::new(),
             opened: Default::default(),
             task_list: task_ui::TaskListUi::new(),
             theme_frame: Default::default(),
-            library: desktop_core::library::LibraryState::new(output),
+            library: desktop_store::library::LibraryState::new(output),
             library_ui: library_ui::LibraryUi::new(),
             preference_defaults_pending: false,
             transient_task_result: None,
@@ -429,11 +432,11 @@ impl Desktop {
             workspace_reconciling: false,
             import_submit_focus: cx.focus_handle(),
             root_focus: Self::install_root_focus(window, cx),
-            account: desktop_core::account::AccountUi::default(),
+            account: desktop_accounts::account::AccountUi::default(),
             login_inputs: None,
-            youtube: desktop_core::youtube::YoutubeUi::default(),
-            codex: desktop_core::codex::CodexUi::default(),
-            ollama: desktop_core::ollama::OllamaUi::default(),
+            youtube: desktop_accounts::youtube::YoutubeUi::default(),
+            codex: desktop_accounts::codex::CodexUi::default(),
+            ollama: desktop_accounts::ollama::OllamaUi::default(),
             window: window.window_handle(),
             settings_origin: None,
             settings_tab: settings_ui::SettingsTab::Appearance,
@@ -528,7 +531,7 @@ impl Desktop {
         self.environment = None;
         // Environment detection starts subprocesses synchronously (Metal enumeration can exceed ten seconds),
         // so it runs off the executor; see spawn_blocking_io.
-        let task = spawn_blocking_io(backend::Environment::detect);
+        let task = spawn_blocking_io(environment::Environment::detect);
         cx.spawn(async move |this, cx| {
             let Ok(environment) = task.recv().await else {
                 return;
@@ -635,7 +638,7 @@ impl Desktop {
         if page != Page::New
             || matches!(
                 self.import.following_conversion,
-                Some(desktop_core::import::ConversionFollow::ReaderTask { .. })
+                Some(desktop_tasks::import::ConversionFollow::ReaderTask { .. })
             )
         {
             self.import.following_conversion = None;
@@ -868,11 +871,11 @@ impl Desktop {
         self.storage_ui
             .location_checks
             .begin(generation, &locations);
-        let task = desktop_core::locations::scan_locations(locations, move |location| {
+        let task = desktop_store::locations::scan_locations(locations, move |location| {
             let scan = notes::scan_library(&location.root);
             let organization = organize::Library::load(&location.root);
             let cache =
-                desktop_core::library::LibraryViewCache::inspect(location, scan.as_ref().ok());
+                desktop_store::library::LibraryViewCache::inspect(location, scan.as_ref().ok());
             (scan, organization, cache)
         });
         cx.spawn(async move |this, cx| {
@@ -943,7 +946,7 @@ impl Desktop {
     fn open_course_with_conversion_guard(
         &mut self,
         course: Rc<Course>,
-        follow: Option<desktop_core::import::ConversionFollow>,
+        follow: Option<desktop_tasks::import::ConversionFollow>,
         cx: &mut Context<Self>,
     ) {
         // Reading needs its own copy on the worker; rendering shares the rest.
@@ -953,7 +956,7 @@ impl Desktop {
         let reader_origin = follow.as_ref().and_then(|follow| {
             if !matches!(
                 follow,
-                desktop_core::import::ConversionFollow::ReaderTask { .. }
+                desktop_tasks::import::ConversionFollow::ReaderTask { .. }
             ) {
                 return None;
             }
@@ -977,7 +980,7 @@ impl Desktop {
                 this.opened.reading = false;
                 this.opened.opening_course = None;
                 if this.reader_viewer_open() {
-                    desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
+                    desktop_tasks::import::ConversionFollow::interrupt_for_reader_viewer(
                         &mut this.import.following_conversion,
                     );
                 }

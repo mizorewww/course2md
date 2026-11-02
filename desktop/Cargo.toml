@@ -15,7 +15,11 @@ capture = ["gpui-kit/test-support"]
 
 [dependencies]
 course2md = { path = "../crates/course2md", default-features = false }
-desktop-core = { path = "core" }
+desktop-accounts = { path = "accounts" }
+desktop-prefs = { path = "prefs" }
+desktop-reader-core = { path = "reader-core" }
+desktop-store = { path = "store" }
+desktop-tasks = { path = "tasks" }
 desktop-ui = { path = "ui" }
 gpui-kit.workspace = true
 gpui-base.workspace = true
@@ -35,5 +39,4 @@ libc.workspace = true
 embed-resource.workspace = true
 
 [dev-dependencies]
-desktop-core = { path = "core", features = ["test-support"] }
 gpui-kit = { workspace = true, features = ["test-support"] }

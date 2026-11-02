@@ -10,7 +10,7 @@ use course2md::auth::{
     geetest::{CAPTCHA_TIMEOUT, CaptchaPage},
     passport::{Captcha, GeetestSolution, LoginOutcome, Passport, Password, Zeroizing},
 };
-use desktop_core::account::*;
+use desktop_accounts::account::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit::component::input::InputState;

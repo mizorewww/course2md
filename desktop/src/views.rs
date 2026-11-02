@@ -273,7 +273,7 @@ impl Desktop {
     ) -> AppBar {
         let (task_count, tasks_need_attention) =
             self.workspace.as_ref().map_or((0, false), |workspace| {
-                desktop_core::task_view::task_navigation_summary(&workspace.state.tasks)
+                desktop_tasks::task_view::task_navigation_summary(&workspace.state.tasks)
             });
         let page = self.page;
         let bar = h_flex()

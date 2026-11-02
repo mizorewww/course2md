@@ -1,0 +1,35 @@
+[package]
+name = "desktop-tasks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The course2md desktop's sources, task plans, imports and engine runs, without GPUI"
+publish = false
+
+[dependencies]
+c2m-artifact = { path = "../../crates/c2m-artifact" }
+c2m-asr = { path = "../../crates/c2m-asr" }
+c2m-config = { path = "../../crates/c2m-config" }
+c2m-core = { path = "../../crates/c2m-core" }
+c2m-engine = { path = "../../crates/c2m-engine" }
+c2m-i18n = { path = "../../crates/c2m-i18n" }
+c2m-process = { path = "../../crates/c2m-process" }
+c2m-protocol = { path = "../../crates/c2m-protocol" }
+c2m-source = { path = "../../crates/c2m-source" }
+desktop-prefs = { path = "../prefs" }
+desktop-store = { path = "../store" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+smol.workspace = true
+tempfile.workspace = true
+url.workspace = true
+zeroize.workspace = true
+image = { workspace = true, features = ["webp"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+desktop-prefs = { path = "../prefs", features = ["test-support"] }
+desktop-store = { path = "../store", features = ["test-support"] }

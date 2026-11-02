@@ -3,7 +3,7 @@ use super::*;
 use crate::folder_tree::{Command, NoteDrag, command_context_menu, command_menu, note_count};
 use crate::library_ui::{Moving, NameTarget};
 use crate::{symbols, ui};
-use desktop_core::library::*;
+use desktop_store::library::*;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
@@ -1504,7 +1504,7 @@ impl Desktop {
 
     fn course_has_reading_position(&self, course: &Course) -> bool {
         course.manifest.as_ref().is_some_and(|manifest| {
-            let key = desktop_core::reader::manifest_reading_key(
+            let key = desktop_reader_core::reader::manifest_reading_key(
                 &manifest.course_id,
                 &manifest.version_id,
                 0,
@@ -1512,7 +1512,7 @@ impl Desktop {
             self.workspace
                 .as_ref()
                 .and_then(|workspace| workspace.state.positions.get(&key))
-                .is_some_and(desktop_core::reader::has_reading_position)
+                .is_some_and(desktop_reader_core::reader::has_reading_position)
         })
     }
 
@@ -1983,9 +1983,9 @@ impl Desktop {
                 .iter()
                 .any(|request| request.is_uncertain());
         let requires_repair =
-            !uncertain && desktop_core::task_view::task_requires_service_repair(&task);
+            !uncertain && desktop_tasks::task_view::task_requires_service_repair(&task);
         let partial_components = if task.state == TaskState::Partial && task.artifact.is_some() {
-            desktop_core::task_view::task_component_failures(&task)
+            desktop_tasks::task_view::task_component_failures(&task)
                 .into_iter()
                 .filter_map(|(component, _, _)| course2md::execution::Component::parse(&component))
                 .collect::<Vec<_>>()
@@ -2031,7 +2031,7 @@ impl Desktop {
             action("retry", ButtonVariant::Text)
                 .tone(ButtonTone::Neutral)
                 .icon(symbols::refresh())
-                .child(desktop_core::task_view::retry_components_label(&labels))
+                .child(desktop_tasks::task_view::retry_components_label(&labels))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.reprocess_task(
                         task_id.clone(),
@@ -2060,7 +2060,7 @@ impl Desktop {
                 }))
         });
         let scale = TileScale::Regular;
-        let summary = desktop_core::task_view::task_attention_summary(&task);
+        let summary = desktop_tasks::task_view::task_attention_summary(&task);
         list_surface(outer).child(
             v_flex()
                 .w_full()
@@ -2115,7 +2115,7 @@ impl Desktop {
                         TaskState::NeedsAttention | TaskState::Uncertain | TaskState::Paused
                     ) || (task.state == TaskState::Partial
                         && task.artifact.is_some()
-                        && !desktop_core::task_view::task_component_failures(task).is_empty()))
+                        && !desktop_tasks::task_view::task_component_failures(task).is_empty()))
             })
             .collect();
         attention.sort_by_key(|task| std::cmp::Reverse(task.updated));
