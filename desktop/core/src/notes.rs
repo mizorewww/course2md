@@ -1,7 +1,7 @@
 //! Read published versions and isolate damaged library entries.
-use crate::backend::Done;
 use anyhow::{Context, Result};
 use course2md::artifact;
+use course2md::progress::Done;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
