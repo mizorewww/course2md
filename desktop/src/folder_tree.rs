@@ -550,7 +550,9 @@ impl Desktop {
             TreeTarget::Root(root) => (Some(root.clone()), 0),
             TreeTarget::Folder(root, id) => (Some(root.clone()), *id),
         };
+        // A sidebar row is 44 tall, as before the migration (L1).
         let item = ListItem::new(SharedString::from(key.clone()), label.clone())
+            .density(ListDensity::Minus3)
             .leading(ListLeading::Icon(icon.into()))
             .container(ground)
             .segment([true; 4])
