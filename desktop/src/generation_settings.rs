@@ -308,7 +308,8 @@ impl Desktop {
                         .w_full()
                         .label(course2md::tr!(
                             "模型名称或 Hugging Face 仓库（如 org/model）"
-                        )),
+                        ))
+                        .float_label(true),
                     material_button("apply-custom-npu-model", ButtonVariant::Outlined)
                         .tone(ButtonTone::Accent)
                         .icon(symbols::check_circle())
