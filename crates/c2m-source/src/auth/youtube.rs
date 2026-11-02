@@ -364,14 +364,54 @@ pub struct BrowserReadError {
     pub detail: String,
 }
 
+/// Where a check's private directories live, so one a crash left behind is
+/// found and removed ([`remove_stale_checks`]).
+fn checks_dir() -> PathBuf {
+    crate::config::cache_dir().join("browser-check")
+}
+
+/// A check lasts at most [`CHECK_TIMEOUT`]; anything older was left by a crash
+/// or a force quit and still holds a browser's cookies.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Removes check directories older than any running check. Called before each
+/// check and when the app starts.
+pub fn remove_stale_checks() {
+    remove_stale_in(&checks_dir(), CHECK_TIMEOUT + Duration::from_secs(60));
+}
+
+fn remove_stale_in(dir: &Path, age: Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_none_or(|elapsed| elapsed >= age);
+        if stale && entry.file_name().to_string_lossy().starts_with("check-") {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 /// Has yt-dlp read the chosen browser's cookies, the way every YouTube run will,
 /// and reports whether they include a signed-in YouTube session. No network
-/// request is made. yt-dlp writes what it read into a private temporary
-/// directory; only cookie names are looked at, and the directory is removed
-/// before this returns. Blocking: on macOS the system may ask the person to
-/// allow access to the browser's keychain item.
+/// request is made. yt-dlp can only hand over what it read as a cookie file, so
+/// it writes the browser's cookies into a private (0700) directory in the app's
+/// cache; only cookie names are looked at, the directory is removed before this
+/// returns, and one a crash left behind is removed by the next check or start.
+/// Blocking: on macOS the system may ask the person to allow access to the
+/// browser's keychain item.
 pub fn check_session(program: &Path, choice: &BrowserChoice) -> Result<Session> {
-    let dir = tempfile::Builder::new().prefix("c2m-browser-").tempdir()?;
+    remove_stale_checks();
+    let parent = checks_dir();
+    std::fs::create_dir_all(&parent)?;
+    let dir = tempfile::Builder::new()
+        .prefix("check-")
+        .tempdir_in(&parent)?;
     let jar = dir.path().join("cookies.txt");
     let mut command = std::process::Command::new(program);
     command
@@ -381,7 +421,7 @@ pub fn check_session(program: &Path, choice: &BrowserChoice) -> Result<Session> 
         .arg(&jar);
     // With no URL yt-dlp loads the browser's cookies, saves them and stops
     // before any request. Two minutes leave time to answer a keychain prompt.
-    let output = crate::runtime::run_bounded("yt-dlp", &mut command, Duration::from_secs(120))?;
+    let output = crate::runtime::run_bounded("yt-dlp", &mut command, CHECK_TIMEOUT)?;
     let text = zeroize::Zeroizing::new(std::fs::read_to_string(&jar).unwrap_or_default());
     drop(dir);
     if !text.starts_with("# Netscape HTTP Cookie File") {
@@ -466,7 +506,7 @@ fn read_error(browser: Browser, stderr: &str) -> BrowserReadError {
 pub fn login_youtube(choice: BrowserChoice) -> Result<()> {
     use crate::println_tr;
     println_tr!(
-        "将由 yt-dlp 读取 {} 的 Cookie，仅用于访问 YouTube；course2md 不保存这些 Cookie。使用账号下载存在被 YouTube 限制或封禁的风险，请适度使用。 / yt-dlp will read {}'s cookies and use them only for YouTube; course2md does not keep them. Downloading with an account risks YouTube restricting or banning it; use it sparingly.",
+        "将由 yt-dlp 读取 {} 的 Cookie，仅用于访问 YouTube；course2md 不保存这些 Cookie（检查时会短暂写入私有临时文件，结束即删除）。使用账号下载存在被 YouTube 限制或封禁的风险，请适度使用。 / yt-dlp will read {}'s cookies and use them only for YouTube; course2md does not keep them (this check briefly writes them to a private temporary file, deleted when it ends). Downloading with an account risks YouTube restricting or banning it; use it sparingly.",
         choice.label(),
         choice.label()
     );
@@ -504,6 +544,21 @@ pub fn logout_youtube() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_check_left_by_a_crash_is_removed_and_a_running_one_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("check-old");
+        std::fs::create_dir(&old).unwrap();
+        std::fs::write(old.join("cookies.txt"), "secret").unwrap();
+        let other = dir.path().join("unrelated");
+        std::fs::create_dir(&other).unwrap();
+        remove_stale_in(dir.path(), Duration::from_secs(3600));
+        assert!(old.exists());
+        remove_stale_in(dir.path(), Duration::ZERO);
+        assert!(!old.exists());
+        assert!(other.exists());
+    }
 
     #[test]
     fn choices_round_trip_as_yt_dlp_specs_and_hold_no_cookie() {

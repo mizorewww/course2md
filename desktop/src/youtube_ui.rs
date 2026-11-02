@@ -328,7 +328,7 @@ impl Desktop {
             body = body.child(supporting_info(
                 "youtube-explain",
                 course2md::tr!(
-                    "YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用；course2md 不复制、不保存这些 Cookie。"
+                    "YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。"
                 ),
             ));
             if names.is_empty() {

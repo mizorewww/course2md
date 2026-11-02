@@ -458,6 +458,8 @@ impl Desktop {
         this.prepare_workbench_input(window, cx);
         this.restore_storage_state(cx);
         std::thread::spawn(source::prune_cache);
+        // A YouTube check a crash or force quit interrupted left cookies behind.
+        std::thread::spawn(course2md::auth::youtube::remove_stale_checks);
         cx.set_reduce_motion(this.desktop_settings.reduce_motion);
         this.refresh_account(cx);
         this.load_youtube(cx);
