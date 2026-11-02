@@ -759,7 +759,7 @@ impl Desktop {
 
     pub fn settings_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         // Rendering has no side effects: hydration and diagnostics run from event entries such as
-        // open_settings, select_settings_tab and restore_settings_group.
+        // open_settings, select_settings_tab and restore_ordinary_preferences.
         let compact = is_compact(window);
         let navigation = self.settings_navigation(compact, cx);
         let content = match self.settings_tab {
@@ -1443,7 +1443,7 @@ impl Desktop {
                     .icon(symbols::refresh())
                     .child(course2md::tr!("保留原文件并重置这些设置"))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.restore_settings_group(group, window, cx);
+                        this.restore_ordinary_preferences(group, window, cx);
                     })),
             )
         });
@@ -1963,17 +1963,6 @@ impl Desktop {
     }
     /// Only the explicitly named group is reset; the form and its source stay in place.
     pub fn restore_ordinary_preferences(
-        &mut self,
-        group: PreferenceGroup,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if group == PreferenceGroup::Services {
-            return false;
-        }
-        self.restore_settings_group(group, window, cx)
-    }
-    fn restore_settings_group(
         &mut self,
         group: PreferenceGroup,
         window: &mut Window,
