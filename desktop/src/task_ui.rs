@@ -1005,6 +1005,8 @@ impl Desktop {
                 CardPlace::Row { .. } => card
                     .child(head)
                     .children(body.map(|body| div().px(rem(16.)).pb(rem(16.)).child(body))),
+                // A card of its own on Tasks is roomy, as its large corners are (T6).
+                CardPlace::Open { .. } => card.p(rem(20.)).gap(rem(16.)).child(head).children(body),
                 _ => card.p(rem(16.)).gap(rem(16.)).child(head).children(body),
             })
             .into_any_element()
@@ -1166,14 +1168,15 @@ impl Desktop {
             .flex_wrap()
             .gap(rem(16.))
             .map(|head| {
-                // A task that needs the person leads with that, not its video.
+                // A task that needs the person leads with that, not its video. Only a
+                // failure is red: a paused, partial or uncertain task is a warning.
                 if !home && needs_person(task) {
                     head.child(tinted_icon(
                         symbols::warning(),
-                        if task.state == TaskState::Paused {
-                            Tint::Amber
-                        } else {
+                        if task.state == TaskState::NeedsAttention {
                             Tint::Danger
+                        } else {
+                            Tint::Amber
                         },
                         ui::RESOURCE_ICON,
                     ))
@@ -1196,10 +1199,15 @@ impl Desktop {
                             .map(|row| {
                                 if !home && needs_person(task) {
                                     row.child(
+                                        // It shrinks before the menu beside it, and a long
+                                        // title ends in an ellipsis on its second line.
                                         TileScale::Regular
                                             .label(format!("task-title-{id}"), title.clone())
                                             .flex_1()
-                                            .whitespace_normal(),
+                                            .min_w_0()
+                                            .whitespace_normal()
+                                            .text_ellipsis()
+                                            .line_clamp(2),
                                     )
                                 } else {
                                     row.child(
@@ -1421,16 +1429,20 @@ impl Desktop {
                 .gap(rem(8.))
                 .flex_wrap()
                 .children(stages.iter().map(|stage| {
-                    status_chip_outlined(stage.status.chip())
-                        .when(stage.status.running(), |chip| {
-                            chip.child(icon_spinner(
-                                SharedString::from(format!("{}-chip-spinner", stage.id)),
-                                stage.title.clone(),
-                                rem(16.),
-                                cx,
-                            ))
-                        })
-                        .child(stage.title.clone())
+                    status_fact_chip(
+                        SharedString::from(format!("{}-chip", stage.id)),
+                        course2md::tr!("{}：{}", stage.title, stage.status.label()),
+                        stage.status.chip(),
+                    )
+                    .when(stage.status.running(), |chip| {
+                        chip.child(icon_spinner(
+                            SharedString::from(format!("{}-chip-spinner", stage.id)),
+                            stage.title.clone(),
+                            rem(16.),
+                            cx,
+                        ))
+                    })
+                    .child(stage.title.clone())
                 }))
         });
         let buttons = actions.iter().map(|action| {

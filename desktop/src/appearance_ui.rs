@@ -245,6 +245,7 @@ impl Desktop {
                         ButtonVariant::Filled
                     },
                 )
+                .when(failed, |button| button.tone(ButtonTone::Accent))
                 .icon(if failed {
                     symbols::close()
                 } else {

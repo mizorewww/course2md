@@ -68,6 +68,45 @@ kit's vendored engine (PR #16). Wave 2's row-plus-menu choices (H7, S13) are rev
 | P3 | should | Partial `restore` rows by source: G3 (9 untoned Outlined), G4 (10 of 12 quiet actions primary), G5 (find and view tools without circle), G8 (`library_ui.rs:969` radius 4; two fields without floating label), H4 (16/16 vs 20/24), L1, L6, T6 (padding 16 vs 20), R9 (radius 16, not pill), R12 (action off the image), S1 (selected circle; compact rail plain), S11, O3. Fix `DESIGN-RESTORE.md` so it is true |
 | R8 | should | After kit PR #16 merges: summary as a surface; close the `inline_formula` escape hole (`desktop/ui/src/note_text.rs:107`) |
 
+### Desktop UI fixes
+
+Each line names the commit by subject; evidence is under the session scratchpad `desktop-ui/shots/`.
+
+- A1, `desktop: groups with a required choice report it through on_change`: all nine `ConnectedButtonGroup`s
+  (library view, reader views, source kind, home text source, settings text source, recognition mode, appearance mode,
+  text size, service check) changed by click and by arrow key in the running app (`live/a1a` to `live/a1h`). The reader's
+  view switch now keeps focus, so its arrow keys go on choosing.
+- A5 (unsaved settings), `desktop: offer a settings change whose save failed again after relaunch`: a failed
+  save leaves its value in `desktop-preferences.recovery/`, as before `cdd31e3`; relaunch shows it with 重试保存,
+  and a successful save or a reset removes it. Read-only settings directory, relaunch, retry, relaunch (`live/a5a` to `live/a5d`).
+- A5 (search clear), `desktop: clear the settings and screenshot searches in place`: a × in the field while it holds
+  text, as the library's search has; typed and cleared by real input (`live/a5e`, `live/a5f`).
+
+- Kit pin, `desktop: pin gpui-kit-material main at 79bce30`: both dependency and all six `[patch]` entries;
+  the hero field and outlined fact chips follow the kit's API.
+- U25 (duration chip), `desktop: a video's duration over its cover is the kit's media label`: preview and recent
+  notes (`t1/home-recent`, `m1/home-preview`).
+- A5 (screenshots), `desktop: a screenshot in the note shows its time and an enlarge action` (`m1/reader-end`).
+- R8, `desktop: a formula in note text stays on one line` and `desktop: the note's summary is a panel again`
+  (`r8/reader-light`, `r8/reader-dark`).
+- U14, `i18n: the rename button and missing-part notices read naturally`.
+- U9 and dead symbols, `desktop: the library destination shows books, not a chart`; `progress_activity` is the kit's
+  spinner and stays, listed with the kit's symbols.
+- U13, `desktop: a model surface under an engine obstacle offers one 重新检查` (source only: no installable
+  engine obstacle could be produced on this machine).
+- U3, `desktop: a model's surface leads with its purple circle` (`u3/model`, `u3/model-dark`).
+- U5, U6, `desktop: only a failed task's card leads with a red circle` (`t1/tasks`).
+- U15 and L6, `desktop: the current destination and folder grouping are tonal when on` (`u15/lib`, `u15/lib-group-dark`).
+- U8, `desktop: the screenshot switch says why it is off and disabled` (`u8/g3`). The enabled off switches are the
+  kit's M3 off state and read apart from the disabled one in the same capture; unchanged.
+- U12, `desktop: a listed collection leaves the link field unringed` (source only: no network fixture).
+- U11, `desktop: a section's time and its watch action are one pill again` (`u11/r`).
+- G3, G5, T6: `desktop: every outlined action has a primary label`, `desktop: the reader's find and view tools sit in
+  the neutral circle` (`g5/r`), `desktop: a task's own card on Tasks has roomy padding` (`t6/tasks-dark`).
+- Open, waiting on kit PRs: U1 (#18, #19), U4/G17 (#20), U10/L1 and R9 (#21). U2 not re-measured: load average
+  30 to 36 from other builds, so a measurement would not mean anything. U7/S11 needs a kit dialog wider than 720
+  and a selected-card ring. `DESIGN-RESTORE.md` lists the rest under Not finished.
+
 ## Plan conformance (after the three fix agents)
 
 | ID | Sev | Finding |

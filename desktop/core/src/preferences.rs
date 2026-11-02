@@ -842,6 +842,10 @@ pub struct Store {
     revisions: BTreeMap<PreferenceGroup, u64>,
     blocked: BTreeSet<PreferenceGroup>,
     issues: Vec<SettingsIssue>,
+    /// A change whose save failed, kept beside the settings so it can be retried after relaunch.
+    /// It never becomes the active value by itself.
+    generation_intent: Option<GenerationPreferences>,
+    application_intent: Option<ApplicationPreferences>,
 }
 
 impl Store {
@@ -868,9 +872,19 @@ impl Store {
             revisions: BTreeMap::new(),
             blocked: BTreeSet::new(),
             issues: Vec::new(),
+            generation_intent: None,
+            application_intent: None,
         };
         store.generation = store.load_group(PreferenceGroup::Generation);
         store.application = store.load_group(PreferenceGroup::Application);
+        store.generation_intent = store.load_intent(
+            PreferenceGroup::Generation,
+            course2md::tr!("已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项"),
+        );
+        store.application_intent = store.load_intent(
+            PreferenceGroup::Application,
+            course2md::tr!("已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项"),
+        );
         store.services = store.load_group(PreferenceGroup::Services);
         store.forget_retired_service_records();
         store.migrate_retired_npu_model();
@@ -989,6 +1003,14 @@ impl Store {
     }
     pub fn application(&self) -> &ApplicationPreferences {
         &self.application
+    }
+    /// The generation change whose save failed before the last quit, if any.
+    pub fn generation_intent(&self) -> Option<&GenerationPreferences> {
+        self.generation_intent.as_ref()
+    }
+    /// The application change whose save failed before the last quit, if any.
+    pub fn application_intent(&self) -> Option<&ApplicationPreferences> {
+        self.application_intent.as_ref()
     }
     pub fn issues(&self) -> &[SettingsIssue] {
         &self.issues
@@ -1115,16 +1137,85 @@ impl Store {
     pub fn save_generation(&mut self, mut value: GenerationPreferences) -> Result<()> {
         value.options.out = None;
         value.options.resume = Some(true);
-        self.persist(PreferenceGroup::Generation, &value)?;
+        let saved = self.persist(PreferenceGroup::Generation, &value);
+        self.generation_intent = self.settle_intent(PreferenceGroup::Generation, &saved, &value);
+        saved?;
         self.generation = value;
         Ok(())
     }
 
     pub fn save_application(&mut self, mut value: ApplicationPreferences) -> Result<()> {
         value.desktop.system_titlebar = true;
-        self.persist(PreferenceGroup::Application, &value)?;
+        let saved = self.persist(PreferenceGroup::Application, &value);
+        self.application_intent = self.settle_intent(PreferenceGroup::Application, &saved, &value);
+        saved?;
         self.application = value;
         Ok(())
+    }
+
+    fn intent_path(&self, group: PreferenceGroup) -> PathBuf {
+        let file = match group {
+            PreferenceGroup::Generation => "generation-intent.json",
+            PreferenceGroup::Application => "application-intent.json",
+            PreferenceGroup::Services => "services-intent.json",
+        };
+        // Beside the settings directory, as before 2.1, so a settings directory that refuses
+        // writes can still keep it, and an intent an older version left is found.
+        self.root.with_extension("recovery").join(file)
+    }
+
+    /// After a save: a failed one leaves its valid value on disk as an intent, which the
+    /// next launch offers again; a successful one removes the intent. Best effort either way:
+    /// the caller already reports the save itself.
+    fn settle_intent<T: Serialize + Validate + Clone>(
+        &self,
+        group: PreferenceGroup,
+        saved: &Result<()>,
+        value: &T,
+    ) -> Option<T> {
+        let path = self.intent_path(group);
+        if saved.is_ok() || value.validate_value().is_err() {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+        let envelope = Envelope {
+            schema: SCHEMA,
+            revision: self.revision(group) + 1,
+            value,
+        };
+        let _ = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .map_err(anyhow::Error::from)
+            .and_then(|_| Ok(serde_json::to_vec_pretty(&envelope)?))
+            .and_then(|bytes| course2md::checkpoint::atomic_write(&path, &bytes));
+        Some(value.clone())
+    }
+
+    /// An intent newer than the saved group, with a notice that it can be retried.
+    fn load_intent<T: DeserializeOwned + Validate>(
+        &mut self,
+        group: PreferenceGroup,
+        message: &'static str,
+    ) -> Option<T> {
+        let path = self.intent_path(group);
+        match read_envelope::<T>(&path) {
+            Ok(Some(intent)) if intent.revision > self.revision(group) => {
+                self.issues.push(SettingsIssue {
+                    group,
+                    kind: SettingsIssueKind::SaveFailed,
+                    message: message.into(),
+                    detail: None,
+                });
+                Some(intent.value)
+            }
+            Ok(None) => None,
+            // Stale or unreadable: the saved group is newer, or the intent cannot be used.
+            _ => {
+                let _ = std::fs::remove_file(&path);
+                None
+            }
+        }
     }
 
     fn check_draft_edit(&self, draft: &ServiceDraft) -> Result<()> {
@@ -2116,18 +2207,30 @@ mod tests {
                 .iter()
                 .any(|issue| issue.group == PreferenceGroup::Generation)
         );
-        // The unwritten edit is never what a relaunch applies, and a retry succeeds.
+        // The unwritten edit is never what a relaunch applies, but it is offered to retry,
+        // and a retry succeeds.
         let reopened = open(directory.path(), store.vault());
         assert!(!reopened.generation().ai.summarize);
+        assert!(
+            reopened
+                .generation_intent()
+                .is_some_and(|intent| intent.ai.summarize)
+        );
+        assert!(
+            reopened
+                .issues()
+                .iter()
+                .any(|issue| issue.group == PreferenceGroup::Generation
+                    && issue.kind == SettingsIssueKind::SaveFailed)
+        );
         std::fs::remove_dir(directory.path().join("generation.json")).unwrap();
         store.save_generation(next).unwrap();
         assert!(store.generation().ai.summarize);
-        assert!(
-            open(directory.path(), store.vault())
-                .generation()
-                .ai
-                .summarize
-        );
+        assert!(store.generation_intent().is_none());
+        let reopened = open(directory.path(), store.vault());
+        assert!(reopened.generation().ai.summarize);
+        assert!(reopened.generation_intent().is_none());
+        std::fs::remove_dir_all(directory.path().with_extension("recovery")).unwrap();
     }
 
     #[test]

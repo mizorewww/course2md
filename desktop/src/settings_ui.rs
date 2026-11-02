@@ -402,7 +402,11 @@ impl Desktop {
             return;
         }
         self.settings_ui.initialized = true;
-        let value = self.preferences.generation().clone();
+        // A change whose save failed before the last quit comes back as the pending edit,
+        // which the group's notice offers to retry; the saved value stays active until then.
+        self.settings_ui.pending_generation = self.preferences.generation_intent().cloned();
+        self.settings_ui.pending_application = self.preferences.application_intent().cloned();
+        let value = self.generation_edit_base();
         let languages = value
             .subtitle_languages_draft
             .unwrap_or_else(|| value.preferred_subtitle_languages.join(", "));
@@ -664,6 +668,26 @@ impl Desktop {
                                 Icon::from(symbols::search())
                                     .size(rem(24.))
                                     .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                            )
+                            .when(
+                                !self.settings_ui.search.read(cx).value().is_empty(),
+                                |field| {
+                                    field.trailing(
+                                        IconButton::new(
+                                            "settings-search-clear",
+                                            symbols::close(),
+                                            course2md::tr!("清除搜索"),
+                                        )
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.settings_ui.search.update(cx, |state, cx| {
+                                                    state.set_value("", window, cx)
+                                                });
+                                                this.settings_search_changed(cx);
+                                            }),
+                                        ),
+                                    )
+                                },
                             ),
                     )
                     .child(list),
@@ -1693,11 +1717,12 @@ impl Desktop {
                 } else {
                     (StatusKind::Warning, course2md::tr!("待修复"))
                 };
-                status_chip_outlined(kind)
-                    .id(("diagnostic-capability", index))
-                    .role(Role::Label)
-                    .aria_label(course2md::tr!("{}：{}", *label, state))
-                    .child(*label)
+                status_fact_chip(
+                    ("diagnostic-capability", index),
+                    course2md::tr!("{}：{}", *label, state),
+                    kind,
+                )
+                .child(*label)
             });
         let summary = v_flex()
             .w_full()

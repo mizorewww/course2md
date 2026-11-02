@@ -400,6 +400,42 @@ impl NoteDocument {
                     .map(move |block| (block, Some(index)))
             };
             match block {
+                // The summary is one panel: its overview and its key points.
+                PreviewBlock::Heading { anchor, .. } if anchor == "summary" => {
+                    parts.append(&mut figures);
+                    if let Some(chapter) = chapters.get(&index) {
+                        let chapter = note_text::plain_inline_markdown(chapter);
+                        parts.push((format!("## {chapter}"), Some(index)));
+                    }
+                    let start = index;
+                    let mut summary = Vec::new();
+                    index += 1;
+                    while let Some(PreviewBlock::Paragraph { text, anchor }) = blocks.get(index)
+                        && (anchor == "summary-tldr" || anchor.starts_with("key-point-"))
+                    {
+                        if anchor.starts_with("key-point-") {
+                            let mut list = Vec::new();
+                            while let Some(PreviewBlock::Paragraph { text, anchor }) =
+                                blocks.get(index)
+                                && anchor.starts_with("key-point-")
+                            {
+                                list.push(format!("- {}", note_text::inline_markdown(text)));
+                                index += 1;
+                            }
+                            summary.push(list.join("\n"));
+                        } else {
+                            summary.extend(note_text::blocks(text));
+                            index += 1;
+                        }
+                    }
+                    if !summary.is_empty() {
+                        parts.push((
+                            note_text::surface(note_text::SUMMARY_SURFACE, &summary.join("\n\n")),
+                            Some(start),
+                        ));
+                    }
+                    continue;
+                }
                 PreviewBlock::Heading { text, seconds, .. } => {
                     parts.append(&mut figures);
                     if let Some(chapter) = chapters.get(&index) {
@@ -411,12 +447,16 @@ impl NoteDocument {
                     } else {
                         "##"
                     };
-                    let link = seconds
-                        .and_then(&seek)
-                        .map(|url| format!(" [{}]({url})", note_text::SOURCE_LINK_LABEL))
-                        .unwrap_or_default();
                     let heading = note_text::plain_inline_markdown(text);
-                    parts.push((format!("{level} {heading}{link}"), Some(index)));
+                    // A section's time and the control that plays from it are one pill.
+                    let heading = match seconds.and_then(&seek) {
+                        Some(url) if block.is_timestamp_heading() => {
+                            note_text::source_link(&heading, &url)
+                        }
+                        Some(url) => format!("{heading} {}", note_text::source_link("", &url)),
+                        None => heading,
+                    };
+                    parts.push((format!("{level} {heading}"), Some(index)));
                 }
                 PreviewBlock::Paragraph { anchor, .. } if anchor.starts_with("key-point-") => {
                     // The key points are one list.
@@ -1698,6 +1738,13 @@ impl Desktop {
     }
 
     fn select_reader_view(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_reader_view(index, cx);
+        self.reader_ui.focus.focus(window, cx);
+    }
+
+    /// Switches the view and leaves focus where it is: the view switch keeps it, so its
+    /// arrow keys go on choosing.
+    fn show_reader_view(&mut self, index: usize, cx: &mut Context<Self>) {
         if self.opened.result_tab != index {
             self.save_reading_position(cx);
             self.opened.result_tab = index;
@@ -1716,7 +1763,6 @@ impl Desktop {
                 self.restore_reading_position(cx);
             }
         }
-        self.reader_ui.focus.focus(window, cx);
         cx.notify();
     }
 
@@ -1933,12 +1979,8 @@ impl Desktop {
                         } else {
                             "images"
                         })
-                        .on_activate(cx.listener(|this, selected: &SharedString, window, cx| {
-                            this.select_reader_view(
-                                usize::from(selected.as_ref() == "images"),
-                                window,
-                                cx,
-                            );
+                        .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
+                            this.show_reader_view(usize::from(selected.as_ref() == "images"), cx);
                         })),
                 ),
             )
@@ -2194,10 +2236,50 @@ impl Desktop {
         let label = frame.map_or(course2md::tr!("截图").to_owned(), |frame| {
             frame_label(&self.reader_ui.frames[frame])
         });
-        let slot = screenshot_slot(("note-figure-slot", block), Some(loaded));
+        let enlarge = course2md::tr!("放大{}", label);
+        // The frame's time at one corner and the action that enlarges it at the other.
+        let slot = screenshot_slot(("note-figure-slot", block), Some(loaded)).when_some(
+            frame,
+            |slot, frame| {
+                let seconds = self.reader_ui.frames[frame].seconds;
+                slot.child(
+                    media_label(
+                        ("note-figure-time", block),
+                        course2md::render::fmt_ts(seconds),
+                    )
+                    .absolute()
+                    .left(rem(12.))
+                    .bottom(rem(12.)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .right(rem(12.))
+                        .bottom(rem(12.))
+                        .child(tool(
+                            IconButton::new(
+                                ("note-figure-enlarge", block),
+                                symbols::open_in_full(),
+                                enlarge.clone(),
+                            )
+                            .variant(IconButtonVariant::Tonal)
+                            .tone(ButtonTone::Neutral)
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    // The figure under the button opens the viewer too.
+                                    cx.stop_propagation();
+                                    this.open_reader_image(frame, window, cx)
+                                },
+                            )),
+                            ("note-figure-enlarge-tip", block),
+                            course2md::tr!("放大"),
+                        )),
+                )
+            },
+        );
         let card = MaterialCard::new(("note-figure", block), CardVariant::Filled)
             .rounded(RADIUS_LARGE_INCREASED)
-            .accessibility_label(course2md::tr!("放大{}", label))
+            .accessibility_label(enlarge)
             .w_full()
             .overflow_hidden()
             .child(slot);
@@ -2746,11 +2828,12 @@ impl Desktop {
                 (symbols::description(), course2md::tr!("笔记"))
             };
             tool(
-                IconButton::new("reader-view-toggle", icon, label).on_click(cx.listener(
-                    move |this, _, window, cx| {
+                IconButton::new("reader-view-toggle", icon, label)
+                    .variant(IconButtonVariant::Tonal)
+                    .tone(ButtonTone::Neutral)
+                    .on_click(cx.listener(move |this, _, window, cx| {
                         this.select_reader_view(usize::from(reading_note), window, cx)
-                    },
-                )),
+                    })),
                 "reader-view-toggle-tip",
                 label,
             )
@@ -2762,7 +2845,10 @@ impl Desktop {
         };
         let find = reading_note.then(|| {
             tool(
+                // A tool on the reader's bar sits in the neutral circle the back button has.
                 IconButton::new("reader-open-find", symbols::search(), find_label)
+                    .variant(IconButtonVariant::Tonal)
+                    .tone(ButtonTone::Neutral)
                     .toggle(true)
                     .selected(self.reader_ui.find.open)
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -3120,7 +3206,29 @@ impl Desktop {
                         .child(
                             SearchField::new(&input)
                                 .field_style(SearchFieldStyle::Tonal)
-                                .leading(Icon::from(symbols::search())),
+                                .leading(Icon::from(symbols::search()))
+                                // The note's search closes with its bar; the screenshots'
+                                // stays, so it clears in place.
+                                .when(!reading_note && searching, |field| {
+                                    field.trailing(
+                                        IconButton::new(
+                                            "gallery-search-clear",
+                                            symbols::close(),
+                                            course2md::tr!("清除搜索"),
+                                        )
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.reader_ui
+                                                    .gallery
+                                                    .find
+                                                    .update(cx, |state, cx| {
+                                                        state.set_value("", window, cx)
+                                                    });
+                                                this.gallery_search_changed(cx);
+                                            }),
+                                        ),
+                                    )
+                                }),
                         ),
                 )
                 .children(status)
@@ -4275,9 +4383,13 @@ mod tests {
         assert!(
             document
                 .markdown
-                .contains("## 问题由来\n\n### 01:00 [▶](https://video.example/?t=60)")
+                .contains("## 问题由来\n\n### [▶ 01:00](https://video.example/?t=60)")
         );
-        assert!(document.markdown.contains("- 第一点\n- 第二点 $x$"));
+        // The summary is one panel, which names it; its text stays the note's.
+        assert!(document.markdown.contains(
+            "<!-- surface:summary -->\n\n总览 \\*不是强调\\*\n\n- 第一点\n- 第二点 $x$\n\n<!-- /surface -->"
+        ));
+        assert!(!document.markdown.contains("## 摘要"));
         assert!(document.markdown.contains("> A translation"));
         // A section's screenshot follows its paragraphs.
         assert!(
@@ -4291,8 +4403,6 @@ mod tests {
                 None,
                 None,
                 Some(0),
-                Some(1),
-                Some(2),
                 Some(4),
                 Some(4),
                 Some(6),
@@ -4304,11 +4414,11 @@ mod tests {
                 Some(8)
             ]
         );
-        assert_eq!(document.item_of(2), Some(4));
-        // A later key point is in the same list.
-        assert_eq!(document.item_of(3), Some(4));
+        // The overview and every key point are in the summary's panel.
+        assert_eq!(document.item_of(1), Some(2));
+        assert_eq!(document.item_of(3), Some(2));
         assert_eq!(document.block_at(0), Some(0));
-        assert_eq!(document.block_at(12), Some(5));
+        assert_eq!(document.block_at(10), Some(5));
         assert_eq!(document.block_at(99), None);
     }
 

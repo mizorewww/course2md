@@ -50,6 +50,7 @@ info fill
 keyboard_arrow_down
 keyboard_arrow_up
 language
+library_books
 light_mode
 link
 list
@@ -60,7 +61,6 @@ menu_book
 mic
 more_vert
 movie fill
-newsstand
 notes
 open_in_full
 open_in_new
@@ -69,7 +69,6 @@ password
 phone_iphone
 pause
 play_arrow
-progress_activity
 qr_code_2
 refresh
 restart_alt
@@ -80,7 +79,6 @@ search
 settings
 smart_display
 sms
-storage fill
 subtitles
 summarize
 task
@@ -138,6 +136,7 @@ more_horiz
 notifications
 person
 pie_chart
+progress_activity
 redo
 remove
 resize

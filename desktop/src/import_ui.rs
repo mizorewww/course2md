@@ -649,7 +649,7 @@ impl Desktop {
                             .icon("online", symbols::link())
                             .icon("local", symbols::movie())
                             .selected("local")
-                            .on_activate(cx.listener(|this, value: &SharedString, window, cx| {
+                            .on_change(cx.listener(|this, value: &SharedString, window, cx| {
                                 this.switch_source_kind(value.as_ref() == "online", window, cx);
                             })),
                     ),
@@ -662,7 +662,10 @@ impl Desktop {
             .is_none()
             .then(|| self.import.source_validation.clone())
             .flatten();
-        let failed = validation.is_some() || self.import.preview_error.is_some();
+        // A collection whose videos are listed did not fail: what it could not confirm
+        // is a note under the list, not an error on the link.
+        let failed = validation.is_some()
+            || (self.import.preview_error.is_some() && self.import.source_candidates.is_empty());
         // The start action owns the submit focus once it is on screen.
         let start_shown = self.import.source_preview.is_some() && self.can_start_input(cx);
         let preview_label = course2md::tr!("预览视频");
@@ -703,8 +706,7 @@ impl Desktop {
             .child(
                 TextField::new("source-link", &self.inputs[&Field::Source])
                     .w_full()
-                    .hero()
-                    .label(course2md::tr!("视频链接"))
+                    .hero(course2md::tr!("视频链接"))
                     .leading_icon(Icon::from(symbols::link()))
                     .trailing_icon(preview)
                     .error(failed)
@@ -743,6 +745,9 @@ impl Desktop {
         let input = self.value(Field::Source, cx);
         let choose = |id: &'static str, variant, label: &'static str, cx: &mut Context<Self>| {
             material_button(id, variant)
+                .when(variant == ButtonVariant::Outlined, |button| {
+                    button.tone(ButtonTone::Accent)
+                })
                 .icon(symbols::folder_open())
                 .child(label)
                 .on_click(cx.listener(|this, _, window, cx| this.pick_video(window, cx)))
@@ -1215,17 +1220,10 @@ impl Desktop {
             .self_start()
             .when_some(duration, |cover, duration| {
                 cover.child(
-                    div()
+                    media_label("import-source-duration", duration)
                         .absolute()
                         .right(rem(8.))
-                        .bottom(rem(8.))
-                        .px(rem(8.))
-                        .py(rem(2.))
-                        .rounded(RADIUS_SMALL)
-                        .bg(color(ColorRole::ON_SURFACE))
-                        .text_color(color(ColorRole::SURFACE))
-                        .text_size(TEXT_AUX)
-                        .child(duration),
+                        .bottom(rem(8.)),
                 )
             });
         let details = v_flex()
@@ -1681,7 +1679,7 @@ impl Desktop {
                 .full_width()
                 .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
                 .selected(text_source_id(mode))
-                .on_activate(cx.listener(|this, value: &SharedString, _, cx| {
+                .on_change(cx.listener(|this, value: &SharedString, _, cx| {
                     let Some(mode) = text_source_choices()
                         .iter()
                         .map(|(mode, _)| *mode)
@@ -2639,8 +2637,14 @@ impl Desktop {
         let checking = !preferences_blocked && (self.environment.is_none() || plan_pending);
         let mut facts: Vec<AnyElement> = Vec::new();
         let mut actions: Vec<MaterialButton> = Vec::new();
+        // An outlined action reads as live: its label is primary (G3).
         let button = |id: &'static str, variant, icon, label: &'static str| {
-            material_button(id, variant).icon(icon).child(label)
+            material_button(id, variant)
+                .when(variant == ButtonVariant::Outlined, |button| {
+                    button.tone(ButtonTone::Accent)
+                })
+                .icon(icon)
+                .child(label)
         };
         if self.environment.as_ref().is_some_and(|environment| {
             !environment.engine

@@ -108,7 +108,13 @@ fn nav_destination(
                 ButtonVariant::Text
             },
         )
-        .tone(ButtonTone::Neutral)
+        // Neutral at rest, so the current destination's secondary container is the one
+        // tint in the bar.
+        .tone(if selected {
+            ButtonTone::Standard
+        } else {
+            ButtonTone::Neutral
+        })
         .button_size(ButtonSize::Small)
         .icon(icon)
         .accessibility_label(label.clone())
@@ -325,7 +331,7 @@ impl Desktop {
         let library = nav_destination(
             "nav-library",
             matches!(page, Page::Library | Page::Result),
-            symbols::newsstand(),
+            symbols::library_books(),
             course2md::tr!("笔记库"),
             shown(course2md::tr!("笔记库")),
             cx.listener(|this, _, _, cx| {

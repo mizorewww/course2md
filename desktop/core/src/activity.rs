@@ -1245,7 +1245,7 @@ mod tests {
             assert_eq!(missing_term(part), term);
         }
         use course2md::i18n::{Lang, t_for};
-        assert_eq!(t_for("{}未生成", Lang::En), "{} was not generated");
+        assert_eq!(t_for("{}未生成", Lang::En), "{} not generated");
         assert_eq!(t_for("摘要", Lang::En), "Summary");
     }
     #[test]

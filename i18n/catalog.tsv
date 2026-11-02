@@ -176,17 +176,17 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {} 视频 {}	{} 视频 {}	{} video {}	{} 影片 {}	{} 動画 {}
 {}。保存位置尚未切换，已复制的内容保留在目标位置。	{}。保存位置尚未切换，已复制的内容保留在目标位置。	{}. The save location has not been switched and the copied content remains at the target location.	{}。儲存位置尚未切換，已複製的內容保留在目標位置。	{}。保存場所はまだ切り替えられていません。コピー済みの内容はコピー先に残っています。
 {}。请备份后删除该文件再重试：{}	{}。请备份后删除该文件再重试：{}	{}. Back up and delete the file, then try again: {}	{}。請備份後刪除該檔案再重試：{}	{}。バックアップ後にファイルを削除して、再試行してください: {}
-{}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{} は {} に送信されます
-{}发送到「{}」	{}发送到「{}」	{} is sent to "{}"	{}傳送到「{}」	{} は「{}」に送信されます
+{}会发送到 {}	{}会发送到 {}	{} will be sent to {}	{}會傳送到 {}	{}は {} に送信されます
+{}发送到「{}」	{}发送到「{}」	{} is sent to "{}"	{}傳送到「{}」	{}は「{}」に送信されます
 {}尚未完成	{}尚未完成	{} has not been completed yet	{}尚未完成	{}はまだ完了していません
-{}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{} は保存されていません: {}
-{}未完成	{}未完成	{} is not completed	{}未完成	{} は完了していません
-{}未生成	{}未生成	{} was not generated	{}未生成	{} は生成されませんでした
+{}未保存：{}	{}未保存：{}	{} not saved: {}	{}未儲存：{}	{}は保存されていません: {}
+{}未完成	{}未完成	{} not completed	{}未完成	{}は完了していません
+{}未生成	{}未生成	{} not generated	{}未生成	{}は生成されませんでした
 {}测试通过	{}测试通过	{} test passed	{}測試通過	{} テストに合格しました
 {}的文件夹信息已损坏：{}	{}的文件夹信息已损坏：{}	The folder information of {} is corrupted: {}	{}的資料夾資訊已損壞：{}	{} のフォルダー情報が壊れています: {}
 {}的显示名称尚未读取：{}	{}的显示名称尚未读取：{}	The display name of {} has not been read yet: {}	{}的顯示名稱尚未讀取：{}	{} の表示名はまだ読み込まれていません: {}
 {}读取失败：{}	{}读取失败：{}	{} failed to read: {}	{}讀取失敗：{}	{} が読み取れませんでした: {}
-{}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{} は有効な非負の数値である必要があります
+{}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{}は有効な非負の数値である必要があります
 {}（具体内容未记录）	{}（具体内容未记录）	{} (specific content not recorded)	{}（具體內容未記錄）	{}（詳細は記録されていません）
 {}（自动选择）	{}（自动选择）	{} (automatic)	{}（自動選擇）	{}（自動）
 {}，{}{}	{}，{}{}	{}, {}{}	{}，{}{}	{}、{}{}
@@ -343,7 +343,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 保存位置需要重新关联	保存位置需要重新关联	Save location needs to be reconnected	儲存位置需要重新關聯	保存場所を再接続する必要があります
 保存位置：{}\n\n	保存位置：{}\n\n	Save location: {}\n\n	儲存位置：{}\n\n	保存先：{}\n\n
 保存到	保存到	Save to	儲存到	保存先
-保存名称	保存名称	Saved name	儲存名稱	保存名
+保存名称	保存名称	Save name	儲存名稱	名前を保存
 保存并继续	保存并继续	Save and continue	儲存並繼續	保存して続行
 保存并补做	保存并补做	Save and fill in missing steps	儲存並補做	保存して未完了分を処理
 保留下载的视频	保留下载的视频	Keep downloaded videos	保留下載的影片	ダウンロードした動画を保存しておく
@@ -2144,3 +2144,6 @@ AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
 音频的处理位置	音频的处理位置	Where audio is processed	音訊的處理位置	音声の処理場所
 清空链接，选项恢复为默认设置	清空链接，选项恢复为默认设置	Clears the link and returns the options to your defaults	清空連結，選項恢復為預設設定	リンクを消去し、オプションを既定の設定に戻します
 无法连接服务，尚未发送请求，请核对服务地址和网络	无法连接服务，尚未发送请求，请核对服务地址和网络	Could not connect to the service, so no request was sent. Check the service URL and the network.	無法連線服務，尚未傳送請求，請核對服務網址和網路	サービスに接続できなかったため、リクエストは送信されていません。サービス URL とネットワークを確認してください。
+已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	An app settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的應用程式設定，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかったアプリ設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
+已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	A settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的設定變更，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかった設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
+打开「校对文字和标点」后可用	打开「校对文字和标点」后可用	Available once “Proofread text and punctuation” is on	開啟「校對文字與標點」後可用	「文章と句読点を校正」をオンにすると使えます

@@ -429,6 +429,12 @@ impl Desktop {
                 |next, on| next.ai.vision = on,
                 cx,
             )
+            // Off, it says why it cannot be turned on.
+            .hint(if value.ai.enabled {
+                ""
+            } else {
+                course2md::tr!("打开「校对文字和标点」后可用")
+            })
             .disabled(!value.ai.enabled),
             translation,
             self.service_field(ServicePurpose::Ai, cx),

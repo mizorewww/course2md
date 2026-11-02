@@ -14,9 +14,10 @@ use gpui_base::{
         InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
         MarkdownPlugin, TextViewStyle,
     },
+    v_flex,
 };
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
-use gpui_kit_material::{color::ColorRole, prelude::*};
+use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};
 use std::{
     ops::Range,
     sync::{
@@ -25,8 +26,18 @@ use std::{
     },
 };
 
-/// A link with this text is the control that plays the source from a section's time.
+/// A link whose text starts with this is the control that plays the source from a
+/// section's time; what follows it, such as the time, shows in the control.
 pub const SOURCE_LINK_LABEL: &str = "▶";
+
+/// The control that plays the source from a moment, `time` its Markdown text.
+pub fn source_link(time: &str, url: &str) -> String {
+    if time.is_empty() {
+        format!("[{SOURCE_LINK_LABEL}]({url})")
+    } else {
+        format!("[{SOURCE_LINK_LABEL} {time}]({url})")
+    }
+}
 
 /// The widest one formula image is drawn, in device pixels: GPUI rasterises an SVG
 /// at twice that size and draws none wider than 8192 pixels, so a wider formula is
@@ -104,14 +115,30 @@ fn escape_inline(line: &str, dollars: bool, out: &mut String) {
 }
 
 /// `$…$`. Inside it a backslash is no escape, so a `\$` would end it: then `$$…$$`.
+/// The formula stays on one line: a line inside it would be parsed for blocks before
+/// the formula is found, so a line opening with `#`, `>` or a surface fence would
+/// start one. LaTeX reads a line break as a space.
 fn inline_formula(latex: &str, display: bool, out: &mut String) {
     let fence = if display || latex.contains('$') {
         "$$"
     } else {
         "$"
     };
+    // A dollar beside the fence would lengthen it.
+    let pad = if latex.starts_with('$') || latex.ends_with('$') {
+        " "
+    } else {
+        ""
+    };
     out.push_str(fence);
-    out.push_str(latex);
+    out.push_str(pad);
+    for (index, line) in latex.lines().enumerate() {
+        if index > 0 {
+            out.push(' ');
+        }
+        out.push_str(line.trim());
+    }
+    out.push_str(pad);
     out.push_str(fence);
 }
 
@@ -402,7 +429,8 @@ impl MarkdownPlugin for ReaderBlock {
     }
 }
 
-/// `[▶](url)` after a section's time: the control that plays the source from there.
+/// `[▶ 00:00](url)` as a section's heading, or `[▶](url)` after one: the control that
+/// plays the source from there, one tonal pill with the time it starts at.
 struct SourceLink;
 
 impl MarkdownPlugin for SourceLink {
@@ -417,8 +445,11 @@ impl MarkdownPlugin for SourceLink {
         let [Node::Text(text)] = &link.children[..] else {
             return None;
         };
-        (text.value == SOURCE_LINK_LABEL)
-            .then(|| MarkdownNode::new("source-link", link.url.clone()).text(SOURCE_LINK_LABEL))
+        let time = text.value.strip_prefix(SOURCE_LINK_LABEL)?;
+        (time.is_empty() || time.starts_with(' ')).then(|| {
+            MarkdownNode::new("source-link", (link.url.clone(), time.trim().to_owned()))
+                .text(text.value.clone())
+        })
     }
 
     fn render_inline(
@@ -428,9 +459,14 @@ impl MarkdownPlugin for SourceLink {
         _: &mut Window,
         _: &mut App,
     ) -> Option<InlineElement> {
-        let url = node.data::<String>()?.clone();
+        let (url, time) = node.data::<(String, String)>()?.clone();
         let at = node.source_range().map_or(0, |range| range.start);
         let label = c2m_i18n::tr!("从此处观看");
+        let label: SharedString = if time.is_empty() {
+            label.into()
+        } else {
+            format!("{time} · {label}").into()
+        };
         // Centred on the text beside it: a Latin x-height above the baseline.
         let middle =
             CONTROL_HEIGHT.to_pixels(context.rem_size()) * 0.4 + context.font_size() * 0.35;
@@ -455,12 +491,54 @@ pub fn extensions(line_width: Arc<AtomicU32>) -> MarkdownExtensions {
         .plugin(DisplayFormula)
 }
 
+/// The block surface a note's summary is drawn in.
+pub const SUMMARY_SURFACE: &str = "summary";
+
+/// `blocks` as one block surface named `name`: what they hold stays the note's text.
+pub fn surface(name: &str, blocks: &str) -> String {
+    format!("<!-- surface:{name} -->\n\n{blocks}\n\n<!-- /surface -->")
+}
+
+/// The summary's panel: the secondary container, with its title and sparkle. The title
+/// is the panel's, not the note's text, so a copy or a find does not take it.
+fn summary_panel(window: &mut Window, _: &mut App) -> Div {
+    let compact = window.viewport_size().width < px(600.);
+    let title = TypeRole::TitleSmall.scale();
+    v_flex()
+        .w_full()
+        .min_w_0()
+        .px(if compact { rem(16.) } else { rem(24.) })
+        .py(rem(20.))
+        .rounded(RADIUS_LARGE_INCREASED)
+        .bg(color(ColorRole::SECONDARY_CONTAINER))
+        .text_color(color(ColorRole::ON_SECONDARY_CONTAINER))
+        .child(
+            h_flex()
+                .gap(rem(8.))
+                .pb(rem(12.))
+                .items_center()
+                .child(
+                    Icon::from(crate::symbols::auto_awesome())
+                        .size(rem(18.))
+                        .color(color(ColorRole::ON_SECONDARY_CONTAINER)),
+                )
+                .child(
+                    accessible_text("note-summary-title", c2m_i18n::tr!("摘要"))
+                        .role(Role::Heading)
+                        .text_size(title.font_size)
+                        .line_height(title.line_height)
+                        .font_weight(FontWeight::SEMIBOLD),
+                ),
+        )
+}
+
 /// [`extensions`], plus what only a whole note holds.
 pub fn note_extensions(line_width: Arc<AtomicU32>, render: RenderBlock) -> MarkdownExtensions {
     extensions(line_width)
-        .parser_revision(2)
+        .parser_revision(4)
         .plugin(ReaderBlock { render })
         .plugin(SourceLink)
+        .block_surface(SUMMARY_SURFACE, summary_panel)
 }
 
 /// How note text reads: the kit's type roles on the note's surface.
@@ -583,6 +661,21 @@ mod tests {
         );
         // A formula holding a dollar cannot use one as its fence.
         assert_eq!(blocks("设 $a\\$b$ 为"), ["设 $$a\\$b$$ 为"]);
+        assert_eq!(blocks("设 $a\\$$ 为"), ["设 $$ a\\$ $$ 为"]);
+    }
+
+    #[test]
+    fn a_formula_keeps_to_one_line_so_its_lines_open_no_block() {
+        // A line of a formula starting a block, such as a surface's fence, would end
+        // the formula and the paragraph around it.
+        assert_eq!(
+            blocks("设 $a\n<!-- /surface -->$ 为"),
+            ["设 $a <!-- /surface -->$ 为"]
+        );
+        assert_eq!(
+            blocks("如下\n$$a\n# b$$\n，以及"),
+            ["如下  \n$$a # b$$，以及"]
+        );
     }
 
     #[test]

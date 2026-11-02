@@ -16,8 +16,8 @@ use gpui_kit_material::{
         ListLeading, MaterialCard, MaterialSideSheet, MaterialTooltip, NoticeKind, RADIUS_LARGE,
         RADIUS_SMALL, SearchField, SearchFieldStyle, StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP,
         TILE_RADIUS, TileScale, Tint, TypeRole, accessible_text, color, disclosure_chevron,
-        list_corners, material_button, notice_banner, progress, rem, spinner, status_chip, tile,
-        tile_chevron, tinted_icon,
+        list_corners, material_button, media_label, notice_banner, progress, rem, spinner,
+        status_chip, tile, tile_chevron, tinted_icon,
     },
     tokens::shape::OuterCorners,
 };
@@ -1331,7 +1331,7 @@ impl Desktop {
                 "list"
             })
             .button_size(ButtonSize::Small)
-            .on_activate(move |value, _, cx| {
+            .on_change(move |value, _, cx| {
                 let cards = value.as_ref() == "cards";
                 let _ = desktop.update(cx, |this, cx| {
                     this.desktop_settings.library_cards = cards;
@@ -1394,7 +1394,13 @@ impl Desktop {
                                 ButtonVariant::Outlined
                             },
                         )
-                        .tone(ButtonTone::Neutral)
+                        // On, it is tonal in the secondary container; off, an outlined
+                        // action with a primary label (L6).
+                        .tone(if group_on && can_group {
+                            ButtonTone::Standard
+                        } else {
+                            ButtonTone::Accent
+                        })
                         .icon(if group_on && can_group {
                             symbols::check()
                         } else {
@@ -1730,11 +1736,10 @@ impl Desktop {
                     .child(
                         row_cover(course.thumbnail.clone(), symbols::description()).children(
                             duration.map(|duration| {
-                                div()
+                                media_label(("note-duration", index), duration)
                                     .absolute()
                                     .right(rem(4.))
                                     .bottom(rem(4.))
-                                    .child(status_chip(StatusKind::Neutral).child(duration))
                             }),
                         ),
                     )
