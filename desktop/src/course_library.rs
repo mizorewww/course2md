@@ -60,7 +60,7 @@ fn cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
 }
 
 /// The cover of a note or task row.
-fn row_cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
+pub(crate) fn row_cover(image: Option<PathBuf>, icon: SymbolIcon) -> Div {
     cover(image, icon)
         .w(rem(ROW_COVER))
         .max_w(relative(ROW_COVER_SHARE))
@@ -1849,6 +1849,7 @@ impl Desktop {
                                 SharedString::from(format!("workbench-task-cancel-{cancel}")),
                                 ButtonVariant::Text,
                             )
+                            .tone(ButtonTone::Neutral)
                             .icon(symbols::close())
                             .child(course2md::tr!("取消任务"))
                             .disabled(task.intent == Intent::Cancel)
@@ -2058,7 +2059,11 @@ impl Desktop {
                                 .min_w(rem(160.))
                                 .flex_1(),
                         )
-                        .child(status_chip(StatusKind::Warning).child(task.state.label()))
+                        // The same colour as on Tasks: a failure is red, a pause amber.
+                        .child(
+                            status_chip(crate::task_ui::task_status_kind(task.state))
+                                .child(task.state.label()),
+                        )
                         .child(actions),
                 )
                 .when(summary != task.state.label(), |card| {
@@ -2196,7 +2201,7 @@ impl Desktop {
 
 /// A place with nothing in it: a tinted icon, what that means and the way forward,
 /// which the caller appends.
-fn empty_state(
+pub(crate) fn empty_state(
     icon: SymbolIcon,
     title: impl Into<SharedString>,
     description: Option<&'static str>,

@@ -215,3 +215,47 @@ plan reviewer re-derives anything they held.
 
 In progress, with fresh reviewers (UI, app, CLI, plan) per `PLAN.md` § Acceptance. The coordinator adds the findings
 and their resolutions here.
+
+## UI findings: resolutions
+
+Branch `split/ui2`. Native captures from the capture build, Paper (light) and Ink (dark), before (the reviewer's
+binary, `126cb4d`) and after, on a copy of the reviewer's fixture, at 992×620 and 1280×620 pt, 720 wide for narrow
+settings; Japanese and English for V1.
+
+- **U21, V6.** `42e74702`. A task row is the kit's tile button holding the grip, the note row's inset cover (8
+  corners), the text and the commands, so hover and press cover the whole row. Queued rows were held queued with a
+  stand-in worker (`COURSE2MD_BIN` → a script that sleeps), then hovered.
+- **R9.** `fcfaff27`. The contents beside the note were filled surface-container-low on the surface-container page;
+  each entry now rests on its ground, only the current one filled.
+- **U25, Q9.** `bb5c8c49`. The two `border_t_1` hairlines are `MaterialDivider` (pixel-identical in first use). The
+  mark no longer clips the icon, which carries its own rounded square (as on 关于); differs from before by sub-pixel
+  corner antialiasing only. The wordmark stays `rem(20.)`: no type role is 20 (title medium 16, title large 22).
+- **V1.** `69261b4e`, `e6dc55d4`. The Bilibili login hint was appended to any failure that was not yt-dlp's own
+  answer, so a missing yt-dlp got it; only a refusal yt-dlp reports, and for Bilibili only one about an account, gets
+  a hint now. `run-task` output stays Simplified Chinese; the desktop translates each known part of a failure through
+  the catalog (`c2m_i18n::i18n::engine_message`) and drops the misplaced hint from records older engines wrote. Tests
+  `bilibili_suggests_an_account_only_when_one_could_help`, `a_login_tip_keeps_the_markers_retries_look_for` (a spawn
+  failure gets no hint), `an_engine_message_reads_in_the_interface_language`,
+  `a_worker_failure_reads_in_the_interface_language`.
+- **V2, V7.** `f424d2f6`. The narrow pane keeps the 设置 title and the search; a search matching nothing shows
+  没有匹配的设置 with 清除搜索 in the content pane instead of the ruled-out category.
+- **V3.** `b12e6288`. 开源许可 is one outlined link per license, not a value dropdown. The kit's `ExposedDropdown`
+  still cuts a long value without an ellipsis (its static value has no `text_ellipsis`); not changed.
+- **V4.** `82e88c16`. Reproduced on an empty profile: the field's own notification after Enter read as a new edit
+  (the draft did not hold the typed link yet) and cleared the message. The draft now records the input first.
+- **V5.** `05c2ebdc`. Home's attention chip takes the Tasks page's status kind.
+- **V8.** `9b06ce29`. The gallery's card stays; the find bar's 无匹配 goes for screenshots.
+- **V9.** `7a1470ee`. Without the contents beside it, both views keep the note's measure, so the switch stays put;
+  fewer screenshots than columns share the row, each at most twice the narrowest column.
+- **V10.** `466874db`. The text toggle shows `subtitles`.
+- **V11.** `bfd0d1ce`. The kit's list item cannot tell whether its name was cut, so the sidebar rows have no tooltip.
+- **V12.** `c0230a05`. Device facts and tool states are the list item's supporting (body) text.
+- **V13.** `5a71c323`. 取消任务 is a neutral text button on Tasks, Home's card and Home's processing list.
+- **V14.** Kit side: the connected group's ring is inward and secondary, invisible on a primary-filled selected
+  option (captured after click and arrow keys). Draft kit PR #29 draws it at the M3 outer offset in a ring layer
+  painted after the options. Not yet verified in the app; the app pins the kit and needs a repin once merged.
+- **V15.** `08e2636d`. Rows 146, 246, 1014, 1465, also 1062 and 1548; row 699's translations held a second garbled
+  copy.
+- **Q10.** `5f49d50a`. The capture's `~end` asks the restore, which runs on the frame after the view's content
+  reaches its list, instead of waiting 800 ms.
+- **R6.** `97744d7f`. The reader bar is 56; breadcrumb and title still centre on the back button.

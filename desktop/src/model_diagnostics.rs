@@ -874,8 +874,9 @@ impl Desktop {
         let request = self.default_model_request();
         let environment = self.environment.as_ref()?;
         let facts = self.hardware_facts().into_iter().map(|(id, label, value)| {
+            // A fact's value is body text under its name, not a tiny trailing label (V12).
             ListItem::new(id, label)
-                .trailing_text(value)
+                .supporting(value)
                 .density(ListDensity::Compact)
         });
         let alternatives = LOCAL_ENGINES

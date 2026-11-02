@@ -33,24 +33,6 @@ pub(crate) type Response = ureq::http::Response<ureq::Body>;
 
 pub const BILIBILI_SETUP_TIP: &str = "使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。 / For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.";
 
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-struct LoginTip(&'static str);
-
-/// Keep the original failure visible and recognisable: login is a suggested next
-/// step, not a diagnosis, so markers in `error` still answer to `downcast_ref`.
-pub(crate) fn with_bilibili_login_tip(url: &str, error: anyhow::Error) -> anyhow::Error {
-    if !is_bilibili_url(url) || error.downcast_ref::<LoginTip>().is_some() {
-        return error;
-    }
-    let hint = if crate::progress::is_json() {
-        "提示：请在设置的账号中重新登录 B 站后重试。 / Hint: sign in to Bilibili again in Settings and retry."
-    } else {
-        "提示：可运行 course2md --login bilibili 扫码登录后重试；已登录时可重新登录。 / Hint: run course2md --login bilibili and scan the QR code to retry; if already logged in, log in again."
-    };
-    error.context(LoginTip(hint))
-}
-
 pub fn cookie_path() -> PathBuf {
     crate::config::config_dir().join("auth/bilibili.cookies.txt")
 }
@@ -83,7 +65,7 @@ pub fn configure_ytdlp(
 /// `cause` is the source's own words (yt-dlp's last error line). A person reads
 /// it in their language; machine-readable output keeps the stable bilingual text.
 pub fn login_hint(url: &str, cause: &str) -> Option<&'static str> {
-    if is_bilibili_url(url) {
+    if is_bilibili_url(url) && bilibili_wants_sign_in(cause) {
         return Some(if crate::progress::is_json() {
             "提示：若视频需要登录或会员权限，请在设置的账号中登录 B 站；已登录时可重新登录。 / Hint: if the video needs a login or membership, sign in to Bilibili in Settings; if already signed in, sign in again."
         } else {
@@ -102,6 +84,31 @@ pub fn login_hint(url: &str, cause: &str) -> Option<&'static str> {
         });
     }
     None
+}
+
+/// Whether Bilibili's answer, as yt-dlp words it, is one an account could change:
+/// a refusal, a members-only video, or formats held back from a visitor. A missing
+/// video, a broken network or a tool that did not start is not.
+fn bilibili_wants_sign_in(cause: &str) -> bool {
+    let lower = cause.to_lowercase();
+    [
+        "login",
+        "log in",
+        "logged in",
+        "sign in",
+        "registered users",
+        "premium",
+        "member",
+        "vip",
+        "cookies",
+        "http error 401",
+        "http error 403",
+        "requested format is not available",
+        "登录",
+        "会员",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn configure_with_path(
@@ -570,32 +577,25 @@ mod tests {
     }
 
     #[test]
-    fn login_tip_preserves_failure_and_only_applies_to_bilibili_once() {
-        let error = anyhow::anyhow!("HTTP Error 403").context("无法读取视频");
-        let error = with_bilibili_login_tip("https://b23.tv/example", error);
-        let error = with_bilibili_login_tip("https://b23.tv/example", error);
-        let message = format!("{error:#}");
-        assert!(message.contains("无法读取视频: HTTP Error 403"));
-        assert_eq!(message.matches("--login bilibili").count(), 2);
-        let error = with_bilibili_login_tip(
-            "https://youtube.com/watch?v=bilibili.com",
-            anyhow::anyhow!("HTTP Error 403"),
-        );
-        assert_eq!(error.to_string(), "HTTP Error 403");
-    }
-
-    #[test]
-    fn login_tip_leaves_typed_causes_reachable() {
-        #[derive(Debug)]
-        struct Marker;
-        impl std::fmt::Display for Marker {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("marker")
-            }
+    fn bilibili_suggests_an_account_only_when_one_could_help() {
+        let url = "https://www.bilibili.com/video/BV1";
+        for cause in [
+            "[BiliBili] BV1: Unable to download webpage: HTTP Error 403: Forbidden",
+            "[BiliBili] BV1: This video is only available for registered users",
+            "[BiliBili] BV1: Subtitles are only available when logged in",
+            "[site] fake: Requested format is not available",
+        ] {
+            assert!(login_hint(url, cause).is_some(), "{cause}");
         }
-        impl std::error::Error for Marker {}
-        let error = with_bilibili_login_tip("https://b23.tv/example", Marker.into());
-        assert!(error.downcast_ref::<Marker>().is_some());
+        for cause in [
+            "[BiliBili] BV1: HTTP Error 404: Not Found",
+            "Unsupported URL: https://www.bilibili.com/",
+            "No such file or directory (os error 2)",
+            "",
+        ] {
+            assert!(login_hint(url, cause).is_none(), "{cause}");
+        }
+        assert!(login_hint("https://example.com/v", "HTTP Error 403").is_none());
     }
 
     #[test]

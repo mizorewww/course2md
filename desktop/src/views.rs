@@ -70,15 +70,13 @@ fn brand(wordmark: bool) -> Div {
     h_flex()
         .items_center()
         .gap(rem(10.))
-        .child(
-            img("images/course2md.png")
-                .size(rem(32.))
-                .rounded(rem(10.))
-                .flex_shrink_0(),
-        )
+        // The mark carries its own rounded square, as on 关于, so nothing clips it.
+        .child(img("images/course2md.png").size(rem(32.)).flex_shrink_0())
         .when(wordmark, |brand| {
             brand.child(
                 div()
+                    // 20 between title medium and title large: the existing wordmark,
+                    // which no type role matches.
                     .text_size(rem(20.))
                     .text_color(color(ColorRole::ON_SURFACE))
                     .font_weight(FontWeight::MEDIUM)

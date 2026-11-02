@@ -255,7 +255,18 @@ pub(crate) fn ai_stage_outcome(
 /// partial result names each unfinished component beside its retry action.
 /// Keep worker diagnostics in raw logs, and retain only a short, actionable
 /// localized failure summary in the task.
+/// The hint older engines attached to failures no account could fix (V1).
+const LEGACY_LOGIN_HINT: &str = "提示：请在设置的账号中重新登录 B 站后重试。 / Hint: sign in to Bilibili again in Settings and retry.";
+
 pub(crate) fn task_failure_summary(state: TaskState, error: Option<&str>) -> Option<String> {
+    failure_summary_in(state, error, c2m_i18n::i18n::lang())
+}
+
+fn failure_summary_in(
+    state: TaskState,
+    error: Option<&str>,
+    lang: c2m_i18n::i18n::Lang,
+) -> Option<String> {
     if matches!(
         state,
         TaskState::Paused | TaskState::Cancelled | TaskState::Partial
@@ -274,12 +285,21 @@ pub(crate) fn task_failure_summary(state: TaskState, error: Option<&str>) -> Opt
                     && !line.starts_with("panic")
             })
             .unwrap_or_default();
+        // Older engines put a Bilibili login hint before any failure that was not
+        // yt-dlp's own answer, such as yt-dlp missing; it never fit, so it goes.
+        let summary = summary
+            .strip_prefix(LEGACY_LOGIN_HINT)
+            .map_or(summary, |rest| rest.trim_start_matches([':', ' ']));
+        // The worker writes for machine consumers in Simplified Chinese; the
+        // person reads it in the interface language.
+        let summary = c2m_i18n::i18n::engine_message_for(summary, lang);
+        let summary = summary.as_str();
         // A long cause (a tool's own error line) is cut, not replaced: the start
         // of the real reason helps more than a generic one.
-        if summary.chars().count() <= 140 {
+        if summary.is_empty() {
+            c2m_i18n::i18n::t_for("转换未完成", lang).into()
+        } else if summary.chars().count() <= 140 {
             summary.into()
-        } else if summary.is_empty() {
-            c2m_i18n::tr!("转换未完成").into()
         } else {
             format!("{}…", summary.chars().take(139).collect::<String>())
         }
@@ -891,8 +911,8 @@ pub fn task_stage_rows(task: &TaskRecord, active: bool) -> Vec<TaskStage> {
 #[cfg(test)]
 mod tests {
     use super::{
-        StageStatus, WorkerWait, ai_stage_outcome, stage_progress, task_failure_summary,
-        worker_wait_state,
+        LEGACY_LOGIN_HINT, StageStatus, WorkerWait, ai_stage_outcome, failure_summary_in,
+        stage_progress, task_failure_summary, worker_wait_state,
     };
     use crate::plan::tests::source;
     use c2m_protocol::progress::Stage;
@@ -1182,6 +1202,30 @@ mod tests {
         assert!(summary.starts_with("yt-dlp: [BiliBili] BV1: Unable"));
         assert!(summary.ends_with('…'));
         assert_eq!(summary.chars().count(), 140);
+    }
+
+    #[test]
+    fn a_worker_failure_reads_in_the_interface_language() {
+        use c2m_i18n::i18n::Lang;
+        let error = "启动 yt-dlp 失败: No such file or directory (os error 2)";
+        assert_eq!(
+            failure_summary_in(TaskState::NeedsAttention, Some(error), Lang::En).as_deref(),
+            Some("Failed to start yt-dlp: No such file or directory (os error 2)")
+        );
+        assert_eq!(
+            failure_summary_in(TaskState::NeedsAttention, Some(error), Lang::Ja).as_deref(),
+            Some("yt-dlp の起動に失敗しました: No such file or directory (os error 2)")
+        );
+        assert_eq!(
+            failure_summary_in(TaskState::NeedsAttention, Some(error), Lang::ZhHans).as_deref(),
+            Some(error)
+        );
+        // A record an older engine wrote keeps its cause and loses the misplaced hint.
+        let older = format!("{LEGACY_LOGIN_HINT}: {error}");
+        assert_eq!(
+            failure_summary_in(TaskState::NeedsAttention, Some(&older), Lang::En).as_deref(),
+            Some("Failed to start yt-dlp: No such file or directory (os error 2)")
+        );
     }
 
     #[test]

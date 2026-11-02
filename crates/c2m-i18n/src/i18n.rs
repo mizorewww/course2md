@@ -313,6 +313,80 @@ pub fn template(source: &str, args: &[&dyn Display]) -> String {
     out
 }
 
+/// Rows by their Simplified Chinese text, for text a machine consumer already
+/// received in that language (the worker's `run-task` output).
+fn by_simplified() -> &'static HashMap<&'static str, Entry> {
+    static INDEX: OnceLock<HashMap<&'static str, Entry>> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let mut index = HashMap::new();
+        for entry in catalog().values() {
+            index.entry(entry[Lang::ZhHans as usize]).or_insert(*entry);
+        }
+        index
+    })
+}
+
+/// One part of an engine message in `lang`, if the catalog or the part's own
+/// bilingual halves know it.
+fn engine_part(part: &str, lang: Lang) -> Option<&str> {
+    if let Some(entry) = catalog().get(part) {
+        return Some(entry[lang as usize]);
+    }
+    if let Some(entry) = by_simplified().get(part) {
+        return Some(entry[lang as usize]);
+    }
+    bilingual_halves(part).map(|(zh, en)| match lang {
+        Lang::ZhHans | Lang::ZhHant => zh,
+        Lang::En | Lang::Ja => en,
+    })
+}
+
+/// Shows a message the engine wrote for machine consumers (Simplified Chinese, or
+/// the older "中文 / English" form) in `lang`. An error chain joins its parts with
+/// ": "; each known part is translated, the longest first, and the rest (a tool's
+/// or the system's own words) is kept as written.
+pub fn engine_message_for(text: &str, lang: Lang) -> String {
+    let bounds: Vec<usize> = text
+        .match_indices(": ")
+        .map(|(index, _)| index)
+        .chain([text.len()])
+        .collect();
+    let mut out = String::with_capacity(text.len());
+    let mut start = 0;
+    while start < text.len() {
+        let found = bounds
+            .iter()
+            .rev()
+            .filter(|end| **end > start)
+            .find_map(|end| engine_part(&text[start..*end], lang).map(|part| (*end, part)));
+        let end = match found {
+            Some((end, part)) => {
+                out.push_str(part);
+                end
+            }
+            None => {
+                let end = bounds
+                    .iter()
+                    .copied()
+                    .find(|end| *end > start)
+                    .unwrap_or(text.len());
+                out.push_str(&text[start..end]);
+                end
+            }
+        };
+        if end < text.len() {
+            out.push_str(": ");
+        }
+        start = end + 2;
+    }
+    out
+}
+
+/// [`engine_message_for`] in the current interface language.
+pub fn engine_message(text: &str) -> String {
+    engine_message_for(text, lang())
+}
+
 /// Looks up a source string without consulting the global language.
 /// Used by tests and by callers that resolve a language per document.
 pub fn t_for(source: &str, lang: Lang) -> &str {
@@ -398,6 +472,40 @@ mod tests {
         let list = "YouTube / Bilibili";
         assert_eq!(t_for(list, Lang::ZhHans), list);
         assert_eq!(t_for(list, Lang::En), list);
+    }
+
+    #[test]
+    fn an_engine_message_reads_in_the_interface_language() {
+        let message = "启动 yt-dlp 失败: No such file or directory (os error 2)";
+        assert_eq!(
+            engine_message_for(message, Lang::En),
+            "Failed to start yt-dlp: No such file or directory (os error 2)"
+        );
+        assert_eq!(
+            engine_message_for(message, Lang::Ja),
+            "yt-dlp の起動に失敗しました: No such file or directory (os error 2)"
+        );
+        assert_eq!(engine_message_for(message, Lang::ZhHans), message);
+        assert_eq!(
+            engine_message_for(message, Lang::ZhHant),
+            "啟動 yt-dlp 失敗: No such file or directory (os error 2)"
+        );
+        // An older bilingual part keeps its English half whole, ": " and all.
+        let older = "提示：稍后重试。 / Hint: retry later.: 启动 yt-dlp 失败: gone";
+        assert_eq!(
+            engine_message_for(older, Lang::En),
+            "Hint: retry later.: Failed to start yt-dlp: gone"
+        );
+        assert_eq!(
+            engine_message_for(older, Lang::ZhHans),
+            "提示：稍后重试。: 启动 yt-dlp 失败: gone"
+        );
+        // Unknown words stay as written.
+        assert_eq!(
+            engine_message_for("yt-dlp: [x] gone", Lang::Ja),
+            "yt-dlp: [x] gone"
+        );
+        assert_eq!(engine_message_for("", Lang::En), "");
     }
 
     #[test]

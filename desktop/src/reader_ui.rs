@@ -192,6 +192,9 @@ struct RestoreState {
     last_position: Option<(String, workspace::ReadingPosition)>,
     /// The pending record of a settling scroll; replacing it restarts the wait.
     save: Option<Task<()>>,
+    /// Capture harness: go to the end once the restore has laid the view out.
+    #[cfg(feature = "capture")]
+    then_end: bool,
 }
 
 impl State {
@@ -590,11 +593,22 @@ const GALLERY_GAP: Rems = rem(12.);
 const GALLERY_MIN_COLUMN: Rems = rem(260.);
 /// A window with less height than this for the page shows no view tabs.
 const SHORT_MAX_HEIGHT: Rems = rem(336.);
-const TITLE_BAR_HEIGHT: Rems = rem(64.);
+const TITLE_BAR_HEIGHT: Rems = rem(56.);
 /// The widest the search field grows.
 const SEARCH_MAX_WIDTH: Rems = rem(560.);
 
 impl ReaderMetrics {
+    /// The width the page gives its views: all of it beside the contents, else the
+    /// note's measure.
+    fn view_width(&self, rem_size: Pixels) -> f32 {
+        if self.toc_beside {
+            self.content_width
+        } else {
+            self.content_width
+                .min(f32::from(ARTICLE_MAX.to_pixels(rem_size)))
+        }
+    }
+
     fn new(window: &Window, has_outline: bool) -> Self {
         let rem_size = window.rem_size();
         let pixels = |value: Rems| f32::from(value.to_pixels(rem_size));
@@ -817,6 +831,10 @@ impl Desktop {
             }
             let target = this.reader_list_target(&position);
             this.reader_list().scroll_to(target);
+            #[cfg(feature = "capture")]
+            if std::mem::take(&mut this.reader_ui.restore.then_end) {
+                this.reader_list().scroll_to_end();
+            }
             this.reader_ui.restore.active = false;
             this.reader_ui.restore.last_position = None;
             cx.notify();
@@ -1434,17 +1452,13 @@ impl Desktop {
             self.select_reader_view(1, window, cx);
         }
         if end {
-            // After the tab's saved position has been restored.
-            cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(800))
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    this.reader_list().scroll_to_end();
-                    cx.notify();
-                });
-            })
-            .detach();
+            // Once the view's own restore has its content laid out, not after a guess
+            // at how long that takes: the restore runs on the frame after the note or
+            // the screenshots reach their list.
+            self.reader_ui.restore.then_end = true;
+            if self.reader_ui.restore.pending.is_none() && !self.reader_ui.restore.active {
+                self.restore_reading_position(cx);
+            }
         }
         if let Some(index) = shot {
             self.open_reader_image(index, window, cx);
@@ -1823,8 +1837,9 @@ impl Desktop {
                     .h_full()
                     .min_h_0()
                     .w_full()
-                    // A note alone keeps its views at its own measure.
-                    .when(self.opened.result_tab == 0 && !metrics.toc_beside, |page| {
+                    // A note alone keeps both its views at its own measure, so the view
+                    // switch stays put between them and the gallery fills what it has (V9).
+                    .when(!metrics.toc_beside, |page| {
                         page.max_w(ARTICLE_MAX).mx_auto()
                     })
                     .pb(rem(16.))
@@ -2160,9 +2175,9 @@ impl Desktop {
                         ListItem::new(("toc-item", index), label.clone())
                             .density(ListDensity::Compact)
                             .container(if beside {
-                                ColorRole::SURFACE_CONTAINER_LOW
-                            } else {
                                 ColorRole::SURFACE_CONTAINER
+                            } else {
+                                ColorRole::SURFACE
                             })
                             .pill(true)
                             .selected(current == Some(index))
@@ -3136,13 +3151,14 @@ impl Desktop {
         } else {
             self.reader_ui.gallery.matches.len()
         };
-        let status = searching.then(|| {
+        // A screenshot search that finds nothing says so once, in the gallery's own
+        // card with its way out; the note's search has no such card.
+        let status = (searching && (reading_note || count > 0)).then(|| {
             accessible_text(
                 "find-status",
                 if reading_note && count > 0 {
                     format!("{}/{count}", self.reader_ui.find.current + 1)
                 } else if count == 0 {
-                    // Note and screenshot searches word their empty results the same way.
                     course2md::tr!("无匹配").into()
                 } else {
                     course2md::tr!("{} 张", count)
@@ -3254,14 +3270,20 @@ impl Desktop {
         let gap = f32::from(GALLERY_GAP.to_pixels(rem_size));
         // Each screenshot needs enough width for both the slide and a readable excerpt.
         let column = f32::from(GALLERY_MIN_COLUMN.to_pixels(rem_size));
-        let columns = ((metrics.content_width + gap) / (column + gap))
+        let width = metrics.view_width(rem_size);
+        // Fewer screenshots than columns take the row between them, each at most
+        // twice the narrowest column, rather than leaving its end empty (V9).
+        let shown = self.reader_ui.gallery.matches.len().max(1) as f32;
+        let columns = ((width + gap) / (column + gap))
             .floor()
-            .clamp(1., 6.) as usize;
+            .clamp(1., 6.)
+            .min(shown) as usize;
+        let width = width.min(columns as f32 * (column * 2. + gap) - gap);
         if columns != self.reader_ui.gallery.columns {
             self.set_gallery_items(columns);
         }
         // Cards draw a thumbnail decoded at their own device width.
-        let card_width = (metrics.content_width - gap * (columns as f32 - 1.)) / columns as f32;
+        let card_width = (width - gap * (columns as f32 - 1.)) / columns as f32;
         self.reader_ui
             .gallery
             .line_width
@@ -3287,7 +3309,8 @@ impl Desktop {
                             GalleryItem::Row(row) => div()
                                 .grid()
                                 .grid_cols(columns as u16)
-                                .w_full()
+                                .w(px(width))
+                                .max_w_full()
                                 .min_w_0()
                                 .gap(GALLERY_GAP)
                                 .children(
@@ -3973,10 +3996,11 @@ impl Desktop {
         let text_toggle = (has_text || text_only).then(|| {
             action(
                 "image-toggle-details",
+                // What was said at this picture, apart from the note's own icon (V10).
                 if text_only {
                     symbols::image()
                 } else {
-                    symbols::description()
+                    symbols::subtitles()
                 },
                 if text_only {
                     course2md::tr!("返回图片")

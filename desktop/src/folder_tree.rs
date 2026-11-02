@@ -11,8 +11,7 @@ use gpui_kit_material::{
     icons::{Icon, SymbolIcon},
     prelude::{
         AssistChip, ButtonSize, ButtonVariant, IconButton, ListDensity, ListItem, ListLeading,
-        ListTrailing, MaterialMenu, MaterialMenuItem, MaterialTooltip, color, material_button, rem,
-        section_title,
+        ListTrailing, MaterialMenu, MaterialMenuItem, color, material_button, rem, section_title,
     },
     tokens::shape::RADIUS_CARD,
 };
@@ -614,12 +613,9 @@ impl Desktop {
                 Some(COMMAND_MENU_WIDTH),
                 commands,
             ))
-            .child(
-                // A long name is cut by its row; the tooltip shows the whole.
-                MaterialTooltip::plain(SharedString::from(format!("{key}-tip")), label.clone())
-                    .show_on_focus(false)
-                    .trigger(item),
-            );
+            // No tooltip: the kit's list item cannot tell whether its name was cut, and
+            // one that repeats a whole name only covers the row above (V11).
+            .child(item);
         row = match &root {
             Some(root) => self.drop_target(row, root, folder, cx),
             None => row,
