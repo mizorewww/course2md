@@ -21,17 +21,48 @@ struct Receipt {
     version: String,
 }
 
-pub fn inspect(provider: AsrProvider, model: &str, root: &Path) -> Result<LocalModelStatus> {
-    let home = crate::config::home_dir().unwrap_or_else(crate::config::cache_dir);
-    let var = |keys: [&str; 2]| {
-        keys.into_iter()
-            .find_map(|key| std::env::var_os(key).filter(|value| !value.is_empty()))
-            .map(PathBuf::from)
+fn env_path(keys: [&str; 2]) -> Option<PathBuf> {
+    keys.into_iter()
+        .find_map(|key| std::env::var_os(key).filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+}
+
+fn home() -> PathBuf {
+    crate::config::home_dir().unwrap_or_else(crate::config::cache_dir)
+}
+
+/// The directory holding `qwen3-speech`, the Apple models' cache: `QWEN3_CACHE_DIR`
+/// (or its older name), else `$HOME/Library/Caches`.
+pub fn apple_cache_root() -> PathBuf {
+    env_path(["QWEN3_CACHE_DIR", "QWEN3_ASR_CACHE_DIR"])
+        .unwrap_or_else(|| home().join("Library/Caches"))
+}
+
+/// `path` in a form the Swift downloader accepts. It checks each file stays inside
+/// its directory by comparing standardized paths, and standardizing drops a leading
+/// `/private` from an existing directory but not from a file still to be written,
+/// so a cache under `/private/tmp` refused every file. The `/tmp` alias of such a
+/// path has no `/private` to drop.
+pub fn swift_cache_path(path: &Path) -> PathBuf {
+    let Ok(rest) = path.strip_prefix("/private") else {
+        return path.to_path_buf();
     };
-    let apple_base = var(["QWEN3_CACHE_DIR", "QWEN3_ASR_CACHE_DIR"])
-        .unwrap_or_else(|| home.join("Library/Caches"))
-        .join("qwen3-speech");
-    let hf_base = var(["HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"]).unwrap_or_else(|| {
+    let mut parts = rest.components();
+    let Some(first) = parts.next() else {
+        return path.to_path_buf();
+    };
+    let alias = Path::new("/").join(first);
+    if fs::canonicalize(&alias).is_ok_and(|target| target == Path::new("/private").join(first)) {
+        alias.join(parts.as_path())
+    } else {
+        path.to_path_buf()
+    }
+}
+
+pub fn inspect(provider: AsrProvider, model: &str, root: &Path) -> Result<LocalModelStatus> {
+    let home = home();
+    let apple_base = apple_cache_root().join("qwen3-speech");
+    let hf_base = env_path(["HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"]).unwrap_or_else(|| {
         std::env::var_os("HF_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|| home.join(".cache").join("huggingface"))
@@ -492,6 +523,22 @@ pub fn record_result(status: &LocalModelStatus, loaded: bool, error: Option<Stri
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn swift_cache_path_drops_private_only_where_an_alias_leads_there() {
+        assert_eq!(
+            swift_cache_path(Path::new("/Users/someone/Library/Caches")),
+            Path::new("/Users/someone/Library/Caches")
+        );
+        let no_alias = Path::new("/private/course2md-no-such-alias/cache");
+        assert_eq!(swift_cache_path(no_alias), no_alias);
+        if cfg!(target_os = "macos") {
+            assert_eq!(
+                swift_cache_path(Path::new("/private/tmp/scratch/cache")),
+                Path::new("/tmp/scratch/cache")
+            );
+        }
+    }
+
     use super::*;
     use std::io::Write;
     fn roots() -> tempfile::TempDir {

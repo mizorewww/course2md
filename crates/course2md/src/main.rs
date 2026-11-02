@@ -47,6 +47,11 @@ fn init_logging(verbose: u8, quiet: bool, json: bool) {
 }
 
 fn main() -> std::process::ExitCode {
+    // SAFETY: the first statement of main, before any thread exists.
+    #[cfg(apple_native)]
+    unsafe {
+        course2md::apple::pin_cache_dir()
+    };
     let mut args: Vec<_> = std::env::args_os().collect();
     let lang_arg = course2md::cli::take_lang_arg(&mut args);
     // 近似扫描（先于 clap 解析，解析失败也要走对输出模式）：把值恰为 "--json"/
