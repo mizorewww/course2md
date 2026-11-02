@@ -2,7 +2,7 @@
 //! so native layout can be reviewed without screen-recording permission.
 //!
 //! `COURSE2MD_CAPTURE` lists `page=path.png` pairs separated by `;`. Pages are
-//! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]`, `library`, `tasks`, `settings:<category>` (appearance, generation,
+//! `onboarding[:<ai|account|model|cloud>]`, `home[:<state>]`, `size:<w>x<h>` (resizes the window, in points), `library`, `tasks`, `settings:<category>` (appearance, generation,
 //! services, storage, application) and `reader[:<title text>][~shots][~shot:<n>][~end]`
 //! (the newest note, or the first whose title contains the text; it opens at
 //! the top, ignoring saved reading positions; `~shots` opens the screenshot
@@ -344,6 +344,14 @@ impl Desktop {
                 self.capture_library_state(category, window, cx);
             }
             "tasks" => self.navigate(Page::Task, cx),
+            // `size:<w>x<h>` resizes the window, in points, and stays on the page.
+            "size" => {
+                let (width, height) = category
+                    .split_once('x')
+                    .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
+                    .unwrap_or_else(|| panic!("capture size is <w>x<h>, not {category}"));
+                window.resize(gpui::size(gpui::px(width), gpui::px(height)));
+            }
             // `language:<code>` chooses an interface language the way settings does,
             // on whatever page is open.
             "language" => {

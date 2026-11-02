@@ -1750,8 +1750,12 @@ impl Desktop {
         ]
         .into_iter()
         .map(|option| {
+            let vision_off = option == ConversionAiOption::Vision && !self.task_options().llm;
             let hint = if option == ConversionAiOption::Proofread && custom_rule {
                 course2md::tr!("使用自定义校对规则")
+            } else if vision_off {
+                // Disabled, it says why, as on the settings page.
+                course2md::tr!("打开「校对文字和标点」后可用")
             } else {
                 ""
             };
@@ -1765,7 +1769,7 @@ impl Desktop {
                 }),
             )
             .hint(hint)
-            .disabled(option == ConversionAiOption::Vision && !self.task_options().llm)
+            .disabled(vision_off)
         })
         .collect();
         // Bilingual translation is a per-task choice; the global default is only

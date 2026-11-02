@@ -133,6 +133,19 @@ Each line names the commit by subject; evidence is under the session scratchpad 
   2px drop border on each side; the outline is now drawn inside the row (`l1/l-click`, rows at a 56 pitch, click and
   hover still reach the item). The 44 height and pill wait on kit #21 and its pill split-off.
 
+- Round 4: the workbench's screenshot switch says why it is disabled (`iv/ho`); the image viewer is framed by the
+  kit's outlined `CardSurface` (`iv/vd`); capture builds take `size:<w>x<h>`. At 900 and 1600 wide and 200% text:
+  U23 reproduced and fixed (`sz/a200s2`, `sz/awide`); the reader's folded play action was the one tool without a
+  container, now outlined (`sz/r900`). U20: at 1600 wide the breadcrumb and title sit about 4pt above the back
+  button's centre; not fixed. U21: queued rows could not be held queued on this machine (the runner starts and
+  fails them without tools), so not reproduced. U17: Nord's palette is kit data (`crates/color/src/palette.rs`);
+  a kit PR for its error contrast is being prepared. U2: load average 8 to 13 during the attempt, so not measured;
+  capture builds with `performance` log draw histograms only, frame events need `COURSE2MD_FRAME_TRACE`.
+- U7 (200% text), `desktop: a palette card's preview gives up height before its name is cut`: the grid already
+  reflows to fewer columns; on a short window the scrolling body was shorter than one row, so names were cut under
+  the previews (`pal/p200w2`, `pal/p200d`, `pal/p100`). Kit #23's width cap is rem-scaled and does not address this.
+- Kit PRs open for the rest: #18 and #20 ready for the owner; #19, #21, #22, #23, #24, #25, #26 in review.
+
 ## Plan conformance (after the three fix agents)
 
 | ID | Sev | Finding |
