@@ -29,6 +29,15 @@ impl std::fmt::Display for NewerSchema {
 
 impl std::error::Error for NewerSchema {}
 
+/// The library's own wording for the engine's typed refusal.
+fn newer(error: anyhow::Error) -> anyhow::Error {
+    if error.is::<artifact::NewerSchema>() {
+        NewerSchema.into()
+    } else {
+        error
+    }
+}
+
 #[derive(Clone)]
 pub struct Course {
     pub dir: PathBuf,
@@ -124,14 +133,10 @@ fn version_course(dir: &Path) -> Result<Course> {
 
 fn current_course(dir: &Path) -> Result<Course> {
     let current = || -> Result<Course> {
-        let pointer: artifact::CurrentVersion =
-            serde_json::from_slice(&std::fs::read(dir.join("current.json"))?)?;
-        if pointer.schema > 1 {
-            return Err(NewerSchema.into());
-        }
-        anyhow::ensure!(pointer.schema == 1, version_damaged());
+        let pointer = artifact::read_current(&dir.join("current.json")).map_err(newer)?;
         let manifest_path = artifact::safe_asset_path(dir, &pointer.manifest)?;
-        let course = version_course(manifest_path.parent().context(version_damaged())?)?;
+        let course =
+            version_course(manifest_path.parent().context(version_damaged())?).map_err(newer)?;
         anyhow::ensure!(
             course.manifest.as_ref().is_some_and(|manifest| {
                 manifest.course_id == pointer.course_id && manifest.version_id == pointer.version_id
@@ -144,19 +149,27 @@ fn current_course(dir: &Path) -> Result<Course> {
         if error.is::<NewerSchema>() {
             return Err(error);
         }
-        let mut intact = std::fs::read_dir(dir.join("versions"))
+        let mut intact = Vec::new();
+        for entry in std::fs::read_dir(dir.join("versions"))
             .into_iter()
             .flatten()
             .filter_map(Result::ok)
             .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-            .filter_map(|entry| version_course(&entry.path()).ok())
-            .filter(|course| {
-                course
-                    .manifest
-                    .as_ref()
-                    .is_some_and(|manifest| assets_present(&course.dir, manifest))
-            })
-            .collect::<Vec<_>>();
+        {
+            match version_course(&entry.path()).map_err(newer) {
+                // A version this app cannot read may be the latest one.
+                Err(error) if error.is::<NewerSchema>() => return Err(error),
+                Ok(course)
+                    if course
+                        .manifest
+                        .as_ref()
+                        .is_some_and(|manifest| assets_present(&course.dir, manifest)) =>
+                {
+                    intact.push(course)
+                }
+                _ => {}
+            }
+        }
         intact.sort_by_key(|course| course.manifest.as_ref().map(|m| m.revision));
         let mut course = intact.pop().ok_or(error)?;
         course.warning =
@@ -689,6 +702,26 @@ mod tests {
         std::fs::write(&pointer, serde_json::to_vec(&value).unwrap()).unwrap();
         let scan = scan_library(root.path()).unwrap();
         assert!(scan.courses.is_empty());
+        assert!(
+            scan.issues[0].contains("更新版本的应用"),
+            "{:?}",
+            scan.issues
+        );
+    }
+
+    /// The pointer is one this app reads; the manifest it names is not.
+    #[test]
+    fn a_newer_manifest_under_a_current_pointer_is_not_replaced_by_an_older_version() {
+        let root = tempfile::tempdir().unwrap();
+        published_note(root.path(), 1, &[10.], Default::default());
+        let newer = published_note(root.path(), 2, &[20.], Default::default());
+        let manifest = newer.dir.join("manifest.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+        value["schema"] = 2.into();
+        std::fs::write(&manifest, serde_json::to_vec(&value).unwrap()).unwrap();
+        let scan = scan_library(root.path()).unwrap();
+        assert!(scan.courses.is_empty(), "{:?}", scan.courses[0].dir);
         assert!(
             scan.issues[0].contains("更新版本的应用"),
             "{:?}",

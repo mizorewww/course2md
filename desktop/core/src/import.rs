@@ -1106,6 +1106,7 @@ mod tests {
             updated: 0,
             parent: None,
             handled_by: None,
+            held: false,
             work_dir: "work/original".into(),
             events: crate::activity::JobEvents {
                 error: Some("原摘要请求结果未确认".into()),

@@ -814,6 +814,7 @@ mod tests {
             updated: 0,
             parent: None,
             handled_by: None,
+            held: false,
             work_dir: root.join(".course2md/work").join(&manifest.task_id),
             events: crate::activity::JobEvents {
                 error: None,

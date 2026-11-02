@@ -28,13 +28,11 @@ const CACHE_LIMIT: usize = 4096;
 struct Cache {
     formulas: HashMap<(String, bool), Option<Formula>>,
     svgs: HashMap<SharedString, Arc<[u8]>>,
-    /// Never reused, so a path cannot name another formula after a reset.
-    next_path: u64,
 }
 
 impl Cache {
-    /// Starts over rather than track use: a formula still on screen is
-    /// typeset again under a new path the next time it is drawn.
+    /// Starts over rather than track use. A path names its formula, so one still on
+    /// screen is typeset again from its path when next drawn.
     fn reset_if_full(&mut self) {
         if self.formulas.len() >= CACHE_LIMIT || self.svgs.len() >= CACHE_LIMIT {
             self.formulas.clear();
@@ -47,9 +45,53 @@ static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
     Mutex::new(Cache {
         formulas: HashMap::new(),
         svgs: HashMap::new(),
-        next_path: 0,
     })
 });
+
+/// `math/{d|i}{hex of the LaTeX}.svg`: the path is the formula, so it can never name
+/// another one and can always be typeset again.
+fn path_of(latex: &str, display: bool) -> SharedString {
+    let mut path = format!("{ASSET_PREFIX}{}", if display { 'd' } else { 'i' });
+    for byte in latex.bytes() {
+        path.push_str(&format!("{byte:02x}"));
+    }
+    path.push_str(".svg");
+    path.into()
+}
+
+/// What a formula's asset path names.
+struct Source {
+    latex: String,
+    display: bool,
+    /// A tile's slice: index and count.
+    slice: Option<(usize, usize)>,
+}
+
+fn source_of(path: &str) -> Option<Source> {
+    let name = path.strip_prefix(ASSET_PREFIX)?.strip_suffix(".svg")?;
+    let (name, slice) = match name.split_once('-') {
+        Some((name, slice)) => {
+            let (index, count) = slice.split_once("of")?;
+            (name, Some((index.parse().ok()?, count.parse().ok()?)))
+        }
+        None => (name, None),
+    };
+    let display = match name.as_bytes().first()? {
+        b'd' => true,
+        b'i' => false,
+        _ => return None,
+    };
+    let hex = &name[1..];
+    let bytes = (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok())
+        .collect::<Option<Vec<_>>>()?;
+    Some(Source {
+        latex: String::from_utf8(bytes).ok()?,
+        display,
+        slice,
+    })
+}
 
 /// The typeset formula, or `None` when RaTeX cannot parse it; the note then
 /// shows the source. Results are cached. The note's parser asks off the UI thread.
@@ -62,8 +104,7 @@ pub fn formula(latex: &str, display: bool) -> Option<Formula> {
     let mut cache = CACHE.lock().ok()?;
     cache.reset_if_full();
     let formula = typeset.map(|typeset| {
-        let path = SharedString::from(format!("{ASSET_PREFIX}{}.svg", cache.next_path));
-        cache.next_path += 1;
+        let path = path_of(latex, display);
         cache
             .svgs
             .insert(path.clone(), typeset.svg.into_bytes().into());
@@ -80,24 +121,15 @@ pub fn formula(latex: &str, display: bool) -> Option<Formula> {
 
 /// The asset path of slice `index` of `count` equal vertical slices of the
 /// formula at `path`, so a formula too wide for one image can be drawn as
-/// several. `None` once the cache has been reset; the next frame typesets
-/// the formula again.
-pub fn tile(path: &str, index: usize, count: usize) -> Option<SharedString> {
+/// several. The slice is cut when first drawn.
+pub fn tile(path: &str, index: usize, count: usize) -> SharedString {
     if count <= 1 {
-        return Some(SharedString::from(path.to_owned()));
+        return SharedString::from(path.to_owned());
     }
-    let tile = SharedString::from(format!(
+    SharedString::from(format!(
         "{}-{index}of{count}.svg",
         path.trim_end_matches(".svg")
-    ));
-    let mut cache = CACHE.lock().ok()?;
-    if !cache.svgs.contains_key(&tile) {
-        let svg = std::str::from_utf8(cache.svgs.get(path)?).ok()?;
-        let sliced = slice_svg(svg, index, count)?;
-        cache.reset_if_full();
-        cache.svgs.insert(tile.clone(), sliced.into_bytes().into());
-    }
-    Some(tile)
+    ))
 }
 
 /// The same drawing seen through slice `index` of `count` of its viewBox,
@@ -144,8 +176,26 @@ pub fn asset(path: &str) -> Option<Cow<'static, [u8]>> {
     if !path.starts_with(ASSET_PREFIX) {
         return None;
     }
-    let cache = CACHE.lock().ok()?;
-    cache.svgs.get(path).map(|svg| Cow::Owned(svg.to_vec()))
+    if let Some(svg) = CACHE.lock().ok()?.svgs.get(path) {
+        return Some(Cow::Owned(svg.to_vec()));
+    }
+    let Source {
+        latex,
+        display,
+        slice,
+    } = source_of(path)?;
+    let svg = c2m_artifact::math::typeset(&latex, display)?.svg;
+    let svg = match slice {
+        Some((index, count)) if index < count => slice_svg(&svg, index, count)?,
+        Some(_) => return None,
+        None => svg,
+    };
+    let mut cache = CACHE.lock().ok()?;
+    cache.reset_if_full();
+    cache
+        .svgs
+        .insert(SharedString::from(path.to_owned()), svg.as_bytes().into());
+    Some(Cow::Owned(svg.into_bytes()))
 }
 
 #[cfg(test)]
@@ -161,9 +211,10 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 0 100 40" width="100pt" height="40pt"><path d="M0 0"/></svg>"#
         );
         let typeset = formula("a+b+c", false).unwrap();
-        assert_eq!(tile(&typeset.path, 0, 1).unwrap(), typeset.path);
-        let second = tile(&typeset.path, 1, 2).unwrap();
+        assert_eq!(tile(&typeset.path, 0, 1), typeset.path);
+        let second = tile(&typeset.path, 1, 2);
         assert!(asset(&second).is_some());
+        assert!(asset(&tile(&typeset.path, 2, 2)).is_none());
     }
 
     /// The tests below fill the one shared cache, which resets it for the others.
@@ -174,15 +225,17 @@ mod tests {
         let _filling = FILLING.lock().unwrap();
         for index in 0..=CACHE_LIMIT {
             let typeset = formula("x^2+y^2", false).unwrap();
-            assert!(tile(&typeset.path, index, CACHE_LIMIT * 2).is_some());
+            assert!(asset(&tile(&typeset.path, index, CACHE_LIMIT * 2)).is_some());
             assert!(CACHE.lock().unwrap().svgs.len() <= CACHE_LIMIT);
         }
     }
 
+    /// A note keeps the formula it parsed; a reset must not blank it on screen.
     #[test]
-    fn the_formula_cache_is_bounded_and_never_reuses_a_path() {
+    fn a_formula_parsed_before_a_reset_still_draws_after_it() {
         let _filling = FILLING.lock().unwrap();
-        let first = formula("a_{0}", false).unwrap();
+        let first = formula("a_{0} + \\frac{1}{2}", true).unwrap();
+        let expected = asset(&first.path).unwrap().into_owned();
         for n in 1..=CACHE_LIMIT {
             formula(&format!("a_{{{n}}}"), false);
         }
@@ -190,11 +243,14 @@ mod tests {
             let cache = CACHE.lock().unwrap();
             assert!(cache.formulas.len() <= CACHE_LIMIT);
             assert!(cache.svgs.len() <= CACHE_LIMIT);
+            assert!(!cache.svgs.contains_key(&first.path));
         }
-        // CACHE_LIMIT later insertions reset the cache at least once.
-        assert!(asset(&first.path).is_none());
-        let again = formula("a_{0}", false).unwrap();
-        assert_ne!(again.path, first.path);
-        assert!(asset(&again.path).is_some());
+        assert_eq!(asset(&first.path).unwrap().into_owned(), expected);
+        assert!(asset(&tile(&first.path, 1, 3)).is_some());
+        assert_eq!(
+            formula("a_{0} + \\frac{1}{2}", true).unwrap().path,
+            first.path
+        );
+        assert!(asset("math/zz.svg").is_none());
     }
 }

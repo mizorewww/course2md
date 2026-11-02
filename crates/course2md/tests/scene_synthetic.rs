@@ -127,3 +127,34 @@ fn stable_mode_waits_for_settled_state() {
     // 观察到的稳定时长 1.0s < 1.2s，不发射；灰页 4.0s 首现，5.5s 发射。
     assert_eq!(onsets(&cfg, &video), [0.0, 4.0]);
 }
+
+/// Footage that keeps moving never holds a picture long enough for stable mode. It
+/// still yields screenshots, one per cooldown, instead of failing the whole step.
+#[test]
+fn moving_footage_still_yields_screenshots() {
+    if !common::ffmpeg_available() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let video = dir.path().join("moving.mp4");
+    // A test card scrolling diagonally: every sample differs from the one before.
+    let st = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi"])
+        .args(["-i", "testsrc2=s=1280x720:r=10:d=20,scroll=h=0.004:v=0.002"])
+        .args(["-pix_fmt", "yuv420p"])
+        .arg(&video)
+        .status()
+        .expect("spawn ffmpeg");
+    assert!(st.success());
+    // The app's defaults.
+    let cfg = course2md::config::PipelineConfig {
+        similarity: course2md::config::DEFAULT_SIMILARITY,
+        sample_interval: course2md::config::DEFAULT_SAMPLE_INTERVAL,
+        cooldown: course2md::config::DEFAULT_COOLDOWN,
+        slide_mode: course2md::config::SlideMode::Stable,
+        stable_secs: course2md::config::DEFAULT_STABLE_SECS,
+        ..test_cfg(&video, dir.path())
+    };
+    // The last moving picture is flushed at the end, as in first mode.
+    assert_eq!(onsets(&cfg, &video), [0.0, 10.0, 19.0]);
+}

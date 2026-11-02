@@ -344,6 +344,18 @@ impl Desktop {
                 self.capture_library_state(category, window, cx);
             }
             "tasks" => self.navigate(Page::Task, cx),
+            // `language:<code>` chooses an interface language the way settings does,
+            // on whatever page is open.
+            "language" => {
+                let language: crate::preferences::InterfaceLanguage =
+                    serde_json::from_value(serde_json::Value::String(category.into()))
+                        .unwrap_or_else(|_| panic!("unknown capture language {category}"));
+                let mut next = self.application_edit_base();
+                next.language = language;
+                if self.commit_application(next, cx) {
+                    self.apply_interface_language(language, window, cx);
+                }
+            }
             "settings" => {
                 self.open_settings(window, cx);
                 let tab = match category {

@@ -188,7 +188,9 @@ impl Desktop {
         self.onboarding.ai.cancel();
         for purpose in [ServicePurpose::Speech, ServicePurpose::Ai] {
             let id = self.onboarding.service(purpose).form.draft.id.clone();
-            let _ = self.preferences.discard_service_draft(&id);
+            if let Ok(released) = self.preferences.discard_service_draft(&id) {
+                self.forget_credentials(released);
+            }
         }
         self.onboarding.active = false;
         self.onboarding.session += 1;
@@ -747,7 +749,9 @@ impl Desktop {
             service.form.models.invalidate();
             service.form.clear_key(window, cx);
             let id = service.form.draft.id.clone();
-            let _ = self.preferences.discard_service_draft(&id);
+            if let Ok(released) = self.preferences.discard_service_draft(&id) {
+                self.forget_credentials(released);
+            }
         }
         self.onboarding.active = false;
         self.onboarding.finish_failed = false;

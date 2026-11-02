@@ -601,11 +601,7 @@ impl Desktop {
     }
 
     pub fn start_next_task(&mut self, cx: &mut Context<Self>) {
-        if self.work.job.is_some()
-            || self.work.closing
-            || self.storage_ui.busy
-            || self.work.start_pending
-        {
+        if self.storage_ui.busy {
             return;
         }
         let Some(task) = self
@@ -616,6 +612,10 @@ impl Desktop {
         else {
             return;
         };
+        // Held until the job runs or the start fails: polls keep coming meanwhile.
+        if !self.work.claim_start(&task.id) {
+            return;
+        }
         let refs = ServiceRefs {
             asr: task.plan.asr_service.clone(),
             llm: task.plan.ai_service.clone(),
@@ -638,7 +638,6 @@ impl Desktop {
         // Keychain resolution may surface a system authorization dialog whose queue can even
         // be held by another application; resolving on the UI thread would freeze the whole
         // interface, so the secrets are gathered on a background executor first.
-        self.work.start_pending = true;
         let vault = self.preferences.vault();
         let task_id = task.id.clone();
         let secrets_rx = crate::spawn_blocking_io(move || -> Result<HashMap<String, String>> {
@@ -655,7 +654,6 @@ impl Desktop {
                 .await
                 .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("凭据读取意外中断"))));
             let _ = this.update(cx, |this, cx| {
-                this.work.start_pending = false;
                 match secrets {
                     Ok(secrets) => this.finish_task_start(&task_id, secrets, cx),
                     Err(error) => {
@@ -675,21 +673,20 @@ impl Desktop {
         secrets: HashMap<String, String>,
         cx: &mut Context<Self>,
     ) {
-        if self.work.job.is_some() || self.work.closing {
-            return;
-        }
-        let Some(task) = self
+        let task = self
             .workspace
             .as_ref()
             .and_then(|w| w.state.task(task_id))
-            .cloned()
-        else {
+            .cloned();
+        // The queue may have changed while credentials were being resolved off-thread.
+        let Some(task) = task.filter(|task| {
+            self.work.is_starting(&task.id)
+                && task.state == TaskState::Queued
+                && task.intent == Intent::Run
+        }) else {
+            self.work.end_start(task_id);
             return;
         };
-        // The queue may have changed while credentials were being resolved off-thread.
-        if task.state != TaskState::Queued || task.intent != Intent::Run {
-            return;
-        }
         let prepared = self.request_for(&task, &secrets).and_then(|request| {
             let control = self.task_control(&task)?;
             let location = self
@@ -759,11 +756,20 @@ impl Desktop {
         request: course2md::execution::Request,
         cx: &mut Context<Self>,
     ) {
-        if self.work.job.is_some()
+        // What the task is now, not the copy taken before the library was read.
+        let current = self
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.state.task(&task.id))
+            .is_some_and(|record| {
+                record.state == TaskState::Queued && record.intent == Intent::Run
+            });
+        if !self.work.is_starting(&task.id)
+            || self.work.job.is_some()
             || self.work.closing
-            || task.state != TaskState::Queued
-            || task.intent != Intent::Run
+            || !current
         {
+            self.work.end_start(&task.id);
             return;
         }
         let running = self
@@ -796,8 +802,7 @@ impl Desktop {
             let job = started.recv().await;
             let _ = desktop.update(cx, |this, cx| match job {
                 Ok(Ok(job)) => {
-                    this.work.job = Some(job);
-                    this.work.active_task = Some(task.id.clone());
+                    this.work.install(&task.id, job);
                     this.work.kind = Kind::Convert;
                     this.work.cancelling = false;
                     this.work.job_started = Some(std::time::Instant::now());
@@ -818,6 +823,7 @@ impl Desktop {
     }
 
     fn fail_task_before_start(&mut self, task_id: &str, message: String) {
+        self.work.end_start(task_id);
         if let Some(workspace) = &mut self.workspace {
             let compensated = workspace.transaction(|state| {
                 let record = state

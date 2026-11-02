@@ -151,6 +151,16 @@ impl Default for KeychainCredentialVault {
     }
 }
 
+#[cfg(all(test, target_os = "macos"))]
+impl KeychainCredentialVault {
+    /// A Keychain service of a test's own, so a test never touches the app's keys.
+    pub fn for_test(service: &str) -> Self {
+        Self {
+            service: service.into(),
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 impl CredentialVault for KeychainCredentialVault {
     fn insert(&self, secret: Secret) -> Result<CredentialRef> {

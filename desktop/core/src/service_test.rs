@@ -292,6 +292,10 @@ struct HttpResponse {
 enum TransportFailure {
     /// The request or response was not fully observed. No retry is performed.
     Unknown,
+    /// No connection was made, so nothing was sent: an unknown host, a refused or
+    /// timed-out connection, or an address that is not one. Redirects are off, so this
+    /// is about the address itself.
+    NotSent,
     ResponseTooLarge(u16),
 }
 
@@ -318,7 +322,15 @@ impl Transport for HttpTransport {
         let response = match call.send_bytes(&request.body) {
             Ok(response) => response,
             Err(ureq::Error::Status(_, response)) => response,
-            Err(ureq::Error::Transport(_)) => return Err(TransportFailure::Unknown),
+            Err(ureq::Error::Transport(transport)) => {
+                return Err(match transport.kind() {
+                    ureq::ErrorKind::Dns
+                    | ureq::ErrorKind::ConnectionFailed
+                    | ureq::ErrorKind::InvalidUrl
+                    | ureq::ErrorKind::UnknownScheme => TransportFailure::NotSent,
+                    _ => TransportFailure::Unknown,
+                });
+            }
         };
         let status = response.status();
         let body =
@@ -389,6 +401,11 @@ fn run_test(
         Err(TransportFailure::Unknown) => {
             evidence.outcome = TestOutcome::OutcomeUnknown;
             evidence.message = unknown_result_message().into();
+            return evidence;
+        }
+        Err(TransportFailure::NotSent) => {
+            evidence.message =
+                course2md::tr!("无法连接服务，尚未发送请求，请核对服务地址和网络").into();
             return evidence;
         }
         Err(TransportFailure::ResponseTooLarge(status)) => {
@@ -721,6 +738,29 @@ mod tests {
             &AtomicBool::new(false),
             fake,
         )
+    }
+
+    /// A refused connection sent nothing, so it cannot have cost anything.
+    #[test]
+    fn a_refused_connection_is_not_sent_rather_than_possibly_charged() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        let evidence = run_test(
+            &ServiceConfiguration {
+                endpoint: format!("http://127.0.0.1:{port}/v1/chat/completions"),
+                ..config()
+            },
+            TestKind::Proofread,
+            &MemoryCredentialVault::new(),
+            &AtomicBool::new(false),
+            &HttpTransport,
+        );
+        assert_eq!(evidence.outcome, TestOutcome::NotSent);
+        assert_eq!(
+            evidence.message,
+            "无法连接服务，尚未发送请求，请核对服务地址和网络"
+        );
     }
 
     #[test]
