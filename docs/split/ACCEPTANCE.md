@@ -33,6 +33,7 @@ Resolutions (branch `split/engine-fixes`; evidence under the session scratchpad 
 | ID | Commit | Resolution and evidence |
 |---|---|---|
 | C1 | `ai: proofreading receipts saved by 2.0.1 in any language are found again` | Cause: E18 (`7aab974`) fixed the proofreading rule and vision note to Simplified Chinese, so the body, the ledger identity, changed for CLI tasks begun in English, Traditional Chinese or Japanese (`--json` and `run-task` always sent Chinese). Reverting E18 would make a language change resend again, so the earlier wording of each language is kept as a former identity: `RequestSpec::former`, and a receipt under one continues under its id. `prompt_identity` checks 16 ids taken from `3db4a88` (vision, custom prompt, four languages, OpenAI-compatible and Ollama): completed ones replay in every language, an in-flight one stays unresolved, new tasks keep the Simplified Chinese id. Matrix of 9 option sets × 4 languages × human/`--json`/`run-task` (`ids-base.json`, `ids-new0.json`): proofreading in the three languages was the only id that differed. 2.0.1 killed mid-proofreading in each language, resumed by this build: 0 requests, the 2.0.1 receipt marked uncertain (`proof/`) |
+| C2 | `ci: run prompt_identity; DESIGN.md cites its path` | `ci.yml` runs `--test prompt_identity` with the other integration tests on all three platforms; `docs/DESIGN.md:52` names `crates/course2md/tests/prompt_identity.rs` |
 
 ## Desktop behaviour (agent: desktop-logic)
 
