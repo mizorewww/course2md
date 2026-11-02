@@ -1,5 +1,5 @@
 {
-  "about": "Request markers and canned responses of the fake OpenAI-compatible service. Read by tests/common/mod.rs (Rust MockAi in tests/task_execution.rs) and desktop/scripts/ux_fixture.py; change response shapes here only. The service_test markers quote the request samples in desktop/core/src/service_test.rs and must stay in step with them.",
+  "about": "Request markers and canned responses of the fake OpenAI-compatible service. Read by tests/common/mod.rs (Rust MockAi in tests/task_execution.rs) and desktop/scripts/ux_fixture.py; change response shapes here only. The service_test markers quote the request samples in desktop/prefs/src/service_test.rs and must stay in step with them.",
   "markers": {
     "speech": "input_audio",
     "speech_path": "audio/transcriptions",

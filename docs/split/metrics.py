@@ -17,7 +17,9 @@ for path in root.rglob("*.rs"):
     if "test_" in rel.name:
         continue
     # Crates under crates/ and desktop/ report one per line; the desktop binary is `desktop`.
-    nested = rel.parts[0] == "crates" or rel.parts[:2] in (("desktop", "core"), ("desktop", "ui"))
+    nested = rel.parts[0] == "crates" or (
+        rel.parts[0] == "desktop" and len(rel.parts) > 2 and (root / rel.parts[0] / rel.parts[1] / "Cargo.toml").is_file()
+    )
     key = "/".join(rel.parts[:2]) if nested else rel.parts[0]
     total[key] = total.get(key, 0) + text.count("\n")
 for key, lines in sorted(total.items()):

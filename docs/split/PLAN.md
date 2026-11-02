@@ -147,7 +147,8 @@ No `tr!` in them. Check name availability before creating a repository.
 `crates/` holds `c2m-i18n`, `c2m-core`, `c2m-process`, `c2m-protocol`, `c2m-config`,
 `c2m-dispatch`, `c2m-source`, `c2m-ai`, `c2m-asr`, `c2m-artifact`, `c2m-engine`, the
 `course2md` facade and binary, and the test-only `c2m-test-http`; `desktop/` holds
-`desktop-core` (`desktop/core`), `desktop-ui` (`desktop/ui`) and `course2md-desktop` (`desktop`).
+`desktop-prefs`, `desktop-accounts`, `desktop-store`, `desktop-reader-core`, `desktop-tasks` (each under
+`desktop/`), `desktop-ui` (`desktop/ui`) and `course2md-desktop` (`desktop`).
 They form one Cargo workspace with one lock file. What each holds and the allowed dependency
 directions are in `docs/CRATES.md`.
 

@@ -4,7 +4,12 @@ Native client for macOS, Windows and Linux, built on GPUI Kit and `gpui-kit-mate
 
 ## Layout
 
-- `desktop/core` (`desktop-core`): what the app knows and decides, without GPUI, and tested without a window: state, persistence, preferences, the task record and task logic, credentials.
+- What the app knows and decides, without GPUI, and tested without a window, in five crates ([`docs/CRATES.md`](../docs/CRATES.md) has their directions):
+  - `desktop/prefs` (`desktop-prefs`): preferences, services and their checks, credentials, this machine's components, and the JSON record helpers.
+  - `desktop/accounts` (`desktop-accounts`): the sign-ins' state.
+  - `desktop/store` (`desktop-store`): the workspace record of drafts and tasks, libraries and their folders, published notes.
+  - `desktop/reader-core` (`desktop-reader-core`): what the reader shows of a note.
+  - `desktop/tasks` (`desktop-tasks`): sources, imports, task plans, engine runs and the task view.
 - `desktop/ui` (`desktop-ui`): the pages' shared compositions on the kit, without page state: rows and fields, embedded symbols and fonts, note text and formulas. `assets/symbols.txt` lists the symbols its build script renders.
 - `desktop/src` (`course2md-desktop`): the binary: the pages, the window and its menus.
 
@@ -20,7 +25,7 @@ cargo run --manifest-path desktop/Cargo.toml
 
 `just install` (macOS) installs the current checkout as `/Applications/course2md.app`, keeping existing notes and settings.
 
-The UI stack comes from [`gpui-kit-material`](https://github.com/mizorewww/gpui-kit-material), which vendors patched GPUI and GPUI Base sources. `desktop/Cargo.toml`, `desktop/core/Cargo.toml` and `desktop/ui/Cargo.toml` pin one revision of it in their dependencies, and the root `Cargo.toml` in a `[patch]` table holding only what the build needs; bump them together.
+The UI stack comes from [`gpui-kit-material`](https://github.com/mizorewww/gpui-kit-material), which vendors patched GPUI and GPUI Base sources. `desktop/Cargo.toml`, `desktop/prefs/Cargo.toml` and `desktop/ui/Cargo.toml` pin one revision of it in their dependencies, and the root `Cargo.toml` in a `[patch]` table holding only what the build needs; bump them together.
 
 The app looks for the engine in `COURSE2MD_BIN`, then beside its own executable, then in a debug build `target/` of this repository, then on PATH.
 
@@ -37,7 +42,7 @@ python3 desktop/scripts/ux_fixture.py serve &   # fake OpenAI-compatible service
 python3 desktop/scripts/ux_fixture.py bundle --label check1
 ```
 
-The fake service answers from [`crates/course2md/tests/fixtures/fake_ai.json`](../crates/course2md/tests/fixtures/fake_ai.json), which the engine's task tests also use. It recognizes the service-test requests by phrases quoted from `desktop/core/src/service_test.rs`; keep the two in step.
+The fake service answers from [`crates/course2md/tests/fixtures/fake_ai.json`](../crates/course2md/tests/fixtures/fake_ai.json), which the engine's task tests also use. It recognizes the service-test requests by phrases quoted from `desktop/prefs/src/service_test.rs`; keep the two in step.
 
 Test-only environment variables:
 
