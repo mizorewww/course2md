@@ -1459,6 +1459,22 @@ impl Desktop {
             .min_w_0()
             .gap(rem(8.))
             .child(h_flex().min_w_0().child(chip))
+            // A confirmed subtitle is good news, in the success role as before (U16).
+            .when(
+                !speech
+                    && !pending
+                    && !self.import.subtitle_loading
+                    && failure.is_none()
+                    && source.selected_subtitle.is_some(),
+                |view| {
+                    view.children(ui::async_status(
+                        "subtitle-confirmed",
+                        &ui::AsyncStatus::Success(course2md::tr!("有字幕，将直接使用").into()),
+                        None,
+                        cx,
+                    ))
+                },
+            )
             .when_some(notice, |view, notice| {
                 view.child(supporting_info("import-subtitle-message", notice))
             })

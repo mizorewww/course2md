@@ -2147,3 +2147,4 @@ AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
 已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	A settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的設定變更，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかった設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
 打开「校对文字和标点」后可用	打开「校对文字和标点」后可用	Available once “Proofread text and punctuation” is on	開啟「校對文字與標點」後可用	「文章と句読点を校正」をオンにすると使えます
 无法连接服务，尚未发送请求，请核对服务地址和网络	无法连接服务，尚未发送请求，请核对服务地址和网络	Could not connect to the service, so no request was sent. Check the service URL and the network.	無法連線服務，尚未傳送請求，請核對服務網址和網路	サービスに接続できなかったため、リクエストは送信されていません。サービス URL とネットワークを確認してください。
+有字幕，将直接使用	有字幕，将直接使用	Subtitles found; they will be used directly	有字幕，將直接使用	字幕があるため、そのまま使います
