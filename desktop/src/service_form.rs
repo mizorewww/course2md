@@ -319,7 +319,7 @@ impl Desktop {
         }
         self.run_vault_step(
             cx,
-            move |vault| preferences::Store::insert_credential(vault, secret),
+            move |vault| vault.insert(secret),
             move |this, stored, window, cx| {
                 let Some(form) = this.form_of_draft(owner, &id) else {
                     if let Ok(reference) = stored {
