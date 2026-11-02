@@ -11,7 +11,7 @@ pub fn earliest_deadline(a: Option<Instant>, b: Option<Instant>) -> Option<Insta
 
 /// Task log/progress events coalesce into at most one repaint per interval;
 /// stage, error and completion transitions still repaint immediately.
-pub const EVENT_REPAINT_INTERVAL: Duration = Duration::from_millis(250);
+pub(crate) const EVENT_REPAINT_INTERVAL: Duration = Duration::from_millis(250);
 
 /// A job's state, whichever kind it is.
 pub struct WorkState {

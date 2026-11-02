@@ -104,7 +104,7 @@ pub fn providers() -> [(&'static str, &'static str); 6] {
 
 /// Choice id of a recognition engine, as in `providers()`; automatic
 /// selection is the empty id.
-pub fn provider_id(provider: Option<course2md::config::AsrProvider>) -> &'static str {
+pub(crate) fn provider_id(provider: Option<course2md::config::AsrProvider>) -> &'static str {
     provider.map_or("", |provider| provider.as_str())
 }
 

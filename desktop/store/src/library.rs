@@ -152,7 +152,7 @@ impl LibraryViewCache {
         cache
     }
 
-    pub fn merge(&mut self, other: Self) {
+    pub(crate) fn merge(&mut self, other: Self) {
         for (path, location) in other.locations {
             let replace = self.locations.get(&path).is_none_or(|previous| {
                 location.root.components().count() > previous.root.components().count()
@@ -188,7 +188,7 @@ pub fn note_has_unfinished_task(
 }
 
 /// What one library's scan found, as `locations::scan_locations` returns it.
-pub type LibraryScanned = (
+pub(crate) type LibraryScanned = (
     workspace::LibraryLocation,
     LocationCheck,
     (

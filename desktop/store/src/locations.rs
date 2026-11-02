@@ -180,14 +180,16 @@ pub fn registry_unavailable() -> &'static str {
     course2md::tr!("笔记库列表暂时无法读取，请重启应用后重试")
 }
 
-pub fn location_paths(locations: &[workspace::LibraryLocation]) -> BTreeMap<String, PathBuf> {
+pub(crate) fn location_paths(
+    locations: &[workspace::LibraryLocation],
+) -> BTreeMap<String, PathBuf> {
     locations
         .iter()
         .map(|location| (location.id.clone(), location.root.clone()))
         .collect()
 }
 
-pub fn inspect_location(location: &workspace::LibraryLocation) -> LocationCheck {
+pub(crate) fn inspect_location(location: &workspace::LibraryLocation) -> LocationCheck {
     let available = std::fs::read_dir(&location.root).is_ok();
     let mut check = LocationCheck {
         available,

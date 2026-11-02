@@ -517,7 +517,7 @@ pub mod fixtures {
     }
 
     /// A published note whose paragraphs carry `translation`.
-    pub fn published_note_translated(
+    pub(crate) fn published_note_translated(
         root: &Path,
         revision: u64,
         times: &[f64],

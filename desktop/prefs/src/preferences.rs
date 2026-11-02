@@ -14,9 +14,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub type ServiceId = String;
-pub type ServiceVersionId = String;
-pub type ServiceDraftId = String;
+pub(crate) type ServiceId = String;
+pub(crate) type ServiceVersionId = String;
+pub(crate) type ServiceDraftId = String;
 
 const SCHEMA: u32 = 1;
 
@@ -220,7 +220,7 @@ impl GenerationPreferences {
         self.select_provider(provider);
     }
 
-    pub fn effective_vision(&self) -> bool {
+    pub(crate) fn effective_vision(&self) -> bool {
         self.ai.enabled && self.ai.vision
     }
 
@@ -339,7 +339,7 @@ impl ServiceProtocol {
             .filter(move |protocol| protocol.purpose() == purpose)
     }
 
-    pub fn endpoint_suffix(self) -> &'static str {
+    pub(crate) fn endpoint_suffix(self) -> &'static str {
         match self {
             Self::SpeechTranscriptions => "/audio/transcriptions",
             Self::SpeechChat | Self::AiChat | Self::OllamaChat => "/chat/completions",
@@ -375,7 +375,7 @@ impl ServiceProtocol {
     }
 
     /// 该协议对应的 CLI LLM 方言（仅 AI 用途参与映射）。
-    pub fn llm_provider(self) -> course2md::llm::LlmProvider {
+    pub(crate) fn llm_provider(self) -> course2md::llm::LlmProvider {
         match self {
             Self::OllamaChat => course2md::llm::LlmProvider::Ollama,
             Self::CodexResponses => course2md::llm::LlmProvider::Codex,
@@ -1099,7 +1099,7 @@ impl Store {
         self.services.tests.get(&config.fingerprint(contract))
     }
 
-    pub fn apply_defaults(&self, config: &mut ConfigFile) {
+    pub(crate) fn apply_defaults(&self, config: &mut ConfigFile) {
         self.generation.apply_to(config);
         config.desktop = self.application.desktop.clone();
     }
@@ -1722,7 +1722,7 @@ fn preserve_original(root: &Path, source: &Path) -> Result<()> {
     )
 }
 
-pub fn strip_secrets(config: &mut ConfigFile) {
+pub(crate) fn strip_secrets(config: &mut ConfigFile) {
     use zeroize::Zeroize;
     config.asr_api.api_key.zeroize();
     config.llm.api_key.zeroize();

@@ -256,7 +256,7 @@ impl Source {
     }
 }
 
-pub fn relocate_path(path: &mut PathBuf, old: &Path, new: &Path) {
+pub(crate) fn relocate_path(path: &mut PathBuf, old: &Path, new: &Path) {
     if path.is_absolute()
         && let Ok(relative) = path.strip_prefix(old)
     {
@@ -308,7 +308,7 @@ fn serialize_optional_public_config<S: serde::Serializer>(
     config.as_ref().map(public_config).serialize(serializer)
 }
 
-pub fn public_config(config: &ConfigFile) -> ConfigFile {
+pub(crate) fn public_config(config: &ConfigFile) -> ConfigFile {
     let mut config = config.clone();
     config.asr_api.api_key.clear();
     config.llm.api_key.clear();
@@ -1226,7 +1226,7 @@ impl State {
     /// Points a library at a new folder and rewrites every saved path inside the old
     /// ones. Moving, locating and restoring a library all come through here; keeping
     /// its id keeps folder ids, reading positions and service bindings stable.
-    pub fn rebind_library(
+    pub(crate) fn rebind_library(
         &mut self,
         library_id: &str,
         old_roots: &[PathBuf],
@@ -1269,7 +1269,7 @@ impl State {
 
     /// Adds tasks a library carries that this record has not seen. They are evidence of
     /// earlier work, never permission to run it.
-    pub fn adopt_tasks(&mut self, tasks: Vec<TaskRecord>) {
+    pub(crate) fn adopt_tasks(&mut self, tasks: Vec<TaskRecord>) {
         for mut task in tasks {
             if self.task(&task.id).is_none() {
                 task.pause_as_restored();
@@ -1524,7 +1524,7 @@ pub fn check_library(location: &LibraryLocation) -> Result<()> {
     Ok(())
 }
 
-pub fn create_library_marker(location: &LibraryLocation) -> Result<()> {
+pub(crate) fn create_library_marker(location: &LibraryLocation) -> Result<()> {
     use std::io::Write;
     ensure!(
         location.root.is_dir(),
@@ -1920,7 +1920,7 @@ pub fn forget_task_subtitles(task: &mut TaskRecord) {
 
 /// Task records a library's folder carries, with their paths moved to where the folder
 /// is now. Unreadable ones are named in the second list; their materials stay. Blocking.
-pub fn read_library_tasks(location: &LibraryLocation) -> (Vec<TaskRecord>, Vec<String>) {
+pub(crate) fn read_library_tasks(location: &LibraryLocation) -> (Vec<TaskRecord>, Vec<String>) {
     let mut tasks = Vec::new();
     let mut issues = Vec::new();
     let Ok(entries) = std::fs::read_dir(location.root.join(".course2md/work")) else {
@@ -2235,7 +2235,11 @@ impl Workspace {
     }
     /// Opens the record without reconciling it with the libraries; call
     /// `reconciliation` and `apply_reconciliation` before work is dispatched.
-    pub fn open_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
+    pub(crate) fn open_at(
+        path: PathBuf,
+        root: PathBuf,
+        options: ConversionOptions,
+    ) -> Result<Self> {
         let mut recovery = None;
         if path.is_file()
             && let Ok(bytes) = desktop_prefs::store::read(&path)
@@ -2416,7 +2420,7 @@ impl Workspace {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn reconcile_now(&mut self) {
+    pub(crate) fn reconcile_now(&mut self) {
         if let Some(reconciliation) = self.reconciliation() {
             self.apply_reconciliation(reconciliation.run()).unwrap();
         }

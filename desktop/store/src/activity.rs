@@ -284,7 +284,7 @@ impl Activity {
         self.finished.get_or_insert_with(Instant::now);
     }
     /// Adds the tokens of responses that arrived since the last report.
-    pub fn note_tokens(&mut self, prompt: u64, completion: u64) {
+    pub(crate) fn note_tokens(&mut self, prompt: u64, completion: u64) {
         self.prompt_tokens += prompt;
         self.completion_tokens += completion;
     }
@@ -313,7 +313,7 @@ impl Activity {
     /// sample at the current count: a transfer that resumes a partial file
     /// (or reconnects) may report the bytes already on disk only once it is
     /// under way, and those bytes did not cross the network in this session.
-    pub fn set_phase(&mut self, phase: Option<Phase>) {
+    pub(crate) fn set_phase(&mut self, phase: Option<Phase>) {
         if phase != self.phase {
             let now = Instant::now();
             if phase == Some(Phase::Download) {
@@ -489,7 +489,7 @@ impl Activity {
         }
     }
     /// Whether `current` and `total` are bytes moving over the network.
-    pub fn counts_bytes(&self, stage: &Stage) -> bool {
+    pub(crate) fn counts_bytes(&self, stage: &Stage) -> bool {
         is_byte_download(stage) || self.unit == Some(Unit::Bytes)
     }
     pub fn detail(&self, stage: &Stage, running: bool) -> String {
@@ -565,7 +565,7 @@ pub fn elapsed_label(elapsed: Duration) -> String {
 /// remaining-time estimates alike: "16 秒", "1 分 05 秒", "1 小时 02 分"
 /// ("16s", "1m 05s", "1h 02m" in English). Within a larger unit the smaller
 /// one keeps two digits, so a ticking clock does not change width.
-pub fn duration_label(seconds: u64) -> String {
+pub(crate) fn duration_label(seconds: u64) -> String {
     if seconds >= 3600 {
         course2md::tr!(
             "{} 小时 {} 分",
@@ -725,7 +725,7 @@ pub fn outcome_failure_message(part: NotePart, outcome: &course2md::artifact::Ou
 /// Older saved outcomes combined a stage label, retention message and English
 /// diagnostics as one bilingual text. This reads them by matching that text;
 /// delete it once saved records carry a failure kind and a plain cause.
-pub fn legacy_outcome_message(part: NotePart, message: Option<&str>) -> String {
+pub(crate) fn legacy_outcome_message(part: NotePart, message: Option<&str>) -> String {
     let term = missing_term(part);
     let chinese = message
         .unwrap_or_default()

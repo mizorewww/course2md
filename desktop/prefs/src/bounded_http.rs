@@ -11,7 +11,7 @@ use crate::credentials::Secret;
 /// 不跟随重定向、不读环境代理）。各超时独立传入——探测与测试的预算不同：
 /// `connect` 每次连接，`read`/`write` 每次传输读写，`total` 整个请求。
 /// 错误状态码照常作为响应返回，调用方读状态与响应体。
-pub fn json_agent(
+pub(crate) fn json_agent(
     connect: Duration,
     read: Duration,
     write: Option<Duration>,
@@ -28,7 +28,7 @@ pub fn json_agent(
 }
 
 /// Accept: application/json；有密钥才加 Bearer 头。
-pub fn json_call<B>(
+pub(crate) fn json_call<B>(
     call: ureq::RequestBuilder<B>,
     authorization: Option<&Secret>,
 ) -> ureq::RequestBuilder<B> {
@@ -44,13 +44,13 @@ pub fn json_call<B>(
 
 /// 有界读取的失败分类：网络/IO 错误与响应体超限分开。
 /// 调用方把 Network 统一映射为自己的网络错误。
-pub enum BoundedReadError {
+pub(crate) enum BoundedReadError {
     Network,
     TooLarge,
 }
 
 /// 按 max+1 读取；超过 max 报 TooLarge，IO 失败报 Network。
-pub fn read_bounded(
+pub(crate) fn read_bounded(
     response: ureq::http::Response<ureq::Body>,
     max: u64,
 ) -> Result<Vec<u8>, BoundedReadError> {

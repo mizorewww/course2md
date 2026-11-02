@@ -50,11 +50,11 @@ impl std::fmt::Display for PlanPending {
 impl std::error::Error for PlanPending {}
 
 /// The finished component check, or the wait for it.
-pub fn plan_environment(environment: Option<&Environment>) -> Result<&Environment> {
+pub(crate) fn plan_environment(environment: Option<&Environment>) -> Result<&Environment> {
     Ok(environment.ok_or(PlanPending(course2md::tr!("正在检查所需组件…")))?)
 }
 
-pub fn validate_plan_storage(
+pub(crate) fn validate_plan_storage(
     validation: PlanValidation,
     library: &workspace::LibraryLocation,
     folder: Option<u64>,
@@ -216,7 +216,7 @@ pub fn batch_note_title(
 }
 
 /// Local recognition check; build_plan and build_batch_plan share its exact messages.
-pub fn ensure_asr_capability(
+pub(crate) fn ensure_asr_capability(
     environment: &Environment,
     provider: course2md::config::AsrProvider,
 ) -> Result<()> {
@@ -264,7 +264,10 @@ pub fn fill_default_asr_model(
     }
 }
 
-pub fn validate_plan_config(source: &str, config: &course2md::settings::ConfigFile) -> Result<()> {
+pub(crate) fn validate_plan_config(
+    source: &str,
+    config: &course2md::settings::ConfigFile,
+) -> Result<()> {
     let resolved = course2md::options::resolve(source.to_owned(), &Default::default(), config)?;
     resolved.validate()?;
     if resolved.transcript_source != course2md::config::TranscriptSource::Subtitle {

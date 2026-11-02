@@ -26,14 +26,14 @@ pub fn block_anchor(block: &PreviewBlock, index: usize) -> String {
 }
 
 /// How far a card excerpt moves its cut to reach a word boundary.
-pub const EXCERPT_WORD_SLACK: usize = 24;
+pub(crate) const EXCERPT_WORD_SLACK: usize = 24;
 
 /// What a card shows of a screenshot's text without a match to centre on.
-pub const EXCERPT_GRAPHEMES: usize = 160;
+pub(crate) const EXCERPT_GRAPHEMES: usize = 160;
 
-pub const ZOOM_MIN: f32 = 0.1;
+pub(crate) const ZOOM_MIN: f32 = 0.1;
 
-pub const ZOOM_MAX: f32 = 4.;
+pub(crate) const ZOOM_MAX: f32 = 4.;
 
 #[derive(Clone)]
 pub struct FrameImage {
@@ -151,7 +151,7 @@ impl OfflineVideoRequest {
             .unwrap_or(OfflineVideo::Missing)
     }
 
-    pub fn checked_path(&self) -> Option<PathBuf> {
+    pub(crate) fn checked_path(&self) -> Option<PathBuf> {
         let mut components = std::path::Path::new(&self.task_id).components();
         if !matches!(components.next(), Some(std::path::Component::Normal(_)))
             || components.next().is_some()
@@ -581,7 +581,7 @@ pub fn load_reader_data(preview: &notes::Preview) -> ReaderData {
     data
 }
 
-pub fn existing_export_folder(dir: &std::path::Path, outputs: &[String]) -> Option<PathBuf> {
+pub(crate) fn existing_export_folder(dir: &std::path::Path, outputs: &[String]) -> Option<PathBuf> {
     let folder = course2md::artifact::safe_asset_path(dir, "exports").ok()?;
     let has_file = outputs.iter().any(|output| {
         std::path::Path::new(output).starts_with("exports")

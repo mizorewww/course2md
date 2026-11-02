@@ -9,7 +9,7 @@ use desktop_store::{
 };
 
 /// Request purpose of a remote speech recognition call.
-pub const TRANSCRIPTION_PURPOSE: &str = "transcription";
+pub(crate) const TRANSCRIPTION_PURPOSE: &str = "transcription";
 
 /// A settled task that waits for the person.
 pub fn needs_person(task: &TaskRecord) -> bool {
@@ -160,7 +160,7 @@ pub enum StageStatus {
 /// AI counters describe dispatched batches, including requests still in flight.
 /// Only the worker's stage result can move these stages into completed history.
 /// A returned response is the live signal instead, without inventing a fraction.
-pub fn stage_progress(
+pub(crate) fn stage_progress(
     name: &Stage,
     done: bool,
     live: Option<&activity::Activity>,
@@ -234,7 +234,7 @@ pub fn ai_component(name: &str) -> Option<Component> {
 
 /// A proofreading stage can close after failed requests. Published component
 /// outcomes distinguish an ended attempt from a successfully completed step.
-pub fn ai_stage_outcome(
+pub(crate) fn ai_stage_outcome(
     name: &Stage,
     outcomes: Option<&course2md::artifact::Outcomes>,
 ) -> Option<StageStatus> {
@@ -255,7 +255,7 @@ pub fn ai_stage_outcome(
 /// partial result names each unfinished component beside its retry action.
 /// Keep worker diagnostics in raw logs, and retain only a short, actionable
 /// localized failure summary in the task.
-pub fn task_failure_summary(state: TaskState, error: Option<&str>) -> Option<String> {
+pub(crate) fn task_failure_summary(state: TaskState, error: Option<&str>) -> Option<String> {
     if matches!(
         state,
         TaskState::Paused | TaskState::Cancelled | TaskState::Partial
@@ -299,7 +299,9 @@ pub fn task_attention_summary(task: &TaskRecord) -> String {
 
 /// Only concrete configuration rejections change recovery from Retry to Repair.
 /// Rate limiting, timeouts and unknown outcomes keep their own recovery.
-pub fn service_repair_reason(kind: course2md::artifact::FailureKind) -> Option<&'static str> {
+pub(crate) fn service_repair_reason(
+    kind: course2md::artifact::FailureKind,
+) -> Option<&'static str> {
     match kind {
         course2md::artifact::FailureKind::Authentication => {
             Some(course2md::tr!("AI 服务拒绝了 API Key，请检查密钥或权限"))
@@ -314,7 +316,7 @@ pub fn service_repair_reason(kind: course2md::artifact::FailureKind) -> Option<&
     }
 }
 
-pub fn task_service_repair_reason(task: &TaskRecord) -> Option<&'static str> {
+pub(crate) fn task_service_repair_reason(task: &TaskRecord) -> Option<&'static str> {
     if task.handled_by.is_some() || task.has_uncertain() {
         return None;
     }

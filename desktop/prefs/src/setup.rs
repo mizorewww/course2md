@@ -117,7 +117,7 @@ pub fn requested_tests(
     tests
 }
 
-pub fn enabled_ai_tests(proofread: bool, summary: bool, vision: bool) -> Vec<TestKind> {
+pub(crate) fn enabled_ai_tests(proofread: bool, summary: bool, vision: bool) -> Vec<TestKind> {
     let mut tests = Vec::new();
     if proofread {
         tests.push(TestKind::Proofread);

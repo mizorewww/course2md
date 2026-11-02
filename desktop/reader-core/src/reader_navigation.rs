@@ -138,7 +138,7 @@ pub fn text_matches(text: &str, query: &str) -> Vec<Range<usize>> {
 
 /// A contents list describes topics. Frame boundaries remain in the article,
 /// but a timestamp alone does not become a chapter in the reading rail.
-pub fn content_outline(
+pub(crate) fn content_outline(
     headings: &[(usize, String, Option<f64>, bool)],
     topics: &[(f64, String)],
 ) -> Vec<(usize, String, Option<f64>)> {

@@ -38,7 +38,7 @@ impl Event {
 /// PID: on Unix the reaper first waits without reaping (`WNOWAIT`), so the
 /// zombie keeps its PID reserved until the reaper marks it reaped under the
 /// same lock `kill` takes; on Windows the open process handle reserves it.
-pub struct Watched {
+pub(crate) struct Watched {
     shared: std::sync::Arc<WatchedProcess>,
 }
 struct WatchedProcess {
@@ -96,7 +96,7 @@ impl Watched {
 
     /// Stops the process and its group (Unix) / tree (Windows) unless it has
     /// already been reaped. Returns whether it was still running.
-    pub fn kill(&self) -> bool {
+    pub(crate) fn kill(&self) -> bool {
         let mut state = course2md::runtime::lock_recover(&self.shared.state);
         if state.reaped {
             return false;

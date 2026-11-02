@@ -41,7 +41,7 @@ fn compute_tool_path() -> std::ffi::OsString {
 }
 /// Presence of a llama.cpp runtime is independent of `--list-devices` succeeding.
 /// That flag can fail on CPU-only builds or older binaries that are still installed.
-pub fn llama_binary_on_path(path: &std::ffi::OsStr) -> bool {
+pub(crate) fn llama_binary_on_path(path: &std::ffi::OsStr) -> bool {
     // The working directory only matters for names with a path in them; these have none.
     ["llama-server", "llama-cli"]
         .iter()

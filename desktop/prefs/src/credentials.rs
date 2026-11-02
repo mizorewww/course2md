@@ -138,7 +138,7 @@ impl CredentialVault for MemoryCredentialVault {
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 
 #[cfg(target_os = "macos")]
-pub struct KeychainCredentialVault {
+pub(crate) struct KeychainCredentialVault {
     service: String,
 }
 
@@ -154,7 +154,7 @@ impl Default for KeychainCredentialVault {
 #[cfg(all(test, target_os = "macos"))]
 impl KeychainCredentialVault {
     /// A Keychain service of a test's own, so a test never touches the app's keys.
-    pub fn for_test(service: &str) -> Self {
+    pub(crate) fn for_test(service: &str) -> Self {
         Self {
             service: service.into(),
         }
@@ -218,7 +218,7 @@ impl CredentialVault for KeychainCredentialVault {
 /// Windows (Credential Manager). Availability is checked once through the
 /// keyring crate's store status.
 #[cfg(not(target_os = "macos"))]
-pub struct KeyringCredentialVault {
+pub(crate) struct KeyringCredentialVault {
     service: String,
 }
 
@@ -310,7 +310,7 @@ trait SystemStore: CredentialVault {
 /// each other's keys. An unreadable file refuses writes, so an empty map never
 /// replaces the saved keys.
 #[cfg(any(test, not(target_os = "macos")))]
-pub struct FileCredentialVault {
+pub(crate) struct FileCredentialVault {
     path: PathBuf,
 }
 

@@ -20,7 +20,7 @@ pub struct Recovery {
 /// A registered root and a discovered note may use different filesystem aliases
 /// (for example `/tmp` and `/private/tmp`). Folder and title records always keep
 /// one relative key, regardless of which spelling the importer returned.
-pub fn relative_key(root: &Path, course: &Path) -> Result<PathBuf> {
+pub(crate) fn relative_key(root: &Path, course: &Path) -> Result<PathBuf> {
     let valid = |key: &Path| {
         !key.as_os_str().is_empty()
             && key
@@ -113,7 +113,7 @@ struct Titles {
     names: BTreeMap<PathBuf, String>,
 }
 
-pub fn title_aliases(root: &Path) -> Result<BTreeMap<PathBuf, String>> {
+pub(crate) fn title_aliases(root: &Path) -> Result<BTreeMap<PathBuf, String>> {
     match std::fs::read(root.join(TITLES)) {
         Ok(bytes) => Ok(serde_json::from_slice::<Titles>(&bytes)
             .context(course2md::tr!("笔记名称记录无法读取，原文件已保留"))?
@@ -132,7 +132,7 @@ pub fn recover_titles(root: &Path, reset: bool) -> Result<PathBuf> {
 }
 
 #[cfg(test)]
-pub fn title_alias(root: &Path, course: &Path) -> Result<Option<String>> {
+pub(crate) fn title_alias(root: &Path, course: &Path) -> Result<Option<String>> {
     Ok(title_aliases(root)?
         .get(&relative_key(root, course)?)
         .cloned())

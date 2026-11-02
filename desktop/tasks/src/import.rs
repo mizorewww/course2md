@@ -197,7 +197,7 @@ pub fn locked_input_task<'a>(
     submitted_input_task(draft, tasks, input).filter(|task| !task.state.finished())
 }
 
-pub fn completed_input_task<'a>(
+pub(crate) fn completed_input_task<'a>(
     draft: &workspace::Draft,
     tasks: &'a [workspace::TaskRecord],
     input: &str,
@@ -460,7 +460,7 @@ pub struct ImportSession {
 }
 
 /// A derived preview plan, or its message and whether it is only waiting.
-pub type PreviewPlan = Result<workspace::TaskPlan, (String, bool)>;
+pub(crate) type PreviewPlan = Result<workspace::TaskPlan, (String, bool)>;
 
 impl ImportSession {
     /// A source or its subtitles are being read.

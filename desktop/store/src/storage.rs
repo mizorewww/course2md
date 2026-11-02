@@ -17,7 +17,7 @@ use std::{
 };
 
 /// Identity marker written at the root of every registered library.
-pub const LIBRARY_ID_FILE: &str = ".course2md-library-id";
+pub(crate) const LIBRARY_ID_FILE: &str = ".course2md-library-id";
 /// Task bindings rewrite this file when a verified copy is relocated.
 const TASK_IDENTITY_FILE: &str = "task-identity.json";
 const MOVE_MARKER_FILE: &str = ".course2md-move.json";
@@ -106,9 +106,9 @@ pub struct PreparedMove {
 /// disk or a directory at that path changes meanwhile. The open handle keeps the directory's
 /// identity from being recycled while they decide.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DirectoryStamp(Arc<same_file::Handle>);
+pub(crate) struct DirectoryStamp(Arc<same_file::Handle>);
 
-pub fn directory_stamp(path: &Path) -> Result<DirectoryStamp> {
+pub(crate) fn directory_stamp(path: &Path) -> Result<DirectoryStamp> {
     let canonical = std::fs::canonicalize(path).context(course2md::tr!("保存位置暂时不可访问"))?;
     ensure!(canonical.is_dir(), course2md::tr!("保存位置不是文件夹"));
     Ok(DirectoryStamp(Arc::new(same_file::Handle::from_path(
@@ -306,7 +306,7 @@ pub fn prepare_move(
     copy_library(path, journal, cancel, progress)
 }
 
-pub fn read_journal(path: &Path) -> Result<Journal> {
+pub(crate) fn read_journal(path: &Path) -> Result<Journal> {
     serde_json::from_slice(&std::fs::read(path)?).context(course2md::tr!("移动记录无法读取"))
 }
 
