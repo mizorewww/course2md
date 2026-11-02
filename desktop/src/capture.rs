@@ -188,6 +188,26 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
             modifiers: Modifiers::default(),
         })
     };
+    let press = |down: bool, button, position, click_count| {
+        let modifiers = Modifiers::default();
+        if down {
+            PlatformInput::MouseDown(MouseDownEvent {
+                button,
+                position,
+                modifiers,
+                click_count,
+                first_mouse: false,
+            })
+        } else {
+            PlatformInput::MouseUp(MouseUpEvent {
+                button,
+                position,
+                modifiers,
+                click_count,
+            })
+        }
+    };
+    let (left, right) = (MouseButton::Left, MouseButton::Right);
     let events = match (kind, position) {
         ("move", Some(position)) => vec![moved(position)],
         ("click", Some(position)) => {
@@ -195,64 +215,30 @@ async fn simulate_input(step: &str, cx: &mut AsyncWindowContext) {
             // triple click, counting up as the platform reports it.
             let clicks = numbers.get(2).map_or(1, |count| (*count as usize).max(1));
             let mut events = vec![moved(position)];
-            for click_count in 1..=clicks {
-                events.push(PlatformInput::MouseDown(MouseDownEvent {
-                    button: MouseButton::Left,
-                    position,
-                    modifiers: Modifiers::default(),
-                    click_count,
-                    first_mouse: false,
-                }));
-                events.push(PlatformInput::MouseUp(MouseUpEvent {
-                    button: MouseButton::Left,
-                    position,
-                    modifiers: Modifiers::default(),
-                    click_count,
-                }));
+            for count in 1..=clicks {
+                events.extend([
+                    press(true, left, position, count),
+                    press(false, left, position, count),
+                ]);
             }
             events
         }
         ("rclick", Some(position)) => vec![
             moved(position),
-            PlatformInput::MouseDown(MouseDownEvent {
-                button: MouseButton::Right,
-                position,
-                modifiers: Modifiers::default(),
-                click_count: 1,
-                first_mouse: false,
-            }),
-            PlatformInput::MouseUp(MouseUpEvent {
-                button: MouseButton::Right,
-                position,
-                modifiers: Modifiers::default(),
-                click_count: 1,
-            }),
+            press(true, right, position, 1),
+            press(false, right, position, 1),
         ],
         ("drag", Some(from)) if numbers.len() >= 4 => {
             let to = point(px(numbers[2]), px(numbers[3]));
-            let mut events = vec![
-                moved(from),
-                PlatformInput::MouseDown(MouseDownEvent {
-                    button: MouseButton::Left,
-                    position: from,
-                    modifiers: Modifiers::default(),
-                    click_count: 1,
-                    first_mouse: false,
-                }),
-            ];
+            let mut events = vec![moved(from), press(true, left, from, 1)];
             events.extend((1..=8).map(|step| {
                 PlatformInput::MouseMove(MouseMoveEvent {
                     position: from + (to - from) * (step as f32 / 8.),
-                    pressed_button: Some(MouseButton::Left),
+                    pressed_button: Some(left),
                     modifiers: Modifiers::default(),
                 })
             }));
-            events.push(PlatformInput::MouseUp(MouseUpEvent {
-                button: MouseButton::Left,
-                position: to,
-                modifiers: Modifiers::default(),
-                click_count: 1,
-            }));
+            events.push(press(false, left, to, 1));
             events
         }
         ("wheel", Some(position)) if numbers.len() >= 3 => vec![
