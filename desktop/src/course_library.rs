@@ -1331,7 +1331,7 @@ impl Desktop {
                 "list"
             })
             .button_size(ButtonSize::Small)
-            .on_activate(move |value, _, cx| {
+            .on_change(move |value, _, cx| {
                 let cards = value.as_ref() == "cards";
                 let _ = desktop.update(cx, |this, cx| {
                     this.desktop_settings.library_cards = cards;

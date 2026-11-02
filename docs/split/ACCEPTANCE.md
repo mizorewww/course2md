@@ -68,6 +68,15 @@ kit's vendored engine (PR #16). Wave 2's row-plus-menu choices (H7, S13) are rev
 | P3 | should | Partial `restore` rows by source: G3 (9 untoned Outlined), G4 (10 of 12 quiet actions primary), G5 (find and view tools without circle), G8 (`library_ui.rs:969` radius 4; two fields without floating label), H4 (16/16 vs 20/24), L1, L6, T6 (padding 16 vs 20), R9 (radius 16, not pill), R12 (action off the image), S1 (selected circle; compact rail plain), S11, O3. Fix `DESIGN-RESTORE.md` so it is true |
 | R8 | should | After kit PR #16 merges: summary as a surface; close the `inline_formula` escape hole (`desktop/ui/src/note_text.rs:107`) |
 
+### Desktop UI fixes
+
+Each line names the commit by subject; evidence is under the session scratchpad `desktop-ui/shots/`.
+
+- A1, `desktop: groups with a required choice report it through on_change`: all nine `ConnectedButtonGroup`s
+  (library view, reader views, source kind, home text source, settings text source, recognition mode, appearance mode,
+  text size, service check) changed by click and by arrow key in the running app (`live/a1a` to `live/a1h`). The reader's
+  view switch now keeps focus, so its arrow keys go on choosing.
+
 ## Plan conformance (after the three fix agents)
 
 | ID | Sev | Finding |

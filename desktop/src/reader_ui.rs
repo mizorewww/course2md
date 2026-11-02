@@ -1699,6 +1699,13 @@ impl Desktop {
     }
 
     fn select_reader_view(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_reader_view(index, cx);
+        self.reader_ui.focus.focus(window, cx);
+    }
+
+    /// Switches the view and leaves focus where it is: the view switch keeps it, so its
+    /// arrow keys go on choosing.
+    fn show_reader_view(&mut self, index: usize, cx: &mut Context<Self>) {
         if self.opened.result_tab != index {
             self.save_reading_position(cx);
             self.opened.result_tab = index;
@@ -1717,7 +1724,6 @@ impl Desktop {
                 self.restore_reading_position(cx);
             }
         }
-        self.reader_ui.focus.focus(window, cx);
         cx.notify();
     }
 
@@ -1934,12 +1940,8 @@ impl Desktop {
                         } else {
                             "images"
                         })
-                        .on_activate(cx.listener(|this, selected: &SharedString, window, cx| {
-                            this.select_reader_view(
-                                usize::from(selected.as_ref() == "images"),
-                                window,
-                                cx,
-                            );
+                        .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
+                            this.show_reader_view(usize::from(selected.as_ref() == "images"), cx);
                         })),
                 ),
             )

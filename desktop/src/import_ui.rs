@@ -649,7 +649,7 @@ impl Desktop {
                             .icon("online", symbols::link())
                             .icon("local", symbols::movie())
                             .selected("local")
-                            .on_activate(cx.listener(|this, value: &SharedString, window, cx| {
+                            .on_change(cx.listener(|this, value: &SharedString, window, cx| {
                                 this.switch_source_kind(value.as_ref() == "online", window, cx);
                             })),
                     ),
@@ -1658,7 +1658,7 @@ impl Desktop {
                 .full_width()
                 .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
                 .selected(text_source_id(mode))
-                .on_activate(cx.listener(|this, value: &SharedString, _, cx| {
+                .on_change(cx.listener(|this, value: &SharedString, _, cx| {
                     let Some(mode) = text_source_choices()
                         .iter()
                         .map(|(mode, _)| *mode)
