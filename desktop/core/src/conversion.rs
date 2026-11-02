@@ -5,7 +5,7 @@
 pub struct ConversionOptions {
     #[serde(with = "crate::provider_serde")]
     pub provider: Option<course2md::config::AsrProvider>,
-    #[serde(with = "crate::workspace::text_source_index")]
+    #[serde(with = "text_source_index")]
     pub source_mode: course2md::config::TranscriptSource,
     pub llm: bool,
     #[serde(default)]
@@ -121,4 +121,32 @@ pub fn provider_label(provider: Option<course2md::config::AsrProvider>) -> &'sta
 
 pub fn provider_from_id(id: &str) -> Option<course2md::config::AsrProvider> {
     course2md::config::AsrProvider::from_id(id)
+}
+
+/// The text source choice is stored as its historical index (0 auto,
+/// 1 subtitles, 2 speech recognition).
+mod text_source_index {
+    use course2md::config::TranscriptSource;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        value: &TranscriptSource,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u64(match value {
+            TranscriptSource::Auto => 0,
+            TranscriptSource::Subtitle => 1,
+            TranscriptSource::Asr => 2,
+        })
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<TranscriptSource, D::Error> {
+        Ok(match u64::deserialize(deserializer)? {
+            1 => TranscriptSource::Subtitle,
+            2 => TranscriptSource::Asr,
+            _ => TranscriptSource::Auto,
+        })
+    }
 }

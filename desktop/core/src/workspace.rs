@@ -33,34 +33,6 @@ pub fn course_dir_name(source_id: &str) -> String {
     )
 }
 
-/// The text source choice is stored as its historical index (0 auto,
-/// 1 subtitles, 2 speech recognition).
-pub mod text_source_index {
-    use course2md::config::TranscriptSource;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(
-        value: &TranscriptSource,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u64(match value {
-            TranscriptSource::Auto => 0,
-            TranscriptSource::Subtitle => 1,
-            TranscriptSource::Asr => 2,
-        })
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<TranscriptSource, D::Error> {
-        Ok(match u64::deserialize(deserializer)? {
-            1 => TranscriptSource::Subtitle,
-            2 => TranscriptSource::Asr,
-            _ => TranscriptSource::Auto,
-        })
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LibraryLocation {
     pub id: String,
