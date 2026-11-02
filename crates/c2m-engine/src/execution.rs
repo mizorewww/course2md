@@ -358,7 +358,14 @@ pub fn enter_work_dir(
     source: crate::dispatch::ControlSource,
 ) -> Result<WorkDir> {
     std::fs::create_dir_all(work_dir)?;
-    let lock = crate::runtime::lock_file(&work_dir.join(".task.lock"))?;
+    // The desktop briefly takes this lock to learn whether a worker from an earlier
+    // session still runs here; a short wait rides that out, while another worker that
+    // really holds the directory is still refused.
+    let path = work_dir.join(".task.lock");
+    let lock = crate::runtime::lock_file_within(&path, std::time::Duration::from_secs(2))
+        .with_context(|| {
+            crate::tr!("目录正被另一任务使用：{}。请等待任务结束", path.display()).to_string()
+        })?;
     bind_work_dir(work_dir, binding)?;
     let control = crate::dispatch::TaskControl::open(work_dir, source)?;
     Ok(WorkDir {
