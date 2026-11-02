@@ -192,6 +192,9 @@ struct RestoreState {
     last_position: Option<(String, workspace::ReadingPosition)>,
     /// The pending record of a settling scroll; replacing it restarts the wait.
     save: Option<Task<()>>,
+    /// Capture harness: go to the end once the restore has laid the view out.
+    #[cfg(feature = "capture")]
+    then_end: bool,
 }
 
 impl State {
@@ -817,6 +820,10 @@ impl Desktop {
             }
             let target = this.reader_list_target(&position);
             this.reader_list().scroll_to(target);
+            #[cfg(feature = "capture")]
+            if std::mem::take(&mut this.reader_ui.restore.then_end) {
+                this.reader_list().scroll_to_end();
+            }
             this.reader_ui.restore.active = false;
             this.reader_ui.restore.last_position = None;
             cx.notify();
@@ -1434,17 +1441,13 @@ impl Desktop {
             self.select_reader_view(1, window, cx);
         }
         if end {
-            // After the tab's saved position has been restored.
-            cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(800))
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    this.reader_list().scroll_to_end();
-                    cx.notify();
-                });
-            })
-            .detach();
+            // Once the view's own restore has its content laid out, not after a guess
+            // at how long that takes: the restore runs on the frame after the note or
+            // the screenshots reach their list.
+            self.reader_ui.restore.then_end = true;
+            if self.reader_ui.restore.pending.is_none() && !self.reader_ui.restore.active {
+                self.restore_reading_position(cx);
+            }
         }
         if let Some(index) = shot {
             self.open_reader_image(index, window, cx);
