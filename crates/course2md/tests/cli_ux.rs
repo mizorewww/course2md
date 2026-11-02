@@ -492,3 +492,22 @@ fn password_login_without_a_terminal_explains_what_to_do() {
         }
     }
 }
+
+/// The values' descriptions in `--help` follow the interface language too.
+#[test]
+fn value_descriptions_in_help_are_localized() {
+    let cli = CliTest::new();
+    let help = stdout(&cli.run_with_lang(&["--help"], "en"));
+    assert!(
+        help.contains("- qr:       Scan a QR code (default)"),
+        "{help}"
+    );
+    assert!(help.contains("Prefer subtitles; transcribe speech if unavailable"));
+    let help = stdout(&cli.run_with_lang(&["--help"], "ja"));
+    assert!(help.contains("QR コードをスキャン（既定）"), "{help}");
+    assert!(help.contains("字幕を優先し、なければ音声を認識"), "{help}");
+    assert!(!help.contains("Scan a QR code"), "{help}");
+    assert!(help.contains("使用できる値："), "{help}");
+    assert!(help.contains("[使用できる値：bilibili, youtube"), "{help}");
+    assert!(!help.to_lowercase().contains("possible values"), "{help}");
+}

@@ -34,14 +34,19 @@ fn no_help<T>(_: T) -> Option<&'static str> {
 }
 
 #[cfg(feature = "clap")]
-/// What `--help` says about each value, as the variants' doc comments said in 2.0.1.
+/// What `--help` says about each value, in the interface language. The
+/// command line is built after the language is chosen.
 fn asr_api_mode_help(mode: settings::AsrApiMode) -> Option<&'static str> {
     Some(match mode {
         settings::AsrApiMode::Transcriptions => {
-            "POST {base_url}/audio/transcriptions（OpenAI 兼容转录端点，如 OpenRouter 的 qwen3-asr）"
+            tr!(
+                "POST {base_url}/audio/transcriptions（OpenAI 兼容转录端点，如 OpenRouter 的 qwen3-asr）"
+            )
         }
         settings::AsrApiMode::Chat => {
-            "POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）"
+            tr!(
+                "POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）"
+            )
         }
     })
 }
@@ -50,13 +55,15 @@ fn asr_api_mode_help(mode: settings::AsrApiMode) -> Option<&'static str> {
 fn transcript_source_help(source: config::TranscriptSource) -> Option<&'static str> {
     Some(match source {
         config::TranscriptSource::Auto => {
-            "优先字幕，无字幕时识别语音 / Prefer subtitles; transcribe speech if unavailable"
+            tr!("优先字幕，无字幕时识别语音 / Prefer subtitles; transcribe speech if unavailable")
         }
         config::TranscriptSource::Subtitle => {
-            "仅字幕；本地需同名 .srt/.vtt / Subtitles only; local files need a matching .srt/.vtt"
+            tr!(
+                "仅字幕；本地需同名 .srt/.vtt / Subtitles only; local files need a matching .srt/.vtt"
+            )
         }
         config::TranscriptSource::Asr => {
-            "使用所选后端识别，不查字幕 / Transcribe with the selected backend; skip subtitles"
+            tr!("使用所选后端识别，不查字幕 / Transcribe with the selected backend; skip subtitles")
         }
     })
 }

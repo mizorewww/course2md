@@ -303,6 +303,7 @@ pub fn localize_rendered(text: &str) -> String {
         ("Options:", tr!("选项：")),
         ("Commands:", tr!("命令：")),
         ("Arguments:", tr!("参数：")),
+        ("Possible values:", tr!("可选值：")),
         (
             "For more information, try '--help'.",
             tr!("更多信息请运行 --help。"),
@@ -315,6 +316,7 @@ pub fn localize_rendered(text: &str) -> String {
             "Print this message or the help of the given subcommand(s)",
             tr!("显示此消息或子命令的帮助"),
         ),
+        ("[possible values: ", tr!("[可选值：")),
     ];
     text.split_inclusive('\n')
         .map(|line| {

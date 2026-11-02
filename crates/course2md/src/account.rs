@@ -12,12 +12,12 @@ use std::sync::atomic::AtomicBool;
 /// How to sign in to Bilibili.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum LoginMethod {
-    /// 扫码（默认）/ Scan a QR code (default)
     #[default]
+    #[value(help = tr!("扫码（默认）/ Scan a QR code (default)"))]
     Qr,
-    /// 账号和密码 / Account and password
+    #[value(help = tr!("账号和密码 / Account and password"))]
     Password,
-    /// 手机短信验证码 / SMS code
+    #[value(help = tr!("手机短信验证码 / SMS code"))]
     Sms,
 }
 
