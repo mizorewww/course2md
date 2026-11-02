@@ -401,7 +401,11 @@ impl Desktop {
             return;
         }
         self.settings_ui.initialized = true;
-        let value = self.preferences.generation().clone();
+        // A change whose save failed before the last quit comes back as the pending edit,
+        // which the group's notice offers to retry; the saved value stays active until then.
+        self.settings_ui.pending_generation = self.preferences.generation_intent().cloned();
+        self.settings_ui.pending_application = self.preferences.application_intent().cloned();
+        let value = self.generation_edit_base();
         let languages = value
             .subtitle_languages_draft
             .unwrap_or_else(|| value.preferred_subtitle_languages.join(", "));

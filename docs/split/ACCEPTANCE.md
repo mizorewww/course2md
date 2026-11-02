@@ -76,6 +76,9 @@ Each line names the commit by subject; evidence is under the session scratchpad 
   (library view, reader views, source kind, home text source, settings text source, recognition mode, appearance mode,
   text size, service check) changed by click and by arrow key in the running app (`live/a1a` to `live/a1h`). The reader's
   view switch now keeps focus, so its arrow keys go on choosing.
+- A5 (unsaved settings), `desktop: offer a settings change whose save failed again after relaunch`: a failed
+  save leaves its value in `desktop-preferences.recovery/`, as before `cdd31e3`; relaunch shows it with 重试保存,
+  and a successful save or a reset removes it. Read-only settings directory, relaunch, retry, relaunch (`live/a5a` to `live/a5d`).
 
 ## Plan conformance (after the three fix agents)
 

@@ -2039,3 +2039,5 @@ AI 用途	AI 用途	What AI is used for	AI 用途	AI の用途
 第 {} 步，共 {} 步	第 {} 步，共 {} 步	Step {} of {}	第 {} 步，共 {} 步	ステップ {} / {}
 音频的处理位置	音频的处理位置	Where audio is processed	音訊的處理位置	音声の処理場所
 清空链接，选项恢复为默认设置	清空链接，选项恢复为默认设置	Clears the link and returns the options to your defaults	清空連結，選項恢復為預設設定	リンクを消去し、オプションを既定の設定に戻します
+已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项	An app settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的應用程式設定，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかったアプリ設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
+已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项	A settings change that could not be saved last time was found. Save it again to apply it; the previous settings stay in use until then.	已找回上次未生效的設定變更，可以重試儲存；目前仍使用原來的有效選項	前回保存できなかった設定の変更が見つかりました。もう一度保存すると適用されます。それまでは元の設定が使われます。
