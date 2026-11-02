@@ -657,29 +657,29 @@ impl Desktop {
         let preview_click = cx.listener(|this, _, window, cx| this.inspect_source(window, cx));
         // A narrow window keeps the field's text: the action folds to its icon.
         let preview = if is_compact(window) {
-            let mut button =
-                IconButton::new("preview-source", symbols::visibility(), preview_label)
-                    .variant(IconButtonVariant::Tonal)
-                    .button_size(ButtonSize::Medium)
-                    .disabled(preview_disabled)
-                    .on_click(preview_click);
-            if !start_shown {
-                button = button.track_focus(&self.import_submit_focus);
-            }
-            MaterialTooltip::plain("preview-source-tooltip", preview_label)
-                .trigger(button)
-                .into_any_element()
+            ui::tip_button(
+                "preview-source",
+                symbols::visibility(),
+                preview_label,
+                |button| {
+                    button
+                        .variant(IconButtonVariant::Tonal)
+                        .button_size(ButtonSize::Medium)
+                        .disabled(preview_disabled)
+                        .on_click(preview_click)
+                        .when(!start_shown, |b| b.track_focus(&self.import_submit_focus))
+                },
+            )
+            .into_any_element()
         } else {
-            let mut button = material_button("preview-source", ButtonVariant::Tonal)
+            material_button("preview-source", ButtonVariant::Tonal)
                 .button_size(ButtonSize::Medium)
                 .icon(symbols::visibility())
                 .child(preview_label)
                 .disabled(preview_disabled)
-                .on_click(preview_click);
-            if !start_shown {
-                button = button.track_focus(&self.import_submit_focus);
-            }
-            button.into_any_element()
+                .on_click(preview_click)
+                .when(!start_shown, |b| b.track_focus(&self.import_submit_focus))
+                .into_any_element()
         };
         v_flex()
             .w_full()
@@ -1174,13 +1174,10 @@ impl Desktop {
                                     )
                                 },
                             )
-                            .child(details_toggle("source-error-details", open).on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.import.show_preview_details =
-                                        !this.import.show_preview_details;
-                                    cx.notify();
-                                }),
-                            )),
+                            .child(
+                                details_toggle("source-error-details", open)
+                                    .on_click(cx.listener(Self::toggle_preview_details)),
+                            ),
                     ),
                 )
                 .child(motion::disclosure(
@@ -1192,6 +1189,11 @@ impl Desktop {
                     )),
                 )),
         ))
+    }
+
+    fn toggle_preview_details(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.import.show_preview_details = !self.import.show_preview_details;
+        cx.notify();
     }
 
     /// The previewed video: cover, identity, what its text will come from and the one
@@ -1317,13 +1319,9 @@ impl Desktop {
                                         },
                                         course2md::tr!("来源详情"),
                                         |button| {
-                                            button.button_size(ButtonSize::ExtraSmall).on_click(
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.import.show_preview_details =
-                                                        !this.import.show_preview_details;
-                                                    cx.notify();
-                                                }),
-                                            )
+                                            button
+                                                .button_size(ButtonSize::ExtraSmall)
+                                                .on_click(cx.listener(Self::toggle_preview_details))
                                         },
                                     )),
                             ),
@@ -1381,12 +1379,14 @@ impl Desktop {
     ) -> Div {
         let speech = self.import_uses_speech();
         let mode = self.task_options().source_mode;
-        let failure = self.import.subtitle_error.as_deref().or_else(|| {
-            match (&source.subtitles, subtitle_needs_confirmation(source, mode)) {
-                (SubtitleEvidence::Failed { message }, true) => Some(message.as_str()),
-                _ => None,
-            }
-        });
+        // A read error of this input, or the source's own failed read.
+        let read_error = self.import.subtitle_error.as_deref();
+        let source_failure = match &source.subtitles {
+            SubtitleEvidence::Failed { message } => Some(message.as_str()),
+            _ => None,
+        };
+        let failure =
+            read_error.or(source_failure.filter(|_| subtitle_needs_confirmation(source, mode)));
         let pending = source.subtitle_request.is_some() || source.subtitle_read_error.is_some();
         let value: SharedString = if self.import.subtitle_loading {
             course2md::tr!("正在读取字幕…").into()
@@ -1420,14 +1420,8 @@ impl Desktop {
         );
         let login = source.online
             && course2md::auth::is_bilibili_url(&source.input)
-            && self
-                .import
-                .subtitle_error
-                .as_deref()
-                .or(match &source.subtitles {
-                    SubtitleEvidence::Failed { message } => Some(message.as_str()),
-                    _ => None,
-                })
+            && read_error
+                .or(source_failure)
                 .is_some_and(source::legacy_login_failure_from_text);
         let notice = match &source.subtitles {
             _ if !speech || self.import.subtitle_loading => None,
@@ -2216,11 +2210,11 @@ impl Desktop {
                     ))
                     .child(disclosure_chevron(open)),
             );
-        let hairline = || {
-            div()
-                .h(px(1.))
-                .mx(ITEM_INSET)
-                .bg(color(ColorRole::OUTLINE_VARIANT))
+        let hairline = |id: &'static str| {
+            MaterialDivider::new(id)
+                .variant(DividerVariant::MiddleInset)
+                .inset_start(ITEM_INSET)
+                .inset_end(ITEM_INSET)
         };
         // The way to the next video stays visible whether or not the plan is open: a
         // running task's card carries it; otherwise it sits right under this header.
@@ -2228,30 +2222,38 @@ impl Desktop {
             .as_ref()
             .filter(|task| !desktop_core::task_view::runs_in_card(task))
             .map(|_| {
-                v_flex().w_full().min_w_0().child(hairline()).child(
-                    scale
-                        .button("set-up-next-video", [false, false, false, false])
-                        .accessibility_label(course2md::tr!("设置下一个视频"))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.set_up_next_video(window, cx)),
-                        )
-                        .child(
-                            scale
-                                .row()
-                                .child(Icon::from(symbols::add()).color(color(ColorRole::PRIMARY)))
-                                .child(scale.text(
-                                    "set-up-next-video-label",
-                                    course2md::tr!("设置下一个视频"),
-                                    Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
-                                )),
-                        ),
-                )
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .child(hairline("options-next-divider"))
+                    .child(
+                        scale
+                            .button("set-up-next-video", [false, false, false, false])
+                            .accessibility_label(course2md::tr!("设置下一个视频"))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.set_up_next_video(window, cx)
+                                }),
+                            )
+                            .child(
+                                scale
+                                    .row()
+                                    .child(
+                                        Icon::from(symbols::add()).color(color(ColorRole::PRIMARY)),
+                                    )
+                                    .child(scale.text(
+                                        "set-up-next-video-label",
+                                        course2md::tr!("设置下一个视频"),
+                                        Some(course2md::tr!("清空链接，选项恢复为默认设置").into()),
+                                    )),
+                            ),
+                    )
             });
         // One surface: a hairline under the header, then quiet sections inside it.
         let body = v_flex()
             .w_full()
             .min_w_0()
-            .child(hairline())
+            .child(hairline("options-header-divider"))
             .child(match &owner {
                 Some(task) => v_flex()
                     .w_full()
