@@ -107,6 +107,14 @@ Each line names the commit by subject; evidence is under the session scratchpad 
   30 to 36 from other builds, so a measurement would not mean anything. U7/S11 needs a kit dialog wider than 720
   and a selected-card ring. `DESIGN-RESTORE.md` lists the rest under Not finished.
 
+- Round 3, after merging `split/workspace` (`fbc7bb0`): U19 wordmark weight; U22 export chevron; U24 find returns
+  focus to the note (`u22/after-find`); U16 confirmed-subtitle success line (`u16/h`); U25 one Bilibili mark
+  (`symbols::bilibili()`); G8 and H4 (`h4/h`, `h4/opts2`); G4 (`g4/t`). R12 kept by the design language.
+- Not app-side: U17 (Nord's error roles read dim on its slate surface) is the kit palette; U18 and S1 need a
+  `NavigationRail` ground and tinted icons; U25's dashed drop zones need a kit drop target; U7/S11 a wider dialog
+  and a selected card. U20, U21, U23 were not reproduced at the capture size (1280 wide). U2: load average 29 to 37
+  throughout, so not measured.
+
 ## Plan conformance (after the three fix agents)
 
 | ID | Sev | Finding |

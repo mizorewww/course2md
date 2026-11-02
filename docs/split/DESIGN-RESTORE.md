@@ -170,14 +170,10 @@ A `restore` verdict states the intent. These are not there yet:
 
 | # | What remains |
 | --- | --- |
-| G4 | Some quiet text actions beside primary ones are still primary; each needs `ButtonTone::Neutral` where it is the lesser of two |
-| G8 | The workbench's folder picker (`library_ui.rs`) is an outlined dropdown at the kit's standard corners; two fields still rest their label inside |
 | G17 | `ui::page_title` asks for headline medium 28/36 but measures 24: `page_heading` sets its size on an inner element. Kit PR #20 lets the caller's size through; repin after it merges |
-| H4 | Hero spacing: title to field and field to hint |
 | L1 | Sidebar items 44 tall with a pill selection: kit PR #21 adds `ListDensity::Navigation` and `ListItem::pill`; the sidebar takes both after it merges |
 | R9 | Contents as flat pills: the same `ListItem::pill`, without the surface container |
-| R12 | A screenshot card's action sits off the image |
-| S1 | The compact settings rail draws plain icons rather than the tinted circles |
+| S1 | The compact settings rail draws plain icons rather than the tinted circles, and paints its own band (U18): the kit's `NavigationRail` has neither a tinted icon nor a ground option; kit PR requested |
 | S11 | Palette picker: the kit's largest dialog is 720 against the baseline's 918, so names wrap at four across; the selected card has no ring. Both need a kit capability |
 | U1 | Value choices as rows opening a menu, not `ExposedDropdown`s: kit PRs #18 (`show_label`) and #19 (a caller's menu with its value) let a row hold one with its supporting text, icons and actions |
 
@@ -206,3 +202,7 @@ The rows above state the verdict; this says what the last pass did.
 | T1 | Only a failed task leads with a red circle; paused, partial and uncertain ones are amber |
 | T6 | A card of its own on Tasks pads 20 inside its 28 corners |
 | O3 | The model surface leads with a purple tinted mic at 40 |
+| G4 | A task's 查看详情 and log and the 恢复默认 resets are text actions in the neutral tone, ink beside the primary ones |
+| G8 | The folder picker takes `TextFieldShape::Rounded`; the custom model field floats its label. The note title field is named by its row |
+| H4 | 20 from the hero title to the link field, 24 from the field to the line under it |
+| R12 | Kept on the title row: the design language puts a card's commands on its title row, not over its image. The note's own figures carry their time and enlarge action over the image (A5) |
