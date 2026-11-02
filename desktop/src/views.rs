@@ -194,14 +194,6 @@ pub(super) fn shell_content_width(page: Page, window: &Window) -> f32 {
         .max(0.)
 }
 
-/// Entrance motion replays when the notice text changes, not on every frame.
-fn notice_key(text: &str) -> usize {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish() as usize
-}
-
 /// How much text the app bar can hold, from most to least.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppBarDensity {
@@ -511,12 +503,16 @@ impl Desktop {
             });
         };
         let close = dismiss.clone();
-        Snackbar::new(("app-message", notice_key(&message)), message)
-            .position(SnackbarPosition::default())
-            .close(course2md::tr!("关闭提示"), move |_, window, cx| {
-                close(window, cx)
-            })
-            .on_dismiss(dismiss)
+        // Keyed by its text, so entrance motion replays when the text changes.
+        Snackbar::new(
+            SharedString::from(format!("app-message-{message}")),
+            message,
+        )
+        .position(SnackbarPosition::default())
+        .close(course2md::tr!("关闭提示"), move |_, window, cx| {
+            close(window, cx)
+        })
+        .on_dismiss(dismiss)
     }
 }
 
@@ -666,7 +662,7 @@ impl Render for Desktop {
             )
             .when_some(self.workspace_error.clone(), |v, message| {
                 v.child(motion::enter(
-                    ("workspace-error", notice_key(&message)),
+                    SharedString::from(format!("workspace-error-{message}")),
                     shell_column_for(self.page).pb_3().child(
                         notice_banner("workspace-error", NoticeKind::Danger, message)
                             .child(

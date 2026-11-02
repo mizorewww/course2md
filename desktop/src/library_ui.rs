@@ -17,6 +17,14 @@ use std::{
     },
 };
 
+/// What a blocking worker returned; one that ended without a result was interrupted.
+pub(crate) async fn worker_result<T>(
+    worker: smol::channel::Receiver<anyhow::Result<T>>,
+) -> anyhow::Result<T> {
+    let result = worker.recv().await;
+    result.unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())))
+}
+
 fn folders_unavailable() -> &'static str {
     course2md::tr!("文件夹暂不可用，请重新扫描笔记库。")
 }
@@ -208,10 +216,7 @@ impl Desktop {
         // probe is blocking network/subprocess work; see crate::spawn_blocking_io.
         let task = crate::spawn_blocking_io(move || source::probe(input, online, cancel));
         cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let result = worker_result(task).await;
             // Always return the worker count, window or not (request_close waits for zero).
             let _ = this.update(cx, |this, _| {
                 this.import.preview_workers = this.import.preview_workers.saturating_sub(1);
@@ -363,18 +368,6 @@ impl Desktop {
         })
         .detach();
     }
-    fn folder_name(&self, id: Option<u64>) -> String {
-        match id.filter(|id| *id != 0) {
-            None => course2md::tr!("未分类").into(),
-            Some(id) => self
-                .library
-                .current
-                .folders
-                .get(&id)
-                .cloned()
-                .unwrap_or_else(|| course2md::tr!("已删除的文件夹").into()),
-        }
-    }
 
     /// The library a new folder goes in, and the draft it is for on the workbench.
     fn current_folder_origin(&self) -> (PathBuf, Option<String>) {
@@ -388,17 +381,19 @@ impl Desktop {
         (self.library.root.clone(), None)
     }
 
-    pub fn begin_folder(&mut self, id: Option<u64>, window: &mut Window, cx: &mut Context<Self>) {
+    /// A new top-level folder in the current library, for the workbench's draft there.
+    pub fn begin_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (root, draft) = self.current_folder_origin();
-        let target = match id {
-            Some(id) => NameTarget::Folder { root, id },
-            None => NameTarget::NewFolder {
+        let parent = None;
+        self.begin_naming(
+            NameTarget::NewFolder {
                 root,
-                parent: None,
+                parent,
                 draft,
             },
-        };
-        self.begin_naming(target, window, cx)
+            window,
+            cx,
+        )
     }
 
     /// Rename folder `id`, or create a folder inside `parent`, in the library at `root`.
@@ -484,10 +479,7 @@ impl Desktop {
     ) {
         let task = crate::spawn_blocking_io(work);
         cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let result = worker_result(task).await;
             let _ = this.update(cx, |this, cx| {
                 done(this, result, cx);
                 cx.notify();
@@ -834,10 +826,12 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let library = self.library.indexes.get(&root);
-        let name = library
-            .and_then(|library| library.folders.get(&id))
+        let name = [library, Some(&self.library.current)]
+            .into_iter()
+            .flatten()
+            .find_map(|library| library.folders.get(&id))
             .cloned()
-            .unwrap_or_else(|| self.folder_name(Some(id)));
+            .unwrap_or_else(|| course2md::tr!("已删除的文件夹").into());
         let nested = library.map_or(0, |library| library.subtree(id).len() - 1);
         let detail = if nested > 0 {
             course2md::tr!(

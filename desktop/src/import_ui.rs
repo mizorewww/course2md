@@ -2067,9 +2067,9 @@ impl Desktop {
                         button
                             .variant(IconButtonVariant::Tonal)
                             .tone(ButtonTone::Neutral)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.begin_folder(None, window, cx)
-                            }))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.begin_folder(window, cx)),
+                            )
                     },
                 )),
         ));
