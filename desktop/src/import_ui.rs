@@ -1191,17 +1191,10 @@ impl Desktop {
             .self_start()
             .when_some(duration, |cover, duration| {
                 cover.child(
-                    div()
+                    media_label("import-source-duration", duration)
                         .absolute()
                         .right(rem(8.))
-                        .bottom(rem(8.))
-                        .px(rem(8.))
-                        .py(rem(2.))
-                        .rounded(RADIUS_SMALL)
-                        .bg(color(ColorRole::ON_SURFACE))
-                        .text_color(color(ColorRole::SURFACE))
-                        .text_size(TEXT_AUX)
-                        .child(duration),
+                        .bottom(rem(8.)),
                 )
             });
         let details = v_flex()

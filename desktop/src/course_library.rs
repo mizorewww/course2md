@@ -16,8 +16,8 @@ use gpui_kit_material::{
         ListLeading, MaterialCard, MaterialSideSheet, MaterialTooltip, NoticeKind, RADIUS_LARGE,
         RADIUS_SMALL, SearchField, SearchFieldStyle, StatusKind, TEXT_AUX, TEXT_BODY, TILE_GAP,
         TILE_RADIUS, TileScale, Tint, TypeRole, accessible_text, color, disclosure_chevron,
-        list_corners, material_button, notice_banner, progress, rem, spinner, status_chip, tile,
-        tile_chevron, tinted_icon,
+        list_corners, material_button, media_label, notice_banner, progress, rem, spinner,
+        status_chip, tile, tile_chevron, tinted_icon,
     },
     tokens::shape::OuterCorners,
 };
@@ -1730,11 +1730,10 @@ impl Desktop {
                     .child(
                         row_cover(course.thumbnail.clone(), symbols::description()).children(
                             duration.map(|duration| {
-                                div()
+                                media_label(("note-duration", index), duration)
                                     .absolute()
                                     .right(rem(4.))
                                     .bottom(rem(4.))
-                                    .child(status_chip(StatusKind::Neutral).child(duration))
                             }),
                         ),
                     )
