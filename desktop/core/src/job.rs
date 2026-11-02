@@ -26,8 +26,10 @@ pub struct WorkState {
     pub kind: Kind,
     pub cancelling: bool,
     pub closing: bool,
-    /// A queued task's credentials are being resolved off the UI thread before it can start.
-    pub start_pending: bool,
+    /// The task being started: picked from the queue, its job not yet running. Starting
+    /// reads credentials and the library off the UI thread, and the task is still queued
+    /// meanwhile, so this, not the queue, keeps a second start out.
+    starting: Option<String>,
     pub task_status: String,
     /// What a model job has said; a task's events live on its record.
     pub job_events: JobEvents,
@@ -47,7 +49,7 @@ impl WorkState {
             kind: Kind::Convert,
             cancelling: false,
             closing: false,
-            start_pending: false,
+            starting: None,
             task_status: String::new(),
             job_events: Default::default(),
             job_started: None,
@@ -57,6 +59,35 @@ impl WorkState {
             last_tick: Instant::now(),
             event_repaint_pending: false,
         }
+    }
+
+    /// Claims the start of task `id`: false while a job runs, the app closes, or another
+    /// start is under way.
+    pub fn claim_start(&mut self, id: &str) -> bool {
+        if self.job.is_some() || self.closing || self.starting.is_some() {
+            return false;
+        }
+        self.starting = Some(id.to_owned());
+        true
+    }
+
+    /// Whether task `id` holds the start claimed for it.
+    pub fn is_starting(&self, id: &str) -> bool {
+        self.starting.as_deref() == Some(id)
+    }
+
+    /// The start of task `id` ended without a job: it failed, or the task changed.
+    pub fn end_start(&mut self, id: &str) {
+        if self.is_starting(id) {
+            self.starting = None;
+        }
+    }
+
+    /// Task `id`'s job runs; its start is over.
+    pub fn install(&mut self, id: &str, job: Job) {
+        self.end_start(id);
+        self.job = Some(job);
+        self.active_task = Some(id.to_owned());
     }
 
     /// Whether a poll that saw these events should repaint now. Stage, error and completion
@@ -130,6 +161,23 @@ mod tests {
             !work.repaint_due_at(false, false, later + Duration::from_secs(9)),
             "nothing running, nothing to repaint"
         );
+    }
+
+    /// A poll may come while a task's start reads the library: the task is still queued
+    /// then, and must not be started twice.
+    #[test]
+    fn a_task_being_started_holds_dispatch_until_its_start_ends() {
+        let mut work = WorkState::new();
+        assert!(work.claim_start("a"));
+        assert!(!work.claim_start("a"), "a poll during the start");
+        assert!(!work.claim_start("b"));
+        work.end_start("b");
+        assert!(work.is_starting("a"), "another task cannot release it");
+        work.end_start("a");
+        assert!(work.claim_start("b"));
+        work.closing = true;
+        work.end_start("b");
+        assert!(!work.claim_start("a"), "nothing starts while closing");
     }
 
     #[test]
