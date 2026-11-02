@@ -753,7 +753,7 @@ impl Desktop {
     }
 
     /// The form a Codex result belongs to, while it still edits a Codex service.
-    fn codex_form(&mut self, surface: CodexSurface) -> Option<&mut ServiceForm> {
+    pub(crate) fn codex_form(&mut self, surface: CodexSurface) -> Option<&mut ServiceForm> {
         let owner = match surface {
             CodexSurface::Editor => FormOwner::Editor,
             CodexSurface::Onboarding => FormOwner::Setup(ServicePurpose::Ai),
@@ -761,40 +761,9 @@ impl Desktop {
         };
         self.service_form_mut(owner).filter(|form| form.is_codex())
     }
-    pub(crate) fn codex_form_needs_catalog(&mut self, surface: CodexSurface) -> bool {
-        self.codex_form(surface)
-            .is_some_and(|form| form.models.models().is_empty() && !form.models.loading())
-    }
-    pub(crate) fn codex_form_models_loading(&mut self, surface: CodexSurface) -> bool {
-        self.codex_form(surface)
-            .map(|form| form.models.begin_external())
-            .is_some()
-    }
     pub(crate) fn codex_form_models_failed(&mut self, surface: CodexSurface, message: String) {
         if let Some(form) = self.codex_form(surface) {
             form.models.reject(model_discovery::Error::Custom(message));
-        }
-    }
-    /// Candidates only: a suggestion fills an empty model input and changes nothing saved.
-    pub(crate) fn codex_form_catalog(
-        &mut self,
-        surface: CodexSurface,
-        models: Vec<String>,
-        suggested: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        let window = self.window;
-        if let Some(form) = self.codex_form(surface) {
-            form.models.prime(models);
-            let input = form.input(FormField::Model).clone();
-            crate::codex_ui::autofill_input(window, input, suggested, cx);
-        }
-    }
-    pub(crate) fn codex_forms_logged_out(&mut self) {
-        for surface in [CodexSurface::Editor, CodexSurface::Onboarding] {
-            if let Some(form) = self.codex_form(surface) {
-                form.models.invalidate();
-            }
         }
     }
 }

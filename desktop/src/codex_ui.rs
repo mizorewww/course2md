@@ -2,6 +2,7 @@
 //! Credentials live only in the CLI token file ({config_dir}/auth/codex.json); desktop settings, logs and
 //! interface text never touch the token. The settings service editor and first-use AI step share this state.
 use crate::preferences::{ServiceProtocol, ServicePurpose};
+use crate::settings_ui::service_form::FormField;
 use crate::ui::Resource;
 use crate::{Desktop, symbols};
 use course2md::login::codex::LoginStatus;
@@ -96,7 +97,9 @@ impl Desktop {
                 }
                 // A connected Codex surface without a catalog fetches it next (an empty model input takes the first candidate).
                 if matches!(this.codex.status, Some(LoginStatus::Connected))
-                    && this.codex_form_needs_catalog(surface)
+                    && this.codex_form(surface).is_some_and(|form| {
+                        form.models.models().is_empty() && !form.models.loading()
+                    })
                 {
                     this.codex_refresh_models(surface, cx);
                 }
@@ -179,9 +182,10 @@ impl Desktop {
     pub(crate) fn codex_refresh_models(&mut self, surface: CodexSurface, cx: &mut Context<Self>) {
         // Put the model field into its loading state first, so a click stopped by the busy guard is not silent.
         // The settings account card has no model input and no catalog to refresh.
-        if !self.codex_form_models_loading(surface) {
+        let Some(form) = self.codex_form(surface) else {
             return;
-        }
+        };
+        form.models.begin_external();
         if self.codex.busy() {
             let message = course2md::tr!("上一个 Codex 请求尚未完成").to_string();
             self.codex_form_models_failed(surface, message);
@@ -230,7 +234,11 @@ impl Desktop {
                             course2md::tr!("已退出 Codex 登录；默认 AI 服务已解除绑定").into(),
                         );
                     }
-                    this.codex_forms_logged_out();
+                    for surface in [CodexSurface::Editor, CodexSurface::Onboarding] {
+                        if let Some(form) = this.codex_form(surface) {
+                            form.models.invalidate();
+                        }
+                    }
                 }
                 Err(error) => {
                     this.codex
@@ -268,16 +276,21 @@ impl Desktop {
         }
     }
 
-    /// The account catalog reaches only the originating surface while it still edits a Codex service.
+    /// Candidates only: a suggestion fills an empty model input and changes nothing saved.
+    /// The catalog reaches only the originating surface while it still edits a Codex service.
     fn codex_apply_catalog(
         &mut self,
         surface: CodexSurface,
         catalog: Vec<(String, String)>,
         cx: &mut Context<Self>,
     ) {
-        let models: Vec<String> = catalog.into_iter().map(|(slug, _)| slug).collect();
-        let suggested = models.first().cloned();
-        self.codex_form_catalog(surface, models, suggested, cx);
+        let window = self.window;
+        if let Some(form) = self.codex_form(surface) {
+            let models: Vec<String> = catalog.into_iter().map(|(slug, _)| slug).collect();
+            let suggested = models.first().cloned();
+            form.models.prime(models);
+            autofill_input(window, form.input(FormField::Model).clone(), suggested, cx);
+        }
     }
 
     /// The Codex account section shared by the editor and first use: status, explanation and sign-in actions.
