@@ -116,6 +116,18 @@ pub fn menu_key_toggle(
     }
 }
 
+/// An icon button whose plain tooltip names it with its label.
+pub fn tip_button(
+    id: impl Into<ElementId>,
+    icon: impl Into<Icon>,
+    label: impl Into<SharedString>,
+    configure: impl FnOnce(IconButton) -> IconButton,
+) -> MaterialTooltip {
+    let (id, label) = (id.into(), label.into());
+    MaterialTooltip::plain(child_id(&id, "tip"), label.clone())
+        .trigger(configure(IconButton::new(id, icon, label)))
+}
+
 /// The items of a menu that picks one value, the current one checked.
 ///
 /// ```ignore

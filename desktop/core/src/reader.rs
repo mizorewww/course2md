@@ -672,6 +672,7 @@ pub fn settle_reader_notice(current: &mut Option<String>, failure: &mut Option<S
 
 /// The note being read, or on its way. A read that finishes after a newer one started no
 /// longer counts.
+#[derive(Default)]
 pub struct OpenedNote {
     pub preview: Option<Rc<notes::Preview>>,
     pub read_generation: u64,
@@ -682,21 +683,6 @@ pub struct OpenedNote {
     /// The page reading returns to.
     pub result_origin: Page,
     pub result_tab: usize,
-}
-
-impl Default for OpenedNote {
-    fn default() -> Self {
-        Self {
-            preview: None,
-            read_generation: 0,
-            reading: false,
-            opening_course: None,
-            reader_course_error: None,
-            reader_failure_notice: None,
-            result_origin: Page::Library,
-            result_tab: 0,
-        }
-    }
 }
 
 impl OpenedNote {

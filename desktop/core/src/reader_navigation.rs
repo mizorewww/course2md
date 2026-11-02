@@ -175,17 +175,8 @@ pub fn content_outline(
 
 /// Calendar date in local time, without slicing a formatted timestamp.
 pub fn date_local(milliseconds: u64) -> String {
-    use chrono::Datelike;
-    let instant = i64::try_from(milliseconds)
-        .ok()
-        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis);
-    let Some(instant) = instant.filter(|instant| (1..=9999).contains(&instant.year())) else {
-        return "-".into();
-    };
-    instant
-        .with_timezone(&chrono::Local)
-        .format("%Y-%m-%d")
-        .to_string()
+    local_time(milliseconds, &chrono::Local)
+        .map_or_else(|| "-".into(), |local| local.format("%Y-%m-%d").to_string())
 }
 
 /// Display an immutable UTC instant using the system timezone's rules for that
@@ -195,24 +186,25 @@ pub fn timestamp_local(milliseconds: u64) -> String {
 }
 
 fn timestamp_in_timezone<Tz: chrono::TimeZone>(milliseconds: u64, timezone: &Tz) -> String {
-    use chrono::Datelike;
+    local_time(milliseconds, timezone).map_or_else(
+        || course2md::tr!("时间未知").into(),
+        |local| local.format("%Y-%m-%d %H:%M").to_string(),
+    )
+}
 
-    let display = || {
-        let instant = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(
-            i64::try_from(milliseconds).ok()?,
-        )?;
-        // Keep ordinary display years bounded before adding a timezone offset;
-        // malformed persisted values must not overflow or invent a nearby date.
-        if !(1..=9999).contains(&instant.year()) {
-            return None;
-        }
-        let local = instant.with_timezone(timezone).naive_local();
-        if !(1..=9999).contains(&local.year()) {
-            return None;
-        }
-        Some(local.format("%Y-%m-%d %H:%M").to_string())
-    };
-    display().unwrap_or_else(|| course2md::tr!("时间未知").into())
+/// The instant in `timezone`. Ordinary display years stay bounded before and after the
+/// offset, so a malformed persisted value neither overflows nor invents a nearby date.
+fn local_time<Tz: chrono::TimeZone>(
+    milliseconds: u64,
+    timezone: &Tz,
+) -> Option<chrono::NaiveDateTime> {
+    use chrono::Datelike;
+    let instant =
+        chrono::DateTime::<chrono::Utc>::from_timestamp_millis(i64::try_from(milliseconds).ok()?)?;
+    let local = (1..=9999)
+        .contains(&instant.year())
+        .then(|| instant.with_timezone(timezone).naive_local())?;
+    (1..=9999).contains(&local.year()).then_some(local)
 }
 
 #[cfg(test)]

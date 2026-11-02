@@ -25,6 +25,7 @@ const ASSET_PREFIX: &str = "math/";
 /// Formulas kept typeset; notes rarely hold more than a few hundred.
 const CACHE_LIMIT: usize = 4096;
 
+#[derive(Default)]
 struct Cache {
     formulas: HashMap<(String, bool), Option<Formula>>,
     svgs: HashMap<SharedString, Arc<[u8]>>,
@@ -41,57 +42,7 @@ impl Cache {
     }
 }
 
-static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
-    Mutex::new(Cache {
-        formulas: HashMap::new(),
-        svgs: HashMap::new(),
-    })
-});
-
-/// `math/{d|i}{hex of the LaTeX}.svg`: the path is the formula, so it can never name
-/// another one and can always be typeset again.
-fn path_of(latex: &str, display: bool) -> SharedString {
-    let mut path = format!("{ASSET_PREFIX}{}", if display { 'd' } else { 'i' });
-    for byte in latex.bytes() {
-        path.push_str(&format!("{byte:02x}"));
-    }
-    path.push_str(".svg");
-    path.into()
-}
-
-/// What a formula's asset path names.
-struct Source {
-    latex: String,
-    display: bool,
-    /// A tile's slice: index and count.
-    slice: Option<(usize, usize)>,
-}
-
-fn source_of(path: &str) -> Option<Source> {
-    let name = path.strip_prefix(ASSET_PREFIX)?.strip_suffix(".svg")?;
-    let (name, slice) = match name.split_once('-') {
-        Some((name, slice)) => {
-            let (index, count) = slice.split_once("of")?;
-            (name, Some((index.parse().ok()?, count.parse().ok()?)))
-        }
-        None => (name, None),
-    };
-    let display = match name.as_bytes().first()? {
-        b'd' => true,
-        b'i' => false,
-        _ => return None,
-    };
-    let hex = &name[1..];
-    let bytes = (0..hex.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok())
-        .collect::<Option<Vec<_>>>()?;
-    Some(Source {
-        latex: String::from_utf8(bytes).ok()?,
-        display,
-        slice,
-    })
-}
+static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
 
 /// The typeset formula, or `None` when RaTeX cannot parse it; the note then
 /// shows the source. Results are cached. The note's parser asks off the UI thread.
@@ -104,7 +55,11 @@ pub fn formula(latex: &str, display: bool) -> Option<Formula> {
     let mut cache = CACHE.lock().ok()?;
     cache.reset_if_full();
     let formula = typeset.map(|typeset| {
-        let path = path_of(latex, display);
+        // `math/{d|i}{hex of the LaTeX}.svg`: the path is the formula, so it can never
+        // name another one and can always be typeset again.
+        let hex: String = latex.bytes().map(|byte| format!("{byte:02x}")).collect();
+        let kind = if display { 'd' } else { 'i' };
+        let path = SharedString::from(format!("{ASSET_PREFIX}{kind}{hex}.svg"));
         cache
             .svgs
             .insert(path.clone(), typeset.svg.into_bytes().into());
@@ -179,11 +134,26 @@ pub fn asset(path: &str) -> Option<Cow<'static, [u8]>> {
     if let Some(svg) = CACHE.lock().ok()?.svgs.get(path) {
         return Some(Cow::Owned(svg.to_vec()));
     }
-    let Source {
-        latex,
-        display,
-        slice,
-    } = source_of(path)?;
+    // What the path names: the formula, its display mode and a tile's slice.
+    let name = path.strip_prefix(ASSET_PREFIX)?.strip_suffix(".svg")?;
+    let (name, slice) = match name.split_once('-') {
+        Some((name, slice)) => {
+            let (index, count) = slice.split_once("of")?;
+            (name, Some((index.parse().ok()?, count.parse().ok()?)))
+        }
+        None => (name, None),
+    };
+    let display = match name.as_bytes().first()? {
+        b'd' => true,
+        b'i' => false,
+        _ => return None,
+    };
+    let hex = &name[1..];
+    let bytes = (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok())
+        .collect::<Option<Vec<_>>>()?;
+    let latex = String::from_utf8(bytes).ok()?;
     let svg = c2m_artifact::math::typeset(&latex, display)?.svg;
     let svg = match slice {
         Some((index, count)) if index < count => slice_svg(&svg, index, count)?,

@@ -84,15 +84,6 @@ struct ImageViewer {
 
 const ZOOM_STEP_IN: f32 = 1.25;
 const ZOOM_STEP_OUT: f32 = 0.8;
-/// A tooltip naming an icon button.
-fn tool(
-    button: IconButton,
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-) -> impl IntoElement {
-    MaterialTooltip::plain(id, label).trigger(button)
-}
-
 /// One of the viewer's icons: `tip` also names its key.
 fn viewer_tool(
     id: &'static str,
@@ -102,12 +93,10 @@ fn viewer_tool(
     disabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    tool(
+    MaterialTooltip::plain(SharedString::from(format!("{id}-tip")), tip).trigger(
         IconButton::new(id, icon, label)
             .disabled(disabled)
             .on_click(on_click),
-        SharedString::from(format!("{id}-tip")),
-        tip,
     )
 }
 
@@ -392,21 +381,29 @@ impl NoteDocument {
         ];
         // A section's screenshot follows its paragraphs.
         let mut figures: Vec<(String, Option<usize>)> = Vec::new();
+        // The key points from `index` on, as one list, and the index after them.
+        let key_points = |mut index: usize| {
+            let mut list = Vec::new();
+            while let Some(PreviewBlock::Paragraph { text, anchor }) = blocks.get(index)
+                && anchor.starts_with("key-point-")
+            {
+                list.push(format!("- {}", note_text::inline_markdown(text)));
+                index += 1;
+            }
+            (list.join("\n"), index)
+        };
         let mut index = 0;
         while let Some(block) = blocks.get(index) {
-            let paragraph_blocks = |text: &str, index: usize| {
-                note_text::blocks(text)
-                    .into_iter()
-                    .map(move |block| (block, Some(index)))
-            };
+            if let PreviewBlock::Heading { .. } = block {
+                parts.append(&mut figures);
+                if let Some(chapter) = chapters.get(&index) {
+                    let chapter = note_text::plain_inline_markdown(chapter);
+                    parts.push((format!("## {chapter}"), Some(index)));
+                }
+            }
             match block {
                 // The summary is one panel: its overview and its key points.
                 PreviewBlock::Heading { anchor, .. } if anchor == "summary" => {
-                    parts.append(&mut figures);
-                    if let Some(chapter) = chapters.get(&index) {
-                        let chapter = note_text::plain_inline_markdown(chapter);
-                        parts.push((format!("## {chapter}"), Some(index)));
-                    }
                     let start = index;
                     let mut summary = Vec::new();
                     index += 1;
@@ -414,15 +411,9 @@ impl NoteDocument {
                         && (anchor == "summary-tldr" || anchor.starts_with("key-point-"))
                     {
                         if anchor.starts_with("key-point-") {
-                            let mut list = Vec::new();
-                            while let Some(PreviewBlock::Paragraph { text, anchor }) =
-                                blocks.get(index)
-                                && anchor.starts_with("key-point-")
-                            {
-                                list.push(format!("- {}", note_text::inline_markdown(text)));
-                                index += 1;
-                            }
-                            summary.push(list.join("\n"));
+                            let (list, next) = key_points(index);
+                            summary.push(list);
+                            index = next;
                         } else {
                             summary.extend(note_text::blocks(text));
                             index += 1;
@@ -437,11 +428,6 @@ impl NoteDocument {
                     continue;
                 }
                 PreviewBlock::Heading { text, seconds, .. } => {
-                    parts.append(&mut figures);
-                    if let Some(chapter) = chapters.get(&index) {
-                        let chapter = note_text::plain_inline_markdown(chapter);
-                        parts.push((format!("## {chapter}"), Some(index)));
-                    }
                     let level = if block.is_timestamp_heading() {
                         "###"
                     } else {
@@ -458,20 +444,18 @@ impl NoteDocument {
                     };
                     parts.push((format!("{level} {heading}"), Some(index)));
                 }
+                // The key points are one list.
                 PreviewBlock::Paragraph { anchor, .. } if anchor.starts_with("key-point-") => {
-                    // The key points are one list.
-                    let start = index;
-                    let mut list = Vec::new();
-                    while let Some(PreviewBlock::Paragraph { text, anchor }) = blocks.get(index)
-                        && anchor.starts_with("key-point-")
-                    {
-                        list.push(format!("- {}", note_text::inline_markdown(text)));
-                        index += 1;
-                    }
-                    parts.push((list.join("\n"), Some(start)));
+                    let (list, next) = key_points(index);
+                    parts.push((list, Some(index)));
+                    index = next;
                     continue;
                 }
-                PreviewBlock::Paragraph { text, .. } => parts.extend(paragraph_blocks(text, index)),
+                PreviewBlock::Paragraph { text, .. } => parts.extend(
+                    note_text::blocks(text)
+                        .into_iter()
+                        .map(|block| (block, Some(index))),
+                ),
                 // A translation reads as a quieter companion to the paragraph above it.
                 PreviewBlock::Translation { text, .. } => parts.push((
                     note_text::blocks(text)
@@ -1605,21 +1589,13 @@ impl Desktop {
                 );
                 // The native save panel owns the explicit overwrite decision; the old file
                 // remains intact until a complete export is ready beside it.
-                if target.exists() {
-                    let temp = parent.join(format!(
-                        ".course2md-export-{}.{}",
-                        workspace::new_id("file"),
-                        extension
-                    ));
-                    let result = course2md::portable::export(&source, format, &temp)
-                        .and_then(|_| std::fs::rename(&temp, &target).map_err(anyhow::Error::from));
-                    if result.is_err() {
-                        let _ = std::fs::remove_file(&temp);
-                    }
-                    result
-                } else {
-                    course2md::portable::export(&source, format, &target).map(|_| ())
-                }
+                // A dropped temporary folder takes an unfinished export with it.
+                let temp = tempfile::Builder::new()
+                    .prefix(".course2md-export-")
+                    .tempdir_in(&parent)?;
+                let file = temp.path().join(target.file_name().unwrap_or_default());
+                course2md::portable::export(&source, format, &file)?;
+                Ok(std::fs::rename(&file, &target)?)
             })
             .recv()
             .await
@@ -1664,15 +1640,16 @@ impl Desktop {
         let child = |name: &str| SharedString::from(format!("{id}:{name}"));
         let source = course.dir.clone();
         let dismiss_label = course2md::tr!("关闭这份笔记的导出提示");
-        let dismiss = tool(
-            IconButton::new(child("dismiss"), symbols::close(), dismiss_label).on_click(
-                cx.listener(move |this, _, _, cx| {
+        let dismiss = ui::tip_button(
+            child("dismiss"),
+            symbols::close(),
+            dismiss_label,
+            |button| {
+                button.on_click(cx.listener(move |this, _, _, cx| {
                     this.reader_ui.export_state.feedback.remove(&source);
                     cx.notify();
-                }),
-            ),
-            child("dismiss-tip"),
-            dismiss_label,
+                }))
+            },
         );
         Some(match feedback.result {
             Ok(path) => {
@@ -1880,15 +1857,18 @@ impl Desktop {
                 .mx_auto()
                 .gap(rem(20.))
                 .pt(rem(8.))
-                .child(tool(
-                    IconButton::new("reader-loading-back", symbols::arrow_back(), label.clone())
-                        .variant(IconButtonVariant::Tonal)
-                        .tone(ButtonTone::Neutral)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.navigate(this.opened.result_origin, cx);
-                        })),
-                    "reader-loading-back-tip",
+                .child(ui::tip_button(
+                    "reader-loading-back",
+                    symbols::arrow_back(),
                     label,
+                    |button| {
+                        button
+                            .variant(IconButtonVariant::Tonal)
+                            .tone(ButtonTone::Neutral)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.navigate(this.opened.result_origin, cx);
+                            }))
+                    },
                 ))
                 .child(
                     h_flex()
@@ -1998,16 +1978,19 @@ impl Desktop {
         }
         let label = course2md::tr!("阅读目录");
         Some(
-            tool(
-                IconButton::new("note-contents", symbols::format_list_bulleted(), label)
-                    .toggle(true)
-                    .selected(self.reader_ui.toc_open)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.reader_ui.toc_open = !this.reader_ui.toc_open;
-                        cx.notify();
-                    })),
-                "note-contents-tip",
+            ui::tip_button(
+                "note-contents",
+                symbols::format_list_bulleted(),
                 label,
+                |button| {
+                    button
+                        .toggle(true)
+                        .selected(self.reader_ui.toc_open)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.reader_ui.toc_open = !this.reader_ui.toc_open;
+                            cx.notify();
+                        }))
+                },
             )
             .into_any_element(),
         )
@@ -2252,11 +2235,12 @@ impl Desktop {
                     .bottom(rem(12.)),
                 )
                 .child(
-                    div()
-                        .absolute()
-                        .right(rem(12.))
-                        .bottom(rem(12.))
-                        .child(tool(
+                    div().absolute().right(rem(12.)).bottom(rem(12.)).child(
+                        MaterialTooltip::plain(
+                            ("note-figure-enlarge-tip", block),
+                            course2md::tr!("放大"),
+                        )
+                        .trigger(
                             IconButton::new(
                                 ("note-figure-enlarge", block),
                                 symbols::open_in_full(),
@@ -2271,9 +2255,8 @@ impl Desktop {
                                     this.open_reader_image(frame, window, cx)
                                 },
                             )),
-                            ("note-figure-enlarge-tip", block),
-                            course2md::tr!("放大"),
-                        )),
+                        ),
+                    ),
                 )
             },
         );
@@ -2415,10 +2398,7 @@ impl Desktop {
         };
         let mut obstacles = Vec::new();
         let offline = matches!(self.reader_ui.offline_video, OfflineVideo::Available(_));
-        if matches!(self.reader_ui.source, Some(nav::SourceTarget::Local(_)))
-            && !offline
-            && !self.reader_ui.source_available
-        {
+        if self.reader_source_missing() && !offline {
             obstacles.push(obstacle(
                 "missing-original-video",
                 course2md::tr!("原视频不可用"),
@@ -2827,16 +2807,14 @@ impl Desktop {
             } else {
                 (symbols::description(), course2md::tr!("笔记"))
             };
-            tool(
-                IconButton::new("reader-view-toggle", icon, label)
+            ui::tip_button("reader-view-toggle", icon, label, |button| {
+                button
                     .variant(IconButtonVariant::Tonal)
                     .tone(ButtonTone::Neutral)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.select_reader_view(usize::from(reading_note), window, cx)
-                    })),
-                "reader-view-toggle-tip",
-                label,
-            )
+                    }))
+            })
         });
         let toc_toggle = if metrics.short {
             self.reader_toc_toggle(metrics, cx)
@@ -2844,23 +2822,22 @@ impl Desktop {
             None
         };
         let find = reading_note.then(|| {
-            tool(
-                // A tool on the reader's bar sits in the neutral circle the back button has.
-                IconButton::new("reader-open-find", symbols::search(), find_label)
-                    .variant(IconButtonVariant::Tonal)
-                    .tone(ButtonTone::Neutral)
-                    .toggle(true)
-                    .selected(self.reader_ui.find.open)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        if this.reader_ui.find.open {
-                            this.close_reader_find(window, cx);
-                        } else {
-                            this.open_reader_find(window, cx);
-                        }
-                    })),
-                "reader-open-find-tip",
-                format!("{find_label} {shortcut}"),
-            )
+            MaterialTooltip::plain("reader-open-find-tip", format!("{find_label} {shortcut}"))
+                .trigger(
+                    // A tool on the reader's bar sits in the neutral circle the back button has.
+                    IconButton::new("reader-open-find", symbols::search(), find_label)
+                        .variant(IconButtonVariant::Tonal)
+                        .tone(ButtonTone::Neutral)
+                        .toggle(true)
+                        .selected(self.reader_ui.find.open)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if this.reader_ui.find.open {
+                                this.close_reader_find(window, cx);
+                            } else {
+                                this.open_reader_find(window, cx);
+                            }
+                        })),
+                )
         });
         // So short a window gives the video's place to its views; it moves to the menu.
         let play = if metrics.short {
@@ -2889,11 +2866,13 @@ impl Desktop {
     /// local file while it is still there.
     fn reader_can_play(&self) -> bool {
         matches!(self.reader_ui.offline_video, OfflineVideo::Available(_))
-            || match &self.reader_ui.source {
-                Some(nav::SourceTarget::Web(_)) => true,
-                Some(nav::SourceTarget::Local(_)) => self.reader_ui.source_available,
-                None => false,
-            }
+            || (self.reader_ui.source.is_some() && !self.reader_source_missing())
+    }
+
+    /// Whether the note's local video is no longer where it was.
+    fn reader_source_missing(&self) -> bool {
+        matches!(self.reader_ui.source, Some(nav::SourceTarget::Local(_)))
+            && !self.reader_ui.source_available
     }
 
     /// Watches the video, the kept offline copy first.
@@ -2914,16 +2893,14 @@ impl Desktop {
         }
         let play = cx.listener(|this: &mut Self, _: &ClickEvent, _, cx| this.play_reader_video(cx));
         Some(if icon_only {
-            tool(
-                // Folded to its icon it is an outlined icon button, as it is outlined
-                // with its label.
-                IconButton::new("reader-play", symbols::play_arrow(), label)
+            // Folded to its icon it is an outlined icon button, as it is outlined
+            // with its label.
+            ui::tip_button("reader-play", symbols::play_arrow(), label, |button| {
+                button
                     .variant(IconButtonVariant::Outlined)
                     .disabled(opening)
-                    .on_click(play),
-                "reader-play-tip",
-                label,
-            )
+                    .on_click(play)
+            })
             .into_any_element()
         } else {
             material_button("reader-play", ButtonVariant::Outlined)
@@ -3028,14 +3005,12 @@ impl Desktop {
         }
         let label = course2md::tr!("复制与导出");
         let trigger: AnyElement = if icon_only {
-            tool(
-                IconButton::new("export-note", symbols::content_copy(), label)
+            ui::tip_button("export-note", symbols::content_copy(), label, |button| {
+                button
                     .variant(IconButtonVariant::Tonal)
                     .tone(ButtonTone::Neutral)
-                    .disabled(exporting),
-                "export-note-tip",
-                label,
-            )
+                    .disabled(exporting)
+            })
             .into_any_element()
         } else {
             material_button("export-note", ButtonVariant::Tonal)
@@ -3073,8 +3048,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let source = self.reader_ui.source.clone();
-        let missing_local =
-            matches!(source, Some(nav::SourceTarget::Local(_))) && !self.reader_ui.source_available;
+        let missing_local = self.reader_source_missing();
         // A web source opens on its site; the title bar may be playing the kept copy.
         let source_label = match &source {
             _ if missing_local => course2md::tr!("找到原视频…").to_owned(),
@@ -3133,11 +3107,7 @@ impl Desktop {
         let label = course2md::tr!("更多笔记操作");
         ui::menu(
             "reader-more-menu",
-            tool(
-                IconButton::new("reader-more", symbols::more_vert(), label),
-                "reader-more-tip",
-                label,
-            ),
+            ui::tip_button("reader-more", symbols::more_vert(), label, |button| button),
             MaterialMenu::new("reader-more-items")
                 .width(280.)
                 .items(items),
@@ -3186,13 +3156,11 @@ impl Desktop {
                     icon: SymbolIcon,
                     delta: isize,
                     cx: &mut Context<Self>| {
-            tool(
-                IconButton::new(id, icon, label)
+            ui::tip_button(id, icon, label, |button| {
+                button
                     .disabled(count == 0)
-                    .on_click(cx.listener(move |this, _, _, cx| this.move_reader_match(delta, cx))),
-                SharedString::from(format!("{id}-tip")),
-                label,
-            )
+                    .on_click(cx.listener(move |this, _, _, cx| this.move_reader_match(delta, cx)))
+            })
         };
         Some(
             h_flex()
@@ -3255,12 +3223,17 @@ impl Desktop {
                 })
                 .when(reading_note, |bar| {
                     let label = course2md::tr!("关闭");
-                    bar.child(tool(
-                        IconButton::new("close-find", symbols::close(), label).on_click(
-                            cx.listener(|this, _, window, cx| this.close_reader_find(window, cx)),
-                        ),
-                        "close-find-tip",
+                    bar.child(ui::tip_button(
+                        "close-find",
+                        symbols::close(),
                         label,
+                        |button| {
+                            button.on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.close_reader_find(window, cx)
+                                }),
+                            )
+                        },
                     ))
                 }),
         )
@@ -3499,22 +3472,19 @@ impl Desktop {
                             .font_weight(FontWeight::MEDIUM),
                         )
                         .when_some(frame.body_index, |row, block| {
-                            row.child(tool(
-                                IconButton::new(
-                                    ("frame-to-body", index),
-                                    symbols::description(),
-                                    to_note,
-                                )
-                                .button_size(ButtonSize::ExtraSmall)
-                                .on_click(cx.listener(
-                                    move |this, _, _, cx| {
-                                        // The card under the button opens the viewer.
-                                        cx.stop_propagation();
-                                        this.jump_reader_block(block, cx)
-                                    },
-                                )),
-                                ("frame-to-body-tip", index),
+                            row.child(ui::tip_button(
+                                ("frame-to-body", index),
+                                symbols::description(),
                                 to_note,
+                                |button| {
+                                    button.button_size(ButtonSize::ExtraSmall).on_click(
+                                        cx.listener(move |this, _, _, cx| {
+                                            // The card under the button opens the viewer.
+                                            cx.stop_propagation();
+                                            this.jump_reader_block(block, cx)
+                                        }),
+                                    )
+                                },
                             ))
                         }),
                 )
@@ -4245,18 +4215,16 @@ impl Desktop {
         let short = ReaderMetrics::new(window, false).short;
         crate::views::app_bar(height, window, cx).child(
             bar.gap(rem(12.))
-                .child(title_bar_control(
-                    div().flex_shrink_0().child(tool(
-                        IconButton::new("reader-back", symbols::arrow_back(), back.clone())
+                .child(title_bar_control(div().flex_shrink_0().child(
+                    ui::tip_button("reader-back", symbols::arrow_back(), back, |button| {
+                        button
                             .variant(IconButtonVariant::Tonal)
                             .tone(ButtonTone::Neutral)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.navigate(this.opened.result_origin, cx)
-                            })),
-                        "reader-back-tip",
-                        back,
-                    )),
-                ))
+                            }))
+                    }),
+                )))
                 .child(
                     v_flex()
                         .flex_1()

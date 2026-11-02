@@ -44,12 +44,6 @@ pub fn source_link(time: &str, url: &str) -> String {
 /// drawn as several tiles side by side.
 const MAX_FORMULA_PIXELS: f32 = 4000.;
 
-/// Closing punctuation stays in the sentence: a display formula it follows is laid
-/// out inline, so a line never starts with it.
-fn closes_line(c: char) -> bool {
-    "，。、；：！？）」』”’》〉】,.;:!?)]}".contains(c)
-}
-
 /// Text as it reads once Markdown has parsed it. `dollars` escapes `$` too, for text
 /// that also holds a formula; elsewhere a stray pair stays literal through [`formula_of`].
 /// Only what could start markup is escaped, because whole paragraphs copy as their source.
@@ -174,10 +168,13 @@ pub fn blocks(text: &str) -> Vec<String> {
                 escape(latex, true, &mut paragraph);
             }
             Piece::Math { latex, display } => {
+                // Closing punctuation stays in the sentence: a display formula it follows
+                // is laid out inline, so a line never starts with it.
+                let closes = |c: char| "，。、；：！？）」』”’》〉】,.;:!?)]}".contains(c);
                 in_sentence = display
                     && matches!(
                         pieces.peek(),
-                        Some(Piece::Text(next)) if next.trim_start().starts_with(closes_line)
+                        Some(Piece::Text(next)) if next.trim_start().starts_with(closes)
                     );
                 if display && !in_sentence {
                     flush(&mut paragraph, &mut blocks);

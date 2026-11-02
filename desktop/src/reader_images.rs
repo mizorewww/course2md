@@ -69,6 +69,7 @@ enum Entry {
     Failed,
 }
 
+#[derive(Default)]
 pub(crate) struct ReaderImages {
     entries: HashMap<Key, Entry>,
     queue: VecDeque<Key>,
@@ -78,19 +79,6 @@ pub(crate) struct ReaderImages {
     tick: u64,
     /// Bumped by `clear` so decodes started for an earlier note are dropped.
     generation: u64,
-}
-
-impl Default for ReaderImages {
-    fn default() -> Self {
-        Self {
-            entries: HashMap::new(),
-            queue: VecDeque::new(),
-            in_flight: 0,
-            bytes: 0,
-            tick: 1,
-            generation: 0,
-        }
-    }
 }
 
 impl ReaderImages {
