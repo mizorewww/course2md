@@ -17,25 +17,23 @@ capture = ["gpui-kit/test-support"]
 course2md = { path = "../crates/course2md" }
 desktop-core = { path = "core" }
 desktop-ui = { path = "ui" }
-# The stack gpui-kit-material pins, at one revision of that repository.
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86", features = ["gpui-fast"] }
-gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86" }
-gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86", default-features = false, features = ["serde", "gpui-fast", "buttons", "containment", "dialogs", "feedback", "inputs", "menus", "navigation", "progress", "selection", "window-chrome"] }
-anyhow = "1"
-serde_json = "1"
-smol = "2"
-tempfile = "3"
-url = "2"
-chrono = "0.4"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
-unicode-segmentation = "1"
+gpui-kit.workspace = true
+gpui-base.workspace = true
+gpui-kit-material = { workspace = true, features = ["buttons", "containment", "dialogs", "feedback", "inputs", "menus", "navigation", "progress", "selection", "window-chrome"] }
+anyhow.workspace = true
+serde_json.workspace = true
+smol.workspace = true
+tempfile.workspace = true
+url.workspace = true
+chrono.workspace = true
+image = { workspace = true, features = ["webp"] }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc.workspace = true
 
 [build-dependencies]
-embed-resource = "3.0"
+embed-resource.workspace = true
 
 [dev-dependencies]
 desktop-core = { path = "core", features = ["test-support"] }
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "3df2920f17cecb765c96f23073fff5e4a2773e86", features = ["gpui-fast", "test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }

@@ -1625,7 +1625,6 @@ dependencies = [
  "serde_json",
  "smol",
  "tempfile",
- "unicode-segmentation",
  "url",
 ]
 
@@ -1789,7 +1788,7 @@ name = "desktop-core"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "c2m-test-http",
  "chrono",
  "course2md",
