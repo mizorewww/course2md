@@ -3973,10 +3973,11 @@ impl Desktop {
         let text_toggle = (has_text || text_only).then(|| {
             action(
                 "image-toggle-details",
+                // What was said at this picture, apart from the note's own icon (V10).
                 if text_only {
                     symbols::image()
                 } else {
-                    symbols::description()
+                    symbols::subtitles()
                 },
                 if text_only {
                     course2md::tr!("返回图片")
