@@ -1011,6 +1011,7 @@ impl Desktop {
             label: course2md::tr!("服务操作").into(),
             subject: Some(course2md::tr!("{} 操作", version.config.name).into()),
             commands: actions.clone(),
+            width: Some(MENU_WIDTH),
             tonal: false,
         };
         let row = ui::Resource {
@@ -1042,6 +1043,7 @@ impl Desktop {
                 .min_w_0()
                 .child(command_context_menu(
                     SharedString::from(format!("service-context-menu-{id}")),
+                    Some(MENU_WIDTH),
                     actions,
                 ))
                 .child(

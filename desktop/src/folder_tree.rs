@@ -28,8 +28,8 @@ const FOLDER_SIDEBAR_MIN_CONTENT: f32 = 832.;
 /// Nested folders step in by this much per level.
 const TREE_INDENT: f32 = 12.;
 
-/// Wide enough for the longest command in every language.
-const COMMAND_MENU_WIDTH: f32 = 320.;
+/// Wide enough for the longest note or folder command in every language.
+pub(crate) const COMMAND_MENU_WIDTH: f32 = 320.;
 
 /// A note being dragged onto a folder.
 #[derive(Clone)]
@@ -122,33 +122,41 @@ impl Command {
     }
 }
 
-/// The commands as the kit's menu.
-pub(crate) fn command_menu(id: impl Into<ElementId>, commands: Vec<Command>) -> MaterialMenu {
-    MaterialMenu::new(id)
-        .width(COMMAND_MENU_WIDTH)
-        .items(commands.into_iter().map(|command| {
-            let icon = Icon::from(command.icon);
-            MaterialMenuItem::new(command.label)
-                .leading(if command.danger {
-                    icon.color(color(ColorRole::ERROR))
-                } else {
-                    icon
-                })
-                .divider(command.ends_group)
-                .disabled(command.disabled)
-                .on_click(move |_, window, cx| (command.run)(window, cx))
-        }))
+/// The commands as the kit's menu, `width` wide or the kit's default width.
+pub(crate) fn command_menu(
+    id: impl Into<ElementId>,
+    width: Option<f32>,
+    commands: Vec<Command>,
+) -> MaterialMenu {
+    let menu = MaterialMenu::new(id);
+    let menu = match width {
+        Some(width) => menu.width(width),
+        None => menu,
+    };
+    menu.items(commands.into_iter().map(|command| {
+        let icon = Icon::from(command.icon);
+        MaterialMenuItem::new(command.label)
+            .leading(if command.danger {
+                icon.color(color(ColorRole::ERROR))
+            } else {
+                icon
+            })
+            .divider(command.ends_group)
+            .disabled(command.disabled)
+            .on_click(move |_, window, cx| (command.run)(window, cx))
+    }))
 }
 
 /// The commands on a right press: the first child of the `relative` element they serve.
 pub(crate) fn command_context_menu(
     id: impl Into<ElementId>,
+    width: Option<f32>,
     commands: Vec<Command>,
 ) -> MaterialContextMenu {
     let id = id.into();
     let items = ElementId::NamedChild(Arc::new(id.clone()), "items".into());
     MaterialContextMenu::new(id, move |_, _| {
-        command_menu(items.clone(), commands.clone())
+        command_menu(items.clone(), width, commands.clone())
     })
 }
 
@@ -601,7 +609,11 @@ impl Desktop {
             .flex_1()
             .min_w_0()
             .on_key_down(keys)
-            .child(command_context_menu(format!("{key}-context"), commands))
+            .child(command_context_menu(
+                format!("{key}-context"),
+                Some(COMMAND_MENU_WIDTH),
+                commands,
+            ))
             .child(
                 // A long name is cut by its row; the tooltip shows the whole.
                 MaterialTooltip::plain(SharedString::from(format!("{key}-tip")), label.clone())
@@ -677,6 +689,7 @@ impl Desktop {
             .mt(rem(8.))
             .child(command_context_menu(
                 SharedString::from(format!("folder-tree-library-context-{}", root.display())),
+                Some(COMMAND_MENU_WIDTH),
                 commands,
             ))
             .child(
@@ -884,6 +897,7 @@ impl Desktop {
                 )
                 .child(command_context_menu(
                     ("folder-context", id as usize),
+                    Some(COMMAND_MENU_WIDTH),
                     commands,
                 ))
                 .child(

@@ -1,6 +1,8 @@
 //! The note library and the workbench's lists of notes and tasks.
 use super::*;
-use crate::folder_tree::{Command, NoteDrag, command_context_menu, command_menu, note_count};
+use crate::folder_tree::{
+    COMMAND_MENU_WIDTH, Command, NoteDrag, command_context_menu, command_menu, note_count,
+};
 use crate::library_ui::{Moving, NameTarget};
 use crate::{symbols, task_ui::TaskActionView as _, ui};
 use desktop_store::library::*;
@@ -257,6 +259,8 @@ pub(crate) struct CommandsButton {
     pub(crate) label: SharedString,
     pub(crate) subject: Option<SharedString>,
     pub(crate) commands: Vec<Command>,
+    /// The menu's width; `None` is the kit's default.
+    pub(crate) width: Option<f32>,
     pub(crate) tonal: bool,
 }
 
@@ -281,7 +285,7 @@ impl RenderOnce for CommandsButton {
                 })
                 .on_click(key_toggle),
             ),
-            command_menu(items, self.commands),
+            command_menu(items, self.width, self.commands),
             window,
             cx,
         )
@@ -526,6 +530,7 @@ impl Desktop {
             label: course2md::tr!("笔记操作").into(),
             subject: Some(course2md::tr!("《{}》的笔记操作", course.title).into()),
             commands: self.note_commands(course, cx),
+            width: Some(COMMAND_MENU_WIDTH),
             tonal,
         }
     }
@@ -1040,6 +1045,7 @@ impl Desktop {
                 label: course2md::tr!("文件夹操作").into(),
                 subject: None,
                 commands: self.folder_commands(&self.library.root.clone(), id, cx),
+                width: Some(COMMAND_MENU_WIDTH),
                 tonal: false,
             });
         h_flex()
@@ -1615,7 +1621,11 @@ impl Desktop {
             .accessibility_label(course2md::tr!("阅读 {}", course.title))
             .on_click(cx.listener(move |this, _, _, cx| this.open_course(open.clone(), cx)))
             .relative()
-            .child(command_context_menu(("note-card-context", index), commands))
+            .child(command_context_menu(
+                ("note-card-context", index),
+                Some(COMMAND_MENU_WIDTH),
+                commands,
+            ))
             .child(
                 v_flex()
                     .w_full()
@@ -1746,7 +1756,11 @@ impl Desktop {
         list_surface(outer)
             .id(("note", index))
             .relative()
-            .child(command_context_menu(("note-context", index), commands))
+            .child(command_context_menu(
+                ("note-context", index),
+                Some(COMMAND_MENU_WIDTH),
+                commands,
+            ))
             .child(row)
             .children(details)
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))

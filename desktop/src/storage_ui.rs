@@ -1070,6 +1070,7 @@ impl Desktop {
             label: course2md::tr!("笔记库操作").into(),
             subject: Some(course2md::tr!("{} 操作", library.name).into()),
             commands: actions.clone(),
+            width: None,
             tonal: false,
         };
         let (id, reassociate_id) = (library.id.clone(), library.id.clone());
@@ -1185,6 +1186,7 @@ impl Desktop {
             .py(rem(16.))
             .child(command_context_menu(
                 ("storage-location-context", index),
+                None,
                 actions,
             ))
             .child(row)
