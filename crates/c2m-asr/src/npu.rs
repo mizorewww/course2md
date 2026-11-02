@@ -234,14 +234,17 @@ pub(crate) struct NpuWorker {
 
 impl crate::asr::Transcribe for NpuWorker {
     fn transcribe(&self, chunk: &Path, _seg: crate::asr::Seg) -> Result<String> {
-        let mut resp = self
+        let request = self
             .client
             .post(&format!("{}/audio/transcriptions", self.base))
-            .header("X-Auth-Token", &self.token)
-            .send_json(serde_json::json!({"path": chunk.to_string_lossy()}))
-            .map_err(|e| {
-                anyhow::anyhow!("Intel NPU 识别进程无响应 / Intel NPU worker did not respond: {e}")
-            })?;
+            .header("X-Auth-Token", &self.token);
+        let mut resp = crate::runtime::send_json(
+            request,
+            &serde_json::json!({"path": chunk.to_string_lossy()}),
+        )
+        .map_err(|e| {
+            anyhow::anyhow!("Intel NPU 识别进程无响应 / Intel NPU worker did not respond: {e}")
+        })?;
         let v: serde_json::Value = resp.body_mut().read_json().map_err(|e| {
             anyhow::anyhow!("NPU 无法解析服务响应 / Could not parse the service response: {e}")
         })?;

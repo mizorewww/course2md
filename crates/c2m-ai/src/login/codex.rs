@@ -192,22 +192,22 @@ fn needs_refresh(tokens: &CodexTokens) -> bool {
 /// 刷新（refresh token 单次使用且会轮换：成功必须写回；4xx = 登录已失效）。
 fn refresh(tokens: &CodexTokens) -> Result<CodexTokens> {
     let agent = crate::runtime::http_agent(Duration::from_secs(30));
-    let mut response = agent
-        .post(TOKEN_URL)
-        .header("Content-Type", "application/json")
-        .send_json(serde_json::json!({
+    let mut response = crate::runtime::send_json(
+        agent.post(TOKEN_URL),
+        &serde_json::json!({
             "client_id": CLIENT_ID,
             "grant_type": "refresh_token",
             "refresh_token": tokens.refresh_token,
-        }))
-        .map_err(|e| match e {
-            ureq::Error::StatusCode(status) if (400..500).contains(&status) => {
-                anyhow::Error::new(CodexLoginRequired)
-            }
-            _ => anyhow::anyhow!(
-                tr!("无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later")
-            ),
-        })?;
+        }),
+    )
+    .map_err(|e| match e {
+        ureq::Error::StatusCode(status) if (400..500).contains(&status) => {
+            anyhow::Error::new(CodexLoginRequired)
+        }
+        _ => anyhow::anyhow!(tr!(
+            "无法连接 OpenAI 认证服务，稍后重试 / Cannot reach the OpenAI auth service; retry later"
+        )),
+    })?;
     let value: Value = response.body_mut().read_json().context(tr!(
         "无法解析刷新响应 / Cannot parse the token refresh response"
     ))?;

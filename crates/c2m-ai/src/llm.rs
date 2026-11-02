@@ -776,14 +776,11 @@ impl<'a> Chat<'a> {
                 },
             },
             || {
-                let mut request = self
-                    .agent
-                    .post(&url)
-                    .header("Content-Type", "application/json");
+                let mut request = self.agent.post(&url);
                 for (name, value) in &headers {
                     request = request.header(name, value);
                 }
-                let response = crate::dispatch::receive(request.send_json(body))?;
+                let response = crate::dispatch::receive(crate::runtime::send_json(request, body))?;
                 // Codex Responses API 只提供 SSE 流：聚合为 chat/completions 形状，
                 // 下游校验与解析不变；非 2xx 原样上交（重试/降级逻辑要看状态码）
                 if sse && (200..300).contains(&response.status) {
@@ -915,8 +912,7 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
     for (name, value) in crate::provider::auth_headers(s)? {
         request = request.header(&name, &value);
     }
-    let mut resp = request
-        .send_json(body)
+    let mut resp = crate::runtime::send_json(request, &body)
         .map_err(RequestError::from)
         .context(fail_hint)?;
     let v: serde_json::Value = if crate::provider::is_sse(s) {

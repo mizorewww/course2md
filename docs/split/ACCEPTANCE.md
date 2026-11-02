@@ -38,6 +38,7 @@ Resolutions (branch `split/engine-fixes`; evidence under the session scratchpad 
 | C10 | `engine: RunOpts no longer derives Debug` | Nothing formats `RunOpts`, so the derive is removed rather than written by hand; the workspace builds without it |
 | C11 | `source: subtitle files follow the interface language` | Sidecars and a downloaded track's directory prefer the interface language, then English, as the desktop does since D8. `--json` and `run-task` run in Simplified Chinese, so their choice is unchanged; a resumed task keeps its cached transcript, so no request changes under it. Unit test over five languages |
 | C4 | `config: the OpenAI-compatible provider shows its 2.0.1 name` | `Display` and `as_str` give `openai-compatible` again; serde keeps `open-ai-compatible`, which 2.0.1 also wrote to files. Unit test on both forms |
+| C5 | `http: JSON request bodies are compact again` | `runtime::send_json` serializes with `serde_json::to_vec`; the AI requests, the connection test, the Codex refresh and the NPU worker use it. Ledger ids hash the value, not the bytes, so they do not change. `prompt_identity` asserts every body equals its compact form |
 
 ## Desktop behaviour (agent: desktop-logic)
 

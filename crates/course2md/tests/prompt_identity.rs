@@ -104,6 +104,11 @@ fn requests_do_not_vary_with_the_interface_language() {
         };
         let expected = requests(Lang::ZhHans);
         assert_eq!(expected.len(), 2);
+        // Compact, as 2.0.1 sent them: no whitespace between tokens.
+        for body in &expected {
+            let value: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(body, &serde_json::to_string(&value).unwrap());
+        }
         for lang in languages {
             assert_eq!(requests(lang), expected, "{lang:?}");
         }

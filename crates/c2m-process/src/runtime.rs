@@ -291,6 +291,16 @@ pub fn http_agent_keeping_errors(timeout: Duration) -> ureq::Agent {
     agent.http_status_as_error(false).build().new_agent()
 }
 
+/// Sends `value` as compact JSON with its content type. ureq 3's `send_json`
+/// pretty-prints, which made every request body larger than 2.0.1's.
+pub fn send_json(
+    request: ureq::RequestBuilder<ureq::typestate::WithBody>,
+    value: &impl serde::Serialize,
+) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+    let body = serde_json::to_vec(value)?;
+    request.content_type("application/json").send(body)
+}
+
 /// A menu that Esc cancels with `cancelled` as the error, not accepting the default.
 pub fn choose(
     prompt: &str,
