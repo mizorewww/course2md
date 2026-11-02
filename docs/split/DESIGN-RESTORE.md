@@ -116,10 +116,10 @@ accent tint. A straight swap would have painted the settings navigation one colo
 | R1 | Note attention | Warning tone, radius 28, page level above the view switch. `reader_ui.rs:4881`, `reader` | Error tone inside the note | restore | A partial note isn't an error; the tone is restored with `NoticeKind::Warning` (kit #5), the place stays in the scrolling head |
 | R2 | View switch | Connected pills, left, primary fill. `reader_ui.rs:1699`, `reader` | Full-width underlined tabs on a white band | restore | The band read as a second title bar. `ConnectedButtonGroup` is allowed for views of the same item |
 | R3 | Note metadata | Tonal chips with icon | Plain line | restore | App-side, the kit's neutral status chip |
-| R4 | Timestamp | Tonal pill 「▶ 00:00 从此处观看」. `reader_ui.rs:5661` | Small text and glyph | restore | Depends on `TextView`'s block support, see the report |
+| R4 | Timestamp | Tonal pill 「▶ 00:00 从此处观看」. `reader_ui.rs:5661` | Small text and glyph | restore | The inline `SourceLink` plugin draws the heading's link as one pill |
 | R5 | Note card height | Hugs the note | Stretches to the window | keep new | `TextView` scrolls as one document inside the card |
 | R6 | Reader bar | 56 tall, breadcrumb and title centered. `reader_ui.rs:4321` | Crowded to the top | restore | App-side |
-| R8 | Summary | Tinted panel with sparkle icon and title. `reader-rich` | Plain headings in the note | restore (open) | The first thing to read. `TextView` paints no block background, so this is not restored yet; it needs block styling in `TextView` |
+| R8 | Summary | Tinted panel with sparkle icon and title. `reader-rich` | Plain headings in the note | restore | The first thing to read. A block surface (kit #16) draws it inside the one note document |
 | R9 | Contents | Flat pills, no surface. `reader_ui.rs:1590`, `reader-rich` | Segmented white list | restore | App-side |
 | R10 | Section cards | A card per section. `reader_ui.rs:1374` | One surface | keep new | `TextView` as one document gives selection and find across sections |
 | R11 | Body and figures | 17, figures radius 20. `reader-rich` | 16, radius 12 | restore | Reading comfort; `TextView` style options |
@@ -170,7 +170,16 @@ A `restore` verdict states the intent. These are not there yet:
 
 | # | What remains |
 | --- | --- |
-| R8 | Open. `TextView` paints no block background, and nothing kit-native gives a tinted summary without a hack: block quotes are the one block with a style option (`with_blockquote_style` can paint a panel), but a translation already draws as a quote, and the style is per view, so every translation would read as the summary; flipping it per note gives translated notes another look. A surface above the document, or a nested `TextView` in a block plugin, breaks selection and find across it. A real fix is block styling in `TextView`, in vendored engine code, which decision 12 rules out for this app's sake |
+| G4 | Some quiet text actions beside primary ones are still primary; each needs `ButtonTone::Neutral` where it is the lesser of two |
+| G8 | The workbench's folder picker (`library_ui.rs`) is an outlined dropdown at the kit's standard corners; two fields still rest their label inside |
+| G17 | `ui::page_title` asks for headline medium 28/36 but measures 24: `page_heading` sets its size on an inner element. Kit PR #20 lets the caller's size through; repin after it merges |
+| H4 | Hero spacing: title to field and field to hint |
+| L1 | Sidebar items 44 tall with a pill selection: kit PR #21 adds `ListDensity::Navigation` and `ListItem::pill`; the sidebar takes both after it merges |
+| R9 | Contents as flat pills: the same `ListItem::pill`, without the surface container |
+| R12 | A screenshot card's action sits off the image |
+| S1 | The compact settings rail draws plain icons rather than the tinted circles |
+| S11 | Palette picker: the kit's largest dialog is 720 against the baseline's 918, so names wrap at four across; the selected card has no ring. Both need a kit capability |
+| U1 | Value choices as rows opening a menu, not `ExposedDropdown`s: kit PRs #18 (`show_label`) and #19 (a caller's menu with its value) let a row hold one with its supporting text, icons and actions |
 
 ## Finished after the audit
 
@@ -179,7 +188,7 @@ The rows above state the verdict; this says what the last pass did.
 | # | How it was restored |
 | --- | --- |
 | G11 | The kit's `TileScale::label` takes body large's weight (kit #15); video titles and note headings take their role's |
-| G12 | `newsstand` for the library, `book_2` for all notes, `database` for storage, `description` for a note. `notebook` is not in the catalog; `book_2` is the nearest form |
+| G12 | `library_books` for the library (`newsstand` read as a chart), `book_2` for all notes, `database` for storage, `description` for a note. `notebook` is not in the catalog; `book_2` is the nearest form |
 | G18 | Palette cards, the log box, the uncertain-request panel, the QR frame and the image viewer moved from 12 to `RADIUS_LARGE`; a tree row's drop outline stays on the row's own 12 |
 | H11 | On home a running card has no step chips, status chip or second measure line; progress and actions are in the text column. Its menu button stays: it holds actions the old card lacked |
 | H12 | 「设置下一个视频」 stays on a running card, as in the baseline, and is otherwise a row under the panel's header, shown whether or not the plan is open; the plan's rows are flat |
@@ -189,3 +198,11 @@ The rows above state the verdict; this says what the last pass did.
 | R3 | Platform and uploader are one chip led by the platform's icon |
 | D1 | The label stands above the field; an empty field shows it as its placeholder |
 | O4 | `ui::Field::icon` leads the switch rows with their icons |
+| R8 | The summary is a block surface (kit #16): the secondary container with its sparkle and title, its text still the note's for selection, find and copy |
+| R4 | A timestamp heading is the source link itself, one tonal pill 「▶ 00:00 · 从此处观看」 |
+| G3 | Every outlined action has `ButtonTone::Accent`: the workbench repairs, storage relocate, first use's forward while a model is unprepared |
+| G5 | The reader's find and view tools sit in the neutral tonal circle beside the back button |
+| L6 | Grouping by folder is outlined with a primary label and folder icon off, tonal with a check on |
+| T1 | Only a failed task leads with a red circle; paused, partial and uncertain ones are amber |
+| T6 | A card of its own on Tasks pads 20 inside its 28 corners |
+| O3 | The model surface leads with a purple tinted mic at 40 |
