@@ -248,6 +248,16 @@ fn subtitle_failure_message(error: &anyhow::Error) -> String {
     }
 }
 
+/// A failed preview's first line is yt-dlp's final reason (see
+/// [`preview_command_error`]); the lines after it are its log, where a reset
+/// yt-dlp already retried on its own may appear before a refusal.
+fn preview_ended_by_connection_reset(message: &str) -> bool {
+    message
+        .lines()
+        .next()
+        .is_some_and(course2md::fetch::is_connection_reset)
+}
+
 fn command(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Vec<u8>> {
     command_output(name, args, cancel).map(|output| output.stdout)
 }
@@ -268,7 +278,7 @@ fn command_output(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Comm
                 return result.context(course2md::fetch::BILIBILI_412_DESKTOP_HINT);
             };
             delay
-        } else if course2md::fetch::is_connection_reset(&message) && retries < 2 {
+        } else if preview_ended_by_connection_reset(&message) && retries < 2 {
             // The site's edge dropped the connection; the next attempt usually passes.
             Duration::from_secs(1)
         } else {
@@ -1099,6 +1109,19 @@ mod tests {
         assert_eq!(pasted_local_path(dir.path().to_str().unwrap()), None);
         assert_eq!(pasted_local_path("/no/such/video.mp4"), None);
         assert_eq!(pasted_local_path("bilibili.com/video/BV1"), None);
+    }
+
+    #[test]
+    fn a_preview_is_retried_only_when_yt_dlp_ended_on_a_dropped_connection() {
+        let reset = "ERROR: [BiliBili] BV1: Unable to download webpage: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))";
+        let message = preview_command_error("yt-dlp", Some(1), reset).to_string();
+        assert!(preview_ended_by_connection_reset(&message), "{message}");
+        let refused = format!(
+            "WARNING: [BiliBili] Got error: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer')). Retrying\n{}",
+            "ERROR: [BiliBili] BV1: Unable to download JSON metadata: HTTP Error 403: Forbidden"
+        );
+        let message = preview_command_error("yt-dlp", Some(1), &refused).to_string();
+        assert!(!preview_ended_by_connection_reset(&message), "{message}");
     }
 
     #[test]

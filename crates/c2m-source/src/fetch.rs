@@ -874,6 +874,14 @@ pub fn is_connection_reset(stderr: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
+/// Whether yt-dlp itself failed on a dropped connection: its final reason, not
+/// a warning about an earlier attempt it retried on its own.
+fn ended_by_connection_reset(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<YtDlpFailure>()
+        .is_some_and(|failure| is_connection_reset(&failure.cause))
+}
+
 /// Shared by CLI extraction and the desktop preview. At most three attempts.
 pub fn bilibili_retry_delay(stderr: &str, retries: usize) -> Option<std::time::Duration> {
     is_bilibili_412(stderr)
@@ -1008,7 +1016,7 @@ async fn run_retrying(
         } else {
             let text = format!("{error:#}");
             ((retry_transient && !is_deterministic_download_error(&text))
-                || is_connection_reset(&text))
+                || ended_by_connection_reset(&error))
             .then_some(TRANSIENT_RETRY_DELAY)
         };
         let Some(delay) = delay.filter(|_| attempt < YTDLP_ATTEMPTS) else {
@@ -1267,6 +1275,22 @@ mod tests {
         ] {
             assert!(!is_connection_reset(text), "{text}");
         }
+    }
+
+    #[test]
+    fn only_a_run_that_ended_on_a_dropped_connection_is_retried_for_it() {
+        let failure = |stderr: &str| anyhow::Error::new(YtDlpFailure::new(Some(1), stderr));
+        assert!(ended_by_connection_reset(&failure(
+            "ERROR: [BiliBili] BV1: Unable to download webpage: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))"
+        )));
+        // yt-dlp retried the reset itself; its final reason is a refusal.
+        let refused = failure(
+            "WARNING: [download] Got error: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer')). Retrying (1/10)...\nERROR: unable to download video data: HTTP Error 403: Forbidden",
+        );
+        assert!(!ended_by_connection_reset(&refused));
+        assert!(!ended_by_connection_reset(&anyhow::anyhow!(
+            "Connection reset by peer"
+        )));
     }
 
     #[test]
