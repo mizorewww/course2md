@@ -1277,6 +1277,35 @@ impl Store {
         Ok(released.into_iter().collect())
     }
 
+    /// Forgets the service edits an earlier session left open: no editor outlives the
+    /// app, so a draft found at startup was abandoned mid-onboarding or mid-edit.
+    /// Returns the keys only those drafts held, for `remove_credentials`; a key a saved
+    /// service uses stays.
+    pub fn discard_abandoned_drafts(&mut self) -> Result<Vec<CredentialRef>> {
+        if self.services.drafts.is_empty() || self.is_blocked(PreferenceGroup::Services) {
+            return Ok(Vec::new());
+        }
+        let kept: BTreeSet<&CredentialRef> = self
+            .services
+            .versions
+            .values()
+            .filter_map(|version| version.config.credential.as_ref())
+            .collect();
+        let released: BTreeSet<CredentialRef> = self
+            .services
+            .drafts
+            .values()
+            .filter_map(|draft| draft.credential.as_ref())
+            .filter(|reference| !kept.contains(reference))
+            .cloned()
+            .collect();
+        let mut next = self.services.clone();
+        next.drafts.clear();
+        self.persist(PreferenceGroup::Services, &next)?;
+        self.services = next;
+        Ok(released.into_iter().collect())
+    }
+
     /// Static checks of a publication that need no vault.
     fn publication(&self, draft_id: &str) -> Result<(ServiceDraft, ServiceConfiguration)> {
         let draft =
@@ -2095,6 +2124,44 @@ mod tests {
         let kept = active.config.credential.clone().unwrap();
         assert_eq!(vault.resolve(&kept).unwrap().expose(), "test-only-secret");
         Store::remove_credentials(vault.as_ref(), &[kept]);
+    }
+
+    /// Edits an earlier session left open (it quit mid-onboarding or mid-edit) are
+    /// forgotten at the next start, with the keys only they held; a saved service's
+    /// key stays, even when an abandoned edit of that service shares it.
+    #[test]
+    fn drafts_left_by_an_earlier_session_go_with_only_their_own_keys() {
+        let vault: Arc<dyn CredentialVault> = Arc::new(MemoryCredentialVault::new());
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = open(directory.path(), vault.clone());
+        let draft = complete_draft(&mut store, "kept-model");
+        let active = store
+            .publish_service(&draft.id, BindingScope::Defaults)
+            .unwrap();
+        let kept = active.config.credential.clone().unwrap();
+        let mut edit = ServiceDraft::from_version(&active);
+        edit.model = "abandoned-edit".into();
+        store.save_service_draft(edit, None).unwrap();
+        let mut added = ServiceDraft::new(ServicePurpose::Ai);
+        added.address = "https://example.test/v1".into();
+        let added = store
+            .save_service_draft(added, Some(Secret::new("abandoned-key")))
+            .unwrap();
+        let abandoned = added.credential.clone().unwrap();
+        drop(store);
+
+        let mut store = open(directory.path(), vault.clone());
+        assert_eq!(store.service_drafts().count(), 2);
+        let released = store.discard_abandoned_drafts().unwrap();
+        assert_eq!(released, vec![abandoned.clone()]);
+        Store::remove_credentials(vault.as_ref(), &released);
+        assert!(vault.resolve(&abandoned).is_err());
+        assert_eq!(vault.resolve(&kept).unwrap().expose(), "test-only-secret");
+        assert_eq!(store.service_drafts().count(), 0);
+        assert_eq!(store.versions().count(), 1);
+        let saved = std::fs::read_to_string(directory.path().join("services.json")).unwrap();
+        assert!(!saved.contains(&added.id));
+        assert!(store.discard_abandoned_drafts().unwrap().is_empty());
     }
 
     #[test]

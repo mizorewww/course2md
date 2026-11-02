@@ -276,10 +276,13 @@ impl Desktop {
         let preferences_root = configuration_directory.join("desktop-preferences");
         // What opening the settings reports about them reads in the saved language.
         i18n::apply(preferences::Store::saved_language(&preferences_root));
-        let preferences = preferences::Store::open(
+        let mut preferences = preferences::Store::open(
             preferences_root,
             credentials::system_vault(configuration_directory.join("desktop-credentials.json")),
         );
+        // No service editor outlives the app: edits an earlier session left open go,
+        // with the keys only they held.
+        let abandoned_keys = preferences.discard_abandoned_drafts().unwrap_or_default();
         // Inputs and the first frame read the catalog immediately, so the
         // persisted language must be active before they are constructed.
         i18n::apply(preferences.application().language);
@@ -471,6 +474,7 @@ impl Desktop {
         this.refresh_environment(cx);
         this.refresh_library(cx);
         this.poll_workspace(cx);
+        this.forget_credentials(abandoned_keys);
         if !this.preferences.application().desktop.setup_completed {
             this.start_onboarding(window, cx);
         }
