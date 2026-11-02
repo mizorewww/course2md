@@ -175,6 +175,7 @@ A `restore` verdict states the intent. These are not there yet:
 | G17 | `ui::page_title` asks for headline medium 28/36 but measures 24: `page_heading` sets its size on an inner element. Kit PR #20 lets the caller's size through; repin after it merges |
 | H4 | Hero spacing: title to field and field to hint |
 | L1 | Sidebar items 44 tall with a pill selection: kit PR #21 adds `ListDensity::Navigation` and `ListItem::pill`; the sidebar takes both after it merges |
+| R6 | The reader bar has its breadcrumb over the note title again, in a 64 bar rather than the baseline's 56; centring is not yet confirmed in the running app (acceptance U15 to U25) |
 | R9 | Contents as flat pills: the same `ListItem::pill`, without the surface container |
 | R12 | A screenshot card's action sits off the image |
 | S1 | The compact settings rail draws plain icons rather than the tinted circles |

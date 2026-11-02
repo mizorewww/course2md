@@ -46,11 +46,11 @@ Status of `AUDIT.md` § Bugs, E1–E22, T1–T6 and T8, on branch `split/bugs`.
 - **E18.** Everything sent to a service is one fixed text, the Simplified Chinese the desktop already sent, so desktop receipts stay valid. Excluding prompts from the identity would let an edited prompt replay old results. A CLI task left unfinished in another locale by 2.0.1 finds its receipts through the former wording of the proofreading rule (acceptance C1).
 - **E20.** `C` and `POSIX` select English. An unsupported language such as `fr_FR` still falls through to the next variable.
 
-## Desktop changes needed
+## Desktop side
 
-- `desktop/src/service_test.rs:255-261`: replace the `ureq::Error` downcasts on the `llm::test_connection` chain with `course2md::llm::RequestError` (`Status(u16)`, `Transport(String)`). The desktop's ureq 2 type no longer matches the engine's errors, so this compiles but silently loses the status.
-- `desktop/Cargo.lock` needs regenerating for the engine's new dependencies.
-- Not needed: the desktop's other ureq uses are its own requests, and `runtime::http_agent` and `dispatch::receive`, now `pub(crate)`, have no desktop callers.
+- `desktop/core/src/service_test.rs:255-263` reads the `llm::test_connection` chain as `course2md::llm::RequestError` (`Status(u16)`, `Transport(String)`), so a connection test keeps the status. Its remaining `ureq::Error` matches are the desktop's own requests, on the workspace's ureq 3.
+- One `Cargo.lock` at the root covers the desktop since the workspaces merged.
+- `runtime::http_agent` and `runtime::receive` (now in `c2m-process`, public to the engine crates) have no desktop callers.
 
 ## Checks
 
