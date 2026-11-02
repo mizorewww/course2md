@@ -359,9 +359,24 @@ pub fn prepare_cache_here(model: &str) -> Result<()> {
     let status = unsafe { ffi::c2m_asr_prepare_cache(name.as_ptr(), manifest.as_ptr()) };
     finish_transfer();
     if status != 0 {
-        anyhow::bail!("{}", last_error());
+        anyhow::bail!("{}", download_failure(&last_error()));
     }
     Ok(())
+}
+
+/// The Swift downloader reports in both languages; people read their own. The
+/// `--json` protocol keeps the downloader's text.
+fn download_failure(message: &str) -> String {
+    const PREFIX: &str = "Apple 模型下载失败 / Apple model download failed ";
+    match message.strip_prefix(PREFIX) {
+        Some(detail) if !crate::progress::is_json() => {
+            tr!(
+                "Apple 模型下载失败 / Apple model download failed {}",
+                detail
+            )
+        }
+        _ => message.to_owned(),
+    }
 }
 
 /// Prepares the model cache, trying the configured mirror first. The Swift
@@ -386,9 +401,13 @@ pub(crate) fn prepare_cache(model: &str, control: &crate::dispatch::TaskControl)
     if let Err(error) = &result
         && control.check().is_ok()
     {
-        tracing::warn!(
-            "Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download from the mirror failed; trying Hugging Face: {error:#}"
-        );
+        const MIRROR_FAILED: &str = "Apple 模型从镜像下载失败，改用 Hugging Face / Apple model download from the mirror failed; trying Hugging Face: {}";
+        let error = format!("{error:#}");
+        if crate::progress::is_json() {
+            tracing::warn!("{}", MIRROR_FAILED.replace("{}", &error));
+        } else {
+            tracing::warn!("{}", tr!(MIRROR_FAILED, error));
+        }
         result = prepare_cache_from(&program, model, crate::hub::ORIGIN, control);
     }
     result
@@ -485,6 +504,21 @@ impl crate::asr::Transcribe for CoremlAsr {
 mod helper_tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn a_download_failure_reads_in_the_interface_language() {
+        let lang = c2m_i18n::i18n::lang();
+        let message = download_failure(
+            "Apple 模型下载失败 / Apple model download failed (qwen3-1.7b): offline",
+        );
+        let expected = c2m_i18n::i18n::template(
+            "Apple 模型下载失败 / Apple model download failed {}",
+            &[&"(qwen3-1.7b): offline"],
+        );
+        assert_eq!(message, expected, "{lang:?}");
+        assert!(!message.contains(" / "));
+        assert_eq!(download_failure("other: offline"), "other: offline");
+    }
 
     /// Network test: run with `QWEN3_CACHE_DIR=<scratch dir> cargo test --lib --
     /// --ignored mirror_attempt` after `cargo build` with the same profile and target.
