@@ -65,7 +65,6 @@ fn query_windows_devices() -> Result<crate::runtime::BoundedOutput> {
     let mut cmd = Command::new(shell);
     cmd.args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
         .arg(powershell_encoded(WINDOWS_DEVICE_QUERY));
-    crate::runtime::hide_console(&mut cmd);
     crate::runtime::run_bounded("PowerShell", &mut cmd, Duration::from_secs(20))
 }
 
@@ -172,7 +171,6 @@ fn python_has_worker_packages(python: &Launcher) -> bool {
     let mut cmd = python.command();
     cmd.args(["-c", "import openvino_genai, numpy, huggingface_hub"]);
     worker_env(&mut cmd);
-    crate::runtime::hide_console(&mut cmd);
     crate::runtime::run_bounded("Python", &mut cmd, Duration::from_secs(60))
         .is_ok_and(|out| out.status.success())
 }

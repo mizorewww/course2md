@@ -124,9 +124,7 @@ fn runs(path: &Path) -> bool {
     }
     let mut command = std::process::Command::new(path);
     command.arg("--version");
-    let ok =
-        crate::runtime::run_bounded("yt-dlp", &mut command, std::time::Duration::from_secs(30))
-            .is_ok_and(|output| output.status.success());
+    let ok = crate::runtime::run_ok(&mut command, std::time::Duration::from_secs(30)).is_some();
     if ok && let Ok(mut ran) = RAN.lock() {
         ran.insert(path.to_path_buf());
     }

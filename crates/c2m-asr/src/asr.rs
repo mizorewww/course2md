@@ -733,10 +733,8 @@ fn caps_from_help(help: &str) -> LlamaServerCaps {
 fn probe_help_text(bin: &Path) -> Option<String> {
     let mut cmd = Command::new(bin);
     cmd.arg("--help");
-    let out = crate::runtime::run_bounded("llama-server", &mut cmd, HELP_PROBE_TIMEOUT).ok()?;
-    out.status
-        .success()
-        .then(|| format!("{}\n{}", out.stdout, out.stderr))
+    let out = crate::runtime::run_ok(&mut cmd, HELP_PROBE_TIMEOUT)?;
+    Some(format!("{}\n{}", out.stdout, out.stderr))
 }
 
 /// 组装 llama-server 启动参数：

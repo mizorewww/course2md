@@ -311,9 +311,7 @@ fn supports_js_runtimes(program: &Path) -> bool {
     }
     let mut command = std::process::Command::new(program);
     command.arg("--version");
-    let supported = crate::runtime::run_bounded("yt-dlp", &mut command, Duration::from_secs(30))
-        .ok()
-        .filter(|output| output.status.success())
+    let supported = crate::runtime::run_ok(&mut command, Duration::from_secs(30))
         .is_some_and(|output| version_has_js_runtimes(output.stdout.trim()));
     if let Ok(mut seen) = SEEN.lock() {
         seen.push((program.to_path_buf(), supported));
