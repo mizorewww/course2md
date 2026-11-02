@@ -185,6 +185,9 @@ impl Desktop {
                 input = link;
             }
             if let Err(error) = source::validate_url(&input) {
+                // Record the input first: otherwise the field's own notification after
+                // Enter reads as a new edit and clears the message before it is drawn (V4).
+                self.save_current_draft(cx);
                 self.import.source_validation = Some(error.to_string());
                 cx.notify();
                 return;
