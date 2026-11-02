@@ -417,6 +417,11 @@ pub struct TaskRecord {
     /// The later attempt that replaced this one: the task whose `parent` this is.
     #[serde(skip)]
     pub handled_by: Option<String>,
+    /// A worker from an earlier session, which outlived the app, still holds the task's
+    /// folder. Until it lets go, what its requests did is unknown and nothing else may
+    /// run there; see `Reconciliation`.
+    #[serde(skip)]
+    pub held: bool,
     /// Always `<library>/.course2md/work/<id>`.
     #[serde(skip)]
     pub work_dir: PathBuf,
@@ -683,7 +688,10 @@ impl State {
             return None;
         }
         self.tasks.iter().find(|t| {
-            t.state == TaskState::Queued && t.intent == Intent::Run && t.handled_by.is_none()
+            t.state == TaskState::Queued
+                && t.intent == Intent::Run
+                && t.handled_by.is_none()
+                && !t.held
         })
     }
 
@@ -777,7 +785,7 @@ impl State {
             !matches!(
                 task.state,
                 TaskState::Running | TaskState::Pausing | TaskState::Queued
-            ),
+            ) && !task.held,
             course2md::tr!("当前任务还在处理，请先暂停并等候当前步骤结束")
         );
         let mut draft = Draft::new(
@@ -844,11 +852,13 @@ impl State {
         let location = self
             .library(&plan.library_id)
             .context(course2md::tr!("所选保存位置未登记"))?;
-        if let Some(existing) = self
-            .tasks
-            .iter()
-            .find(|t| !t.state.finished() && t.handled_by.is_none() && t.plan.same_work(&plan))
-        {
+        if let Some(existing) = self.tasks.iter().find(|t| {
+            // The attempt this one replaces is not a duplicate of it.
+            !t.state.finished()
+                && t.handled_by.is_none()
+                && parent.as_deref() != Some(t.id.as_str())
+                && t.plan.same_work(&plan)
+        }) {
             return Ok((existing.id.clone(), false));
         }
         let id = new_id("task");
@@ -863,6 +873,7 @@ impl State {
             updated: now,
             parent: parent.clone(),
             handled_by: None,
+            held: false,
             work_dir,
             artifact: None,
             unread: false,
@@ -1035,7 +1046,8 @@ impl State {
             !matches!(
                 task.state,
                 TaskState::Running | TaskState::Pausing | TaskState::Queued
-            ) && !task.state.finished(),
+            ) && !task.state.finished()
+                && !task.held,
             course2md::tr!("这项任务的状态已变化，请查看最新状态")
         );
         reconcile_receipts(task)?;
@@ -1093,7 +1105,7 @@ impl State {
             !matches!(
                 original.state,
                 TaskState::Running | TaskState::Pausing | TaskState::Queued
-            ),
+            ) && !original.held,
             course2md::tr!("当前任务仍在处理，请先等候当前步骤结束")
         );
         let base = original
@@ -1301,7 +1313,12 @@ pub struct Workspace {
     /// Identifies this opened record, so findings for a record that was
     /// replaced meanwhile are not applied to its successor.
     identity: u64,
+    /// When held tasks were last checked; see `held_check_due`.
+    held_checked: Option<std::time::Instant>,
 }
+
+/// How often a task held by a worker from an earlier session is checked again.
+const HELD_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 #[derive(Serialize, Deserialize)]
 struct TaskMirror {
@@ -1696,7 +1713,27 @@ fn apply_receipts(task: &mut TaskRecord, uncertain: Vec<BlockedRequest>) {
     if task.has_uncertain() && task.intent == Intent::Run {
         task.state = TaskState::Uncertain;
         task.unread = true;
+    } else if !task.has_uncertain() && task.state == TaskState::Uncertain {
+        // A worker that outlived the app settled them: nothing is left to decide,
+        // and a completed request is read back, never sent again.
+        task.state = if task.intent == Intent::Run {
+            TaskState::Queued
+        } else {
+            TaskState::Paused
+        };
+        task.events.error = None;
+        task.unread = true;
     }
+}
+
+/// Whether a worker still holds the task's folder: the lock every worker takes on entry
+/// (`execution::enter_work_dir`). A missing lock file means no worker ever got that far.
+fn worker_holds(work_dir: &Path) -> bool {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(work_dir.join(".task.lock"))
+        .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)))
 }
 
 pub fn reconcile_receipts(task: &mut TaskRecord) -> Result<()> {
@@ -1754,6 +1791,8 @@ fn keep_old_mirror(directory: &Path) -> Result<()> {
 enum TaskFacts {
     /// The library is not reachable; the task keeps what it has.
     Unavailable,
+    /// A worker from an earlier session still holds the folder; checked again later.
+    Held,
     Found {
         artifact: ArtifactFact,
         uncertain: Vec<BlockedRequest>,
@@ -1765,8 +1804,9 @@ enum TaskFacts {
 
 impl TaskFacts {
     fn apply(self, task: &mut TaskRecord) {
+        task.held = matches!(self, Self::Held);
         match self {
-            Self::Unavailable => {}
+            Self::Unavailable | Self::Held => {}
             Self::Found {
                 artifact,
                 uncertain,
@@ -1843,6 +1883,10 @@ impl Reconciliation {
                 .into_iter()
                 .map(|(task, location)| {
                     let facts = match location.filter(|location| check_library(location).is_ok()) {
+                        // Its receipts may still say Sending for a request in flight.
+                        Some(_) if !task.state.finished() && worker_holds(&task.work_dir) => {
+                            TaskFacts::Held
+                        }
                         Some(location) => reconcile_task(&task, &location)
                             .unwrap_or_else(|error| TaskFacts::Unreadable(format!("{error:#}"))),
                         None => TaskFacts::Unavailable,
@@ -2177,6 +2221,7 @@ impl Workspace {
             path,
             library_writes: LibraryWrites::default(),
             identity: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            held_checked: None,
         }
     }
 
@@ -2285,7 +2330,11 @@ impl Workspace {
     /// The checks still owed, to run on a blocking thread. A running task is telling
     /// the app what it is doing, and has nothing to read back.
     pub fn reconciliation(&self) -> Option<Reconciliation> {
-        self.state.reconciling.then(|| Reconciliation {
+        let held = !self.state.reconciling
+            && self
+                .held_check_due()
+                .is_some_and(|due| due <= std::time::Instant::now());
+        (self.state.reconciling || held).then(|| Reconciliation {
             workspace: self.identity,
             tasks: self
                 .state
@@ -2294,6 +2343,7 @@ impl Workspace {
                 .filter(|task| {
                     !task.events.loaded
                         && !matches!(task.state, TaskState::Running | TaskState::Pausing)
+                        && (!held || task.held)
                 })
                 .map(|task| {
                     (
@@ -2302,6 +2352,16 @@ impl Workspace {
                     )
                 })
                 .collect(),
+        })
+    }
+
+    /// When a task held by a worker from an earlier session is next checked, if any is.
+    pub fn held_check_due(&self) -> Option<std::time::Instant> {
+        self.state.tasks.iter().any(|task| task.held).then(|| {
+            self.held_checked
+                .map_or_else(std::time::Instant::now, |checked| {
+                    checked + HELD_CHECK_INTERVAL
+                })
         })
     }
 
@@ -2331,6 +2391,7 @@ impl Workspace {
             }
             state.reconciling = false;
         }
+        self.held_checked = Some(std::time::Instant::now());
         let mut facts = Some(reconciled.facts);
         let result = self.transaction(|state| {
             apply(state, facts.take().unwrap_or_default());
@@ -3606,6 +3667,127 @@ mod tests {
         assert_eq!(failed.intent, Intent::Quit);
         assert_eq!(failed.events.error.as_deref(), Some("保留这次失败原因"));
         assert!(failed.unread);
+    }
+
+    fn receipt(task: &TaskRecord, state: course2md::dispatch::State) {
+        let completed = state == course2md::dispatch::State::Completed;
+        let receipt = course2md::dispatch::Receipt {
+            schema: 1,
+            stable_id: "stable-request".into(),
+            request_id: "stable-request.1".into(),
+            purpose: "proofreading".into(),
+            description: "校对 00:00–00:20 的文字".into(),
+            service_version: "version-a".into(),
+            attempt: 1,
+            state,
+            http_status: completed.then_some(200),
+            response: completed.then(|| serde_json::json!({"choices": []})),
+            message: None,
+            unsupported_response_format: false,
+            retry_authorized: None,
+        };
+        std::fs::create_dir_all(task.work_dir.join("requests")).unwrap();
+        std::fs::write(
+            task.work_dir.join("requests/stable-request.json"),
+            serde_json::to_vec(&receipt).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// The app was killed during a paid request and its worker lived on to save the
+    /// answer. Until it lets go, its Sending receipt is no question for the person;
+    /// once it has, the task continues from the saved answer.
+    #[test]
+    fn a_worker_outliving_a_killed_app_is_waited_for_and_its_answer_used() {
+        use course2md::dispatch::State as Receipt;
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let id = ws
+            .state
+            .enqueue(plan(&ws.state.default_library), None)
+            .unwrap()
+            .0;
+        ws.transaction(|state| {
+            state.task_mut(&id).unwrap().state = TaskState::Running;
+            Ok(())
+        })
+        .unwrap();
+        let task = ws.state.task(&id).unwrap().clone();
+        receipt(&task, Receipt::Sending);
+        drop(ws);
+
+        let worker = course2md::runtime::lock_file(&task.work_dir.join(".task.lock")).unwrap();
+        let mut reopened = test_workspace(dir.path());
+        let held = reopened.state.task(&id).unwrap();
+        assert!(held.held && !held.has_uncertain(), "not judged yet");
+        assert_ne!(held.state, TaskState::Uncertain);
+        assert_eq!(crate::task_view::task_status_label(held), "正在保存进度");
+        assert!(reopened.state.next_task().is_none(), "not run beside it");
+        assert!(reopened.held_check_due().is_some());
+        reopened.held_checked = None;
+        reopened.reconcile_now();
+        assert!(reopened.state.task(&id).unwrap().held, "still held");
+
+        receipt(&task, Receipt::Completed);
+        drop(worker);
+        reopened.held_checked = None;
+        reopened.reconcile_now();
+        let task = reopened.state.task(&id).unwrap();
+        assert!(!task.held && !task.has_uncertain());
+        assert_eq!(task.state, TaskState::Queued);
+        assert_eq!(reopened.state.next_task().unwrap().id, id);
+        assert!(reopened.held_check_due().is_none());
+    }
+
+    /// Adjusting and retrying an uncertain task unchanged starts a new attempt; the
+    /// original it replaces is not a duplicate in the way.
+    #[test]
+    fn retrying_an_uncertain_task_unchanged_is_not_refused_as_a_duplicate() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        ws.state.task_mut(&id).unwrap().state = TaskState::Uncertain;
+        let (retry, created) = ws.state.enqueue(plan(&library), Some(id.clone())).unwrap();
+        assert!(created);
+        assert_ne!(retry, id);
+        assert_eq!(
+            ws.state.task(&id).unwrap().handled_by.as_deref(),
+            Some(retry.as_str())
+        );
+        // Without a parent the same work is still not added twice.
+        assert_eq!(
+            ws.state.enqueue(plan(&library), None).unwrap(),
+            (retry, false)
+        );
+    }
+
+    /// A task judged uncertain whose request was settled afterwards does not stay stuck.
+    #[test]
+    fn an_uncertain_task_whose_requests_settled_goes_back_to_its_intent() {
+        use course2md::dispatch::State as Receipt;
+        for (intent, expected) in [
+            (Intent::Run, TaskState::Queued),
+            (Intent::Quit, TaskState::Paused),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut ws = test_workspace(dir.path());
+            let id = ws
+                .state
+                .enqueue(plan(&ws.state.default_library), None)
+                .unwrap()
+                .0;
+            let task = ws.state.task_mut(&id).unwrap();
+            task.state = TaskState::Uncertain;
+            task.intent = intent;
+            receipt(task, Receipt::Uncertain);
+            reconcile_receipts(task).unwrap();
+            assert!(task.has_uncertain());
+            receipt(task, Receipt::Completed);
+            reconcile_receipts(task).unwrap();
+            assert!(!task.has_uncertain());
+            assert_eq!(task.state, expected, "{intent:?}");
+        }
     }
 
     #[test]

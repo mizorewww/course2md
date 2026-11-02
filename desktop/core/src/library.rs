@@ -529,6 +529,7 @@ mod tests {
             updated: 0,
             parent: None,
             handled_by: None,
+            held: false,
             work_dir: "/tmp/work".into(),
             events: crate::activity::JobEvents {
                 error: None,

@@ -739,6 +739,10 @@ impl Desktop {
         if self.storage_ui.resume_ready() {
             deadline = earliest_deadline(deadline, Some(Instant::now()));
         }
+        // A worker that outlived an earlier session is waited for.
+        if let Some(workspace) = &self.workspace {
+            deadline = earliest_deadline(deadline, workspace.held_check_due());
+        }
         deadline
     }
     fn poll(&mut self, cx: &mut Context<Self>) {

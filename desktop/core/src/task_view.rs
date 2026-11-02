@@ -53,6 +53,8 @@ impl TaskGroup {
 pub fn task_group(task: &TaskRecord) -> TaskGroup {
     if task.handled_by.is_some() {
         TaskGroup::History
+    } else if task.held {
+        TaskGroup::Running
     } else {
         match task.state {
             // A task the person paused keeps its place in the queue.
@@ -533,6 +535,10 @@ pub fn task_status_label(task: &TaskRecord) -> String {
     if task.handled_by.is_some() {
         return course2md::tr!("已有后续处理任务").into();
     }
+    // What the folder holds is not known until the earlier worker lets go.
+    if task.held {
+        return TaskState::Pausing.label().into();
+    }
     if task.has_uncertain() {
         let purpose: std::collections::BTreeSet<_> = task
             .events
@@ -710,8 +716,8 @@ pub fn task_actions(
 ) -> Vec<TaskAction> {
     use TaskAction::*;
     let active = facts.active;
-    let uncertain = task.has_uncertain();
-    let running = matches!(task.state, TaskState::Running | TaskState::Pausing);
+    let uncertain = task.has_uncertain() && !task.held;
+    let running = matches!(task.state, TaskState::Running | TaskState::Pausing) || task.held;
     let queued = task.state == TaskState::Queued;
     let has_note = task.artifact.is_some();
     let has_log = task_log_text(task).is_some();
@@ -929,6 +935,7 @@ mod tests {
             updated: 0,
             parent: None,
             handled_by: None,
+            held: false,
             work_dir: "work".into(),
             events: crate::activity::JobEvents {
                 error: None,
@@ -1217,6 +1224,7 @@ mod tests {
             updated: 0,
             parent: None,
             handled_by: None,
+            held: false,
             work_dir: "work".into(),
             events: crate::activity::JobEvents {
                 outcomes: Some(outcomes.clone()),
