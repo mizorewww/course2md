@@ -65,6 +65,9 @@ pub struct State {
     pub entries: BTreeMap<String, Entry>,
     /// The request the running model job is preparing; taken when it exits.
     pub preparing: Option<Request>,
+    /// The person asked for this preparation from a task that stopped for its model:
+    /// the tasks stopped for it continue once it is ready.
+    pub preparing_for_tasks: bool,
     pub outcome: Option<Outcome>,
     /// The models whose files and preparation log are expanded.
     pub details: BTreeSet<String>,

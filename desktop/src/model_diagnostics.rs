@@ -295,23 +295,22 @@ impl Desktop {
         ]
     }
     /// Prepares the speech model a task stopped for: the download the person agrees
-    /// to by asking for it here. The task continues when they continue it.
+    /// to by asking for it here. Once it is ready, the tasks stopped for it continue.
     pub(crate) fn prepare_task_model(
         &mut self,
         task: &crate::workspace::TaskRecord,
         cx: &mut Context<Self>,
     ) {
-        let defaults = &task.plan.config.defaults;
-        let request = Request::new(
-            defaults
-                .provider
-                .unwrap_or_else(|| self.recommended_local_provider()),
-            defaults.asr_model.as_deref(),
-            &model_dir_from(defaults.model_dir.as_deref()),
-        );
-        self.begin_model_preparation(request, cx);
+        let request =
+            desktop_tasks::task_view::task_model_request(task, self.recommended_local_provider());
+        self.begin_model_preparation(request, true, cx);
     }
-    fn begin_model_preparation(&mut self, request: Request, cx: &mut Context<Self>) {
+    fn begin_model_preparation(
+        &mut self,
+        request: Request,
+        for_tasks: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.work.job.is_some() {
             self.message = Some(job_busy().into());
             cx.notify();
@@ -320,6 +319,7 @@ impl Desktop {
         self.follow_setup_model(&request);
         let state = &mut self.settings_ui.model_diagnostics;
         state.preparing = Some(request);
+        state.preparing_for_tasks = for_tasks;
         state.outcome = None;
         self.start_model_preparation(cx);
     }
@@ -335,6 +335,7 @@ impl Desktop {
             .preparing
             .take()
             .unwrap_or_else(|| self.default_model_request());
+        let for_tasks = std::mem::take(&mut self.settings_ui.model_diagnostics.preparing_for_tasks);
         let name = model_label(&request.model);
         let message = if success {
             course2md::tr!("{} 已准备完成", name)
@@ -358,7 +359,29 @@ impl Desktop {
             cancelled: cancelled && !success,
         });
         self.refresh_model_diagnostics(cx);
+        if success && for_tasks {
+            self.resume_tasks_awaiting_model(&request, cx);
+        }
         cx.notify();
+    }
+    /// Continues the tasks that stopped only for `request`'s model, now that it is
+    /// ready: the person's "Download and prepare the model" asked for that.
+    fn resume_tasks_awaiting_model(&mut self, request: &Request, cx: &mut Context<Self>) {
+        let fallback = self.recommended_local_provider();
+        let ids = self
+            .workspace
+            .as_ref()
+            .map(|workspace| {
+                desktop_tasks::task_view::tasks_awaiting_model(
+                    &workspace.state.tasks,
+                    request,
+                    fallback,
+                )
+            })
+            .unwrap_or_default();
+        for id in ids {
+            self.set_task_intent(id, crate::workspace::Intent::Run, cx);
+        }
     }
     /// Why the engine cannot run here; `None` while detection is pending.
     pub(crate) fn engine_issue(&self, provider: AsrProvider) -> Option<DeviceIssue> {
@@ -564,7 +587,7 @@ impl Desktop {
                     .child(label)
                     .disabled(self.work.job.is_some() || checking)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.begin_model_preparation(target.clone(), cx)
+                        this.begin_model_preparation(target.clone(), false, cx)
                     })),
             );
         }
