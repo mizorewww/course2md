@@ -917,19 +917,16 @@ pub const BILIBILI_412_DESKTOP_HINT: &str =
 
 pub(crate) const BILIBILI_412_HINT: &str = "B 站暂时限制了访问。请稍后重试；若持续失败，运行 course2md --login bilibili 重新登录，或导入本地视频。 / Bilibili is temporarily limiting access. Retry later; if it keeps failing, run course2md --login bilibili to log in again, or import a local video.";
 
-/// What a failed yt-dlp run suggests. A stopped task did not fail, and a 412
-/// already carries its own advice, so neither is told to log in.
+/// What a failed yt-dlp run suggests. Only a run that yt-dlp itself reports as
+/// refused can be helped by an account; a stopped task did not fail, a 412 carries
+/// its own advice, and a yt-dlp that never started says nothing about the site.
 fn login_tip(url: &str, mut error: anyhow::Error) -> anyhow::Error {
-    if error.downcast_ref::<crate::dispatch::Failure>().is_some()
-        || error.downcast_ref::<Bilibili412>().is_some()
+    if error.downcast_ref::<Bilibili412>().is_none()
+        && let Some(failure) = error.downcast_mut::<YtDlpFailure>()
     {
-        return error;
-    }
-    if let Some(failure) = error.downcast_mut::<YtDlpFailure>() {
         failure.hint = crate::auth::login_hint(url, &failure.cause);
-        return error;
     }
-    crate::auth::with_bilibili_login_tip(url, error)
+    error
 }
 
 /// A failed yt-dlp run. Its own last `ERROR:` line comes first: that is what a
@@ -1207,10 +1204,16 @@ mod tests {
         let url = "https://www.bilibili.com/video/BV1";
         let error = login_tip(url, anyhow::anyhow!("yt-dlp failed").context(Bilibili412));
         assert!(error.downcast_ref::<Bilibili412>().is_some());
-        let error = login_tip(url, anyhow::anyhow!("HTTP Error 403"));
+        // A yt-dlp that did not start is not a refusal: no account would help.
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let error = login_tip(
+            url,
+            anyhow::Error::new(missing).context("启动 yt-dlp 失败 / Failed to start yt-dlp"),
+        );
         let message = format!("{error:#}");
-        assert!(message.contains("--login bilibili"), "{message}");
-        assert!(message.contains("HTTP Error 403"), "{message}");
+        assert!(!message.contains("--login"), "{message}");
+        assert!(!message.contains("提示"), "{message}");
+        assert!(message.starts_with("启动 yt-dlp 失败"), "{message}");
     }
 
     #[test]
