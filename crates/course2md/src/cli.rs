@@ -17,6 +17,9 @@ pub const QUICK_START: &str = "快速开始 / Quick start:
 
 下一步 / Next steps:
   course2md --login bilibili    扫码登录 / Log in with a QR code
+  course2md --login bilibili --method password|sms
+                                密码或短信登录 / Log in with a password or SMS code
+  course2md --login youtube     使用浏览器中的 YouTube 登录 / Use your browser's YouTube session
   course2md --logout bilibili   清除登录 / Remove saved login
   course2md doctor              检查依赖与配置 / Check dependencies and settings
   course2md config init         生成配置模板 / Create a configuration template
@@ -41,9 +44,17 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "LANG")]
     pub lang: Option<String>,
 
-    /// 登录（bilibili 扫码；ollama 本地服务；codex 订阅），可接视频地址继续转换 / Log in (bilibili QR, ollama local, codex subscription), optionally then process a video
+    /// 登录（bilibili 扫码、密码或短信；youtube 浏览器登录；ollama 本地服务；codex 订阅），可接视频地址继续转换 / Log in (bilibili QR, password or SMS; youtube browser session; ollama local; codex subscription), optionally then process a video
     #[arg(long, value_enum, conflicts_with_all = ["logout", "json"])]
     pub login: Option<LoginPlatform>,
+
+    /// Bilibili 登录方式：qr（默认）、password、sms / Bilibili login method: qr (default), password, sms
+    #[arg(long, value_enum, requires = "login", value_name = "METHOD")]
+    pub method: Option<crate::account::LoginMethod>,
+
+    /// YouTube 使用哪个浏览器的登录，如 chrome 或 "chrome:Profile 1" / Browser whose YouTube session to use, e.g. chrome or "chrome:Profile 1"
+    #[arg(long, requires = "login", value_name = "BROWSER[:PROFILE]")]
+    pub browser: Option<String>,
 
     /// 清除保存的登录凭据 / Remove saved login credentials
     #[arg(long, value_enum, conflicts_with_all = ["login", "source", "json"])]
@@ -62,6 +73,7 @@ pub struct Cli {
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum LoginPlatform {
     Bilibili,
+    Youtube,
     Ollama,
     Codex,
 }
@@ -319,9 +331,22 @@ pub fn localize_rendered(text: &str) -> String {
         .collect()
 }
 
-pub fn login(platform: LoginPlatform) -> anyhow::Result<()> {
+pub fn login(
+    platform: LoginPlatform,
+    method: Option<crate::account::LoginMethod>,
+    browser: Option<&str>,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        method.is_none() || matches!(platform, LoginPlatform::Bilibili),
+        tr!("--method 只适用于 --login bilibili / --method applies only to --login bilibili")
+    );
+    anyhow::ensure!(
+        browser.is_none() || matches!(platform, LoginPlatform::Youtube),
+        tr!("--browser 只适用于 --login youtube / --browser applies only to --login youtube")
+    );
     match platform {
-        LoginPlatform::Bilibili => crate::auth::login_bilibili(),
+        LoginPlatform::Bilibili => crate::account::login_bilibili(method.unwrap_or_default()),
+        LoginPlatform::Youtube => crate::account::login_youtube(browser),
         LoginPlatform::Ollama => crate::login::ollama::login(),
         LoginPlatform::Codex => crate::login::codex::login(),
     }
@@ -330,6 +355,7 @@ pub fn login(platform: LoginPlatform) -> anyhow::Result<()> {
 pub fn logout(platform: LoginPlatform) -> anyhow::Result<()> {
     match platform {
         LoginPlatform::Bilibili => crate::auth::logout_bilibili(),
+        LoginPlatform::Youtube => crate::auth::youtube::logout_youtube(),
         LoginPlatform::Ollama => crate::login::ollama::logout(),
         LoginPlatform::Codex => crate::login::codex::logout(),
     }
