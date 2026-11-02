@@ -1685,6 +1685,11 @@ impl TaskActionView for TaskAction {
             Self::Pause if pausing => (tr!("正在暂停…"), symbols::pause(), true),
             Self::Pause => (tr!("暂停"), symbols::pause(), false),
             Self::Resume => (tr!("继续生成"), symbols::play_arrow(), false),
+            Self::PrepareModel => (
+                tr!("下载并准备模型"),
+                symbols::download(),
+                desktop.work.job.is_some(),
+            ),
             Self::Repair => (tr!("修复 AI 服务并补做"), symbols::settings(), false),
             Self::Retry(component) => (retry_component_label(component), symbols::refresh(), false),
             Self::Reassociate(_) => (
@@ -1728,6 +1733,7 @@ impl TaskActionView for TaskAction {
             }
             Self::Pause => this.set_task_intent(id, Intent::Pause, cx),
             Self::Resume => this.set_task_intent(id, Intent::Run, cx),
+            Self::PrepareModel => this.prepare_task_model(&task, cx),
             Self::Cancel => this.set_task_intent(id, Intent::Cancel, cx),
             Self::Repair => this.repair_task_service(id, window, cx),
             Self::Retry(component) => {

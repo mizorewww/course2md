@@ -106,6 +106,26 @@ pub async fn ensure_cache(
     fetch_model(provider, &status.model, root, CoremlMode::Cache, control).await
 }
 
+/// `ensure_cache` for a task that may not download: a model not yet on disk is
+/// `ModelRequired`, for the person to prepare.
+pub fn require_cache(provider: crate::config::AsrProvider, model: &str, root: &Path) -> Result<()> {
+    let status = status::inspect(provider, model, root)?;
+    if !status.can_prepare {
+        return Err(unsupported_model(&status));
+    }
+    if matches!(
+        status.state,
+        status::CacheState::Cached | status::CacheState::Loaded
+    ) {
+        return Ok(());
+    }
+    Err(c2m_core::speech::ModelRequired {
+        provider,
+        model: status.model,
+    }
+    .into())
+}
+
 /// Prepare the exact selected backend without sending course content or changing settings.
 pub async fn prepare(
     provider: crate::config::AsrProvider,
@@ -313,4 +333,24 @@ pub fn list_models(root: &Path) {
     println_tr!(
         "Apple 和 NPU 模型由各自后端管理 / Apple and NPU models are managed by their backends."
     );
+}
+
+#[cfg(test)]
+mod tests {
+    /// A task asks for a model it lacks instead of downloading it: the error is typed,
+    /// so the desktop can offer to prepare it.
+    #[test]
+    fn a_task_without_its_model_is_asked_to_prepare_it_not_sent_to_download() {
+        use c2m_protocol::progress::ErrorCode;
+        let dir = tempfile::tempdir().unwrap();
+        let error = super::require_cache(crate::config::AsrProvider::Cpu, "qwen3-1.7b", dir.path())
+            .unwrap_err();
+        assert!(error.is::<c2m_core::speech::ModelRequired>(), "{error:#}");
+        assert_eq!(ErrorCode::of(&error), ErrorCode::ModelRequired);
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "nothing was fetched"
+        );
+    }
 }

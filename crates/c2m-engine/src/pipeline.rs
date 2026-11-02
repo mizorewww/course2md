@@ -951,15 +951,28 @@ impl Task<'_> {
         }
         if needs_speech && cfg.provider != config::AsrProvider::Api {
             progress::start(Stage::ModelPrepare);
-            crate::models::ensure_cache(
-                cfg.provider,
-                cfg.asr_model
-                    .as_deref()
-                    .unwrap_or(config::default_model(cfg.provider)),
-                &cfg.model_dir,
-                &self.job.control,
-            )
-            .await?;
+            let model = cfg
+                .asr_model
+                .as_deref()
+                .unwrap_or(config::default_model(cfg.provider));
+            match credentials {
+                Credentials::Cli => {
+                    crate::models::ensure_cache(
+                        cfg.provider,
+                        model,
+                        &cfg.model_dir,
+                        &self.job.control,
+                    )
+                    .await?
+                }
+                // A task never downloads a model on the way: the person agrees to that
+                // download first, when the app asks them to prepare it.
+                Credentials::Task { .. } => {
+                    let (provider, root) = (cfg.provider, cfg.model_dir.clone());
+                    let model = model.to_owned();
+                    blocking(move || crate::models::require_cache(provider, &model, &root)).await?
+                }
+            }
             progress::done(Stage::ModelPrepare);
         }
         Ok(())

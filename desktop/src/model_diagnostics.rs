@@ -294,6 +294,23 @@ impl Desktop {
             "--json".into(),
         ]
     }
+    /// Prepares the speech model a task stopped for: the download the person agrees
+    /// to by asking for it here. The task continues when they continue it.
+    pub(crate) fn prepare_task_model(
+        &mut self,
+        task: &crate::workspace::TaskRecord,
+        cx: &mut Context<Self>,
+    ) {
+        let defaults = &task.plan.config.defaults;
+        let request = Request::new(
+            defaults
+                .provider
+                .unwrap_or_else(|| self.recommended_local_provider()),
+            defaults.asr_model.as_deref(),
+            &model_dir_from(defaults.model_dir.as_deref()),
+        );
+        self.begin_model_preparation(request, cx);
+    }
     fn begin_model_preparation(&mut self, request: Request, cx: &mut Context<Self>) {
         if self.work.job.is_some() {
             self.message = Some(job_busy().into());

@@ -94,6 +94,9 @@ pub struct JobEvents {
     pub blocked: Vec<BlockedRequest>,
     #[serde(default, skip_serializing)]
     pub outcomes: Option<c2m_artifact::artifact::Outcomes>,
+    /// The last error was a speech model that must be prepared first.
+    #[serde(default, skip_serializing)]
+    pub model_required: bool,
     /// The result of the run in progress, until the job exits.
     #[serde(skip)]
     pub done: Option<Done>,
@@ -172,8 +175,9 @@ impl JobEvents {
                 self.stage(stage).workers = *workers;
                 false
             }
-            Event::Error { message, .. } => {
+            Event::Error { message, code } => {
                 self.error = Some(message.clone());
+                self.model_required = *code == c2m_protocol::progress::ErrorCode::ModelRequired;
                 true
             }
             Event::Blocked {

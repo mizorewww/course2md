@@ -414,6 +414,8 @@ pub enum TaskAction {
     },
     Pause,
     Resume,
+    /// Download the speech model the task stopped for, which the person agrees to here.
+    PrepareModel,
     Repair,
     Retry(String),
     Reassociate(String),
@@ -434,7 +436,10 @@ pub fn lead_action<'a>(
         actions.iter().find(|action| {
             matches!(
                 action,
-                TaskAction::Repair | TaskAction::Resume | TaskAction::Retry(_)
+                TaskAction::PrepareModel
+                    | TaskAction::Repair
+                    | TaskAction::Resume
+                    | TaskAction::Retry(_)
             )
         })
     };
@@ -732,6 +737,10 @@ pub fn task_actions(
         if repair && has_note {
             recovery.push(Repair);
         }
+        // Continuing would only stop again until the model is there.
+        if task.state == TaskState::NeedsAttention && task.events.model_required && !uncertain {
+            recovery.push(PrepareModel);
+        }
         if matches!(task.state, TaskState::Paused | TaskState::NeedsAttention) && !uncertain {
             recovery.push(Resume);
         }
@@ -1005,6 +1014,40 @@ mod tests {
         task.state = TaskState::Uncertain;
         let uncertain = [Action::Adjust, Action::ViewTask, Action::NextVideo];
         assert_eq!(lead_action(&uncertain, &task, TaskSurface::Home), None);
+    }
+
+    /// A task stopped for a speech model asks to prepare it; it never downloads one
+    /// on its own, and continuing first would only stop again.
+    #[test]
+    fn a_task_stopped_for_its_speech_model_leads_with_preparing_it() {
+        use super::{TaskAction as Action, TaskFacts, TaskSurface, lead_action, task_actions};
+        use c2m_protocol::progress::{ErrorCode, Event};
+        let mut task = task_record("task");
+        task.state = TaskState::NeedsAttention;
+        let facts = || TaskFacts {
+            active: false,
+            expanded: false,
+            library: None,
+            needs_reassociation: false,
+            queue: Vec::new(),
+        };
+        task.events.apply(&Event::Error {
+            message: "识别模型 qwen3 尚未下载，请先下载并准备模型，再继续".into(),
+            code: ErrorCode::ModelRequired,
+        });
+        let actions = task_actions(&task, TaskSurface::Card, &facts());
+        assert!(actions.contains(&Action::Resume));
+        assert_eq!(
+            lead_action(&actions, &task, TaskSurface::Card),
+            Some(&Action::PrepareModel)
+        );
+        // Another failure afterwards is that failure's to answer.
+        task.events.apply(&Event::Error {
+            message: "其他错误".into(),
+            code: ErrorCode::Other,
+        });
+        let actions = task_actions(&task, TaskSurface::Card, &facts());
+        assert!(!actions.contains(&Action::PrepareModel));
     }
 
     #[test]

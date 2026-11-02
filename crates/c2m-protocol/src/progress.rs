@@ -174,6 +174,8 @@ pub enum ErrorCode {
     InvalidConfiguration,
     /// A required program (ffmpeg, ffprobe, yt-dlp, llama-server) is missing.
     MissingTool,
+    /// A local speech model must be downloaded first, with the person's consent.
+    ModelRequired,
     /// A service rejected the credentials.
     Authentication,
     /// A service does not have the endpoint or model asked for.
@@ -195,6 +197,12 @@ impl ErrorCode {
         use crate::outcome::FailureKind;
         if error.downcast_ref::<crate::tool::MissingTool>().is_some() {
             return Self::MissingTool;
+        }
+        if error
+            .downcast_ref::<crate::speech::ModelRequired>()
+            .is_some()
+        {
+            return Self::ModelRequired;
         }
         if error
             .downcast_ref::<crate::invalid::InvalidInput>()
