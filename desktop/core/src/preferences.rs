@@ -1154,15 +1154,29 @@ impl Store {
         Ok(draft)
     }
 
-    pub fn discard_service_draft(&mut self, id: &str) -> Result<()> {
-        if !self.services.drafts.contains_key(id) {
-            return Ok(());
-        }
+    /// Forgets an unpublished edit. Returns the key it alone held, for the caller to
+    /// remove from the vault with `remove_credentials`: a key typed into an edit that
+    /// was cancelled must not stay behind. A key a saved version or another edit still
+    /// uses is kept.
+    pub fn discard_service_draft(&mut self, id: &str) -> Result<Vec<CredentialRef>> {
+        let Some(draft) = self.services.drafts.get(id) else {
+            return Ok(Vec::new());
+        };
+        let released = draft.credential.clone().filter(|reference| {
+            !self
+                .services
+                .versions
+                .values()
+                .any(|version| version.config.credential.as_ref() == Some(reference))
+                && !self.services.drafts.iter().any(|(other, draft)| {
+                    other != id && draft.credential.as_ref() == Some(reference)
+                })
+        });
         let mut next = self.services.clone();
         next.drafts.remove(id);
         self.persist(PreferenceGroup::Services, &next)?;
         self.services = next;
-        Ok(())
+        Ok(released.into_iter().collect())
     }
 
     /// Static checks of a publication that need no vault.
@@ -1952,6 +1966,58 @@ mod tests {
             .into_config();
         assert_eq!(runtime.llm.model, "active-model");
         assert_eq!(runtime.llm.api_key, "test-only-secret");
+    }
+
+    /// Cancelling Add Service after a test saved its key leaves neither the draft nor
+    /// the key; cancelling an edit of a saved service keeps the key that version uses.
+    fn cancelled_drafts_release_only_their_own_keys(vault: Arc<dyn CredentialVault>) {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = open(directory.path(), vault.clone());
+        let mut added = ServiceDraft::new(ServicePurpose::Ai);
+        added.address = "https://example.test/v1".into();
+        let added = store
+            .save_service_draft(added, Some(Secret::new("cancelled-add-key")))
+            .unwrap();
+        let key = added.credential.clone().unwrap();
+        let released = store.discard_service_draft(&added.id).unwrap();
+        assert_eq!(released, vec![key.clone()]);
+        Store::remove_credentials(vault.as_ref(), &released);
+        assert!(vault.resolve(&key).is_err());
+        let saved = std::fs::read_to_string(directory.path().join("services.json")).unwrap();
+        assert!(
+            !saved.contains(&added.id),
+            "the draft is gone from services.json"
+        );
+
+        let draft = complete_draft(&mut store, "kept-model");
+        let active = store
+            .publish_service(&draft.id, BindingScope::Defaults)
+            .unwrap();
+        let mut edit = ServiceDraft::from_version(&active);
+        edit.model = "cancelled-model".into();
+        let edit = store.save_service_draft(edit, None).unwrap();
+        assert!(store.discard_service_draft(&edit.id).unwrap().is_empty());
+        let kept = active.config.credential.clone().unwrap();
+        assert_eq!(vault.resolve(&kept).unwrap().expose(), "test-only-secret");
+        Store::remove_credentials(vault.as_ref(), &[kept]);
+    }
+
+    #[test]
+    fn a_cancelled_draft_releases_only_its_own_key() {
+        cancelled_drafts_release_only_their_own_keys(Arc::new(MemoryCredentialVault::new()));
+    }
+
+    /// The same against the real Keychain, under a service of its own; it removes every
+    /// item it creates. Run with `--ignored` on a Mac with an unlocked login keychain.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "uses the login keychain"]
+    fn a_cancelled_draft_releases_only_its_own_key_in_the_keychain() {
+        cancelled_drafts_release_only_their_own_keys(Arc::new(
+            crate::credentials::KeychainCredentialVault::for_test(
+                "com.course2md.desktop.test-only.cancelled-draft",
+            ),
+        ));
     }
 
     #[test]

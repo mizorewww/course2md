@@ -1517,9 +1517,12 @@ impl Desktop {
         if let Some(editor) = &self.settings_ui.editor {
             // Tests can stage a private edit, but cancelling never publishes
             // it. A cleanup failure cannot make these hidden records active.
-            let _ = self
+            if let Ok(released) = self
                 .preferences
-                .discard_service_draft(&editor.form.draft.id);
+                .discard_service_draft(&editor.form.draft.id)
+            {
+                self.forget_credentials(released);
+            }
         }
         self.dismiss_service_editor(cx);
     }
