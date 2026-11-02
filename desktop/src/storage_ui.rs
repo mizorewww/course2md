@@ -46,6 +46,10 @@ impl Desktop {
             })
     }
 
+    fn registered_library(&self, id: &str) -> Option<&workspace::LibraryLocation> {
+        self.workspace.as_ref()?.state.library(id)
+    }
+
     pub(super) fn cached_location_check(
         &self,
         location: &workspace::LibraryLocation,
@@ -145,15 +149,9 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(root) = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.library(&library_id))
-            .map(|location| location.root.clone())
-        else {
-            return;
-        };
-        self.link_library(library_id, root, window, cx);
+        if let Some(root) = self.registered_library(&library_id).map(|l| l.root.clone()) {
+            self.link_library(library_id, root, window, cx);
+        }
     }
 
     /// Points a library at `folder`, asking first if the folder has no identity to prove it.
@@ -391,9 +389,7 @@ impl Desktop {
 
     fn set_default_library(&mut self, id: String, cx: &mut Context<Self>) {
         let Some(root) = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.library(&id))
+            .registered_library(&id)
             .map(|library| library.root.clone())
         else {
             self.workspace_error = Some(course2md::tr!("这个笔记库已被移除").into());
@@ -463,12 +459,7 @@ impl Desktop {
         if self.storage_ui.busy {
             return;
         }
-        let Some(location) = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.library(&library_id))
-            .cloned()
-        else {
+        let Some(location) = self.registered_library(&library_id).cloned() else {
             return;
         };
         self.pick_folder(
