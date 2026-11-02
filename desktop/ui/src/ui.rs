@@ -183,6 +183,9 @@ pub const DIALOG_WIDTH_ROOMY: f32 = 448.;
 pub const RESOURCE_ICON: Rems = rem(RESOURCE_ICON_SIZE);
 pub const RESOURCE_ICON_SIZE: f32 = 48.;
 
+/// A row's dropdown, in design px: wide enough for a model's name and its state.
+const DROPDOWN_WIDTH: f32 = 260.;
+
 /// One row of a [`field_table`].
 pub struct Field {
     id: SharedString,
@@ -350,26 +353,26 @@ impl Field {
                     .disabled(disabled)
                     .on_change(move |on, window, cx| on_change(on, window, cx)),
             ),
+            // A value chosen from a menu is an exposed dropdown beside its label (U1); the
+            // row's label names it, so the field draws none of its own.
             Control::Menu(value, items) => {
-                let value = Some(match hint {
-                    Some(hint) => format!("{value} · {hint}").into(),
-                    None => value,
-                });
                 let popup = ElementId::Name(format!("{id}-menu").into());
-                let trigger = scale
-                    .button(ElementId::Name(id.clone()), outer)
-                    .accessibility_label(label.clone())
-                    .disabled(disabled)
-                    .on_click(menu_key_toggle(&popup, window, cx))
-                    .child(
-                        scale
-                            .row()
-                            .child(scale.text(text_id, label, value))
-                            .child(tile_chevron()),
-                    );
-                menu(popup, trigger, items, window, cx)
-                    .anchor(Anchor::TopRight)
-                    .into_any_element()
+                let (open, set_open) = keyed_open(&popup, window, cx);
+                Self::inline_row(
+                    outer,
+                    scale.text(text_id, label.clone(), hint),
+                    ExposedDropdown::new(ElementId::Name(id.clone()), label)
+                        .show_label(false)
+                        .variant(TextFieldVariant::Outlined)
+                        .shape(TextFieldShape::Rounded)
+                        .density(TextFieldDensity::Compact)
+                        .width(DROPDOWN_WIDTH)
+                        .menu(items)
+                        .value(value)
+                        .disabled(disabled)
+                        .open(open)
+                        .on_open_change(set_open),
+                )
             }
             Control::Inline(control) => {
                 Self::inline_row(outer, scale.text(text_id, label, hint), control)
