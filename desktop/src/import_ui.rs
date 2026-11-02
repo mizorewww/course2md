@@ -703,8 +703,7 @@ impl Desktop {
             .child(
                 TextField::new("source-link", &self.inputs[&Field::Source])
                     .w_full()
-                    .hero()
-                    .label(course2md::tr!("视频链接"))
+                    .hero(course2md::tr!("视频链接"))
                     .leading_icon(Icon::from(symbols::link()))
                     .trailing_icon(preview)
                     .error(failed)

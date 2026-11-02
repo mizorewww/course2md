@@ -1701,11 +1701,12 @@ impl Desktop {
                 } else {
                     (StatusKind::Warning, course2md::tr!("待修复"))
                 };
-                status_chip_outlined(kind)
-                    .id(("diagnostic-capability", index))
-                    .role(Role::Label)
-                    .aria_label(course2md::tr!("{}：{}", *label, state))
-                    .child(*label)
+                status_fact_chip(
+                    ("diagnostic-capability", index),
+                    course2md::tr!("{}：{}", *label, state),
+                    kind,
+                )
+                .child(*label)
             });
         let summary = v_flex()
             .w_full()

@@ -1421,16 +1421,20 @@ impl Desktop {
                 .gap(rem(8.))
                 .flex_wrap()
                 .children(stages.iter().map(|stage| {
-                    status_chip_outlined(stage.status.chip())
-                        .when(stage.status.running(), |chip| {
-                            chip.child(icon_spinner(
-                                SharedString::from(format!("{}-chip-spinner", stage.id)),
-                                stage.title.clone(),
-                                rem(16.),
-                                cx,
-                            ))
-                        })
-                        .child(stage.title.clone())
+                    status_fact_chip(
+                        SharedString::from(format!("{}-chip", stage.id)),
+                        course2md::tr!("{}：{}", stage.title, stage.status.label()),
+                        stage.status.chip(),
+                    )
+                    .when(stage.status.running(), |chip| {
+                        chip.child(icon_spinner(
+                            SharedString::from(format!("{}-chip-spinner", stage.id)),
+                            stage.title.clone(),
+                            rem(16.),
+                            cx,
+                        ))
+                    })
+                    .child(stage.title.clone())
                 }))
         });
         let buttons = actions.iter().map(|action| {
