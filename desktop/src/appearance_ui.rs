@@ -5,8 +5,6 @@ use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{
     color::{Scheme, palette::ALL},
-    icons::Icon,
-    motion,
     prelude::*,
     theme::{is_dark, rgba},
     tokens::shape::OuterCorners,
@@ -18,6 +16,9 @@ const CARD_MIN_WIDTH: f32 = 150.;
 
 /// As many columns as `width` holds, each following the text size so a longer name
 /// or larger text reduces the columns before the names collide.
+/// The picker's widest, in dp: four previews across with their names on one line.
+const PICKER_WIDTH: f32 = 920.;
+
 fn palette_columns(width: f32, rem_size: f32) -> u16 {
     let unit = rem_size / 14.;
     (((width + CARD_GAP * unit) / ((CARD_MIN_WIDTH + CARD_GAP) * unit)).floor() as u16).clamp(1, 4)
@@ -109,44 +110,19 @@ impl Desktop {
         appearance
     }
 
-    fn palette_card(
-        &self,
-        palette: PaletteId,
-        selected: bool,
-        preview: Rems,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
-        let amount = motion::selection_value(
-            ("palette-selection", palette as usize),
-            if selected { 1. } else { 0. },
-            window,
-            cx,
-        );
-        let dark = palette.is_dark();
+    /// One palette as a selectable card: the kit draws its selection (outline, tint and
+    /// check) and the group announces it; the caption is tonal while chosen (S11).
+    fn palette_card(palette: PaletteId, selected: bool, preview: Rems) -> MaterialCard {
         MaterialCard::new(("palette", palette as usize), CardVariant::Outlined)
             .rounded(RADIUS_LARGE)
             .w_full()
             .overflow_hidden()
             .accessibility_label(course2md::tr!(
-                "{}，{}{}",
+                "{}，{}",
                 palette.name(),
-                mode_label(dark),
-                if selected {
-                    course2md::tr!("，已选择")
-                } else {
-                    ""
-                }
+                mode_label(palette.is_dark())
             ))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                let saved = &this.preferences.application().appearance;
-                if (if dark { saved.dark } else { saved.light }) == palette {
-                    return;
-                }
-                let mut next = this.application_edit_base();
-                next.appearance.select(palette);
-                this.commit_application(next, cx);
-            }))
+            .selected(selected)
             .child(sample(palette, preview).rounded_t(RADIUS_LARGE))
             .child(
                 h_flex()
@@ -164,13 +140,6 @@ impl Desktop {
                             .flex_1()
                             .min_w_0()
                             .whitespace_normal(),
-                    )
-                    .child(
-                        div().flex_shrink_0().opacity(amount).child(
-                            Icon::from(symbols::check_circle())
-                                .size(rem(18.))
-                                .color(color(ColorRole::PRIMARY)),
-                        ),
                     ),
             )
     }
@@ -186,7 +155,7 @@ impl Desktop {
             appearance.light
         };
         let inner_width = (f32::from(window.viewport_size().width) - 48.)
-            .min(rem(720.).to_pixels(window.rem_size()).as_f32())
+            .min(rem(PICKER_WIDTH).to_pixels(window.rem_size()).as_f32())
             - rem(48.).to_pixels(window.rem_size()).as_f32();
         let columns = palette_columns(inner_width, f32::from(window.rem_size()));
         // A row of cards fits the body however large the text: the preview gives up
@@ -199,29 +168,39 @@ impl Desktop {
             .settings_group_notice(PreferenceGroup::Application)
             .is_some_and(|(_, error)| error);
         let scroll = self.settings_ui.palette_scroll.clone();
-        let grid = div()
-            .grid()
-            .grid_cols(columns)
-            .w_full()
-            .min_w_0()
-            .gap(rem(CARD_GAP))
-            .children(
-                ALL.into_iter()
-                    .filter(|palette| palette.is_dark() == dark)
-                    .map(|palette| {
-                        RevealFocus::new(
-                            ("palette-reveal", palette as usize),
-                            self.palette_card(palette, palette == selected, preview, window, cx),
-                            scroll.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            );
+        let palettes: Vec<PaletteId> = ALL
+            .into_iter()
+            .filter(|palette| palette.is_dark() == dark)
+            .collect();
+        let choices = palettes.clone();
+        let grid = palettes
+            .iter()
+            .fold(
+                CardGroup::new("palette-group", mode_label(dark))
+                    .grid()
+                    .grid_cols(columns)
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(CARD_GAP)),
+                |group, &palette| {
+                    group.card(Self::palette_card(palette, palette == selected, preview))
+                },
+            )
+            .on_change(cx.listener(move |this, index: &usize, _, cx| {
+                let Some(&palette) = choices.get(*index) else {
+                    return;
+                };
+                let mut next = this.application_edit_base();
+                next.appearance.select(palette);
+                this.commit_application(next, cx);
+            }));
         let close = cx.listener(|this, _: &ClickEvent, _, cx| this.close_palette_picker(cx));
         MaterialDialog::new("palette-dialog")
             .container(ColorRole::SURFACE)
             .headline(mode_label(dark))
-            .size(DialogSize::Large)
+            // Four previews across on a large window, as before the migration (S11).
+            .size(DialogSize::FullWidth)
+            .max_width(PICKER_WIDTH)
             .content(
                 v_flex()
                     .w_full()
