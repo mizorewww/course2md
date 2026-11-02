@@ -23,5 +23,8 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-ureq.workspace = true
+# native-tls: see bilibili_agent_builder — bilibili's edge resets rustls
+# handshakes. vendored builds OpenSSL in-tree on Linux so shipped binaries do
+# not pick up a runtime libssl dependency.
+ureq = { workspace = true, features = ["native-tls", "vendored"] }
 url.workspace = true

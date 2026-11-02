@@ -377,7 +377,7 @@ pub fn enrich_bilibili_candidates(candidates: &mut [SourceCandidate]) {
             break;
         }
     }
-    let agent = crate::runtime::agent_builder()
+    let agent = crate::bilibili_agent_builder()
         .timeout_connect(Some(std::time::Duration::from_secs(3)))
         .timeout_per_read(Some(std::time::Duration::from_secs(3)))
         .timeout_global(Some(std::time::Duration::from_secs(8)))

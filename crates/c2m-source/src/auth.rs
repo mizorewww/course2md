@@ -331,7 +331,10 @@ pub enum AccountStatus {
 }
 
 fn login_agent() -> ureq::Agent {
-    crate::runtime::http_agent(Duration::from_secs(12))
+    crate::bilibili_agent_builder()
+        .timeout_global(Some(Duration::from_secs(12)))
+        .build()
+        .new_agent()
 }
 
 /// Check saved credentials against Bilibili. A network failure is an error, not logout.
