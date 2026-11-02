@@ -2829,11 +2829,12 @@ impl Desktop {
                 (symbols::description(), course2md::tr!("笔记"))
             };
             tool(
-                IconButton::new("reader-view-toggle", icon, label).on_click(cx.listener(
-                    move |this, _, window, cx| {
+                IconButton::new("reader-view-toggle", icon, label)
+                    .variant(IconButtonVariant::Tonal)
+                    .tone(ButtonTone::Neutral)
+                    .on_click(cx.listener(move |this, _, window, cx| {
                         this.select_reader_view(usize::from(reading_note), window, cx)
-                    },
-                )),
+                    })),
                 "reader-view-toggle-tip",
                 label,
             )
@@ -2845,7 +2846,10 @@ impl Desktop {
         };
         let find = reading_note.then(|| {
             tool(
+                // A tool on the reader's bar sits in the neutral circle the back button has.
                 IconButton::new("reader-open-find", symbols::search(), find_label)
+                    .variant(IconButtonVariant::Tonal)
+                    .tone(ButtonTone::Neutral)
                     .toggle(true)
                     .selected(self.reader_ui.find.open)
                     .on_click(cx.listener(|this, _, window, cx| {
