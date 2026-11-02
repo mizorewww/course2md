@@ -1589,21 +1589,13 @@ impl Desktop {
                 );
                 // The native save panel owns the explicit overwrite decision; the old file
                 // remains intact until a complete export is ready beside it.
-                if target.exists() {
-                    let temp = parent.join(format!(
-                        ".course2md-export-{}.{}",
-                        workspace::new_id("file"),
-                        extension
-                    ));
-                    let result = course2md::portable::export(&source, format, &temp)
-                        .and_then(|_| std::fs::rename(&temp, &target).map_err(anyhow::Error::from));
-                    if result.is_err() {
-                        let _ = std::fs::remove_file(&temp);
-                    }
-                    result
-                } else {
-                    course2md::portable::export(&source, format, &target).map(|_| ())
-                }
+                // A dropped temporary folder takes an unfinished export with it.
+                let temp = tempfile::Builder::new()
+                    .prefix(".course2md-export-")
+                    .tempdir_in(&parent)?;
+                let file = temp.path().join(target.file_name().unwrap_or_default());
+                course2md::portable::export(&source, format, &file)?;
+                Ok(std::fs::rename(&file, &target)?)
             })
             .recv()
             .await
