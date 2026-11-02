@@ -272,7 +272,6 @@ impl Desktop {
         if switched.is_some() {
             self.import.following_conversion = None;
             self.invalidate_source();
-            self.import.completed_source = None;
             self.message = None;
             self.restore_draft(window, cx);
         }
