@@ -437,3 +437,36 @@ fn an_unsupported_model_is_quoted_in_every_language() {
         );
     }
 }
+
+/// Transport crates dump what a request sends at trace level, `Authorization`
+/// header included; however `RUST_LOG` is set, the key never reaches a log.
+#[test]
+fn trace_logging_never_shows_the_api_key() {
+    const KEY: &str = "sk-Zq8Xv3Lp9Wm2Tn7Rb4Yc6Hd5";
+    for spec in ["trace", "ureq_proto=trace,ureq=trace,rustls=trace"] {
+        let cli = CliTest::new();
+        let (url, server) = c2m_test_http::serve(vec![c2m_test_http::json_response(
+            r#"{"choices":[{"message":{"content":"ok"}}]}"#,
+        )]);
+        let output = Command::new(env!("CARGO_BIN_EXE_course2md"))
+            .args(["llm", "setup", "--base-url", &url, "--model", "m"])
+            .args(["--api-key", KEY])
+            .current_dir(cli.dir.path())
+            .env("XDG_CONFIG_HOME", cli.dir.path().join("config"))
+            .env("XDG_CACHE_HOME", cli.dir.path().join("cache"))
+            .env("COURSE2MD_LANG", "en")
+            .env("RUST_LOG", spec)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        let requests = server.join().unwrap();
+        assert!(
+            requests[0].head.contains(KEY),
+            "the request must carry the key for this test to mean anything"
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        for text in [stdout(&output), stderr(&output)] {
+            assert!(!common::shows_part_of(&text, KEY), "{spec}: {text}");
+        }
+    }
+}

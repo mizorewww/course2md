@@ -39,6 +39,7 @@ tracing-subscriber.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+c2m-test-http = { path = "../c2m-test-http" }
 tempfile.workspace = true
 tokio.workspace = true
 which.workspace = true
