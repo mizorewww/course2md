@@ -1,5 +1,6 @@
 use super::*;
 use crate::{symbols, ui};
+use desktop_store::records::{FolderContext, FolderPlace, folders_unavailable};
 use gpui_kit_material::{
     color::ColorRole,
     icons::Icon,
@@ -16,10 +17,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-
-fn folders_unavailable() -> &'static str {
-    course2md::tr!("文件夹暂不可用，请重新扫描笔记库。")
-}
 
 /// What the name dialog names.
 #[derive(Clone)]
@@ -97,18 +94,6 @@ pub(crate) struct MoveDialog {
     root: PathBuf,
     moving: Moving,
     open: bool,
-}
-
-/// Resolved picker state for the draft or a note.
-#[derive(Clone)]
-pub(crate) struct FolderContext {
-    pub(crate) root: PathBuf,
-    draft_id: Option<String>,
-    folder: Option<u64>,
-    pub(crate) load_error: Option<String>,
-    pub(crate) label: String,
-    /// Every folder in tree order, labelled with its path.
-    folders: Vec<(u64, String)>,
 }
 
 impl Desktop {
@@ -884,67 +869,18 @@ impl Desktop {
     }
 
     pub(crate) fn folder_context(&self, course: Option<PathBuf>, cx: &App) -> FolderContext {
-        let storage = course.as_ref().map(|path| {
-            self.library(cx)
-                .courses
-                .iter()
-                .find(|course| &course.dir == path || &course.storage_dir() == path)
-                .map(|course| course.storage_dir())
-                .unwrap_or_else(|| path.clone())
-        });
-        let (root, draft_id) = match &storage {
-            Some(path) => (
-                self.library(cx)
-                    .view_cache
-                    .locations
-                    .get(path)
-                    .map(|location| location.root.clone())
-                    .unwrap_or_else(|| self.library(cx).root.clone()),
-                None,
-            ),
-            None => self.current_folder_origin(cx),
+        let place = match &course {
+            Some(path) => FolderPlace::Note(path),
+            None => {
+                let (root, draft_id) = self.current_folder_origin(cx);
+                FolderPlace::Draft {
+                    root,
+                    draft_id,
+                    folder: self.target_folder(cx),
+                }
+            }
         };
-        let loaded = self.library(cx).indexes.get(&root);
-        let checking = loaded.is_none() && self.library(cx).loading;
-        let load_error = (loaded.is_none() && !checking).then(|| folders_unavailable().to_owned());
-        let folder = match &storage {
-            Some(path) => self
-                .library(cx)
-                .view_cache
-                .locations
-                .get(path)
-                .filter(|location| location.root == root)
-                .and_then(|location| loaded?.folder_key(&location.relative)),
-            None => self.target_folder(cx),
-        };
-        let label = if checking {
-            course2md::tr!("正在读取文件夹…").to_owned()
-        } else if load_error.is_some() {
-            course2md::tr!("文件夹暂不可用").to_owned()
-        } else if let Some(id) = folder {
-            loaded
-                .filter(|organization| organization.folders.contains_key(&id))
-                .map(|organization| organization.path(id).join(" / "))
-                .unwrap_or_else(|| course2md::tr!("文件夹已删除，请重新选择").into())
-        } else {
-            course2md::tr!("未分类").into()
-        };
-        FolderContext {
-            root,
-            draft_id,
-            folder,
-            load_error,
-            label,
-            folders: loaded
-                .map(|organization| {
-                    organization
-                        .tree()
-                        .into_iter()
-                        .map(|(id, _)| (id, organization.path(id).join(" / ")))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        }
+        self.records.read(cx).folder_context(place)
     }
 
     /// Where the workbench's next note is saved: one of many folders, by name.

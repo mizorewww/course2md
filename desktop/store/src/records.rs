@@ -6,7 +6,40 @@ use crate::{
     notes::Course,
     workspace::{Draft, LibraryLocation, TaskRecord, Workspace},
 };
-use std::{path::PathBuf, rc::Rc};
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+};
+
+/// Where a note, or the workbench's next note, is filed: for the folder picker and
+/// the reader's crumb.
+#[derive(Clone)]
+pub struct FolderContext {
+    pub root: PathBuf,
+    pub draft_id: Option<String>,
+    pub folder: Option<u64>,
+    pub load_error: Option<String>,
+    pub label: String,
+    /// Every folder in tree order, labelled with its path.
+    pub folders: Vec<(u64, String)>,
+}
+
+/// What a folder context is asked for.
+pub enum FolderPlace<'a> {
+    /// The note version or note folder at this path.
+    Note(&'a Path),
+    /// The draft's library and folder.
+    Draft {
+        root: PathBuf,
+        draft_id: Option<String>,
+        folder: Option<u64>,
+    },
+}
+
+/// Why the folder picker and moves are unavailable.
+pub fn folders_unavailable() -> &'static str {
+    c2m_i18n::tr!("文件夹暂不可用，请重新扫描笔记库。")
+}
 
 pub struct Records {
     /// The workspace record, when it could be read.
@@ -110,6 +143,83 @@ impl Records {
             {
                 Rc::make_mut(course).title = name.clone();
             }
+        }
+    }
+
+    /// Where `place` is filed, as the folder picker and the reader's crumb show it.
+    pub fn folder_context(&self, place: FolderPlace) -> FolderContext {
+        let library = &self.library;
+        let storage = match &place {
+            FolderPlace::Note(path) => Some(
+                library
+                    .courses
+                    .iter()
+                    .find(|course| course.dir == *path || course.storage_dir() == *path)
+                    .map(|course| course.storage_dir())
+                    .unwrap_or_else(|| path.to_path_buf()),
+            ),
+            FolderPlace::Draft { .. } => None,
+        };
+        let (root, draft_id, draft_folder) = match (&storage, place) {
+            (Some(path), _) => (
+                library
+                    .view_cache
+                    .locations
+                    .get(path)
+                    .map(|location| location.root.clone())
+                    .unwrap_or_else(|| library.root.clone()),
+                None,
+                None,
+            ),
+            (
+                None,
+                FolderPlace::Draft {
+                    root,
+                    draft_id,
+                    folder,
+                },
+            ) => (root, draft_id, folder),
+            (None, FolderPlace::Note(_)) => unreachable!("a note has a storage folder"),
+        };
+        let loaded = library.indexes.get(&root);
+        let checking = loaded.is_none() && library.loading;
+        let load_error = (loaded.is_none() && !checking).then(|| folders_unavailable().to_owned());
+        let folder = match &storage {
+            Some(path) => library
+                .view_cache
+                .locations
+                .get(path)
+                .filter(|location| location.root == root)
+                .and_then(|location| loaded?.folder_key(&location.relative)),
+            None => draft_folder,
+        };
+        let label = if checking {
+            c2m_i18n::tr!("正在读取文件夹…").to_owned()
+        } else if load_error.is_some() {
+            c2m_i18n::tr!("文件夹暂不可用").to_owned()
+        } else if let Some(id) = folder {
+            loaded
+                .filter(|organization| organization.folders.contains_key(&id))
+                .map(|organization| organization.path(id).join(" / "))
+                .unwrap_or_else(|| c2m_i18n::tr!("文件夹已删除，请重新选择").into())
+        } else {
+            c2m_i18n::tr!("未分类").into()
+        };
+        FolderContext {
+            root,
+            draft_id,
+            folder,
+            load_error,
+            label,
+            folders: loaded
+                .map(|organization| {
+                    organization
+                        .tree()
+                        .into_iter()
+                        .map(|(id, _)| (id, organization.path(id).join(" / ")))
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
