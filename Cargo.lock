@@ -4941,7 +4941,7 @@ dependencies = [
 [[package]]
 name = "model-fetch"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/model-fetch?rev=4434f944d43fe2f5395fcbafb5e1e82ea3a9fb7d#4434f944d43fe2f5395fcbafb5e1e82ea3a9fb7d"
+source = "git+https://github.com/mizorewww/model-fetch?rev=b7e06822400edb4ed1042ad1b07daa24a880c287#b7e06822400edb4ed1042ad1b07daa24a880c287"
 dependencies = [
  "getrandom 0.4.3",
  "serde_json",
