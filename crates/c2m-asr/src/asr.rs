@@ -182,7 +182,19 @@ fn transcribe_all(
 ) -> Result<Vec<TranscriptEvent>> {
     let started = Instant::now();
     let segs = backend.segments(wav, max_speech)?;
-    tracing::info!(segs = segs.len(), "vad");
+    // The names and fields 2.0.1 logged for each backend.
+    match &backend {
+        Backend::Api(api) => tracing::info!(
+            segs = segs.len(),
+            endpoint = %api.base_url,
+            model = %api.model,
+            "api vad"
+        ),
+        Backend::Npu(_) => tracing::info!(segs = segs.len(), "npu vad"),
+        #[cfg(apple_native)]
+        Backend::Coreml(_) => tracing::info!(segs = segs.len(), engine = "silero-coreml", "vad"),
+        Backend::Llama(_) => tracing::info!(segs = segs.len(), "vad"),
+    }
     if segs.is_empty() {
         tracing::warn!(
             "未检测到语音，将仅保留截图 / No speech detected; keeping slides without a transcript"
@@ -190,7 +202,7 @@ fn transcribe_all(
         return Ok(Vec::new());
     }
     let engine = backend.load(control)?;
-    tracing::info!(
+    tracing::debug!(
         secs = format_args!("{:.1}", started.elapsed().as_secs_f64()),
         "asr ready"
     );

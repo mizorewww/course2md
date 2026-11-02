@@ -455,7 +455,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 启动 {} 失败	启动 {} 失败	Failed to start {}	啟動 {} 失敗	{} の起動に失敗しました
 呃	呃	Uh	呃	えー
 命令行 Codex 的登录已失效，请先在 Codex 中重新登录再导入，或改用浏览器授权	命令行 Codex 的登录已失效，请先在 Codex 中重新登录再导入，或改用浏览器授权	The command line Codex login has expired. Please log in again in Codex before importing, or use browser authorization instead.	命令列 Codex 的登入已失效，請先在 Codex 中重新登入再匯入，或改用瀏覽器授權	コマンド ライン Codex ログインの有効期限が切れました。インポートする前に Codex に再度ログインするか、代わりにブラウザ認証を使用してください。
-命令：	命令：	Command:	命令：	コマンド:
+命令：	命令：	Command:	命令：	コマンド：
 哦	哦	Oh	哦	おお
 唉	唉	Alas	唉	はあ
 唔	唔	Hmm	唔	うーん
@@ -983,7 +983,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 暂时无法验证，已保存登录信息	暂时无法验证，已保存登录信息	Unable to verify temporarily, login information has been saved	暫時無法驗證，已儲存登入資訊	一時的に認証できませんでした。ログイン情報は保存されました
 暂时进入不会保存未完成的选择	暂时进入不会保存未完成的选择	Entering now won't save unfinished choices	暫時進入不會儲存未完成的選擇	今すぐ入ると、未完了の選択は保存されません
 暂时进入应用	暂时进入应用	Enter the app for now	暫時進入應用程式	ひとまずアプリに入る
-更多信息请运行 --help。	更多信息请运行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を実行してください。
+更多信息请运行 --help。	更多信息请运行 --help。	For more information, run --help.	更多資訊請執行 --help。	詳細については、--help を参照してください。
 更多笔记操作	更多笔记操作	More note actions	更多筆記操作	その他のノート操作
 更快，占内存较少	更快，占内存较少	Faster, takes up less memory	更快，佔記憶體較少	より高速で、メモリ使用量が少ない
 更换视频	更换视频	Change video	更換影片	動画を変更する
@@ -1746,7 +1746,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 选择识别模型 / Choose a speech model	选择识别模型	Choose a speech model	選擇辨識模型	認識モデルを選択
 选择课程视频	选择课程视频	Select course video	選擇課程影片	コース動画を選択してください
 选择这个笔记库移动后的文件夹	选择这个笔记库移动后的文件夹	Select the folder to which this note library is moved	選擇這個筆記庫移動後的資料夾	このノートライブラリの移動先フォルダーを選択してください
-选项：	选项：	Options:	選項：	オプション:
+选项：	选项：	Options:	選項：	オプション：
 速度	速度	Speed	速度	速度
 速度 {}	速度 {}	Speed {}	速度 {}	速度 {}
 部分内容待补全	部分内容待补全	Incomplete	部分內容待補全	一部の内容は補完が必要です

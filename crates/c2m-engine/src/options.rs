@@ -370,7 +370,15 @@ pub fn template() -> String {
         ("asr_api.", &defaults["asr_api"]),
     ] {
         for (key, value) in values.as_object().into_iter().flatten() {
-            text = text.replace(&format!("{{{prefix}{key}}}"), &value.to_string());
+            // Arrays as TOML writers space them: `["md", "html"]`.
+            let literal = match value {
+                serde_json::Value::Array(items) => {
+                    let items: Vec<String> = items.iter().map(ToString::to_string).collect();
+                    format!("[{}]", items.join(", "))
+                }
+                other => other.to_string(),
+            };
+            text = text.replace(&format!("{{{prefix}{key}}}"), &literal);
         }
     }
     text
@@ -402,6 +410,11 @@ pub fn print_effective(cfg: &settings::ConfigFile) -> Result<()> {
                 .collect();
             items.join(",")
         }
+        // As Rust prints the number, which 2.0.1 showed: `1`, not JSON's `1.0`.
+        serde_json::Value::Number(number) => number
+            .as_f64()
+            .filter(|_| number.is_f64())
+            .map_or_else(|| number.to_string(), |float| float.to_string()),
         other => other.to_string(),
     };
     println!("[defaults]");
@@ -433,7 +446,13 @@ pub fn print_effective(cfg: &settings::ConfigFile) -> Result<()> {
         "gpu_layers",
         "mmproj_offload",
     ] {
-        println!("  {key:<17}: {}", plain(&values[key]));
+        // An f32 widened to JSON's f64 would print 0.800000011920929 for 0.8.
+        let value = if key == "max_speech" {
+            r.max_speech.to_string()
+        } else {
+            plain(&values[key])
+        };
+        println!("  {key:<17}: {value}");
     }
     let hidden = |key: &str| {
         if key.is_empty() {
@@ -583,6 +602,11 @@ mod tests {
         let quoted = toml::Value::String(r"C:\Users\me\models".into()).to_string();
         let parsed: toml::Table = toml::from_str(&format!("model_dir = {quoted}")).unwrap();
         assert_eq!(parsed["model_dir"].as_str(), Some(r"C:\Users\me\models"));
+    }
+
+    #[test]
+    fn template_writes_lists_as_2_0_1_did() {
+        assert!(template().contains("\n#formats = [\"md\", \"html\"]\n"));
     }
 
     #[test]
