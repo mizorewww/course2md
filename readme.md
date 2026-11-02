@@ -130,7 +130,9 @@ Notes go to a default library; add other folders in **Settings → Storage**. Th
 
 **Conversion says `ffmpeg` is missing.** The downloaded app keeps its own `ffmpeg` next to `course2md-desktop`; extract or reinstall the whole package. The CLI and the Arch package use the system's: install it (`brew install ffmpeg` on macOS, `winget install --id Gyan.FFmpeg -e` on Windows, your package manager on Linux). **Settings → Application → Run checks** (CLI: `course2md doctor`) shows where each tool comes from.
 
-**A Bilibili video fails or comes back in low quality.** Log in under **Settings → Services & accounts → Bilibili account** by scanning the QR code.
+**A Bilibili video fails or comes back in low quality.** Log in under **Settings → Services & accounts → Bilibili account** by scanning the QR code, or with your password or an SMS code.
+
+**YouTube asks you to sign in.** Under **Settings → Services & accounts → YouTube account**, choose the browser where you are signed in to YouTube. yt-dlp reads that browser's cookies when it opens a YouTube video; course2md does not keep them. Downloading with an account may lead YouTube to restrict it, so use it sparingly.
 
 **How large are the model downloads, and where do they go?** About 1–2.3 GB on Apple Silicon (`~/Library/Caches/qwen3-speech/`) and 2.4 GB elsewhere (`~/.cache/course2md/models/`). On a system set up for mainland China (its locale or time zone) they download from domestic mirrors (ModelScope / hf-mirror.com); elsewhere these are fallbacks. `HF_ENDPOINT` names a host outright, and `COURSE2MD_IP_LOOKUP=1` lets course2md ask public services for your country instead, which sends them your IP address. Downloads resume after interruptions, and GPU/CPU models are checked with SHA-256.
 
@@ -140,7 +142,7 @@ More answers in [Troubleshooting](https://github.com/mizorewww/course2md/wiki/Tr
 
 ## Command-line tool
 
-Prefer the terminal or scripts? The `course2md` CLI does the same conversion. It can be installed beside the desktop app; the two share the Bilibili and ChatGPT logins and the downloaded speech models, and each keeps its own settings.
+Prefer the terminal or scripts? The `course2md` CLI does the same conversion. It can be installed beside the desktop app; the two share the Bilibili, YouTube and ChatGPT logins and the downloaded speech models, and each keeps its own settings.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mizorewww/course2md/main/install.sh | bash   # macOS / Linux, into ~/bin
@@ -160,7 +162,8 @@ The first run asks a few setup questions; notes are saved as `platform/title/ID/
 
 | Command | Purpose |
 | --- | --- |
-| `course2md --login bilibili` / `--logout bilibili` | Log in to Bilibili with a QR code / remove the saved login |
+| `course2md --login bilibili` / `--logout bilibili` | Log in to Bilibili with a QR code (`--method password` or `sms` for a password or SMS code) / remove the saved login |
+| `course2md --login youtube` / `--logout youtube` | Use a browser's YouTube sign-in (`--browser chrome`, or `--browser "chrome:Profile 1"` for a profile) / stop using it |
 | `course2md --login ollama` / `--login codex` | Use a local Ollama server / a ChatGPT subscription via the Codex login |
 | `course2md doctor` | Check tools, speech backends and settings |
 | `course2md models list` / `models prepare` | Check downloaded models / download one ahead of time |
