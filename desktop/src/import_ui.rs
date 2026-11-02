@@ -121,11 +121,6 @@ fn tip_button(
         .trigger(configure(IconButton::new(id, icon, label)))
 }
 
-/// The Bilibili brand mark, for the login that recovers a read.
-fn bilibili_mark() -> Icon {
-    Icon::new("icons/bilibili.svg").color(rgb(0x00a1d6))
-}
-
 /// The first line of a message when it is already readable. A raw download
 /// tool line (`WARNING:` / `ERROR:`) is not, and the caller supplies a summary.
 fn readable_first_line(message: &str) -> Option<&str> {
@@ -1151,7 +1146,7 @@ impl Desktop {
                                             ButtonVariant::Outlined,
                                         )
                                         .tone(ButtonTone::Accent)
-                                        .icon(bilibili_mark())
+                                        .icon(symbols::bilibili())
                                         .child(course2md::tr!("登录 Bilibili"))
                                         .on_click(
                                             cx.listener(|this, _, window, cx| {
@@ -1647,7 +1642,7 @@ impl Desktop {
                         row.child(
                             material_button("login-for-subtitles", ButtonVariant::Outlined)
                                 .tone(ButtonTone::Accent)
-                                .icon(bilibili_mark())
+                                .icon(symbols::bilibili())
                                 .child(course2md::tr!("登录 Bilibili"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.open_account_dialog(window, cx)
