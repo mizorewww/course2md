@@ -207,10 +207,9 @@ struct RestoreState {
 
 impl State {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Desktop>) -> Self {
-        let find =
-            cx.new(|cx| InputState::new(window, cx).placeholder(course2md::tr!("查找笔记内容")));
-        let gallery_find = cx
-            .new(|cx| InputState::new(window, cx).placeholder(course2md::tr!("搜索截图对应文字")));
+        let find = cx.new(|cx| InputState::new(window, cx).placeholder(find_placeholder()));
+        let gallery_find =
+            cx.new(|cx| InputState::new(window, cx).placeholder(gallery_find_placeholder()));
         let subscription = cx.subscribe(&find, |this, _, event, cx| match event {
             InputEvent::Change => {
                 let query = this.reader_ui.find.input.read(cx).value();
@@ -4163,6 +4162,29 @@ impl Desktop {
                 )
                 .child(tools),
         )
+    }
+}
+
+fn find_placeholder() -> &'static str {
+    course2md::tr!("查找笔记内容")
+}
+
+fn gallery_find_placeholder() -> &'static str {
+    course2md::tr!("搜索截图对应文字")
+}
+
+impl Desktop {
+    /// The reader's searches say what they do in the interface language.
+    pub(crate) fn relocalize_reader_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = &self.reader_ui;
+        for (input, placeholder) in [
+            (&state.find.input, find_placeholder()),
+            (&state.gallery.find, gallery_find_placeholder()),
+        ] {
+            input.update(cx, |input, cx| {
+                input.set_placeholder(placeholder, window, cx)
+            });
+        }
     }
 }
 

@@ -846,6 +846,18 @@ pub struct Store {
 
 impl Store {
     /// Loading a broken group never makes reading notes or unrelated settings unavailable.
+    /// The interface language saved under `root`, read without opening the store, so
+    /// that what `open` reports about the settings is already in that language.
+    pub fn saved_language(root: &Path) -> InterfaceLanguage {
+        let path = root.join(PreferenceGroup::Application.filename());
+        let backup = crate::store::backup_path(&path);
+        [path, backup]
+            .iter()
+            .find_map(|path| read_envelope::<ApplicationPreferences>(path).ok().flatten())
+            .map(|envelope| envelope.value.language)
+            .unwrap_or_default()
+    }
+
     pub fn open(root: impl Into<PathBuf>, vault: Arc<dyn CredentialVault>) -> Self {
         let mut store = Self {
             root: root.into(),
@@ -2018,6 +2030,34 @@ mod tests {
                 "com.course2md.desktop.test-only.cancelled-draft",
             ),
         ));
+    }
+
+    /// The language is known before the store opens, so its findings are in that language.
+    #[test]
+    fn the_saved_language_is_read_before_the_store_opens() {
+        let (directory, mut store) = isolated();
+        assert_eq!(
+            Store::saved_language(directory.path()),
+            InterfaceLanguage::System
+        );
+        let mut application = store.application().clone();
+        application.language = InterfaceLanguage::En;
+        store.save_application(application.clone()).unwrap();
+        application.language = InterfaceLanguage::Ja;
+        store.save_application(application).unwrap();
+        assert_eq!(
+            Store::saved_language(directory.path()),
+            InterfaceLanguage::Ja
+        );
+        // A damaged record falls back to its backup, as opening does.
+        let path = directory
+            .path()
+            .join(PreferenceGroup::Application.filename());
+        std::fs::write(&path, b"{damaged").unwrap();
+        assert_eq!(
+            Store::saved_language(directory.path()),
+            InterfaceLanguage::En
+        );
     }
 
     #[test]

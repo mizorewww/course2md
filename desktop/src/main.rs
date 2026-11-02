@@ -65,6 +65,18 @@ enum Field {
     Name,
     Search,
 }
+
+impl Field {
+    /// What an empty field says, in the interface language.
+    fn placeholder(self) -> &'static str {
+        match self {
+            Self::Source => course2md::tr!("粘贴 YouTube 或 Bilibili 视频链接"),
+            Self::Search => course2md::tr!("搜索笔记标题"),
+            Self::Title | Self::Name => "",
+        }
+    }
+}
+
 /// Debug builds: open a note in a given reader state at startup, so native
 /// layout can be checked without synthetic input. Release builds ignore it.
 struct ValidationOpen {
@@ -251,8 +263,11 @@ impl Desktop {
         // Fresh installs bootstrap managed local storage so the welcome screen does not
         // synchronously access a protected Documents folder before the user chooses a location.
         let output = configuration_directory.join("desktop-local-library");
+        let preferences_root = configuration_directory.join("desktop-preferences");
+        // What opening the settings reports about them reads in the saved language.
+        i18n::apply(preferences::Store::saved_language(&preferences_root));
         let preferences = preferences::Store::open(
-            configuration_directory.join("desktop-preferences"),
+            preferences_root,
             credentials::system_vault(configuration_directory.join("desktop-credentials.json")),
         );
         // Inputs and the first frame read the catalog immediately, so the
@@ -260,26 +275,12 @@ impl Desktop {
         i18n::apply(preferences.application().language);
         let mut config = preferences.defaults_config();
         config.defaults.out = Some(output.clone());
-        let fields = [
-            (
-                Field::Source,
-                course2md::tr!("粘贴 YouTube 或 Bilibili 视频链接"),
-                String::new(),
-            ),
-            (Field::Title, "", String::new()),
-            (Field::Search, course2md::tr!("搜索笔记标题"), String::new()),
-            (Field::Name, "", String::new()),
-        ];
-        let inputs: BTreeMap<_, _> = fields
+        let inputs: BTreeMap<_, _> = [Field::Source, Field::Title, Field::Search, Field::Name]
             .into_iter()
-            .map(|(field, placeholder, value)| {
+            .map(|field| {
                 (
                     field,
-                    cx.new(|cx| {
-                        InputState::new(window, cx)
-                            .placeholder(placeholder)
-                            .default_value(value)
-                    }),
+                    cx.new(|cx| InputState::new(window, cx).placeholder(field.placeholder())),
                 )
             })
             .collect();
@@ -1257,23 +1258,51 @@ fn main() {
             secondary_binding("secondary-n", ImportVideo, None, cx),
             secondary_binding("secondary-f", SearchContent, None, cx),
         ]);
-        cx.set_menus([
-            gpui::Menu::new("course2md").items([
-                gpui::MenuItem::action(course2md::tr!("关于 course2md"), OpenAbout),
-                gpui::MenuItem::action(course2md::tr!("设置…"), OpenSettings),
-                gpui::MenuItem::action(course2md::tr!("退出 course2md"), Quit),
-            ]),
-            gpui::Menu::new(course2md::tr!("文件")).items([gpui::MenuItem::action(
-                course2md::tr!("导入视频"),
-                ImportVideo,
-            )]),
-            gpui::Menu::new(course2md::tr!("查找")).items([gpui::MenuItem::action(
-                course2md::tr!("搜索笔记"),
-                SearchContent,
-            )]),
-        ]);
+        install_menus(cx);
         cx.activate(true);
     });
+}
+
+/// The menu bar, in the interface language; installed again when it changes.
+fn install_menus(cx: &mut App) {
+    cx.set_menus([
+        gpui::Menu::new("course2md").items([
+            gpui::MenuItem::action(course2md::tr!("关于 course2md"), OpenAbout),
+            gpui::MenuItem::action(course2md::tr!("设置…"), OpenSettings),
+            gpui::MenuItem::action(course2md::tr!("退出 course2md"), Quit),
+        ]),
+        gpui::Menu::new(course2md::tr!("文件")).items([gpui::MenuItem::action(
+            course2md::tr!("导入视频"),
+            ImportVideo,
+        )]),
+        gpui::Menu::new(course2md::tr!("查找")).items([gpui::MenuItem::action(
+            course2md::tr!("搜索笔记"),
+            SearchContent,
+        )]),
+    ]);
+}
+
+impl Desktop {
+    /// Switches the interface language: the catalog, then the text that was fixed when
+    /// it was created rather than drawn each frame.
+    fn apply_interface_language(
+        &mut self,
+        language: preferences::InterfaceLanguage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        i18n::apply(language);
+        for (field, input) in &self.inputs {
+            let placeholder = field.placeholder();
+            input.update(cx, |input, cx| {
+                input.set_placeholder(placeholder, window, cx)
+            });
+        }
+        self.relocalize_settings_inputs(window, cx);
+        self.relocalize_reader_inputs(window, cx);
+        install_menus(cx);
+        cx.notify();
+    }
 }
 
 #[cfg(test)]
