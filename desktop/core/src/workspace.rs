@@ -2110,7 +2110,7 @@ impl Workspace {
             .parent()
             .context(course2md::tr!("任务记录缺少保存目录"))?;
         std::fs::create_dir_all(parent)?;
-        let backup = path.with_extension("json.bak");
+        let backup = crate::store::backup_path(&path);
         let originals: Vec<_> = [&path, &backup]
             .into_iter()
             .filter(|p| p.exists())
@@ -2261,12 +2261,11 @@ impl Workspace {
             match Self::read(&path) {
                 Ok(state) => state,
                 Err(error) => {
-                    let backup = path.with_extension("json.bak");
-                    match Self::read(&backup) {
+                    match Self::read(&crate::store::backup_path(&path)) {
                         Ok(mut state) => {
-                            let saved =
-                                path.with_extension(format!("{}.damaged", new_id("backup")));
-                            std::fs::copy(&path, &saved)
+                            std::fs::read(&path)
+                                .map_err(anyhow::Error::from)
+                                .and_then(|damaged| crate::store::set_aside(&path, &damaged))
                                 .context(course2md::tr!("无法保留损坏的任务记录"))?;
                             recovery = Some(
                                 course2md::tr!("已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。")
@@ -2765,7 +2764,7 @@ mod tests {
         );
         assert_eq!(restored.state.task(&id).unwrap().state, TaskState::Queued);
         assert_eq!(restored.state.draft().unwrap().input, "B.mp4");
-        for path in [file.clone(), file.with_extension("json.bak")] {
+        for path in [file.clone(), crate::store::backup_path(&file)] {
             assert!(
                 !std::fs::read_to_string(path)
                     .unwrap()
@@ -3159,7 +3158,7 @@ mod tests {
             .unwrap()
             .remove("translate");
         std::fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
-        let _ = std::fs::remove_file(file.with_extension("json.bak"));
+        let _ = std::fs::remove_file(crate::store::backup_path(&file));
 
         let defaults = ConversionOptions {
             summarize: false,
@@ -4334,7 +4333,7 @@ mod tests {
         .unwrap();
         std::fs::write(ws.storage_path(), b"{broken primary").unwrap();
         std::fs::write(
-            ws.storage_path().with_extension("json.bak"),
+            crate::store::backup_path(&ws.storage_path()),
             b"{broken backup",
         )
         .unwrap();

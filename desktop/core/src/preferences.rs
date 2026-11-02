@@ -1459,7 +1459,7 @@ impl Store {
     pub fn reset_group(&mut self, group: PreferenceGroup) -> Result<()> {
         let path = self.root.join(group.filename());
         preserve_original(&self.root, &path)?;
-        preserve_original(&self.root, &path.with_extension("json.bak"))?;
+        preserve_original(&self.root, &crate::store::backup_path(&path))?;
         self.blocked.remove(&group);
         let result = match group {
             PreferenceGroup::Generation => self.save_generation(GenerationPreferences::default()),
@@ -1490,7 +1490,7 @@ impl Store {
                 envelope.value
             }
             Ok(None) => T::default(),
-            Err(_) => match read_envelope::<T>(&path.with_extension("json.bak")) {
+            Err(_) => match read_envelope::<T>(&crate::store::backup_path(&path)) {
                 Ok(Some(envelope)) => {
                     let restored = preserve_original(&self.root, &path).and_then(|_| {
                         course2md::checkpoint::atomic_write(

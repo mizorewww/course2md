@@ -1,7 +1,10 @@
 //! The one way the desktop keeps a JSON record: atomic writes beside a `.json.bak` of the
 //! last readable version, with damaged originals preserved instead of overwritten.
 use anyhow::{Context, Result, ensure};
-use std::{io::Read, path::Path};
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 /// Records and task materials this large are damage, not data.
 const READ_LIMIT: u64 = 32 * 1024 * 1024;
@@ -28,6 +31,24 @@ pub fn read(path: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Where `save` keeps the last readable version of `path`.
+pub fn backup_path(path: &Path) -> PathBuf {
+    path.with_extension("json.bak")
+}
+
+/// Reads the last readable version of `path`, as `read` does.
+pub fn read_backup(path: &Path) -> Result<Vec<u8>> {
+    read(&backup_path(path))
+}
+
+/// Keeps `bytes`, a damaged version of `path`, under a name of its own beside it, so
+/// that nothing written to `path` afterwards replaces them. Returns where they are.
+pub fn set_aside(path: &Path, bytes: &[u8]) -> Result<PathBuf> {
+    let kept = path.with_extension(format!("{}.damaged", new_id("record")));
+    course2md::checkpoint::atomic_write(&kept, bytes)?;
+    Ok(kept)
+}
+
 fn directory_of(path: &Path) -> &Path {
     path.parent().unwrap_or(Path::new("."))
 }
@@ -36,7 +57,7 @@ fn directory_of(path: &Path) -> &Path {
 /// a commit should cost the interface one disk flush, not two.
 fn write_backup(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
-    let backup = path.with_extension("json.bak");
+    let backup = backup_path(path);
     let mut temporary = tempfile::NamedTempFile::new_in(directory_of(path))?;
     temporary.write_all(bytes)?;
     temporary.persist(&backup).map_err(|error| error.error)?;
@@ -51,10 +72,9 @@ pub fn save(path: &Path, bytes: &[u8]) -> Result<()> {
         Ok(previous) if serde_json::from_slice::<serde::de::IgnoredAny>(&previous).is_ok() => {
             write_backup(path, &previous)?
         }
-        Ok(previous) => course2md::checkpoint::atomic_write(
-            &path.with_extension(format!("{}.damaged", new_id("record"))),
-            &previous,
-        )?,
+        Ok(previous) => {
+            set_aside(path, &previous)?;
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => write_backup(path, bytes)?,
         Err(error) => return Err(error).context(course2md::tr!("无法保留原记录")),
     }
@@ -69,7 +89,7 @@ mod tests {
     fn a_save_backs_up_good_records_and_sets_damaged_ones_aside() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("record.json");
-        let backup = path.with_extension("json.bak");
+        let backup = backup_path(&path);
         save(&path, b"[1]").unwrap();
         assert_eq!(std::fs::read(&backup).unwrap(), b"[1]");
         save(&path, b"[2]").unwrap();
