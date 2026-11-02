@@ -1828,7 +1828,9 @@ impl Desktop {
         fields.push(ui::Field::inline(
             "reset-task-overrides-field",
             course2md::tr!("恢复 AI 默认"),
+            // A quiet reset: ink, not the primary of the panel's actions (G4).
             material_button("reset-task-overrides", ButtonVariant::Text)
+                .tone(ButtonTone::Neutral)
                 .icon(symbols::restart_alt())
                 .child(course2md::tr!("恢复默认"))
                 .on_click(cx.listener(|this, _, _, cx| this.reset_task_ai_overrides(cx))),

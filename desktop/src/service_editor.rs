@@ -279,6 +279,7 @@ impl Desktop {
                     ))
                     .child(
                         material_button(("inherit-default-service", index), ButtonVariant::Text)
+                            .tone(ButtonTone::Neutral)
                             .icon(symbols::refresh())
                             .child(course2md::tr!("恢复默认"))
                             .on_click(cx.listener(move |this, _, _, cx| {
