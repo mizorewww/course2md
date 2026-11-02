@@ -59,8 +59,15 @@ fn path_of(latex: &str, display: bool) -> SharedString {
     path.into()
 }
 
-/// The formula a path names, and the slice for a tile's path.
-fn source_of(path: &str) -> Option<(String, bool, Option<(usize, usize)>)> {
+/// What a formula's asset path names.
+struct Source {
+    latex: String,
+    display: bool,
+    /// A tile's slice: index and count.
+    slice: Option<(usize, usize)>,
+}
+
+fn source_of(path: &str) -> Option<Source> {
     let name = path.strip_prefix(ASSET_PREFIX)?.strip_suffix(".svg")?;
     let (name, slice) = match name.split_once('-') {
         Some((name, slice)) => {
@@ -79,7 +86,11 @@ fn source_of(path: &str) -> Option<(String, bool, Option<(usize, usize)>)> {
         .step_by(2)
         .map(|at| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok())
         .collect::<Option<Vec<_>>>()?;
-    Some((String::from_utf8(bytes).ok()?, display, slice))
+    Some(Source {
+        latex: String::from_utf8(bytes).ok()?,
+        display,
+        slice,
+    })
 }
 
 /// The typeset formula, or `None` when RaTeX cannot parse it; the note then
@@ -168,7 +179,11 @@ pub fn asset(path: &str) -> Option<Cow<'static, [u8]>> {
     if let Some(svg) = CACHE.lock().ok()?.svgs.get(path) {
         return Some(Cow::Owned(svg.to_vec()));
     }
-    let (latex, display, slice) = source_of(path)?;
+    let Source {
+        latex,
+        display,
+        slice,
+    } = source_of(path)?;
     let svg = c2m_artifact::math::typeset(&latex, display)?.svg;
     let svg = match slice {
         Some((index, count)) if index < count => slice_svg(&svg, index, count)?,
