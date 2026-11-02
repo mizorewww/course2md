@@ -1005,6 +1005,8 @@ impl Desktop {
                 CardPlace::Row { .. } => card
                     .child(head)
                     .children(body.map(|body| div().px(rem(16.)).pb(rem(16.)).child(body))),
+                // A card of its own on Tasks is roomy, as its large corners are (T6).
+                CardPlace::Open { .. } => card.p(rem(20.)).gap(rem(16.)).child(head).children(body),
                 _ => card.p(rem(16.)).gap(rem(16.)).child(head).children(body),
             })
             .into_any_element()
