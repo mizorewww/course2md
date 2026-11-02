@@ -1644,7 +1644,7 @@ impl Desktop {
     /// Programs the app runs, and whether each was found.
     fn program_facts(
         &self,
-        environment: &crate::backend::Environment,
+        environment: &crate::environment::Environment,
     ) -> Vec<(&'static str, bool)> {
         let mut tools = vec![
             (course2md::tr!("转换程序"), environment.engine),
@@ -1837,7 +1837,7 @@ impl Desktop {
 
     fn diagnostic_details(
         &self,
-        environment: &crate::backend::Environment,
+        environment: &crate::environment::Environment,
         cx: &mut Context<Self>,
     ) -> Div {
         let tools = self.program_facts(environment);

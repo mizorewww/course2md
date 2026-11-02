@@ -9,6 +9,7 @@ pub mod bounded_http;
 pub mod codex;
 pub mod conversion;
 pub mod credentials;
+pub mod environment;
 pub mod import;
 pub mod job;
 pub mod library;

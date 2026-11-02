@@ -30,8 +30,9 @@ mod views;
 mod youtube_ui;
 
 use desktop_core::{
-    activity, backend, conversion, credentials, interrupted, model_discovery, notes, organize,
-    preferences, reader_navigation, service_test, source, spawn_blocking_io, storage, workspace,
+    activity, backend, conversion, credentials, environment, interrupted, model_discovery, notes,
+    organize, preferences, reader_navigation, service_test, source, spawn_blocking_io, storage,
+    workspace,
 };
 
 use desktop_ui::{note_text, symbols, ui};
@@ -137,7 +138,7 @@ struct Desktop {
     /// Where Settings was opened from, and the control to refocus on return.
     settings_origin: Option<(Page, Option<FocusHandle>)>,
     settings_tab: settings_ui::SettingsTab,
-    environment: Option<backend::Environment>,
+    environment: Option<environment::Environment>,
     scrolls: [ScrollHandle; 5],
     inputs: BTreeMap<Field, Entity<InputState>>,
     config: course2md::settings::ConfigFile,
@@ -528,7 +529,7 @@ impl Desktop {
         self.environment = None;
         // Environment detection starts subprocesses synchronously (Metal enumeration can exceed ten seconds),
         // so it runs off the executor; see spawn_blocking_io.
-        let task = spawn_blocking_io(backend::Environment::detect);
+        let task = spawn_blocking_io(environment::Environment::detect);
         cx.spawn(async move |this, cx| {
             let Ok(environment) = task.recv().await else {
                 return;

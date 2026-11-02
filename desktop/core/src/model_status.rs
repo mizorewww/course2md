@@ -149,7 +149,7 @@ impl DeviceIssue {
 
 pub fn device_issue(
     provider: AsrProvider,
-    environment: &crate::backend::Environment,
+    environment: &crate::environment::Environment,
 ) -> Option<DeviceIssue> {
     if !environment.engine {
         return Some(DeviceIssue::Engine);

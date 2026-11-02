@@ -1,7 +1,8 @@
 //! What a task plan is built from, and the checks it has to pass.
 use crate::{
-    backend::{Done, Environment},
+    backend::Done,
     conversion::ConversionOptions,
+    environment::Environment,
     import::ImportSession,
     library::LibraryState,
     locations::{LocationCheck, LocationChecks},

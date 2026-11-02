@@ -331,10 +331,10 @@ fn command_once(
     // ffmpeg/ffprobe 走引擎的同一套查找（随包自带 → 扩展 PATH），预览读取视频
     // 与转换用的是同一个 ffmpeg。
     let program = if name == "yt-dlp" {
-        course2md::ytdlp::resolve_in(Some(&crate::backend::tool_path()))
+        course2md::ytdlp::resolve_in(Some(&crate::environment::tool_path()))
             .unwrap_or_else(|| PathBuf::from(name))
     } else {
-        course2md::tools::locate_in(name, Some(&crate::backend::tool_path()))
+        course2md::tools::locate_in(name, Some(&crate::environment::tool_path()))
             .map_or_else(|| PathBuf::from(name), |tool| tool.path)
     };
     let mut command = Command::new(&program);
@@ -345,7 +345,7 @@ fn command_once(
     };
     command
         .args(args)
-        .env("PATH", crate::backend::tool_path())
+        .env("PATH", crate::environment::tool_path())
         .stdin(Stdio::null())
         .stdout(stdout.try_clone()?)
         .stderr(stderr.try_clone()?);
