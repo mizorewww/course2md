@@ -381,21 +381,29 @@ impl NoteDocument {
         ];
         // A section's screenshot follows its paragraphs.
         let mut figures: Vec<(String, Option<usize>)> = Vec::new();
+        // The key points from `index` on, as one list, and the index after them.
+        let key_points = |mut index: usize| {
+            let mut list = Vec::new();
+            while let Some(PreviewBlock::Paragraph { text, anchor }) = blocks.get(index)
+                && anchor.starts_with("key-point-")
+            {
+                list.push(format!("- {}", note_text::inline_markdown(text)));
+                index += 1;
+            }
+            (list.join("\n"), index)
+        };
         let mut index = 0;
         while let Some(block) = blocks.get(index) {
-            let paragraph_blocks = |text: &str, index: usize| {
-                note_text::blocks(text)
-                    .into_iter()
-                    .map(move |block| (block, Some(index)))
-            };
+            if let PreviewBlock::Heading { .. } = block {
+                parts.append(&mut figures);
+                if let Some(chapter) = chapters.get(&index) {
+                    let chapter = note_text::plain_inline_markdown(chapter);
+                    parts.push((format!("## {chapter}"), Some(index)));
+                }
+            }
             match block {
                 // The summary is one panel: its overview and its key points.
                 PreviewBlock::Heading { anchor, .. } if anchor == "summary" => {
-                    parts.append(&mut figures);
-                    if let Some(chapter) = chapters.get(&index) {
-                        let chapter = note_text::plain_inline_markdown(chapter);
-                        parts.push((format!("## {chapter}"), Some(index)));
-                    }
                     let start = index;
                     let mut summary = Vec::new();
                     index += 1;
@@ -403,15 +411,9 @@ impl NoteDocument {
                         && (anchor == "summary-tldr" || anchor.starts_with("key-point-"))
                     {
                         if anchor.starts_with("key-point-") {
-                            let mut list = Vec::new();
-                            while let Some(PreviewBlock::Paragraph { text, anchor }) =
-                                blocks.get(index)
-                                && anchor.starts_with("key-point-")
-                            {
-                                list.push(format!("- {}", note_text::inline_markdown(text)));
-                                index += 1;
-                            }
-                            summary.push(list.join("\n"));
+                            let (list, next) = key_points(index);
+                            summary.push(list);
+                            index = next;
                         } else {
                             summary.extend(note_text::blocks(text));
                             index += 1;
@@ -426,11 +428,6 @@ impl NoteDocument {
                     continue;
                 }
                 PreviewBlock::Heading { text, seconds, .. } => {
-                    parts.append(&mut figures);
-                    if let Some(chapter) = chapters.get(&index) {
-                        let chapter = note_text::plain_inline_markdown(chapter);
-                        parts.push((format!("## {chapter}"), Some(index)));
-                    }
                     let level = if block.is_timestamp_heading() {
                         "###"
                     } else {
@@ -447,20 +444,18 @@ impl NoteDocument {
                     };
                     parts.push((format!("{level} {heading}"), Some(index)));
                 }
+                // The key points are one list.
                 PreviewBlock::Paragraph { anchor, .. } if anchor.starts_with("key-point-") => {
-                    // The key points are one list.
-                    let start = index;
-                    let mut list = Vec::new();
-                    while let Some(PreviewBlock::Paragraph { text, anchor }) = blocks.get(index)
-                        && anchor.starts_with("key-point-")
-                    {
-                        list.push(format!("- {}", note_text::inline_markdown(text)));
-                        index += 1;
-                    }
-                    parts.push((list.join("\n"), Some(start)));
+                    let (list, next) = key_points(index);
+                    parts.push((list, Some(index)));
+                    index = next;
                     continue;
                 }
-                PreviewBlock::Paragraph { text, .. } => parts.extend(paragraph_blocks(text, index)),
+                PreviewBlock::Paragraph { text, .. } => parts.extend(
+                    note_text::blocks(text)
+                        .into_iter()
+                        .map(|block| (block, Some(index))),
+                ),
                 // A translation reads as a quieter companion to the paragraph above it.
                 PreviewBlock::Translation { text, .. } => parts.push((
                     note_text::blocks(text)
