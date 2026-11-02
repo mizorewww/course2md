@@ -4,6 +4,65 @@ use anyhow::Result;
 use clap::Args;
 use std::path::PathBuf;
 
+/// Parses a configuration enum from its configuration name, the way clap's
+/// `ValueEnum` would, without the configuration crate depending on clap.
+/// `help` describes a value in `--help`, as a variant's doc comment did.
+pub fn choice<T>(
+    help: fn(T) -> Option<&'static str>,
+) -> impl clap::builder::TypedValueParser<Value = T>
+where
+    T: strum::VariantArray + Into<&'static str> + Copy + Send + Sync + 'static,
+{
+    use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser as _};
+    let name = |value: &T| -> &'static str { (*value).into() };
+    PossibleValuesParser::new(
+        T::VARIANTS
+            .iter()
+            .map(move |value| PossibleValue::new(name(value)).help(help(*value))),
+    )
+    .map(move |chosen| {
+        *T::VARIANTS
+            .iter()
+            .find(|value| name(value) == chosen)
+            .expect("clap passes only a listed value")
+    })
+}
+
+fn no_help<T>(_: T) -> Option<&'static str> {
+    None
+}
+
+/// What `--help` says about each value, as the variants' doc comments said in 2.0.1.
+fn asr_api_mode_help(mode: settings::AsrApiMode) -> Option<&'static str> {
+    Some(match mode {
+        settings::AsrApiMode::Transcriptions => {
+            "POST {base_url}/audio/transcriptions（OpenAI 兼容转录端点，如 OpenRouter 的 qwen3-asr）"
+        }
+        settings::AsrApiMode::Chat => {
+            "POST {base_url}/chat/completions（支持音频输入的多模态 LLM， 如 gpt-4o-audio-preview、Gemini、Qwen2-Audio 等 OpenAI 兼容端点）"
+        }
+    })
+}
+
+fn transcript_source_help(source: config::TranscriptSource) -> Option<&'static str> {
+    Some(match source {
+        config::TranscriptSource::Auto => {
+            "优先字幕，无字幕时识别语音 / Prefer subtitles; transcribe speech if unavailable"
+        }
+        config::TranscriptSource::Subtitle => {
+            "仅字幕；本地需同名 .srt/.vtt / Subtitles only; local files need a matching .srt/.vtt"
+        }
+        config::TranscriptSource::Asr => {
+            "使用所选后端识别，不查字幕 / Transcribe with the selected backend; skip subtitles"
+        }
+    })
+}
+
+/// `--provider`, shared by conversions and `models`.
+pub fn asr_provider() -> impl clap::builder::TypedValueParser<Value = config::AsrProvider> {
+    choice(no_help)
+}
+
 /// 内置默认输出格式。settings 的展示与配置模板也由它渲染，避免第二份真相。
 pub fn default_formats() -> Vec<config::OutputFormat> {
     vec![config::OutputFormat::Md, config::OutputFormat::Html]
@@ -158,7 +217,7 @@ pub struct RunOpts {
     pub max_height: Option<u32>,
 
     /// 截图时机：first 立即，stable 等画面稳定 / Capture immediately or wait for stable slides
-    #[arg(long, value_enum)]
+    #[arg(long, value_parser = choice::<config::SlideMode>(no_help))]
     #[arg(help_heading = "截图 / Slides")]
     pub slide_mode: Option<config::SlideMode>,
 
@@ -178,7 +237,7 @@ pub struct RunOpts {
     pub threads: Option<i32>,
 
     /// 识别后端：coreml（Apple 芯片）、gpu、cpu、npu（Intel）、api（云端）/ Speech backend: coreml (Apple Silicon), gpu, cpu, npu (Intel), api (cloud)
-    #[arg(long, value_enum)]
+    #[arg(long, value_parser = asr_provider())]
     #[arg(help_heading = "语音识别 / Speech recognition")]
     pub provider: Option<config::AsrProvider>,
 
@@ -204,12 +263,12 @@ pub struct RunOpts {
     pub asr_api_model: Option<String>,
 
     /// 云端请求方式 / Cloud request mode: transcriptions (default) or chat (audio-capable models)
-    #[arg(long, value_enum)]
+    #[arg(long, value_parser = choice(asr_api_mode_help))]
     #[arg(help_heading = "语音识别 / Speech recognition")]
     pub asr_api_mode: Option<crate::settings::AsrApiMode>,
 
     /// 文字来源：auto 优先字幕，subtitle 仅字幕，asr 语音识别 / Transcript source: auto, subtitle, asr
-    #[arg(long, value_enum)]
+    #[arg(long, value_parser = choice(transcript_source_help))]
     #[arg(help_heading = "输入与输出 / Input and output")]
     pub transcript_source: Option<crate::config::TranscriptSource>,
 
@@ -234,7 +293,7 @@ pub struct RunOpts {
     pub max_speech: Option<f32>,
 
     /// 输出格式，逗号分隔 / Output formats, comma-separated: md,html,json
-    #[arg(long, value_delimiter = ',', value_enum)]
+    #[arg(long, value_delimiter = ',', value_parser = choice::<config::OutputFormat>(no_help))]
     #[arg(help_heading = "输入与输出 / Input and output")]
     pub formats: Option<Vec<crate::config::OutputFormat>>,
 

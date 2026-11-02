@@ -965,7 +965,6 @@ dependencies = [
  "anyhow",
  "c2m-core",
  "c2m-i18n",
- "clap",
  "serde",
  "serde_json",
  "strum 0.27.2",

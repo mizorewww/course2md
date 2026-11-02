@@ -170,7 +170,7 @@ pub enum ModelsCmd {
 #[derive(Args)]
 pub struct ModelTarget {
     /// 识别方式 / Speech backend
-    #[arg(long, value_enum)]
+    #[arg(long, value_parser = crate::options::asr_provider())]
     pub provider: crate::config::AsrProvider,
     /// 模型（默认为该识别方式的默认模型）/ Model (defaults to the backend's default)
     #[arg(long)]

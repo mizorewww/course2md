@@ -91,10 +91,10 @@ pub fn asr_api_key_from_env() -> Option<String> {
     Copy,
     PartialEq,
     Eq,
-    clap::ValueEnum,
     Serialize,
     Deserialize,
     strum::Display,
+    strum::VariantArray,
     strum::IntoStaticStr,
     strum::EnumString,
 )]
@@ -337,10 +337,11 @@ pub fn effective_model(provider: AsrProvider, saved: Option<&str>) -> &str {
     Default,
     PartialEq,
     Eq,
-    clap::ValueEnum,
     Serialize,
     Deserialize,
     strum::Display,
+    strum::IntoStaticStr,
+    strum::VariantArray,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -358,10 +359,11 @@ pub enum SlideMode {
     Default,
     PartialEq,
     Eq,
-    clap::ValueEnum,
     Serialize,
     Deserialize,
     strum::Display,
+    strum::IntoStaticStr,
+    strum::VariantArray,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
@@ -383,10 +385,11 @@ pub enum TranscriptSource {
     Copy,
     PartialEq,
     Eq,
-    clap::ValueEnum,
     Serialize,
     Deserialize,
     strum::Display,
+    strum::IntoStaticStr,
+    strum::VariantArray,
     strum::EnumString,
 )]
 #[serde(rename_all = "lowercase")]

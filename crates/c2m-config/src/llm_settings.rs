@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
     Default,
     PartialEq,
     Eq,
-    clap::ValueEnum,
     Serialize,
     Deserialize,
     strum::Display,
