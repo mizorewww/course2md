@@ -83,6 +83,7 @@ impl Desktop {
             }
         } else {
             self.youtube.checking = true;
+            self.youtube.recheck = Some(generation);
         }
         let task = crate::spawn_blocking_io(move || {
             let program = course2md::ytdlp::resolve_in(Some(&desktop_core::backend::tool_path()))
@@ -99,6 +100,11 @@ impl Desktop {
         cx.spawn(async move |this, cx| {
             let result = task.recv().await;
             let _ = this.update(cx, |this, cx| {
+                if !save {
+                    // Even a stale re-check ends its own busy state.
+                    this.youtube.finish_recheck(generation);
+                    cx.notify();
+                }
                 if !this.youtube.current(generation) {
                     return;
                 }
@@ -132,12 +138,8 @@ impl Desktop {
                         detail: String::new(),
                     },
                 };
-                if save {
-                    if let Some(dialog) = &mut this.youtube.dialog {
-                        dialog.step = step.clone();
-                    }
-                } else {
-                    this.youtube.checking = false;
+                if save && let Some(dialog) = &mut this.youtube.dialog {
+                    dialog.step = step.clone();
                 }
                 this.youtube.status = Some(step);
                 cx.notify();

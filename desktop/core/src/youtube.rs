@@ -11,6 +11,9 @@ pub struct YoutubeUi {
     /// The last check of the saved choice, when one ran.
     pub status: Option<YoutubeStep>,
     pub checking: bool,
+    /// The generation of the re-check that set `checking`. Its result clears
+    /// `checking` even when it arrives stale, unless a newer re-check took over.
+    pub recheck: Option<u64>,
     pub generation: u64,
     pub dialog: Option<YoutubeDialog>,
     /// The closed dialog's last state, so it can play its exit.
@@ -21,6 +24,14 @@ pub struct YoutubeUi {
 impl YoutubeUi {
     pub fn current(&self, generation: u64) -> bool {
         self.generation == generation
+    }
+
+    /// Ends the re-check started at `generation`, if it is still the running one.
+    pub fn finish_recheck(&mut self, generation: u64) {
+        if self.recheck == Some(generation) {
+            self.recheck = None;
+            self.checking = false;
+        }
     }
 
     pub fn close(&mut self) {
@@ -108,4 +119,27 @@ pub enum YoutubeStep {
         detail: String,
     },
     Connected,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stale_recheck_still_ends_checking_unless_a_newer_one_runs() {
+        let mut ui = YoutubeUi {
+            checking: true,
+            recheck: Some(3),
+            generation: 4,
+            ..Default::default()
+        };
+        // Switching browser or disconnecting moved the generation on.
+        assert!(!ui.current(3));
+        ui.finish_recheck(3);
+        assert!(!ui.checking);
+        ui.checking = true;
+        ui.recheck = Some(5);
+        ui.finish_recheck(3);
+        assert!(ui.checking);
+    }
 }
