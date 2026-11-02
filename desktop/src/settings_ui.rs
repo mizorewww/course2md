@@ -15,6 +15,10 @@ use crate::preferences::{
 };
 use crate::service_test::{self, TestKind};
 use crate::{ConversionOptions, Desktop, Page, symbols, ui};
+use crate::{
+    course_library::CommandsButton,
+    folder_tree::{Command, command_context_menu},
+};
 use anyhow::{Context as _, Result, anyhow};
 use course2md::execution::Component;
 use gpui::{prelude::*, *};
@@ -23,7 +27,6 @@ use gpui_kit::component::{
     input::{InputEvent, InputState, TextareaState},
     scroll::Scrollbar,
 };
-use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
     icons::{Icon, SymbolIcon},
     motion,
@@ -31,7 +34,6 @@ use gpui_kit_material::{
 };
 use service_form::{FormField, FormOwner, ServiceForm};
 use std::collections::{BTreeMap, BTreeSet};
-use std::rc::Rc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -802,7 +804,7 @@ impl Desktop {
         let content = match self.settings_tab {
             SettingsTab::Generation => self.generation_settings_page(window, cx),
             SettingsTab::Services => self.services_settings_page(window, cx),
-            SettingsTab::Storage => self.storage_settings_page(window, cx),
+            SettingsTab::Storage => self.storage_settings_page(cx),
             SettingsTab::Application => self.application_settings_page(cx),
             SettingsTab::Appearance => self.appearance_page(window, cx),
         };
@@ -933,7 +935,7 @@ impl Desktop {
             };
             let mut fields: Vec<_> = services
                 .iter()
-                .map(|version| self.service_row(version, window, cx))
+                .map(|version| self.service_row(version, cx))
                 .collect();
             fields.push(
                 ui::Field::add(
@@ -952,12 +954,7 @@ impl Desktop {
 
     /// One saved service: what it is, whether it works, and its commands in a menu that
     /// the row's ⋯ button and a right-click open alike. The row itself opens the editor.
-    fn service_row(
-        &self,
-        version: &ServiceVersion,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> ui::Field {
+    fn service_row(&self, version: &ServiceVersion, cx: &mut Context<Self>) -> ui::Field {
         let id = version.id.clone();
         let protocol = version.config.protocol;
         let purpose = protocol.purpose();
@@ -1008,28 +1005,15 @@ impl Desktop {
         if is_default {
             status.insert(0, (StatusKind::Tonal, course2md::tr!("默认")));
         }
-        let actions = self.service_actions(version, is_default);
-        let menu_id = ElementId::Name(format!("service-actions-{id}").into());
-        let trigger = MaterialTooltip::plain(
-            SharedString::from(format!("service-actions-tip-{id}")),
-            course2md::tr!("服务操作"),
-        )
-        .trigger(
-            IconButton::new(
-                SharedString::from(format!("service-actions-button-{id}")),
-                symbols::more_vert(),
-                course2md::tr!("{} 操作", version.config.name),
-            )
-            .on_click(ui::menu_key_toggle(&menu_id, window, cx)),
-        );
-        let menu = ui::menu(
-            menu_id,
-            trigger,
-            service_action_menu(&id, &actions, version, &cx.weak_entity()),
-            window,
-            cx,
-        )
-        .anchor(Anchor::TopRight);
+        let actions = self.service_actions(version, is_default, cx);
+        let menu = CommandsButton {
+            id: ElementId::Name(format!("service-actions-{id}").into()),
+            label: course2md::tr!("服务操作").into(),
+            subject: Some(course2md::tr!("{} 操作", version.config.name).into()),
+            commands: actions.clone(),
+            width: Some(MENU_WIDTH),
+            tonal: false,
+        };
         let row = ui::Resource {
             id: SharedString::from(format!("saved-service-{id}")),
             icon: service_form::protocol_icon(protocol).into(),
@@ -1047,9 +1031,6 @@ impl Desktop {
             actions: vec![menu.into_any_element()],
         }
         .row(cx);
-        let this = cx.weak_entity();
-        let context_version = version.clone();
-        let context_id = id.clone();
         let open_version = id.clone();
         let open = cx.listener(move |this, _, window, cx| {
             this.open_settings_service_editor(purpose, Some(open_version.clone()), window, cx);
@@ -1060,9 +1041,10 @@ impl Desktop {
                 .relative()
                 .w_full()
                 .min_w_0()
-                .child(MaterialContextMenu::new(
+                .child(command_context_menu(
                     SharedString::from(format!("service-context-menu-{id}")),
-                    move |_, _| service_action_menu(&context_id, &actions, &context_version, &this),
+                    Some(MENU_WIDTH),
+                    actions,
                 ))
                 .child(
                     TileScale::Regular
@@ -1079,39 +1061,47 @@ impl Desktop {
         &self,
         version: &ServiceVersion,
         is_default: bool,
-    ) -> Rc<Vec<ServiceAction>> {
-        let action = |kind, label, icon| ServiceAction {
-            kind,
-            label,
-            icon,
-            disabled: false,
-            divider: false,
-            danger: false,
+        cx: &mut Context<Self>,
+    ) -> Vec<Command> {
+        let desktop = cx.weak_entity();
+        let purpose = version.config.protocol.purpose();
+        let open = |test: bool| {
+            let id = version.id.clone();
+            move |this: &mut Desktop, window: &mut Window, cx: &mut Context<Desktop>| {
+                if this.open_settings_service_editor(purpose, Some(id.clone()), window, cx) && test
+                {
+                    this.start_service_test(window, cx);
+                }
+            }
         };
+        let (default_id, service_id) = (version.id.clone(), version.service_id.clone());
         let mut actions = vec![
-            action(
-                ServiceCommand::Test,
+            Command::new(
                 course2md::tr!("测试连接"),
                 symbols::science(),
+                &desktop,
+                open(true),
             ),
-            action(
-                ServiceCommand::Edit,
+            Command::new(
                 course2md::tr!("编辑…"),
                 symbols::edit(),
+                &desktop,
+                open(false),
             ),
-            ServiceAction {
-                disabled: is_default,
-                divider: true,
-                ..action(
-                    ServiceCommand::MakeDefault,
-                    if is_default {
-                        course2md::tr!("已是默认服务")
-                    } else {
-                        course2md::tr!("设为默认服务…")
-                    },
-                    symbols::check_circle(),
-                )
-            },
+            Command::new(
+                if is_default {
+                    course2md::tr!("已是默认服务")
+                } else {
+                    course2md::tr!("设为默认服务…")
+                },
+                symbols::check_circle(),
+                &desktop,
+                move |this, window, cx| {
+                    this.confirm_default_service(default_id.clone(), window, cx)
+                },
+            )
+            .disabled(is_default)
+            .ends_group(),
         ];
         if version.config.protocol == ServiceProtocol::CodexResponses
             && matches!(
@@ -1119,56 +1109,28 @@ impl Desktop {
                 Some(course2md::login::codex::LoginStatus::Connected)
             )
         {
-            actions.push(ServiceAction {
-                disabled: self.codex.busy(),
-                ..action(
-                    ServiceCommand::SignOut,
+            actions.push(
+                Command::new(
                     course2md::tr!("退出 ChatGPT 账号"),
                     symbols::logout(),
+                    &desktop,
+                    |this, _, cx| {
+                        this.codex_logout(desktop_accounts::codex::CodexSurface::Settings, cx)
+                    },
                 )
-            });
+                .disabled(self.codex.busy()),
+            );
         }
-        actions.push(ServiceAction {
-            danger: true,
-            ..action(
-                ServiceCommand::Delete,
+        actions.push(
+            Command::new(
                 course2md::tr!("删除服务…"),
                 symbols::delete(),
+                &desktop,
+                move |this, window, cx| this.confirm_delete_service(service_id.clone(), window, cx),
             )
-        });
-        Rc::new(actions)
-    }
-
-    fn run_service_action(
-        &mut self,
-        command: ServiceCommand,
-        version: &ServiceVersion,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let purpose = version.config.protocol.purpose();
-        match command {
-            ServiceCommand::Test | ServiceCommand::Edit => {
-                let opened = self.open_settings_service_editor(
-                    purpose,
-                    Some(version.id.clone()),
-                    window,
-                    cx,
-                );
-                if opened && matches!(command, ServiceCommand::Test) {
-                    self.start_service_test(window, cx);
-                }
-            }
-            ServiceCommand::MakeDefault => {
-                self.confirm_default_service(version.id.clone(), window, cx)
-            }
-            ServiceCommand::SignOut => {
-                self.codex_logout(desktop_accounts::codex::CodexSurface::Settings, cx)
-            }
-            ServiceCommand::Delete => {
-                self.confirm_delete_service(version.service_id.clone(), window, cx)
-            }
-        }
+            .danger(),
+        );
+        actions
     }
 
     fn service_tests(
@@ -2128,53 +2090,6 @@ impl Desktop {
 /// kept for retry and exit when the save failed.
 fn pending_after_save<T, E>(result: &std::result::Result<(), E>, next: T) -> Option<T> {
     result.is_err().then_some(next)
-}
-
-/// The commands of a saved service, drawn by its ⋯ menu and its context menu alike.
-#[derive(Clone, Copy)]
-enum ServiceCommand {
-    Test,
-    Edit,
-    MakeDefault,
-    SignOut,
-    Delete,
-}
-
-struct ServiceAction {
-    kind: ServiceCommand,
-    label: &'static str,
-    icon: SymbolIcon,
-    disabled: bool,
-    divider: bool,
-    danger: bool,
-}
-
-/// A saved service's commands, on a right press and behind its ⋮ button.
-fn service_action_menu(
-    id: &str,
-    actions: &[ServiceAction],
-    version: &ServiceVersion,
-    desktop: &WeakEntity<Desktop>,
-) -> MaterialMenu {
-    MaterialMenu::new(SharedString::from(format!("service-action-items-{id}")))
-        .width(MENU_WIDTH)
-        .items(actions.iter().map(|action| {
-            let (kind, version, desktop) = (action.kind, version.clone(), desktop.clone());
-            let icon = Icon::from(action.icon);
-            MaterialMenuItem::new(action.label)
-                .leading(if action.danger {
-                    icon.color(color(ColorRole::ERROR))
-                } else {
-                    icon
-                })
-                .disabled(action.disabled)
-                .divider(action.divider)
-                .on_click(move |_, window, cx| {
-                    let _ = desktop.update(cx, |this, cx| {
-                        this.run_service_action(kind, &version, window, cx)
-                    });
-                })
-        }))
 }
 
 fn search_placeholder() -> &'static str {

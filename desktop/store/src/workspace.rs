@@ -2236,25 +2236,18 @@ impl Workspace {
         options: ConversionOptions,
     ) -> Result<Self> {
         let mut recovery = None;
-        if path.is_file()
-            && let Ok(bytes) = desktop_prefs::store::read(&path)
-            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
-            && value
-                .get("schema")
-                .and_then(|v| v.as_u64())
-                .is_some_and(|schema| schema > SCHEMA as u64)
-        {
+        let schema = desktop_prefs::store::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .and_then(|record| record.get("schema")?.as_u64());
+        if schema.is_some_and(|schema| schema > SCHEMA as u64) {
             bail!(c2m_i18n::tr!(
                 "任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。"
             ));
         }
         // The first rewrite drops what the record used to carry for each task, and its
         // mirror in the library normally holds the same. This copy covers the rest.
-        if desktop_prefs::store::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .is_some_and(|record| record["schema"] == 1)
-        {
+        if schema == Some(1) {
             let _ = std::fs::copy(&path, path.with_extension("schema1.json"));
         }
         let mut state = if path.exists() {
