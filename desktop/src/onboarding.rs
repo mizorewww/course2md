@@ -1007,6 +1007,7 @@ impl Desktop {
                         div().px(ITEM_INSET).child(self.engine_obstacle(
                             &format!("setup-engine-obstacle-{issue:?}"),
                             issue,
+                            true,
                             cx,
                         ))
                     })),

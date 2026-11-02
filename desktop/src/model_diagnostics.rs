@@ -135,12 +135,15 @@ impl Desktop {
         let outcome = self.settings_ui.model_diagnostics.outcome.as_ref()?;
         (outcome.key == key).then_some(outcome)
     }
-    /// The checked file state; `None` while checking or after a failed check.
-    pub(crate) fn model_cache_state(&self, request: &Request) -> Option<CacheState> {
+    fn model_entry(&self, request: &Request) -> Option<&Entry> {
         self.settings_ui
             .model_diagnostics
             .entries
             .get(&request.key())
+    }
+    /// The checked file state; `None` while checking or after a failed check.
+    pub(crate) fn model_cache_state(&self, request: &Request) -> Option<CacheState> {
+        self.model_entry(request)
             .filter(|entry| !entry.checking)
             .and_then(Entry::status)
             .map(|status| status.state)
@@ -164,11 +167,7 @@ impl Desktop {
         if self.model_outcome(request).is_some_and(|o| o.cancelled) {
             return (StatusKind::Neutral, course2md::tr!("模型准备已暂停"));
         }
-        let entry = self
-            .settings_ui
-            .model_diagnostics
-            .entries
-            .get(&request.key());
+        let entry = self.model_entry(request);
         if self.environment.is_none() || entry.is_none_or(|entry| entry.checking) {
             return (StatusKind::Progress, course2md::tr!("正在检查模型"));
         }
@@ -349,19 +348,9 @@ impl Desktop {
         device_issue(provider, self.environment.as_ref()?)
     }
 
-    /// Why no engine can run, in one quiet line, followed by its repair.
+    /// Why no engine can run, in one quiet line, followed by its repair; without
+    /// its own 重新检查 where the surface already offers one (the 运行检查 summary).
     pub(crate) fn engine_obstacle(
-        &self,
-        id: &str,
-        issue: DeviceIssue,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        self.engine_obstacle_with(id, issue, true, cx)
-    }
-
-    /// The obstacle and its repair, without its own 重新检查 where the
-    /// surrounding surface already offers one (the 运行检查 summary).
-    pub(crate) fn engine_obstacle_with(
         &self,
         id: &str,
         issue: DeviceIssue,
@@ -425,7 +414,7 @@ impl Desktop {
         let request = Request::new(provider, model, root);
         match self.engine_issue(provider) {
             Some(issue) => {
-                self.engine_obstacle(&format!("import-engine-{}", request.key()), issue, cx)
+                self.engine_obstacle(&format!("import-engine-{}", request.key()), issue, true, cx)
             }
             None => self.model_surface(&request, false, window, cx),
         }
@@ -608,7 +597,7 @@ impl Desktop {
             .gap(rem(12.))
             .child(header)
             .when_some(issue.filter(|_| full), |view, issue| {
-                view.child(self.engine_obstacle(&id("obstacle"), issue, cx))
+                view.child(self.engine_obstacle(&id("obstacle"), issue, true, cx))
             })
             .children(
                 lines
@@ -937,10 +926,7 @@ impl Desktop {
         if request.provider == AsrProvider::Api || self.engine_issue(request.provider).is_some() {
             return None;
         }
-        self.settings_ui
-            .model_diagnostics
-            .entries
-            .get(&request.key())
+        self.model_entry(&request)
             .and_then(Entry::status)
             .map(|status| status.state)
     }
@@ -957,11 +943,7 @@ impl Desktop {
                 course2md::tr!("所选识别方式暂不可用，可在模型管理中查看原因").into(),
             );
         }
-        let entry = self
-            .settings_ui
-            .model_diagnostics
-            .entries
-            .get(&request.key());
+        let entry = self.model_entry(&request);
         if entry.is_none_or(|entry| entry.checking) {
             return (true, course2md::tr!("正在检查识别模型…").into());
         }

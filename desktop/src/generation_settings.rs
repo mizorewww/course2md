@@ -279,7 +279,7 @@ impl Desktop {
         if let Some(issue) = engine_issue {
             fields.push(ui::Field::content(
                 "generation-engine-obstacle",
-                self.engine_obstacle("generation-engine-obstacle-detail", issue, cx),
+                self.engine_obstacle("generation-engine-obstacle-detail", issue, true, cx),
             ));
         } else if !(settled && ready) {
             let status = if settled {

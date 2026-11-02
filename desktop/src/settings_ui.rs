@@ -1768,7 +1768,7 @@ impl Desktop {
         {
             fields.push(ui::Field::content(
                 "diagnostic-engine-obstacle-row",
-                self.engine_obstacle_with("diagnostic-engine-obstacle", issue, false, cx),
+                self.engine_obstacle("diagnostic-engine-obstacle", issue, false, cx),
             ));
         }
         if !e.engine {
