@@ -69,8 +69,6 @@ struct ServiceEditor {
     saved_configuration: Option<ServiceVersion>,
     test_details_open: bool,
     save_failed: bool,
-    /// A credential is being written to or checked in the system vault.
-    vault_busy: bool,
 }
 
 pub struct OrdinaryPreferenceIssue {

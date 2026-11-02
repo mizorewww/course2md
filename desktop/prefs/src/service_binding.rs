@@ -4,7 +4,6 @@ use c2m_engine::execution::Component;
 
 /// What a service publication continues with once its credential is checked.
 pub struct PublishPlan {
-    pub draft_id: String,
     pub continue_repair: bool,
     pub target: Option<String>,
     pub repair_task: Option<(String, Vec<Component>)>,

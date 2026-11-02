@@ -46,8 +46,6 @@ struct ServiceSetup {
     pending_version: Option<ServiceVersion>,
     evidence: Vec<(TestKind, ServiceTestEvidence)>,
     running: Option<Arc<AtomicBool>>,
-    /// A key is being stored in, or checked against, the system vault.
-    vault_busy: bool,
     test_serial: u64,
     details_open: bool,
 }
@@ -66,7 +64,6 @@ impl ServiceSetup {
             pending_version: None,
             evidence: Vec::new(),
             running: None,
-            vault_busy: false,
             test_serial: 0,
             details_open: false,
         }
@@ -78,7 +75,7 @@ impl ServiceSetup {
     }
     /// Editing is closed while a check, a vault step or a retried save is open.
     fn busy(&self) -> bool {
-        self.running.is_some() || self.vault_busy || self.pending_version.is_some()
+        self.running.is_some() || self.form.vault_busy || self.pending_version.is_some()
     }
     fn unchanged(&self, cx: &App) -> bool {
         self.form.typed_key(cx).is_empty()
@@ -432,35 +429,25 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let owner = FormOwner::Setup(purpose);
         let service = self.onboarding.service(purpose);
-        if service.running.is_some() || service.vault_busy {
+        if service.running.is_some() || service.form.vault_busy {
             return;
         }
         let key = service.form.typed_key(cx);
         if !key.trim().is_empty() {
             let draft = service.form.current_draft(cx);
-            self.onboarding.service_mut(purpose).vault_busy = true;
-            let secret = Secret::new(key);
-            self.run_vault_step(
-                cx,
-                move |vault| preferences::Store::insert_credential(vault, secret),
-                move |this, stored, window, cx| {
-                    let service = this.onboarding.service_mut(purpose);
-                    service.vault_busy = false;
-                    if service.form.draft.id != draft.id {
-                        if let Ok(reference) = stored {
-                            this.forget_credentials(vec![reference]);
-                        }
-                        return;
-                    }
-                    let committed = stored.and_then(|reference| {
-                        this.preferences
-                            .commit_service_draft(draft, Some(reference.clone()))
-                            .inspect_err(|_| this.forget_credentials(vec![reference]))
-                    });
+            self.store_form_secret(
+                owner,
+                draft,
+                Secret::new(key),
+                |this, draft, reference| {
+                    this.preferences
+                        .commit_service_draft(draft, Some(reference))
+                },
+                move |this, committed, window, cx| {
                     if committed.is_ok() {
-                        let service = this.onboarding.service_mut(purpose);
-                        service.form.clear_key(window, cx);
+                        this.onboarding.service(purpose).form.clear_key(window, cx);
                     }
                     if this
                         .commit_setup_draft(purpose, committed, window, cx)
@@ -470,6 +457,7 @@ impl Desktop {
                     }
                     cx.notify();
                 },
+                cx,
             );
             cx.notify();
             return;
@@ -510,18 +498,8 @@ impl Desktop {
                 {
                     return;
                 }
-                let service = this.onboarding.service(purpose);
-                let unchanged = service.form.typed_key(cx).is_empty()
-                    && service
-                        .form
-                        .current_draft(cx)
-                        .configuration()
-                        .ok()
-                        .is_some_and(|config| {
-                            results.iter().all(|(_, evidence)| {
-                                evidence.fingerprint == config.fingerprint(&evidence.contract)
-                            })
-                        });
+                let form = &this.onboarding.service(purpose).form;
+                let unchanged = results.iter().all(|(_, evidence)| form.fits(evidence, cx));
                 let service = this.onboarding.service_mut(purpose);
                 service.running = None;
                 if unchanged {
@@ -579,34 +557,19 @@ impl Desktop {
         if self.commit_setup_form(purpose, window, cx).is_none() {
             return;
         }
-        let id = self.onboarding.service(purpose).form.draft.id.clone();
-        // Publication confirms the credential is in the vault, which can
-        // block: that check runs off the UI thread.
-        let reference = match self.preferences.publication_credential(&id) {
-            Ok(reference) => reference,
-            Err(error) => return self.setup_publish_failed(&error, cx),
-        };
-        self.onboarding.service_mut(purpose).vault_busy = true;
-        self.run_vault_step(
-            cx,
-            move |vault| preferences::Store::verify_credential(vault, reference),
-            move |this, verified, window, cx| {
-                this.onboarding.service_mut(purpose).vault_busy = false;
-                let published = verified.and_then(|verified| {
-                    this.preferences
-                        .commit_publication(&id, BindingScope::Defaults, verified)
-                });
-                match published {
-                    Ok(version) => {
-                        this.onboarding.service_mut(purpose).pending_version =
-                            Some(version.clone());
-                        this.finish_setup_service(purpose, version, window, cx);
-                    }
-                    Err(error) => this.setup_publish_failed(&error, cx),
+        self.publish_form_draft(
+            FormOwner::Setup(purpose),
+            BindingScope::Defaults,
+            move |this, published, window, cx| match published {
+                Ok(version) => {
+                    this.onboarding.service_mut(purpose).pending_version = Some(version.clone());
+                    this.finish_setup_service(purpose, version, window, cx);
                 }
+                Err(error) => this.setup_publish_failed(&error, cx),
             },
+            window,
+            cx,
         );
-        cx.notify();
     }
 
     fn finish_setup_service(
@@ -1414,7 +1377,7 @@ impl Desktop {
         let service_action = purpose.map(|purpose| self.setup_service_action(purpose, cx));
         let busy = purpose.is_some_and(|purpose| {
             let service = self.onboarding.service(purpose);
-            service.running.is_some() || service.vault_busy
+            service.running.is_some() || service.form.vault_busy
         });
         let label = match (service_action, step) {
             (Some(action), _) => action.label(),

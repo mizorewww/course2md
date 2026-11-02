@@ -2,8 +2,9 @@
 //! draft, inputs, field errors, model discovery and key visibility. Each surface
 //! lays the controls out in its own form; behavior and choices live here once.
 use super::*;
+use crate::credentials::CredentialRef;
 use crate::model_discovery;
-use crate::preferences::FieldError;
+use crate::preferences::{BindingScope, FieldError, ServiceTestEvidence};
 use desktop_accounts::codex::CodexSurface;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -62,6 +63,8 @@ pub(crate) struct ServiceForm {
     pub(crate) errors: Vec<FieldError>,
     pub(crate) models: model_discovery::State,
     pub(crate) show_key: bool,
+    /// A key is being stored in, or checked against, the system vault.
+    pub(crate) vault_busy: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -97,6 +100,7 @@ impl ServiceForm {
             errors: Vec::new(),
             models: Default::default(),
             show_key: false,
+            vault_busy: false,
             _subscriptions: subscriptions,
         };
         form.load(draft, window, cx);
@@ -129,6 +133,15 @@ impl ServiceForm {
         draft
     }
 
+    /// The result was for what the form shows now, with no new key typed.
+    pub(crate) fn fits(&self, evidence: &ServiceTestEvidence, cx: &App) -> bool {
+        self.typed_key(cx).is_empty()
+            && self
+                .current_draft(cx)
+                .configuration()
+                .is_ok_and(|config| config.fingerprint(&evidence.contract) == evidence.fingerprint)
+    }
+
     /// A service is called with a key exactly when it has one: a saved key or
     /// one typed now. Keyless types never send one.
     fn authentication(&self, cx: &App) -> Authentication {
@@ -158,6 +171,7 @@ impl ServiceForm {
         self.errors.clear();
         self.models.invalidate();
         self.show_key = false;
+        self.vault_busy = false;
     }
     pub(crate) fn clear_key(&self, window: &mut Window, cx: &mut App) {
         self.inputs[&FormField::Key].update(cx, |input, cx| input.set_value("", window, cx));
@@ -280,6 +294,83 @@ impl Desktop {
                 .map(|editor| &mut editor.form),
             FormOwner::Setup(purpose) => self.setup_form_mut(purpose),
         }
+    }
+
+    fn form_of_draft(&mut self, owner: FormOwner, id: &str) -> Option<&mut ServiceForm> {
+        self.service_form_mut(owner)
+            .filter(|form| form.draft.id == id)
+    }
+
+    /// Stores a secret in the vault off the UI thread and commits `draft` with it. If the
+    /// form moved to another draft or closed meanwhile, or the commit fails, nothing
+    /// refers to the stored key.
+    pub(crate) fn store_form_secret(
+        &mut self,
+        owner: FormOwner,
+        draft: ServiceDraft,
+        secret: Secret,
+        commit: impl FnOnce(&mut Self, ServiceDraft, CredentialRef) -> Result<ServiceDraft> + 'static,
+        then: impl FnOnce(&mut Self, Result<ServiceDraft>, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let id = draft.id.clone();
+        if let Some(form) = self.service_form_mut(owner) {
+            form.vault_busy = true;
+        }
+        self.run_vault_step(
+            cx,
+            move |vault| preferences::Store::insert_credential(vault, secret),
+            move |this, stored, window, cx| {
+                let Some(form) = this.form_of_draft(owner, &id) else {
+                    if let Ok(reference) = stored {
+                        this.forget_credentials(vec![reference]);
+                    }
+                    return;
+                };
+                form.vault_busy = false;
+                let committed = stored.and_then(|reference| {
+                    commit(this, draft, reference.clone())
+                        .inspect_err(|_| this.forget_credentials(vec![reference]))
+                });
+                then(this, committed, window, cx);
+            },
+        );
+    }
+
+    /// Publishes the form's committed draft. Publication first confirms the draft's
+    /// credential is in the vault, which can block; only that check leaves the UI thread.
+    pub(crate) fn publish_form_draft(
+        &mut self,
+        owner: FormOwner,
+        scope: BindingScope,
+        then: impl FnOnce(&mut Self, Result<ServiceVersion>, &mut Window, &mut Context<Self>) + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(id) = self.service_form(owner).map(|form| form.draft.id.clone()) else {
+            return;
+        };
+        let reference = match self.preferences.publication_credential(&id) {
+            Ok(reference) => reference,
+            Err(error) => return then(self, Err(error), window, cx),
+        };
+        if let Some(form) = self.service_form_mut(owner) {
+            form.vault_busy = true;
+        }
+        self.run_vault_step(
+            cx,
+            move |vault| preferences::Store::verify_credential(vault, reference),
+            move |this, verified, window, cx| {
+                let Some(form) = this.form_of_draft(owner, &id) else {
+                    return;
+                };
+                form.vault_busy = false;
+                let published = verified
+                    .and_then(|verified| this.preferences.commit_publication(&id, scope, verified));
+                then(this, published, window, cx);
+            },
+        );
+        cx.notify();
     }
 
     /// An edit invalidates what the surface derived from the old values.
