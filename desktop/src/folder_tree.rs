@@ -197,7 +197,7 @@ impl Desktop {
             .map(|location| {
                 (
                     location.root.clone(),
-                    location.name.clone(),
+                    location.label(),
                     self.library.indexes.get(&location.root).cloned(),
                 )
             })
