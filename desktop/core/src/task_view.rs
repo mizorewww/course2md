@@ -931,6 +931,14 @@ mod tests {
     use crate::workspace::{Intent, TaskState};
 
     #[test]
+    fn a_task_an_earlier_worker_still_holds_reads_as_saving_its_progress() {
+        let mut task = task_record("task");
+        task.state = TaskState::Running;
+        task.held = true;
+        assert_eq!(super::task_status_label(&task), "正在保存进度");
+    }
+
+    #[test]
     fn a_waiting_task_offers_the_moves_its_place_allows() {
         use super::{TaskAction, task_moves};
         let task = task_record("b");

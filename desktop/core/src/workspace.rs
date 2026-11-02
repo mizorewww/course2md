@@ -3718,7 +3718,6 @@ mod tests {
         let held = reopened.state.task(&id).unwrap();
         assert!(held.held && !held.has_uncertain(), "not judged yet");
         assert_ne!(held.state, TaskState::Uncertain);
-        assert_eq!(crate::task_view::task_status_label(held), "正在保存进度");
         assert!(reopened.state.next_task().is_none(), "not run beside it");
         assert!(reopened.held_check_due().is_some());
         reopened.held_checked = None;
