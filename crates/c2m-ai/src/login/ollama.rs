@@ -37,9 +37,11 @@ pub(super) fn models(host: &str) -> Result<Vec<String>> {
         .get(&format!("{host}/api/tags"))
         .call()
         .map_err(|_| {
-            anyhow::anyhow!(
-                "无法连接 Ollama 服务 {host}；请确认已安装并正在运行（ollama serve） / Cannot reach the Ollama service at {host}; make sure it is installed and running (ollama serve)"
-            )
+            anyhow::anyhow!(tr!(
+                "无法连接 Ollama 服务 {}；请确认已安装并正在运行（ollama serve） / Cannot reach the Ollama service at {}; make sure it is installed and running (ollama serve)",
+                host,
+                host
+            ))
         })?;
     let value: serde_json::Value = response.body_mut().read_json().context(tr!(
         "Ollama 响应无法解析 / Cannot parse the Ollama response"
@@ -114,9 +116,13 @@ pub fn login() -> Result<()> {
     );
     match crate::llm::test_connection(&cfg.llm) {
         Ok(()) => println_tr!("连接测试通过 / Connection test passed."),
-        Err(e) => bail!(
-            "配置已保存，但连接测试失败；请确认模型 {model} 可正常对话 / Settings saved, but the connection test failed; make sure {model} can chat: {e:#}"
-        ),
+        Err(e) => bail!(tr!(
+            "配置已保存，但连接测试失败；请确认模型 {} 可正常对话：{} / Settings saved, but the connection test failed; make sure {} can chat: {}",
+            model,
+            format!("{e:#}"),
+            model,
+            format!("{e:#}")
+        )),
     }
     Ok(())
 }

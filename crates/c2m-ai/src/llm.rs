@@ -1062,22 +1062,22 @@ pub fn print_status(cfg: &crate::settings::ConfigFile) {
     } else {
         tr!("已设置（隐藏） / set (hidden)")
     };
-    println!(
+    println_tr!(
         "配置文件 / Configuration: {}",
         crate::settings::config_path().display()
     );
-    println!("  LLM 校对 / Transcript polish: {}", state(s.enabled));
-    println!("  服务类型 / Provider: {}", s.provider);
-    println!("  服务地址 / Base URL: {}", or_dash(&s.base_url));
-    println!("  API key: {key}");
-    println!("  模型 / Model: {}", or_dash(&s.model));
-    println!(
+    println_tr!("  LLM 校对 / Transcript polish: {}", state(s.enabled));
+    println_tr!("  服务类型 / Provider: {}", s.provider);
+    println_tr!("  服务地址 / Base URL: {}", or_dash(&s.base_url));
+    println_tr!("  API 密钥 / API key: {}", key);
+    println_tr!("  模型 / Model: {}", or_dash(&s.model));
+    println_tr!(
         "  截图辅助校对 / Slide-assisted polish: {}",
         state(s.vision)
     );
-    println!("  自动摘要 / Automatic summary: {}", state(s.summarize));
-    println!("  并发请求 / Concurrent requests: {}", s.concurrency);
-    println!("  使用提示 / Usage hint: {}", state(!s.disable_hint));
+    println_tr!("  自动摘要 / Automatic summary: {}", state(s.summarize));
+    println_tr!("  并发请求 / Concurrent requests: {}", s.concurrency);
+    println_tr!("  使用提示 / Usage hint: {}", state(!s.disable_hint));
     if !s.enabled {
         println_tr!("开启校对 / Enable transcript polish: course2md llm setup");
     }

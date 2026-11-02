@@ -391,7 +391,7 @@ const TEMPLATE: &str = include_str!("config_template.toml");
 pub fn print_effective(cfg: &settings::ConfigFile) -> Result<()> {
     let d = &cfg.defaults;
     let r = resolve(String::new(), &RunOpts::default(), cfg)?;
-    println!(
+    println_tr!(
         "配置文件 / Configuration: {}",
         settings::config_path().display()
     );

@@ -87,7 +87,7 @@ fn run_wizard(
                     model_dir_override.or(cfg.defaults.model_dir.as_deref()),
                 );
                 if crate::models::llama_ready(&root) {
-                    println!(
+                    crate::println_tr!(
                         "使用已下载模型 / Using downloaded models: {}",
                         root.display()
                     );
@@ -136,7 +136,7 @@ fn run_wizard(
 
     let path = crate::settings::save(&cfg)?;
     println!();
-    println!("✓ 已保存配置 / Configuration saved: {}", path.display());
+    crate::println_tr!("✓ 已保存配置 / Configuration saved: {}", path.display());
     println_tr!("开始处理视频… / Processing your video…");
     Ok(cfg)
 }

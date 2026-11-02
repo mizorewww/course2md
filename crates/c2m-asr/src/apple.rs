@@ -38,6 +38,9 @@ mod ffi {
     }
 }
 
+/// The Swift shim's message while it loads a cached model; shown translated.
+const LOAD_MESSAGE: &str = "正在加载本机模型… / Loading local model…";
+
 // Swift downloads report through the same serialized NDJSON stream as Rust.
 #[unsafe(no_mangle)]
 extern "C" fn c2m_model_progress(
@@ -73,6 +76,11 @@ extern "C" fn c2m_model_progress(
         static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
         let percent = (fraction * 100.0) as i64;
         if LAST.swap(percent, std::sync::atomic::Ordering::Relaxed) != percent {
+            let message = if message == LOAD_MESSAGE {
+                tr!(LOAD_MESSAGE)
+            } else {
+                &message
+            };
             eprintln_tr!("模型 {}% · {}", percent, message);
         }
     }

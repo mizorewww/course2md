@@ -292,7 +292,7 @@ pub async fn download_models(root: &Path, control: &crate::dispatch::TaskControl
 
 pub fn list_models(root: &Path) {
     let p = llama_paths(root);
-    println!(
+    crate::println_tr!(
         "gpu/cpu 模型目录 / gpu/cpu model directory: {}",
         root.display()
     );
@@ -305,7 +305,7 @@ pub fn list_models(root: &Path) {
         println!("  {name} {state} {}", path.display());
     }
     if !llama_ready(root) {
-        println!(
+        crate::println_tr!(
             "下载或修复 / Download or repair: course2md models download --dir \"{}\"",
             root.display()
         );

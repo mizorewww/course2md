@@ -384,7 +384,10 @@ fn parse_callback_request(request_line: &str, expected_state: &str) -> Result<St
 /// 打开系统浏览器；失败时用户可手动复制 URL。
 fn open_browser(url: &str) {
     if open::that_detached(url).is_err() {
-        println!("请手动在浏览器打开 / Open this URL in your browser:\n{url}");
+        println_tr!(
+            "请手动在浏览器打开 / Open this URL in your browser:\n{}",
+            url
+        );
     }
 }
 
@@ -651,9 +654,10 @@ pub fn login() -> Result<()> {
     );
     match crate::llm::test_connection(&cfg.llm) {
         Ok(()) => println_tr!("连接测试通过 / Connection test passed."),
-        Err(e) => bail!(
-            "登录态已保存，但连接测试失败；可用 course2md llm setup 调整模型 / Login saved, but the connection test failed; adjust the model with course2md llm setup: {e:#}"
-        ),
+        Err(e) => bail!(tr!(
+            "登录态已保存，但连接测试失败；可用 course2md llm setup 调整模型 / Login saved, but the connection test failed; adjust the model with course2md llm setup: {}",
+            format!("{e:#}")
+        )),
     }
     Ok(())
 }
