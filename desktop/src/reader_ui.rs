@@ -590,7 +590,7 @@ const GALLERY_GAP: Rems = rem(12.);
 const GALLERY_MIN_COLUMN: Rems = rem(260.);
 /// A window with less height than this for the page shows no view tabs.
 const SHORT_MAX_HEIGHT: Rems = rem(336.);
-const TITLE_BAR_HEIGHT: Rems = rem(64.);
+const TITLE_BAR_HEIGHT: Rems = rem(56.);
 /// The widest the search field grows.
 const SEARCH_MAX_WIDTH: Rems = rem(560.);
 
