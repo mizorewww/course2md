@@ -459,7 +459,7 @@ fn post_local_json(
     let bytes = serde_json::to_vec(body)?;
     crate::pool::retry(control, MAX_ATTEMPTS, || {
         let request = agent.post(url).header("Content-Type", "application/json");
-        match crate::dispatch::receive(request.send(&bytes)) {
+        match crate::runtime::receive(request.send(&bytes)) {
             Ok(response) if (200..300).contains(&response.status) => {
                 serde_json::from_slice(&response.body).map_err(Failure::local)
             }
@@ -531,7 +531,7 @@ impl CloudSpeech {
                 } else {
                     request.header("Authorization", &format!("Bearer {}", self.key))
                 };
-                crate::dispatch::receive(request.send(body))
+                crate::runtime::receive(request.send(body))
             };
             self.control.request(
                 &crate::dispatch::RequestSpec {

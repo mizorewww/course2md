@@ -1002,7 +1002,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "ureq",
 ]
 
 [[package]]

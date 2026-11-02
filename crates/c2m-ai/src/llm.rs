@@ -780,7 +780,7 @@ impl<'a> Chat<'a> {
                 for (name, value) in &headers {
                     request = request.header(name, value);
                 }
-                let response = crate::dispatch::receive(crate::runtime::send_json(request, body))?;
+                let response = crate::runtime::receive(crate::runtime::send_json(request, body))?;
                 // Codex Responses API 只提供 SSE 流：聚合为 chat/completions 形状，
                 // 下游校验与解析不变；非 2xx 原样上交（重试/降级逻辑要看状态码）
                 if sse && (200..300).contains(&response.status) {
@@ -1142,7 +1142,7 @@ mod tests {
         });
         let agent = stall_limited_agent(false, Duration::from_millis(500));
         let started = std::time::Instant::now();
-        let failure = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let failure = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
             .err()
             .expect("a stalled body is not a response");
         assert!(started.elapsed() < Duration::from_secs(10));
@@ -1158,7 +1158,7 @@ mod tests {
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").unwrap();
         });
         let agent = stall_limited_agent(false, Duration::from_millis(500));
-        let response = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let response = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
             .ok()
             .expect("waiting for the first byte is not a stall");
         assert_eq!(response.body, b"ok");
@@ -1178,7 +1178,7 @@ mod tests {
         });
         let agent = stall_limited_agent(true, Duration::from_secs(2));
         let started = std::time::Instant::now();
-        let response = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let response = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
             .ok()
             .expect("a stream that keeps sending is alive");
         assert!(started.elapsed() > Duration::from_millis(1500));
@@ -1195,7 +1195,7 @@ mod tests {
         });
         let agent = stall_limited_agent(true, Duration::from_millis(500));
         let started = std::time::Instant::now();
-        let failure = crate::dispatch::receive(agent.post(&url).send_json(serde_json::json!({})))
+        let failure = crate::runtime::receive(agent.post(&url).send_json(serde_json::json!({})))
             .err()
             .expect("a silent stream is stalled");
         assert!(started.elapsed() < Duration::from_secs(10));

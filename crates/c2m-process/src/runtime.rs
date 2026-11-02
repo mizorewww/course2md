@@ -6,6 +6,7 @@
 
 use crate::tr;
 use anyhow::{Context, Result};
+use c2m_core::outcome::{HttpResponse, NetworkFailure};
 use std::net::TcpListener;
 use std::path::Path;
 #[cfg(windows)]
@@ -285,7 +286,7 @@ pub fn http_agent(timeout: Duration) -> ureq::Agent {
 }
 
 /// [`http_agent`] whose error statuses arrive as responses, so that a caller can
-/// read the body. Whoever uses it checks the status; `dispatch::receive` does.
+/// read the body. Whoever uses it checks the status; [`receive`] does.
 pub fn http_agent_keeping_errors(timeout: Duration) -> ureq::Agent {
     let agent = agent_builder().timeout_global(Some(timeout));
     agent.http_status_as_error(false).build().new_agent()
@@ -299,6 +300,75 @@ pub fn send_json(
 ) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
     let body = serde_json::to_vec(value)?;
     request.content_type("application/json").send(body)
+}
+
+/// Whether this failure proves that no request bytes left: only then may a paid
+/// request go out again without asking. ureq reports refused connections as plain I/O
+/// errors. The two unreachable kinds are not here although connecting can fail with
+/// them, because an established connection can fail with them too, after sending.
+fn never_sent(error: &ureq::Error) -> bool {
+    use std::io::ErrorKind;
+    match error {
+        ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => true,
+        ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect) => true,
+        ureq::Error::Io(error) => matches!(
+            error.kind(),
+            ErrorKind::ConnectionRefused | ErrorKind::AddrNotAvailable
+        ),
+        _ => false,
+    }
+}
+
+/// Drain the HTTP body before recording completion; a body read error is still uncertain.
+/// Cloud callers must disable redirects: a failed connection after a redirect would not
+/// prove that the initial request was never handled.
+pub fn receive(
+    result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+) -> std::result::Result<HttpResponse, NetworkFailure> {
+    use std::io::Read;
+    let response = match result {
+        Ok(response) => response,
+        // An agent that reports statuses as errors has dropped the body; the status
+        // still classifies the answer.
+        Err(ureq::Error::StatusCode(status)) => {
+            return Ok(HttpResponse {
+                status,
+                body: Vec::new(),
+            });
+        }
+        Err(error) => {
+            let definitely_unsent = never_sent(&error);
+            return Err(NetworkFailure {
+                message: if definitely_unsent {
+                    tr!("无法连接服务，尚未提交内容 / Could not connect; request content was not submitted")
+                } else {
+                    tr!("未完整收到服务响应 / Did not receive a complete service response")
+                }
+                .into(),
+                definitely_unsent,
+            });
+        }
+    };
+    let status = response.status().as_u16();
+    let mut body = Vec::new();
+    const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
+    response
+        .into_body()
+        .into_reader()
+        .take(MAX_RESPONSE_BYTES + 1)
+        .read_to_end(&mut body)
+        .map_err(|_| NetworkFailure {
+            message: tr!("服务响应接收中断 / Service response was interrupted").into(),
+            definitely_unsent: false,
+        })?;
+    if body.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err(NetworkFailure {
+            message: tr!("服务响应超过接收上限 / Service response exceeds the receiving limit")
+                .into(),
+            definitely_unsent: false,
+        });
+    }
+    Ok(HttpResponse { status, body })
 }
 
 /// A menu that Esc cancels with `cancelled` as the error, not accepting the default.
@@ -467,6 +537,31 @@ pub fn random_b64url(bytes: usize) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_failures_before_sending_count_as_unsent() {
+        use std::io::{Error, ErrorKind};
+        for error in [
+            ureq::Error::HostNotFound,
+            ureq::Error::ConnectionFailed,
+            ureq::Error::Timeout(ureq::Timeout::Connect),
+            ureq::Error::Timeout(ureq::Timeout::Resolve),
+            ureq::Error::Io(Error::from(ErrorKind::ConnectionRefused)),
+        ] {
+            assert!(never_sent(&error), "{error}");
+        }
+        for error in [
+            ureq::Error::Timeout(ureq::Timeout::Global),
+            ureq::Error::Timeout(ureq::Timeout::SendBody),
+            ureq::Error::Timeout(ureq::Timeout::RecvResponse),
+            ureq::Error::Timeout(ureq::Timeout::PerRead),
+            ureq::Error::Io(Error::from(ErrorKind::ConnectionReset)),
+            ureq::Error::Io(Error::from(ErrorKind::BrokenPipe)),
+            ureq::Error::Io(Error::from(ErrorKind::HostUnreachable)),
+        ] {
+            assert!(!never_sent(&error), "{error}");
+        }
+    }
 
     #[test]
     fn output_lines_survive_bytes_that_are_not_utf8() {
