@@ -552,7 +552,8 @@ impl Desktop {
             .into_any_element()
     }
 
-    /// The model input with its discovery and field error.
+    /// The model input with its discovery and field error. The input remains editable
+    /// in every discovery state; candidates list below it, however many a service returns.
     pub(crate) fn service_model_field(
         &self,
         owner: FormOwner,
@@ -560,42 +561,146 @@ impl Desktop {
         disabled: bool,
         cx: &mut Context<Self>,
     ) -> Div {
+        use model_discovery::ModelFieldEvent::{self, *};
         let Some(form) = self.service_form(owner) else {
             return div();
         };
-        model_field(
-            id,
-            form.input(FormField::Model),
+        let (state, input, error) = (
             &form.models,
-            disabled,
+            form.input(FormField::Model),
             form.error(FormField::Model),
-            cx.listener(
-                move |this, event: &model_discovery::ModelFieldEvent, window, cx| {
-                    use model_discovery::ModelFieldEvent::*;
-                    match event {
-                        Fetch => this.fetch_service_models(owner, cx),
-                        ToggleChoices => {
-                            if let Some(form) = this.service_form_mut(owner) {
-                                form.models.choices_open = !form.models.choices_open;
-                            }
-                        }
-                        // A value set from here emits no change event, so this is the edit.
-                        Choose(model) => {
-                            if let Some(form) = this.service_form_mut(owner) {
-                                form.models.choices_open = false;
-                                form.errors.clear();
-                                form.input(FormField::Model).update(cx, |input, cx| {
-                                    input.set_value(model.clone(), window, cx)
+        );
+        let child = |name: &str| SharedString::from(format!("{id}-{name}"));
+        let this = cx.weak_entity();
+        let send = |event: ModelFieldEvent| {
+            let this = this.clone();
+            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                let _ = this.update(cx, |this, cx| {
+                    this.service_model_event(owner, event.clone(), window, cx)
+                });
+            }
+        };
+        let fetch_label = if matches!(state.status(), model_discovery::Status::Ready(_)) {
+            course2md::tr!("刷新模型列表")
+        } else {
+            course2md::tr!("获取模型列表")
+        };
+        let trailing = if state.loading() {
+            icon_spinner(child("fetching"), fetch_label, rem(20.), cx)
+        } else {
+            MaterialTooltip::plain(child("fetch-tip"), fetch_label)
+                .trigger(
+                    IconButton::new(child("fetch"), symbols::refresh(), fetch_label)
+                        .button_size(ButtonSize::Small)
+                        .disabled(disabled)
+                        .on_click(send(Fetch)),
+                )
+                .into_any_element()
+        };
+        let field = TextField::new(child("input"), input)
+            .outlined()
+            .shape(TextFieldShape::Rounded)
+            .w_full()
+            .label(course2md::tr!("模型"))
+            .float_label(true)
+            .placeholder(course2md::tr!("模型 ID，或从服务获取列表"))
+            .disabled(disabled)
+            .trailing_icon(trailing)
+            .error(error.is_some())
+            .when_some(error, |field, error| {
+                field.supporting_text(error.to_owned())
+            });
+        let status = match state.status() {
+            // Idle needs no words: the field and its button say what can be done.
+            model_discovery::Status::Idle => ui::AsyncStatus::Idle,
+            model_discovery::Status::Loading => {
+                ui::AsyncStatus::Busy(course2md::tr!("正在获取模型列表…").into())
+            }
+            model_discovery::Status::Ready(models) if models.is_empty() => {
+                ui::AsyncStatus::Warning(course2md::tr!("服务未返回模型").into())
+            }
+            model_discovery::Status::Ready(models) => {
+                ui::AsyncStatus::Success(course2md::tr!("找到 {} 个模型", models.len()).into())
+            }
+            model_discovery::Status::Failed(error) => {
+                ui::AsyncStatus::Failed(error.message().into())
+            }
+        };
+        let toggle = (!state.models().is_empty()).then(|| {
+            material_button(child("choose"), ButtonVariant::Text)
+                .child(if state.choices_open {
+                    course2md::tr!("收起模型列表")
+                } else {
+                    course2md::tr!("选择模型")
+                })
+                .disabled(disabled)
+                .on_click(send(ToggleChoices))
+                .into_any_element()
+        });
+        let choices = (state.choices_open && !disabled && !state.models().is_empty()).then(|| {
+            let models = state.models().to_vec();
+            let count = models.len();
+            let selected = input.read(cx).value().to_string();
+            let this = this.clone();
+            uniform_list(child("choices"), count, move |range, _, _| {
+                range
+                    .map(|index| {
+                        let (model, this) = (models[index].clone(), this.clone());
+                        ListItem::new(("model-choice", index), model.clone())
+                            .density(ListDensity::Compact)
+                            .selected(model == selected)
+                            .on_click(move |_, window, cx| {
+                                let _ = this.update(cx, |this, cx| {
+                                    this.service_model_event(
+                                        owner,
+                                        Choose(model.clone()),
+                                        window,
+                                        cx,
+                                    )
                                 });
-                            }
-                            this.service_form_edited(owner, true);
-                        }
-                    }
-                    cx.notify();
-                },
-            ),
-            cx,
-        )
+                            })
+                    })
+                    .collect()
+            })
+            .h(rem(200.))
+            .w_full()
+        });
+        v_flex()
+            .w_full()
+            .min_w_0()
+            .gap(rem(8.))
+            .child(field)
+            .children(ui::async_status(child("status"), &status, toggle, cx))
+            .children(choices)
+    }
+
+    fn service_model_event(
+        &mut self,
+        owner: FormOwner,
+        event: model_discovery::ModelFieldEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use model_discovery::ModelFieldEvent::*;
+        match event {
+            Fetch => self.fetch_service_models(owner, cx),
+            ToggleChoices => {
+                if let Some(form) = self.service_form_mut(owner) {
+                    form.models.choices_open = !form.models.choices_open;
+                }
+            }
+            // A value set from here emits no change event, so this is the edit.
+            Choose(model) => {
+                if let Some(form) = self.service_form_mut(owner) {
+                    form.models.choices_open = false;
+                    form.errors.clear();
+                    form.input(FormField::Model)
+                        .update(cx, |input, cx| input.set_value(model, window, cx));
+                }
+                self.service_form_edited(owner, true);
+            }
+        }
+        cx.notify();
     }
 
     fn fetch_service_models(&mut self, owner: FormOwner, cx: &mut Context<Self>) {
@@ -692,118 +797,4 @@ impl Desktop {
             }
         }
     }
-}
-
-/// Shared settings/setup model control. The input remains editable in every discovery
-/// state. Candidates list below the field, however many a service returns.
-pub fn model_field(
-    id: &'static str,
-    input: &gpui::Entity<gpui_kit::component::input::InputState>,
-    state: &model_discovery::State,
-    disabled: bool,
-    error: Option<&str>,
-    on_event: impl Fn(&model_discovery::ModelFieldEvent, &mut gpui::Window, &mut gpui::App) + 'static,
-    cx: &mut gpui::App,
-) -> gpui::Div {
-    use crate::{symbols, ui};
-    use gpui::{SharedString, prelude::*};
-    use gpui_base::v_flex;
-    use gpui_kit_material::prelude::*;
-
-    let child = |name: &str| SharedString::from(format!("{id}-{name}"));
-    let on_event = std::rc::Rc::new(on_event);
-    let send = |event: fn() -> model_discovery::ModelFieldEvent| {
-        let on_event = on_event.clone();
-        move |_: &gpui::ClickEvent, window: &mut gpui::Window, cx: &mut gpui::App| {
-            on_event(&event(), window, cx)
-        }
-    };
-    let fetch_label = if matches!(state.status(), model_discovery::Status::Ready(_)) {
-        course2md::tr!("刷新模型列表")
-    } else {
-        course2md::tr!("获取模型列表")
-    };
-    let trailing = if state.loading() {
-        icon_spinner(child("fetching"), fetch_label, rem(20.), cx)
-    } else {
-        MaterialTooltip::plain(child("fetch-tip"), fetch_label)
-            .trigger(
-                IconButton::new(child("fetch"), symbols::refresh(), fetch_label)
-                    .button_size(ButtonSize::Small)
-                    .disabled(disabled)
-                    .on_click(send(|| model_discovery::ModelFieldEvent::Fetch)),
-            )
-            .into_any_element()
-    };
-    let field = TextField::new(child("input"), input)
-        .outlined()
-        .shape(TextFieldShape::Rounded)
-        .w_full()
-        .label(course2md::tr!("模型"))
-        .float_label(true)
-        .placeholder(course2md::tr!("模型 ID，或从服务获取列表"))
-        .disabled(disabled)
-        .trailing_icon(trailing)
-        .error(error.is_some())
-        .when_some(error, |field, error| {
-            field.supporting_text(error.to_owned())
-        });
-    let status = match state.status() {
-        // Idle needs no words: the field and its button say what can be done.
-        model_discovery::Status::Idle => ui::AsyncStatus::Idle,
-        model_discovery::Status::Loading => {
-            ui::AsyncStatus::Busy(course2md::tr!("正在获取模型列表…").into())
-        }
-        model_discovery::Status::Ready(models) if models.is_empty() => {
-            ui::AsyncStatus::Warning(course2md::tr!("服务未返回模型").into())
-        }
-        model_discovery::Status::Ready(models) => {
-            ui::AsyncStatus::Success(course2md::tr!("找到 {} 个模型", models.len()).into())
-        }
-        model_discovery::Status::Failed(error) => ui::AsyncStatus::Failed(error.message().into()),
-    };
-    let toggle = (!state.models().is_empty()).then(|| {
-        material_button(child("choose"), ButtonVariant::Text)
-            .child(if state.choices_open {
-                course2md::tr!("收起模型列表")
-            } else {
-                course2md::tr!("选择模型")
-            })
-            .disabled(disabled)
-            .on_click(send(|| model_discovery::ModelFieldEvent::ToggleChoices))
-            .into_any_element()
-    });
-    let choices = (state.choices_open && !disabled && !state.models().is_empty()).then(|| {
-        let models = state.models().to_vec();
-        let count = models.len();
-        let selected = input.read(cx).value().to_string();
-        let on_event = on_event.clone();
-        gpui::uniform_list(child("choices"), count, move |range, _, _| {
-            range
-                .map(|index| {
-                    let model = models[index].clone();
-                    let on_event = on_event.clone();
-                    ListItem::new(("model-choice", index), model.clone())
-                        .density(ListDensity::Compact)
-                        .selected(model == selected)
-                        .on_click(move |_, window, cx| {
-                            on_event(
-                                &model_discovery::ModelFieldEvent::Choose(model.clone()),
-                                window,
-                                cx,
-                            )
-                        })
-                })
-                .collect()
-        })
-        .h(rem(200.))
-        .w_full()
-    });
-    v_flex()
-        .w_full()
-        .min_w_0()
-        .gap(rem(8.))
-        .child(field)
-        .children(ui::async_status(child("status"), &status, toggle, cx))
-        .children(choices)
 }

@@ -408,6 +408,7 @@ fn parse_models(body: &[u8], authorization: Option<&Secret>) -> Result<Vec<Strin
 }
 
 /// What the model field asks of its form.
+#[derive(Clone)]
 pub enum ModelFieldEvent {
     Fetch,
     ToggleChoices,
