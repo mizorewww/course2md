@@ -9,8 +9,8 @@ use crate::{
 use anyhow::{Context as _, Result, ensure};
 use course2md::config::TranscriptSource;
 use course2md::execution::Component;
-use desktop_core::plan::*;
-use desktop_core::task_view::{TaskGroup, ai_component, task_component_failures, task_group};
+use desktop_tasks::plan::*;
+use desktop_tasks::task_view::{TaskGroup, ai_component, task_component_failures, task_group};
 use std::collections::HashMap;
 
 /// Options shown before the workspace has restored a draft.
@@ -876,16 +876,17 @@ impl Desktop {
                 .current_input_task(cx)
                 .is_some_and(|task| task.id == id)
         {
-            self.import.following_conversion = Some(desktop_core::import::ConversionFollow::Task {
-                id: id.to_owned(),
-                source_revision: self.import.preview_generation,
-            });
+            self.import.following_conversion =
+                Some(desktop_tasks::import::ConversionFollow::Task {
+                    id: id.to_owned(),
+                    source_revision: self.import.preview_generation,
+                });
         } else if self.page == Page::Result && !self.opened.reading {
             self.import.following_conversion = self
                 .task(id)
                 .zip(self.opened.preview.as_ref())
                 .and_then(|(task, preview)| {
-                    desktop_core::import::ConversionFollow::reader_reprocess(
+                    desktop_tasks::import::ConversionFollow::reader_reprocess(
                         task,
                         &preview.course.dir,
                         self.opened.read_generation,
@@ -1169,7 +1170,7 @@ impl Desktop {
         match result {
             Ok(task) => {
                 if self.reader_viewer_open() {
-                    desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
+                    desktop_tasks::import::ConversionFollow::interrupt_for_reader_viewer(
                         &mut self.import.following_conversion,
                     );
                 }

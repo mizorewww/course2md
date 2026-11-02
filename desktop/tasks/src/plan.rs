@@ -1,19 +1,19 @@
 //! What a task plan is built from, and the checks it has to pass.
-use crate::{
-    backend::Done,
+use crate::{backend::Done, import::ImportSession, source};
+use anyhow::{Context as _, Result, ensure};
+use course2md::config::{AsrProvider, TranscriptSource};
+use desktop_prefs::{
     conversion::ConversionOptions,
     environment::Environment,
-    import::ImportSession,
+    preferences::{self, ServiceRefs},
+};
+use desktop_store::{
     library::LibraryState,
     locations::{LocationCheck, LocationChecks},
     notes::Course,
     organize,
-    preferences::{self, ServiceRefs},
-    source,
     workspace::{self, TaskPlan},
 };
-use anyhow::{Context as _, Result, ensure};
-use course2md::config::{AsrProvider, TranscriptSource};
 use std::{path::PathBuf, rc::Rc};
 
 /// A stable validation identity for the missing-title case. Rendering compares
@@ -604,9 +604,10 @@ pub mod tests {
     #[test]
     fn a_plan_tells_an_obstacle_from_a_check_still_running() {
         use super::{PlanInputs, PlanPending};
-        use crate::{
-            credentials::MemoryCredentialVault, import::ImportSession, library::LibraryState,
-            locations::LocationChecks, preferences, workspace::Workspace,
+        use crate::import::ImportSession;
+        use desktop_prefs::{credentials::MemoryCredentialVault, preferences};
+        use desktop_store::{
+            library::LibraryState, locations::LocationChecks, workspace::Workspace,
         };
         let dir = tempfile::tempdir().unwrap();
         let store = preferences::Store::open(
@@ -671,7 +672,7 @@ pub mod tests {
 
     #[test]
     fn a_changed_option_is_the_draft_without_a_separate_save() {
-        use crate::workspace::{Override, Workspace};
+        use desktop_store::workspace::{Override, Workspace};
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("workspace.json");
         let root = dir.path().join("library");
@@ -740,8 +741,9 @@ pub mod tests {
 
     #[test]
     fn a_published_repair_replaces_the_stale_card_before_a_library_scan() {
-        use crate::{backend::Done as Completed, notes::Course};
+        use crate::backend::Done as Completed;
         use course2md::artifact::{Manifest, Outcome, Outcomes};
+        use desktop_store::notes::Course;
         use std::{
             path::PathBuf,
             time::{Duration, UNIX_EPOCH},
@@ -819,7 +821,8 @@ pub mod tests {
 
     #[test]
     fn unchanged_form_values_leave_the_draft_as_it_was() {
-        let mut input = crate::workspace::Draft::new(true, "library".into(), Default::default());
+        let mut input =
+            desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
         let source = source("https://example.test/a", "课程 A");
         update_draft_source_title(
             &mut input,
@@ -845,8 +848,8 @@ pub mod tests {
         apply_draft_options(&mut input, options.clone());
         assert_eq!(input.options, options);
         for field in [
-            crate::workspace::Override::Formats,
-            crate::workspace::Override::Translate,
+            desktop_store::workspace::Override::Formats,
+            desktop_store::workspace::Override::Translate,
         ] {
             assert!(input.overrides.contains(&field));
         }
@@ -854,7 +857,8 @@ pub mod tests {
 
     #[test]
     fn temporary_speech_service_keeps_the_explicit_local_engine_for_the_same_input() {
-        let mut draft = crate::workspace::Draft::new(true, "library".into(), Default::default());
+        let mut draft =
+            desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
         draft.change_source("video".into());
         let mut options = draft.options.clone();
         options.provider = Some(course2md::config::AsrProvider::Cpu);
@@ -873,25 +877,25 @@ pub mod tests {
             draft.local_provider,
             Some(course2md::config::AsrProvider::Cpu)
         );
-        let next = crate::workspace::Draft::new(true, "library".into(), Default::default());
+        let next = desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
         assert_eq!(next.local_provider, None);
     }
 
     #[test]
     fn plan_preview_uses_loaded_storage_but_submission_rechecks_identity_and_folders() {
         let directory = tempfile::tempdir().unwrap();
-        let location = crate::workspace::LibraryLocation {
+        let location = desktop_store::workspace::LibraryLocation {
             id: "library".into(),
             name: "笔记库".into(),
             root: directory.path().to_owned(),
             previous_roots: Vec::new(),
         };
-        let cached = crate::locations::LocationCheck {
+        let cached = desktop_store::locations::LocationCheck {
             available: true,
             needs_reassociation: false,
             problem: None,
         };
-        let mut index = crate::organize::Library::default();
+        let mut index = desktop_store::organize::Library::default();
         index.folders.insert(7, "复习".into());
         std::fs::write(
             location.root.join(".course2md-library-id"),
@@ -952,7 +956,7 @@ pub mod tests {
 
     #[test]
     fn changing_source_keeps_automatic_title_provenance_and_frozen_task() {
-        use crate::workspace::{TaskPlan, Workspace};
+        use desktop_store::workspace::{TaskPlan, Workspace};
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("workspace.json");
         let root = dir.path().join("library");
@@ -1028,7 +1032,8 @@ pub mod tests {
 
     #[test]
     fn manual_title_survives_a_source_change_and_late_metadata() {
-        let mut draft = crate::workspace::Draft::new(true, "library".into(), Default::default());
+        let mut draft =
+            desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
         let a = source("https://example.test/a", "课程 A");
         let b = source("https://example.test/b", "课程 B");
         update_draft_source_title(&mut draft, a.input.clone(), a.title.clone(), Some(a));
@@ -1036,7 +1041,9 @@ pub mod tests {
         update_draft_source_title(&mut draft, b.input.clone(), "我的复习笔记".into(), None);
         assert!(draft.custom_title);
         let revision = draft.revision;
-        assert!(crate::workspace::accept_source(&mut draft, revision, b));
+        assert!(desktop_store::workspace::accept_source(
+            &mut draft, revision, b
+        ));
         assert_eq!(draft.title, "我的复习笔记");
         assert!(draft.custom_title);
     }

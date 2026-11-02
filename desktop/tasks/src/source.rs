@@ -16,8 +16,8 @@ const PREVIEW_TIMEOUT: Duration = Duration::from_secs(45);
 /// Cached covers and subtitles unused for this long are removed.
 const CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
-pub use crate::workspace::Source;
 pub use course2md::fetch::SourceCandidate;
+pub use desktop_store::workspace::Source;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SourceProbe {
@@ -308,10 +308,10 @@ fn command_once(
     // ffmpeg/ffprobe 走引擎的同一套查找（随包自带 → 扩展 PATH），预览读取视频
     // 与转换用的是同一个 ffmpeg。
     let program = if name == "yt-dlp" {
-        course2md::ytdlp::resolve_in(Some(&crate::environment::tool_path()))
+        course2md::ytdlp::resolve_in(Some(&desktop_prefs::environment::tool_path()))
             .unwrap_or_else(|| PathBuf::from(name))
     } else {
-        course2md::tools::locate_in(name, Some(&crate::environment::tool_path()))
+        course2md::tools::locate_in(name, Some(&desktop_prefs::environment::tool_path()))
             .map_or_else(|| PathBuf::from(name), |tool| tool.path)
     };
     let mut command = Command::new(&program);
@@ -322,7 +322,7 @@ fn command_once(
     };
     command
         .args(args)
-        .env("PATH", crate::environment::tool_path())
+        .env("PATH", desktop_prefs::environment::tool_path())
         .stdin(Stdio::null())
         .stdout(stdout.try_clone()?)
         .stderr(stderr.try_clone()?);
@@ -359,7 +359,7 @@ fn command_once(
             Ok(status) => break status?,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                anyhow::bail!(crate::interrupted())
+                anyhow::bail!(desktop_prefs::interrupted())
             }
         }
     };

@@ -3,7 +3,7 @@
 //! app keeps only which browser to use.
 use crate::{Desktop, Field, Page, symbols, ui::Resource};
 use course2md::auth::youtube::{self, Browser, BrowserChoice, Session};
-use desktop_core::youtube::*;
+use desktop_accounts::youtube::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};

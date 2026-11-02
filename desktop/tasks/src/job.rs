@@ -1,9 +1,6 @@
 //! The one background job the app runs at a time, and when it asks for a repaint.
-use crate::{
-    activity::JobEvents,
-    backend::{Done, Job},
-    page::Kind,
-};
+use crate::backend::{Done, Job};
+use desktop_store::{activity::JobEvents, page::Kind};
 use std::time::{Duration, Instant};
 
 /// `Option<Instant>` orders `None` before every `Some`; polling needs the

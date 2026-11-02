@@ -3,7 +3,7 @@
 use crate::ui::Resource;
 use crate::{Desktop, Field, Page, symbols, ui};
 use course2md::auth::{AccountStatus, QrPoll, QrSession};
-use desktop_core::account::*;
+use desktop_accounts::account::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};

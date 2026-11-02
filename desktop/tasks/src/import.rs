@@ -1,8 +1,10 @@
 //! The workbench's decisions: which task owns the input, when a start intent goes
 //! through, and what follows a conversion to its note.
-use crate::{conversion::ConversionOptions, page::Page, source, workspace};
+use crate::source;
 use course2md::config::TranscriptSource;
 use course2md::subtitle::{SubtitleEvidence, SubtitleReadError};
+use desktop_prefs::conversion::ConversionOptions;
+use desktop_store::{page::Page, workspace};
 use std::{
     collections::{BTreeSet, HashMap},
     path::PathBuf,
@@ -550,14 +552,15 @@ mod tests {
         completed_input_task, conversion_gate, locked_input_task, submitted_input_task,
         subtitle_needs_confirmation, uses_speech,
     };
-    use crate::{source, workspace};
+    use crate::source;
     use course2md::config::TranscriptSource;
     use course2md::subtitle::{CachedSubtitle, SubtitleEvidence, SubtitleReadError};
+    use desktop_store::workspace;
 
     /// A plan's configuration as build_plan writes it from default options.
     fn planned_config() -> course2md::settings::ConfigFile {
         let mut config = course2md::settings::ConfigFile::default();
-        crate::conversion::ConversionOptions::default().apply_to(&mut config);
+        desktop_prefs::conversion::ConversionOptions::default().apply_to(&mut config);
         config
     }
 
@@ -989,7 +992,7 @@ mod tests {
         // 设置下一个视频 clears the link: the next input starts from the
         // saved defaults and the submitted task keeps its own plan.
         state.task_mut(&id).unwrap().state = workspace::TaskState::Running;
-        let defaults = crate::conversion::ConversionOptions {
+        let defaults = desktop_prefs::conversion::ConversionOptions {
             summarize: !state.draft().unwrap().options.summarize,
             ..state.draft().unwrap().options.clone()
         };
@@ -1099,7 +1102,7 @@ mod tests {
             handled_by: None,
             held: false,
             work_dir: "work/original".into(),
-            events: crate::activity::JobEvents {
+            events: desktop_store::activity::JobEvents {
                 error: Some("原摘要请求结果未确认".into()),
                 ..Default::default()
             },

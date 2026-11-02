@@ -5,7 +5,7 @@ use crate::preferences::{ServiceProtocol, ServicePurpose};
 use crate::ui::Resource;
 use crate::{Desktop, symbols};
 use course2md::login::codex::LoginStatus;
-use desktop_core::codex::*;
+use desktop_accounts::codex::*;
 use gpui::{prelude::*, *};
 use gpui_kit::component::input::InputState;
 use gpui_kit_material::prelude::*;

@@ -68,9 +68,9 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         # --no-deps keeps the GPUI crates' deprecation warnings out of the log.
-        run: cargo clippy -p course2md-desktop -p desktop-core -p desktop-ui --all-targets --no-deps -- -D warnings
+        run: cargo clippy -p course2md-desktop -p desktop-prefs -p desktop-accounts -p desktop-store -p desktop-reader-core -p desktop-tasks -p desktop-ui --all-targets --no-deps -- -D warnings
       - name: Check and test desktop
-        run: cargo test -p course2md-desktop -p desktop-core -p desktop-ui
+        run: cargo test -p course2md-desktop -p desktop-prefs -p desktop-accounts -p desktop-store -p desktop-reader-core -p desktop-tasks -p desktop-ui
       - name: Catalog matches the strings the app looks up
         run: cargo test --test i18n_catalog
       - name: Build development binaries

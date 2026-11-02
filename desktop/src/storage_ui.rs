@@ -7,7 +7,7 @@ use crate::{
     workspace,
 };
 use anyhow::{Context as _, Result, ensure};
-use desktop_core::locations::*;
+use desktop_store::locations::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::components::MaterialContextMenu;

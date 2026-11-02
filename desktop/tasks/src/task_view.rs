@@ -1,12 +1,12 @@
 //! What a task is doing and what can be done about it, as words and decisions. The task
 //! page draws this.
-use crate::{
-    activity,
-    workspace::{self, Intent, TaskRecord, TaskState},
-};
 use course2md::config::TranscriptSource;
 use course2md::execution::Component;
 use course2md::progress::Stage;
+use desktop_store::{
+    activity,
+    workspace::{self, Intent, TaskRecord, TaskState},
+};
 
 /// Request purpose of a remote speech recognition call.
 pub const TRANSCRIPTION_PURPOSE: &str = "transcription";
@@ -895,10 +895,10 @@ mod tests {
     use crate::plan::tests::source;
     use course2md::progress::Stage;
 
-    fn task_record(id: &str) -> crate::workspace::TaskRecord {
-        crate::workspace::TaskRecord {
+    fn task_record(id: &str) -> desktop_store::workspace::TaskRecord {
+        desktop_store::workspace::TaskRecord {
             id: id.into(),
-            plan: crate::workspace::TaskPlan {
+            plan: desktop_store::workspace::TaskPlan {
                 operation: Default::default(),
                 source: source("https://example.test/video", "课程"),
                 source_id: "online:video".into(),
@@ -910,15 +910,15 @@ mod tests {
                 asr_service: None,
                 ai_service: None,
             },
-            state: crate::workspace::TaskState::Paused,
-            intent: crate::workspace::Intent::Run,
+            state: desktop_store::workspace::TaskState::Paused,
+            intent: desktop_store::workspace::Intent::Run,
             created: 0,
             updated: 0,
             parent: None,
             handled_by: None,
             held: false,
             work_dir: "work".into(),
-            events: crate::activity::JobEvents {
+            events: desktop_store::activity::JobEvents {
                 error: None,
                 ..Default::default()
             },
@@ -928,7 +928,7 @@ mod tests {
         }
     }
 
-    use crate::workspace::{Intent, TaskState};
+    use desktop_store::workspace::{Intent, TaskState};
 
     #[test]
     fn a_task_an_earlier_worker_still_holds_reads_as_saving_its_progress() {
@@ -1061,7 +1061,7 @@ mod tests {
     #[test]
     fn ai_dispatch_counts_do_not_claim_received_results() {
         for name in [&Stage::Llm, &Stage::Summary] {
-            let mut activity = crate::activity::Activity::new();
+            let mut activity = desktop_store::activity::Activity::new();
             for (current, total) in [(0, 3), (1, 3), (3, 3), (1, 1)] {
                 activity.update(current, total, None);
                 let (detail, fraction) =
@@ -1078,7 +1078,7 @@ mod tests {
             assert!(fraction.is_none());
         }
         // Quantities that measure completed work keep their determinate progress.
-        let mut screenshots = crate::activity::Activity::new();
+        let mut screenshots = desktop_store::activity::Activity::new();
         screenshots.update(2, 6, None);
         let (detail, fraction) = stage_progress(
             &Stage::parse("scenes/extract"),
@@ -1184,8 +1184,8 @@ mod tests {
 
     #[test]
     fn partial_task_recovery_excludes_successful_and_unrequested_components() {
-        use crate::workspace::{Intent, TaskPlan, TaskRecord, TaskState};
         use course2md::artifact::{Outcome, Outcomes, Status};
+        use desktop_store::workspace::{Intent, TaskPlan, TaskRecord, TaskState};
 
         let mut outcomes = Outcomes {
             transcript: Outcome::succeeded(),
@@ -1229,7 +1229,7 @@ mod tests {
             handled_by: None,
             held: false,
             work_dir: "work".into(),
-            events: crate::activity::JobEvents {
+            events: desktop_store::activity::JobEvents {
                 outcomes: Some(outcomes.clone()),
                 ..Default::default()
             },
@@ -1295,14 +1295,16 @@ mod tests {
         outcomes.proofreading.message = Some("服务拒绝凭据".into());
         outcomes.proofreading.kind = Some(course2md::artifact::FailureKind::Authentication);
         task.events.outcomes = Some(outcomes.clone());
-        task.events.blocked.push(crate::workspace::BlockedRequest {
-            reason: course2md::progress::BlockReason::Uncertain,
-            request_id: Some("pending".into()),
-            purpose: Some("summary".into()),
-            description: "摘要".into(),
-            kind: Some(course2md::artifact::FailureKind::Uncertain),
-            message: "结果尚未确认".into(),
-        });
+        task.events
+            .blocked
+            .push(desktop_store::workspace::BlockedRequest {
+                reason: course2md::progress::BlockReason::Uncertain,
+                request_id: Some("pending".into()),
+                purpose: Some("summary".into()),
+                description: "摘要".into(),
+                kind: Some(course2md::artifact::FailureKind::Uncertain),
+                message: "结果尚未确认".into(),
+            });
         assert!(!super::task_requires_service_repair(&task));
         task.events.blocked.clear();
         task.handled_by = Some("recovery".into());

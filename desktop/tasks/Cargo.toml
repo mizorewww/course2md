@@ -1,21 +1,15 @@
 [package]
-name = "desktop-core"
+name = "desktop-tasks"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The course2md desktop's state, persistence, preferences and task logic, without GPUI"
+description = "The course2md desktop's sources, task plans, imports and engine runs, without GPUI"
 publish = false
-
-[features]
-# What the binary's own tests build their fixtures from.
-test-support = []
 
 [dependencies]
 course2md = { path = "../../crates/course2md", default-features = false }
 desktop-prefs = { path = "../prefs" }
-desktop-accounts = { path = "../accounts" }
 desktop-store = { path = "../store" }
-desktop-reader-core = { path = "../reader-core" }
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -29,5 +23,5 @@ image = { workspace = true, features = ["webp"] }
 libc.workspace = true
 
 [dev-dependencies]
-desktop-store = { path = "../store", features = ["test-support"] }
 desktop-prefs = { path = "../prefs", features = ["test-support"] }
+desktop-store = { path = "../store", features = ["test-support"] }

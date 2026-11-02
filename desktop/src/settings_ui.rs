@@ -517,7 +517,7 @@ impl Desktop {
             && self.codex.status.is_none()
             && !self.codex.busy()
         {
-            self.codex_refresh_status(desktop_core::codex::CodexSurface::Settings, cx);
+            self.codex_refresh_status(desktop_accounts::codex::CodexSurface::Settings, cx);
         }
     }
 
@@ -990,7 +990,7 @@ impl Desktop {
         if protocol == ServiceProtocol::CodexResponses {
             lines.extend(
                 self.codex
-                    .notice_on(desktop_core::codex::CodexSurface::Settings),
+                    .notice_on(desktop_accounts::codex::CodexSurface::Settings),
             );
         }
         lines.extend(
@@ -1163,7 +1163,7 @@ impl Desktop {
                 self.confirm_default_service(version.id.clone(), window, cx)
             }
             ServiceCommand::SignOut => {
-                self.codex_logout(desktop_core::codex::CodexSurface::Settings, cx)
+                self.codex_logout(desktop_accounts::codex::CodexSurface::Settings, cx)
             }
             ServiceCommand::Delete => {
                 self.confirm_delete_service(version.service_id.clone(), window, cx)

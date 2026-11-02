@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "desktop", "desktop/accounts", "desktop/core", "desktop/prefs", "desktop/reader-core", "desktop/store", "desktop/ui"]
+members = ["crates/*", "desktop", "desktop/accounts", "desktop/prefs", "desktop/reader-core", "desktop/store", "desktop/tasks", "desktop/ui"]
 # A plain `cargo build` or `cargo test` covers the engine and the CLI, which build on
 # machines without the desktop's native libraries. `--workspace` adds the desktop.
 default-members = ["crates/*"]

@@ -8,7 +8,7 @@ use course2md::{
     config::{AsrProvider, model_dir_from, model_label},
     models::status::CacheState,
 };
-pub(crate) use desktop_core::model_status::*;
+pub(crate) use desktop_prefs::model_status::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
 use gpui_kit_material::{

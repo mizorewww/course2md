@@ -1,6 +1,6 @@
 //! UI-independent process lifecycle and course library access.
-use crate::environment::{resolve_cli, tool_path};
 use anyhow::{Context, Result};
+use desktop_prefs::environment::{resolve_cli, tool_path};
 use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -130,7 +130,9 @@ impl Job {
             Some(serde_json::to_vec(request)?),
             Redactions::for_request(request),
             Some(EventLog::open(
-                &request.work_dir.join(crate::workspace::TASK_EVENTS_FILE),
+                &request
+                    .work_dir
+                    .join(desktop_store::workspace::TASK_EVENTS_FILE),
             )?),
             wake,
         )
@@ -454,7 +456,7 @@ fn line_event(line: &str, json: bool, redactions: &Redactions) -> Event {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notes::{Course, PreviewBlock, read_preview};
+    use desktop_store::notes::{Course, PreviewBlock, read_preview};
     use std::time::SystemTime;
 
     #[test]
@@ -812,7 +814,7 @@ mod tests {
         let text = String::from_utf8_lossy(&saved);
         assert!(!text.contains("sk-secret"));
         assert!(text.lines().count() < 10);
-        let mut replayed = crate::activity::JobEvents::default();
+        let mut replayed = desktop_store::activity::JobEvents::default();
         replayed.replay(&saved);
         let stage = &replayed.stages[&course2md::progress::Stage::Transcribe];
         assert_eq!((stage.current, stage.total), (9, 9));

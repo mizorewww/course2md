@@ -1,6 +1,6 @@
 //! Service editor: picker, editor dialog, connection testing and publishing.
 use super::*;
-use desktop_core::service_binding::*;
+use desktop_prefs::service_binding::*;
 
 impl Desktop {
     pub fn selected_task_service(&self, purpose: ServicePurpose) -> Option<ServiceVersion> {
@@ -492,7 +492,7 @@ impl Desktop {
         });
         match draft_protocol {
             ServiceProtocol::CodexResponses => {
-                self.codex_refresh_status(desktop_core::codex::CodexSurface::Editor, cx)
+                self.codex_refresh_status(desktop_accounts::codex::CodexSurface::Editor, cx)
             }
             ServiceProtocol::OllamaChat => self.ollama_prepare_form(cx),
             _ => {}
@@ -678,7 +678,7 @@ impl Desktop {
         if protocol == ServiceProtocol::CodexResponses {
             parts.push(
                 self.codex_account_section(
-                    desktop_core::codex::CodexSurface::Editor,
+                    desktop_accounts::codex::CodexSurface::Editor,
                     awaiting_binding,
                     cx,
                 )

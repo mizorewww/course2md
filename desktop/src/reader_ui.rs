@@ -7,7 +7,7 @@ use crate::{
     reader_images::{Loaded, ReaderImages, Size},
     reader_navigation as nav, source, symbols, ui, workspace,
 };
-use desktop_core::reader::*;
+use desktop_reader_core::reader::*;
 use gpui::{prelude::*, *};
 use gpui_base::{
     TextSelection, h_flex,
@@ -2634,7 +2634,7 @@ impl Desktop {
             .as_ref()
             .and_then(|manifest| self.workspace.as_ref()?.state.task(&manifest.task_id));
         let requires_repair =
-            task.is_some_and(desktop_core::task_view::task_requires_service_repair);
+            task.is_some_and(desktop_tasks::task_view::task_requires_service_repair);
         let can_retry = task.is_some_and(|task| {
             task.handled_by.is_none()
                 && !matches!(
@@ -2676,7 +2676,7 @@ impl Desktop {
         if let Some(id) = id {
             if can_retry && !components.is_empty() {
                 let retry = id.clone();
-                let label = desktop_core::task_view::retry_components_label(&components);
+                let label = desktop_tasks::task_view::retry_components_label(&components);
                 actions = actions.child(
                     material_button("reader-retry-incomplete", ButtonVariant::Outlined)
                         .tone(ButtonTone::Accent)
@@ -3547,7 +3547,7 @@ impl Desktop {
         let Some(viewer_index) = visible.iter().position(|candidate| *candidate == index) else {
             return;
         };
-        desktop_core::import::ConversionFollow::interrupt_for_reader_viewer(
+        desktop_tasks::import::ConversionFollow::interrupt_for_reader_viewer(
             &mut self.import.following_conversion,
         );
         self.reader_ui.viewer = Some(ImageViewer {
