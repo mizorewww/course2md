@@ -89,6 +89,10 @@ pub struct RequestSpec<'a> {
     pub endpoint: &'a str,
     /// The request content that identifies a repeat of the same request.
     pub identity: &'a Value,
+    /// Identities earlier versions gave this same request. A receipt saved under one
+    /// of them is this request's, and the request continues under that receipt's id,
+    /// so an upgrade never pays for a request an older version already sent.
+    pub former: &'a [Value],
     pub resend: Resend,
 }
 
@@ -460,6 +464,7 @@ impl Ledger {
             description,
             endpoint,
             identity,
+            former,
             resend,
         } = *spec;
         let service_version = self
@@ -467,7 +472,19 @@ impl Ledger {
             .get(service)
             .cloned()
             .unwrap_or_else(|| snapshot_id(&digest(endpoint.as_bytes())));
-        let stable_id = json_digest(&serde_json::json!({"service_version":service_version,"purpose":purpose,"endpoint":endpoint,"payload":identity})).map_err(Failure::local)?;
+        let id_of = |payload: &Value| {
+            json_digest(&serde_json::json!({"service_version":service_version,"purpose":purpose,"endpoint":endpoint,"payload":payload})).map_err(Failure::local)
+        };
+        let mut stable_id = id_of(identity)?;
+        if self.load(&stable_id)?.is_none() {
+            for payload in former {
+                let id = id_of(payload)?;
+                if self.load(&id)?.is_some() {
+                    stable_id = id;
+                    break;
+                }
+            }
+        }
         let lock = self
             .locks
             .lock()
@@ -744,6 +761,7 @@ mod tests {
                     description: purpose,
                     endpoint,
                     identity,
+                    former: &[],
                     resend: Resend::AskUser,
                 },
                 send,
@@ -1069,6 +1087,7 @@ mod tests {
                     description: "segment",
                     endpoint: "https://example.test",
                     identity: payload,
+                    former: &[],
                     resend,
                 },
                 || {
@@ -1118,6 +1137,7 @@ mod tests {
             description: "segment",
             endpoint: "https://example.test",
             identity: &payload,
+            former: &[],
             resend: Resend::Free,
         };
         let failed = || {
@@ -1360,6 +1380,7 @@ mod ephemeral_tests {
                 description: "summary",
                 endpoint: "https://example.test",
                 identity: &serde_json::json!({"n":1}),
+                former: &[],
                 resend,
             },
             move || Ok(HttpResponse { status, body }),
@@ -1397,6 +1418,7 @@ mod ephemeral_tests {
                     description: "summary",
                     endpoint: "https://example.test",
                     identity: &serde_json::json!({"n":2}),
+                    former: &[],
                     resend: Resend::Free,
                 },
                 || {

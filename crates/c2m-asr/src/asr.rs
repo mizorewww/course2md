@@ -528,6 +528,7 @@ impl CloudSpeech {
                     description: &description,
                     endpoint: &self.url,
                     identity,
+                    former: &[],
                     resend: crate::dispatch::Resend::AskUser,
                 },
                 send,

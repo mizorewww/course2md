@@ -28,6 +28,12 @@ kit's vendored engine (PR #16). Wave 2's row-plus-menu choices (H7, S13) are rev
 | C13 | should | AUDIT cycle steps 4 and 5 not done: `clap::ValueEnum` on domain types (8 sites, e.g. `config.rs:94`); dispatch tied to ureq and `progress::emit` (`dispatch.rs:367,658`). Odd edges: `c2m-protocol`→`c2m-config`/`c2m-process`, `c2m-artifact`→`c2m-dispatch`; `desktop-ui` reaches `c2m-artifact`/`c2m-i18n` past the facade; `desktop-core` pulls the whole facade incl. CLI and clap. About 80 `pub` items used only in their crate, three only by tests |
 | C14 | should | `cargo deny` excludes the desktop crates; 8 unmaintained advisories without a desktop decision |
 
+Resolutions (branch `split/engine-fixes`; evidence under the session scratchpad `engine-fixes/ev/`):
+
+| ID | Commit | Resolution and evidence |
+|---|---|---|
+| C1 | `ai: proofreading receipts saved by 2.0.1 in any language are found again` | Cause: E18 (`7aab974`) fixed the proofreading rule and vision note to Simplified Chinese, so the body, the ledger identity, changed for CLI tasks begun in English, Traditional Chinese or Japanese (`--json` and `run-task` always sent Chinese). Reverting E18 would make a language change resend again, so the earlier wording of each language is kept as a former identity: `RequestSpec::former`, and a receipt under one continues under its id. `prompt_identity` checks 16 ids taken from `3db4a88` (vision, custom prompt, four languages, OpenAI-compatible and Ollama): completed ones replay in every language, an in-flight one stays unresolved, new tasks keep the Simplified Chinese id. Matrix of 9 option sets × 4 languages × human/`--json`/`run-task` (`ids-base.json`, `ids-new0.json`): proofreading in the three languages was the only id that differed. 2.0.1 killed mid-proofreading in each language, resumed by this build: 0 requests, the 2.0.1 receipt marked uncertain (`proof/`) |
+
 ## Desktop behaviour (agent: desktop-logic)
 
 | ID | Sev | Finding |
