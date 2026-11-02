@@ -141,6 +141,9 @@ Each line names the commit by subject; evidence is under the session scratchpad 
   fails them without tools), so not reproduced. U17: Nord's palette is kit data (`crates/color/src/palette.rs`);
   a kit PR for its error contrast is being prepared. U2: load average 8 to 13 during the attempt, so not measured;
   capture builds with `performance` log draw histograms only, frame events need `COURSE2MD_FRAME_TRACE`.
+- U7 (200% text), `desktop: a palette card's preview gives up height before its name is cut`: the grid already
+  reflows to fewer columns; on a short window the scrolling body was shorter than one row, so names were cut under
+  the previews (`pal/p200w2`, `pal/p200d`, `pal/p100`). Kit #23's width cap is rem-scaled and does not address this.
 - Kit PRs open for the rest: #18 and #20 ready for the owner; #19, #21, #22, #23, #24, #25, #26 in review.
 
 ## Plan conformance (after the three fix agents)
