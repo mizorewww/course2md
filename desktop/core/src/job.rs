@@ -9,11 +9,7 @@ use std::time::{Duration, Instant};
 /// `Option<Instant>` orders `None` before every `Some`; polling needs the
 /// earliest concrete deadline and must ignore absent ones.
 pub fn earliest_deadline(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
-    match (a, b) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (Some(a), None) => Some(a),
-        (None, b) => b,
-    }
+    a.into_iter().chain(b).min()
 }
 
 /// Task log/progress events coalesce into at most one repaint per interval;

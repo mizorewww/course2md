@@ -1,13 +1,6 @@
 //! The processing choices a note is generated with: what the workbench edits
 //! for the current input, and what a task's configuration implies.
 
-impl ConversionOptions {
-    /// Whether the options use a cloud recognition service.
-    pub fn uses_cloud_provider(&self) -> bool {
-        self.provider == Some(course2md::config::AsrProvider::Api)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConversionOptions {
     #[serde(with = "crate::provider_serde")]
@@ -27,6 +20,11 @@ pub struct ConversionOptions {
 }
 
 impl ConversionOptions {
+    /// Whether the options use a cloud recognition service.
+    pub fn uses_cloud_provider(&self) -> bool {
+        self.provider == Some(course2md::config::AsrProvider::Api)
+    }
+
     pub fn from_config(config: &course2md::settings::ConfigFile) -> Self {
         let provider = config.defaults.provider;
         let source_mode = config.defaults.transcript_source.unwrap_or_default();
@@ -56,17 +54,7 @@ impl ConversionOptions {
             formats,
         }
     }
-}
 
-impl Default for ConversionOptions {
-    fn default() -> Self {
-        let mut value = Self::from_config(&Default::default());
-        value.formats = [false; 3];
-        value
-    }
-}
-
-impl ConversionOptions {
     /// These options as a task plan records them: the configuration keeps
     /// only what takes effect (vision only with proofreading).
     pub fn as_planned(&self) -> Self {
@@ -92,6 +80,14 @@ impl ConversionOptions {
         config.llm.vision = self.llm && self.vision;
         config.llm.translate = self.translate.clone();
         config.llm.disable_hint = true;
+    }
+}
+
+impl Default for ConversionOptions {
+    fn default() -> Self {
+        let mut value = Self::from_config(&Default::default());
+        value.formats = [false; 3];
+        value
     }
 }
 
