@@ -10,6 +10,10 @@ ignore = [
     # Unmaintained, not a vulnerability. Reached only through ratex-svg, for rendering
     # formulas. Remove when ratex moves to another font parser.
     { id = "RUSTSEC-2026-0192", reason = "unmaintained, transitive through ratex-svg" },
+    # The Marvin timing attack recovers a private key from decryption or signing
+    # timings. The Bilibili login only encrypts with the server's public key
+    # (c2m-source auth/passport.rs); no private-key operation exists here.
+    { id = "RUSTSEC-2023-0071", reason = "rsa: public-key encryption only, no private-key operations" },
 ]
 
 [licenses]

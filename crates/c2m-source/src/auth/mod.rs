@@ -1,4 +1,10 @@
-//! Bilibili QR login and private yt-dlp cookie snapshots.
+//! Source accounts for yt-dlp: Bilibili (QR, password or SMS login; cookies saved
+//! here and handed to each run as a private snapshot) and YouTube (the person's
+//! own browser session, which yt-dlp reads; nothing is saved but the choice).
+pub mod geetest;
+pub mod passport;
+pub mod youtube;
+
 use crate::{println_tr, tr};
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
@@ -11,18 +17,19 @@ use std::{
 
 const PASSPORT: &str = "https://passport.bilibili.com/x/passport-login/web/qrcode";
 const NAV: &str = "https://api.bilibili.com/x/web-interface/nav";
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
+pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
 const COOKIE_NAMES: &[&str] = &[
     "SESSDATA",
     "bili_jct",
     "DedeUserID",
     "DedeUserID__ckMd5",
+    "sid",
     "buvid3",
     "buvid4",
     "b_nut",
 ];
-type Cookies = BTreeMap<String, String>;
-type Response = ureq::http::Response<ureq::Body>;
+pub(crate) type Cookies = BTreeMap<String, String>;
+pub(crate) type Response = ureq::http::Response<ureq::Body>;
 
 pub const BILIBILI_SETUP_TIP: &str = "使用 Bilibili 视频时，推荐先运行 course2md --login bilibili 扫码登录，可下载账号权限范围内更高清晰度的视频。 / For Bilibili videos, run course2md --login bilibili first to scan a QR code; downloads can then use higher resolutions available to your account.";
 
@@ -52,14 +59,49 @@ pub fn is_bilibili_url(input: &str) -> bool {
     crate::config::known_video_site(input) == Some("bilibili")
 }
 
-/// yt-dlp rewrites cookie files on exit. Give each subprocess a private snapshot
-/// so simultaneous preview/subtitle/download requests cannot corrupt saved login.
-/// The caller must keep the returned file alive until the subprocess exits.
+pub fn is_youtube_url(input: &str) -> bool {
+    crate::config::known_video_site(input) == Some("youtube")
+}
+
+/// The account a yt-dlp run for `url` uses. Bilibili: yt-dlp rewrites cookie files
+/// on exit, so each subprocess gets a private snapshot and simultaneous
+/// preview/subtitle/download requests cannot corrupt the saved login; the caller
+/// keeps the returned file alive until the subprocess exits. YouTube: yt-dlp
+/// reads the chosen browser's session itself.
 pub fn configure_ytdlp(
     command: &mut std::process::Command,
     url: &str,
 ) -> Result<Option<tempfile::NamedTempFile>> {
+    if is_youtube_url(url) {
+        youtube::configure(command)?;
+        return Ok(None);
+    }
     configure_with_path(command, url, &cookie_path())
+}
+
+/// What to suggest beside a failed run's own message, when an account could help.
+/// `cause` is the source's own words (yt-dlp's last error line). A person reads
+/// it in their language; machine-readable output keeps the stable bilingual text.
+pub fn login_hint(url: &str, cause: &str) -> Option<&'static str> {
+    if is_bilibili_url(url) {
+        return Some(if crate::progress::is_json() {
+            "提示：若视频需要登录或会员权限，请在设置的账号中登录 B 站；已登录时可重新登录。 / Hint: if the video needs a login or membership, sign in to Bilibili in Settings; if already signed in, sign in again."
+        } else {
+            tr!(
+                "提示：若视频需要登录或会员权限，可运行 course2md --login bilibili 登录；已登录时可重新登录。 / Hint: if the video needs a login or membership, run course2md --login bilibili; if already logged in, log in again."
+            )
+        });
+    }
+    if is_youtube_url(url) && youtube::wants_sign_in(cause) {
+        return Some(if crate::progress::is_json() {
+            "提示：YouTube 要求登录。请在设置的账号中连接浏览器里的 YouTube 登录后重试。 / Hint: YouTube asks you to sign in. Connect your browser's YouTube session in Settings, then retry."
+        } else {
+            tr!(
+                "提示：YouTube 要求登录。可运行 course2md --login youtube 使用浏览器里的 YouTube 登录后重试。 / Hint: YouTube asks you to sign in. Run course2md --login youtube to use your browser's YouTube session, then retry."
+            )
+        });
+    }
+    None
 }
 
 fn configure_with_path(
@@ -105,7 +147,7 @@ pub fn logout_bilibili() -> Result<()> {
     Ok(())
 }
 
-fn insert_cookie(cookies: &mut Cookies, name: &str, value: &str) {
+pub(crate) fn insert_cookie(cookies: &mut Cookies, name: &str, value: &str) {
     if COOKIE_NAMES.contains(&name)
         && !value.is_empty()
         && !value.chars().any(|c| c.is_control() || c == ';')
@@ -114,7 +156,7 @@ fn insert_cookie(cookies: &mut Cookies, name: &str, value: &str) {
     }
 }
 
-fn read_cookies(response: &Response, cookies: &mut Cookies) {
+pub(crate) fn read_cookies(response: &Response, cookies: &mut Cookies) {
     for header in response.headers().get_all("set-cookie") {
         let Ok(header) = header.to_str() else {
             continue;
@@ -135,7 +177,7 @@ fn complete(cookies: &Cookies) -> bool {
         .all(|key| cookies.contains_key(*key))
 }
 
-fn cookie_header(cookies: &Cookies) -> String {
+pub(crate) fn cookie_header(cookies: &Cookies) -> String {
     cookies
         .iter()
         .map(|(k, v)| format!("{k}={v}"))
@@ -170,7 +212,7 @@ fn save_cookies(path: &Path, cookies: &Cookies) -> Result<()> {
     ))
 }
 
-fn request(agent: &ureq::Agent, url: &str, cookies: &Cookies) -> Result<Response> {
+pub(crate) fn request(agent: &ureq::Agent, url: &str, cookies: &Cookies) -> Result<Response> {
     // Transport errors may contain the URL, including a one-use QR ticket.
     agent
         .get(url)
@@ -218,6 +260,17 @@ fn trusted_ticket_url(raw: &str) -> Result<url::Url> {
 fn finish_with(
     login: &Value,
     cookies: &mut Cookies,
+    fetch: impl FnMut(&str, &Cookies) -> Result<Response>,
+) -> Result<AccountProfile> {
+    finish_at(login, cookies, NAV, fetch)
+}
+
+/// Collects the session a login reply hands out (its cookies, its callback URL's
+/// query or the crossDomain ticket's redirects), then has `nav` confirm it.
+pub(crate) fn finish_at(
+    login: &Value,
+    cookies: &mut Cookies,
+    nav: &str,
     mut fetch: impl FnMut(&str, &Cookies) -> Result<Response>,
 ) -> Result<AccountProfile> {
     if let Some(raw) = login["url"].as_str().filter(|s| !s.is_empty()) {
@@ -263,7 +316,7 @@ fn finish_with(
             "登录响应缺少凭据，请重新运行 course2md --login bilibili / Login response is missing credentials; run course2md --login bilibili again"
         )
     );
-    let value: Value = fetch(NAV, cookies)?.body_mut().read_json().context(tr!(
+    let value: Value = fetch(nav, cookies)?.body_mut().read_json().context(tr!(
         "无法解析 Bilibili 登录响应 / Cannot parse Bilibili login response"
     ))?;
     match nav_status(&value)? {
@@ -330,7 +383,7 @@ pub enum AccountStatus {
     Expired,
 }
 
-fn login_agent() -> ureq::Agent {
+pub(crate) fn login_agent() -> ureq::Agent {
     crate::bilibili_agent_builder()
         .timeout_global(Some(Duration::from_secs(12)))
         .build()
@@ -368,7 +421,7 @@ pub fn bilibili_account_status() -> Result<AccountStatus> {
 /// A successful poll returns credentials in memory. The caller explicitly commits
 /// only after checking that its GUI session is still current.
 pub struct VerifiedLogin {
-    cookies: Cookies,
+    pub(crate) cookies: Cookies,
     pub profile: AccountProfile,
 }
 impl VerifiedLogin {
