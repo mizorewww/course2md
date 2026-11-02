@@ -4333,7 +4333,7 @@ mod tests {
         .unwrap();
         std::fs::write(ws.storage_path(), b"{broken primary").unwrap();
         std::fs::write(
-            crate::store::backup_path(&ws.storage_path()),
+            crate::store::backup_path(ws.storage_path()),
             b"{broken backup",
         )
         .unwrap();
