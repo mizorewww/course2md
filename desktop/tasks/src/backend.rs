@@ -151,6 +151,10 @@ impl Job {
         command
             .args(args)
             .env("PATH", tool_path())
+            // The app's language, not the environment's: a task reads the
+            // online subtitle track the preview showed first. Messages in
+            // the task protocol stay Simplified Chinese whatever it says.
+            .env("COURSE2MD_LANG", c2m_i18n::i18n::lang().code())
             .stdin(if input.is_some() {
                 Stdio::piped()
             } else {
@@ -698,6 +702,22 @@ mod tests {
             }
         }
         assert_eq!(lines, 901);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_worker_runs_in_the_app_language() {
+        let job = Job::spawn(
+            "/bin/sh".into(),
+            vec!["-c".into(), "echo \"lang=$COURSE2MD_LANG\"".into()],
+        )
+        .unwrap();
+        match job.events.recv_timeout(Duration::from_secs(10)).unwrap() {
+            Event::Engine(EngineEvent::Log { message, .. }) => {
+                assert_eq!(message, format!("lang={}", c2m_i18n::i18n::lang().code()))
+            }
+            _ => panic!("unexpected event"),
+        }
     }
 
     #[test]
