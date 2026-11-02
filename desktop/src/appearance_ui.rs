@@ -113,6 +113,7 @@ impl Desktop {
         &self,
         palette: PaletteId,
         selected: bool,
+        preview: Rems,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
@@ -146,7 +147,7 @@ impl Desktop {
                 next.appearance.select(palette);
                 this.commit_application(next, cx);
             }))
-            .child(sample(palette, rem(120.)).rounded_t(RADIUS_LARGE))
+            .child(sample(palette, preview).rounded_t(RADIUS_LARGE))
             .child(
                 h_flex()
                     .w_full()
@@ -188,6 +189,12 @@ impl Desktop {
             .min(rem(720.).to_pixels(window.rem_size()).as_f32())
             - rem(48.).to_pixels(window.rem_size()).as_f32();
         let columns = palette_columns(inner_width, f32::from(window.rem_size()));
+        // A row of cards fits the body however large the text: the preview gives up
+        // height before its name is cut off.
+        let rem_size = f32::from(window.rem_size());
+        let unit = rem_size / 14.;
+        let body = f32::from(crate::settings_ui::dialog_body_height(window));
+        let preview = rem(((body / unit) - 48. - 8.).clamp(72., 120.));
         let failed = self
             .settings_group_notice(PreferenceGroup::Application)
             .is_some_and(|(_, error)| error);
@@ -204,7 +211,7 @@ impl Desktop {
                     .map(|palette| {
                         RevealFocus::new(
                             ("palette-reveal", palette as usize),
-                            self.palette_card(palette, palette == selected, window, cx),
+                            self.palette_card(palette, palette == selected, preview, window, cx),
                             scroll.clone(),
                         )
                     })
