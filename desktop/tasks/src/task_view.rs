@@ -589,7 +589,7 @@ pub fn task_status_label(task: &TaskRecord) -> String {
 
 pub fn request_scope(request: &workspace::BlockedRequest) -> String {
     if !request.description.trim().is_empty() {
-        request.description.clone()
+        c2m_i18n::i18n::engine_message(&request.description)
     } else {
         let purpose = request.purpose.as_deref().unwrap_or_default();
         let name = match ai_component(purpose) {
