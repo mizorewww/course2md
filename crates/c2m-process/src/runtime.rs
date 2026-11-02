@@ -394,10 +394,48 @@ pub fn interactive() -> bool {
     std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
-/// What every agent starts from: no redirects (see [`http_agent`]), and no proxy from
-/// the environment, which would otherwise also catch local services on loopback.
+/// What every agent starts from: no redirects (see [`http_agent`]), and the proxy the
+/// environment names, which never carries this machine's own services.
 pub fn agent_builder() -> ureq::config::ConfigBuilder<ureq::typestate::AgentScope> {
-    ureq::Agent::config_builder().proxy(None).max_redirects(0)
+    ureq::Agent::config_builder()
+        .proxy(environment_proxy())
+        .max_redirects(0)
+}
+
+/// Hosts that are always this machine: llama-server, Ollama, an NPU worker.
+const LOOPBACK: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
+
+/// The proxy `ALL_PROXY`, `HTTPS_PROXY` or `HTTP_PROXY` names, with `NO_PROXY`, for
+/// people whose network reaches the internet only through one.
+fn environment_proxy() -> Option<ureq::Proxy> {
+    let no_proxy = ["NO_PROXY", "no_proxy"]
+        .into_iter()
+        .find_map(|name| std::env::var(name).ok());
+    bypassing_loopback(ureq::Proxy::try_from_env()?, no_proxy.as_deref())
+}
+
+/// `proxy`, except for loopback and the hosts `no_proxy` lists: ureq's own reading of
+/// the environment would send loopback through the proxy too.
+fn bypassing_loopback(proxy: ureq::Proxy, no_proxy: Option<&str>) -> Option<ureq::Proxy> {
+    let mut builder = ureq::Proxy::builder(proxy.protocol())
+        .host(proxy.host())
+        .port(proxy.port())
+        .resolve_target(proxy.resolve_target());
+    if let Some(username) = proxy.username() {
+        builder = builder.username(username);
+    }
+    if let Some(password) = proxy.password() {
+        builder = builder.password(password);
+    }
+    let listed = no_proxy
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty());
+    for entry in LOOPBACK.into_iter().chain(listed) {
+        builder = builder.no_proxy(entry);
+    }
+    builder.build().ok()
 }
 
 /// Windows: start a console helper without opening a console window. The
@@ -554,6 +592,25 @@ pub fn random_b64url(bytes: usize) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    /// A proxy from the environment carries remote services, never loopback ones, and
+    /// leaves out what NO_PROXY lists.
+    #[test]
+    fn an_environment_proxy_leaves_loopback_and_no_proxy_hosts_direct() {
+        let proxy = ureq::Proxy::new("http://user:secret@proxy.example:3128").unwrap();
+        let proxy = super::bypassing_loopback(proxy, Some("internal.example, .corp")).unwrap();
+        assert_eq!((proxy.host(), proxy.port()), ("proxy.example", 3128));
+        assert_eq!(proxy.username(), Some("user"));
+        assert_eq!(proxy.password(), Some("secret"));
+        let direct = |url: &str| proxy.is_no_proxy(&url.parse().unwrap());
+        assert!(direct("http://127.0.0.1:11434/api/tags"));
+        assert!(direct("http://localhost:8080/v1"));
+        assert!(direct("http://[::1]:8080/v1"));
+        assert!(direct("https://internal.example/v1"));
+        assert!(direct("https://api.corp/v1"));
+        assert!(!direct("https://api.openai.com/v1"));
+        assert!(!direct("https://www.bilibili.com/"));
+    }
+
     use super::*;
 
     #[test]
