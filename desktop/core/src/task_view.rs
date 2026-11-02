@@ -154,21 +154,12 @@ pub enum StageStatus {
     Cancelled,
 }
 
+/// A stage's measurement: in full for the task details, or `compact` for a
+/// one-line card status, which leaves out supplementary context.
+///
 /// AI counters describe dispatched batches, including requests still in flight.
 /// Only the worker's stage result can move these stages into completed history.
 /// A returned response is the live signal instead, without inventing a fraction.
-pub fn task_stage_progress(
-    name: &Stage,
-    done: bool,
-    live: Option<&activity::Activity>,
-    current: u64,
-    total: u64,
-) -> (String, Option<f32>) {
-    stage_progress(name, done, live, current, total, false)
-}
-
-/// A stage's measurement: in full for the task details, or `compact` for a
-/// one-line card status, which leaves out supplementary context.
 pub fn stage_progress(
     name: &Stage,
     done: bool,
@@ -255,9 +246,7 @@ pub fn ai_stage_outcome(
     };
     match outcome.status {
         course2md::artifact::Status::Succeeded => Some(StageStatus::Complete),
-        course2md::artifact::Status::Failed | course2md::artifact::Status::Partial => {
-            Some(StageStatus::Failed)
-        }
+        _ if unfinished(outcome) => Some(StageStatus::Failed),
         _ => None,
     }
 }
@@ -336,12 +325,7 @@ pub fn task_service_repair_reason(task: &TaskRecord) -> Option<&'static str> {
         &outcomes.summary,
     ]
     .into_iter()
-    .filter(|outcome| {
-        matches!(
-            outcome.status,
-            course2md::artifact::Status::Failed | course2md::artifact::Status::Partial
-        )
-    });
+    .filter(|outcome| unfinished(outcome));
     let blocked = task
         .events
         .blocked
@@ -596,6 +580,14 @@ pub fn request_scope(request: &workspace::BlockedRequest) -> String {
     }
 }
 
+/// A component that failed, or finished only in part.
+fn unfinished(outcome: &course2md::artifact::Outcome) -> bool {
+    matches!(
+        outcome.status,
+        course2md::artifact::Status::Failed | course2md::artifact::Status::Partial
+    )
+}
+
 /// Unfinished parts of a published note: (component, label, outcome).
 pub fn task_component_failures(
     task: &TaskRecord,
@@ -603,56 +595,36 @@ pub fn task_component_failures(
     let Some(outcomes) = &task.events.outcomes else {
         return Vec::new();
     };
-    let mut results = Vec::new();
-    for (component, part, outcome) in [
+    use activity::NotePart;
+    let mut results: Vec<_> = [
         (
             Component::Screenshots,
-            activity::NotePart::Screenshots,
+            NotePart::Screenshots,
             &outcomes.screenshots,
         ),
         (
             Component::Proofreading,
-            activity::NotePart::Proofreading,
+            NotePart::Proofreading,
             &outcomes.proofreading,
         ),
-        (
-            Component::Summary,
-            activity::NotePart::Summary,
-            &outcomes.summary,
-        ),
-    ] {
-        if matches!(
-            outcome.status,
-            course2md::artifact::Status::Failed | course2md::artifact::Status::Partial
-        ) {
-            results.push((component.as_str().into(), part, outcome.clone()));
-        }
-    }
-    {
-        let failures: Vec<course2md::artifact::Outcome> = outcomes
-            .exports
-            .values()
-            .filter(|outcome| {
-                matches!(
-                    outcome.status,
-                    course2md::artifact::Status::Failed | course2md::artifact::Status::Partial
-                )
-            })
-            .cloned()
-            .collect();
-        if !failures.is_empty() {
-            results.push((
-                Component::Exports.as_str().into(),
-                activity::NotePart::Exports,
-                course2md::artifact::Outcome::failed(
-                    failures
-                        .iter()
-                        .filter_map(|o| o.message.clone())
-                        .collect::<Vec<_>>()
-                        .join(course2md::tr!("；")),
-                ),
-            ));
-        }
+        (Component::Summary, NotePart::Summary, &outcomes.summary),
+    ]
+    .into_iter()
+    .filter(|(.., outcome)| unfinished(outcome))
+    .map(|(component, part, outcome)| (component.as_str().into(), part, outcome.clone()))
+    .collect();
+    let exports: Vec<_> = outcomes
+        .exports
+        .values()
+        .filter(|o| unfinished(o))
+        .collect();
+    if !exports.is_empty() {
+        let messages: Vec<_> = exports.iter().filter_map(|o| o.message.clone()).collect();
+        results.push((
+            Component::Exports.as_str().into(),
+            NotePart::Exports,
+            course2md::artifact::Outcome::failed(messages.join(course2md::tr!("；"))),
+        ));
     }
     results
 }
@@ -900,7 +872,7 @@ pub fn task_stage_rows(task: &TaskRecord, active: bool) -> Vec<TaskStage> {
                 }
             };
             let (current, total) = (stored.current, stored.total);
-            let (detail, fraction) = task_stage_progress(&name, done, live, current, total);
+            let (detail, fraction) = stage_progress(&name, done, live, current, total, false);
             let (compact_detail, _) = stage_progress(&name, done, live, current, total, true);
             TaskStage {
                 id: format!("task-stage-{}-{name}", task.id),
@@ -917,7 +889,7 @@ pub fn task_stage_rows(task: &TaskRecord, active: bool) -> Vec<TaskStage> {
 #[cfg(test)]
 mod tests {
     use super::{
-        StageStatus, WorkerWait, ai_stage_outcome, task_failure_summary, task_stage_progress,
+        StageStatus, WorkerWait, ai_stage_outcome, stage_progress, task_failure_summary,
         worker_wait_state,
     };
     use crate::plan::tests::source;
@@ -1085,7 +1057,7 @@ mod tests {
             for (current, total) in [(0, 3), (1, 3), (3, 3), (1, 1)] {
                 activity.update(current, total, None);
                 let (detail, fraction) =
-                    task_stage_progress(name, activity.done, Some(&activity), current, total);
+                    stage_progress(name, activity.done, Some(&activity), current, total, false);
                 assert!(fraction.is_none());
                 assert!(!detail.contains('%'));
                 assert!(!detail.contains("收尾"));
@@ -1093,19 +1065,20 @@ mod tests {
             }
             activity.finish();
             // The finished stage keeps its clock as the record, still without a fraction.
-            let (detail, fraction) = task_stage_progress(name, true, Some(&activity), 1, 1);
+            let (detail, fraction) = stage_progress(name, true, Some(&activity), 1, 1, false);
             assert_eq!(detail, "用时 0 秒");
             assert!(fraction.is_none());
         }
         // Quantities that measure completed work keep their determinate progress.
         let mut screenshots = crate::activity::Activity::new();
         screenshots.update(2, 6, None);
-        let (detail, fraction) = task_stage_progress(
+        let (detail, fraction) = stage_progress(
             &Stage::parse("scenes/extract"),
             false,
             Some(&screenshots),
             2,
             6,
+            false,
         );
         assert!(detail.contains("2 / 6"));
         assert_eq!(fraction, Some(2. / 6.));
