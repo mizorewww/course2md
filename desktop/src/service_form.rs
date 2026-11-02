@@ -620,7 +620,7 @@ impl Desktop {
                 ui::AsyncStatus::Warning(course2md::tr!("服务未返回模型").into())
             }
             model_discovery::Status::Ready(models) => {
-                ui::AsyncStatus::Success(course2md::tr!("找到 {} 个模型", models.len()).into())
+                ui::AsyncStatus::Success(found_models(models.len()).into())
             }
             model_discovery::Status::Failed(error) => {
                 ui::AsyncStatus::Failed(error.message().into())
@@ -765,5 +765,14 @@ impl Desktop {
         if let Some(form) = self.codex_form(surface) {
             form.models.reject(model_discovery::Error::Custom(message));
         }
+    }
+}
+
+/// "找到 1 个模型" / "找到 {} 个模型", with the singular English form.
+fn found_models(count: usize) -> String {
+    if count == 1 {
+        course2md::tr!("找到 1 个模型").to_owned()
+    } else {
+        course2md::tr!("找到 {} 个模型", count)
     }
 }
