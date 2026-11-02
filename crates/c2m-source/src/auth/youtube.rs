@@ -389,8 +389,10 @@ fn remove_stale_in(dir: &Path, age: Duration) {
             .metadata()
             .and_then(|meta| meta.modified())
             .ok()
+            // A future time (the clock was set back) is not proof of age, and an
+            // unreadable one could be a running check's: both are kept.
             .and_then(|modified| modified.elapsed().ok())
-            .is_none_or(|elapsed| elapsed >= age);
+            .is_some_and(|elapsed| elapsed >= age);
         if stale && entry.file_name().to_string_lossy().starts_with("check-") {
             let _ = std::fs::remove_dir_all(entry.path());
         }
@@ -557,6 +559,15 @@ mod tests {
         assert!(old.exists());
         remove_stale_in(dir.path(), Duration::ZERO);
         assert!(!old.exists());
+        // A folder dated in the future (the clock went back) is kept.
+        let ahead = dir.path().join("check-ahead");
+        std::fs::create_dir(&ahead).unwrap();
+        std::fs::File::open(&ahead)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + Duration::from_secs(3600))
+            .unwrap();
+        remove_stale_in(dir.path(), Duration::ZERO);
+        assert!(ahead.exists());
         assert!(other.exists());
     }
 
