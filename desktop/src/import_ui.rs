@@ -24,7 +24,10 @@ use std::{
 /// The workbench's one column.
 const WORKBENCH_WIDTH: Rems = rem(760.);
 /// Rhythm inside the column: title, link, video and options.
-const HERO_GAP: Rems = rem(16.);
+/// The hero title to the link field (H4).
+const HERO_GAP: Rems = rem(20.);
+/// The link field to the line under it: the drop hint or the source switch (H4).
+const HERO_HINT_GAP: Rems = rem(24.);
 
 fn workbench_column() -> Div {
     div()
@@ -632,7 +635,7 @@ impl Desktop {
             return v_flex()
                 .w_full()
                 .min_w_0()
-                .gap(HERO_GAP)
+                .gap(HERO_HINT_GAP)
                 .child(
                     h_flex().w_full().justify_center().child(
                         ConnectedButtonGroup::new("source-kind", course2md::tr!("视频来源"))
@@ -697,7 +700,7 @@ impl Desktop {
         v_flex()
             .w_full()
             .min_w_0()
-            .gap(HERO_GAP)
+            .gap(HERO_HINT_GAP)
             .child(
                 TextField::new("source-link", &self.inputs[&Field::Source])
                     .w_full()
