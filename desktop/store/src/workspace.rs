@@ -1793,6 +1793,9 @@ enum TaskFacts {
         uncertain: Vec<BlockedRequest>,
         events: Box<JobEvents>,
         outcomes: Option<Box<c2m_artifact::artifact::Outcomes>>,
+        /// The library copy of the record could not be brought up to date. What was
+        /// read stands; the copy goes to the library writes, which retry and report.
+        mirror_failed: bool,
     },
     Unreadable(String),
 }
@@ -1807,6 +1810,7 @@ impl TaskFacts {
                 uncertain,
                 events,
                 outcomes,
+                mirror_failed: _,
             } => {
                 forget_task_subtitles(task);
                 task.events = *events;
@@ -1856,17 +1860,20 @@ fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskF
             c2m_artifact::artifact::read_manifest(&version.join("manifest.json")).ok()
         })
         .map(|manifest| Box::new(manifest.outcomes));
-    // Catches up on writes made while disconnected.
-    write_mirror(
+    // Catches up on writes made while disconnected. A failure here says nothing about
+    // the receipts just read, so it must not turn an uncertain task into a failed one.
+    let mirror_failed = write_mirror(
         &task.work_dir.join("task-record.json"),
         &mirror_bytes(task, location)?,
         location,
-    )?;
+    )
+    .is_err();
     Ok(TaskFacts::Found {
         artifact,
         uncertain,
         events: Box::new(events),
         outcomes,
+        mirror_failed,
     })
 }
 
@@ -2384,6 +2391,20 @@ impl Workspace {
             state.reconciling = false;
         }
         self.held_checked = Some(std::time::Instant::now());
+        let mirror_failed: BTreeSet<String> = reconciled
+            .facts
+            .iter()
+            .filter(|(_, facts)| {
+                matches!(
+                    facts,
+                    TaskFacts::Found {
+                        mirror_failed: true,
+                        ..
+                    }
+                )
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
         let mut facts = Some(reconciled.facts);
         let result = self.transaction(|state| {
             apply(state, facts.take().unwrap_or_default());
@@ -2392,6 +2413,12 @@ impl Workspace {
         if let Some(facts) = facts.take().filter(|_| result.is_err()) {
             apply(&mut self.state, facts);
         }
+        self.queue_mirrors(
+            self.state
+                .tasks
+                .iter()
+                .filter(|task| mirror_failed.contains(&task.id)),
+        );
         result
     }
 
@@ -3677,6 +3704,59 @@ mod tests {
         assert_eq!(failed.intent, Intent::Quit);
         assert_eq!(failed.events.error.as_deref(), Some("保留这次失败原因"));
         assert!(failed.unread);
+    }
+
+    /// The startup check also brings the library copy of each record up to date. When
+    /// that write fails, the receipts it read still stand: a stopped task with an
+    /// unconfirmed paid request stays uncertain, and the copy is retried and reported
+    /// like any other library write.
+    #[test]
+    fn a_failed_mirror_catch_up_keeps_an_uncertain_task_uncertain() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let id = ws
+            .state
+            .enqueue(plan(&ws.state.default_library), None)
+            .unwrap()
+            .0;
+        ws.transaction(|state| {
+            let task = state.task_mut(&id).unwrap();
+            task.state = TaskState::Uncertain;
+            task.intent = Intent::Quit;
+            write_unknown(task, 1);
+            Ok(())
+        })
+        .unwrap();
+        ws.library_writes.drain();
+        let mirror = ws
+            .state
+            .task(&id)
+            .unwrap()
+            .work_dir
+            .join("task-record.json");
+        drop(ws);
+        // Nothing can replace a directory, on any platform.
+        std::fs::remove_file(&mirror).unwrap();
+        std::fs::create_dir(&mirror).unwrap();
+
+        let ws = test_workspace(dir.path());
+        let task = ws.state.task(&id).unwrap();
+        assert_eq!(task.state, TaskState::Uncertain);
+        assert_eq!(task.intent, Intent::Quit);
+        assert!(task.has_uncertain() && task.events.error.is_none());
+        assert!(ws.state.next_task().is_none());
+        ws.library_writes.drain();
+        let failure = ws
+            .take_write_error()
+            .expect("the copy is retried and reported");
+        assert!(!failure.control);
+
+        std::fs::remove_dir(&mirror).unwrap();
+        ws.save().unwrap();
+        assert!(mirror.is_file());
+        let task = test_workspace(dir.path()).state.task(&id).unwrap().clone();
+        assert_eq!(task.state, TaskState::Uncertain);
+        assert!(task.has_uncertain());
     }
 
     fn receipt(task: &TaskRecord, state: c2m_dispatch::dispatch::State) {
