@@ -586,11 +586,7 @@ impl Desktop {
     /// The categories with the title and search. A narrow window keeps them in a rail
     /// beside the content: the same tinted circles and selection, with the short names (S1).
     fn settings_navigation(&self, rail: bool, cx: &mut Context<Self>) -> AnyElement {
-        let visible = if rail {
-            SettingsTab::ALL.to_vec()
-        } else {
-            self.visible_settings_tabs(cx)
-        };
+        let visible = self.visible_settings_tabs(cx);
         let groups: [&[SettingsTab]; 3] = if rail {
             [&SettingsTab::ALL, &[], &[]]
         } else {
@@ -627,15 +623,9 @@ impl Desktop {
                     .gap(rem(16.)),
                 cx,
             )
-            .children(lists)
-            .when(visible.is_empty(), |list| {
-                list.child(
-                    TileScale::Regular
-                        .support("settings-search-empty", course2md::tr!("没有匹配的设置"))
-                        .px(ITEM_INSET),
-                )
-            });
-        let search = (!rail).then(|| {
+            .children(lists);
+        // Narrow or wide, the search stays: the pane is narrower, not poorer (V2).
+        let search = {
             SearchField::new(&self.settings_ui.search)
                 .id("settings-search")
                 .field_style(SearchFieldStyle::Surface)
@@ -664,7 +654,7 @@ impl Desktop {
                         )
                     },
                 )
-        });
+        };
         div()
             .id("settings-navigation")
             .size_full()
@@ -682,14 +672,13 @@ impl Desktop {
                             .items_center()
                             .gap(rem(16.))
                             .child(self.settings_back_button(cx))
-                            .when(!rail, |row| {
-                                row.child(ui::page_title(
-                                    "settings-page-title",
-                                    course2md::tr!("设置"),
-                                ))
-                            }),
+                            .child(
+                                ui::page_title("settings-page-title", course2md::tr!("设置"))
+                                    .min_w_0()
+                                    .truncate(),
+                            ),
                     )
-                    .children(search)
+                    .child(search)
                     .child(list),
             )
             .into_any_element()
@@ -764,27 +753,33 @@ impl Desktop {
         // open_settings, select_settings_tab and restore_ordinary_preferences.
         let compact = is_compact(window);
         let navigation = self.settings_navigation(compact, cx);
+        // A search that matches nothing says so here, where the category would be, and
+        // shows none of the categories it ruled out (V7).
+        let no_match = self.visible_settings_tabs(cx).is_empty();
         let content = match self.settings_tab {
+            _ if no_match => self.settings_no_match(cx),
             SettingsTab::Generation => self.generation_settings_page(window, cx),
             SettingsTab::Services => self.services_settings_page(window, cx),
             SettingsTab::Storage => self.storage_settings_page(cx),
             SettingsTab::Application => self.application_settings_page(cx),
             SettingsTab::Appearance => self.appearance_page(window, cx),
         };
-        let heading = v_flex()
-            .w_full()
-            .min_w_0()
-            .gap(rem(6.))
-            .child(h_flex().min_h(rem(56.)).child(ui::page_title(
-                "settings-category-heading",
-                self.settings_tab.label(),
-            )))
-            .when(self.settings_tab == SettingsTab::Generation, |view| {
-                view.child(TileScale::Regular.support(
-                    "generation-default-explanation",
-                    course2md::tr!("这里是长期默认值，主页的「处理选项」可以只对单次生效"),
-                ))
-            });
+        let heading = (!no_match).then(|| {
+            v_flex()
+                .w_full()
+                .min_w_0()
+                .gap(rem(6.))
+                .child(h_flex().min_h(rem(56.)).child(ui::page_title(
+                    "settings-category-heading",
+                    self.settings_tab.label(),
+                )))
+                .when(self.settings_tab == SettingsTab::Generation, |view| {
+                    view.child(TileScale::Regular.support(
+                        "generation-default-explanation",
+                        course2md::tr!("这里是长期默认值，主页的「处理选项」可以只对单次生效"),
+                    ))
+                })
+        });
         let scroll = &self.scrolls[Page::Settings as usize];
         let notices: Vec<_> = self.settings_notices(cx).into_iter().collect();
         let panel = v_flex()
@@ -826,7 +821,7 @@ impl Desktop {
                                     .w_full()
                                     .min_w_0()
                                     .gap(rem(28.))
-                                    .child(heading)
+                                    .children(heading)
                                     .child(content),
                             ),
                         ),
@@ -852,6 +847,29 @@ impl Desktop {
             )
             .child(panel)
             .into_any_element()
+    }
+
+    /// The content pane while the search matches no category: what happened and the
+    /// way back to every category.
+    fn settings_no_match(&self, cx: &mut Context<Self>) -> AnyElement {
+        crate::course_library::empty_state(
+            symbols::search(),
+            course2md::tr!("没有匹配的设置"),
+            None,
+        )
+        .mt(rem(64.))
+        .child(
+            material_button("settings-no-match-clear", ButtonVariant::Text)
+                .icon(symbols::close())
+                .child(course2md::tr!("清除搜索"))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.settings_ui
+                        .search
+                        .update(cx, |state, cx| state.set_value("", window, cx));
+                    this.settings_search_changed(cx);
+                })),
+        )
+        .into_any_element()
     }
 
     fn services_settings_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

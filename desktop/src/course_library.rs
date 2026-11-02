@@ -2201,7 +2201,7 @@ impl Desktop {
 
 /// A place with nothing in it: a tinted icon, what that means and the way forward,
 /// which the caller appends.
-fn empty_state(
+pub(crate) fn empty_state(
     icon: SymbolIcon,
     title: impl Into<SharedString>,
     description: Option<&'static str>,
