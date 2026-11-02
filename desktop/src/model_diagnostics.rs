@@ -565,9 +565,7 @@ impl Desktop {
         let target = request.clone();
         // An engine obstacle shown above carries its own 重新检查; one is enough.
         let obstacle_rechecks = full
-            && issue.is_some_and(|issue| {
-                issue.installable() && issue != DeviceIssue::AppleRuntime
-            });
+            && issue.is_some_and(|issue| issue.installable() && issue != DeviceIssue::AppleRuntime);
         actions = actions.when(!preparing && !obstacle_rechecks, |row| {
             row.child(
                 material_button(id("recheck"), ButtonVariant::Text)

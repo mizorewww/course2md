@@ -448,12 +448,16 @@ impl NoteDocument {
                     } else {
                         "##"
                     };
-                    let link = seconds
-                        .and_then(&seek)
-                        .map(|url| format!(" [{}]({url})", note_text::SOURCE_LINK_LABEL))
-                        .unwrap_or_default();
                     let heading = note_text::plain_inline_markdown(text);
-                    parts.push((format!("{level} {heading}{link}"), Some(index)));
+                    // A section's time and the control that plays from it are one pill.
+                    let heading = match seconds.and_then(&seek) {
+                        Some(url) if block.is_timestamp_heading() => {
+                            note_text::source_link(&heading, &url)
+                        }
+                        Some(url) => format!("{heading} {}", note_text::source_link("", &url)),
+                        None => heading,
+                    };
+                    parts.push((format!("{level} {heading}"), Some(index)));
                 }
                 PreviewBlock::Paragraph { anchor, .. } if anchor.starts_with("key-point-") => {
                     // The key points are one list.
@@ -4353,7 +4357,7 @@ mod tests {
         assert!(
             document
                 .markdown
-                .contains("## 问题由来\n\n### 01:00 [▶](https://video.example/?t=60)")
+                .contains("## 问题由来\n\n### [▶ 01:00](https://video.example/?t=60)")
         );
         // The summary is one panel, which names it; its text stays the note's.
         assert!(document.markdown.contains(
