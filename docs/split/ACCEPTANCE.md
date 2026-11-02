@@ -79,6 +79,8 @@ Each line names the commit by subject; evidence is under the session scratchpad 
 - A5 (unsaved settings), `desktop: offer a settings change whose save failed again after relaunch`: a failed
   save leaves its value in `desktop-preferences.recovery/`, as before `cdd31e3`; relaunch shows it with 重试保存,
   and a successful save or a reset removes it. Read-only settings directory, relaunch, retry, relaunch (`live/a5a` to `live/a5d`).
+- A5 (search clear), `desktop: clear the settings and screenshot searches in place`: a × in the field while it holds
+  text, as the library's search has; typed and cleared by real input (`live/a5e`, `live/a5f`).
 
 ## Plan conformance (after the three fix agents)
 

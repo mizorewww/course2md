@@ -667,6 +667,26 @@ impl Desktop {
                                 Icon::from(symbols::search())
                                     .size(rem(24.))
                                     .color(color(ColorRole::ON_SURFACE_VARIANT)),
+                            )
+                            .when(
+                                !self.settings_ui.search.read(cx).value().is_empty(),
+                                |field| {
+                                    field.trailing(
+                                        IconButton::new(
+                                            "settings-search-clear",
+                                            symbols::close(),
+                                            course2md::tr!("清除搜索"),
+                                        )
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.settings_ui.search.update(cx, |state, cx| {
+                                                    state.set_value("", window, cx)
+                                                });
+                                                this.settings_search_changed(cx);
+                                            }),
+                                        ),
+                                    )
+                                },
                             ),
                     )
                     .child(list),

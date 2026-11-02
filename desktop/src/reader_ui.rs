@@ -3123,7 +3123,29 @@ impl Desktop {
                         .child(
                             SearchField::new(&input)
                                 .field_style(SearchFieldStyle::Tonal)
-                                .leading(Icon::from(symbols::search())),
+                                .leading(Icon::from(symbols::search()))
+                                // The note's search closes with its bar; the screenshots'
+                                // stays, so it clears in place.
+                                .when(!reading_note && searching, |field| {
+                                    field.trailing(
+                                        IconButton::new(
+                                            "gallery-search-clear",
+                                            symbols::close(),
+                                            course2md::tr!("清除搜索"),
+                                        )
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.reader_ui
+                                                    .gallery
+                                                    .find
+                                                    .update(cx, |state, cx| {
+                                                        state.set_value("", window, cx)
+                                                    });
+                                                this.gallery_search_changed(cx);
+                                            }),
+                                        ),
+                                    )
+                                }),
                         ),
                 )
                 .children(status)
