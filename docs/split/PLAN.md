@@ -93,7 +93,7 @@ Taken by reading the code, against decisions 11 and 13. Each states what would r
   multi-line `///` help text into the one key clap looks up, and the `about`/`help` attributes. Reopen if
   the scanner misreads a literal.
 - **Credentials: Keychain through `security-framework` on macOS, `keyring` elsewhere.** Consolidating on
-  `keyring` 4 would save about 70 lines in `desktop/core/src/credentials.rs`, but the Keychain status code
+  `keyring` 4 would save about 70 lines in `desktop/prefs/src/credentials.rs`, but the Keychain status code
   that every error message shows would have to be dug out of `keyring`'s platform error, and it must read items that 2.0.1's signed app wrote (the audit's
   caveat), which cannot be tested here without that signed build. Reopen when a signed build can test it.
 - **No `toml_edit`.** `c2m-config` rewrites `config.toml` from its struct and keeps the previous file as
