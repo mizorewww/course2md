@@ -2,34 +2,30 @@
 
 Update this file in the same commit as the work it records.
 
-**Current phase:** Wave 4, acceptance fixes. Round 1 of acceptance (`ACCEPTANCE.md`) failed in all four
-reviews; the engine crates, the desktop crates, the design restore, the Bilibili password and SMS logins
-(Geetest) and the YouTube browser login, `engine-fixes` (C1–C14), `desktop-logic` (A2–A14) and the first
-`desktop-ui` batch are merged into `split/workspace`. Open: the rest of `desktop-ui` (U1, U2, U4, U7, U10 and
-`DESIGN-RESTORE.md` § Not finished), and the plan blockers P1 (reduction) and P2 (thin wrapper).
+**Current phase:** Wave 4. The acceptance-round-1 fixes, the reduction chunks and the `desktop-core` split are
+merged into `split/workspace`; acceptance round 2 is next. Every `DESIGN-RESTORE.md` restore that waited on the kit
+is in, through kit PRs #16 to #27. Open: U2 (reader resize, unmeasured: load stayed high), U21 (not reproduced),
+and kit #28 (a menu opens above its field when there is no room below), ready for the owner.
 
-**Dependency form:** git, `gpui-kit-material` `main` at `79bce30`, in `[workspace.dependencies]` and all six
-`[patch]` entries of the root `Cargo.toml`. No temporary pin. Kit `main` has since merged #18, #20 and #21,
-which U1, U4/G17 and U10/L1 wait for, so the next repin takes them; #19 and #22 to #27 are open.
+**Dependency form:** git, `gpui-kit-material` `main` at `53fa0fd`, in `[workspace.dependencies]` and all six
+`[patch]` entries of the root `Cargo.toml`. No temporary pin. Repin when #28 merges.
 
 ## Metrics
 
-`python3 docs/split/metrics.py` at `5863f22`: **67,456** production Rust lines, against the 78,518 baseline
-(-11,062, -14.1%). The baseline was counted with an earlier script; the current one reads
-77,921 at `3db4a88`, so -10,465 (-13.4%). Desktop 47,530 (`desktop` 29,912, `desktop/core` 15,848, `desktop/ui` 1,770); engine 19,926
-across `crates/`.
+`python3 docs/split/metrics.py` at `edf140d`: **66,768** production Rust lines against the 78,518 baseline
+(-11,750, -15.0%); the current script reads 77,921 at `3db4a88`, so -14.3% like for like. Engine 19,901 across
+`crates/`; desktop 46,867 (`desktop` 29,451, `prefs` 4,454, `store` 6,112, `tasks` 3,653, `reader-core` 946,
+`accounts` 493, `ui` 1,758).
 
-Secondary metric (decision 13), lines this project put into repositories the owner maintains:
+Secondary metric (decision 13): `gpui-kit-material` PRs #1 to #27 add about 3,950 net Rust lines (upper bound, as
+counted at `5863f22` plus the then-open PRs); `model-fetch`, `slide-detect` and `subtitle-parse` hold 2,343.
 
-- `gpui-kit-material`: merged PRs #1 to #18, #20 and #21 add 2,537 net Rust lines outside `tests/`, examples
-  and the gallery (in-file test modules included, so this is an upper bound). The open PRs #19 and #22 to #27
-  would add 1,412 more.
-- `model-fetch` 1,080, `slide-detect` 596, `subtitle-parse` 667 production lines at the pinned revisions: 2,343.
-
-Primary plus secondary: 72,336, so the true deletion is about 5,590 lines (-7.2%) like for like. Since round 1 of acceptance
-(`d89579d`, 63,001) the count rose by 4,455: the Bilibili and YouTube logins 3,329, `engine-fixes` 380,
-`desktop-logic` 383, `desktop-ui` 347. The working target in `REDUCTION.md` (about 46,700) has not been
-re-estimated (finding P1).
+The reduction was re-estimated by reading every desktop file over 400 lines and every engine crate (finding P1):
+about 3,500 lines looked removable with every feature kept. Done by chunk, the reductions came to engine and
+process helpers -140, tasks -174, reader -103, library and storage -188, settings and setup -175, import -15,
+async idiom -40: -835, about a quarter of the estimate. Most rows were not duplication once read (different
+wording, look, retry policy or cancellation), or saved nothing after formatting. What remains is feature logic.
+Under the no-drop rule this is the reachable figure; see `REDUCTION.md` § Working target.
 
 | Reading | Commit | Lines |
 | --- | --- | ---: |
@@ -37,13 +33,22 @@ re-estimated (finding P1).
 | Wave 1 end | `0a13c9f` | 74,176 (74,038 by the current script) |
 | Waves 2 and 3 | `29cdd24` | 61,992 (current script) |
 | Acceptance round 1 | `d89579d` | 63,001 |
-| Acceptance fixes so far | `5863f22` | 67,456 |
+| Fixes and logins | `5863f22` | 67,456 |
+| Reduction chunks, crate split | `edf140d` | 66,768 |
 
 ## Next action
 
-Finish `desktop-ui`: repin the kit to a `main` that has #18, #20 and #21 and take U1, U4 and U10; the rest
-waits on #19 and #22 to #27. Then decide P1 and P2 with the owner (re-estimate the reduction; split the
-`Desktop` impl and `desktop-core`), and run a fresh acceptance round with new reviewers.
+Acceptance round 2 with fresh reviewers (UI, app, CLI, plan), per `PLAN.md` § Acceptance; repin to the kit `main`
+that has #28 when it merges.
+
+## Owner questions
+
+Each saves a little and changes behaviour, so it waits for the owner; the default is to keep things as they are.
+
+- Stop reading schema-1 records and task records from before `events.jsonl` (about -115 to -175).
+- Run the CLI pipeline through `execution::Request` (about -60): an interrupted CLI run from before the upgrade
+  would start over instead of resuming.
+- Whether an image cache belongs in the kit (recommendation: no).
 
 ## Decisions made during the work
 

@@ -41,10 +41,12 @@ owner's no-drop rule:
 
 ## Working target
 
-**About 46,700 lines (-40%)**, about 44,300 in this repo (-44%) after lever 10, with lever 2 off.
-Levers 1, 3 and 10 came in well under estimate (see `STATUS.md`), so this is re-estimated after wave 2. Componentization
-alone is about -11,450 (14.6%, range 13.3-16.5%): lever 9 plus 4,200-6,700 of page view code
-already counted in levers 6-8. So the 20% first target needs the logic levers as well.
+**About 66,800 lines (-15%), measured, not estimated.** The figures above counted theme, widget and
+`note_text` code that waves 2 and 3 had already removed or moved to the kit. A second audit read every desktop file
+over 400 lines and every engine crate and found about 3,500 lines it judged removable with every feature kept;
+the chunks delivered -835 of them (`STATUS.md` § Metrics). The rest is feature logic: draft and version safety,
+paid-request guards, move and recovery, the image viewer, find, capture. More would need features dropped, which
+decision 13 rules out, or the owner's leave for the items `STATUS.md` lists as owner questions.
 
 ## Kit audit (2026-10-31)
 
