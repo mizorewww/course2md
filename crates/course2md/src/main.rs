@@ -212,6 +212,9 @@ fn main() -> std::process::ExitCode {
     let quiet = cli.opts.quiet
         || helper == Some(ChildProgress::Quiet)
         || matches!(&cli.command, Some(Command::Summarize(args)) if args.quiet);
+    // Content choices (the subtitle track a run reads) follow the person's
+    // language in every output mode.
+    course2md::i18n::set_person_lang(course2md::i18n::lang());
     if json {
         // Machine consumers (--json, run-task) parse message text; keep the
         // protocol's source language whatever --lang says.

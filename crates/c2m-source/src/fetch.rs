@@ -639,7 +639,7 @@ pub async fn fetch_subtitle(
             crate::subtitle::sort_tracks(
                 &mut tracks,
                 &[],
-                "zh",
+                &subtitle_language(out_dir)?,
                 video.original_language.as_deref(),
             );
             let track = tracks.first().context(tr!(
@@ -663,6 +663,30 @@ pub async fn fetch_subtitle(
         )),
         SubtitleEvidence::NoneFound | SubtitleEvidence::Unsupported { .. } => Ok(None),
     }
+}
+
+/// The language a task's online subtitle choice prefers, as the desktop's does:
+/// the person's interface language. It is fixed at the task's first choice, so
+/// that continuing the task in another language reads the same track and its
+/// paid requests keep their ids. A work folder from a version that preferred
+/// Chinese whatever the language (it has subtitle downloads, but no record)
+/// keeps preferring Chinese.
+fn subtitle_language(out_dir: &Path) -> Result<String> {
+    let dir = out_dir.join(".subs");
+    let record = dir.join("language");
+    if let Ok(saved) = std::fs::read_to_string(&record)
+        && !saved.trim().is_empty()
+    {
+        return Ok(saved.trim().to_owned());
+    }
+    let language = if dir.is_dir() {
+        "zh"
+    } else {
+        c2m_i18n::i18n::person_lang().code()
+    };
+    std::fs::create_dir_all(&dir)?;
+    crate::fsio::atomic_write(&record, language.as_bytes())?;
+    Ok(language.to_owned())
 }
 
 /// Escape the complete language key as an exact yt-dlp subtitle regular expression.

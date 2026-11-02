@@ -471,6 +471,102 @@ fn trace_logging_never_shows_the_api_key() {
     }
 }
 
+/// An online run picks its subtitle track in the interface language, as the
+/// desktop does, in plain and `--json` output alike. A task keeps its first
+/// choice when it continues in another language, and a work folder from a
+/// version that preferred Chinese keeps Chinese, so paid requests made from
+/// the transcript keep their ids.
+#[cfg(unix)]
+#[test]
+fn online_subtitles_follow_the_interface_language_and_stay_with_the_task() {
+    use std::os::unix::fs::PermissionsExt;
+    let cli = CliTest::new();
+    let log = cli.dir.path().join("yt-dlp.log");
+    let fake = cli.dir.path().join("yt-dlp");
+    // Offers Simplified Chinese and English tracks of a French video; records
+    // the chosen track, then refuses the video download, which ends the run.
+    std::fs::write(
+        &fake,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then echo 2026.08.19; exit 0; fi
+json='{{"id":"abcdefghijk","title":"Fake lecture","duration":240,"webpage_url":"https://www.youtube.com/watch?v=abcdefghijk","extractor":"youtube","extractor_key":"Youtube","_type":"video","language":"fr","subtitles":{{"zh-Hans":[{{"ext":"vtt","url":"http://127.0.0.1:1/zh.vtt"}}],"en":[{{"ext":"vtt","url":"http://127.0.0.1:1/en.vtt"}}]}},"automatic_captions":{{}}}}'
+prev=""; langs=""; out=""; skip=""
+for arg in "$@"; do
+  [ "$prev" = "--sub-langs" ] && langs="$arg"
+  [ "$prev" = "-o" ] && out="$arg"
+  [ "$arg" = "--skip-download" ] && skip=1
+  prev="$arg"
+done
+if [ -n "$skip" ]; then
+  lang="${{langs#^}}"; lang="${{lang%$}}"
+  echo "$lang" >> "{log}"
+  printf '1\n00:00:00,000 --> 00:00:02,000\nsubtitle in %s\n' "$lang" > "$out.$lang.srt"
+  echo "$json"; exit 0
+fi
+for arg in "$@"; do [ "$arg" = "--dump-single-json" ] && {{ echo "$json"; exit 0; }}; done
+echo "ERROR: [youtube] abcdefghijk: Private video" >&2
+exit 1
+"#,
+            log = log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let run = |lang: &str, extra: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_course2md"))
+            .args(["https://www.youtube.com/watch?v=abcdefghijk"])
+            .args(["--transcript-source", "subtitle", "-o"])
+            .arg(cli.dir.path().join("out"))
+            .args(extra)
+            .current_dir(cli.dir.path())
+            .env("HOME", cli.dir.path())
+            .env("XDG_CONFIG_HOME", cli.dir.path().join("config"))
+            .env("XDG_CACHE_HOME", cli.dir.path().join("cache"))
+            .env("COURSE2MD_LANG", lang)
+            .env("COURSE2MD_YTDLP", &fake)
+            .env_remove("RUST_LOG")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let chosen = std::fs::read_to_string(&log).unwrap_or_default();
+        let _ = std::fs::remove_file(&log);
+        (chosen.trim().to_owned(), output)
+    };
+    let fresh = ["--no-resume"];
+    for (lang, extra, track) in [
+        ("en", &fresh[..], "en"),
+        ("en", &["--no-resume", "--json"][..], "en"),
+        ("zh-Hans", &fresh[..], "zh-Hans"),
+        ("zh-Hans", &["--no-resume", "--json"][..], "zh-Hans"),
+    ] {
+        let (chosen, output) = run(lang, extra);
+        assert_eq!(chosen, track, "{lang} {extra:?}: {}", stderr(&output));
+    }
+    // A task keeps its first choice when it continues in another language.
+    assert_eq!(run("en", &[]).0, "en");
+    assert_eq!(run("zh-Hans", &[]).0, "en");
+    // A work folder from before the choice was recorded preferred Chinese.
+    let work = std::fs::read_dir(cli.dir.path().join("out/youtube"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path()
+        .join(".work");
+    let mut records = 0;
+    for task in std::fs::read_dir(&work).unwrap() {
+        let record = task.unwrap().path().join(".subs/language");
+        if record.is_file() {
+            std::fs::remove_file(record).unwrap();
+            records += 1;
+        }
+    }
+    assert!(records > 0);
+    assert_eq!(run("en", &[]).0, "zh-Hans");
+}
+
 /// Password and SMS login type into a terminal; without one the error says what
 /// to do instead, in the interface language, before anything is sent.
 #[test]

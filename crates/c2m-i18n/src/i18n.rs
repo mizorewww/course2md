@@ -114,6 +114,26 @@ pub fn lang() -> Lang {
     LANGUAGES[CURRENT.load(Ordering::Relaxed) as usize]
 }
 
+// The person's own language, apart from the message language: machine output
+// (`--json`, `run-task`) pins messages to the protocol language, while choices
+// made for the person, such as which subtitle track to read, still follow them.
+// Unset, it is the message language.
+static PERSON: AtomicU8 = AtomicU8::new(u8::MAX);
+
+/// Records the person's language before messages are pinned to the protocol's.
+pub fn set_person_lang(lang: Lang) {
+    PERSON.store(lang as u8, Ordering::Relaxed);
+}
+
+/// The language content choices follow: the person's, even while messages stay
+/// in the protocol language.
+pub fn person_lang() -> Lang {
+    LANGUAGES
+        .get(PERSON.load(Ordering::Relaxed) as usize)
+        .copied()
+        .unwrap_or_else(lang)
+}
+
 /// Selects the language from `COURSE2MD_LANG` or the operating system locale.
 pub fn init_from_env() -> Lang {
     let lang = Lang::detect();
