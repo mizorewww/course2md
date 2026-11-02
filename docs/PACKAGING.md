@@ -18,6 +18,8 @@ The desktop is the `course2md-desktop` binary in `desktop/`, over `desktop-core`
 
 Desktop archives are self-contained. Pins and build options live in `desktop/scripts/` (`ffmpeg_bundle.py`, `ytdlp_bundle.py`, `prebuilt.py`, `package.py`).
 
+`python3 desktop/scripts/package.py` (Python 3.11 or later, with `desktop/scripts/requirements-packaging.txt` installed) builds and packages for the current platform into `target/packages/`, or `$CARGO_TARGET_DIR/packages/` when that is set. Without `APPLE_SIGNING_IDENTITY` it signs ad hoc and skips notarization, so a local run publishes nothing. Downloads are retried, and the ffmpeg tarball falls back to Debian's and Gentoo's copies of it, verified by the same sha256.
+
 | Tool | Platforms | Notes |
 | --- | --- | --- |
 | ffmpeg, ffprobe | All | LGPL-2.1, built from the pinned release with the system's TLS (on Linux, the user's shared GnuTLS). Windows binaries are cross-compiled with llvm-mingw; in CI the `windows-ffmpeg` job builds them |

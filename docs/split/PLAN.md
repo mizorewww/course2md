@@ -5,9 +5,9 @@ pure Material on `gpui-kit-material`. `STATUS.md` holds progress and the next
 action; `AUDIT.md` holds the findings this plan is based on. Delete this
 directory when the project is accepted.
 
-**Resuming after a context loss:** read this file, then `STATUS.md`, then run
-`git log --oneline main..split/workspace` here and
-`git log --oneline origin/main..course2md-integration` in the kit worktree.
+**Resuming after a context loss:** read this file, then `STATUS.md` and `ACCEPTANCE.md`, then run
+`git log --oneline --first-parent main..split/workspace` here and
+`gh pr list -R mizorewww/gpui-kit-material` for the kit PRs in flight.
 
 ## Owner decisions
 
@@ -74,18 +74,55 @@ directory when the project is accepted.
     the page uses it; it is neither flattened to the kit default nor hand-painted in the page.
     `DESIGN-RESTORE.md` lists what wave 2 lost and how each item is restored.
 
+## Decisions
+
+Taken by reading the code, against decisions 11 and 13. Each states what would reopen it.
+
+- **Library sidebar: the app's `folder_tree.rs`, not the kit's `Tree`.** The kit's `Tree`
+  (`vendor/gpui-base/src/tree.rs`) is an unstyled `uniform_list` of `TreeItem`s whose expansion it owns,
+  and a full click on a folder both selects and toggles it. The sidebar selects a place on click and
+  toggles only by its arrow, mixes rows of different heights (all notes, a library heading, a section
+  title, folders), and draws everything itself: the drag source and drop outline, the right-click menu,
+  the tooltip for a cut name, the indent per level and the note counts. All of that would stay in the
+  app's render callback; `Tree` would remove only the dozen lines that skip a closed folder's children,
+  while adding a mirror of `organize::Library` into `TreeItem`s and changing what a click does. Reopen if
+  the kit gains a Material tree with a separate disclosure target.
+- **Catalog test: keep the hand scanner, no `syn`.** `crates/course2md/tests/i18n_catalog.rs` is test
+  code, outside the primary metric. `syn` (or `proc-macro2`'s tokenizer) would replace the literal scanner
+  (about 130 lines), but the test still needs its own code for what it checks beyond literals: joining a
+  multi-line `///` help text into the one key clap looks up, and the `about`/`help` attributes. Reopen if
+  the scanner misreads a literal.
+- **Credentials: Keychain through `security-framework` on macOS, `keyring` elsewhere.** Consolidating on
+  `keyring` 4 would save about 70 lines in `desktop/core/src/credentials.rs`, but the Keychain status code
+  that every error message shows would have to be dug out of `keyring`'s platform error, and it must read items that 2.0.1's signed app wrote (the audit's
+  caveat), which cannot be tested here without that signed build. Reopen when a signed build can test it.
+- **No `toml_edit`.** `c2m-config` rewrites `config.toml` from its struct and keeps the previous file as
+  `config.toml.bak`; the CLI's own template is written whole. `toml_edit` would keep a person's comments
+  across `llm setup` and `--login ollama`, which no feature asks for, and adds code rather than removing it.
+- **No `apple-asr-sys`.** The sherpa-onnx spike rejected one engine (`REDUCTION.md` § Decisions applied),
+  so the Swift module stays. As a published crate it would only move `apple.rs` (614 lines, tied to
+  `c2m-protocol`'s progress events and `tr!`), the Swift build in `c2m-asr/build.rs` and
+  `native/apple-asr` to another repository: relocation, counted by the secondary metric, with no deletion.
+  It is already isolated as part of `c2m-asr`.
+- **Lever 10, desktop half: not done.** Its two items stay in this repository. The screenshot cache and
+  viewer (`desktop/src/reader_images.rs`, 472 lines) is written against `Desktop` and GPUI's `RenderImage`;
+  the form primitives became `desktop-ui` (`desktop/ui/src/ui.rs`), a workspace crate, after the looks
+  they lacked went to the kit (PRs #8 to #14). Publishing either would be relocation. Open question for the
+  owner: whether a sized, budgeted image cache belongs in `gpui-kit-material`; recommended no, until a
+  second app needs it.
+
 ## Locations
 
 | What | Where | Branch |
 | --- | --- | --- |
-| App | `/Users/aac6fef/Developer/course2md` | `split/workspace` |
-| Kit worktree | `/Users/aac6fef/Developer/gpui-kit-material-course2md` | `course2md-integration` (equal to `origin/main`; for PR branches) |
+| App | `/Users/aac6fef/Developer/course2md` | `split/workspace`; agents work in sibling worktrees on `split/<topic>` |
+| Kit PR worktrees | `/Users/aac6fef/Developer/gpui-kit-material-<topic>` | One per PR, `design/<topic>` or `text/<topic>`, each from kit `origin/main` |
 | Kit main (do not touch) | `/Users/aac6fef/Developer/gpui-kit-material` | `main` |
 | Symbols (do not touch unless needed) | `/Users/aac6fef/Developer/gpui-material-symbols` | `main` |
 
-The kit worktree starts from `origin/main`, so the owner's unpushed local commits
-are not published by pushing this branch. Do not push the app's `main` or tags,
-and do not change published releases.
+Each kit worktree starts from `origin/main`, so the owner's unpushed local commits
+are not published by pushing a PR branch; remove the worktree and its branch once the PR
+merges. Do not push the app's `main` or tags, and do not change published releases.
 
 ## Target structure
 
@@ -100,7 +137,7 @@ Working names; check availability before creating a repository.
 | `subtitle-parse` | Parser half of `subtitle.rs` | Local `Cue` type |
 | `slide-detect` | `scene.rs` | `SlideParams`, local event type, progress callback, injected ffmpeg |
 | `model-fetch` | `download.rs`, `hub.rs` | `Cancel`/`Progress` traits, no `tr!`, injected tool locator, opt-in IP lookup |
-| `apple-asr-sys` (conditional) | `native/apple-asr`, `build.rs`, `apple.rs` | Decided by the sherpa-onnx spike |
+| ~~`apple-asr-sys`~~ | `native/apple-asr`, `build.rs`, `apple.rs` | Not created; see § Decisions |
 
 Rule: published libraries return typed errors and events; only the app translates.
 No `tr!` in them. Check name availability before creating a repository.
@@ -108,18 +145,19 @@ No `tr!` in them. Check name availability before creating a repository.
 ### Workspace crates in this repository
 
 `crates/` holds `c2m-i18n`, `c2m-core`, `c2m-process`, `c2m-protocol`, `c2m-config`,
-`c2m-source`, `c2m-ai`, `c2m-asr`, `c2m-artifact`, `c2m-engine`, and the `course2md`
-binary; `desktop/` holds `desktop-core` (`desktop/core`), `desktop-ui` (`desktop/ui`) and
-`course2md-desktop` (`desktop/src`).
-Assignment is in `AUDIT.md`. The root and `desktop` become one Cargo workspace with
-one lock file. CI, `package.py`, `release.yml` and the docs must follow.
+`c2m-dispatch`, `c2m-source`, `c2m-ai`, `c2m-asr`, `c2m-artifact`, `c2m-engine`, the
+`course2md` facade and binary, and the test-only `c2m-test-http`; `desktop/` holds
+`desktop-core` (`desktop/core`), `desktop-ui` (`desktop/ui`) and `course2md-desktop` (`desktop`).
+They form one Cargo workspace with one lock file. What each holds and the allowed dependency
+directions are in `docs/CRATES.md`.
 
 ## Phases
 
 `REDUCTION.md` is the execution guide for what each lever removes. Each wave ends green and
 pushed; agents work on branches in sibling worktrees, and the coordinator merges.
 
-Done: P0 setup, P1 deps, P2 bugs, docs rewrite.
+Done: P0 setup, P1 deps, P2 bugs, docs rewrite, waves 1 to 3. Now: wave 4, fixing the findings of
+acceptance round 1 (`ACCEPTANCE.md`); `STATUS.md` has the state.
 
 **Wave 1, in parallel:**
 - `split/engine`: lever 1, engine cleanup, plus the engine wheels.
@@ -145,22 +183,25 @@ crates, merge the two Cargo workspaces, teach `tests/i18n_catalog.rs` about the 
 
 **Wave 4.** Acceptance, below.
 
-Metrics: `python3 docs/split/metrics.py` (3db4a88 reads 78,464 for `src` and `desktop/src`,
-against the 78,518 baseline). Record at each wave end in `STATUS.md`.
+Metrics: `python3 docs/split/metrics.py`, which counts every workspace crate (it reads 77,921 at
+`3db4a88`, against the 78,518 baseline counted before the crates existed). Record at each wave end
+in `STATUS.md`, beside the secondary metric.
 
 ## Checks
 
+One workspace:
+
 ```sh
 cargo fmt --all --check
-cargo clippy --all-targets -- -D warnings      # engine; workspace-wide after P3
-cargo test
-cargo fmt --manifest-path desktop/Cargo.toml --check
-cargo clippy --manifest-path desktop/Cargo.toml --all-targets --no-deps -- -D warnings
-cargo test --manifest-path desktop/Cargo.toml  # until the workspaces merge
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo test --test i18n_catalog        # after any change to i18n/catalog.tsv or a tr! key
+cargo deny check
 ```
-Kit worktree: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo test --workspace`. Before acceptance also read `.github/workflows/ci.yml` and
-`desktop.yml` and run what they run.
+Packaging scripts: `python3 -m unittest discover -s packaging -p 'test_*.py'` and the same for
+`desktop/scripts` (Python 3.11 or later). Kit worktree: `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`. Before acceptance
+also read `.github/workflows/ci.yml` and `desktop.yml` and run what they run.
 
 ## Dependency form
 

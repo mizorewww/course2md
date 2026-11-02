@@ -1,6 +1,6 @@
 # Built-in palette sources
 
-Retrieved 2026-09-08. `desktop/src/palettes.rs` contains the application mapping.
+Retrieved 2026-09-08. The palettes are defined in `gpui-kit-material-color` (`crates/color/src/palette.rs` in `gpui-kit-material`); the app chooses among them by `PaletteId`.
 
 | Family | Upstream | Mapping |
 | --- | --- | --- |

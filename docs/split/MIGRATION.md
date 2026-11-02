@@ -5,17 +5,15 @@ For page agents in wave 2. Design authority: `.agents/skills/course2md-design/SK
 `settings_ui.rs::application_settings_page`); it imports nothing from `theme::*`.
 
 A move keeps the look: see `PLAN.md` decision 16 and the skill's [design language](../../.agents/skills/course2md-design/references/design-language.md). Order of preference for anything not in these tables: drop the need; compose kit components; only
-then `desktop/src/ui.rs`. Do not add to `theme.rs`. Text comes from `i18n/catalog.tsv` in four
+then `desktop/ui/src/ui.rs` (the `desktop-ui` crate). `theme.rs` is gone; nothing replaces it in the app. Text comes from `i18n/catalog.tsv` in four
 languages, through `course2md::tr!`.
 
-## What the foundation already did
+## Theme, symbols and text
 
-- One paint: `theme::color(CANVAS)` and `gpui_kit_material::theme::color(ColorRole::SURFACE_CONTAINER)`
-  are the same value, so old and new code can share a screen in any order.
-- Kit's `Theme` colors stay written by `theme.rs` until wave 3 removes it. Wave 3 replaces
-  `theme::apply_preference` and `apply_scale` in `views.rs` with `init_component_theme` at startup
-  and `advance_component_theme` before Root's render. Render must not touch Kit's `Theme` after that.
-- Every old `icons::*` already draws a Material Symbol. New code calls `symbols::*`.
+- The kit's `Theme` is the only paint. `views.rs` calls `init_component_theme` at startup and
+  `advance_component_theme` before Root's render; render must not write Kit's `Theme` otherwise.
+  Pages read `gpui_kit_material::theme::color(ColorRole::…)`.
+- Icons are Material Symbols through `symbols::*` (`desktop/ui/src/symbols.rs`).
 - Text is Roboto with the system's CJK fallback.
 
 ## Adding a symbol

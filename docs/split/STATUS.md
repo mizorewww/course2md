@@ -2,54 +2,48 @@
 
 Update this file in the same commit as the work it records.
 
-**Current phase:** Wave 3 (see `PLAN.md` § Phases). Waves 1 and 2 and the engine crates are merged; the desktop crates and the rest of `DESIGN-RESTORE.md` are next.
-**Dependency form:** git, kit `401bb47` on branch `course2md-design`, six `[patch]` entries at the root. This pin is temporary: repin to kit `main` once PRs #2 to #14 are merged, before acceptance.
+**Current phase:** Wave 4, acceptance fixes. Round 1 of acceptance (`ACCEPTANCE.md`) failed in all four
+reviews; the engine crates, the desktop crates, the design restore, the Bilibili password and SMS logins
+(Geetest) and the YouTube browser login, `engine-fixes` (C1–C14), `desktop-logic` (A2–A14) and the first
+`desktop-ui` batch are merged into `split/workspace`. Open: the rest of `desktop-ui` (U1, U2, U4, U7, U10 and
+`DESIGN-RESTORE.md` § Not finished), and the plan blockers P1 (reduction) and P2 (thin wrapper).
 
-## Wave 2 and 3 metrics
+**Dependency form:** git, `gpui-kit-material` `main` at `79bce30`, in `[workspace.dependencies]` and all six
+`[patch]` entries of the root `Cargo.toml`. No temporary pin. Kit `main` has since merged #18, #20 and #21,
+which U1, U4/G17 and U10/L1 wait for, so the next repin takes them; #19 and #22 to #27 are open.
 
-`python3 docs/split/metrics.py` at `29cdd24`: 61,992 lines, against the 78,518 baseline. Desktop 44,340, engine about 17,650 across `crates/`. The engine split itself added 195 lines. `theme.rs` keeps only `sync_unprojected`.
+## Metrics
 
-## Done
+`python3 docs/split/metrics.py` at `5863f22`: **67,456** production Rust lines, against the 78,518 baseline
+(-11,062, -14.1%). The baseline was counted with an earlier script; the current one reads
+77,921 at `3db4a88`, so -10,465 (-13.4%). Desktop 47,530 (`desktop` 29,912, `desktop/core` 15,848, `desktop/ui` 1,770); engine 19,926
+across `crates/`.
 
-- P0: branch `split/workspace`, documents, scaffold residue removed. A kit worktree is created from `origin/main` when needed.
-- P1: the desktop builds and runs on the `gpui-kit-material` stack: `gpui-kit` facade, `gpui-base`,
-  `gpui-kit-material`, the kit's `[patch]` tables, `gpui-fast`, toolchain 1.99.1. Source pinning
-  (`sources.py`, `sources.lock.json`, `patches/`, `.deps`) is gone.
-- T7: packages carry `THIRD-PARTY-LICENSES.txt` from `cargo-about` plus the Swift checkouts; see `docs/PACKAGING.md`.
-  It has 804 stars, below the audit's 1k bar, and so has every candidate; no release has been dry-run with it.
+Secondary metric (decision 13), lines this project put into repositories the owner maintains:
 
-## Patch triage
+- `gpui-kit-material`: merged PRs #1 to #18, #20 and #21 add 2,537 net Rust lines outside `tests/`, examples
+  and the gallery (in-file test modules included, so this is an upper bound). The open PRs #19 and #22 to #27
+  would add 1,412 more.
+- `model-fetch` 1,080, `slide-detect` 596, `subtitle-parse` 667 production lines at the pinned revisions: 2,343.
 
-Superseded by `REDUCTION.md` § Kit audit: the kit carries no patch for this app.
+Primary plus secondary: 72,336, so the true deletion is about 5,590 lines (-7.2%) like for like. Since round 1 of acceptance
+(`d89579d`, 63,001) the count rose by 4,455: the Bilibili and YouTube logins 3,329, `engine-fixes` 380,
+`desktop-logic` 383, `desktop-ui` 347. The working target in `REDUCTION.md` (about 46,700) has not been
+re-estimated (finding P1).
 
-## P1 verification
-
-On kit merge `03b38ec` (which includes `origin/main` at `c6a1476`), Rust 1.99.1, Xcode 27.2 beta for Metal.
-
-- `desktop`: `cargo fmt --check`; `cargo test` 303 passed, 3 ignored (they need yt-dlp, ffmpeg or network);
-  `cargo clippy --all-targets --no-deps -- -D warnings`; `cargo check --features capture,performance --all-targets`.
-- Kit, affected packages only, on the earlier merge `f836c92` (`03b38ec` does not touch the text system):
-  `cargo test -p gpui-pre --lib text_system` 56, `-p gpui-fast --lib line_break` 15, `--lib text_system` 41.
-  `gpui-base` is not a workspace member, so `a_disabled_input_leaves_the_tab_order` passed with it added as
-  a member temporarily. `cargo clippy -p gpui-pre -p gpui-fast --lib` ran before the merges, with no findings.
-  The kit's full `cargo test --workspace` was not run, to save disk.
-- Native run, fixture library and isolated `HOME`/`XDG_*`: the normal build stayed alive with no panic until
-  stopped; the capture build exited 0. Looked at PNGs of home, library, reader, settings, rename dialog, image viewer and overflow
-  menu; tasks was captured but not opened. Driven with simulated input: reader
-  find (1/2, 2/2, highlights, scroll to match, close), inline formulas, text selection, wheel scroll, Escape
-  closing the viewer. A real reader line shows `11 分 39 秒` moving down whole and no line opening with punctuation.
-- Not exercised: a real conversion (no engine binary beside the app, so home shows its "cannot run" notice,
-  as it should), Windows and Linux builds, and the old stack for comparison.
-
-## Wave 1 metrics
-
-`docs/split/metrics.py` at `0a13c9f`: 74,176 (src 17,457, desktop 56,581, native 138). Estimate against
-actual: lever 1 -3,314 / about -1,655 true deletion (-2,095 by metric); levers 3 and 4 -4,354 / -1,107;
-lever 10 engine half -1,495 / -1,212, with +2,388 in the three new repositories (secondary metric); lever 2 rejected.
+| Reading | Commit | Lines |
+| --- | --- | ---: |
+| Baseline | `3db4a88` | 78,518 (77,921 by the current script) |
+| Wave 1 end | `0a13c9f` | 74,176 (74,038 by the current script) |
+| Waves 2 and 3 | `29cdd24` | 61,992 (current script) |
+| Acceptance round 1 | `d89579d` | 63,001 |
+| Acceptance fixes so far | `5863f22` | 67,456 |
 
 ## Next action
 
-Merge wave 2 page branches as they report, then wave 3.
+Finish `desktop-ui`: repin the kit to a `main` that has #18, #20 and #21 and take U1, U4 and U10; the rest
+waits on #19 and #22 to #27. Then decide P1 and P2 with the owner (re-estimate the reduction; split the
+`Desktop` impl and `desktop-core`), and run a fresh acceptance round with new reviewers.
 
 ## Decisions made during the work
 
@@ -60,30 +54,20 @@ Merge wave 2 page branches as they report, then wave 3.
   in the app needs frames while occluded (`on_next_frame` is only used for focus and scroll
   restoration, which can wait), and the fallback would draw synchronously on the main thread, against
   the kit's rule. Port it only if a frozen window is ever observed.
-- **`gpui-kit-material` is on with `default-features = false`** (`serde`, `gpui-fast`) until P5 uses it.
-
-## Foundation
-
-Shell, theme, symbols and `ui.rs` are on the kit; pages move in wave 2 by `MIGRATION.md`. Worked example: `about.rs`.
-
-- One paint: old tokens read the kit's roles. Kit's `Theme` is still written by `theme.rs`, through the kit's
-  Base-only `apply_scheme`, because the bridge's `advance_component_theme` would fight it every frame. Wave 3
-  switches to `init_component_theme`/`advance_component_theme` when `theme.rs` goes.
-- Symbols: `build.rs` renders `desktop/assets/symbols.txt`; `embedded-symbols` stays off.
-- Lucide SVGs are gone. `assets/outline/LICENSE` and `assets/material/LICENSE` stay until `package.py` stops copying them (`split/tooling`).
+- The decisions on `Tree`, `syn`, `keyring`, `toml_edit`, `apple-asr-sys` and lever 10's desktop half are in
+  `PLAN.md` § Decisions.
 
 ## Debts for the Material work
 
-Visual only unless noted.
-
-- Old pages still have button labels at Kit's sizes through `theme::ButtonLabelSize`, Kit's default menus, and Kit's default switches, until they move.
-- `NoteText` ignores `TextSelectionEvent::TouchSelectionChanged`, so it draws no touch handles.
-- Modal dialogs no longer mark the page behind them hidden to assistive technology (`ModalBackground` went, per the audit; GPUI has no attribute for it on a div). Keyboard focus stays trapped.
-- The macOS "always show scrollbars" preference shows the bar on hover: Kit maps not-auto-hide to `ScrollbarMode::Hover`.
-- `COURSE2MD_CAPTURE_CHROME` draws the other platform's captions, but content that measures the bar (the reader) still reserves this platform's width: `CaptionButtons::trailing_for_style` is not public.
+- Modal dialogs no longer mark the page behind them hidden to assistive technology (`ModalBackground` went, per
+  the audit; GPUI has no attribute for it on a div). Keyboard focus stays trapped.
+- `COURSE2MD_CAPTURE_CHROME` draws the other platform's captions, but content that measures the bar (the reader)
+  still reserves this platform's width: `CaptionButtons::trailing_for_style` is not public.
 
 ## Open problems
 
-- **Stale worktree records.** `../zed/.git/worktrees` and `../gpui-component/.git/worktrees` still list
-  entries for the removed `desktop/.deps` worktrees. Left alone, as they are sibling repositories;
-  `git worktree prune` there clears them if the owner wants.
+- **Stale worktree records.** `../gpui-component/.git/worktrees` still lists entries for the removed
+  `desktop/.deps` worktrees. Left alone, as it is a sibling repository; `git worktree prune` there clears them
+  if the owner wants.
+- **Leftover kit branches.** `course2md-design` and `course2md-integration` hold commits that `main` has no
+  equivalent of (`git cherry`), so they stay until the owner confirms they are no longer wanted.

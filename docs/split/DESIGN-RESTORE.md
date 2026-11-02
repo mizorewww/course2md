@@ -172,6 +172,7 @@ A `restore` verdict states the intent. These are not there yet:
 | --- | --- |
 | G17 | `ui::page_title` asks for headline medium 28/36 but measures 24: `page_heading` sets its size on an inner element. Kit #20 (ready for the owner) lets the caller's size through; repin after it merges |
 | L1 | Sidebar items 44 tall with a pill selection: kit #21 (`ListDensity::Minus3`) and #26 (`ListItem::pill`); the sidebar takes both after they merge. Rows were 60: 56 plus a 2px transparent drop border on each side, now an inset outline that adds no height, so rows are 56 until then |
+| R6 | The reader bar has its breadcrumb over the note title again, in a 64 bar rather than the baseline's 56; centring is not yet confirmed in the running app (acceptance U15 to U25) |
 | R9 | Contents as flat pills: `ListItem::pill` (kit #26), without the surface container |
 | S11 | Palette picker: the kit's largest dialog is 720 against the baseline's 918, so names wrap at four across; the selected card has no ring. Kit #23 (`MaterialDialog::max_width`) and #22 (`MaterialCard::selected`, a secondary 1dp outline and tint per M3; the old 2dp ring would be a departure) |
 | U1 | Value choices as rows opening a menu, not `ExposedDropdown`s: kit #18 (`show_label`, ready for the owner) and #19 (a caller's menu with its value, in review) let a row hold one with its supporting text, icons and actions |
