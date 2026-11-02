@@ -2,8 +2,9 @@
 use super::*;
 use crate::folder_tree::{Command, NoteDrag, command_context_menu, command_menu, note_count};
 use crate::library_ui::{Moving, NameTarget};
-use crate::{symbols, ui};
+use crate::{symbols, task_ui::TaskActionView as _, ui};
 use desktop_store::library::*;
+use desktop_tasks::task_view::TaskAction;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit_material::components::MaterialContextMenu;
 use gpui_kit_material::{
@@ -1947,7 +1948,7 @@ impl Desktop {
         outer: OuterCorners,
         cx: &mut Context<Self>,
     ) -> Div {
-        use crate::workspace::{Intent, TaskState};
+        use crate::workspace::TaskState;
         let id = task.id.clone();
         let action = |kind: &str, variant| {
             material_button(SharedString::from(format!("recent-{kind}-{id}")), variant)
@@ -1990,51 +1991,34 @@ impl Desktop {
                     })),
             );
         }
-        let task_id = id.clone();
-        actions = actions.child(if requires_repair {
-            action("repair", ButtonVariant::Text)
-                .tone(ButtonTone::Neutral)
-                .icon(symbols::settings())
-                .child(course2md::tr!("修复 AI 服务并补做"))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.repair_task_service(task_id.clone(), window, cx);
-                }))
-        } else if !uncertain && !partial_components.is_empty() {
+        let next = if !requires_repair && !uncertain && !partial_components.is_empty() {
             let labels = partial_components
                 .iter()
                 .map(|component| component.as_str().to_owned())
                 .collect::<Vec<_>>();
+            let task_id = id.clone();
             action("retry", ButtonVariant::Text)
-                .tone(ButtonTone::Neutral)
                 .icon(symbols::refresh())
                 .child(desktop_tasks::task_view::retry_components_label(&labels))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.reprocess_task(
-                        task_id.clone(),
-                        partial_components.clone(),
-                        Vec::new(),
-                        cx,
-                    );
-                }))
-        } else if !uncertain && task.state == TaskState::Paused {
-            action("resume", ButtonVariant::Text)
-                .tone(ButtonTone::Neutral)
-                .icon(symbols::play_arrow())
-                .child(course2md::tr!("继续生成"))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.set_task_intent(task_id.clone(), Intent::Run, cx);
+                    let parts = partial_components.clone();
+                    this.reprocess_task(task_id.clone(), parts, Vec::new(), cx);
                 }))
         } else {
-            action("task", ButtonVariant::Text)
-                .tone(ButtonTone::Neutral)
-                .icon(symbols::task())
-                .child(course2md::tr!("查看任务"))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    // 统一走 navigate()：保存 New 草稿、阅读位置、跟随清理
-                    this.select_task(&task_id, cx);
-                    this.navigate(Page::Task, cx);
-                }))
-        });
+            let next = if requires_repair {
+                TaskAction::Repair
+            } else if !uncertain && task.state == TaskState::Paused {
+                TaskAction::Resume
+            } else {
+                TaskAction::ViewTask
+            };
+            let (label, icon, _) = next.present(&task, self);
+            action(label, ButtonVariant::Text)
+                .icon(icon)
+                .child(label)
+                .on_click(next.click(cx.weak_entity(), id.clone()))
+        };
+        actions = actions.child(next.tone(ButtonTone::Neutral));
         let scale = TileScale::Regular;
         let summary = desktop_tasks::task_view::task_attention_summary(&task);
         list_surface(outer).child(

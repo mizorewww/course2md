@@ -141,7 +141,7 @@ trait StageStatusView {
 }
 
 /// How an action draws and runs; the action itself is in `desktop_tasks::task_view`.
-trait TaskActionView {
+pub(crate) trait TaskActionView {
     fn present(&self, task: &TaskRecord, desktop: &Desktop) -> (&'static str, SymbolIcon, bool);
     fn run(&self, id: &str, this: &mut Desktop, window: &mut Window, cx: &mut Context<Desktop>);
     fn click(
