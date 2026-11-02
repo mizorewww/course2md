@@ -146,6 +146,11 @@ Each line names the commit by subject; evidence is under the session scratchpad 
   the previews (`pal/p200w2`, `pal/p200d`, `pal/p100`). Kit #23's width cap is rem-scaled and does not address this.
 - Kit PRs open for the rest: #18 and #20 ready for the owner; #19, #21, #22, #23, #24, #25, #26 in review.
 
+- Kit main `ae6b517` (#18, #20, #21 merged), `desktop: pin gpui-kit-material main at ae6b517`. U4/G17: page titles
+  now measure 28 with no app change (`u10/l`). U10/L1, `desktop: sidebar rows are 44 tall`: 44 rows at density −3
+  (`u10/l`, `u10/ld`); the pill waits on #26. S1, `desktop: narrow settings keep their categories as the tinted list`
+  (`s1/c`, `s1/cd`, `s1/cen`). U1 waits on #19.
+
 ## Plan conformance (after the three fix agents)
 
 | ID | Sev | Finding |
