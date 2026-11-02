@@ -79,3 +79,9 @@ kit's vendored engine (PR #16). Wave 2's row-plus-menu choices (H7, S13) are rev
 | P9 | should | `packaging.yml` never ran on this branch; no release dry run on the new layout |
 | P13 | minor | Leftovers: kit branches `course2md-design`, `course2md-integration` and stale others; `gpui-kit-material-design`, `gpui-kit-material-qa` worktrees; stray `fixture.mp4`, empty `.claude/`; 12 GB `target` |
 | P14 | minor | Four unbuildable side-branch commits (`e771098`, `3080007`, `2cd910d`, `5e9f046`): document `git bisect --first-parent`; reverts `d89579d`, `29cdd24` lack attribution |
+
+## Desktop behaviour: resolutions
+
+Each line is recorded in the commit it names. "Before" means the new test was run against the old code and failed.
+
+- **A12 move.** A resumed move skipped any copy of the same size whose time was no older than its original's, so an edited same-size file that a sync tool or a restore stamped earlier than the copy was published stale. Copies now carry their original's modification time, and a restart skips only an exact match; a coarser destination clock only costs a recopy. Test `a_restart_recopies_a_same_size_source_stamped_earlier_than_its_copy`, failed before. Commit "storage: a resumed move recopies a file unless size and time match its original".
