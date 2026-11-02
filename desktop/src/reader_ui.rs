@@ -3042,6 +3042,8 @@ impl Desktop {
                 } else {
                     label
                 })
+                // It opens a menu, as its chevron says.
+                .child(Icon::from(symbols::keyboard_arrow_down()).size(rem(18.)))
                 .loading(current, label)
                 .disabled(exporting)
                 .into_any_element()
