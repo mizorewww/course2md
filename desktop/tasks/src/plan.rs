@@ -1,7 +1,7 @@
 //! What a task plan is built from, and the checks it has to pass.
 use crate::{backend::Done, import::ImportSession, source};
 use anyhow::{Context as _, Result, ensure};
-use course2md::config::{AsrProvider, TranscriptSource};
+use c2m_config::config::{AsrProvider, TranscriptSource};
 use desktop_prefs::{
     conversion::ConversionOptions,
     environment::Environment,
@@ -24,7 +24,7 @@ pub struct TitleRequired;
 
 impl std::fmt::Display for TitleRequired {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(course2md::tr!("请填写笔记名称"))
+        f.write_str(c2m_i18n::tr!("请填写笔记名称"))
     }
 }
 
@@ -51,7 +51,7 @@ impl std::error::Error for PlanPending {}
 
 /// The finished component check, or the wait for it.
 pub(crate) fn plan_environment(environment: Option<&Environment>) -> Result<&Environment> {
-    Ok(environment.ok_or(PlanPending(course2md::tr!("正在检查所需组件…")))?)
+    Ok(environment.ok_or(PlanPending(c2m_i18n::tr!("正在检查所需组件…")))?)
 }
 
 pub(crate) fn validate_plan_storage(
@@ -63,21 +63,21 @@ pub(crate) fn validate_plan_storage(
 ) -> Result<()> {
     let folder_exists = match validation {
         PlanValidation::Preview => {
-            let check = cached.ok_or(PlanPending(course2md::tr!("正在检查保存位置，请稍候")))?;
+            let check = cached.ok_or(PlanPending(c2m_i18n::tr!("正在检查保存位置，请稍候")))?;
             ensure!(
                 check.available,
-                course2md::tr!("保存位置不可访问，请连接磁盘或选择其他位置")
+                c2m_i18n::tr!("保存位置不可访问，请连接磁盘或选择其他位置")
             );
             ensure!(
                 !check.needs_reassociation,
-                course2md::tr!("保存位置需要重新关联")
+                c2m_i18n::tr!("保存位置需要重新关联")
             );
             if let Some(problem) = &check.problem {
                 anyhow::bail!("{problem}");
             }
             match folder {
                 Some(folder) => index
-                    .ok_or(PlanPending(course2md::tr!("正在读取文件夹信息，请稍候")))?
+                    .ok_or(PlanPending(c2m_i18n::tr!("正在读取文件夹信息，请稍候")))?
                     .folders
                     .contains_key(&folder),
                 None => true,
@@ -86,7 +86,7 @@ pub(crate) fn validate_plan_storage(
         PlanValidation::Submission => {
             ensure!(
                 library.root.is_dir(),
-                course2md::tr!("保存位置不可访问，请连接磁盘或选择其他位置")
+                c2m_i18n::tr!("保存位置不可访问，请连接磁盘或选择其他位置")
             );
             workspace::check_library(library)?;
             match folder {
@@ -99,7 +99,7 @@ pub(crate) fn validate_plan_storage(
     };
     ensure!(
         folder_exists,
-        course2md::tr!("文件夹已删除。请选择其他文件夹，或保存到未分类。")
+        c2m_i18n::tr!("文件夹已删除。请选择其他文件夹，或保存到未分类。")
     );
     Ok(())
 }
@@ -181,7 +181,7 @@ pub fn edit_current_draft(
     let current = workspace
         .state
         .draft()
-        .context(course2md::tr!("当前输入记录暂时不可用"))?;
+        .context(c2m_i18n::tr!("当前输入记录暂时不可用"))?;
     let mut next = current.clone();
     edit(&mut next);
     next.updated = current.updated;
@@ -192,7 +192,7 @@ pub fn edit_current_draft(
     workspace.transaction(|state| {
         *state
             .draft_mut()
-            .context(course2md::tr!("没有可保存的输入"))? = next;
+            .context(c2m_i18n::tr!("没有可保存的输入"))? = next;
         Ok(())
     })?;
     Ok(true)
@@ -210,33 +210,33 @@ pub fn batch_note_title(
         return title.to_owned();
     }
     match collection.map(str::trim).filter(|title| !title.is_empty()) {
-        Some(collection) => course2md::tr!("{} 视频 {}", collection, index + 1),
-        None => course2md::tr!("视频 {}", index + 1),
+        Some(collection) => c2m_i18n::tr!("{} 视频 {}", collection, index + 1),
+        None => c2m_i18n::tr!("视频 {}", index + 1),
     }
 }
 
 /// Local recognition check; build_plan and build_batch_plan share its exact messages.
 pub(crate) fn ensure_asr_capability(
     environment: &Environment,
-    provider: course2md::config::AsrProvider,
+    provider: c2m_config::config::AsrProvider,
 ) -> Result<()> {
-    use course2md::config::AsrProvider;
+    use c2m_config::config::AsrProvider;
     match provider {
         AsrProvider::Coreml => ensure!(
             environment.apple,
-            course2md::tr!("Apple 识别组件不可用，请选择其他识别方式")
+            c2m_i18n::tr!("Apple 识别组件不可用，请选择其他识别方式")
         ),
         AsrProvider::Gpu => ensure!(
             environment.llama && environment.gpu.is_some(),
-            course2md::tr!("没有检测到可用的 GPU 识别引擎。请选择 CPU 或其他本机识别方式。")
+            c2m_i18n::tr!("没有检测到可用的 GPU 识别引擎。请选择 CPU 或其他本机识别方式。")
         ),
         AsrProvider::Cpu => ensure!(
             environment.llama,
-            course2md::tr!("CPU 识别引擎尚未安装。请在设置的「应用」中查看安装方法。")
+            c2m_i18n::tr!("CPU 识别引擎尚未安装。请在设置的「应用」中查看安装方法。")
         ),
         AsrProvider::Npu => ensure!(
             environment.npu(),
-            course2md::tr!("没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。")
+            c2m_i18n::tr!("没有检测到可用的 Intel NPU 识别环境。请选择其他本机识别方式。")
         ),
         AsrProvider::Api => (),
     }
@@ -246,13 +246,13 @@ pub(crate) fn ensure_asr_capability(
 /// Without an explicit model, fill in the default for the recognition engine.
 /// import_ui's import_model_request and both plan builders share this rule.
 pub fn fill_default_asr_model(
-    config: &mut course2md::settings::ConfigFile,
-    provider: course2md::config::AsrProvider,
+    config: &mut c2m_config::settings::ConfigFile,
+    provider: c2m_config::config::AsrProvider,
 ) {
-    use course2md::config::AsrProvider;
+    use c2m_config::config::AsrProvider;
     // Automatic engine selection keeps the saved model, which may be a
     // Qwen3 choice from 2.0.0 that the NPU this machine resolved to never ran.
-    course2md::config::migrate_retired_npu_model(Some(provider), &mut config.defaults.asr_model);
+    c2m_config::config::migrate_retired_npu_model(Some(provider), &mut config.defaults.asr_model);
     if provider != AsrProvider::Api
         && config
             .defaults
@@ -260,17 +260,17 @@ pub fn fill_default_asr_model(
             .as_deref()
             .is_none_or(|model| model.trim().is_empty())
     {
-        config.defaults.asr_model = Some(course2md::config::default_model(provider).into());
+        config.defaults.asr_model = Some(c2m_config::config::default_model(provider).into());
     }
 }
 
 pub(crate) fn validate_plan_config(
     source: &str,
-    config: &course2md::settings::ConfigFile,
+    config: &c2m_config::settings::ConfigFile,
 ) -> Result<()> {
-    let resolved = course2md::options::resolve(source.to_owned(), &Default::default(), config)?;
+    let resolved = c2m_engine::options::resolve(source.to_owned(), &Default::default(), config)?;
     resolved.validate()?;
-    if resolved.transcript_source != course2md::config::TranscriptSource::Subtitle {
+    if resolved.transcript_source != c2m_config::config::TranscriptSource::Subtitle {
         // Credentials belong to the service vault, not this static model/provider check.
         resolved.validate_asr_with_auth(false, false)?;
     }
@@ -283,7 +283,7 @@ pub(crate) fn validate_plan_config(
 pub fn update_published_course(
     courses: &mut Vec<Rc<Course>>,
     done: &Done,
-    manifest: &course2md::artifact::Manifest,
+    manifest: &c2m_artifact::artifact::Manifest,
     thumbnail: Option<PathBuf>,
 ) {
     let mut course = Course {
@@ -325,7 +325,7 @@ pub fn recommended_local_provider(environment: Option<&Environment>) -> AsrProvi
         Some(_) => AsrProvider::Cpu,
         // Detection runs in the background. A temporary display hint must
         // not scan Linux devices or PATH while the interface is rendering.
-        None if course2md::config::apple_native_available() => AsrProvider::Coreml,
+        None if c2m_asr::asr::apple_native_available() => AsrProvider::Coreml,
         None => AsrProvider::Cpu,
     }
 }
@@ -357,11 +357,11 @@ impl PlanInputs<'_> {
         ensure!(!self.defaults_pending, unsynced);
         let workspace = self
             .workspace
-            .context(course2md::tr!("输入与任务记录尚未恢复"))?;
+            .context(c2m_i18n::tr!("输入与任务记录尚未恢复"))?;
         let draft = workspace
             .state
             .draft()
-            .context(course2md::tr!("当前输入尚未准备好"))?;
+            .context(c2m_i18n::tr!("当前输入尚未准备好"))?;
         Ok((workspace, draft))
     }
 
@@ -370,14 +370,14 @@ impl PlanInputs<'_> {
     /// A check still in progress is [`PlanPending`], not a failure.
     fn ensure_plan_environment(&self, online: bool) -> Result<&Environment> {
         let environment = plan_environment(self.environment)?;
-        ensure!(environment.engine, course2md::tr!("生成引擎无法启动"));
+        ensure!(environment.engine, c2m_i18n::tr!("生成引擎无法启动"));
         ensure!(
             environment.ffmpeg && environment.ffprobe,
-            course2md::tr!("缺少视频处理组件，请在设置中查看")
+            c2m_i18n::tr!("缺少视频处理组件，请在设置中查看")
         );
         ensure!(
             !online || environment.ytdlp,
-            course2md::tr!("缺少在线视频下载组件，请在设置中查看")
+            c2m_i18n::tr!("缺少在线视频下载组件，请在设置中查看")
         );
         Ok(environment)
     }
@@ -389,11 +389,11 @@ impl PlanInputs<'_> {
         workspace: &workspace::Workspace,
         draft: &workspace::Draft,
         validation: PlanValidation,
-    ) -> Result<course2md::settings::ConfigFile> {
+    ) -> Result<c2m_config::settings::ConfigFile> {
         let library = workspace
             .state
             .library(&draft.library_id)
-            .context(course2md::tr!("保存位置已不在笔记库中，请选择保存位置"))?;
+            .context(c2m_i18n::tr!("保存位置已不在笔记库中，请选择保存位置"))?;
         validate_plan_storage(
             validation,
             library,
@@ -406,7 +406,7 @@ impl PlanInputs<'_> {
             .clone()
             .unwrap_or_else(|| self.preferences.defaults_config());
         draft.options.apply_to(&mut config);
-        config.defaults.model_dir = Some(course2md::config::model_dir_from(
+        config.defaults.model_dir = Some(c2m_config::config::model_dir_from(
             config.defaults.model_dir.as_deref(),
         ));
         Ok(config)
@@ -416,7 +416,7 @@ impl PlanInputs<'_> {
     /// needed, when it is only a fallback) and its default model filled in.
     fn plan_asr(
         &self,
-        config: &mut course2md::settings::ConfigFile,
+        config: &mut c2m_config::settings::ConfigFile,
         environment: &Environment,
         fallback: Option<&'static str>,
     ) -> Result<()> {
@@ -439,7 +439,7 @@ impl PlanInputs<'_> {
     fn finish_plan(
         &self,
         draft: &workspace::Draft,
-        config: course2md::settings::ConfigFile,
+        config: c2m_config::settings::ConfigFile,
         validation: PlanValidation,
         source: source::Source,
         title: String,
@@ -462,7 +462,7 @@ impl PlanInputs<'_> {
         if validation == PlanValidation::Submission && !source.online {
             ensure!(
                 std::path::Path::new(&source.input).is_file(),
-                course2md::tr!("原视频已移动或无法读取，请重新选择视频")
+                c2m_i18n::tr!("原视频已移动或无法读取，请重新选择视频")
             );
         }
         Ok(TaskPlan {
@@ -480,42 +480,42 @@ impl PlanInputs<'_> {
     }
 
     pub fn build_plan(&self, validation: PlanValidation) -> Result<TaskPlan> {
-        let (workspace, draft) = self.plan_draft(course2md::tr!(
+        let (workspace, draft) = self.plan_draft(c2m_i18n::tr!(
             "默认设置已保存，当前视频的选项尚未同步。请重试。"
         ))?;
         ensure!(
             !draft.input.is_empty(),
             if draft.online {
-                course2md::tr!("先粘贴视频链接")
+                c2m_i18n::tr!("先粘贴视频链接")
             } else {
-                course2md::tr!("先选择一个视频")
+                c2m_i18n::tr!("先选择一个视频")
             }
         );
         ensure!(
             !self.import.subtitle_loading && self.import.preview_cancel.is_none(),
-            course2md::tr!("正在确认来源，请等待读取完成")
+            c2m_i18n::tr!("正在确认来源，请等待读取完成")
         );
         ensure!(
             self.import.source_preview.is_some(),
-            course2md::tr!("还没读取到视频信息，请重新预览")
+            c2m_i18n::tr!("还没读取到视频信息，请重新预览")
         );
         ensure!(
             self.import.subtitle_error.is_none(),
-            course2md::tr!("字幕还没读取完成，请重新读取，或改用语音识别")
+            c2m_i18n::tr!("字幕还没读取完成，请重新读取，或改用语音识别")
         );
         let source = draft
             .source
             .clone()
-            .context(course2md::tr!("请先读取并确认视频"))?;
+            .context(c2m_i18n::tr!("请先读取并确认视频"))?;
         let environment = self.ensure_plan_environment(source.online)?;
         ensure!(
             draft.options.source_mode == TranscriptSource::Asr
                 || (source.subtitle_request.is_none() && source.subtitle_read_error.is_none()),
-            course2md::tr!("所选字幕还未确认，请继续读取或明确选择其他文字来源。")
+            c2m_i18n::tr!("所选字幕还未确认，请继续读取或明确选择其他文字来源。")
         );
         ensure!(
             !source.identity.is_empty(),
-            course2md::tr!("无法识别这个视频，请重新预览")
+            c2m_i18n::tr!("无法识别这个视频，请重新预览")
         );
         if draft.title.trim().is_empty() {
             return Err(TitleRequired.into());
@@ -527,12 +527,12 @@ impl PlanInputs<'_> {
             if let Some(subtitle) = &source.selected_subtitle {
                 ensure!(
                     subtitle.source_identity == source.identity,
-                    course2md::tr!("所选字幕与当前视频不匹配，请重新读取字幕")
+                    c2m_i18n::tr!("所选字幕与当前视频不匹配，请重新读取字幕")
                 );
             }
             config.defaults.transcript_source = Some(TranscriptSource::Subtitle);
         } else {
-            use course2md::subtitle::SubtitleEvidence;
+            use c2m_source::subtitle::SubtitleEvidence;
             ensure!(
                 draft.options.source_mode == TranscriptSource::Asr
                     || (draft.options.source_mode == TranscriptSource::Auto
@@ -542,7 +542,7 @@ impl PlanInputs<'_> {
                                 | SubtitleEvidence::Unsupported { .. }
                                 | SubtitleEvidence::Failed { .. }
                         )),
-                course2md::tr!("字幕还未确认。请读取字幕，或明确选择语音识别。")
+                c2m_i18n::tr!("字幕还未确认。请读取字幕，或明确选择语音识别。")
             );
             config.defaults.transcript_source = Some(TranscriptSource::Asr);
             self.plan_asr(&mut config, environment, None)?;
@@ -563,9 +563,9 @@ impl PlanInputs<'_> {
         title: String,
     ) -> Result<TaskPlan> {
         let (workspace, draft) =
-            self.plan_draft(course2md::tr!("默认设置已保存，当前选项尚未同步。请重试。"))?;
-        let identity = course2md::fetch::candidate_identity(candidate)
-            .context(course2md::tr!("还无法确认这个视频的身份，请单独打开后转换"))?;
+            self.plan_draft(c2m_i18n::tr!("默认设置已保存，当前选项尚未同步。请重试。"))?;
+        let identity = c2m_source::fetch::candidate_identity(candidate)
+            .context(c2m_i18n::tr!("还无法确认这个视频的身份，请单独打开后转换"))?;
         let environment = self.ensure_plan_environment(true)?;
         let mut config =
             self.plan_storage_and_config(workspace, draft, PlanValidation::Submission)?;
@@ -573,7 +573,7 @@ impl PlanInputs<'_> {
         // so, as in build_plan, check local recognition and fill in the default model first.
         if draft.options.source_mode != TranscriptSource::Subtitle {
             let fallback = (draft.options.source_mode == TranscriptSource::Auto).then_some(
-                course2md::tr!("部分视频可能没有字幕，需要语音识别能力作为后备"),
+                c2m_i18n::tr!("部分视频可能没有字幕，需要语音识别能力作为后备"),
             );
             self.plan_asr(&mut config, environment, fallback)?;
         }
@@ -663,8 +663,8 @@ pub mod tests {
 
     #[test]
     fn an_automatic_engine_resolving_to_the_npu_does_not_keep_qwen3() {
-        use course2md::config::AsrProvider;
-        let mut config = course2md::settings::ConfigFile::default();
+        use c2m_config::config::AsrProvider;
+        let mut config = c2m_config::settings::ConfigFile::default();
         config.defaults.asr_model = Some("qwen3-1.7b".into());
         super::fill_default_asr_model(&mut config, AsrProvider::Npu);
         assert_eq!(config.defaults.asr_model.as_deref(), Some("whisper"));
@@ -745,7 +745,7 @@ pub mod tests {
     #[test]
     fn a_published_repair_replaces_the_stale_card_before_a_library_scan() {
         use crate::backend::Done as Completed;
-        use course2md::artifact::{Manifest, Outcome, Outcomes};
+        use c2m_artifact::artifact::{Manifest, Outcome, Outcomes};
         use desktop_store::notes::Course;
         use std::{
             path::PathBuf,
@@ -864,21 +864,21 @@ pub mod tests {
             desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
         draft.change_source("video".into());
         let mut options = draft.options.clone();
-        options.provider = Some(course2md::config::AsrProvider::Cpu);
+        options.provider = Some(c2m_config::config::AsrProvider::Cpu);
         apply_draft_options(&mut draft, options.clone());
         assert_eq!(
             draft.local_provider,
-            Some(course2md::config::AsrProvider::Cpu)
+            Some(c2m_config::config::AsrProvider::Cpu)
         );
-        options.provider = Some(course2md::config::AsrProvider::Api);
+        options.provider = Some(c2m_config::config::AsrProvider::Api);
         apply_draft_options(&mut draft, options);
         assert_eq!(
             draft.options.provider,
-            Some(course2md::config::AsrProvider::Api)
+            Some(c2m_config::config::AsrProvider::Api)
         );
         assert_eq!(
             draft.local_provider,
-            Some(course2md::config::AsrProvider::Cpu)
+            Some(c2m_config::config::AsrProvider::Cpu)
         );
         let next = desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
         assert_eq!(next.local_provider, None);
@@ -1053,8 +1053,8 @@ pub mod tests {
 
     #[test]
     fn submit_validates_the_selected_model_only_when_speech_recognition_is_needed() {
-        use course2md::config::{AsrProvider, TranscriptSource};
-        let mut config = course2md::settings::ConfigFile::default();
+        use c2m_config::config::{AsrProvider, TranscriptSource};
+        let mut config = c2m_config::settings::ConfigFile::default();
         config.defaults.provider = Some(AsrProvider::Cpu);
         config.defaults.asr_model = Some("whisper".into());
         config.defaults.transcript_source = Some(TranscriptSource::Asr);

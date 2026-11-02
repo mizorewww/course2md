@@ -1,11 +1,11 @@
 //! The Codex login's state; credentials stay in the CLI's token file.
-use course2md::login::codex::LoginStatus;
+use c2m_ai::login::codex::LoginStatus;
 
 /// Recognize the engine's missing/expired login marker and replace it with in-app connection guidance.
 pub fn login_required(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
-            .downcast_ref::<course2md::login::codex::CodexLoginRequired>()
+            .downcast_ref::<c2m_ai::login::codex::CodexLoginRequired>()
             .is_some()
     })
 }

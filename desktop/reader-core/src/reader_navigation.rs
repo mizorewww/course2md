@@ -187,7 +187,7 @@ pub fn timestamp_local(milliseconds: u64) -> String {
 
 fn timestamp_in_timezone<Tz: chrono::TimeZone>(milliseconds: u64, timezone: &Tz) -> String {
     local_time(milliseconds, timezone).map_or_else(
-        || course2md::tr!("时间未知").into(),
+        || c2m_i18n::tr!("时间未知").into(),
         |local| local.format("%Y-%m-%d %H:%M").to_string(),
     )
 }

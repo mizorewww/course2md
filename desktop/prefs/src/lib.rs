@@ -17,7 +17,7 @@ pub mod store;
 
 /// Shown when a blocking worker ends without a result.
 pub fn interrupted() -> &'static str {
-    course2md::tr!("操作意外中断，请重试")
+    c2m_i18n::tr!("操作意外中断，请重试")
 }
 
 /// Runs blocking IO on smol's blocking thread pool and delivers the result through a

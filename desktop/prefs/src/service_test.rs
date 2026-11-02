@@ -19,7 +19,7 @@ const BLUE_CARD: &[u8] = include_bytes!("../../assets/tests/service-blue-card.pn
 const MAX_RESPONSE: u64 = 128 * 1024;
 
 pub fn test_notice() -> &'static str {
-    course2md::tr!("检查仅发送内置示例，服务商可能计费")
+    c2m_i18n::tr!("检查仅发送内置示例，服务商可能计费")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,10 +33,10 @@ pub enum TestKind {
 impl TestKind {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Speech => course2md::tr!("语音识别"),
-            Self::Proofread => course2md::tr!("AI 校对"),
-            Self::Summary => course2md::tr!("生成摘要"),
-            Self::Vision => course2md::tr!("截图辅助校对"),
+            Self::Speech => c2m_i18n::tr!("语音识别"),
+            Self::Proofread => c2m_i18n::tr!("AI 校对"),
+            Self::Summary => c2m_i18n::tr!("生成摘要"),
+            Self::Vision => c2m_i18n::tr!("截图辅助校对"),
         }
     }
 
@@ -145,7 +145,7 @@ pub fn test_services_blocking(
 }
 
 fn passed_message(kind: TestKind) -> String {
-    course2md::tr!("{}测试通过", kind.label())
+    c2m_i18n::tr!("{}测试通过", kind.label())
 }
 
 /// Unsent evidence for this check; `None` when cancellation already stops it.
@@ -161,8 +161,8 @@ fn new_evidence(
         outcome: TestOutcome::NotSent,
         message: String::new(),
         details: vec![
-            course2md::tr!("用途：{}", kind.label()),
-            course2md::tr!("请求模型：{}", config.model),
+            c2m_i18n::tr!("用途：{}", kind.label()),
+            c2m_i18n::tr!("请求模型：{}", config.model),
         ],
         http_status: None,
     };
@@ -174,10 +174,10 @@ fn new_evidence(
 }
 
 fn cancelled_message() -> &'static str {
-    course2md::tr!("测试已取消，尚未发送请求")
+    c2m_i18n::tr!("测试已取消，尚未发送请求")
 }
 
-/// Codex uses the CLI's Responses/SSE dialect (course2md::llm::test_connection); the
+/// Codex uses the CLI's Responses/SSE dialect (c2m_ai::llm::test_connection); the
 /// desktop chat/completions transport does not apply. The proofreading structure is
 /// checked again during conversion, which keeps the original text on failure.
 fn test_codex(
@@ -190,17 +190,17 @@ fn test_codex(
         Err(cancelled) => return cancelled,
     };
     if kind == TestKind::Speech || config.model.trim().is_empty() {
-        evidence.message = course2md::tr!("所选服务不支持这项测试，尚未发送请求").into();
+        evidence.message = c2m_i18n::tr!("所选服务不支持这项测试，尚未发送请求").into();
         return evidence;
     }
-    let settings = course2md::llm::LlmSettings {
+    let settings = c2m_ai::llm::LlmSettings {
         enabled: true,
-        provider: course2md::llm::LlmProvider::Codex,
+        provider: c2m_ai::llm::LlmProvider::Codex,
         model: config.model.clone(),
         vision: kind == TestKind::Vision,
         ..Default::default()
     };
-    match course2md::llm::test_connection(&settings) {
+    match c2m_ai::llm::test_connection(&settings) {
         Ok(()) => {
             evidence.outcome = TestOutcome::Passed;
             evidence.message = passed_message(kind);
@@ -210,10 +210,10 @@ fn test_codex(
             evidence.http_status = failure.http_status;
             evidence.message = match failure.outcome {
                 TestOutcome::AuthenticationRefused => {
-                    course2md::tr!("Codex 登录已失效或尚未连接，请重新连接账号").into()
+                    c2m_i18n::tr!("Codex 登录已失效或尚未连接，请重新连接账号").into()
                 }
                 TestOutcome::OutcomeUnknown => unknown_result_message().into(),
-                _ => course2md::tr!("服务有回应但未通过检查，请确认模型支持此用途").into(),
+                _ => c2m_i18n::tr!("服务有回应但未通过检查，请确认模型支持此用途").into(),
             };
             evidence.outcome = failure.outcome;
             evidence
@@ -249,17 +249,17 @@ fn classify_status(status: Option<u16>, model_error: bool, transport: bool) -> T
 fn codex_failure(error: &anyhow::Error) -> CodexFailure {
     let login = error.chain().any(|cause| {
         cause
-            .downcast_ref::<course2md::login::codex::CodexLoginRequired>()
+            .downcast_ref::<c2m_ai::login::codex::CodexLoginRequired>()
             .is_some()
     });
     let http_status = error.chain().find_map(|cause| match cause.downcast_ref() {
-        Some(course2md::llm::RequestError::Status(status)) => Some(*status),
+        Some(c2m_ai::llm::RequestError::Status(status)) => Some(*status),
         _ => None,
     });
     let transport = error.chain().any(|cause| {
         matches!(
             cause.downcast_ref(),
-            Some(course2md::llm::RequestError::Transport(_))
+            Some(c2m_ai::llm::RequestError::Transport(_))
         ) || cause.downcast_ref::<std::io::Error>().is_some()
     });
     let outcome = if login {
@@ -274,7 +274,7 @@ fn codex_failure(error: &anyhow::Error) -> CodexFailure {
 }
 
 fn unknown_result_message() -> &'static str {
-    course2md::tr!("未收到确定结果，测试可能已产生费用")
+    c2m_i18n::tr!("未收到确定结果，测试可能已产生费用")
 }
 
 struct HttpRequest {
@@ -361,7 +361,7 @@ fn run_test(
         Err(cancelled) => return cancelled,
     };
     if !kind.accepts(config.protocol) {
-        evidence.message = course2md::tr!("所选服务类型不支持这项测试，尚未发送请求").into();
+        evidence.message = c2m_i18n::tr!("所选服务类型不支持这项测试，尚未发送请求").into();
         return evidence;
     }
     if normalize_endpoint(&config.endpoint, config.protocol)
@@ -370,18 +370,18 @@ fn run_test(
         != Some(config.endpoint.as_str())
         || config.model.trim().is_empty()
     {
-        evidence.message = course2md::tr!("请先填写有效的服务地址和模型 ID，尚未发送请求").into();
+        evidence.message = c2m_i18n::tr!("请先填写有效的服务地址和模型 ID，尚未发送请求").into();
         return evidence;
     }
     let authorization = if config.authentication == Authentication::ApiKey {
         let Some(reference) = &config.credential else {
-            evidence.message = course2md::tr!("此认证方式需要 API Key，尚未发送请求").into();
+            evidence.message = c2m_i18n::tr!("此认证方式需要 API Key，尚未发送请求").into();
             return evidence;
         };
         match vault.resolve(reference) {
             Ok(secret) => Some(secret),
             Err(error) => {
-                evidence.message = course2md::tr!("{}；尚未发送请求", error);
+                evidence.message = c2m_i18n::tr!("{}；尚未发送请求", error);
                 return evidence;
             }
         }
@@ -408,14 +408,14 @@ fn run_test(
         }
         Err(TransportFailure::NotSent) => {
             evidence.message =
-                course2md::tr!("无法连接服务，尚未发送请求，请核对服务地址和网络").into();
+                c2m_i18n::tr!("无法连接服务，尚未发送请求，请核对服务地址和网络").into();
             return evidence;
         }
         Err(TransportFailure::ResponseTooLarge(status)) => {
             evidence.outcome = TestOutcome::ContractMismatch;
             evidence.http_status = Some(status);
-            evidence.message = course2md::tr!("服务返回的内容异常，请核对服务地址").into();
-            evidence.details.push(course2md::tr!(
+            evidence.message = c2m_i18n::tr!("服务返回的内容异常，请核对服务地址").into();
+            evidence.details.push(c2m_i18n::tr!(
                 "HTTP {}；响应超过 128 KiB，未读取其余内容",
                 status
             ));
@@ -427,7 +427,7 @@ fn run_test(
     let json = serde_json::from_slice::<Value>(&response.body).ok();
     if response.status == 401 || response.status == 403 {
         evidence.outcome = TestOutcome::AuthenticationRefused;
-        evidence.message = course2md::tr!("服务拒绝凭据，请检查 API Key 或此模型的使用权限").into();
+        evidence.message = c2m_i18n::tr!("服务拒绝凭据，请检查 API Key 或此模型的使用权限").into();
         return evidence;
     }
     if !(200..300).contains(&response.status)
@@ -455,22 +455,22 @@ fn run_test(
         .contains(&code.as_str());
         evidence.outcome = classify_status(Some(response.status), model_error, false);
         evidence.message = if response.status >= 500 {
-            course2md::tr!("服务返回错误，未收到确定结果，测试可能已产生费用")
+            c2m_i18n::tr!("服务返回错误，未收到确定结果，测试可能已产生费用")
         } else if response.status == 429 {
-            course2md::tr!("服务暂时无法接受测试请求，请查看服务的额度或速率限制")
+            c2m_i18n::tr!("服务暂时无法接受测试请求，请查看服务的额度或速率限制")
         } else if model_error {
-            course2md::tr!("服务不接受所选模型，请检查模型 ID 和使用权限")
+            c2m_i18n::tr!("服务不接受所选模型，请检查模型 ID 和使用权限")
         } else if (300..400).contains(&response.status) {
-            course2md::tr!("服务地址已变更或不正确，请核对")
+            c2m_i18n::tr!("服务地址已变更或不正确，请核对")
         } else {
-            course2md::tr!("已收到回应，但服务未接受这项测试请求")
+            c2m_i18n::tr!("已收到回应，但服务未接受这项测试请求")
         }
         .into();
         return evidence;
     }
     let Some(json) = json else {
         evidence.outcome = TestOutcome::ContractMismatch;
-        evidence.message = course2md::tr!("服务返回的内容格式不对，请确认服务类型和地址").into();
+        evidence.message = c2m_i18n::tr!("服务返回的内容格式不对，请确认服务类型和地址").into();
         return evidence;
     };
     let content = if config.protocol == ServiceProtocol::SpeechTranscriptions {
@@ -481,7 +481,7 @@ fn run_test(
     };
     let Some(content) = content.filter(|content| !content.trim().is_empty()) else {
         evidence.outcome = TestOutcome::ContractMismatch;
-        evidence.message = course2md::tr!("服务有回应但内容为空，请确认模型支持此用途").into();
+        evidence.message = c2m_i18n::tr!("服务有回应但内容为空，请确认模型支持此用途").into();
         return evidence;
     };
     match verify_sample(kind, content) {
@@ -492,17 +492,17 @@ fn run_test(
         Err((outcome, detail)) => {
             evidence.outcome = outcome;
             evidence.message = if evidence.outcome == TestOutcome::ContractMismatch {
-                course2md::tr!("返回格式不符合要求").into()
+                c2m_i18n::tr!("返回格式不符合要求").into()
             } else {
-                course2md::tr!("样例未通过，请查看详情").into()
+                c2m_i18n::tr!("样例未通过，请查看详情").into()
             };
             evidence.details.push(detail);
             let excerpt = if let Some(secret) = &request.authorization {
-                content.replace(secret.expose(), course2md::tr!("[已隐藏凭据]"))
+                content.replace(secret.expose(), c2m_i18n::tr!("[已隐藏凭据]"))
             } else {
                 content.to_owned()
             };
-            evidence.details.push(course2md::tr!(
+            evidence.details.push(c2m_i18n::tr!(
                 "样例回应：{}",
                 excerpt.chars().take(240).collect::<String>()
             ));
@@ -590,14 +590,14 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
                 .iter()
                 .all(|word| has_word(&text, word))
             {
-                return mismatch(course2md::tr!(
+                return mismatch(c2m_i18n::tr!(
                     "内置音频：The blue notebook contains seven pages.；回应未保留其中的关键信息"
                 ));
             }
         }
         TestKind::Proofread | TestKind::Vision => {
-            let pairs = course2md::llm::parse_segments(content)
-                .ok_or_else(|| contract(course2md::tr!("需要 segments 列表，每项有 id 与 text")))?;
+            let pairs = c2m_ai::llm::parse_segments(content)
+                .ok_or_else(|| contract(c2m_i18n::tr!("需要 segments 列表，每项有 id 与 text")))?;
             let mut ids = pairs.iter().map(|(id, _)| *id).collect::<Vec<_>>();
             ids.sort_unstable();
             let expected: &[usize] = if kind == TestKind::Proofread {
@@ -606,7 +606,7 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
                 &[0]
             };
             if ids != expected || pairs.iter().any(|(_, text)| text.trim().is_empty()) {
-                return Err(contract(course2md::tr!(
+                return Err(contract(c2m_i18n::tr!(
                     "返回段落 ID 必须与内置输入一一对应，且每段包含有效文字"
                 )));
             }
@@ -620,7 +620,7 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
             let first = segment(0);
             if kind == TestKind::Vision {
                 if !has_word(&first, "blue") || has_word(&first, "red") {
-                    return mismatch(course2md::tr!(
+                    return mismatch(c2m_i18n::tr!(
                         "内置图片为蓝色卡片，校对后应将原文的 red 改为 blue"
                     ));
                 }
@@ -630,7 +630,7 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
                     || !second.contains("water")
                     || !second.contains("celsius")
                 {
-                    return mismatch(course2md::tr!(
+                    return mismatch(c2m_i18n::tr!(
                         "第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意"
                     ));
                 }
@@ -639,11 +639,11 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
         TestKind::Summary => {
             // The same reading production gives a summary: code fences, surrounding
             // prose and trailing commas do not make a working service fail its test.
-            let value = course2md::llm::extract_json_object(content).ok_or_else(|| {
+            let value = c2m_ai::llm::extract_json_object(content).ok_or_else(|| {
                 contract(if content.contains('{') {
-                    course2md::tr!("摘要 JSON 无法解析")
+                    c2m_i18n::tr!("摘要 JSON 无法解析")
                 } else {
-                    course2md::tr!("需要摘要 JSON 对象")
+                    c2m_i18n::tr!("需要摘要 JSON 对象")
                 })
             })?;
             let list = |name| {
@@ -664,7 +664,7 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
                     })
                 });
             if !structured {
-                return Err(contract(course2md::tr!(
+                return Err(contract(c2m_i18n::tr!(
                     "需要有效的 tldr、key_points 和带时间的 outline"
                 )));
             }
@@ -673,7 +673,7 @@ fn verify_sample(kind: TestKind, content: &str) -> Result<(), (TestOutcome, Stri
                 .iter()
                 .all(|word| text.contains(word))
             {
-                return mismatch(course2md::tr!(
+                return mismatch(c2m_i18n::tr!(
                     "短文讲述光合作用使用阳光并释放氧气，摘要未保留这些关键信息"
                 ));
             }
@@ -775,7 +775,7 @@ mod tests {
             body.to_owned(),
             format!("Here it is:\n```json\n{body}\n```\nDone."),
         ] {
-            assert!(course2md::llm::extract_json_object(&content).is_some());
+            assert!(c2m_ai::llm::extract_json_object(&content).is_some());
             assert_eq!(verify_sample(TestKind::Summary, &content), Ok(()));
         }
         assert!(verify_sample(TestKind::Summary, "no object here").is_err());
@@ -965,7 +965,7 @@ mod tests {
     #[test]
     fn codex_failures_separate_login_refusal_from_unknown_and_mismatched_results() {
         let outcome = |error: anyhow::Error| codex_failure(&error).outcome;
-        let expired = || anyhow::Error::new(course2md::login::codex::CodexLoginRequired);
+        let expired = || anyhow::Error::new(c2m_ai::login::codex::CodexLoginRequired);
         assert_eq!(outcome(expired()), TestOutcome::AuthenticationRefused);
         assert_eq!(
             outcome(expired().context("连接失败。请检查服务地址、密钥和模型。")),

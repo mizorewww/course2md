@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::credentials::Secret;
 
-/// 无重定向的 JSON agent，与引擎同一起点（[`course2md::runtime::agent_builder`]：
+/// 无重定向的 JSON agent，与引擎同一起点（[`c2m_process::runtime::agent_builder`]：
 /// 不跟随重定向、不读环境代理）。各超时独立传入——探测与测试的预算不同：
 /// `connect` 每次连接，`read`/`write` 每次传输读写，`total` 整个请求。
 /// 错误状态码照常作为响应返回，调用方读状态与响应体。
@@ -17,7 +17,7 @@ pub(crate) fn json_agent(
     write: Option<Duration>,
     total: Duration,
 ) -> ureq::Agent {
-    course2md::runtime::agent_builder()
+    c2m_process::runtime::agent_builder()
         .http_status_as_error(false)
         .timeout_connect(Some(connect))
         .timeout_per_read(Some(read))

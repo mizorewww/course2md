@@ -32,12 +32,12 @@ pub(crate) fn relative_key(root: &Path, course: &Path) -> Result<PathBuf> {
     {
         return Ok(key.to_path_buf());
     }
-    let root = std::fs::canonicalize(root).context(course2md::tr!("笔记库文件夹暂时无法访问"))?;
-    let course = std::fs::canonicalize(course).context(course2md::tr!("笔记位置暂时无法访问"))?;
+    let root = std::fs::canonicalize(root).context(c2m_i18n::tr!("笔记库文件夹暂时无法访问"))?;
+    let course = std::fs::canonicalize(course).context(c2m_i18n::tr!("笔记位置暂时无法访问"))?;
     let key = course
         .strip_prefix(root)
-        .context(course2md::tr!("笔记不在这个笔记库中"))?;
-    ensure!(valid(key), course2md::tr!("笔记位置无效"));
+        .context(c2m_i18n::tr!("笔记不在这个笔记库中"))?;
+    ensure!(valid(key), c2m_i18n::tr!("笔记位置无效"));
     Ok(key.to_path_buf())
 }
 
@@ -55,7 +55,7 @@ fn metadata_recovery<T: serde::de::DeserializeOwned>(
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(error).context(course2md::tr!(
+            return Err(error).context(c2m_i18n::tr!(
                 "无法读取文件夹信息，请检查保存位置的访问权限"
             ));
         }
@@ -83,27 +83,26 @@ fn recover_metadata<T: serde::de::DeserializeOwned + Serialize + Default>(
 ) -> Result<(T, PathBuf)> {
     ensure!(
         root.is_dir(),
-        course2md::tr!("笔记库文件夹暂时无法访问，请重新连接磁盘后再试")
+        c2m_i18n::tr!("笔记库文件夹暂时无法访问，请重新连接磁盘后再试")
     );
     let path = root.join(filename);
-    let _lock = course2md::runtime::lock_file(&path.with_extension("lock"))?;
-    let original =
-        std::fs::read(&path).context(course2md::tr!("无法读取并保留原记录，尚未恢复"))?;
+    let _lock = c2m_process::runtime::lock_file(&path.with_extension("lock"))?;
+    let original = std::fs::read(&path).context(c2m_i18n::tr!("无法读取并保留原记录，尚未恢复"))?;
     ensure!(
         serde_json::from_slice::<T>(&original).is_err(),
-        course2md::tr!("记录已恢复，请重新扫描笔记库")
+        c2m_i18n::tr!("记录已恢复，请重新扫描笔记库")
     );
     let library = if rebuild {
         T::default()
     } else {
         serde_json::from_slice::<T>(
             &desktop_prefs::store::read_backup(&path)
-                .context(course2md::tr!("最近备份无法读取，原记录已保留"))?,
+                .context(c2m_i18n::tr!("最近备份无法读取，原记录已保留"))?,
         )
-        .context(course2md::tr!("最近备份也无法读取，原记录已保留"))?
+        .context(c2m_i18n::tr!("最近备份也无法读取，原记录已保留"))?
     };
     let preserved = desktop_prefs::store::set_aside(&path, &original)?;
-    course2md::checkpoint::atomic_write(&path, &serde_json::to_vec_pretty(&library)?)?;
+    c2m_core::fsio::atomic_write(&path, &serde_json::to_vec_pretty(&library)?)?;
     Ok((library, preserved))
 }
 
@@ -116,10 +115,10 @@ struct Titles {
 pub(crate) fn title_aliases(root: &Path) -> Result<BTreeMap<PathBuf, String>> {
     match std::fs::read(root.join(TITLES)) {
         Ok(bytes) => Ok(serde_json::from_slice::<Titles>(&bytes)
-            .context(course2md::tr!("笔记名称记录无法读取，原文件已保留"))?
+            .context(c2m_i18n::tr!("笔记名称记录无法读取，原文件已保留"))?
             .names),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
-        Err(error) => Err(error).context(course2md::tr!("笔记名称记录暂时无法读取")),
+        Err(error) => Err(error).context(c2m_i18n::tr!("笔记名称记录暂时无法读取")),
     }
 }
 
@@ -140,17 +139,17 @@ pub(crate) fn title_alias(root: &Path, course: &Path) -> Result<Option<String>> 
 
 pub fn rename_course(root: &Path, course: &Path, name: &str) -> Result<()> {
     let name = name.trim();
-    ensure!(!name.is_empty(), course2md::tr!("请输入笔记名称"));
+    ensure!(!name.is_empty(), c2m_i18n::tr!("请输入笔记名称"));
     ensure!(
         name.chars().count() <= 240,
-        course2md::tr!("笔记名称最多 240 个字符")
+        c2m_i18n::tr!("笔记名称最多 240 个字符")
     );
     ensure!(
         root.is_dir() && course.is_dir(),
-        course2md::tr!("这份笔记的位置暂时无法访问")
+        c2m_i18n::tr!("这份笔记的位置暂时无法访问")
     );
     let key = relative_key(root, course)?;
-    let _lock = course2md::runtime::lock_file(&root.join(".course2md-titles.lock"))?;
+    let _lock = c2m_process::runtime::lock_file(&root.join(".course2md-titles.lock"))?;
     let mut names = title_aliases(root)?;
     names.insert(key, name.to_owned());
     desktop_prefs::store::save(
@@ -162,9 +161,9 @@ pub fn rename_course(root: &Path, course: &Path, name: &str) -> Result<()> {
 /// The platform's name for the system trash.
 pub fn trash_name() -> &'static str {
     if cfg!(target_os = "macos") {
-        course2md::tr!("废纸篓")
+        c2m_i18n::tr!("废纸篓")
     } else {
-        course2md::tr!("回收站")
+        c2m_i18n::tr!("回收站")
     }
 }
 
@@ -174,7 +173,7 @@ pub fn trash_name() -> &'static str {
 pub fn delete_course(root: &Path, course: &Path) -> Result<()> {
     delete_course_with(root, course, |course| {
         move_to_trash(course)
-            .with_context(|| course2md::tr!("笔记未能移到{}", trash_name()).to_string())
+            .with_context(|| c2m_i18n::tr!("笔记未能移到{}", trash_name()).to_string())
     })
 }
 
@@ -201,7 +200,7 @@ fn delete_course_with(
 ) -> Result<()> {
     ensure!(
         root.is_dir() && course.is_dir(),
-        course2md::tr!("这份笔记的位置暂时无法访问")
+        c2m_i18n::tr!("这份笔记的位置暂时无法访问")
     );
     let key = relative_key(root, course)?;
     remove(course)?;
@@ -209,7 +208,7 @@ fn delete_course_with(
         library.courses.remove(&key);
         Ok(())
     })?;
-    let _lock = course2md::runtime::lock_file(&root.join(".course2md-titles.lock"))?;
+    let _lock = c2m_process::runtime::lock_file(&root.join(".course2md-titles.lock"))?;
     let mut names = title_aliases(root)?;
     if names.remove(&key).is_some() {
         desktop_prefs::store::save(
@@ -235,11 +234,11 @@ impl Library {
     pub fn load(root: &Path) -> Result<Self> {
         ensure!(
             root.is_dir(),
-            course2md::tr!("笔记库文件夹暂时无法访问，请重新连接磁盘后再试")
+            c2m_i18n::tr!("笔记库文件夹暂时无法访问，请重新连接磁盘后再试")
         );
         let mut library: Self = match std::fs::read(root.join(FILE)) {
             Ok(bytes) => serde_json::from_slice(&bytes)
-                .context(course2md::tr!("文件夹信息损坏；原文件已保留，请修复后重试"))?,
+                .context(c2m_i18n::tr!("文件夹信息损坏；原文件已保留，请修复后重试"))?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::default(),
             Err(e) => return Err(e.into()),
         };
@@ -253,9 +252,9 @@ impl Library {
     pub fn edit(root: &Path, change: impl FnOnce(&mut Self) -> Result<()>) -> Result<Self> {
         ensure!(
             root.is_dir(),
-            course2md::tr!("笔记库文件夹暂时无法访问，请重新连接磁盘后再试")
+            c2m_i18n::tr!("笔记库文件夹暂时无法访问，请重新连接磁盘后再试")
         );
-        let _lock = course2md::runtime::lock_file(&root.join(".course2md-library.lock"))?;
+        let _lock = c2m_process::runtime::lock_file(&root.join(".course2md-library.lock"))?;
         let mut library = Self::load(root)?;
         let parents = library.parents.clone();
         change(&mut library)?;
@@ -277,7 +276,7 @@ impl Library {
             Some(id) => {
                 ensure!(
                     self.folders.contains_key(&id),
-                    course2md::tr!("文件夹已不存在，请重新扫描笔记库")
+                    c2m_i18n::tr!("文件夹已不存在，请重新扫描笔记库")
                 );
                 let name = self.valid_name(self.parent(id), Some(id), name)?;
                 self.folders.insert(id, name);
@@ -289,21 +288,21 @@ impl Library {
     /// Names are unique among the folders that share a parent.
     fn valid_name(&self, parent: Option<u64>, id: Option<u64>, name: &str) -> Result<String> {
         let name = name.trim();
-        ensure!(!name.is_empty(), course2md::tr!("请输入文件夹名称"));
+        ensure!(!name.is_empty(), c2m_i18n::tr!("请输入文件夹名称"));
         ensure!(
             name.chars().count() <= 60,
-            course2md::tr!("文件夹名称最多 60 个字符")
+            c2m_i18n::tr!("文件夹名称最多 60 个字符")
         );
         ensure!(
-            name != course2md::tr!("未分类"),
-            course2md::tr!("「未分类」已被使用，请换一个文件夹名称")
+            name != c2m_i18n::tr!("未分类"),
+            c2m_i18n::tr!("「未分类」已被使用，请换一个文件夹名称")
         );
         let lower = name.to_lowercase();
         ensure!(
             !self.children(parent).into_iter().any(|sibling| {
                 Some(sibling) != id && self.folders[&sibling].to_lowercase() == lower
             }),
-            course2md::tr!("这里已有同名文件夹")
+            c2m_i18n::tr!("这里已有同名文件夹")
         );
         Ok(name.to_owned())
     }
@@ -311,7 +310,7 @@ impl Library {
         if let Some(parent) = parent {
             ensure!(
                 self.folders.contains_key(&parent),
-                course2md::tr!("文件夹已不存在，请重新扫描笔记库")
+                c2m_i18n::tr!("文件夹已不存在，请重新扫描笔记库")
             );
         }
         let name = self.valid_name(parent, None, name)?;
@@ -319,7 +318,7 @@ impl Library {
             .next_id
             .max(self.folders.keys().copied().max().unwrap_or(0))
             .checked_add(1)
-            .context(course2md::tr!("文件夹编号已耗尽"))?;
+            .context(c2m_i18n::tr!("文件夹编号已耗尽"))?;
         let id = self.next_id;
         self.folders.insert(id, name);
         if let Some(parent) = parent {
@@ -416,16 +415,16 @@ impl Library {
     pub fn move_folder(&mut self, id: u64, parent: Option<u64>) -> Result<()> {
         ensure!(
             self.folders.contains_key(&id),
-            course2md::tr!("文件夹已不存在，请重新扫描笔记库")
+            c2m_i18n::tr!("文件夹已不存在，请重新扫描笔记库")
         );
         if let Some(parent) = parent {
             ensure!(
                 self.folders.contains_key(&parent),
-                course2md::tr!("文件夹已不存在，请选择其他文件夹")
+                c2m_i18n::tr!("文件夹已不存在，请选择其他文件夹")
             );
             ensure!(
                 !self.subtree(id).contains(&parent),
-                course2md::tr!("不能把文件夹移到它自己里面")
+                c2m_i18n::tr!("不能把文件夹移到它自己里面")
             );
         }
         self.valid_name(parent, Some(id), &self.folders[&id].clone())?;
@@ -460,7 +459,7 @@ impl Library {
         if let Some(id) = folder {
             ensure!(
                 self.folders.contains_key(&id),
-                course2md::tr!("文件夹已不存在，请选择其他文件夹")
+                c2m_i18n::tr!("文件夹已不存在，请选择其他文件夹")
             );
             self.courses.insert(key, id);
         } else {

@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub use course2md::progress::{Done, Event as EngineEvent, LogLevel};
+pub use c2m_protocol::progress::{Done, Event as EngineEvent, LogLevel};
 
 /// One line of engine output, or the end of the process.
 #[derive(Debug)]
@@ -83,7 +83,7 @@ impl Watched {
                 }
             }
             let (status, killed) = {
-                let mut state = course2md::runtime::lock_recover(&reaper.state);
+                let mut state = c2m_process::runtime::lock_recover(&reaper.state);
                 let status = child.wait();
                 state.reaped = true;
                 (status, state.killed)
@@ -97,12 +97,12 @@ impl Watched {
     /// Stops the process and its group (Unix) / tree (Windows) unless it has
     /// already been reaped. Returns whether it was still running.
     pub(crate) fn kill(&self) -> bool {
-        let mut state = course2md::runtime::lock_recover(&self.shared.state);
+        let mut state = c2m_process::runtime::lock_recover(&self.shared.state);
         if state.reaped {
             return false;
         }
         state.killed = true;
-        course2md::runtime::kill_process(self.shared.pid, true, true);
+        c2m_process::runtime::kill_process(self.shared.pid, true, true);
         true
     }
 }
@@ -121,7 +121,7 @@ impl Job {
         Self::spawn_input(bin, args, None, Redactions(vec![]), None, wake)
     }
     pub fn start_task(
-        request: &course2md::execution::Request,
+        request: &c2m_engine::execution::Request,
         wake: smol::channel::Sender<()>,
     ) -> Result<Self> {
         Self::spawn_input(
@@ -163,9 +163,9 @@ impl Job {
             use std::os::unix::process::CommandExt;
             command.process_group(0);
         }
-        let mut child = course2md::runtime::hide_console(&mut command)
+        let mut child = c2m_process::runtime::hide_console(&mut command)
             .spawn()
-            .with_context(|| course2md::tr!("启动 {} 失败", bin.display()))?;
+            .with_context(|| c2m_i18n::tr!("启动 {} 失败", bin.display()))?;
         // All three were set up above: stdin only with an input.
         let stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
@@ -227,7 +227,7 @@ impl Job {
                 bytes.zeroize();
                 if let Err(error) = sent {
                     // The engine closed its input early; its own exit reports why.
-                    let _ = tx.send(Event::error(course2md::tr!("传递任务参数失败：{}", error)));
+                    let _ = tx.send(Event::error(c2m_i18n::tr!("传递任务参数失败：{}", error)));
                     let _ = wake.try_send(());
                 }
             });
@@ -247,7 +247,7 @@ struct Redactions(Vec<String>);
 impl Redactions {
     /// Every credential the request carries, read from its typed fields so a
     /// renamed field fails to compile instead of silently disabling redaction.
-    fn for_request(request: &course2md::execution::Request) -> Self {
+    fn for_request(request: &c2m_engine::execution::Request) -> Self {
         Self(
             [&request.config.llm.api_key, &request.config.asr_api.api_key]
                 .into_iter()
@@ -262,13 +262,13 @@ impl Redactions {
         let mut keys: Vec<_> = self.0.iter().filter(|key| !key.is_empty()).collect();
         keys.sort_by_key(|key| std::cmp::Reverse(key.len()));
         for key in keys {
-            result = result.replace(key, course2md::tr!("[已隐藏密钥]"));
+            result = result.replace(key, c2m_i18n::tr!("[已隐藏密钥]"));
             // Tool diagnostics can contain JSON embedded in ordinary stderr text.
             let encoded = serde_json::to_string(key).unwrap_or_default();
             if encoded.len() > 2 {
                 result = result.replace(
                     &encoded[1..encoded.len() - 1],
-                    course2md::tr!("[已隐藏密钥]"),
+                    c2m_i18n::tr!("[已隐藏密钥]"),
                 );
             }
         }
@@ -355,7 +355,7 @@ impl EventLog {
             .create(true)
             .append(true)
             .open(path)
-            .with_context(|| course2md::tr!("无法读取 {}", path.display()))?;
+            .with_context(|| c2m_i18n::tr!("无法读取 {}", path.display()))?;
         Ok(Self(std::sync::Mutex::new(EventLogState {
             file,
             sampled: None,
@@ -365,7 +365,7 @@ impl EventLog {
 
     /// A failed write costs only detail in a task's history, never its state.
     fn record(&self, event: &EngineEvent) {
-        let mut log = course2md::runtime::lock_recover(&self.0);
+        let mut log = c2m_process::runtime::lock_recover(&self.0);
         if matches!(event, EngineEvent::Progress { .. }) {
             if log
                 .sampled
@@ -421,7 +421,7 @@ fn reader(
                 }
                 // A failed stream stays failed; reading it again would only repeat this.
                 Err(error) => {
-                    let _ = tx.send(Event::error(course2md::tr!("读取任务输出失败：{}", error)));
+                    let _ = tx.send(Event::error(c2m_i18n::tr!("读取任务输出失败：{}", error)));
                     let _ = wake.try_send(());
                     break;
                 }
@@ -447,7 +447,7 @@ fn line_event(line: &str, json: bool, redactions: &Redactions) -> Event {
         // A JSON object this build does not recognize is a
         // protocol drift, not a log line; keep it visible.
         Err(error) if line.starts_with('{') => {
-            Event::log(course2md::tr!("无法识别的任务事件（{}）：{}", error, line))
+            Event::log(c2m_i18n::tr!("无法识别的任务事件（{}）：{}", error, line))
         }
         Err(_) => Event::log(line),
     }
@@ -546,11 +546,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let work = root.path().join("work");
         std::fs::create_dir_all(&work).unwrap();
-        let sections = vec![course2md::timeline::Section {
+        let sections = vec![c2m_core::timeline::Section {
             t: 0.,
             end: 1.,
             image: String::new(),
-            speech: vec![course2md::timeline::TranscriptEvent {
+            speech: vec![c2m_core::timeline::TranscriptEvent {
                 start: 0.,
                 end: 1.,
                 text: "Manually added explanation.".into(),
@@ -558,14 +558,14 @@ mod tests {
                 translation: None,
             }],
         }];
-        let target = course2md::artifact::Target {
+        let target = c2m_artifact::artifact::Target {
             task_id: "task-1".into(),
             course_id: "course-1".into(),
             source_id: "source-1".into(),
             version_id: "v1".into(),
             course_dir: root.path().join("note"),
         };
-        let meta = course2md::fetch::VideoMeta {
+        let meta = c2m_source::fetch::VideoMeta {
             title: "course".into(),
             uploader: String::new(),
             duration: 0.,
@@ -573,7 +573,7 @@ mod tests {
             extractor: "local".into(),
             id: "source".into(),
         };
-        let manifest = course2md::artifact::publish_blocking(
+        let manifest = c2m_artifact::artifact::publish_blocking(
             &target,
             &work,
             &meta,
@@ -606,11 +606,11 @@ mod tests {
             .save(work.join("frames/slide.jpg"))
             .unwrap();
         std::fs::write(dir.path().join("outside.jpg"), b"private").unwrap();
-        let sections = vec![course2md::timeline::Section {
+        let sections = vec![c2m_core::timeline::Section {
             t: 0.,
             end: 1.,
             image: "frames/slide.jpg".into(),
-            speech: vec![course2md::timeline::TranscriptEvent {
+            speech: vec![c2m_core::timeline::TranscriptEvent {
                 start: 0.,
                 end: 1.,
                 text: "Readable explanation.".into(),
@@ -618,14 +618,14 @@ mod tests {
                 translation: None,
             }],
         }];
-        let target = course2md::artifact::Target {
+        let target = c2m_artifact::artifact::Target {
             task_id: "task-1".into(),
             course_id: "course-1".into(),
             source_id: "source-1".into(),
             version_id: "v1".into(),
             course_dir: dir.path().join("course"),
         };
-        let meta = course2md::fetch::VideoMeta {
+        let meta = c2m_source::fetch::VideoMeta {
             title: "Course".into(),
             uploader: String::new(),
             duration: 0.,
@@ -633,7 +633,7 @@ mod tests {
             extractor: "local".into(),
             id: "source".into(),
         };
-        course2md::artifact::publish_blocking(
+        c2m_artifact::artifact::publish_blocking(
             &target,
             &work,
             &meta,
@@ -645,7 +645,7 @@ mod tests {
         .unwrap();
         let version = target.version_dir();
         // Tamper with the published records: the frame reference now escapes the note.
-        let mut manifest: course2md::artifact::Manifest =
+        let mut manifest: c2m_artifact::artifact::Manifest =
             serde_json::from_slice(&std::fs::read(version.join("manifest.json")).unwrap()).unwrap();
         manifest.frames[0].image = "../../outside.jpg".into();
         std::fs::write(
@@ -653,7 +653,7 @@ mod tests {
             serde_json::to_vec_pretty(&manifest).unwrap(),
         )
         .unwrap();
-        let mut document: course2md::artifact::Document =
+        let mut document: c2m_artifact::artifact::Document =
             serde_json::from_slice(&std::fs::read(version.join("document.json")).unwrap()).unwrap();
         document.sections[0].image = "../../outside.jpg".into();
         std::fs::write(
@@ -702,7 +702,7 @@ mod tests {
 
     #[test]
     fn task_redaction_covers_every_typed_credential() {
-        let mut request: course2md::execution::Request =
+        let mut request: c2m_engine::execution::Request =
             serde_json::from_value(serde_json::json!({
                 "schema": 1,
                 "task_id": "task",
@@ -713,7 +713,7 @@ mod tests {
                 "title": "Lecture",
                 "work_dir": "/tmp/work",
                 "course_dir": "/tmp/course",
-                "config": course2md::settings::ConfigFile::default(),
+                "config": c2m_config::settings::ConfigFile::default(),
             }))
             .unwrap();
         request.config.llm.api_key = "llm-only-secret".into();
@@ -816,7 +816,7 @@ mod tests {
         assert!(text.lines().count() < 10);
         let mut replayed = desktop_store::activity::JobEvents::default();
         replayed.replay(&saved);
-        let stage = &replayed.stages[&course2md::progress::Stage::Transcribe];
+        let stage = &replayed.stages[&c2m_protocol::progress::Stage::Transcribe];
         assert_eq!((stage.current, stage.total), (9, 9));
         assert_eq!(replayed.logs.len(), 1);
     }

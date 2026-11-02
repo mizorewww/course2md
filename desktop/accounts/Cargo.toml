@@ -7,7 +7,9 @@ description = "The course2md desktop's sign-ins: Bilibili, YouTube, Codex and Ol
 publish = false
 
 [dependencies]
-course2md = { path = "../../crates/course2md", default-features = false }
+c2m-ai = { path = "../../crates/c2m-ai" }
+c2m-i18n = { path = "../../crates/c2m-i18n" }
+c2m-source = { path = "../../crates/c2m-source" }
 anyhow.workspace = true
 
 [dev-dependencies]

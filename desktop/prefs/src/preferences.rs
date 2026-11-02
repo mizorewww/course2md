@@ -6,8 +6,8 @@
 use crate::credentials::{CredentialRef, CredentialVault, Secret};
 use crate::store::{new_id, now};
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use course2md::config::{AsrProvider, TranscriptSource};
-use course2md::settings::{AsrApiMode, ConfigFile, Defaults, DesktopSettings};
+use c2m_config::config::{AsrProvider, TranscriptSource};
+use c2m_config::settings::{AsrApiMode, ConfigFile, Defaults, DesktopSettings};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -97,19 +97,19 @@ pub fn save_failure_message(group: PreferenceGroup, error: &anyhow::Error) -> St
         .find_map(|cause| cause.downcast_ref::<std::io::Error>())
         .map(|cause| match cause.kind() {
             ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => {
-                course2md::tr!("设置目录暂时无法写入")
+                c2m_i18n::tr!("设置目录暂时无法写入")
             }
-            ErrorKind::StorageFull => course2md::tr!("设置所在磁盘空间不足"),
-            ErrorKind::NotFound => course2md::tr!("设置位置暂时不可访问"),
-            _ => course2md::tr!("设置文件暂时无法写入"),
+            ErrorKind::StorageFull => c2m_i18n::tr!("设置所在磁盘空间不足"),
+            ErrorKind::NotFound => c2m_i18n::tr!("设置位置暂时不可访问"),
+            _ => c2m_i18n::tr!("设置文件暂时无法写入"),
         })
-        .unwrap_or(course2md::tr!("设置变更暂时无法保存"));
+        .unwrap_or(c2m_i18n::tr!("设置变更暂时无法保存"));
     let name = match group {
-        PreferenceGroup::Application => course2md::tr!("应用偏好"),
-        PreferenceGroup::Generation => course2md::tr!("生成笔记偏好"),
-        PreferenceGroup::Services => course2md::tr!("服务配置"),
+        PreferenceGroup::Application => c2m_i18n::tr!("应用偏好"),
+        PreferenceGroup::Generation => c2m_i18n::tr!("生成笔记偏好"),
+        PreferenceGroup::Services => c2m_i18n::tr!("服务配置"),
     };
-    course2md::tr!("{}未保存：{}", name, reason)
+    c2m_i18n::tr!("{}未保存：{}", name, reason)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -120,7 +120,7 @@ pub struct GenerationPreferences {
     /// What AI work a new note gets: the engine's own settings, with the
     /// service fields (provider, address, key, model) always empty; services
     /// are chosen separately.
-    pub ai: course2md::llm::LlmSettings,
+    pub ai: c2m_ai::llm::LlmSettings,
     /// Durable editor text is not an active processing rule until explicitly applied.
     pub prompt_draft: Option<String>,
     pub local_model_draft: Option<String>,
@@ -138,7 +138,7 @@ pub struct GenerationPreferences {
 #[serde(default, deny_unknown_fields)]
 struct StoredGeneration {
     options: Option<Defaults>,
-    ai: Option<course2md::llm::LlmSettings>,
+    ai: Option<c2m_ai::llm::LlmSettings>,
     prompt_draft: Option<String>,
     local_model_draft: Option<String>,
     last_local_provider: Option<AsrProvider>,
@@ -183,7 +183,7 @@ impl Default for GenerationPreferences {
                 keep_video: Some(false),
                 ..Defaults::default()
             },
-            ai: course2md::llm::LlmSettings {
+            ai: c2m_ai::llm::LlmSettings {
                 concurrency: 2,
                 ..Default::default()
             },
@@ -229,7 +229,7 @@ impl GenerationPreferences {
         config.defaults = self.options.clone();
         config.defaults.out = out;
         config.defaults.resume = Some(true);
-        config.llm = course2md::llm::LlmSettings {
+        config.llm = c2m_ai::llm::LlmSettings {
             vision: self.effective_vision(),
             disable_hint: true,
             ..self.ai.clone()
@@ -260,13 +260,13 @@ pub enum InterfaceLanguage {
 impl InterfaceLanguage {
     pub const ALL: [Self; 5] = [Self::System, Self::En, Self::ZhHans, Self::ZhHant, Self::Ja];
 
-    pub fn resolve(self) -> course2md::i18n::Lang {
+    pub fn resolve(self) -> c2m_i18n::i18n::Lang {
         match self {
-            Self::System => course2md::i18n::Lang::detect(),
-            Self::En => course2md::i18n::Lang::En,
-            Self::ZhHans => course2md::i18n::Lang::ZhHans,
-            Self::ZhHant => course2md::i18n::Lang::ZhHant,
-            Self::Ja => course2md::i18n::Lang::Ja,
+            Self::System => c2m_i18n::i18n::Lang::detect(),
+            Self::En => c2m_i18n::i18n::Lang::En,
+            Self::ZhHans => c2m_i18n::i18n::Lang::ZhHans,
+            Self::ZhHant => c2m_i18n::i18n::Lang::ZhHant,
+            Self::Ja => c2m_i18n::i18n::Lang::Ja,
         }
     }
 }
@@ -355,41 +355,41 @@ impl ServiceProtocol {
     /// The service type's choice label, shared by the editor and setup.
     pub fn choice_label(self) -> &'static str {
         match self {
-            Self::SpeechTranscriptions => course2md::tr!("专用转写（如 Whisper）"),
-            Self::SpeechChat => course2md::tr!("多模态对话（如 GPT-4o 音频）"),
-            Self::AiChat => course2md::tr!("OpenAI 兼容服务"),
-            Self::OllamaChat => course2md::tr!("Ollama 本地服务"),
-            Self::CodexResponses => course2md::tr!("OpenAI Codex 订阅"),
+            Self::SpeechTranscriptions => c2m_i18n::tr!("专用转写（如 Whisper）"),
+            Self::SpeechChat => c2m_i18n::tr!("多模态对话（如 GPT-4o 音频）"),
+            Self::AiChat => c2m_i18n::tr!("OpenAI 兼容服务"),
+            Self::OllamaChat => c2m_i18n::tr!("Ollama 本地服务"),
+            Self::CodexResponses => c2m_i18n::tr!("OpenAI Codex 订阅"),
         }
     }
 
     /// What choosing this type means for the person setting it up.
     pub fn choice_detail(self) -> &'static str {
         match self {
-            Self::SpeechTranscriptions => course2md::tr!("上传音频，返回转写文字"),
-            Self::SpeechChat => course2md::tr!("支持音频输入的对话模型"),
-            Self::AiChat => course2md::tr!("填写接口地址和 API Key，适用于大多数云端服务"),
-            Self::OllamaChat => course2md::tr!("使用本机运行的模型，不需要 API Key"),
-            Self::CodexResponses => course2md::tr!("使用 ChatGPT 订阅，不需要 API Key"),
+            Self::SpeechTranscriptions => c2m_i18n::tr!("上传音频，返回转写文字"),
+            Self::SpeechChat => c2m_i18n::tr!("支持音频输入的对话模型"),
+            Self::AiChat => c2m_i18n::tr!("填写接口地址和 API Key，适用于大多数云端服务"),
+            Self::OllamaChat => c2m_i18n::tr!("使用本机运行的模型，不需要 API Key"),
+            Self::CodexResponses => c2m_i18n::tr!("使用 ChatGPT 订阅，不需要 API Key"),
         }
     }
 
     /// 该协议对应的 CLI LLM 方言（仅 AI 用途参与映射）。
-    pub(crate) fn llm_provider(self) -> course2md::llm::LlmProvider {
+    pub(crate) fn llm_provider(self) -> c2m_ai::llm::LlmProvider {
         match self {
-            Self::OllamaChat => course2md::llm::LlmProvider::Ollama,
-            Self::CodexResponses => course2md::llm::LlmProvider::Codex,
-            _ => course2md::llm::LlmProvider::OpenAiCompatible,
+            Self::OllamaChat => c2m_ai::llm::LlmProvider::Ollama,
+            Self::CodexResponses => c2m_ai::llm::LlmProvider::Codex,
+            _ => c2m_ai::llm::LlmProvider::OpenAiCompatible,
         }
     }
 }
 
 fn url_credentials() -> &'static str {
-    course2md::tr!("地址里不能带密钥或 ? # 等附加内容，请把密钥填到 API Key")
+    c2m_i18n::tr!("地址里不能带密钥或 ? # 等附加内容，请把密钥填到 API Key")
 }
 
-/// Codex 订阅登录的固定服务地址（CLI 方言端点固定，见 course2md::provider）。
-pub const CODEX_ADDRESS: &str = course2md::provider::CODEX_BASE_URL;
+/// Codex 订阅登录的固定服务地址（CLI 方言端点固定，见 c2m_ai::provider）。
+pub const CODEX_ADDRESS: &str = c2m_ai::provider::CODEX_BASE_URL;
 /// Ollama 本地服务的默认地址（与 CLI 登录一致）。
 pub const OLLAMA_DEFAULT_ADDRESS: &str = "http://localhost:11434";
 
@@ -473,12 +473,12 @@ impl ServiceDraft {
         if self.model.trim().is_empty() {
             errors.push(FieldError {
                 field: "model",
-                message: course2md::tr!("请输入服务提供的模型 ID").into(),
+                message: c2m_i18n::tr!("请输入服务提供的模型 ID").into(),
             });
         } else if self.model.chars().any(char::is_control) {
             errors.push(FieldError {
                 field: "model",
-                message: course2md::tr!("模型 ID 不能包含换行或控制字符").into(),
+                message: c2m_i18n::tr!("模型 ID 不能包含换行或控制字符").into(),
             });
         }
         if !self.protocol.keyless()
@@ -487,7 +487,7 @@ impl ServiceDraft {
         {
             errors.push(FieldError {
                 field: "api_key",
-                message: course2md::tr!("此认证方式需要 API Key").into(),
+                message: c2m_i18n::tr!("此认证方式需要 API Key").into(),
             });
         }
         errors
@@ -503,7 +503,7 @@ impl ServiceDraft {
                     .iter()
                     .map(|error| error.message.as_str())
                     .collect::<Vec<_>>()
-                    .join(course2md::tr!("；"))
+                    .join(c2m_i18n::tr!("；"))
             );
         }
         let endpoint = normalize_endpoint(&self.address, self.protocol)?;
@@ -603,21 +603,21 @@ impl ServiceVersion {
     pub fn changes_since(&self, old: &ServiceVersion) -> Vec<&'static str> {
         let mut changed = Vec::new();
         if old.config.name != self.config.name {
-            changed.push(course2md::tr!("名称"));
+            changed.push(c2m_i18n::tr!("名称"));
         }
         if old.config.model != self.config.model {
-            changed.push(course2md::tr!("模型"));
+            changed.push(c2m_i18n::tr!("模型"));
         }
         if old.config.endpoint != self.config.endpoint {
-            changed.push(course2md::tr!("地址"));
+            changed.push(c2m_i18n::tr!("地址"));
         }
         if old.config.protocol != self.config.protocol {
-            changed.push(course2md::tr!("服务类型"));
+            changed.push(c2m_i18n::tr!("服务类型"));
         }
         if old.config.authentication != self.config.authentication
             || old.config.credential != self.config.credential
         {
-            changed.push(course2md::tr!("认证"));
+            changed.push(c2m_i18n::tr!("认证"));
         }
         changed
     }
@@ -745,30 +745,30 @@ trait Validate {
 impl Validate for GenerationPreferences {
     fn validate_value(&self) -> Result<()> {
         if self.options.out.is_some() {
-            bail!(course2md::tr!("保存位置由存储设置管理"));
+            bail!(c2m_i18n::tr!("保存位置由存储设置管理"));
         }
         if self.ai.concurrency == 0 || self.ai.concurrency > 64 {
-            bail!(course2md::tr!("AI 并发请求数需要在 1 到 64 之间"));
+            bail!(c2m_i18n::tr!("AI 并发请求数需要在 1 到 64 之间"));
         }
         for (name, value) in [
-            (course2md::tr!("画面相似度"), self.options.similarity),
-            (course2md::tr!("画面采样间隔"), self.options.sample_interval),
-            (course2md::tr!("画面间隔"), self.options.cooldown),
-            (course2md::tr!("稳定画面时长"), self.options.stable_secs),
+            (c2m_i18n::tr!("画面相似度"), self.options.similarity),
+            (c2m_i18n::tr!("画面采样间隔"), self.options.sample_interval),
+            (c2m_i18n::tr!("画面间隔"), self.options.cooldown),
+            (c2m_i18n::tr!("稳定画面时长"), self.options.stable_secs),
         ] {
             if value.is_some_and(|value| !value.is_finite() || value < 0.0) {
-                bail!(course2md::tr!("{}需要是有效的非负数", name));
+                bail!(c2m_i18n::tr!("{}需要是有效的非负数", name));
             }
         }
         if self.options.similarity.is_some_and(|value| value > 1.0) {
-            bail!(course2md::tr!("画面相似度需要在 0 到 1 之间"));
+            bail!(c2m_i18n::tr!("画面相似度需要在 0 到 1 之间"));
         }
         if self
             .options
             .max_speech
             .is_some_and(|value| !value.is_finite() || value <= 0.0)
         {
-            bail!(course2md::tr!("语音分段长度需要大于 0"));
+            bail!(c2m_i18n::tr!("语音分段长度需要大于 0"));
         }
         Ok(())
     }
@@ -777,10 +777,10 @@ impl Validate for GenerationPreferences {
 impl Validate for ApplicationPreferences {
     fn validate_value(&self) -> Result<()> {
         if !self.appearance.valid() {
-            bail!(course2md::tr!("请为浅色和深色外观分别选择对应的主题"));
+            bail!(c2m_i18n::tr!("请为浅色和深色外观分别选择对应的主题"));
         }
         if !crate::preferences::FONT_SCALES.contains(&self.font_scale) {
-            bail!(course2md::tr!("请选择 100%、125%、150% 或 200% 的文字大小"));
+            bail!(c2m_i18n::tr!("请选择 100%、125%、150% 或 200% 的文字大小"));
         }
         Ok(())
     }
@@ -793,7 +793,7 @@ impl Validate for ServicesState {
                 || !valid_id(id, "service-draft-")
                 || !valid_id(&draft.service_id, "service-")
             {
-                bail!(course2md::tr!("服务设置记录不完整"));
+                bail!(c2m_i18n::tr!("服务设置记录不完整"));
             }
         }
         for (id, version) in &self.versions {
@@ -801,14 +801,14 @@ impl Validate for ServicesState {
                 || !valid_id(id, "service-version-")
                 || !valid_id(&version.service_id, "service-")
             {
-                bail!(course2md::tr!("服务版本记录不完整"));
+                bail!(c2m_i18n::tr!("服务版本记录不完整"));
             }
             let config = &version.config;
             if normalize_endpoint(&config.endpoint, config.protocol)? != config.endpoint
                 || config.model.trim().is_empty()
                 || (config.authentication == Authentication::ApiKey && config.credential.is_none())
             {
-                bail!(course2md::tr!("有效服务版本记录不完整"));
+                bail!(c2m_i18n::tr!("有效服务版本记录不完整"));
             }
         }
         for (reference, purpose) in [
@@ -819,9 +819,9 @@ impl Validate for ServicesState {
                 let version = self
                     .versions
                     .get(reference)
-                    .ok_or_else(|| anyhow!(course2md::tr!("默认服务版本不存在")))?;
+                    .ok_or_else(|| anyhow!(c2m_i18n::tr!("默认服务版本不存在")))?;
                 if version.config.protocol.purpose() != purpose {
-                    bail!(course2md::tr!("默认服务用途不匹配"));
+                    bail!(c2m_i18n::tr!("默认服务用途不匹配"));
                 }
             }
         }
@@ -879,11 +879,11 @@ impl Store {
         store.application = store.load_group(PreferenceGroup::Application);
         store.generation_intent = store.load_intent(
             PreferenceGroup::Generation,
-            course2md::tr!("已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项"),
+            c2m_i18n::tr!("已找回上次未生效的设置变更，可以重试保存；当前仍使用原来的有效选项"),
         );
         store.application_intent = store.load_intent(
             PreferenceGroup::Application,
-            course2md::tr!("已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项"),
+            c2m_i18n::tr!("已找回上次未生效的应用设置，可以重试保存；当前仍使用原来的有效选项"),
         );
         store.services = store.load_group(PreferenceGroup::Services);
         store.forget_retired_service_records();
@@ -903,14 +903,14 @@ impl Store {
             Some(AsrProvider::Api) => next.last_local_provider,
             engine => engine,
         };
-        if !course2md::config::migrate_retired_npu_model(engine, &mut next.options.asr_model) {
+        if !c2m_config::config::migrate_retired_npu_model(engine, &mut next.options.asr_model) {
             return;
         }
         if self.save_generation(next).is_ok() {
             self.issues.push(SettingsIssue {
                 group: PreferenceGroup::Generation,
                 kind: SettingsIssueKind::Recovered,
-                message: course2md::config::retired_npu_model_notice().into(),
+                message: c2m_config::config::retired_npu_model_notice().into(),
                 detail: None,
             });
         }
@@ -972,12 +972,12 @@ impl Store {
     /// The value of an offered environment variable. Reads no vault.
     pub fn environment_secret(purpose: ServicePurpose, name: &str) -> Result<Secret> {
         if !Self::available_environment_credentials(purpose).contains(&name) {
-            bail!(course2md::tr!(
+            bail!(c2m_i18n::tr!(
                 "这个环境变量当前没有可用的凭据，请重新选择或填写 API Key"
             ));
         }
         Ok(Secret::new(std::env::var(name).map_err(|_| {
-            anyhow!(course2md::tr!("无法读取所选环境变量"))
+            anyhow!(c2m_i18n::tr!("无法读取所选环境变量"))
         })?))
     }
 
@@ -990,7 +990,7 @@ impl Store {
         reference: CredentialRef,
     ) -> Result<ServiceDraft> {
         draft.credential = Some(reference);
-        draft.credential_source = Some(course2md::tr!("环境变量 {}", name));
+        draft.credential_source = Some(c2m_i18n::tr!("环境变量 {}", name));
         draft.authentication = Authentication::ApiKey;
         self.commit_service_draft(draft, None)
     }
@@ -1056,7 +1056,7 @@ impl Store {
     }
     /// The marker's presence is the whole record; nothing reads its body.
     fn write_retire_marker(&self, service_id: &str) -> Result<()> {
-        course2md::checkpoint::atomic_write(&self.retired_marker(service_id), b"deleted\n")
+        c2m_core::fsio::atomic_write(&self.retired_marker(service_id), b"deleted\n")
     }
     /// Services deleted earlier stay deleted even if an older services.json comes back.
     fn forget_retired_service_records(&mut self) {
@@ -1188,7 +1188,7 @@ impl Store {
             .map_or(Ok(()), std::fs::create_dir_all)
             .map_err(anyhow::Error::from)
             .and_then(|_| Ok(serde_json::to_vec_pretty(&envelope)?))
-            .and_then(|bytes| course2md::checkpoint::atomic_write(&path, &bytes));
+            .and_then(|bytes| c2m_core::fsio::atomic_write(&path, &bytes));
         Some(value.clone())
     }
 
@@ -1227,10 +1227,10 @@ impl Store {
         }
         if let Some(current) = self.services.drafts.get(&draft.id) {
             if current.revision != draft.revision {
-                bail!(course2md::tr!("服务编辑已发生变化，请重新打开服务后再试"));
+                bail!(c2m_i18n::tr!("服务编辑已发生变化，请重新打开服务后再试"));
             }
         } else if draft.revision != 0 {
-            bail!(course2md::tr!("当前服务编辑已结束，请重新打开服务后再试"));
+            bail!(c2m_i18n::tr!("当前服务编辑已结束，请重新打开服务后再试"));
         }
         Ok(())
     }
@@ -1286,10 +1286,10 @@ impl Store {
     fn publication(&self, draft_id: &str) -> Result<(ServiceDraft, ServiceConfiguration)> {
         let draft =
             self.services.drafts.get(draft_id).cloned().ok_or_else(|| {
-                anyhow!(course2md::tr!("当前服务编辑已结束，请重新打开服务后再试"))
+                anyhow!(c2m_i18n::tr!("当前服务编辑已结束，请重新打开服务后再试"))
             })?;
         if self.is_service_retired(&draft.service_id) {
-            bail!(course2md::tr!(
+            bail!(c2m_i18n::tr!(
                 "此服务已删除。请添加新的服务，原任务不会自动恢复外发"
             ));
         }
@@ -1298,7 +1298,7 @@ impl Store {
             version.service_id == draft.service_id
                 && version.config.protocol.purpose() != config.protocol.purpose()
         }) {
-            bail!(course2md::tr!(
+            bail!(c2m_i18n::tr!(
                 "修改接口不能改变此服务的用途，请添加另一用途的服务"
             ));
         }
@@ -1321,7 +1321,7 @@ impl Store {
         let (draft, config) = self.publication(draft_id)?;
         ensure!(
             config.credential == verified.0,
-            course2md::tr!("服务编辑已发生变化，请重新打开服务后再试")
+            c2m_i18n::tr!("服务编辑已发生变化，请重新打开服务后再试")
         );
         let version = ServiceVersion {
             id: new_id("service-version"),
@@ -1361,7 +1361,7 @@ impl Store {
         if let Some(reference) = reference {
             let version = self.check_dispatch(reference)?;
             if version.config.protocol.purpose() != purpose {
-                bail!(course2md::tr!("此服务不支持所选用途"));
+                bail!(c2m_i18n::tr!("此服务不支持所选用途"));
             }
         }
         let mut next = self.services.clone();
@@ -1386,7 +1386,7 @@ impl Store {
             .cloned()
             .collect();
         if versions.is_empty() {
-            bail!(course2md::tr!("找不到此服务"));
+            bail!(c2m_i18n::tr!("找不到此服务"));
         }
         let credentials: Vec<_> = versions
             .iter()
@@ -1405,10 +1405,10 @@ impl Store {
 
     pub fn check_dispatch(&self, reference: &str) -> Result<&ServiceVersion> {
         if self.is_blocked(PreferenceGroup::Services) {
-            bail!(course2md::tr!("服务记录暂时不可用，已保留原文件"));
+            bail!(c2m_i18n::tr!("服务记录暂时不可用，已保留原文件"));
         }
         let version = self.version(reference).ok_or_else(|| {
-            anyhow!(course2md::tr!(
+            anyhow!(c2m_i18n::tr!(
                 "找不到任务使用的服务版本，请选择服务后建立新尝试"
             ))
         })?;
@@ -1416,12 +1416,12 @@ impl Store {
         // ("retired" vs "cannot confirm"), and the in-memory stopped map is
         // checked above, so is_service_retired's second stat is not repeated.
         if self.services.stopped.contains_key(&version.service_id) {
-            bail!(course2md::tr!("此服务已删除，尚未发送新的请求"));
+            bail!(c2m_i18n::tr!("此服务已删除，尚未发送新的请求"));
         }
         match std::fs::metadata(self.retired_marker(&version.service_id)) {
-            Ok(_) => bail!(course2md::tr!("此服务已删除，尚未发送新的请求")),
+            Ok(_) => bail!(c2m_i18n::tr!("此服务已删除，尚未发送新的请求")),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => bail!(course2md::tr!(
+            Err(_) => bail!(c2m_i18n::tr!(
                 "暂时无法确认此服务是否已删除，尚未发送新的请求"
             )),
         }
@@ -1459,14 +1459,14 @@ impl Store {
             }
             ensure!(
                 !self.is_blocked(PreferenceGroup::Services),
-                course2md::tr!("服务记录暂时不可用，已保留原文件")
+                c2m_i18n::tr!("服务记录暂时不可用，已保留原文件")
             );
-            let version = self.version(id).context(course2md::tr!(
+            let version = self.version(id).context(c2m_i18n::tr!(
                 "找不到任务使用的服务版本，请选择服务后建立新尝试"
             ))?;
             ensure!(
                 !self.services.stopped.contains_key(&version.service_id),
-                course2md::tr!("此服务已删除，尚未发送新的请求")
+                c2m_i18n::tr!("此服务已删除，尚未发送新的请求")
             );
             Ok(version)
         };
@@ -1479,10 +1479,10 @@ impl Store {
             let id = required
                 .asr
                 .as_deref()
-                .ok_or_else(|| anyhow!(course2md::tr!("请为这次笔记设置语音识别服务")))?;
+                .ok_or_else(|| anyhow!(c2m_i18n::tr!("请为这次笔记设置语音识别服务")))?;
             let version = check(id)?;
             if version.config.protocol.purpose() != ServicePurpose::Speech {
-                bail!(course2md::tr!("所选服务不支持语音识别"));
+                bail!(c2m_i18n::tr!("所选服务不支持语音识别"));
             }
             config.asr_api.base_url = version.config.endpoint.clone();
             config.asr_api.model = version.config.model.clone();
@@ -1495,10 +1495,10 @@ impl Store {
             let id = required
                 .llm
                 .as_deref()
-                .ok_or_else(|| anyhow!(course2md::tr!("请为这次笔记设置 AI 服务")))?;
+                .ok_or_else(|| anyhow!(c2m_i18n::tr!("请为这次笔记设置 AI 服务")))?;
             let version = check(id)?;
             if version.config.protocol.purpose() != ServicePurpose::Ai {
-                bail!(course2md::tr!("所选服务不支持 AI 校对或摘要"));
+                bail!(c2m_i18n::tr!("所选服务不支持 AI 校对或摘要"));
             }
             config.llm.provider = version.config.protocol.llm_provider();
             // Codex 方言端点固定（provider::endpoint 忽略 base_url）；按 CLI 约定留空
@@ -1545,11 +1545,11 @@ impl Store {
                 // config_for_refs above already ran check_dispatch for exactly
                 // these required ids; same synchronous call chain, so reuse the
                 // validated lookup instead of statting the marker a second time.
-                let version = self.version(&id).context(course2md::tr!(
+                let version = self.version(&id).context(c2m_i18n::tr!(
                     "找不到任务使用的服务版本，请选择服务后建立新尝试"
                 ))?;
                 if let Some(reference) = &version.config.credential {
-                    let secret = secrets.get(reference).cloned().context(course2md::tr!(
+                    let secret = secrets.get(reference).cloned().context(c2m_i18n::tr!(
                         "服务凭据尚未就绪，请重新打开服务设置保存一次"
                     ))?;
                     if is_asr {
@@ -1610,19 +1610,16 @@ impl Store {
             Err(_) => match read_envelope::<T>(&crate::store::backup_path(&path)) {
                 Ok(Some(envelope)) => {
                     let restored = preserve_original(&self.root, &path).and_then(|_| {
-                        course2md::checkpoint::atomic_write(
-                            &path,
-                            &serde_json::to_vec_pretty(&envelope)?,
-                        )
+                        c2m_core::fsio::atomic_write(&path, &serde_json::to_vec_pretty(&envelope)?)
                     });
                     self.revisions.insert(group, envelope.revision);
                     // Whether or not the repair could be written, the next save will.
                     self.issues.push(SettingsIssue {
                         group,
                         kind: SettingsIssueKind::Recovered,
-                        message: course2md::tr!("已恢复最近一次可用的设置，原文件已保留").into(),
+                        message: c2m_i18n::tr!("已恢复最近一次可用的设置，原文件已保留").into(),
                         detail: restored.err().map(|error| {
-                            course2md::tr!(
+                            c2m_i18n::tr!(
                                 "设置目录：{}\n{}",
                                 self.root.display(),
                                 format!("{error:#}")
@@ -1636,11 +1633,11 @@ impl Store {
                     self.issues.push(SettingsIssue {
                         group,
                         kind: SettingsIssueKind::NeedsReset,
-                        message: course2md::tr!(
+                        message: c2m_i18n::tr!(
                             "此组设置暂时无法读取，原文件已保留。可以保留原文件并重置此组"
                         )
                         .into(),
-                        detail: Some(course2md::tr!("设置目录：{}", self.root.display())),
+                        detail: Some(c2m_i18n::tr!("设置目录：{}", self.root.display())),
                     });
                     T::default()
                 }
@@ -1657,7 +1654,7 @@ impl Store {
         let result = (|| {
             ensure!(
                 !self.blocked.contains(&group),
-                course2md::tr!("此组设置需要先保留原文件并重置")
+                c2m_i18n::tr!("此组设置需要先保留原文件并重置")
             );
             value.validate_value()?;
             let bytes = serde_json::to_vec_pretty(&Envelope {
@@ -1666,7 +1663,7 @@ impl Store {
                 value,
             })?;
             crate::store::save(&self.root.join(group.filename()), &bytes)
-                .context(course2md::tr!("无法保存此组设置"))
+                .context(c2m_i18n::tr!("无法保存此组设置"))
         })();
         self.issues
             .retain(|issue| issue.group != group || issue.kind == SettingsIssueKind::Recovered);
@@ -1678,7 +1675,7 @@ impl Store {
                 group,
                 kind: SettingsIssueKind::SaveFailed,
                 message: save_failure_message(group, error),
-                detail: Some(course2md::tr!(
+                detail: Some(c2m_i18n::tr!(
                     "设置目录：{}\n{}",
                     self.root.display(),
                     format!("{error:#}")
@@ -1696,9 +1693,9 @@ fn read_envelope<T: DeserializeOwned + Validate>(path: &Path) -> Result<Option<E
         Err(error) => return Err(error.into()),
     };
     let envelope: Envelope<T> =
-        serde_json::from_slice(&bytes).context(course2md::tr!("设置记录无法解析"))?;
+        serde_json::from_slice(&bytes).context(c2m_i18n::tr!("设置记录无法解析"))?;
     if envelope.schema != SCHEMA {
-        bail!(course2md::tr!("此组设置使用尚不支持的版本"));
+        bail!(c2m_i18n::tr!("此组设置使用尚不支持的版本"));
     }
     envelope.value.validate_value()?;
     Ok(Some(envelope))
@@ -1714,7 +1711,7 @@ fn preserve_original(root: &Path, source: &Path) -> Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("settings");
-    course2md::checkpoint::atomic_write(
+    c2m_core::fsio::atomic_write(
         &root
             .with_extension("recovery")
             .join(format!("{}-{name}", new_id("original"))),
@@ -1733,7 +1730,7 @@ fn clear_service_fields(config: &mut ConfigFile) {
     config.asr_api.base_url.clear();
     config.asr_api.model.clear();
     // 服务绑定未生效时不残留其他服务的方言选择
-    config.llm.provider = course2md::llm::LlmProvider::default();
+    config.llm.provider = c2m_ai::llm::LlmProvider::default();
     config.llm.base_url.clear();
     config.llm.model.clear();
 }
@@ -1743,9 +1740,9 @@ fn clear_service_fields(config: &mut ConfigFile) {
 /// query-string tokens and fragments are rejected before they can enter normal files/logs.
 pub fn normalize_endpoint(address: &str, protocol: ServiceProtocol) -> Result<String> {
     let mut url = url::Url::parse(address.trim())
-        .map_err(|_| anyhow!(course2md::tr!("请输入包含 http:// 或 https:// 的服务地址")))?;
+        .map_err(|_| anyhow!(c2m_i18n::tr!("请输入包含 http:// 或 https:// 的服务地址")))?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        bail!(course2md::tr!("请输入包含 http:// 或 https:// 的服务地址"));
+        bail!(c2m_i18n::tr!("请输入包含 http:// 或 https:// 的服务地址"));
     }
     if !url.username().is_empty()
         || url.password().is_some()
@@ -1756,7 +1753,7 @@ pub fn normalize_endpoint(address: &str, protocol: ServiceProtocol) -> Result<St
     }
     let path = url.path().trim_end_matches('/');
     let desired = protocol.endpoint_suffix();
-    if course2md::config::conflicting_endpoint_suffix(
+    if c2m_config::config::conflicting_endpoint_suffix(
         path,
         desired,
         &[
@@ -1766,7 +1763,7 @@ pub fn normalize_endpoint(address: &str, protocol: ServiceProtocol) -> Result<St
             "/completions",
         ],
     ) {
-        bail!(course2md::tr!(
+        bail!(c2m_i18n::tr!(
             "这个地址和所选服务类型不匹配，请更换其中之一"
         ));
     }
@@ -1779,7 +1776,7 @@ pub fn normalize_endpoint(address: &str, protocol: ServiceProtocol) -> Result<St
     } else {
         path.to_owned()
     };
-    url.set_path(&course2md::config::append_endpoint_suffix(&base, desired));
+    url.set_path(&c2m_config::config::append_endpoint_suffix(&base, desired));
     Ok(url.into())
 }
 
@@ -1959,7 +1956,7 @@ mod tests {
         assert_eq!(reopened.generation().options.asr_model, None);
         assert!(reopened.issues().iter().any(|issue| {
             issue.kind == SettingsIssueKind::Recovered
-                && issue.message == course2md::config::retired_npu_model_notice()
+                && issue.message == c2m_config::config::retired_npu_model_notice()
         }));
         let again = open(directory.path(), store.vault());
         assert_eq!(again.generation().options.asr_model, None);
@@ -2367,7 +2364,7 @@ mod tests {
         );
         // Codex：固定地址归一到 Responses 端点，幂等
         let endpoint = normalize_endpoint(CODEX_ADDRESS, ServiceProtocol::CodexResponses).unwrap();
-        assert_eq!(endpoint, course2md::provider::CODEX_RESPONSES_URL);
+        assert_eq!(endpoint, c2m_ai::provider::CODEX_RESPONSES_URL);
         assert_eq!(
             normalize_endpoint(&endpoint, ServiceProtocol::CodexResponses).unwrap(),
             endpoint
@@ -2391,12 +2388,12 @@ mod tests {
             (
                 ServiceProtocol::OllamaChat,
                 "http://localhost:11434",
-                course2md::llm::LlmProvider::Ollama,
+                c2m_ai::llm::LlmProvider::Ollama,
             ),
             (
                 ServiceProtocol::CodexResponses,
                 CODEX_ADDRESS,
-                course2md::llm::LlmProvider::Codex,
+                c2m_ai::llm::LlmProvider::Codex,
             ),
         ] {
             let (directory, mut store) = isolated();

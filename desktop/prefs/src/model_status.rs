@@ -1,8 +1,6 @@
 //! What is known about a recognition model and its device, and what can be done about it.
-use course2md::{
-    config::{AsrProvider, canonical_model},
-    models::status::LocalModelStatus,
-};
+use c2m_asr::models::status::LocalModelStatus;
+use c2m_config::config::{AsrProvider, canonical_model};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -10,7 +8,7 @@ use std::{
 
 /// Shown wherever a model cannot be prepared while another job runs.
 pub fn job_busy() -> &'static str {
-    course2md::tr!("当前任务完成后才能准备模型")
+    c2m_i18n::tr!("当前任务完成后才能准备模型")
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -23,7 +21,7 @@ pub struct Request {
 impl Request {
     /// Aliases share the canonical cache entry; an unsupported value is checked as typed.
     pub fn new(provider: AsrProvider, model: Option<&str>, root: &Path) -> Self {
-        let model = course2md::config::effective_model(provider, model);
+        let model = c2m_config::config::effective_model(provider, model);
         Self {
             provider,
             model: canonical_model(provider, model).unwrap_or_else(|_| model.to_owned()),
@@ -89,7 +87,7 @@ pub fn model_supported(provider: AsrProvider, model: &str) -> bool {
 }
 
 pub fn unsupported_model() -> &'static str {
-    course2md::tr!("所选识别方式不支持这个模型，请换一个")
+    c2m_i18n::tr!("所选识别方式不支持这个模型，请换一个")
 }
 
 /// The one classification of why a local engine cannot run here. Messages,
@@ -112,30 +110,30 @@ impl DeviceIssue {
     /// A short status for an engine choice.
     pub fn short(self) -> &'static str {
         match self {
-            Self::Engine => course2md::tr!("需要重新安装应用"),
-            Self::AppleHardware => course2md::tr!("需要 Apple 芯片的 Mac"),
-            Self::GpuAbsent => course2md::tr!("未检测到可用显卡"),
-            Self::NpuDevice => course2md::tr!("未检测到 Intel NPU"),
+            Self::Engine => c2m_i18n::tr!("需要重新安装应用"),
+            Self::AppleHardware => c2m_i18n::tr!("需要 Apple 芯片的 Mac"),
+            Self::GpuAbsent => c2m_i18n::tr!("未检测到可用显卡"),
+            Self::NpuDevice => c2m_i18n::tr!("未检测到 Intel NPU"),
             Self::AppleRuntime | Self::LlamaMissing | Self::VcRuntime | Self::NpuRuntime => {
-                course2md::tr!("需要安装识别组件")
+                c2m_i18n::tr!("需要安装识别组件")
             }
         }
     }
     /// The full explanation shown with repair actions.
     pub fn message(self) -> &'static str {
         match self {
-            Self::Engine => course2md::tr!("转换程序无法运行，请重新安装应用"),
-            Self::AppleHardware => course2md::tr!("当前系统不支持 Apple 芯片识别，请改用其他方式"),
+            Self::Engine => c2m_i18n::tr!("转换程序无法运行，请重新安装应用"),
+            Self::AppleHardware => c2m_i18n::tr!("当前系统不支持 Apple 芯片识别，请改用其他方式"),
             Self::AppleRuntime => {
-                course2md::tr!("缺少 Apple 识别组件，请重新安装应用或改用其他方式")
+                c2m_i18n::tr!("缺少 Apple 识别组件，请重新安装应用或改用其他方式")
             }
-            Self::LlamaMissing => course2md::tr!("安装 llama.cpp 后才能用 GPU 或 CPU 识别"),
+            Self::LlamaMissing => c2m_i18n::tr!("安装 llama.cpp 后才能用 GPU 或 CPU 识别"),
             Self::VcRuntime => {
-                course2md::tr!("GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查")
+                c2m_i18n::tr!("GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查")
             }
-            Self::GpuAbsent => course2md::tr!("未检测到可用显卡，可改用 CPU"),
-            Self::NpuDevice => course2md::tr!("未检测到 Intel NPU，请改用其他方式"),
-            Self::NpuRuntime => course2md::tr!("安装 uv 后才能用 Intel NPU 识别"),
+            Self::GpuAbsent => c2m_i18n::tr!("未检测到可用显卡，可改用 CPU"),
+            Self::NpuDevice => c2m_i18n::tr!("未检测到 Intel NPU，请改用其他方式"),
+            Self::NpuRuntime => c2m_i18n::tr!("安装 uv 后才能用 Intel NPU 识别"),
         }
     }
     /// Whether installing something on this machine can clear the issue.

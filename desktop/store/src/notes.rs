@@ -1,7 +1,7 @@
 //! Read published versions and isolate damaged library entries.
 use anyhow::{Context, Result};
-use course2md::artifact;
-use course2md::progress::Done;
+use c2m_artifact::artifact;
+use c2m_protocol::progress::Done;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -9,10 +9,10 @@ use std::{
 };
 
 fn version_damaged() -> &'static str {
-    course2md::tr!("笔记版本信息已损坏")
+    c2m_i18n::tr!("笔记版本信息已损坏")
 }
 fn body_unreadable() -> &'static str {
-    course2md::tr!("笔记正文无法读取，原文件已保留")
+    c2m_i18n::tr!("笔记正文无法读取，原文件已保留")
 }
 
 /// The note was written by a newer app. Unlike damage, an older intact version is
@@ -22,7 +22,7 @@ struct NewerSchema;
 
 impl std::fmt::Display for NewerSchema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(course2md::tr!("这份笔记由更新版本的应用生成，请更新应用"))
+        f.write_str(c2m_i18n::tr!("这份笔记由更新版本的应用生成，请更新应用"))
     }
 }
 
@@ -64,11 +64,11 @@ impl Course {
     pub fn content_description(&self) -> String {
         if self.slides == 1 {
             // English counts its noun; the catalog keeps the singular apart.
-            course2md::tr!("含 1 张截图").to_owned()
+            c2m_i18n::tr!("含 1 张截图").to_owned()
         } else if self.slides > 0 {
-            course2md::tr!("含 {} 张截图", self.slides)
+            c2m_i18n::tr!("含 {} 张截图", self.slides)
         } else {
-            course2md::tr!("文字笔记").to_owned()
+            c2m_i18n::tr!("文字笔记").to_owned()
         }
     }
     pub fn incomplete(&self) -> bool {
@@ -171,8 +171,7 @@ fn current_course(dir: &Path) -> Result<Course> {
         }
         intact.sort_by_key(|course| course.manifest.as_ref().map(|m| m.revision));
         let mut course = intact.pop().ok_or(error)?;
-        course.warning =
-            Some(course2md::tr!("最新版本无法读取，正在显示上一个完好的版本。").into());
+        course.warning = Some(c2m_i18n::tr!("最新版本无法读取，正在显示上一个完好的版本。").into());
         Ok(course)
     })
 }
@@ -200,7 +199,7 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
             Err(error) => {
                 if let Some(io) = error.io_error() {
                     let path = error.path().unwrap_or(root).display();
-                    scan.issues.push(course2md::tr!("{}：{}", path, io));
+                    scan.issues.push(c2m_i18n::tr!("{}：{}", path, io));
                 }
                 continue;
             }
@@ -209,11 +208,10 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
         if entry.file_type().is_dir() && dir.join("current.json").is_file() {
             match current_course(dir) {
                 Ok(course) => scan.courses.push(course),
-                Err(error) => scan.issues.push(course2md::tr!(
-                    "{}：{}",
-                    dir.display(),
-                    format!("{error:#}")
-                )),
+                Err(error) => {
+                    scan.issues
+                        .push(c2m_i18n::tr!("{}：{}", dir.display(), format!("{error:#}")))
+                }
             }
             walk.skip_current_dir();
         }
@@ -223,7 +221,7 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
 }
 
 pub fn default_output() -> PathBuf {
-    course2md::config::home_dir()
+    c2m_config::config::home_dir()
         .unwrap_or_else(|| ".".into())
         .join("Documents")
         .join("course2md")
@@ -255,7 +253,7 @@ impl PreviewBlock {
                 text,
                 seconds: Some(seconds),
                 ..
-            } => course2md::render::fmt_ts(*seconds) == text.as_ref(),
+            } => c2m_artifact::render::fmt_ts(*seconds) == text.as_ref(),
             _ => false,
         }
     }
@@ -278,11 +276,11 @@ pub enum ProcessingStage {
 impl ProcessingStage {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Transcript => course2md::tr!("文字转写"),
-            Self::Screenshots => course2md::tr!("截图"),
-            Self::Proofreading => course2md::tr!("AI 校对"),
-            Self::Translation => course2md::tr!("AI 翻译"),
-            Self::Summary => course2md::tr!("摘要"),
+            Self::Transcript => c2m_i18n::tr!("文字转写"),
+            Self::Screenshots => c2m_i18n::tr!("截图"),
+            Self::Proofreading => c2m_i18n::tr!("AI 校对"),
+            Self::Translation => c2m_i18n::tr!("AI 翻译"),
+            Self::Summary => c2m_i18n::tr!("摘要"),
         }
     }
 }
@@ -354,12 +352,14 @@ pub fn read_preview(mut course: Course) -> Result<Preview> {
     );
     let markdown = artifact::safe_asset_path(&course.dir, &manifest.markdown)
         .and_then(|path| Ok(std::fs::read_to_string(path)?))
-        .unwrap_or_else(|_| course2md::render::render_markdown(&document.meta, &document.sections));
+        .unwrap_or_else(|_| {
+            c2m_artifact::render::render_markdown(&document.meta, &document.sections)
+        });
     let mut plain_text = format!("{}\n\n", manifest.title);
     let mut blocks = Vec::new();
     if let Some(summary) = &document.summary {
         blocks.push(PreviewBlock::Heading {
-            text: course2md::tr!("摘要").into(),
+            text: c2m_i18n::tr!("摘要").into(),
             anchor: "summary".into(),
             seconds: None,
         });
@@ -380,19 +380,19 @@ pub fn read_preview(mut course: Course) -> Result<Preview> {
     }
     let mut issues = course.warning.clone().into_iter().collect::<Vec<_>>();
     if artifact::validate_version(&course.dir, &manifest).is_err() {
-        issues.push(course2md::tr!("部分笔记文件缺失或已改动，先显示能读到的内容。").into());
+        issues.push(c2m_i18n::tr!("部分笔记文件缺失或已改动，先显示能读到的内容。").into());
     }
     for frame in &manifest.frames {
         if artifact::safe_asset_path(&course.dir, &frame.image).is_err() {
-            issues.push(course2md::tr!(
+            issues.push(c2m_i18n::tr!(
                 "{} 的截图无法读取",
-                course2md::render::fmt_ts(frame.t)
+                c2m_artifact::render::fmt_ts(frame.t)
             ));
         }
     }
     for (section_index, section) in document.sections.iter().enumerate() {
         blocks.push(PreviewBlock::Heading {
-            text: course2md::render::fmt_ts(section.t).into(),
+            text: c2m_artifact::render::fmt_ts(section.t).into(),
             anchor: format!("section-{section_index}"),
             seconds: Some(section.t),
         });
@@ -500,11 +500,9 @@ fn whole_line(text: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize
 #[cfg(any(test, feature = "test-support"))]
 pub mod fixtures {
     use super::Course;
-    use course2md::{
-        artifact,
-        fetch::VideoMeta,
-        timeline::{Section, TranscriptEvent},
-    };
+    use c2m_artifact::artifact;
+    use c2m_core::timeline::{Section, TranscriptEvent};
+    use c2m_source::fetch::VideoMeta;
     use std::path::Path;
 
     pub fn published_note(

@@ -1,6 +1,6 @@
 //! The YouTube connection, as state: which browser's YouTube session yt-dlp reads.
 //! No cookie passes through here.
-use course2md::auth::youtube::{Browser, BrowserChoice, Profile};
+use c2m_source::auth::youtube::{Browser, BrowserChoice, Profile};
 
 /// The YouTube connection: which browser session YouTube runs use.
 #[derive(Default)]

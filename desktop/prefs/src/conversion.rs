@@ -4,9 +4,9 @@
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConversionOptions {
     #[serde(with = "crate::provider_serde")]
-    pub provider: Option<course2md::config::AsrProvider>,
+    pub provider: Option<c2m_config::config::AsrProvider>,
     #[serde(with = "text_source_index")]
-    pub source_mode: course2md::config::TranscriptSource,
+    pub source_mode: c2m_config::config::TranscriptSource,
     pub llm: bool,
     #[serde(default)]
     pub summarize: bool,
@@ -22,10 +22,10 @@ pub struct ConversionOptions {
 impl ConversionOptions {
     /// Whether the options use a cloud recognition service.
     pub fn uses_cloud_provider(&self) -> bool {
-        self.provider == Some(course2md::config::AsrProvider::Api)
+        self.provider == Some(c2m_config::config::AsrProvider::Api)
     }
 
-    pub fn from_config(config: &course2md::settings::ConfigFile) -> Self {
+    pub fn from_config(config: &c2m_config::settings::ConfigFile) -> Self {
         let provider = config.defaults.provider;
         let source_mode = config.defaults.transcript_source.unwrap_or_default();
         let llm = config.llm.enabled;
@@ -35,7 +35,7 @@ impl ConversionOptions {
             .formats
             .as_ref()
             .map(|formats| {
-                use course2md::config::OutputFormat::*;
+                use c2m_config::config::OutputFormat::*;
                 [
                     formats.contains(&Md),
                     formats.contains(&Html),
@@ -58,12 +58,12 @@ impl ConversionOptions {
     /// These options as a task plan records them: the configuration keeps
     /// only what takes effect (vision only with proofreading).
     pub fn as_planned(&self) -> Self {
-        let mut config = course2md::settings::ConfigFile::default();
+        let mut config = c2m_config::settings::ConfigFile::default();
         self.apply_to(&mut config);
         Self::from_config(&config)
     }
-    pub fn apply_to(&self, config: &mut course2md::settings::ConfigFile) {
-        use course2md::config::OutputFormat;
+    pub fn apply_to(&self, config: &mut c2m_config::settings::ConfigFile) {
+        use c2m_config::config::OutputFormat;
         config.defaults.provider = self.provider;
         config.defaults.transcript_source = Some(self.source_mode);
         config.defaults.keep_video = Some(self.keep_video);
@@ -93,40 +93,40 @@ impl Default for ConversionOptions {
 
 pub fn providers() -> [(&'static str, &'static str); 6] {
     [
-        ("", course2md::tr!("自动")),
-        ("coreml", course2md::tr!("Apple 芯片")),
+        ("", c2m_i18n::tr!("自动")),
+        ("coreml", c2m_i18n::tr!("Apple 芯片")),
         ("gpu", "GPU"),
         ("cpu", "CPU"),
         ("npu", "Intel NPU"),
-        ("api", course2md::tr!("云端服务")),
+        ("api", c2m_i18n::tr!("云端服务")),
     ]
 }
 
 /// Choice id of a recognition engine, as in `providers()`; automatic
 /// selection is the empty id.
-pub(crate) fn provider_id(provider: Option<course2md::config::AsrProvider>) -> &'static str {
+pub(crate) fn provider_id(provider: Option<c2m_config::config::AsrProvider>) -> &'static str {
     provider.map_or("", |provider| provider.as_str())
 }
 
 /// The canonical display name of a recognition engine; the desktop's one source for choosing and describing it.
 /// Matches the ids of `providers()` one to one; None means 「自动」.
-pub fn provider_label(provider: Option<course2md::config::AsrProvider>) -> &'static str {
+pub fn provider_label(provider: Option<c2m_config::config::AsrProvider>) -> &'static str {
     let id = provider_id(provider);
     providers()
         .iter()
         .find(|(provider_id, _)| *provider_id == id)
         .map(|(_, label)| *label)
-        .unwrap_or(course2md::tr!("自动"))
+        .unwrap_or(c2m_i18n::tr!("自动"))
 }
 
-pub fn provider_from_id(id: &str) -> Option<course2md::config::AsrProvider> {
-    course2md::config::AsrProvider::from_id(id)
+pub fn provider_from_id(id: &str) -> Option<c2m_config::config::AsrProvider> {
+    c2m_config::config::AsrProvider::from_id(id)
 }
 
 /// The text source choice is stored as its historical index (0 auto,
 /// 1 subtitles, 2 speech recognition).
 mod text_source_index {
-    use course2md::config::TranscriptSource;
+    use c2m_config::config::TranscriptSource;
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(

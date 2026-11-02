@@ -1,7 +1,7 @@
 //! The Bilibili account and its logins (QR code, password or SMS), as state. No
 //! ticket or password is logged or stored in interface text.
 use anyhow::Result;
-use course2md::auth::{
+use c2m_source::auth::{
     AccountProfile, AccountStatus,
     passport::{Passport, RiskCheck, SmsTicket},
 };
@@ -109,9 +109,9 @@ impl AccountUi {
         {
             None
         } else if self.has_saved_login || matches!(self.status, Some(AccountStatus::Expired)) {
-            Some(course2md::tr!("重新登录 Bilibili"))
+            Some(c2m_i18n::tr!("重新登录 Bilibili"))
         } else {
-            Some(course2md::tr!("登录 Bilibili"))
+            Some(c2m_i18n::tr!("登录 Bilibili"))
         }
     }
 
@@ -152,9 +152,9 @@ impl LoginMethod {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Qr => course2md::tr!("扫码"),
-            Self::Password => course2md::tr!("密码"),
-            Self::Sms => course2md::tr!("短信"),
+            Self::Qr => c2m_i18n::tr!("扫码"),
+            Self::Password => c2m_i18n::tr!("密码"),
+            Self::Sms => c2m_i18n::tr!("短信"),
         }
     }
 }
@@ -250,7 +250,7 @@ pub fn qr_raster(code_size: f32, module_count: usize, scale: f32) -> (f32, f32) 
 #[cfg(test)]
 mod tests {
     use super::{AccountUi, QrDialogState, qr_layout, qr_raster};
-    use course2md::auth::{AccountProfile, AccountStatus};
+    use c2m_source::auth::{AccountProfile, AccountStatus};
 
     #[test]
     fn qr_layout_keeps_the_complete_code_inside_short_and_regular_dialogs() {

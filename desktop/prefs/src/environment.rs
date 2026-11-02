@@ -20,7 +20,7 @@ fn compute_tool_path() -> std::ffi::OsString {
     }
     // 随包自带的工具（yt-dlp、ffmpeg、llama.cpp/ 等）所在的应用目录排在最前：
     // 安装包行为不随用户 PATH 漂移。目录清单与引擎的 tools::bundled_dirs 同一份。
-    let mut dirs: Vec<PathBuf> = course2md::tools::bundled_dirs();
+    let mut dirs: Vec<PathBuf> = c2m_process::tools::bundled_dirs();
     dirs.extend(
         std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
@@ -53,7 +53,7 @@ pub fn resolve_cli() -> Result<PathBuf> {
         let path = PathBuf::from(path);
         anyhow::ensure!(
             path.is_file(),
-            course2md::tr!("COURSE2MD_BIN 指向的文件不存在：{}", path.display())
+            c2m_i18n::tr!("COURSE2MD_BIN 指向的文件不存在：{}", path.display())
         );
         return Ok(path);
     }
@@ -72,7 +72,7 @@ pub fn resolve_cli() -> Result<PathBuf> {
     candidates
         .into_iter()
         .find(|p| p.is_file())
-        .context(course2md::tr!(
+        .context(c2m_i18n::tr!(
             "找不到 course2md 引擎。请将 CLI 放在应用旁，或设置 COURSE2MD_BIN。"
         ))
 }
@@ -91,7 +91,7 @@ pub struct Environment {
     /// is installed (always true elsewhere).
     pub vc_runtime: bool,
     /// Where each found media tool runs from, by the names the checks show.
-    pub origins: std::collections::BTreeMap<&'static str, course2md::tools::Origin>,
+    pub origins: std::collections::BTreeMap<&'static str, c2m_process::tools::Origin>,
 }
 
 /// The two independent requirements of Intel NPU recognition.
@@ -113,8 +113,8 @@ impl Environment {
         self.npu_parts.runtime
     }
     /// 本机环境是否支持指定的识别方式。Api 不依赖本机组件。
-    pub fn supports(&self, provider: course2md::config::AsrProvider) -> bool {
-        use course2md::config::AsrProvider;
+    pub fn supports(&self, provider: c2m_config::config::AsrProvider) -> bool {
+        use c2m_config::config::AsrProvider;
         match provider {
             AsrProvider::Coreml => self.apple,
             AsrProvider::Gpu => self.llama && self.vc_runtime && self.gpu.is_some(),
@@ -128,10 +128,10 @@ impl Environment {
         let cli = resolve_cli().ok();
         // yt-dlp 走共享搜索清单（随包自带 → PATH → 常见安装目录），定位到
         // 绝对路径再探测；找不到时退回裸名，probe 失败与「未安装」同义。
-        let ytdlp = course2md::ytdlp::resolve_in(Some(&tool_path()))
+        let ytdlp = c2m_process::ytdlp::resolve_in(Some(&tool_path()))
             .unwrap_or_else(|| PathBuf::from("yt-dlp"));
         // ffmpeg/ffprobe/llama-server: the engine's search (bundled with the app, then PATH).
-        let media = |name: &str| course2md::tools::locate_in(name, Some(&tool_path()));
+        let media = |name: &str| c2m_process::tools::locate_in(name, Some(&tool_path()));
         let (ffmpeg, ffprobe) = (media("ffmpeg"), media("ffprobe"));
         let llama_server = media("llama-server");
         let mut origins = std::collections::BTreeMap::new();
@@ -145,10 +145,10 @@ impl Environment {
             }
         }
         if ytdlp.is_absolute() {
-            let origin = course2md::tools::origin_of(&ytdlp, course2md::ytdlp::ENV_OVERRIDE);
+            let origin = c2m_process::tools::origin_of(&ytdlp, c2m_process::ytdlp::ENV_OVERRIDE);
             origins.insert("yt-dlp", origin);
         }
-        let program = |tool: Option<course2md::tools::Tool>, name: &str| {
+        let program = |tool: Option<c2m_process::tools::Tool>, name: &str| {
             tool.map_or_else(|| PathBuf::from(name), |tool| tool.path)
         };
         let (ffmpeg, ffprobe) = (program(ffmpeg, "ffmpeg"), program(ffprobe, "ffprobe"));
@@ -185,24 +185,24 @@ impl Environment {
         });
         let llama = llama_binary_on_path(&tool_path());
         let gpu = checks.get("llama-devices").and_then(|output| {
-            let devices = course2md::asr::parse_gpu_devices(output).ok()?;
+            let devices = c2m_asr::asr::parse_gpu_devices(output).ok()?;
             let (_, description) = devices.first()?.split_once(':')?;
             let name = description
                 .split_once(" (")
                 .map_or(description, |(name, _)| name);
             Some(name.trim().to_owned())
         });
-        let apple = course2md::config::apple_native_available()
+        let apple = c2m_asr::asr::apple_native_available()
             && cli
                 .as_deref()
-                .and_then(course2md::config::find_metallib)
+                .and_then(c2m_config::config::find_metallib)
                 .is_some();
         // Both checks run commands (PowerShell, a Python import), so they run
         // side by side; Intel NPUs only exist on Linux and Windows PCs.
         let (npu_device, npu_runtime) = if cfg!(any(target_os = "linux", windows)) {
             std::thread::scope(|scope| {
-                let device = scope.spawn(course2md::npu::device_present);
-                let runtime = course2md::npu::find_launcher(Some(&tool_path())).is_some();
+                let device = scope.spawn(c2m_asr::npu::device_present);
+                let runtime = c2m_asr::npu::find_launcher(Some(&tool_path())).is_some();
                 (device.join().unwrap_or(false), runtime)
             })
         } else {
@@ -236,9 +236,9 @@ fn vc_runtime_present() -> bool {
     let system = std::env::var_os("SystemRoot")
         .map(|root| PathBuf::from(root).join("System32"))
         .unwrap_or_else(|| PathBuf::from(r"C:\Windows\System32"));
-    let local = course2md::tools::bundled_dirs()
+    let local = c2m_process::tools::bundled_dirs()
         .into_iter()
-        .filter(|dir| dir.ends_with(course2md::tools::LLAMA_DIR));
+        .filter(|dir| dir.ends_with(c2m_process::tools::LLAMA_DIR));
     let dirs: Vec<PathBuf> = std::iter::once(system).chain(local).collect();
     ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"]
         .iter()
@@ -249,7 +249,7 @@ fn vc_runtime_present() -> bool {
 fn probe(bin: &Path, args: &[&str], timeout: Duration) -> Option<String> {
     let mut command = Command::new(bin);
     command.args(args).env("PATH", tool_path());
-    course2md::runtime::run_ok(&mut command, timeout).map(|out| out.stdout)
+    c2m_process::runtime::run_ok(&mut command, timeout).map(|out| out.stdout)
 }
 
 #[cfg(test)]

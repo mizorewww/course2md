@@ -1812,7 +1812,9 @@ name = "desktop-accounts"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "course2md",
+ "c2m-ai",
+ "c2m-i18n",
+ "c2m-source",
  "desktop-prefs",
 ]
 
@@ -1822,9 +1824,15 @@ version = "2.0.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
+ "c2m-ai",
+ "c2m-asr",
+ "c2m-config",
+ "c2m-core",
+ "c2m-engine",
+ "c2m-i18n",
+ "c2m-process",
  "c2m-test-http",
  "chrono",
- "course2md",
  "gpui-kit-material-color",
  "keyring",
  "security-framework",
@@ -1844,8 +1852,10 @@ name = "desktop-reader-core"
 version = "2.0.1"
 dependencies = [
  "anyhow",
+ "c2m-artifact",
+ "c2m-config",
+ "c2m-i18n",
  "chrono",
- "course2md",
  "desktop-store",
  "image",
  "tempfile",
@@ -1858,7 +1868,15 @@ name = "desktop-store"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "course2md",
+ "c2m-artifact",
+ "c2m-config",
+ "c2m-core",
+ "c2m-dispatch",
+ "c2m-engine",
+ "c2m-i18n",
+ "c2m-process",
+ "c2m-protocol",
+ "c2m-source",
  "desktop-prefs",
  "image",
  "pulldown-cmark",
@@ -1876,7 +1894,15 @@ name = "desktop-tasks"
 version = "2.0.1"
 dependencies = [
  "anyhow",
- "course2md",
+ "c2m-artifact",
+ "c2m-asr",
+ "c2m-config",
+ "c2m-core",
+ "c2m-engine",
+ "c2m-i18n",
+ "c2m-process",
+ "c2m-protocol",
+ "c2m-source",
  "desktop-prefs",
  "desktop-store",
  "image",

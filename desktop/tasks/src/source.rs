@@ -16,7 +16,7 @@ const PREVIEW_TIMEOUT: Duration = Duration::from_secs(45);
 /// Cached covers and subtitles unused for this long are removed.
 const CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
-pub use course2md::fetch::SourceCandidate;
+pub use c2m_source::fetch::SourceCandidate;
 pub use desktop_store::workspace::Source;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -47,8 +47,8 @@ enum Interrupted {
 impl std::fmt::Display for Interrupted {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Interrupted::Cancelled => course2md::tr!("已取消读取"),
-            Interrupted::TimedOut => course2md::tr!("读取超时，请重试"),
+            Interrupted::Cancelled => c2m_i18n::tr!("已取消读取"),
+            Interrupted::TimedOut => c2m_i18n::tr!("读取超时，请重试"),
         })
     }
 }
@@ -163,7 +163,7 @@ fn preview_command_error(program: &str, code: Option<i32>, stderr: &str) -> anyh
         .copied()
         .unwrap_or_default();
     let kind = failure_kind(stderr);
-    let reset = course2md::fetch::is_connection_reset(cause);
+    let reset = c2m_source::fetch::is_connection_reset(cause);
     let failure = |message: String| {
         anyhow::Error::new(CommandFailure {
             kind,
@@ -173,15 +173,15 @@ fn preview_command_error(program: &str, code: Option<i32>, stderr: &str) -> anyh
     };
     let summary = match kind {
         FailureKind::NotFound => {
-            course2md::tr!("无法找到这个视频，请检查链接或确认视频仍可访问。").to_owned()
+            c2m_i18n::tr!("无法找到这个视频，请检查链接或确认视频仍可访问。").to_owned()
         }
-        FailureKind::Forbidden => course2md::tr!("视频平台拒绝访问，请确认访问权限").to_owned(),
+        FailureKind::Forbidden => c2m_i18n::tr!("视频平台拒绝访问，请确认访问权限").to_owned(),
         FailureKind::Timeout => {
-            course2md::tr!("读取视频信息超时，请检查网络后重新读取。").to_owned()
+            c2m_i18n::tr!("读取视频信息超时，请检查网络后重新读取。").to_owned()
         }
-        FailureKind::RateLimited => course2md::tr!("平台暂时限制读取，请稍后重试").to_owned(),
+        FailureKind::RateLimited => c2m_i18n::tr!("平台暂时限制读取，请稍后重试").to_owned(),
         FailureKind::LoginRequired => {
-            course2md::tr!("视频平台要求登录后读取，请登录对应账号后重试。").to_owned()
+            c2m_i18n::tr!("视频平台要求登录后读取，请登录对应账号后重试。").to_owned()
         }
         FailureKind::Other if !cause.is_empty() => {
             cause.trim_start_matches("ERROR:").trim().to_owned()
@@ -189,7 +189,7 @@ fn preview_command_error(program: &str, code: Option<i32>, stderr: &str) -> anyh
         // No stderr at all: the program and exit code only go to the log.
         FailureKind::Other => {
             eprintln!("{program} exited without output (code {code:?})");
-            return failure(course2md::tr!("读取失败，请重试").into());
+            return failure(c2m_i18n::tr!("读取失败，请重试").into());
         }
     };
     let details = lines
@@ -214,17 +214,17 @@ fn subtitle_failure_message(error: &anyhow::Error) -> String {
     let message = format!("{error:#}");
     let summary = match error_kind(error) {
         FailureKind::NotFound => {
-            course2md::tr!("字幕链接暂时无法访问，请重新读取字幕，或选择其他文字来源。")
+            c2m_i18n::tr!("字幕链接暂时无法访问，请重新读取字幕，或选择其他文字来源。")
         }
         FailureKind::Forbidden => {
-            course2md::tr!("平台拒绝了这次字幕读取，请确认视频的访问权限，或选择其他文字来源。")
+            c2m_i18n::tr!("平台拒绝了这次字幕读取，请确认视频的访问权限，或选择其他文字来源。")
         }
-        FailureKind::Timeout => course2md::tr!("读取字幕超时，请检查网络后重新读取字幕。"),
+        FailureKind::Timeout => c2m_i18n::tr!("读取字幕超时，请检查网络后重新读取字幕。"),
         FailureKind::RateLimited => {
-            course2md::tr!("平台暂时限制了字幕读取，请稍后重试，或选择其他文字来源。")
+            c2m_i18n::tr!("平台暂时限制了字幕读取，请稍后重试，或选择其他文字来源。")
         }
         FailureKind::LoginRequired => {
-            course2md::tr!("平台要求登录后读取字幕，请登录对应账号后重试。")
+            c2m_i18n::tr!("平台要求登录后读取字幕，请登录对应账号后重试。")
         }
         FailureKind::Other => return message,
     };
@@ -260,9 +260,9 @@ fn command_output(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Comm
         {
             return result;
         }
-        let delay = if course2md::fetch::is_bilibili_412(&message) {
-            let Some(delay) = course2md::fetch::bilibili_retry_delay(&message, retries) else {
-                return result.context(course2md::fetch::BILIBILI_412_DESKTOP_HINT);
+        let delay = if c2m_source::fetch::is_bilibili_412(&message) {
+            let Some(delay) = c2m_source::fetch::bilibili_retry_delay(&message, retries) else {
+                return result.context(c2m_source::fetch::BILIBILI_412_DESKTOP_HINT);
             };
             delay
         } else if preview_ended_by_connection_reset(error) && retries < 2 {
@@ -308,15 +308,15 @@ fn command_once(
     // ffmpeg/ffprobe 走引擎的同一套查找（随包自带 → 扩展 PATH），预览读取视频
     // 与转换用的是同一个 ffmpeg。
     let program = if name == "yt-dlp" {
-        course2md::ytdlp::resolve_in(Some(&desktop_prefs::environment::tool_path()))
+        c2m_process::ytdlp::resolve_in(Some(&desktop_prefs::environment::tool_path()))
             .unwrap_or_else(|| PathBuf::from(name))
     } else {
-        course2md::tools::locate_in(name, Some(&desktop_prefs::environment::tool_path()))
+        c2m_process::tools::locate_in(name, Some(&desktop_prefs::environment::tool_path()))
             .map_or_else(|| PathBuf::from(name), |tool| tool.path)
     };
     let mut command = Command::new(&program);
     let _cookies = if name == "yt-dlp" {
-        course2md::auth::configure_ytdlp(&mut command, args.last().copied().unwrap_or_default())?
+        c2m_source::auth::configure_ytdlp(&mut command, args.last().copied().unwrap_or_default())?
     } else {
         None
     };
@@ -331,11 +331,11 @@ fn command_once(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let child = course2md::runtime::hide_console(&mut command)
+    let child = c2m_process::runtime::hide_console(&mut command)
         .spawn()
         .map_err(|error| {
             eprintln!("cannot start {name}: {error}");
-            anyhow::anyhow!(course2md::tr!(
+            anyhow::anyhow!(c2m_i18n::tr!(
                 "缺少读取视频所需的组件，请在设置中检查运行环境"
             ))
         })?;
@@ -370,7 +370,7 @@ fn command_once(
         file.take(32 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
         ensure!(
             bytes.len() <= 32 * 1024 * 1024,
-            course2md::tr!("返回的视频信息超过读取上限，请复制具体单集的链接")
+            c2m_i18n::tr!("返回的视频信息超过读取上限，请复制具体单集的链接")
         );
         Ok(bytes)
     };
@@ -395,7 +395,7 @@ pub fn pasted_local_path(input: &str) -> Option<PathBuf> {
     let path = if text.starts_with("file://") {
         url::Url::parse(text).ok()?.to_file_path().ok()?
     } else if text.starts_with("~/") || Path::new(text).is_absolute() {
-        course2md::config::expand_tilde(text.into())
+        c2m_config::config::expand_tilde(text.into())
     } else {
         return None;
     };
@@ -403,12 +403,12 @@ pub fn pasted_local_path(input: &str) -> Option<PathBuf> {
 }
 
 pub fn validate_url(input: &str) -> Result<url::Url> {
-    let url = url::Url::parse(input).context(course2md::tr!(
+    let url = url::Url::parse(input).context(c2m_i18n::tr!(
         "请输入完整的视频链接，以 https:// 或 http:// 开头"
     ))?;
     ensure!(
         matches!(url.scheme(), "http" | "https") && url.host_str().is_some(),
-        course2md::tr!("请输入完整的视频链接，以 https:// 或 http:// 开头")
+        c2m_i18n::tr!("请输入完整的视频链接，以 https:// 或 http:// 开头")
     );
     Ok(url)
 }
@@ -468,7 +468,7 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
     let output = online_metadata(&input, true, &cancel);
     let (metadata, subtitle_failure) = match output {
         Ok(output) => (
-            course2md::fetch::parse_online_probe(&output.stdout, &input, &output.stderr)?,
+            c2m_source::fetch::parse_online_probe(&output.stdout, &input, &output.stderr)?,
             None,
         ),
         Err(error) => {
@@ -477,13 +477,13 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
             // Preserve that video and the failure evidence instead of claiming no captions.
             let basic = online_metadata(&input, false, &cancel)?;
             (
-                course2md::fetch::parse_online_probe(&basic.stdout, &input, &basic.stderr)?,
+                c2m_source::fetch::parse_online_probe(&basic.stdout, &input, &basic.stderr)?,
                 Some(subtitle_failure_message(&error)),
             )
         }
     };
     let result = match metadata {
-        course2md::fetch::OnlineProbe::Collection {
+        c2m_source::fetch::OnlineProbe::Collection {
             title,
             mut candidates,
             unavailable_entries,
@@ -491,7 +491,7 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
             // 分 P 视频的 flat 探测只有裸链接：补真实分集标题与首帧预览图。
             // 辅助探测失败不影响候选（辅助探测失败不阻断任务）。
             if !cancel.load(Ordering::Relaxed) {
-                course2md::fetch::enrich_bilibili_candidates(&mut candidates);
+                c2m_source::fetch::enrich_bilibili_candidates(&mut candidates);
             }
             SourceProbe::Collection {
                 title,
@@ -499,10 +499,10 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
                 unavailable_entries,
             }
         }
-        course2md::fetch::OnlineProbe::Unresolved { message } => {
+        c2m_source::fetch::OnlineProbe::Unresolved { message } => {
             SourceProbe::Unresolved { message }
         }
-        course2md::fetch::OnlineProbe::Video { video } => {
+        c2m_source::fetch::OnlineProbe::Video { video } => {
             let mut source = Source {
                 input: video.meta.webpage_url,
                 title: video.meta.title,
@@ -515,15 +515,15 @@ pub fn probe(input: String, online: bool, cancel: Arc<AtomicBool>) -> Result<Sou
                 ..Source::default()
             };
             if let Some(message) = subtitle_failure {
-                source.subtitles = course2md::subtitle::SubtitleEvidence::Failed { message };
+                source.subtitles = c2m_source::subtitle::SubtitleEvidence::Failed { message };
             }
-            if let course2md::subtitle::SubtitleEvidence::Found { tracks, .. } =
+            if let c2m_source::subtitle::SubtitleEvidence::Found { tracks, .. } =
                 &mut source.subtitles
             {
-                course2md::subtitle::sort_tracks(
+                c2m_source::subtitle::sort_tracks(
                     tracks,
                     &[],
-                    course2md::i18n::lang().code(),
+                    c2m_i18n::i18n::lang().code(),
                     source.original_language.as_deref(),
                 );
             }
@@ -545,9 +545,9 @@ fn online_metadata(
     with_subtitles: bool,
     cancel: &AtomicBool,
 ) -> Result<CommandOutput> {
-    let socket_timeout = course2md::fetch::YTDLP_SOCKET_TIMEOUT;
+    let socket_timeout = c2m_source::fetch::YTDLP_SOCKET_TIMEOUT;
     let mut args = vec!["--ignore-config", "--socket-timeout", socket_timeout];
-    args.extend(course2md::fetch::probe_args(with_subtitles));
+    args.extend(c2m_source::fetch::probe_args(with_subtitles));
     args.extend(["--", input]);
     command_output("yt-dlp", &args, cancel)
 }
@@ -555,7 +555,7 @@ fn online_metadata(
 /// The cache file for `key`: the same cover or track reuses one file instead
 /// of leaving a new one behind on every read.
 fn cache_file(kind: &str, key: &str, extension: &str) -> Result<PathBuf> {
-    let dir = course2md::config::cache_dir().join(kind);
+    let dir = c2m_config::config::cache_dir().join(kind);
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join(cache_name(key, extension)))
 }
@@ -563,7 +563,7 @@ fn cache_file(kind: &str, key: &str, extension: &str) -> Result<PathBuf> {
 /// A digest rather than `DefaultHasher`, whose output may change with the
 /// toolchain and would strand every cached file.
 fn cache_name(key: &str, extension: &str) -> String {
-    let digest = course2md::execution::digest(key.as_bytes());
+    let digest = c2m_core::digest::digest(key.as_bytes());
     format!("{}.{extension}", &digest[..16])
 }
 
@@ -587,7 +587,7 @@ pub fn prune_cache() {
         return;
     };
     for kind in ["covers", "subtitles"] {
-        let Ok(entries) = std::fs::read_dir(course2md::config::cache_dir().join(kind)) else {
+        let Ok(entries) = std::fs::read_dir(c2m_config::config::cache_dir().join(kind)) else {
             continue;
         };
         for entry in entries.flatten() {
@@ -612,14 +612,12 @@ pub fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
         return Ok(target);
     }
     // Bilibili's image CDN needs the platform TLS stack, as its pages do.
-    let bytes = course2md::fetch::read_remote(url, 12 * 1024 * 1024, cancel)?;
+    let bytes = c2m_source::fetch::read_remote(url, 12 * 1024 * 1024, cancel)?;
     check_cancel(cancel)?;
-    let image = image::load_from_memory(&bytes).context(course2md::tr!("封面格式无法识别"))?;
-    let file = tempfile::Builder::new().suffix(".jpg").tempfile_in(
-        target
-            .parent()
-            .context(course2md::tr!("封面缓存位置无效"))?,
-    )?;
+    let image = image::load_from_memory(&bytes).context(c2m_i18n::tr!("封面格式无法识别"))?;
+    let file = tempfile::Builder::new()
+        .suffix(".jpg")
+        .tempfile_in(target.parent().context(c2m_i18n::tr!("封面缓存位置无效"))?)?;
     image
         .thumbnail(1280, 720)
         .to_rgb8()
@@ -630,21 +628,21 @@ pub fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
 }
 
 fn inspect_local(input: String, cancel: &AtomicBool) -> Result<Source> {
-    let path = course2md::config::expand_tilde(input.into());
+    let path = c2m_config::config::expand_tilde(input.into());
     // An app bundle or folder exists but is not a video; say so instead of "missing".
     ensure!(
         !path.exists() || path.is_file(),
-        course2md::tr!("所选项目不是视频文件，请选择一个视频文件")
+        c2m_i18n::tr!("所选项目不是视频文件，请选择一个视频文件")
     );
-    ensure!(path.is_file(), course2md::tr!("视频文件不存在，请重新选择"));
+    ensure!(path.is_file(), c2m_i18n::tr!("视频文件不存在，请重新选择"));
     // The path goes to ffprobe/ffmpeg and into the note's source line, so it
     // keeps the plain `C:\...` spelling rather than `\\?\C:\...`.
-    let path = course2md::config::canonicalize(path)
-        .context(course2md::tr!("无法读取所选视频的位置，请重新选择"))?;
-    let before_probe = std::fs::metadata(&path).context(course2md::tr!("无法读取所选视频"))?;
+    let path = c2m_config::config::canonicalize(path)
+        .context(c2m_i18n::tr!("无法读取所选视频的位置，请重新选择"))?;
+    let before_probe = std::fs::metadata(&path).context(c2m_i18n::tr!("无法读取所选视频"))?;
     let input = path
         .to_str()
-        .context(course2md::tr!("文件名含有无法识别的字符，请改名后重试"))?
+        .context(c2m_i18n::tr!("文件名含有无法识别的字符，请改名后重试"))?
         .to_owned();
     let bytes = command(
         "ffprobe",
@@ -660,12 +658,12 @@ fn inspect_local(input: String, cancel: &AtomicBool) -> Result<Source> {
         cancel,
     )?;
     let meta: serde_json::Value =
-        serde_json::from_slice(&bytes).context(course2md::tr!("无法读取所选视频的信息"))?;
+        serde_json::from_slice(&bytes).context(c2m_i18n::tr!("无法读取所选视频的信息"))?;
     ensure!(
         meta["streams"]
             .as_array()
             .is_some_and(|streams| streams.iter().any(|stream| stream["codec_type"] == "video")),
-        course2md::tr!("所选文件不包含视频画面")
+        c2m_i18n::tr!("所选文件不包含视频画面")
     );
     let mut source = Source {
         input,
@@ -693,16 +691,16 @@ fn inspect_local(input: String, cancel: &AtomicBool) -> Result<Source> {
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|duration| duration.is_finite() && *duration >= 0.)
             .unwrap_or_default(),
-        identity: course2md::fetch::local_content_identity(&path, cancel)?,
+        identity: c2m_source::fetch::local_content_identity(&path, cancel)?,
         online: false,
         ..Source::default()
     };
     let after_probe =
-        std::fs::metadata(&path).context(course2md::tr!("视频在读取期间已移动或无法访问"))?;
+        std::fs::metadata(&path).context(c2m_i18n::tr!("视频在读取期间已移动或无法访问"))?;
     ensure!(
         before_probe.len() == after_probe.len()
             && before_probe.modified().ok() == after_probe.modified().ok(),
-        course2md::tr!("视频在读取期间发生变化，请等文件保存完成后重新读取")
+        c2m_i18n::tr!("视频在读取期间发生变化，请等文件保存完成后重新读取")
     );
     source.subtitles = local_subtitle_evidence(&path, &meta, &source.identity);
     let target = cache_file("covers", &source.identity, "jpg")?;
@@ -711,11 +709,9 @@ fn inspect_local(input: String, cancel: &AtomicBool) -> Result<Source> {
         check_cancel(cancel)?;
         return Ok(source);
     }
-    let file = tempfile::Builder::new().suffix(".jpg").tempfile_in(
-        target
-            .parent()
-            .context(course2md::tr!("封面缓存位置无效"))?,
-    )?;
+    let file = tempfile::Builder::new()
+        .suffix(".jpg")
+        .tempfile_in(target.parent().context(c2m_i18n::tr!("封面缓存位置无效"))?)?;
     let offset = (source.duration * 0.1).min(10.).to_string();
     match command(
         "ffmpeg",
@@ -733,7 +729,7 @@ fn inspect_local(input: String, cancel: &AtomicBool) -> Result<Source> {
             "scale=960:-2",
             file.path()
                 .to_str()
-                .context(course2md::tr!("文件名含有无法识别的字符，请改名后重试"))?,
+                .context(c2m_i18n::tr!("文件名含有无法识别的字符，请改名后重试"))?,
         ],
         cancel,
     ) {
@@ -751,8 +747,8 @@ fn local_subtitle_evidence(
     path: &Path,
     metadata: &serde_json::Value,
     identity: &str,
-) -> course2md::subtitle::SubtitleEvidence {
-    use course2md::subtitle::{SubtitleEvidence, SubtitleKind, SubtitleOrigin, SubtitleTrack};
+) -> c2m_source::subtitle::SubtitleEvidence {
+    use c2m_source::subtitle::{SubtitleEvidence, SubtitleKind, SubtitleOrigin, SubtitleTrack};
     let mut tracks = Vec::new();
     let mut image_tracks = 0;
     for stream in metadata["streams"]
@@ -795,11 +791,11 @@ fn local_subtitle_evidence(
             source_order: tracks.len(),
         });
     }
-    tracks.extend(course2md::subtitle::sidecar_tracks(path));
+    tracks.extend(c2m_source::subtitle::sidecar_tracks(path));
     for (index, track) in tracks.iter_mut().enumerate() {
         track.source_order = index;
     }
-    course2md::subtitle::sort_tracks(&mut tracks, &[], course2md::i18n::lang().code(), None);
+    c2m_source::subtitle::sort_tracks(&mut tracks, &[], c2m_i18n::i18n::lang().code(), None);
     if !tracks.is_empty() {
         SubtitleEvidence::Found {
             tracks,
@@ -807,7 +803,7 @@ fn local_subtitle_evidence(
         }
     } else if image_tracks > 0 {
         SubtitleEvidence::Unsupported {
-            message: course2md::tr!("内嵌字幕无法读取").into(),
+            message: c2m_i18n::tr!("内嵌字幕无法读取").into(),
         }
     } else {
         SubtitleEvidence::NoneFound
@@ -819,13 +815,13 @@ fn local_subtitle_evidence(
 pub fn refresh_subtitles(
     source: &Source,
     cancel: Arc<AtomicBool>,
-) -> Result<course2md::subtitle::SubtitleEvidence> {
+) -> Result<c2m_source::subtitle::SubtitleEvidence> {
     if !source.online {
         let current_identity =
-            course2md::fetch::local_content_identity(Path::new(&source.input), &cancel)?;
+            c2m_source::fetch::local_content_identity(Path::new(&source.input), &cancel)?;
         ensure!(
             current_identity == source.identity,
-            course2md::tr!("视频文件内容发生变化，请重新读取视频")
+            c2m_i18n::tr!("视频文件内容发生变化，请重新读取视频")
         );
         let bytes = command(
             "ffprobe",
@@ -841,26 +837,26 @@ pub fn refresh_subtitles(
     }
     let output = online_metadata(&source.input, true, &cancel)
         .map_err(|error| anyhow::anyhow!(subtitle_failure_message(&error)))?;
-    match course2md::fetch::parse_online_probe(&output.stdout, &source.input, &output.stderr)? {
-        course2md::fetch::OnlineProbe::Video { mut video } => {
+    match c2m_source::fetch::parse_online_probe(&output.stdout, &source.input, &output.stderr)? {
+        c2m_source::fetch::OnlineProbe::Video { mut video } => {
             ensure!(
                 video.identity == source.identity,
-                course2md::tr!("视频来源发生变化，请重新读取视频")
+                c2m_i18n::tr!("视频来源发生变化，请重新读取视频")
             );
-            if let course2md::subtitle::SubtitleEvidence::Found { tracks, .. } =
+            if let c2m_source::subtitle::SubtitleEvidence::Found { tracks, .. } =
                 &mut video.subtitles
             {
-                course2md::subtitle::sort_tracks(
+                c2m_source::subtitle::sort_tracks(
                     tracks,
                     &[],
-                    course2md::i18n::lang().code(),
+                    c2m_i18n::i18n::lang().code(),
                     source.original_language.as_deref(),
                 );
             }
             check_cancel(&cancel)?;
             Ok(video.subtitles)
         }
-        _ => anyhow::bail!(course2md::tr!("还无法确定字幕对应哪个视频，请重新读取视频")),
+        _ => anyhow::bail!(c2m_i18n::tr!("还无法确定字幕对应哪个视频，请重新读取视频")),
     }
 }
 
@@ -868,18 +864,20 @@ pub fn refresh_subtitles(
 /// language/ASR. The UI installs the returned value only if draft + revision match.
 pub fn read_subtitle(
     source: &Source,
-    track: &course2md::subtitle::SubtitleTrack,
+    track: &c2m_source::subtitle::SubtitleTrack,
     cancel: Arc<AtomicBool>,
-) -> std::result::Result<course2md::subtitle::CachedSubtitle, course2md::subtitle::SubtitleReadError>
-{
-    use course2md::subtitle::{CachedSubtitle, SubtitleOrigin, SubtitleReadError};
+) -> std::result::Result<
+    c2m_source::subtitle::CachedSubtitle,
+    c2m_source::subtitle::SubtitleReadError,
+> {
+    use c2m_source::subtitle::{CachedSubtitle, SubtitleOrigin, SubtitleReadError};
     let read = || -> Result<CachedSubtitle> {
         check_cancel(&cancel)?;
         ensure!(
             !source.identity.is_empty(),
-            course2md::tr!("请先重新读取视频，确认字幕对应的来源")
+            c2m_i18n::tr!("请先重新读取视频，确认字幕对应的来源")
         );
-        let cache = course2md::config::cache_dir().join("subtitles");
+        let cache = c2m_config::config::cache_dir().join("subtitles");
         std::fs::create_dir_all(&cache)?;
         let temp = tempfile::Builder::new()
             .prefix("read-")
@@ -887,10 +885,10 @@ pub fn read_subtitle(
         let text = match &track.origin {
             SubtitleOrigin::File { path } => {
                 ensure!(
-                    course2md::subtitle::is_subtitle_file(path),
-                    course2md::tr!("请选择 SRT 或 VTT 字幕文件")
+                    c2m_source::subtitle::is_subtitle_file(path),
+                    c2m_i18n::tr!("请选择 SRT 或 VTT 字幕文件")
                 );
-                course2md::subtitle::read_subtitle_text(path)?
+                c2m_source::subtitle::read_subtitle_text(path)?
             }
             SubtitleOrigin::Embedded { stream_index, .. } => {
                 ensure!(
@@ -898,12 +896,12 @@ pub fn read_subtitle(
                         && track
                             .id
                             .starts_with(&format!("{}:embedded:", source.identity)),
-                    course2md::tr!("所选内嵌字幕与当前视频不一致，请重新选择字幕")
+                    c2m_i18n::tr!("所选内嵌字幕与当前视频不一致，请重新选择字幕")
                 );
                 ensure!(
-                    course2md::fetch::local_content_identity(Path::new(&source.input), &cancel)?
+                    c2m_source::fetch::local_content_identity(Path::new(&source.input), &cancel)?
                         == source.identity,
-                    course2md::tr!("视频内容发生变化，请重新读取视频")
+                    c2m_i18n::tr!("视频内容发生变化，请重新读取视频")
                 );
                 let file = temp.path().join("embedded.srt");
                 command(
@@ -919,11 +917,11 @@ pub fn read_subtitle(
                         "-c:s",
                         "srt",
                         file.to_str()
-                            .context(course2md::tr!("字幕缓存路径无法编码"))?,
+                            .context(c2m_i18n::tr!("字幕缓存路径无法编码"))?,
                     ],
                     &cancel,
                 )?;
-                course2md::subtitle::read_subtitle_text(&file)?
+                c2m_source::subtitle::read_subtitle_text(&file)?
             }
             SubtitleOrigin::Online {
                 language_key,
@@ -935,7 +933,7 @@ pub fn read_subtitle(
                         && track
                             .id
                             .starts_with(&format!("{}:subtitle:", source.identity)),
-                    course2md::tr!("所选字幕与当前视频不一致，请重新选择字幕")
+                    c2m_i18n::tr!("所选字幕与当前视频不一致，请重新选择字幕")
                 );
                 if let Some(text) = inline_text {
                     text.clone()
@@ -956,7 +954,7 @@ pub fn read_subtitle(
                             "--sub-format",
                             "srt/vtt/best",
                             "--sub-langs",
-                            &course2md::fetch::exact_subtitle_language(language_key),
+                            &c2m_source::fetch::exact_subtitle_language(language_key),
                             "--socket-timeout",
                             "12",
                             "--retries",
@@ -964,7 +962,7 @@ pub fn read_subtitle(
                             "-o",
                             template
                                 .to_str()
-                                .context(course2md::tr!("字幕缓存路径无法编码"))?,
+                                .context(c2m_i18n::tr!("字幕缓存路径无法编码"))?,
                             if *automatic {
                                 "--write-auto-subs"
                             } else {
@@ -975,29 +973,29 @@ pub fn read_subtitle(
                         ],
                         &cancel,
                     )?;
-                    match course2md::fetch::parse_online_probe(
+                    match c2m_source::fetch::parse_online_probe(
                         &output.stdout,
                         &source.input,
                         &output.stderr,
                     )? {
-                        course2md::fetch::OnlineProbe::Video { video } => ensure!(
+                        c2m_source::fetch::OnlineProbe::Video { video } => ensure!(
                             video.identity == source.identity,
-                            course2md::tr!("视频来源发生变化，请重新读取并选择字幕")
+                            c2m_i18n::tr!("视频来源发生变化，请重新读取并选择字幕")
                         ),
-                        _ => anyhow::bail!(course2md::tr!("无法确认字幕对应的视频，请重新读取")),
+                        _ => anyhow::bail!(c2m_i18n::tr!("无法确认字幕对应的视频，请重新读取")),
                     }
-                    let file = course2md::subtitle::pick_subtitle_file(temp.path()).context(
-                        course2md::tr!("所选字幕没有下载成功，请重新读取字幕或选择其他文字来源"),
+                    let file = c2m_source::subtitle::pick_subtitle_file(temp.path()).context(
+                        c2m_i18n::tr!("所选字幕没有下载成功，请重新读取字幕或选择其他文字来源"),
                     )?;
-                    course2md::subtitle::read_subtitle_text(&file)?
+                    c2m_source::subtitle::read_subtitle_text(&file)?
                 }
             }
         };
         check_cancel(&cancel)?;
-        let events = course2md::subtitle::parse_subtitle(&text);
+        let events = c2m_source::subtitle::parse_subtitle(&text);
         if events.is_empty() {
             return Err(SubtitleReadError::NoReadableText {
-                message: course2md::tr!("这份字幕未包含可读取的文字，请选择其他字幕").into(),
+                message: c2m_i18n::tr!("这份字幕未包含可读取的文字，请选择其他字幕").into(),
             }
             .into());
         }
@@ -1011,13 +1009,13 @@ pub fn read_subtitle(
             .tempfile_in(&cache)?;
         // Write through the temporary file's handle, then publish it whole.
         use std::io::Write;
-        file.write_all(course2md::subtitle::to_srt(&events).as_bytes())?;
+        file.write_all(c2m_source::subtitle::to_srt(&events).as_bytes())?;
         file.as_file().sync_all()?;
         check_cancel(&cancel)?;
         Ok(CachedSubtitle {
             source_identity: source.identity.clone(),
             track_id: track.id.clone(),
-            label: course2md::subtitle::track_label(track),
+            label: c2m_source::subtitle::track_label(track),
             path: {
                 file.persist(&target)?;
                 target
@@ -1039,7 +1037,7 @@ pub fn read_subtitle(
 
 pub fn save_cover(source: &Source, dir: &Path) -> Result<()> {
     if let Some(path) = &source.cover {
-        course2md::checkpoint::atomic_write(&dir.join("cover.jpg"), &std::fs::read(path)?)?;
+        c2m_core::fsio::atomic_write(&dir.join("cover.jpg"), &std::fs::read(path)?)?;
     }
     Ok(())
 }
@@ -1047,7 +1045,7 @@ pub fn save_cover(source: &Source, dir: &Path) -> Result<()> {
 /// Display name of a known video site, shared by the workbench preview and the
 /// reader header.
 pub fn video_site_name(url: &str) -> Option<&'static str> {
-    match course2md::config::known_video_site(url) {
+    match c2m_config::config::known_video_site(url) {
         Some("bilibili") => Some("Bilibili"),
         Some("youtube") => Some("YouTube"),
         _ => None,
@@ -1155,7 +1153,7 @@ mod tests {
         let source: Source = serde_json::from_str(r#"{"input":"old","title":"Lecture","author":"","duration":0,"cover":null,"cover_error":null}"#).unwrap();
         assert!(matches!(
             source.subtitles,
-            course2md::subtitle::SubtitleEvidence::Unchecked
+            c2m_source::subtitle::SubtitleEvidence::Unchecked
         ));
         assert_eq!(
             source,
@@ -1180,7 +1178,7 @@ mod tests {
         };
         let cached = read_subtitle(
             &source,
-            &course2md::subtitle::file_track(path.clone(), None),
+            &c2m_source::subtitle::file_track(path.clone(), None),
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
@@ -1188,12 +1186,12 @@ mod tests {
         assert_eq!(cached.events[0].text, "Bonjour le monde");
         assert_ne!(cached.path, path);
         assert!(
-            course2md::subtitle::read_subtitle_text(&cached.path)
+            c2m_source::subtitle::read_subtitle_text(&cached.path)
                 .unwrap()
                 .contains("Bonjour le monde")
         );
         assert!(
-            course2md::subtitle::read_subtitle_text(&path)
+            c2m_source::subtitle::read_subtitle_text(&path)
                 .unwrap()
                 .starts_with("WEBVTT")
         );
@@ -1202,10 +1200,10 @@ mod tests {
         assert!(matches!(
             read_subtitle(
                 &source,
-                &course2md::subtitle::file_track(path, None),
+                &c2m_source::subtitle::file_track(path, None),
                 Arc::new(AtomicBool::new(false))
             ),
-            Err(course2md::subtitle::SubtitleReadError::NoReadableText { .. })
+            Err(c2m_source::subtitle::SubtitleReadError::NoReadableText { .. })
         ));
         assert_eq!(cached.events[0].text, "Bonjour le monde");
         std::fs::remove_file(cached.path).unwrap();
@@ -1218,18 +1216,18 @@ mod tests {
         let metadata = serde_json::json!({"streams":[{"index":0,"codec_type":"video"},{"index":2,"codec_type":"subtitle","codec_name":"hdmv_pgs_subtitle"}]});
         assert!(matches!(
             local_subtitle_evidence(&video, &metadata, "fixture"),
-            course2md::subtitle::SubtitleEvidence::Unsupported { .. }
+            c2m_source::subtitle::SubtitleEvidence::Unsupported { .. }
         ));
         let metadata = serde_json::json!({"streams":[{"index":3,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"fra"}}]});
         let evidence = local_subtitle_evidence(&video, &metadata, "fixture");
         assert_eq!(evidence.tracks().len(), 1);
         assert_eq!(
-            course2md::subtitle::track_label(&evidence.tracks()[0]),
+            c2m_source::subtitle::track_label(&evidence.tracks()[0]),
             "法语"
         );
         assert!(matches!(
             evidence.tracks()[0].origin,
-            course2md::subtitle::SubtitleOrigin::Embedded {
+            c2m_source::subtitle::SubtitleOrigin::Embedded {
                 stream_index: 3,
                 ..
             }
@@ -1387,10 +1385,10 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let evidence =
             local_subtitle_evidence(&directory.path().join("video.mp4"), &metadata, "local:id");
-        let course2md::subtitle::SubtitleEvidence::Found { tracks, .. } = evidence else {
+        let c2m_source::subtitle::SubtitleEvidence::Found { tracks, .. } = evidence else {
             panic!("expected tracks");
         };
-        assert_eq!(course2md::i18n::lang().code(), "zh-Hans");
+        assert_eq!(c2m_i18n::i18n::lang().code(), "zh-Hans");
         assert_eq!(tracks[0].language.as_deref(), Some("zh-Hans"));
     }
 

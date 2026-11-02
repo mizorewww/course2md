@@ -80,7 +80,7 @@ impl LibraryViewCache {
     pub fn newer_version(
         &self,
         courses: &[Rc<Course>],
-        manifest: &course2md::artifact::Manifest,
+        manifest: &c2m_artifact::artifact::Manifest,
     ) -> Option<Rc<Course>> {
         self.newest_by_course
             .get(&manifest.course_id)
@@ -117,7 +117,7 @@ impl LibraryViewCache {
             Err(error) => cache.alias_issues.push(LibraryIssue {
                 root: location.root.clone(),
                 kind: LibraryIssueKind::Titles,
-                message: course2md::tr!(
+                message: c2m_i18n::tr!(
                     "{}的显示名称尚未读取：{}",
                     location.name,
                     format!("{error:#}")
@@ -274,7 +274,7 @@ impl LibraryState {
                 Err(error) => self.issues.push(LibraryIssue {
                     root: location.root.clone(),
                     kind: LibraryIssueKind::Scan,
-                    message: course2md::tr!("{}读取失败：{}", location.name, format!("{error:#}")),
+                    message: c2m_i18n::tr!("{}读取失败：{}", location.name, format!("{error:#}")),
                 }),
             }
             match organization {
@@ -284,7 +284,7 @@ impl LibraryState {
                 Err(error) => self.issues.push(LibraryIssue {
                     root: location.root.clone(),
                     kind: LibraryIssueKind::Folders,
-                    message: course2md::tr!(
+                    message: c2m_i18n::tr!(
                         "{}的文件夹信息已损坏：{}",
                         location.name,
                         format!("{error:#}")
@@ -310,7 +310,7 @@ impl LibraryState {
             self.current = library;
             self.error = None;
         } else {
-            self.error = Some(course2md::tr!("文件夹信息读取失败").into());
+            self.error = Some(c2m_i18n::tr!("文件夹信息读取失败").into());
         }
     }
 

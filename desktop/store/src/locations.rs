@@ -62,17 +62,17 @@ impl State {
 
     pub fn title(&self) -> &'static str {
         match self.op {
-            StorageOp::Move => course2md::tr!("移动笔记库"),
-            StorageOp::Link(_) => course2md::tr!("重新定位笔记库"),
-            StorageOp::Cleanup => course2md::tr!("清理旧位置备份"),
+            StorageOp::Move => c2m_i18n::tr!("移动笔记库"),
+            StorageOp::Link(_) => c2m_i18n::tr!("重新定位笔记库"),
+            StorageOp::Cleanup => c2m_i18n::tr!("清理旧位置备份"),
         }
     }
 
     pub fn cancel_label(&self) -> &'static str {
         match self.op {
-            StorageOp::Move => course2md::tr!("取消移动"),
-            StorageOp::Link(_) => course2md::tr!("取消重新定位"),
-            StorageOp::Cleanup => course2md::tr!("取消清理"),
+            StorageOp::Move => c2m_i18n::tr!("取消移动"),
+            StorageOp::Link(_) => c2m_i18n::tr!("取消重新定位"),
+            StorageOp::Cleanup => c2m_i18n::tr!("取消清理"),
         }
     }
 
@@ -173,11 +173,11 @@ impl LocationChecks {
 }
 
 pub fn backup_list_stale() -> &'static str {
-    course2md::tr!("备份已删除，但列表尚未更新，请重启应用后检查")
+    c2m_i18n::tr!("备份已删除，但列表尚未更新，请重启应用后检查")
 }
 
 pub fn registry_unavailable() -> &'static str {
-    course2md::tr!("笔记库列表暂时无法读取，请重启应用后重试")
+    c2m_i18n::tr!("笔记库列表暂时无法读取，请重启应用后重试")
 }
 
 pub(crate) fn location_paths(
@@ -203,7 +203,7 @@ pub(crate) fn inspect_location(location: &workspace::LibraryLocation) -> Locatio
         Ok(identity) if identity.trim() == location.id => {}
         Ok(_) => {
             check.problem = Some(
-                course2md::tr!("这个文件夹属于另一个笔记库，请用「重新定位…」选择正确的文件夹")
+                c2m_i18n::tr!("这个文件夹属于另一个笔记库，请用「重新定位…」选择正确的文件夹")
                     .into(),
             )
         }
@@ -211,7 +211,7 @@ pub(crate) fn inspect_location(location: &workspace::LibraryLocation) -> Locatio
             check.needs_reassociation = true
         }
         Err(error) => {
-            check.problem = Some(course2md::tr!(
+            check.problem = Some(c2m_i18n::tr!(
                 "无法确认这个文件夹是否属于本笔记库：{}",
                 error
             ))
@@ -222,11 +222,11 @@ pub(crate) fn inspect_location(location: &workspace::LibraryLocation) -> Locatio
 
 /// What a person needs to see before giving a folder a library's identity.
 pub fn link_confirmation(link: &storage::LibraryLink, found: &storage::NotesFound) -> String {
-    let mut detail = course2md::tr!("保存位置：{}\n\n", link.folder.display());
+    let mut detail = c2m_i18n::tr!("保存位置：{}\n\n", link.folder.display());
     if found.names.is_empty() {
-        detail.push_str(course2md::tr!("未读到笔记。\n"));
+        detail.push_str(c2m_i18n::tr!("未读到笔记。\n"));
     } else {
-        detail.push_str(&course2md::tr!(
+        detail.push_str(&c2m_i18n::tr!(
             "目前可读取 {} 份笔记：\n{}",
             found.names.len(),
             found
@@ -238,7 +238,7 @@ pub fn link_confirmation(link: &storage::LibraryLink, found: &storage::NotesFoun
                 .join("\n")
         ));
         if found.names.len() > 5 {
-            detail.push_str(&course2md::tr!(
+            detail.push_str(&c2m_i18n::tr!(
                 "\n以及另外 {} 份笔记。",
                 found.names.len() - 5
             ));
@@ -246,7 +246,7 @@ pub fn link_confirmation(link: &storage::LibraryLink, found: &storage::NotesFoun
         detail.push('\n');
     }
     if found.unreadable > 0 {
-        detail.push_str(&course2md::tr!(
+        detail.push_str(&c2m_i18n::tr!(
             "另有 {} 份笔记无法读取。\n",
             found.unreadable
         ));
@@ -331,18 +331,18 @@ mod tests {
         std::fs::write(old.join("video.mp4"), "original video").unwrap();
         let work = old.join("note-work");
         std::fs::create_dir_all(&work).unwrap();
-        let target = course2md::artifact::Target {
+        let target = c2m_artifact::artifact::Target {
             task_id: "task-relocate".into(),
             course_id: "course-relocate".into(),
             source_id: "local:original-video".into(),
             version_id: "v1".into(),
             course_dir: old.join("note"),
         };
-        let sections = vec![course2md::timeline::Section {
+        let sections = vec![c2m_core::timeline::Section {
             t: 0.,
             end: 1.,
             image: String::new(),
-            speech: vec![course2md::timeline::TranscriptEvent {
+            speech: vec![c2m_core::timeline::TranscriptEvent {
                 start: 0.,
                 end: 1.,
                 text: "Relocation must preserve this body.".into(),
@@ -350,7 +350,7 @@ mod tests {
                 translation: None,
             }],
         }];
-        let meta = course2md::fetch::VideoMeta {
+        let meta = c2m_source::fetch::VideoMeta {
             title: "Original title".into(),
             uploader: String::new(),
             duration: 0.,
@@ -358,7 +358,7 @@ mod tests {
             extractor: "local".into(),
             id: "original-video".into(),
         };
-        course2md::artifact::publish_blocking(
+        c2m_artifact::artifact::publish_blocking(
             &target,
             &work,
             &meta,
@@ -394,14 +394,14 @@ mod tests {
         draft.folder = Some(7);
         let draft_id = draft.id.clone();
         let plan = workspace::TaskPlan {
-            operation: course2md::execution::Operation::Generate,
+            operation: c2m_engine::execution::Operation::Generate,
             source: source.clone(),
             source_id: source.identity.clone(),
             title: "Frozen task".into(),
             library_id: id.clone(),
             folder: Some(7),
             subtitle: None,
-            config: course2md::settings::ConfigFile::default(),
+            config: c2m_config::settings::ConfigFile::default(),
             asr_service: Some("fixed-service-version".into()),
             ai_service: None,
         };
@@ -777,12 +777,12 @@ mod tests {
         draft.custom_title = true;
         draft.folder = Some(17);
         let original_draft_id = draft.id.clone();
-        let mut config = course2md::settings::ConfigFile::default();
+        let mut config = c2m_config::settings::ConfigFile::default();
         config.defaults.model_dir = Some(old.join("models"));
         let plan = workspace::TaskPlan {
-            operation: course2md::execution::Operation::Reprocess {
+            operation: c2m_engine::execution::Operation::Reprocess {
                 base_version_dir: old.join("note/versions/old-version"),
-                components: vec![course2md::execution::Component::Summary],
+                components: vec![c2m_engine::execution::Component::Summary],
                 prior_work_dir: Some(old.join(".course2md/work/old-task")),
             },
             source: source.clone(),
@@ -902,7 +902,7 @@ mod tests {
             new.join(old_task_work.strip_prefix(&old).unwrap())
         );
         assert!(
-            matches!(&task.plan.operation, course2md::execution::Operation::Reprocess {base_version_dir, prior_work_dir:Some(work),..}
+            matches!(&task.plan.operation, c2m_engine::execution::Operation::Reprocess {base_version_dir, prior_work_dir:Some(work),..}
             if base_version_dir.starts_with(&new) && work.starts_with(&new))
         );
         assert_eq!(state.storage_backups[0].path, old);

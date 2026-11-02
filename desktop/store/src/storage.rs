@@ -48,13 +48,13 @@ impl BackupRecord {
     fn load_journal(&self) -> Result<Journal> {
         let journal: Journal = serde_json::from_slice(
             &std::fs::read(&self.journal_path)
-                .context(course2md::tr!("缺少这份备份的核验记录，未清理任何文件"))?,
+                .context(c2m_i18n::tr!("缺少这份备份的核验记录，未清理任何文件"))?,
         )?;
         ensure!(
             journal.id == self.id
                 && journal.source == self.path
                 && journal.library_id == self.library_id,
-            course2md::tr!("备份与核验记录不一致，未清理任何文件")
+            c2m_i18n::tr!("备份与核验记录不一致，未清理任何文件")
         );
         Ok(journal)
     }
@@ -109,8 +109,8 @@ pub struct PreparedMove {
 pub(crate) struct DirectoryStamp(Arc<same_file::Handle>);
 
 pub(crate) fn directory_stamp(path: &Path) -> Result<DirectoryStamp> {
-    let canonical = std::fs::canonicalize(path).context(course2md::tr!("保存位置暂时不可访问"))?;
-    ensure!(canonical.is_dir(), course2md::tr!("保存位置不是文件夹"));
+    let canonical = std::fs::canonicalize(path).context(c2m_i18n::tr!("保存位置暂时不可访问"))?;
+    ensure!(canonical.is_dir(), c2m_i18n::tr!("保存位置不是文件夹"));
     Ok(DirectoryStamp(Arc::new(same_file::Handle::from_path(
         &canonical,
     )?)))
@@ -144,29 +144,29 @@ impl LibraryAccess {
 fn check_cancel(cancel: &AtomicBool) -> Result<()> {
     ensure!(
         !cancel.load(Ordering::Relaxed),
-        course2md::tr!("已取消移动，原笔记库仍保留")
+        c2m_i18n::tr!("已取消移动，原笔记库仍保留")
     );
     Ok(())
 }
 
 pub fn validate_destination(source: &Path, destination: &Path) -> Result<(PathBuf, PathBuf)> {
     let source = std::fs::canonicalize(source)
-        .context(course2md::tr!("原笔记库无法访问，请重新连接这个保存位置"))?;
+        .context(c2m_i18n::tr!("原笔记库无法访问，请重新连接这个保存位置"))?;
     let destination = std::fs::canonicalize(destination)
-        .context(course2md::tr!("目标文件夹无法访问，请选择已有的空文件夹"))?;
+        .context(c2m_i18n::tr!("目标文件夹无法访问，请选择已有的空文件夹"))?;
     ensure!(
         source.is_dir() && destination.is_dir(),
-        course2md::tr!("请选择文件夹作为笔记库位置")
+        c2m_i18n::tr!("请选择文件夹作为笔记库位置")
     );
     ensure!(
         source != destination
             && !source.starts_with(&destination)
             && !destination.starts_with(&source),
-        course2md::tr!("目标不能是原笔记库、它的父文件夹或子文件夹")
+        c2m_i18n::tr!("目标不能是原笔记库、它的父文件夹或子文件夹")
     );
     ensure!(
         std::fs::read_dir(&destination)?.next().is_none(),
-        course2md::tr!("目标文件夹不是空的，请选择空文件夹")
+        c2m_i18n::tr!("目标文件夹不是空的，请选择空文件夹")
     );
     Ok((source, destination))
 }
@@ -191,17 +191,17 @@ impl Tree {
             )
         }) {
             check_cancel(cancel)?;
-            let entry = entry.with_context(|| course2md::tr!("无法读取 {}", root.display()))?;
+            let entry = entry.with_context(|| c2m_i18n::tr!("无法读取 {}", root.display()))?;
             let path = entry.path();
             ensure!(
                 entry.depth() <= MAX_DEPTH,
-                course2md::tr!("笔记库目录层级过深，请检查 {}", path.display())
+                c2m_i18n::tr!("笔记库目录层级过深，请检查 {}", path.display())
             );
             let relative = path.strip_prefix(root)?.to_path_buf();
             let kind = entry.file_type();
             ensure!(
                 !kind.is_symlink(),
-                course2md::tr!(
+                c2m_i18n::tr!(
                     "笔记库包含符号链接，尚未移动：{}。请先把需要的实际文件放入笔记库。",
                     path.display()
                 )
@@ -211,7 +211,7 @@ impl Tree {
             } else {
                 ensure!(
                     kind.is_file(),
-                    course2md::tr!("笔记库包含无法复制的特殊文件：{}", path.display())
+                    c2m_i18n::tr!("笔记库包含无法复制的特殊文件：{}", path.display())
                 );
                 let metadata = entry.metadata()?;
                 tree.files.push((
@@ -234,7 +234,7 @@ impl Tree {
 }
 
 pub fn save_journal(path: &Path, journal: &Journal) -> Result<()> {
-    course2md::checkpoint::atomic_write(path, &serde_json::to_vec_pretty(journal)?)
+    c2m_core::fsio::atomic_write(path, &serde_json::to_vec_pretty(journal)?)
 }
 
 /// One directory scan with two outcomes: readable pending journals (sorted by
@@ -302,12 +302,12 @@ pub fn prepare_move(
     marker
         .persist_noclobber(journal.destination.join(MOVE_MARKER_FILE))
         .map_err(|error| error.error)
-        .context(course2md::tr!("目标已被其他操作使用，原笔记库尚未改变"))?;
+        .context(c2m_i18n::tr!("目标已被其他操作使用，原笔记库尚未改变"))?;
     copy_library(path, journal, cancel, progress)
 }
 
 pub(crate) fn read_journal(path: &Path) -> Result<Journal> {
-    serde_json::from_slice(&std::fs::read(path)?).context(course2md::tr!("移动记录无法读取"))
+    serde_json::from_slice(&std::fs::read(path)?).context(c2m_i18n::tr!("移动记录无法读取"))
 }
 
 /// Marks an unfinished move as given up; the copy and the original both stay.
@@ -394,22 +394,22 @@ pub fn resume_move(
     let journal = read_journal(path)?;
     ensure!(
         journal.schema == 1 && !matches!(journal.phase, Phase::Committed | Phase::Abandoned),
-        course2md::tr!("这份移动记录不能继续")
+        c2m_i18n::tr!("这份移动记录不能继续")
     );
     ensure!(
         std::fs::canonicalize(&journal.source)? == journal.source
             && std::fs::canonicalize(&journal.destination)? == journal.destination,
-        course2md::tr!("移动位置已经变化，原数据和副本已保留")
+        c2m_i18n::tr!("移动位置已经变化，原数据和副本已保留")
     );
     let marker: Journal = serde_json::from_slice(
         &std::fs::read(journal.destination.join(MOVE_MARKER_FILE))
-            .context(course2md::tr!("目标缺少这次移动的识别记录，未修改目标内容"))?,
+            .context(c2m_i18n::tr!("目标缺少这次移动的识别记录，未修改目标内容"))?,
     )?;
     ensure!(
         marker.id == journal.id
             && marker.source == journal.source
             && marker.destination == journal.destination,
-        course2md::tr!("目标不属于这次移动，未修改目标内容")
+        c2m_i18n::tr!("目标不属于这次移动，未修改目标内容")
     );
     copy_library(path.to_owned(), journal, cancel, progress)
 }
@@ -425,12 +425,12 @@ fn copy_file(
 ) -> Result<()> {
     let parent = destination
         .parent()
-        .context(course2md::tr!("目标文件缺少目录"))?;
+        .context(c2m_i18n::tr!("目标文件缺少目录"))?;
     let mut input = std::fs::File::open(source)?;
     let mut output = tempfile::Builder::new()
         .prefix(TEMPORARY_PREFIX)
         .tempfile_in(parent)?;
-    let message = course2md::tr!(
+    let message = c2m_i18n::tr!(
         "正在复制 {}",
         destination.file_name().unwrap_or_default().display()
     );
@@ -460,7 +460,7 @@ fn copy_file(
     output
         .persist(destination)
         .map_err(|error| error.error)
-        .with_context(|| course2md::tr!("无法保存移动副本 {}", destination.display()))?;
+        .with_context(|| c2m_i18n::tr!("无法保存移动副本 {}", destination.display()))?;
     Ok(())
 }
 
@@ -482,7 +482,7 @@ fn copy_library(
                 total,
             })
         };
-        report(course2md::tr!("正在检查原笔记库…"), 0, 0);
+        report(c2m_i18n::tr!("正在检查原笔记库…"), 0, 0);
         let source = Tree::scan(&journal.source, cancel)?;
         journal.files = source.records();
         journal.directories = source.directories.clone();
@@ -503,7 +503,7 @@ fn copy_library(
                     .directories
                     .iter()
                     .all(|directory| journal.directories.contains(directory)),
-            course2md::tr!("目标副本出现了非预期内容，未覆盖任何文件")
+            c2m_i18n::tr!("目标副本出现了非预期内容，未覆盖任何文件")
         );
         for (file, _) in existing
             .files
@@ -537,20 +537,20 @@ fn copy_library(
                 copy_file(&original, &target, completed, total, cancel, progress)?;
             }
             completed += file.bytes;
-            report(course2md::tr!("正在复制笔记库…"), completed, total);
+            report(c2m_i18n::tr!("正在复制笔记库…"), completed, total);
         }
         check_cancel(cancel)?;
-        report(course2md::tr!("正在检查原笔记库…"), 0, 1);
+        report(c2m_i18n::tr!("正在检查原笔记库…"), 0, 1);
         ensure!(
             Tree::scan(&journal.source, cancel)? == source,
-            course2md::tr!("原笔记库在复制期间发生变化，尚未切换保存位置")
+            c2m_i18n::tr!("原笔记库在复制期间发生变化，尚未切换保存位置")
         );
-        course2md::execution::relocate_work_bindings(&journal.source, &journal.destination)?;
-        report(course2md::tr!("正在核验副本…"), 1, 1);
+        c2m_engine::execution::relocate_work_bindings(&journal.source, &journal.destination)?;
+        report(c2m_i18n::tr!("正在核验副本…"), 1, 1);
         let copied = Tree::scan(&journal.destination, cancel)?;
         ensure!(
             copied.directories == journal.directories && copied.files.len() == journal.files.len(),
-            course2md::tr!("目标副本包含非预期内容，尚未切换保存位置")
+            c2m_i18n::tr!("目标副本包含非预期内容，尚未切换保存位置")
         );
         for (original, (copy, _)) in journal.files.iter().zip(&copied.files) {
             ensure!(
@@ -560,16 +560,16 @@ fn copy_library(
                             .path
                             .file_name()
                             .is_some_and(|n| n == TASK_IDENTITY_FILE)),
-                course2md::tr!(
+                c2m_i18n::tr!(
                     "目标副本未通过校验，尚未切换保存位置：{}",
                     original.path.display()
                 )
             );
         }
         for directory in journal.directories.iter().rev() {
-            course2md::artifact::sync_dir(&journal.destination.join(directory))?;
+            c2m_artifact::artifact::sync_dir(&journal.destination.join(directory))?;
         }
-        course2md::artifact::sync_dir(&journal.destination)
+        c2m_artifact::artifact::sync_dir(&journal.destination)
     };
     if let Err(error) = copy() {
         journal.phase = Phase::Failed;
@@ -585,7 +585,7 @@ fn copy_library(
 
 /// Refuses a folder that overlaps another registered library.
 pub fn check_overlap(state: &workspace::State, library_id: &str, folder: &Path) -> Result<()> {
-    let folder = std::fs::canonicalize(folder).context(course2md::tr!("目标位置暂时无法访问"))?;
+    let folder = std::fs::canonicalize(folder).context(c2m_i18n::tr!("目标位置暂时无法访问"))?;
     ensure!(
         !state
             .libraries
@@ -596,7 +596,7 @@ pub fn check_overlap(state: &workspace::State, library_id: &str, folder: &Path) 
                     std::fs::canonicalize(&library.root).unwrap_or_else(|_| library.root.clone());
                 root.starts_with(&folder) || folder.starts_with(root)
             }),
-        course2md::tr!("目标与另一个笔记库重叠，请选择单独的文件夹")
+        c2m_i18n::tr!("目标与另一个笔记库重叠，请选择单独的文件夹")
     );
     Ok(())
 }
@@ -606,14 +606,14 @@ pub fn publish_move(state: &mut workspace::State, prepared: &PreparedMove) -> Re
     let journal = &prepared.journal;
     ensure!(
         journal.phase == Phase::Verified,
-        course2md::tr!("目标副本尚未核验，不能切换保存位置")
+        c2m_i18n::tr!("目标副本尚未核验，不能切换保存位置")
     );
     let location = state
         .library(&journal.library_id)
-        .context(course2md::tr!("这个笔记库已被移除"))?;
+        .context(c2m_i18n::tr!("这个笔记库已被移除"))?;
     ensure!(
         std::fs::canonicalize(&location.root)? == journal.source,
-        course2md::tr!("笔记库的位置在移动期间已经变化，尚未切换")
+        c2m_i18n::tr!("笔记库的位置在移动期间已经变化，尚未切换")
     );
     let roots = [journal.source.clone(), location.root.clone()];
     check_overlap(state, &journal.library_id, &journal.destination)?;
@@ -656,10 +656,10 @@ pub fn inspect_link(
 ) -> Result<LibraryLink> {
     let location = state
         .library(library_id)
-        .context(course2md::tr!("这个笔记库已被移除"))?;
+        .context(c2m_i18n::tr!("这个笔记库已被移除"))?;
     let folder = folder
         .canonicalize()
-        .context(course2md::tr!("所选文件夹暂时无法访问"))?;
+        .context(c2m_i18n::tr!("所选文件夹暂时无法访问"))?;
     check_overlap(state, library_id, &folder)?;
     let stamp = directory_stamp(&folder)?;
     let current = location.root.canonicalize().ok();
@@ -667,11 +667,11 @@ pub fn inspect_link(
         Ok(identity) => {
             ensure!(
                 identity.trim() == library_id,
-                course2md::tr!("所选文件夹属于另一个笔记库，请选择这个笔记库移动后的文件夹")
+                c2m_i18n::tr!("所选文件夹属于另一个笔记库，请选择这个笔记库移动后的文件夹")
             );
             ensure!(
                 current.as_ref() != Some(&folder),
-                course2md::tr!("所选仍是当前位置，请选择移动后的笔记库文件夹")
+                c2m_i18n::tr!("所选仍是当前位置，请选择移动后的笔记库文件夹")
             );
             None
         }
@@ -680,7 +680,7 @@ pub fn inspect_link(
             for course in crate::notes::scan_library(&folder)?.courses {
                 ensure!(
                     !cancel.load(Ordering::Relaxed),
-                    course2md::tr!("已取消重新定位")
+                    c2m_i18n::tr!("已取消重新定位")
                 );
                 let title = course.title.clone();
                 match crate::notes::read_preview(course) {
@@ -691,14 +691,14 @@ pub fn inspect_link(
             Some(found)
         }
         Err(error) => {
-            return Err(error).context(course2md::tr!(
+            return Err(error).context(c2m_i18n::tr!(
                 "无法确认所选文件夹是这个笔记库，请选择移动后的完整笔记库文件夹"
             ));
         }
     };
     ensure!(
         directory_stamp(&folder)? == stamp,
-        course2md::tr!("所选文件夹已变化，请重新选择")
+        c2m_i18n::tr!("所选文件夹已变化，请重新选择")
     );
     Ok(LibraryLink {
         library_id: library_id.to_owned(),
@@ -714,7 +714,7 @@ pub fn inspect_link(
 pub fn finish_link(link: &LibraryLink) -> Result<Vec<TaskRecord>> {
     ensure!(
         directory_stamp(&link.folder)? == link.stamp,
-        course2md::tr!("所选文件夹已被替换，请重新选择")
+        c2m_i18n::tr!("所选文件夹已被替换，请重新选择")
     );
     let location = LibraryLocation {
         id: link.library_id.clone(),
@@ -739,7 +739,7 @@ pub fn publish_link(
         state
             .library(&link.library_id)
             .is_some_and(|location| location.root == link.previous_root),
-        course2md::tr!("这个笔记库的位置已变化，请重新选择")
+        c2m_i18n::tr!("这个笔记库的位置已变化，请重新选择")
     );
     if link.folder != link.previous_root {
         state.rebind_library(
@@ -757,10 +757,7 @@ pub fn cleanup_backup(
     active_roots: &[PathBuf],
     cancel: &AtomicBool,
 ) -> Result<()> {
-    ensure!(
-        backup.verified,
-        course2md::tr!("这份备份尚未核验，不能清理")
-    );
+    ensure!(backup.verified, c2m_i18n::tr!("这份备份尚未核验，不能清理"));
     let mut journal = backup.load_journal()?;
     if journal.cleanup_complete {
         return Ok(());
@@ -773,17 +770,17 @@ pub fn cleanup_backup(
             journal.cleanup_complete = true;
             return save_journal(&backup.journal_path, &journal);
         }
-        Err(error) => return Err(error).context(course2md::tr!("旧位置备份已移动或无法访问")),
+        Err(error) => return Err(error).context(c2m_i18n::tr!("旧位置备份已移动或无法访问")),
     };
     ensure!(
         path == backup.path,
-        course2md::tr!("旧位置现在指向其他位置，未清理任何文件")
+        c2m_i18n::tr!("旧位置现在指向其他位置，未清理任何文件")
     );
     for root in active_roots {
         let root = std::fs::canonicalize(root)?;
         ensure!(
             !root.starts_with(&path) && !path.starts_with(&root),
-            course2md::tr!("这个位置仍被笔记库使用，不能作为备份清理")
+            c2m_i18n::tr!("这个位置仍被笔记库使用，不能作为备份清理")
         );
     }
     let tree = Tree::scan(&path, cancel)?;
@@ -800,16 +797,16 @@ pub fn cleanup_backup(
         files == journal.files && tree.directories == journal.directories
     };
     if !unchanged {
-        bail!(course2md::tr!(
+        bail!(c2m_i18n::tr!(
             "旧位置备份在移动后发生变化，未清理任何内容。请打开该位置检查新增或修改的文件。"
         ));
     }
     check_cancel(cancel)?;
     journal.cleanup_started = true;
     save_journal(&backup.journal_path, &journal)?;
-    std::fs::remove_dir_all(&path).context(course2md::tr!("旧位置备份尚未清理完成，请重试"))?;
+    std::fs::remove_dir_all(&path).context(c2m_i18n::tr!("旧位置备份尚未清理完成，请重试"))?;
     if let Some(parent) = path.parent() {
-        let _ = course2md::artifact::sync_dir(parent);
+        let _ = c2m_artifact::artifact::sync_dir(parent);
     }
     journal.cleanup_complete = true;
     save_journal(&backup.journal_path, &journal)

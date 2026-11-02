@@ -35,23 +35,23 @@ pub enum Error {
 impl Error {
     pub fn message(&self) -> String {
         match self {
-            Self::InvalidAddress => course2md::tr!("请先填写有效的服务地址，再获取模型").into(),
-            Self::MissingKey => course2md::tr!("请先填写 API Key，再获取模型").into(),
-            Self::InvalidKey => course2md::tr!("API Key 含无效字符，请检查后重试").into(),
+            Self::InvalidAddress => c2m_i18n::tr!("请先填写有效的服务地址，再获取模型").into(),
+            Self::MissingKey => c2m_i18n::tr!("请先填写 API Key，再获取模型").into(),
+            Self::InvalidKey => c2m_i18n::tr!("API Key 含无效字符，请检查后重试").into(),
             Self::CredentialUnavailable => {
-                course2md::tr!("暂时无法读取已保存的 API Key，可重新填写后重试").into()
+                c2m_i18n::tr!("暂时无法读取已保存的 API Key，可重新填写后重试").into()
             }
-            Self::TimedOut => course2md::tr!("获取模型超时，可重试").into(),
-            Self::Network => course2md::tr!("暂时无法获取模型，请检查地址或网络").into(),
+            Self::TimedOut => c2m_i18n::tr!("获取模型超时，可重试").into(),
+            Self::Network => c2m_i18n::tr!("暂时无法获取模型，请检查地址或网络").into(),
             Self::AuthenticationRefused => {
-                course2md::tr!("服务拒绝访问模型列表，请检查认证设置").into()
+                c2m_i18n::tr!("服务拒绝访问模型列表，请检查认证设置").into()
             }
-            Self::Unsupported => course2md::tr!("服务未提供可读取的模型列表").into(),
-            Self::Refused(status) => course2md::tr!("暂时无法获取模型（HTTP {}），可重试", status),
-            Self::InvalidResponse => course2md::tr!("未能识别服务返回的模型列表").into(),
-            Self::TooLarge => course2md::tr!("服务返回的模型列表过大").into(),
+            Self::Unsupported => c2m_i18n::tr!("服务未提供可读取的模型列表").into(),
+            Self::Refused(status) => c2m_i18n::tr!("暂时无法获取模型（HTTP {}），可重试", status),
+            Self::InvalidResponse => c2m_i18n::tr!("未能识别服务返回的模型列表").into(),
+            Self::TooLarge => c2m_i18n::tr!("服务返回的模型列表过大").into(),
             Self::Custom(message) => message.clone(),
-            Self::Cancelled => course2md::tr!("已取消获取模型").into(),
+            Self::Cancelled => c2m_i18n::tr!("已取消获取模型").into(),
         }
     }
 }
@@ -83,7 +83,7 @@ impl RequestKey {
             if typed_key.chars().any(char::is_control) {
                 return Err(Error::InvalidKey);
             }
-            AuthIdentity::Typed(course2md::execution::digest(typed_key.as_bytes()))
+            AuthIdentity::Typed(c2m_core::digest::digest(typed_key.as_bytes()))
         } else {
             AuthIdentity::Saved(draft.credential.clone().ok_or(Error::MissingKey)?)
         };

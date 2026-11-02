@@ -1,8 +1,8 @@
 //! Durable user work. Views never supply the identity or settings of a retry.
 use anyhow::{Context, Result, bail, ensure};
-use course2md::execution::Component;
-use course2md::progress::BlockReason;
-use course2md::settings::ConfigFile;
+use c2m_config::settings::ConfigFile;
+use c2m_engine::execution::Component;
+use c2m_protocol::progress::BlockReason;
 use desktop_prefs::conversion::ConversionOptions;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -29,7 +29,7 @@ const KEPT_CANCELLED_TASKS: usize = 30;
 pub fn course_dir_name(source_id: &str) -> String {
     format!(
         "course-{}",
-        &course2md::execution::digest(source_id.as_bytes())[..32]
+        &c2m_core::digest::digest(source_id.as_bytes())[..32]
     )
 }
 
@@ -48,15 +48,15 @@ pub struct Source {
     #[serde(default)]
     pub online: bool,
     #[serde(default)]
-    pub subtitles: course2md::subtitle::SubtitleEvidence,
+    pub subtitles: c2m_source::subtitle::SubtitleEvidence,
     #[serde(default)]
-    pub selected_subtitle: Option<course2md::subtitle::CachedSubtitle>,
+    pub selected_subtitle: Option<c2m_source::subtitle::CachedSubtitle>,
     #[serde(default)]
     pub original_language: Option<String>,
     #[serde(default)]
-    pub subtitle_request: Option<course2md::subtitle::SubtitleTrack>,
+    pub subtitle_request: Option<c2m_source::subtitle::SubtitleTrack>,
     #[serde(default)]
-    pub subtitle_read_error: Option<course2md::subtitle::SubtitleReadError>,
+    pub subtitle_read_error: Option<c2m_source::subtitle::SubtitleReadError>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct LibraryLocation {
@@ -99,7 +99,7 @@ pub struct Draft {
     /// Remember the local branch when temporarily choosing a speech service.
     #[serde(default)]
     #[serde(with = "desktop_prefs::provider_serde")]
-    pub local_provider: Option<course2md::config::AsrProvider>,
+    pub local_provider: Option<c2m_config::config::AsrProvider>,
     #[serde(default)]
     pub overrides: BTreeSet<Override>,
     #[serde(default)]
@@ -245,11 +245,11 @@ impl Source {
         // Track identity refers to the original confirmed choice. Its content is stored
         // in the task; relocating a file does not reselect a track.
         let tracks = match &mut self.subtitles {
-            course2md::subtitle::SubtitleEvidence::Found { tracks, .. } => tracks.iter_mut(),
+            c2m_source::subtitle::SubtitleEvidence::Found { tracks, .. } => tracks.iter_mut(),
             _ => [].iter_mut(),
         };
         for track in tracks.chain(&mut self.subtitle_request) {
-            if let course2md::subtitle::SubtitleOrigin::File { path } = &mut track.origin {
+            if let c2m_source::subtitle::SubtitleOrigin::File { path } = &mut track.origin {
                 relocate_path(path, old, new);
             }
         }
@@ -318,7 +318,7 @@ pub(crate) fn public_config(config: &ConfigFile) -> ConfigFile {
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct TaskPlan {
     #[serde(default)]
-    pub operation: course2md::execution::Operation,
+    pub operation: c2m_engine::execution::Operation,
     pub source: Source,
     pub source_id: String,
     pub title: String,
@@ -361,7 +361,7 @@ impl TaskPlan {
     }
 }
 
-pub use course2md::dispatch::Intent;
+pub use c2m_dispatch::dispatch::Intent;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -383,15 +383,15 @@ impl TaskState {
     }
     pub fn label(self) -> &'static str {
         match self {
-            Self::Queued => course2md::tr!("等待处理"),
-            Self::Running => course2md::tr!("正在生成笔记"),
-            Self::Pausing => course2md::tr!("正在保存进度"),
-            Self::Paused => course2md::tr!("已暂停"),
-            Self::NeedsAttention => course2md::tr!("需要处理"),
-            Self::Uncertain => course2md::tr!("结果尚未确认"),
-            Self::Complete => course2md::tr!("笔记已生成"),
-            Self::Partial => course2md::tr!("部分未完成"),
-            Self::Cancelled => course2md::tr!("已取消"),
+            Self::Queued => c2m_i18n::tr!("等待处理"),
+            Self::Running => c2m_i18n::tr!("正在生成笔记"),
+            Self::Pausing => c2m_i18n::tr!("正在保存进度"),
+            Self::Paused => c2m_i18n::tr!("已暂停"),
+            Self::NeedsAttention => c2m_i18n::tr!("需要处理"),
+            Self::Uncertain => c2m_i18n::tr!("结果尚未确认"),
+            Self::Complete => c2m_i18n::tr!("笔记已生成"),
+            Self::Partial => c2m_i18n::tr!("部分未完成"),
+            Self::Cancelled => c2m_i18n::tr!("已取消"),
         }
     }
 }
@@ -428,8 +428,8 @@ pub struct TaskRecord {
 
 impl TaskRecord {
     /// One engine event from the running job.
-    pub fn apply_event(&mut self, event: &course2md::progress::Event) -> bool {
-        use course2md::progress::Event;
+    pub fn apply_event(&mut self, event: &c2m_protocol::progress::Event) -> bool {
+        use c2m_protocol::progress::Event;
         if matches!(
             event,
             Event::Stage { .. } | Event::Error { .. } | Event::Blocked { .. }
@@ -451,7 +451,7 @@ impl TaskRecord {
     /// The state label, telling a cancel apart from a pause while the worker stops.
     pub fn status_label(&self) -> &'static str {
         if self.state == TaskState::Pausing && self.intent == Intent::Cancel {
-            course2md::tr!("正在取消")
+            c2m_i18n::tr!("正在取消")
         } else {
             self.state.label()
         }
@@ -479,7 +479,7 @@ impl TaskRecord {
         }
         self.plan.source.relocate(old, new);
         relocate_config(&mut self.plan.config, old, new);
-        if let course2md::execution::Operation::Reprocess {
+        if let c2m_engine::execution::Operation::Reprocess {
             base_version_dir,
             prior_work_dir,
             ..
@@ -499,7 +499,7 @@ impl TaskRecord {
         if !self.state.finished() {
             self.intent = Intent::Pause;
             self.state = TaskState::Paused;
-            self.events.error = Some(course2md::tr!("任务记录已重建").into());
+            self.events.error = Some(c2m_i18n::tr!("任务记录已重建").into());
             self.unread = true;
         }
     }
@@ -507,7 +507,7 @@ impl TaskRecord {
     pub fn exports_only(&self) -> bool {
         matches!(
             &self.plan.operation,
-            course2md::execution::Operation::Reprocess { components, .. }
+            c2m_engine::execution::Operation::Reprocess { components, .. }
                 if !components.is_empty() && components.iter().all(|part| *part == Component::Exports)
         )
     }
@@ -521,7 +521,7 @@ fn task_export_directory(task: &TaskRecord, location: &LibraryLocation) -> Optio
     }
     if task.exports_only() {
         let course = crate::workspace::course_dir_name(&task.plan.source_id);
-        let course2md::execution::Operation::Reprocess {
+        let c2m_engine::execution::Operation::Reprocess {
             base_version_dir, ..
         } = &task.plan.operation
         else {
@@ -559,16 +559,16 @@ pub fn task_export_files(task: &TaskRecord, location: &LibraryLocation) -> Vec<P
     let Some(directory) = task_export_directory(task, location) else {
         return Vec::new();
     };
-    use course2md::config::OutputFormat;
+    use c2m_config::config::OutputFormat;
     [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json]
         .into_iter()
         .filter(|format| {
             outcomes
                 .exports
                 .get(&format.to_string())
-                .is_some_and(|outcome| outcome.status == course2md::artifact::Status::Succeeded)
+                .is_some_and(|outcome| outcome.status == c2m_artifact::artifact::Status::Succeeded)
         })
-        .map(|format| directory.join(course2md::portable::file_name(format)))
+        .map(|format| directory.join(c2m_artifact::portable::file_name(format)))
         .collect()
 }
 
@@ -576,7 +576,7 @@ pub fn available_task_export(task: &TaskRecord, location: &LibraryLocation) -> R
     task_export_files(task, location)
         .into_iter()
         .find(|path| path.is_file())
-        .context(course2md::tr!(
+        .context(c2m_i18n::tr!(
             "导出文件已移动或无法读取，可打开笔记后从「导出」菜单重新保存。"
         ))
 }
@@ -617,7 +617,7 @@ impl State {
     fn initial(root: PathBuf, options: ConversionOptions) -> Self {
         let library = LibraryLocation {
             id: new_id("library"),
-            name: course2md::tr!("笔记库").into(),
+            name: c2m_i18n::tr!("笔记库").into(),
             root,
             previous_roots: Vec::new(),
         };
@@ -644,7 +644,7 @@ impl State {
         let Ok(marker) = std::fs::read_to_string(root.join(".course2md-library-id")) else {
             return false;
         };
-        if course2md::execution::valid_id(marker.trim()) {
+        if c2m_engine::execution::valid_id(marker.trim()) {
             self.default_library = marker.trim().into();
             self.libraries[0].id = self.default_library.clone();
             self.drafts[0].library_id = self.default_library.clone();
@@ -771,19 +771,19 @@ impl State {
     pub fn adjust_task(
         &mut self,
         id: &str,
-        subtitle_events: Option<Vec<course2md::timeline::TranscriptEvent>>,
+        subtitle_events: Option<Vec<c2m_core::timeline::TranscriptEvent>>,
     ) -> Result<()> {
-        let task = self.task(id).context(course2md::tr!("任务不存在"))?.clone();
+        let task = self.task(id).context(c2m_i18n::tr!("任务不存在"))?.clone();
         ensure!(
             task.handled_by.is_none(),
-            course2md::tr!("此任务已有后续处理，请打开对应任务继续")
+            c2m_i18n::tr!("此任务已有后续处理，请打开对应任务继续")
         );
         ensure!(
             !matches!(
                 task.state,
                 TaskState::Running | TaskState::Pausing | TaskState::Queued
             ) && !task.held,
-            course2md::tr!("当前任务还在处理，请先暂停并等候当前步骤结束")
+            c2m_i18n::tr!("当前任务还在处理，请先暂停并等候当前步骤结束")
         );
         let mut draft = Draft::new(
             task.plan.source.online,
@@ -827,14 +827,14 @@ impl State {
     pub fn enqueue(&mut self, plan: TaskPlan, parent: Option<String>) -> Result<(String, bool)> {
         ensure!(
             !plan.source_id.is_empty() && !plan.title.trim().is_empty(),
-            course2md::tr!("请先确认视频和笔记名称")
+            c2m_i18n::tr!("请先确认视频和笔记名称")
         );
         if let Some(id) = parent.as_deref() {
-            let original = self.task(id).context(course2md::tr!("原任务记录不存在"))?;
+            let original = self.task(id).context(c2m_i18n::tr!("原任务记录不存在"))?;
             if let Some(followup) = &original.handled_by {
                 ensure!(
                     self.task(followup).is_some(),
-                    course2md::tr!("后续任务记录缺失，请先恢复任务记录")
+                    c2m_i18n::tr!("后续任务记录缺失，请先恢复任务记录")
                 );
                 return Ok((followup.clone(), false));
             }
@@ -843,12 +843,12 @@ impl State {
                     original.state,
                     TaskState::Running | TaskState::Pausing | TaskState::Queued
                 ),
-                course2md::tr!("原任务仍在处理，请先暂停并等候当前步骤结束")
+                c2m_i18n::tr!("原任务仍在处理，请先暂停并等候当前步骤结束")
             );
         }
         let location = self
             .library(&plan.library_id)
-            .context(course2md::tr!("所选保存位置未登记"))?;
+            .context(c2m_i18n::tr!("所选保存位置未登记"))?;
         if let Some(existing) = self.tasks.iter().find(|t| {
             // The attempt this one replaces is not a duplicate of it.
             !t.state.finished()
@@ -951,24 +951,22 @@ impl State {
     }
 
     pub fn set_intent(&mut self, id: &str, intent: Intent) -> Result<()> {
-        let task = self
-            .task_mut(id)
-            .context(course2md::tr!("任务记录不存在"))?;
+        let task = self.task_mut(id).context(c2m_i18n::tr!("任务记录不存在"))?;
         ensure!(
             !task.state.finished(),
-            course2md::tr!("这项任务已结束，可在任务卡中补做或生成新版")
+            c2m_i18n::tr!("这项任务已结束，可在任务卡中补做或生成新版")
         );
         ensure!(
             task.handled_by.is_none(),
-            course2md::tr!("这项任务已有后续处理，请打开对应任务继续。")
+            c2m_i18n::tr!("这项任务已有后续处理，请打开对应任务继续。")
         );
         ensure!(
             intent != Intent::Run || !matches!(task.state, TaskState::Running | TaskState::Pausing),
-            course2md::tr!("这项任务正在处理当前操作")
+            c2m_i18n::tr!("这项任务正在处理当前操作")
         );
         ensure!(
             intent != Intent::Run || !task.has_uncertain(),
-            course2md::tr!("仍有请求结果尚未确认，请查看请求范围后选择是否重新发送")
+            c2m_i18n::tr!("仍有请求结果尚未确认，请查看请求范围后选择是否重新发送")
         );
         task.intent = intent;
         task.updated = now();
@@ -998,10 +996,10 @@ impl State {
             .tasks
             .iter()
             .position(|task| task.id == id)
-            .context(course2md::tr!("任务记录不存在"))?;
+            .context(c2m_i18n::tr!("任务记录不存在"))?;
         ensure!(
             self.tasks[from].waiting(),
-            course2md::tr!("只能调整排队中的任务")
+            c2m_i18n::tr!("只能调整排队中的任务")
         );
         let task = self.tasks.remove(from);
         let queued: Vec<usize> = self
@@ -1032,12 +1030,10 @@ impl State {
     }
 
     pub fn authorize_uncertain(&mut self, id: &str, requests: &[String]) -> Result<()> {
-        let task = self
-            .task_mut(id)
-            .context(course2md::tr!("任务记录不存在"))?;
+        let task = self.task_mut(id).context(c2m_i18n::tr!("任务记录不存在"))?;
         ensure!(
             task.handled_by.is_none(),
-            course2md::tr!("这项任务已有后续处理，请打开对应任务继续")
+            c2m_i18n::tr!("这项任务已有后续处理，请打开对应任务继续")
         );
         ensure!(
             !matches!(
@@ -1045,7 +1041,7 @@ impl State {
                 TaskState::Running | TaskState::Pausing | TaskState::Queued
             ) && !task.state.finished()
                 && !task.held,
-            course2md::tr!("这项任务的状态已变化，请查看最新状态")
+            c2m_i18n::tr!("这项任务的状态已变化，请查看最新状态")
         );
         reconcile_receipts(task)?;
         let current: BTreeSet<_> = task
@@ -1058,7 +1054,7 @@ impl State {
         let selected: BTreeSet<_> = requests.iter().collect();
         ensure!(
             !selected.is_empty() && current == selected,
-            course2md::tr!("待确认的请求已变化，请查看最新范围后再选择是否重新发送")
+            c2m_i18n::tr!("待确认的请求已变化，请查看最新范围后再选择是否重新发送")
         );
         // The task is neither waiting nor running, so an earlier authorization of these
         // requests was never used: its start failed or the task was paused. A request
@@ -1091,11 +1087,11 @@ impl State {
         resend: Vec<String>,
         ai_service: Option<(String, ConfigFile)>,
     ) -> Result<String> {
-        let mut original = self.task(id).context(course2md::tr!("任务不存在"))?.clone();
+        let mut original = self.task(id).context(c2m_i18n::tr!("任务不存在"))?.clone();
         if let Some(next) = &original.handled_by {
             ensure!(
                 self.task(next).is_some(),
-                course2md::tr!("后续任务记录缺失，请先恢复任务记录")
+                c2m_i18n::tr!("后续任务记录缺失，请先恢复任务记录")
             );
             return Ok(next.clone());
         }
@@ -1104,23 +1100,23 @@ impl State {
                 original.state,
                 TaskState::Running | TaskState::Pausing | TaskState::Queued
             ) && !original.held,
-            course2md::tr!("当前任务仍在处理，请先等候当前步骤结束")
+            c2m_i18n::tr!("当前任务仍在处理，请先等候当前步骤结束")
         );
         let base = original
             .artifact
             .clone()
-            .context(course2md::tr!("此任务尚无可补做的笔记正文"))?;
-        let manifest = course2md::artifact::read_manifest(&base.join("manifest.json"))?;
+            .context(c2m_i18n::tr!("此任务尚无可补做的笔记正文"))?;
+        let manifest = c2m_artifact::artifact::read_manifest(&base.join("manifest.json"))?;
         ensure!(
             manifest.source_id == original.plan.source_id,
-            course2md::tr!("笔记来源与任务不匹配")
+            c2m_i18n::tr!("笔记来源与任务不匹配")
         );
         let outcomes = original.events.outcomes.clone();
         components.sort();
         components.dedup();
         ensure!(
             !components.is_empty(),
-            course2md::tr!("请选择需要补做的内容")
+            c2m_i18n::tr!("请选择需要补做的内容")
         );
         for component in &components {
             let failed = match (component, outcomes.as_ref()) {
@@ -1132,7 +1128,7 @@ impl State {
                 }
                 (_, None) => false,
             };
-            ensure!(failed, course2md::tr!("这部分无需补做"));
+            ensure!(failed, c2m_i18n::tr!("这部分无需补做"));
         }
         if !resend.is_empty() {
             reconcile_receipts(&mut original)?;
@@ -1145,7 +1141,7 @@ impl State {
                 .collect();
             ensure!(
                 !unknown.is_empty() && unknown == resend.iter().collect(),
-                course2md::tr!("待确认请求已变化，请查看最新范围后再选择是否重新发送")
+                c2m_i18n::tr!("待确认请求已变化，请查看最新范围后再选择是否重新发送")
             );
             // The user is continuing the original task, including a requested
             // summary that the uncertain proofreading prevented from starting.
@@ -1162,7 +1158,7 @@ impl State {
                     request.is_uncertain()
                         && request.purpose.as_deref() == Some(Component::Proofreading.as_str())
                 })
-                && !course2md::dispatch::receipts(&original.work_dir)?
+                && !c2m_dispatch::dispatch::receipts(&original.work_dir)?
                     .iter()
                     .any(|receipt| receipt.purpose == summary.as_str())
             {
@@ -1172,7 +1168,7 @@ impl State {
         } else {
             ensure!(
                 !original.has_uncertain(),
-                course2md::tr!("仍有请求结果尚未确认，请先查看请求范围")
+                c2m_i18n::tr!("仍有请求结果尚未确认，请先查看请求范围")
             );
         }
         let mut plan = original.plan;
@@ -1181,7 +1177,7 @@ impl State {
                 components
                     .iter()
                     .all(|part| matches!(part, Component::Proofreading | Component::Summary)),
-                course2md::tr!("服务修复只能用于未完成的校对或摘要")
+                c2m_i18n::tr!("服务修复只能用于未完成的校对或摘要")
             );
             plan.ai_service = Some(service);
             plan.config.llm = config.llm;
@@ -1193,7 +1189,7 @@ impl State {
         plan.config.llm.summarize = components.contains(&Component::Summary);
         plan.config.llm.vision &= plan.config.llm.enabled;
         if only_exports {
-            use course2md::config::OutputFormat;
+            use c2m_config::config::OutputFormat;
             let formats: Vec<_> = [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json]
                 .into_iter()
                 .filter(|format| {
@@ -1205,17 +1201,17 @@ impl State {
                 .collect();
             ensure!(
                 !formats.is_empty(),
-                course2md::tr!("需要补做的导出格式记录不完整，请从笔记中重新选择导出格式")
+                c2m_i18n::tr!("需要补做的导出格式记录不完整，请从笔记中重新选择导出格式")
             );
             plan.config.defaults.formats = Some(formats);
         }
-        plan.operation = course2md::execution::Operation::Reprocess {
+        plan.operation = c2m_engine::execution::Operation::Reprocess {
             base_version_dir: base,
             components,
             prior_work_dir: Some(original.work_dir),
         };
         plan.config.defaults.transcript_source =
-            Some(course2md::config::TranscriptSource::Subtitle);
+            Some(c2m_config::config::TranscriptSource::Subtitle);
         let (next, created) = self.enqueue(plan, Some(id.to_owned()))?;
         if created && let Some(task) = self.task_mut(&next) {
             task.resend = resend;
@@ -1234,7 +1230,7 @@ impl State {
     ) -> Result<()> {
         ensure!(
             self.library(library_id).is_some(),
-            course2md::tr!("这个笔记库已被移除")
+            c2m_i18n::tr!("这个笔记库已被移除")
         );
         for old in old_roots {
             for path in self.reader_sources.values_mut() {
@@ -1256,7 +1252,7 @@ impl State {
             .libraries
             .iter_mut()
             .find(|library| library.id == library_id)
-            .context(course2md::tr!("这个笔记库已被移除"))?;
+            .context(c2m_i18n::tr!("这个笔记库已被移除"))?;
         for old in old_roots {
             if !location.previous_roots.contains(old) {
                 location.previous_roots.push(old.clone());
@@ -1352,15 +1348,15 @@ pub struct WriteFailure {
 
 impl LibraryWrites {
     fn queue(&self, path: PathBuf, bytes: Vec<u8>, mirror_of: Option<LibraryLocation>) {
-        course2md::runtime::lock_recover(&self.pending).insert(path, (bytes, mirror_of));
+        c2m_process::runtime::lock_recover(&self.pending).insert(path, (bytes, mirror_of));
         let this = self.clone();
         desktop_prefs::spawn_blocking_io(move || this.drain());
     }
 
     /// Performs everything queued so far, waiting for any write already running.
     pub fn drain(&self) {
-        let _writing = course2md::runtime::lock_recover(&self.writing);
-        let writes = std::mem::take(&mut *course2md::runtime::lock_recover(&self.pending));
+        let _writing = c2m_process::runtime::lock_recover(&self.writing);
+        let writes = std::mem::take(&mut *c2m_process::runtime::lock_recover(&self.pending));
         for (path, (bytes, mirror_of)) in writes {
             let control = mirror_of.is_none();
             let result = match mirror_of {
@@ -1368,11 +1364,11 @@ impl LibraryWrites {
                 None => write_control(&path, &bytes),
             };
             if let Err(error) = result {
-                *course2md::runtime::lock_recover(&self.failure) = Some(WriteFailure {
+                *c2m_process::runtime::lock_recover(&self.failure) = Some(WriteFailure {
                     message: format!("{error:#}"),
                     control,
                 });
-                if let Some(wake) = course2md::runtime::lock_recover(&self.wake).as_ref() {
+                if let Some(wake) = c2m_process::runtime::lock_recover(&self.wake).as_ref() {
                     let _ = wake.try_send(());
                 }
             }
@@ -1381,7 +1377,7 @@ impl LibraryWrites {
 
     /// Writes a task's control file now, for a job about to start.
     pub fn write_control_now(&self, path: &Path, bytes: &[u8]) -> Result<()> {
-        let _writing = course2md::runtime::lock_recover(&self.writing);
+        let _writing = c2m_process::runtime::lock_recover(&self.writing);
         write_control(path, bytes)
     }
 }
@@ -1389,9 +1385,9 @@ impl LibraryWrites {
 fn write_control(path: &Path, bytes: &[u8]) -> Result<()> {
     std::fs::create_dir_all(
         path.parent()
-            .context(course2md::tr!("任务记录缺少保存目录"))?,
+            .context(c2m_i18n::tr!("任务记录缺少保存目录"))?,
     )?;
-    course2md::checkpoint::atomic_write(path, bytes)
+    c2m_core::fsio::atomic_write(path, bytes)
 }
 
 /// A task record as its library keeps it.
@@ -1414,28 +1410,28 @@ fn write_mirror(path: &Path, bytes: &[u8], location: &LibraryLocation) -> Result
         ensure_work_directory(directory, location)?;
     }
     if std::fs::read(path).ok().as_deref() != Some(bytes) {
-        course2md::checkpoint::atomic_write(path, bytes)
-            .context(course2md::tr!("任务恢复副本未能保存，原任务记录仍保留"))?;
+        c2m_core::fsio::atomic_write(path, bytes)
+            .context(c2m_i18n::tr!("任务恢复副本未能保存，原任务记录仍保留"))?;
     }
     Ok(())
 }
 
 fn validate_record_location(task: &TaskRecord, libraries: &[LibraryLocation]) -> Result<()> {
     ensure!(
-        course2md::execution::valid_id(&task.id),
-        course2md::tr!("任务身份无效")
+        c2m_engine::execution::valid_id(&task.id),
+        c2m_i18n::tr!("任务身份无效")
     );
     let library = libraries
         .iter()
         .find(|library| library.id == task.plan.library_id)
-        .context(course2md::tr!("任务保存位置记录缺失"))?;
+        .context(c2m_i18n::tr!("任务保存位置记录缺失"))?;
     ensure!(
         library.root.is_absolute(),
-        course2md::tr!("任务工作目录与记录的笔记库不匹配")
+        c2m_i18n::tr!("任务工作目录与记录的笔记库不匹配")
     );
     ensure!(
         !task.plan.source_id.trim().is_empty() && !task.plan.title.trim().is_empty(),
-        course2md::tr!("任务来源身份或名称记录缺失")
+        c2m_i18n::tr!("任务来源身份或名称记录缺失")
     );
     Ok(())
 }
@@ -1450,7 +1446,7 @@ fn ensure_work_directory(directory: &Path, library: &LibraryLocation) -> Result<
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) => ensure!(
                 metadata.is_dir() && !metadata.file_type().is_symlink(),
-                course2md::tr!("任务工作目录被其他文件或链接占用，原内容已保留")
+                c2m_i18n::tr!("任务工作目录被其他文件或链接占用，原内容已保留")
             ),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 // A starting job may be creating the same directories.
@@ -1473,7 +1469,7 @@ fn pause_recovered_control(task: &TaskRecord) -> Result<()> {
     let path = task.work_dir.join("control.json");
     let mut control = if path.is_file() {
         let bytes = desktop_prefs::store::read(&path)?;
-        course2md::checkpoint::atomic_write(
+        c2m_core::fsio::atomic_write(
             &task
                 .work_dir
                 .join(format!("{}.json", new_id("control-before-recovery"))),
@@ -1488,20 +1484,20 @@ fn pause_recovered_control(task: &TaskRecord) -> Result<()> {
     };
     control["intent"] = serde_json::to_value(Intent::Pause)?;
     control["resend"] = serde_json::json!([]);
-    course2md::checkpoint::atomic_write(&path, &serde_json::to_vec(&control)?)
+    c2m_core::fsio::atomic_write(&path, &serde_json::to_vec(&control)?)
 }
 
-fn failed_outcome(outcome: &course2md::artifact::Outcome) -> bool {
+fn failed_outcome(outcome: &c2m_artifact::artifact::Outcome) -> bool {
     matches!(
         outcome.status,
-        course2md::artifact::Status::Failed | course2md::artifact::Status::Partial
+        c2m_artifact::artifact::Status::Failed | c2m_artifact::artifact::Status::Partial
     )
 }
 
 fn component_outcome(
-    outcomes: &course2md::artifact::Outcomes,
+    outcomes: &c2m_artifact::artifact::Outcomes,
     component: Component,
-) -> &course2md::artifact::Outcome {
+) -> &c2m_artifact::artifact::Outcome {
     match component {
         Component::Screenshots => &outcomes.screenshots,
         Component::Proofreading => &outcomes.proofreading,
@@ -1513,13 +1509,13 @@ fn component_outcome(
 pub fn check_library(location: &LibraryLocation) -> Result<()> {
     ensure!(
         location.root.is_dir(),
-        course2md::tr!("保存位置不可访问，请连接对应磁盘")
+        c2m_i18n::tr!("保存位置不可访问，请连接对应磁盘")
     );
     let identity = std::fs::read_to_string(location.root.join(".course2md-library-id"))
-        .context(course2md::tr!("保存位置需要重新关联"))?;
+        .context(c2m_i18n::tr!("保存位置需要重新关联"))?;
     ensure!(
         identity.trim() == location.id,
-        course2md::tr!("保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记")
+        c2m_i18n::tr!("保存位置对应其他笔记库，请恢复原位置或在存储设置中重新登记")
     );
     Ok(())
 }
@@ -1528,7 +1524,7 @@ pub(crate) fn create_library_marker(location: &LibraryLocation) -> Result<()> {
     use std::io::Write;
     ensure!(
         location.root.is_dir(),
-        course2md::tr!("保存位置暂时不可访问")
+        c2m_i18n::tr!("保存位置暂时不可访问")
     );
     let target = location.root.join(".course2md-library-id");
     if target.exists() {
@@ -1538,7 +1534,7 @@ pub(crate) fn create_library_marker(location: &LibraryLocation) -> Result<()> {
     temporary.write_all(location.id.as_bytes())?;
     temporary.as_file().sync_all()?;
     match temporary.persist_noclobber(&target) {
-        Ok(_) => course2md::artifact::sync_dir(&location.root)?,
+        Ok(_) => c2m_artifact::artifact::sync_dir(&location.root)?,
         Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
             check_library(location)?
         }
@@ -1553,12 +1549,12 @@ enum ArtifactFact {
     Nothing,
     Published {
         version: PathBuf,
-        outcomes: Box<course2md::artifact::Outcomes>,
+        outcomes: Box<c2m_artifact::artifact::Outcomes>,
         partial: bool,
     },
     Exports {
         base: PathBuf,
-        outcomes: BTreeMap<String, course2md::artifact::Outcome>,
+        outcomes: BTreeMap<String, c2m_artifact::artifact::Outcome>,
     },
 }
 
@@ -1571,19 +1567,19 @@ fn probe_artifact(task: &TaskRecord, location: &LibraryLocation) -> Result<Artif
     let course = course_dir_name(&task.plan.source_id);
     let version = location.root.join(&course).join("versions").join(&task.id);
     if version.join("manifest.json").is_file() {
-        let manifest = course2md::artifact::read_manifest(&version.join("manifest.json"))?;
+        let manifest = c2m_artifact::artifact::read_manifest(&version.join("manifest.json"))?;
         ensure!(
             manifest.task_id == task.id && manifest.source_id == task.plan.source_id,
-            course2md::tr!("已发布笔记与任务身份不匹配，原文件已保留")
+            c2m_i18n::tr!("已发布笔记与任务身份不匹配，原文件已保留")
         );
-        course2md::artifact::validate_version(&version, &manifest)?;
+        c2m_artifact::artifact::validate_version(&version, &manifest)?;
         return Ok(ArtifactFact::Published {
             version,
             outcomes: Box::new(manifest.outcomes),
             partial: manifest.partial,
         });
     }
-    if let course2md::execution::Operation::Reprocess {
+    if let c2m_engine::execution::Operation::Reprocess {
         base_version_dir,
         components,
         ..
@@ -1596,24 +1592,24 @@ fn probe_artifact(task: &TaskRecord, location: &LibraryLocation) -> Result<Artif
         #[derive(serde::Deserialize)]
         struct ExportResult {
             #[serde(default)]
-            outcomes: BTreeMap<String, course2md::artifact::Outcome>,
+            outcomes: BTreeMap<String, c2m_artifact::artifact::Outcome>,
         }
         let mut record: ExportResult =
             serde_json::from_slice(&std::fs::read(task.work_dir.join("export-result.json"))?)?;
         ensure!(
             !record.outcomes.is_empty(),
-            course2md::tr!("导出结果记录为空")
+            c2m_i18n::tr!("导出结果记录为空")
         );
         let export_directory = task_export_directory(task, location)
-            .context(course2md::tr!("导出位置与任务记录不匹配"))?;
+            .context(c2m_i18n::tr!("导出位置与任务记录不匹配"))?;
         for (format, outcome) in &mut record.outcomes {
-            if outcome.status == course2md::artifact::Status::Succeeded {
+            if outcome.status == c2m_artifact::artifact::Status::Succeeded {
                 let Some(format) = output_format(format) else {
                     continue;
                 };
-                let expected = export_directory.join(course2md::portable::file_name(format));
+                let expected = export_directory.join(c2m_artifact::portable::file_name(format));
                 if !expected.is_file() {
-                    *outcome = course2md::artifact::Outcome::failed(course2md::tr!(
+                    *outcome = c2m_artifact::artifact::Outcome::failed(c2m_i18n::tr!(
                         "导出文件已移动或无法读取，可以重新导出"
                     ));
                 }
@@ -1656,7 +1652,7 @@ fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
             let previous_artifact = task.artifact.replace(base);
             task.events
                 .outcomes
-                .get_or_insert_with(course2md::artifact::Outcomes::default)
+                .get_or_insert_with(c2m_artifact::artifact::Outcomes::default)
                 .exports = outcomes;
             task.unread |= previous_artifact != task.artifact || task.state != next_state;
             task.state = next_state;
@@ -1665,19 +1661,19 @@ fn apply_artifact(task: &mut TaskRecord, fact: ArtifactFact) {
 }
 
 /// The output format a saved export outcome is keyed by.
-fn output_format(key: &str) -> Option<course2md::config::OutputFormat> {
+fn output_format(key: &str) -> Option<c2m_config::config::OutputFormat> {
     key.parse().ok()
 }
 
 /// Requests whose result is unknown, read from the task's receipts.
 fn uncertain_requests(task: &TaskRecord) -> Result<Vec<BlockedRequest>> {
-    let receipts = course2md::dispatch::receipts(&task.work_dir)?;
+    let receipts = c2m_dispatch::dispatch::receipts(&task.work_dir)?;
     Ok(receipts
         .into_iter()
         .filter(|r| {
             matches!(
                 r.state,
-                course2md::dispatch::State::Sending | course2md::dispatch::State::Uncertain
+                c2m_dispatch::dispatch::State::Sending | c2m_dispatch::dispatch::State::Uncertain
             )
         })
         .map(|receipt| BlockedRequest {
@@ -1685,18 +1681,18 @@ fn uncertain_requests(task: &TaskRecord) -> Result<Vec<BlockedRequest>> {
             request_id: Some(receipt.request_id),
             purpose: Some(receipt.purpose),
             description: receipt.description.clone(),
-            kind: Some(course2md::artifact::FailureKind::Uncertain),
+            kind: Some(c2m_artifact::artifact::FailureKind::Uncertain),
             message: if receipt.description.trim().is_empty() {
                 receipt
                     .message
-                    .unwrap_or_else(|| course2md::tr!("请求已发送，结果未确认").into())
+                    .unwrap_or_else(|| c2m_i18n::tr!("请求已发送，结果未确认").into())
             } else {
-                course2md::tr!(
+                c2m_i18n::tr!(
                     "{}：{}",
                     receipt.description,
                     receipt
                         .message
-                        .unwrap_or_else(|| { course2md::tr!("请求结果未确认").into() })
+                        .unwrap_or_else(|| { c2m_i18n::tr!("请求结果未确认").into() })
                 )
             },
         })
@@ -1796,7 +1792,7 @@ enum TaskFacts {
         artifact: ArtifactFact,
         uncertain: Vec<BlockedRequest>,
         events: Box<JobEvents>,
-        outcomes: Option<Box<course2md::artifact::Outcomes>>,
+        outcomes: Option<Box<c2m_artifact::artifact::Outcomes>>,
     },
     Unreadable(String),
 }
@@ -1821,7 +1817,7 @@ impl TaskFacts {
             Self::Unreadable(error) => {
                 task.events.loaded = true;
                 task.state = TaskState::NeedsAttention;
-                task.events.error = Some(course2md::tr!(
+                task.events.error = Some(c2m_i18n::tr!(
                     "请求记录暂时无法读取，尚未发送新请求：{}",
                     error
                 ));
@@ -1856,7 +1852,9 @@ fn reconcile_task(task: &TaskRecord, location: &LibraryLocation) -> Result<TaskF
         .artifact
         .as_ref()
         .filter(|_| events.outcomes.is_none() && !task.exports_only())
-        .and_then(|version| course2md::artifact::read_manifest(&version.join("manifest.json")).ok())
+        .and_then(|version| {
+            c2m_artifact::artifact::read_manifest(&version.join("manifest.json")).ok()
+        })
         .map(|manifest| Box::new(manifest.outcomes));
     // Catches up on writes made while disconnected.
     write_mirror(
@@ -1903,7 +1901,7 @@ pub fn store_task_subtitles(task: &TaskRecord) -> Result<()> {
     if let Some(subtitle) = &task.plan.source.selected_subtitle
         && !subtitle.events.is_empty()
     {
-        course2md::checkpoint::atomic_write(
+        c2m_core::fsio::atomic_write(
             &task.work_dir.join(TASK_SUBTITLE_FILE),
             &serde_json::to_vec(&subtitle.events)?,
         )?;
@@ -1936,9 +1934,9 @@ pub(crate) fn read_library_tasks(location: &LibraryLocation) -> (Vec<TaskRecord>
             let mirror: TaskMirror = serde_json::from_value(value.clone())?;
             ensure!(
                 mirror.schema <= SCHEMA
-                    && course2md::execution::valid_id(&mirror.task.id)
+                    && c2m_engine::execution::valid_id(&mirror.task.id)
                     && entry.file_name().to_str() == Some(mirror.task.id.as_str()),
-                course2md::tr!("任务镜像身份不匹配")
+                c2m_i18n::tr!("任务镜像身份不匹配")
             );
             let mut task = mirror.task;
             // A mirror older than `root` names its folder in its own work directory.
@@ -1957,7 +1955,7 @@ pub(crate) fn read_library_tasks(location: &LibraryLocation) -> (Vec<TaskRecord>
         });
         match restored {
             Ok(task) => tasks.push(task),
-            Err(_) => issues.push(course2md::tr!(
+            Err(_) => issues.push(c2m_i18n::tr!(
                 "{} 的任务参数仍无法读取，材料已保留",
                 entry.file_name().to_string_lossy()
             )),
@@ -2009,7 +2007,7 @@ fn compact_history(state: &mut State) {
 /// its base note's transcript and has none of its own.
 pub fn task_subtitle_events(
     task: &TaskRecord,
-) -> Result<Option<Vec<course2md::timeline::TranscriptEvent>>> {
+) -> Result<Option<Vec<c2m_core::timeline::TranscriptEvent>>> {
     let Some(subtitle) = &task.plan.source.selected_subtitle else {
         return Ok(None);
     };
@@ -2025,9 +2023,9 @@ pub fn task_subtitle_events(
     ensure!(
         matches!(
             task.plan.operation,
-            course2md::execution::Operation::Reprocess { .. }
+            c2m_engine::execution::Operation::Reprocess { .. }
         ),
-        course2md::tr!("所选字幕的内容已丢失，请重新读取字幕后再试")
+        c2m_i18n::tr!("所选字幕的内容已丢失，请重新读取字幕后再试")
     );
     Ok(None)
 }
@@ -2042,7 +2040,7 @@ fn hydrate_draft_subtitles(state: &mut State, record: &Path) {
     let stored = desktop_prefs::store::read(&draft_subtitle_path(record))
         .ok()
         .and_then(|bytes| {
-            serde_json::from_slice::<course2md::subtitle::CachedSubtitle>(&bytes).ok()
+            serde_json::from_slice::<c2m_source::subtitle::CachedSubtitle>(&bytes).ok()
         });
     for source in state
         .drafts
@@ -2077,10 +2075,7 @@ fn write_record(path: &Path, previous: &State, next: &State) -> Result<()> {
     if let Some(selected) = subtitle(next).filter(|selected| !selected.events.is_empty())
         && (subtitle(previous).as_ref() != Some(&selected) || !draft_subtitle_path(path).exists())
     {
-        course2md::checkpoint::atomic_write(
-            &draft_subtitle_path(path),
-            &serde_json::to_vec(&selected)?,
-        )?;
+        c2m_core::fsio::atomic_write(&draft_subtitle_path(path), &serde_json::to_vec(&selected)?)?;
     }
     desktop_prefs::store::save(path, &serde_json::to_vec(next)?)
 }
@@ -2100,7 +2095,7 @@ impl Workspace {
     /// record that reads, plus what each library carries. No restored task may dispatch work.
     pub fn rebuild(root: PathBuf, options: ConversionOptions) -> Result<Self> {
         Self::rebuild_at(
-            course2md::config::config_dir().join("desktop-workspace.json"),
+            c2m_config::config::config_dir().join("desktop-workspace.json"),
             root,
             options,
         )
@@ -2109,7 +2104,7 @@ impl Workspace {
     pub fn rebuild_at(path: PathBuf, root: PathBuf, options: ConversionOptions) -> Result<Self> {
         let parent = path
             .parent()
-            .context(course2md::tr!("任务记录缺少保存目录"))?;
+            .context(c2m_i18n::tr!("任务记录缺少保存目录"))?;
         std::fs::create_dir_all(parent)?;
         let backup = desktop_prefs::store::backup_path(&path);
         let originals: Vec<_> = [&path, &backup]
@@ -2119,7 +2114,7 @@ impl Workspace {
             .collect::<Result<_>>()?;
         ensure!(
             !originals.is_empty(),
-            course2md::tr!("原任务记录不存在，请重新打开应用建立新记录")
+            c2m_i18n::tr!("原任务记录不存在，请重新打开应用建立新记录")
         );
         let records: Vec<serde_json::Value> = originals
             .iter()
@@ -2130,16 +2125,16 @@ impl Workspace {
                 .get("schema")
                 .and_then(|v| v.as_u64())
                 .is_some_and(|schema| schema > SCHEMA as u64)),
-            course2md::tr!("这些任务由较新版本创建，请使用对应版本恢复，原文件已保留")
+            c2m_i18n::tr!("这些任务由较新版本创建，请使用对应版本恢复，原文件已保留")
         );
         let archive = parent.join(new_id("workspace-recovery"));
-        std::fs::create_dir(&archive).context(course2md::tr!("无法建立原始记录备份，尚未重建"))?;
+        std::fs::create_dir(&archive).context(c2m_i18n::tr!("无法建立原始记录备份，尚未重建"))?;
         for (original, bytes) in &originals {
             let name = original
                 .file_name()
-                .context(course2md::tr!("原记录缺少文件名"))?;
-            course2md::checkpoint::atomic_write(&archive.join(name), bytes)
-                .context(course2md::tr!("原始记录备份未完成，尚未重建"))?;
+                .context(c2m_i18n::tr!("原记录缺少文件名"))?;
+            c2m_core::fsio::atomic_write(&archive.join(name), bytes)
+                .context(c2m_i18n::tr!("原始记录备份未完成，尚未重建"))?;
         }
         let mut initial = State::initial(root.clone(), options);
         initial.adopt_marker(&root);
@@ -2148,7 +2143,7 @@ impl Workspace {
             .unwrap_or_else(|_| initial.clone());
         // A record that no longer reads as a whole can still name what it knew.
         for location in salvage::<LibraryLocation>(&records, "libraries") {
-            if course2md::execution::valid_id(&location.id)
+            if c2m_engine::execution::valid_id(&location.id)
                 && location.root.is_absolute()
                 && !state
                     .libraries
@@ -2178,7 +2173,7 @@ impl Workspace {
         state.tasks.retain(|task| {
             let kept = validate_record_location(task, &libraries).is_ok();
             if !kept {
-                issues.push(course2md::tr!(
+                issues.push(c2m_i18n::tr!(
                     "《{}》的位置或身份记录不完整，原记录已保留",
                     task.plan.title
                 ));
@@ -2191,7 +2186,7 @@ impl Workspace {
                 .iter()
                 .any(|l| l.id == task.plan.library_id && check_library(l).is_ok())
             {
-                pause_recovered_control(task).context(course2md::tr!(
+                pause_recovered_control(task).context(c2m_i18n::tr!(
                     "无法保存恢复后的暂停指令，尚未替换原任务记录"
                 ))?;
             }
@@ -2200,15 +2195,15 @@ impl Workspace {
         state.recover();
         hydrate_draft_subtitles(&mut state, &path);
         state.reconciling = !state.tasks.is_empty();
-        course2md::checkpoint::atomic_write(&path, &serde_json::to_vec(&state)?)?;
-        let recovery = course2md::tr!(
+        c2m_core::fsio::atomic_write(&path, &serde_json::to_vec(&state)?)?;
+        let recovery = c2m_i18n::tr!(
             "已重建 {} 项任务记录，未启动处理。原始记录保存在 {}。{}",
             state.tasks.len(),
             archive.display(),
             if issues.is_empty() {
                 String::new()
             } else {
-                issues.join(course2md::tr!("；"))
+                issues.join(c2m_i18n::tr!("；"))
             }
         );
         Ok(Self::assemble(state, Some(recovery), path))
@@ -2228,7 +2223,7 @@ impl Workspace {
 
     pub fn open(root: PathBuf, options: ConversionOptions) -> Result<Self> {
         Self::open_at(
-            course2md::config::config_dir().join("desktop-workspace.json"),
+            c2m_config::config::config_dir().join("desktop-workspace.json"),
             root,
             options,
         )
@@ -2249,7 +2244,7 @@ impl Workspace {
                 .and_then(|v| v.as_u64())
                 .is_some_and(|schema| schema > SCHEMA as u64)
         {
-            bail!(course2md::tr!(
+            bail!(c2m_i18n::tr!(
                 "任务记录由较新版本创建，请使用对应版本打开。原记录和备份均保留，尚未启动任务。"
             ));
         }
@@ -2270,9 +2265,9 @@ impl Workspace {
                         std::fs::read(&path)
                             .map_err(anyhow::Error::from)
                             .and_then(|damaged| desktop_prefs::store::set_aside(&path, &damaged))
-                            .context(course2md::tr!("无法保留损坏的任务记录"))?;
+                            .context(c2m_i18n::tr!("无法保留损坏的任务记录"))?;
                         recovery = Some(
-                            course2md::tr!(
+                            c2m_i18n::tr!(
                                 "已从备份恢复输入和任务。无法确认最后一次操作，未完成任务已暂停。"
                             )
                             .into(),
@@ -2288,7 +2283,7 @@ impl Workspace {
                     }
                     Err(_) => {
                         return Err(error)
-                            .context(course2md::tr!("输入和任务记录无法读取，原文件已保留"));
+                            .context(c2m_i18n::tr!("输入和任务记录无法读取，原文件已保留"));
                     }
                 },
             }
@@ -2297,19 +2292,19 @@ impl Workspace {
             match std::fs::create_dir_all(&root) {
                 Ok(()) => {
                     if !initial.adopt_marker(&root)
-                        && let Err(error) = course2md::checkpoint::atomic_write(
+                        && let Err(error) = c2m_core::fsio::atomic_write(
                             &root.join(".course2md-library-id"),
                             initial.default_library.as_bytes(),
                         )
                     {
-                        recovery = Some(course2md::tr!(
+                        recovery = Some(c2m_i18n::tr!(
                             "保存位置尚未准备好：{}。可以在设置的存储中选择其他位置。",
                             format!("{error:#}")
                         ));
                     }
                 }
                 Err(error) => {
-                    recovery = Some(course2md::tr!(
+                    recovery = Some(c2m_i18n::tr!(
                         "无法创建默认保存位置 {}：{}。可以在设置的存储中选择其他位置。",
                         root.display(),
                         error
@@ -2429,22 +2424,22 @@ impl Workspace {
     fn read(path: &Path) -> Result<State> {
         let mut state: State = serde_json::from_slice(
             &desktop_prefs::store::read(path)
-                .with_context(|| course2md::tr!("读取 {}", path.display()))?,
+                .with_context(|| c2m_i18n::tr!("读取 {}", path.display()))?,
         )?;
         ensure!(
             state.schema <= SCHEMA,
-            course2md::tr!("任务记录版本不受支持，请使用创建这些任务的应用版本")
+            c2m_i18n::tr!("任务记录版本不受支持，请使用创建这些任务的应用版本")
         );
         state.schema = SCHEMA;
         ensure!(
             state.library(&state.default_library).is_some(),
-            course2md::tr!("默认保存位置记录缺失")
+            c2m_i18n::tr!("默认保存位置记录缺失")
         );
-        ensure!(state.draft().is_some(), course2md::tr!("当前输入记录缺失"));
+        ensure!(state.draft().is_some(), c2m_i18n::tr!("当前输入记录缺失"));
         let ids: BTreeSet<_> = state.tasks.iter().map(|t| &t.id).collect();
         ensure!(
             ids.len() == state.tasks.len(),
-            course2md::tr!("任务记录包含重复身份")
+            c2m_i18n::tr!("任务记录包含重复身份")
         );
         for task in &state.tasks {
             validate_record_location(task, &state.libraries)?;
@@ -2515,10 +2510,10 @@ impl Workspace {
     /// A library write that failed since the last call. The queue wakes the event loop
     /// (see `set_wake_sender`) when one occurs.
     pub fn take_write_error(&self) -> Option<WriteFailure> {
-        course2md::runtime::lock_recover(&self.library_writes.failure).take()
+        c2m_process::runtime::lock_recover(&self.library_writes.failure).take()
     }
     pub fn set_wake_sender(&self, wake: smol::channel::Sender<()>) {
-        *course2md::runtime::lock_recover(&self.library_writes.wake) = Some(wake);
+        *c2m_process::runtime::lock_recover(&self.library_writes.wake) = Some(wake);
     }
 
     pub fn storage_path(&self) -> &Path {
@@ -2535,7 +2530,7 @@ impl Workspace {
     ) -> Result<PreparedLibrary> {
         ensure!(
             root.is_dir(),
-            course2md::tr!("请选择已有文件夹；新建笔记库请使用新建操作")
+            c2m_i18n::tr!("请选择已有文件夹；新建笔记库请使用新建操作")
         );
         let canonical = root.canonicalize()?;
         for existing in existing_roots {
@@ -2553,23 +2548,23 @@ impl Workspace {
             }
         }
         let probe = tempfile::NamedTempFile::new_in(&canonical)
-            .context(course2md::tr!("所选位置不能写入"))?;
+            .context(c2m_i18n::tr!("所选位置不能写入"))?;
         drop(probe);
         let identity = canonical.join(".course2md-library-id");
         let id = if identity.is_file() {
             let id = std::fs::read_to_string(&identity)?.trim().to_owned();
             if id.is_empty() {
-                bail!(course2md::tr!("笔记库身份记录为空，请检查所选位置"));
+                bail!(c2m_i18n::tr!("笔记库身份记录为空，请检查所选位置"));
             }
             if existing_ids.iter().any(|existing| existing == &id) {
-                bail!(course2md::tr!(
+                bail!(c2m_i18n::tr!(
                     "这个库已经登记在另一个位置，请使用移动笔记库操作"
                 ));
             }
             id
         } else {
             let id = new_id("library");
-            course2md::checkpoint::atomic_write(&identity, id.as_bytes())?;
+            c2m_core::fsio::atomic_write(&identity, id.as_bytes())?;
             id
         };
         // Tasks travel with their library. A task the folder cannot show is named where
@@ -2666,8 +2661,8 @@ pub fn accept_source(draft: &mut Draft, revision: u64, source: Source) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use course2md::execution::Component;
-    use course2md::progress::Stage;
+    use c2m_engine::execution::Component;
+    use c2m_protocol::progress::Stage;
     fn source(input: &str, title: &str) -> Source {
         serde_json::from_value(serde_json::json!({"input":input,"title":title,"author":"","duration":60.0,"cover":null,"cover_error":null})).unwrap()
     }
@@ -2917,8 +2912,8 @@ mod tests {
         let id = ws.transaction(|state| state.enqueue(task, None)).unwrap().0;
         let work = ws.state.task(&id).unwrap().work_dir.clone();
         std::fs::create_dir_all(&work).unwrap();
-        let event = course2md::progress::Event::Log {
-            level: course2md::progress::LogLevel::Info,
+        let event = c2m_protocol::progress::Event::Log {
+            level: c2m_protocol::progress::LogLevel::Info,
             message: "实际进度".into(),
         };
         std::fs::write(
@@ -3088,7 +3083,7 @@ mod tests {
     fn subtitle_text_and_finished_logs_stay_out_of_the_record() {
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
-        let events = vec![course2md::timeline::TranscriptEvent {
+        let events = vec![c2m_core::timeline::TranscriptEvent {
             start: 0.,
             end: 1.,
             text: "字幕正文".into(),
@@ -3097,7 +3092,7 @@ mod tests {
         }];
         let mut task = plan(&ws.state.default_library);
         task.source.identity = "video-a".into();
-        task.source.selected_subtitle = Some(course2md::subtitle::CachedSubtitle {
+        task.source.selected_subtitle = Some(c2m_source::subtitle::CachedSubtitle {
             source_identity: "video-a".into(),
             track_id: "zh".into(),
             label: "中文".into(),
@@ -3224,8 +3219,8 @@ mod tests {
         draft.title = "Current note".into();
         draft.custom_title = true;
         draft.folder = Some(42);
-        draft.options.provider = Some(course2md::config::AsrProvider::Gpu);
-        draft.options.source_mode = course2md::config::TranscriptSource::Subtitle;
+        draft.options.provider = Some(c2m_config::config::AsrProvider::Gpu);
+        draft.options.source_mode = c2m_config::config::TranscriptSource::Subtitle;
         draft.options.keep_video = true;
         draft.options.formats = [true, false, true];
         draft.options.llm = true;
@@ -3531,7 +3526,7 @@ mod tests {
         original.subtitle = Some(dir.path().join("french.srt"));
         original.config.llm.enabled = true;
         original.config.llm.vision = true;
-        original.config.defaults.formats = Some(vec![course2md::config::OutputFormat::Json]);
+        original.config.defaults.formats = Some(vec![c2m_config::config::OutputFormat::Json]);
         original.asr_service = Some("asr-version-a".into());
         original.ai_service = Some("ai-version-a".into());
         original.config.defaults.asr_model = Some("qwen3-0.6b".into());
@@ -3674,9 +3669,9 @@ mod tests {
         assert!(failed.unread);
     }
 
-    fn receipt(task: &TaskRecord, state: course2md::dispatch::State) {
-        let completed = state == course2md::dispatch::State::Completed;
-        let receipt = course2md::dispatch::Receipt {
+    fn receipt(task: &TaskRecord, state: c2m_dispatch::dispatch::State) {
+        let completed = state == c2m_dispatch::dispatch::State::Completed;
+        let receipt = c2m_dispatch::dispatch::Receipt {
             schema: 1,
             stable_id: "stable-request".into(),
             request_id: "stable-request.1".into(),
@@ -3704,7 +3699,7 @@ mod tests {
     /// once it has, the task continues from the saved answer.
     #[test]
     fn a_worker_outliving_a_killed_app_is_waited_for_and_its_answer_used() {
-        use course2md::dispatch::State as Receipt;
+        use c2m_dispatch::dispatch::State as Receipt;
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
         let id = ws
@@ -3721,7 +3716,7 @@ mod tests {
         receipt(&task, Receipt::Sending);
         drop(ws);
 
-        let worker = course2md::runtime::lock_file(&task.work_dir.join(".task.lock")).unwrap();
+        let worker = c2m_process::runtime::lock_file(&task.work_dir.join(".task.lock")).unwrap();
         let mut reopened = test_workspace(dir.path());
         let held = reopened.state.task(&id).unwrap();
         assert!(held.held && !held.has_uncertain(), "not judged yet");
@@ -3769,7 +3764,7 @@ mod tests {
     /// A task judged uncertain whose request was settled afterwards does not stay stuck.
     #[test]
     fn an_uncertain_task_whose_requests_settled_goes_back_to_its_intent() {
-        use course2md::dispatch::State as Receipt;
+        use c2m_dispatch::dispatch::State as Receipt;
         for (intent, expected) in [
             (Intent::Run, TaskState::Queued),
             (Intent::Quit, TaskState::Paused),
@@ -3833,12 +3828,12 @@ mod tests {
     }
 
     fn publish_note(state: &State, task_id: &str, partial: bool) -> PathBuf {
-        let mut outcomes = course2md::artifact::Outcomes {
-            transcript: course2md::artifact::Outcome::succeeded(),
+        let mut outcomes = c2m_artifact::artifact::Outcomes {
+            transcript: c2m_artifact::artifact::Outcome::succeeded(),
             ..Default::default()
         };
         if partial {
-            outcomes.proofreading = course2md::artifact::Outcome::failed("校对未完成");
+            outcomes.proofreading = c2m_artifact::artifact::Outcome::failed("校对未完成");
         }
         publish_note_with_outcomes(state, task_id, outcomes)
     }
@@ -3846,7 +3841,7 @@ mod tests {
     fn publish_note_with_outcomes(
         state: &State,
         task_id: &str,
-        outcomes: course2md::artifact::Outcomes,
+        outcomes: c2m_artifact::artifact::Outcomes,
     ) -> PathBuf {
         publish_note_with_exports(state, task_id, outcomes, &[])
     }
@@ -3854,10 +3849,11 @@ mod tests {
     fn publish_note_with_exports(
         state: &State,
         task_id: &str,
-        outcomes: course2md::artifact::Outcomes,
-        formats: &[course2md::config::OutputFormat],
+        outcomes: c2m_artifact::artifact::Outcomes,
+        formats: &[c2m_config::config::OutputFormat],
     ) -> PathBuf {
-        use course2md::{artifact, timeline};
+        use c2m_artifact::artifact;
+        use c2m_core::timeline;
         let task = state.task(task_id).unwrap();
         let course_id = crate::workspace::course_dir_name(&task.plan.source_id);
         let target = artifact::Target {
@@ -3871,7 +3867,7 @@ mod tests {
                 .root
                 .join(course_id),
         };
-        let meta = course2md::fetch::VideoMeta {
+        let meta = c2m_source::fetch::VideoMeta {
             title: task.plan.title.clone(),
             uploader: String::new(),
             duration: 20.,
@@ -3906,7 +3902,7 @@ mod tests {
 
     fn write_unknown(task: &TaskRecord, attempt: u32) -> String {
         let id = format!("stable-request.{attempt}");
-        let receipt = course2md::dispatch::Receipt {
+        let receipt = c2m_dispatch::dispatch::Receipt {
             schema: 1,
             stable_id: "stable-request".into(),
             request_id: id.clone(),
@@ -3914,7 +3910,7 @@ mod tests {
             description: "校对 00:00–00:20 的文字".into(),
             service_version: "version-a".into(),
             attempt,
-            state: course2md::dispatch::State::Uncertain,
+            state: c2m_dispatch::dispatch::State::Uncertain,
             http_status: None,
             response: None,
             message: Some("连接断开 / connection lost".into()),
@@ -3933,15 +3929,15 @@ mod tests {
     fn uncertain_proofreading_note(
         ws: &mut Workspace,
         summarize: bool,
-        summary: course2md::artifact::Outcome,
+        summary: c2m_artifact::artifact::Outcome,
     ) -> (String, String) {
         let mut snapshot = plan(&ws.state.default_library);
         snapshot.config.llm.enabled = true;
         snapshot.config.llm.summarize = summarize;
         let id = ws.state.enqueue(snapshot, None).unwrap().0;
-        let outcomes = course2md::artifact::Outcomes {
-            transcript: course2md::artifact::Outcome::succeeded(),
-            proofreading: course2md::artifact::Outcome::failed("校对请求结果尚不确定"),
+        let outcomes = c2m_artifact::artifact::Outcomes {
+            transcript: c2m_artifact::artifact::Outcome::succeeded(),
+            proofreading: c2m_artifact::artifact::Outcome::failed("校对请求结果尚不确定"),
             summary,
             ..Default::default()
         };
@@ -3961,7 +3957,7 @@ mod tests {
         let (id, request) = uncertain_proofreading_note(
             &mut ws,
             true,
-            course2md::artifact::Outcome::failed("前一步请求结果尚不确定；没有继续发送"),
+            c2m_artifact::artifact::Outcome::failed("前一步请求结果尚不确定；没有继续发送"),
         );
         let original = ws.state.task(&id).unwrap().clone();
         let manifest_path = original.artifact.as_ref().unwrap().join("manifest.json");
@@ -3976,7 +3972,7 @@ mod tests {
             .reprocess(&id, vec![Component::Proofreading], vec![request.clone()])
             .unwrap();
         let child = ws.state.task(&next).unwrap();
-        let course2md::execution::Operation::Reprocess {
+        let c2m_engine::execution::Operation::Reprocess {
             components,
             base_version_dir,
             prior_work_dir,
@@ -4004,7 +4000,7 @@ mod tests {
 
     #[test]
     fn proofreading_resend_does_not_invent_or_repeat_a_summary() {
-        use course2md::artifact::Outcome;
+        use c2m_artifact::artifact::Outcome;
         for (requested, summary) in [
             (false, Outcome::failed("未要求生成摘要")),
             (true, Outcome::not_requested()),
@@ -4018,7 +4014,7 @@ mod tests {
                 .reprocess(&id, vec![Component::Proofreading], vec![request])
                 .unwrap();
             let child = ws.state.task(&next).unwrap();
-            let course2md::execution::Operation::Reprocess { components, .. } =
+            let c2m_engine::execution::Operation::Reprocess { components, .. } =
                 &child.plan.operation
             else {
                 panic!("expected component recovery");
@@ -4030,7 +4026,7 @@ mod tests {
 
     #[test]
     fn an_existing_summary_attempt_needs_its_own_recovery_decision() {
-        use course2md::dispatch::{Receipt, State as ReceiptState};
+        use c2m_dispatch::dispatch::{Receipt, State as ReceiptState};
         for receipt_state in [
             ReceiptState::Completed,
             ReceiptState::NotSent,
@@ -4044,7 +4040,7 @@ mod tests {
             let (id, request) = uncertain_proofreading_note(
                 &mut ws,
                 true,
-                course2md::artifact::Outcome::failed("摘要未完成"),
+                c2m_artifact::artifact::Outcome::failed("摘要未完成"),
             );
             let task = ws.state.task(&id).unwrap();
             let receipt = Receipt {
@@ -4083,7 +4079,7 @@ mod tests {
             } else {
                 let next = recovery.unwrap();
                 let child = ws.state.task(&next).unwrap();
-                let course2md::execution::Operation::Reprocess { components, .. } =
+                let c2m_engine::execution::Operation::Reprocess { components, .. } =
                     &child.plan.operation
                 else {
                     panic!("expected component recovery");
@@ -4148,7 +4144,7 @@ mod tests {
 
     #[test]
     fn export_keys_parse_as_the_engine_spells_them() {
-        use course2md::config::OutputFormat;
+        use c2m_config::config::OutputFormat;
         for format in [OutputFormat::Md, OutputFormat::Html, OutputFormat::Json] {
             assert_eq!(output_format(&format.to_string()), Some(format));
         }
@@ -4203,7 +4199,7 @@ mod tests {
         let library = ws.state.default_library.clone();
         let id = ws.state.enqueue(plan(&library), None).unwrap().0;
         let version = publish_note(&ws.state, &id, true);
-        let outcomes = course2md::artifact::read_manifest(&version.join("manifest.json"))
+        let outcomes = c2m_artifact::artifact::read_manifest(&version.join("manifest.json"))
             .unwrap()
             .outcomes;
         let original = ws.state.task_mut(&id).unwrap();
@@ -4238,7 +4234,7 @@ mod tests {
         assert_eq!(child.plan.source.input, "lecture.mp4");
         assert_eq!(
             child.plan.config.defaults.transcript_source,
-            Some(course2md::config::TranscriptSource::Subtitle)
+            Some(c2m_config::config::TranscriptSource::Subtitle)
         );
     }
 
@@ -4252,7 +4248,7 @@ mod tests {
         snapshot.config.llm.model = "old-model".into();
         let id = ws.state.enqueue(snapshot.clone(), None).unwrap().0;
         let version = publish_note(&ws.state, &id, true);
-        let outcomes = course2md::artifact::read_manifest(&version.join("manifest.json"))
+        let outcomes = c2m_artifact::artifact::read_manifest(&version.join("manifest.json"))
             .unwrap()
             .outcomes;
         let original = ws.state.task_mut(&id).unwrap();
@@ -4304,7 +4300,7 @@ mod tests {
         assert!(!child.plan.config.llm.summarize);
         assert!(matches!(
             &child.plan.operation,
-            course2md::execution::Operation::Reprocess { base_version_dir, components, .. }
+            c2m_engine::execution::Operation::Reprocess { base_version_dir, components, .. }
                 if base_version_dir == &version && components == &[Component::Proofreading]
         ));
         let again = ws
@@ -4455,7 +4451,7 @@ mod tests {
 
     #[test]
     fn export_only_followup_needs_no_ai_service_and_retries_only_failed_formats() {
-        use course2md::config::OutputFormat;
+        use c2m_config::config::OutputFormat;
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
         let library = ws.state.default_library.clone();
@@ -4467,12 +4463,12 @@ mod tests {
         original.plan.config.llm.enabled = true;
         original.plan.config.llm.summarize = true;
         original.plan.config.defaults.formats = Some(vec![OutputFormat::Md, OutputFormat::Html]);
-        original.events.outcomes = Some(course2md::artifact::Outcomes {
+        original.events.outcomes = Some(c2m_artifact::artifact::Outcomes {
             exports: BTreeMap::from([
-                ("md".into(), course2md::artifact::Outcome::succeeded()),
+                ("md".into(), c2m_artifact::artifact::Outcome::succeeded()),
                 (
                     "html".into(),
-                    course2md::artifact::Outcome::failed("disk full"),
+                    c2m_artifact::artifact::Outcome::failed("disk full"),
                 ),
             ]),
             ..Default::default()
@@ -4497,7 +4493,8 @@ mod tests {
 
     #[test]
     fn published_exports_remain_reachable_after_a_lost_completion_event() {
-        use course2md::{artifact, config::OutputFormat, portable};
+        use c2m_artifact::{artifact, portable};
+        use c2m_config::config::OutputFormat;
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
         let library = ws.state.default_library.clone();
@@ -4544,7 +4541,8 @@ mod tests {
 
     #[test]
     fn export_only_completion_reopens_its_own_files_and_recovers_missing_outputs() {
-        use course2md::{artifact, config::OutputFormat, portable};
+        use c2m_artifact::{artifact, portable};
+        use c2m_config::config::OutputFormat;
         let dir = tempfile::tempdir().unwrap();
         let mut ws = test_workspace(dir.path());
         let library = ws.state.default_library.clone();

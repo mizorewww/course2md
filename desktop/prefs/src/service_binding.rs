@@ -1,6 +1,6 @@
 //! What publishing a service changes: its defaults, and which input or task it binds.
 use crate::preferences::{BindingScope, ServicePurpose};
-use course2md::execution::Component;
+use c2m_engine::execution::Component;
 
 /// What a service publication continues with once its credential is checked.
 pub struct PublishPlan {
@@ -32,15 +32,15 @@ pub fn draft_service(scope: BindingScope, id: &str) -> Option<String> {
 
 pub fn purpose_label(purpose: ServicePurpose) -> &'static str {
     match purpose {
-        ServicePurpose::Speech => course2md::tr!("语音服务"),
-        ServicePurpose::Ai => course2md::tr!("AI 服务"),
+        ServicePurpose::Speech => c2m_i18n::tr!("语音服务"),
+        ServicePurpose::Ai => c2m_i18n::tr!("AI 服务"),
     }
 }
 
 pub fn add_service_label(purpose: ServicePurpose) -> &'static str {
     match purpose {
-        ServicePurpose::Speech => course2md::tr!("添加语音服务"),
-        ServicePurpose::Ai => course2md::tr!("添加 AI 服务"),
+        ServicePurpose::Speech => c2m_i18n::tr!("添加语音服务"),
+        ServicePurpose::Ai => c2m_i18n::tr!("添加 AI 服务"),
     }
 }
 

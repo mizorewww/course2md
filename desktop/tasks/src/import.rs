@@ -1,8 +1,8 @@
 //! The workbench's decisions: which task owns the input, when a start intent goes
 //! through, and what follows a conversion to its note.
 use crate::source;
-use course2md::config::TranscriptSource;
-use course2md::subtitle::{SubtitleEvidence, SubtitleReadError};
+use c2m_config::config::TranscriptSource;
+use c2m_source::subtitle::{SubtitleEvidence, SubtitleReadError};
 use desktop_prefs::conversion::ConversionOptions;
 use desktop_store::{page::Page, workspace};
 use std::{
@@ -17,7 +17,7 @@ use std::{
 /// Where a video comes from and who made it.
 pub fn source_metadata(source: &source::Source) -> String {
     let platform = if !source.online {
-        course2md::tr!("本地视频").to_owned()
+        c2m_i18n::tr!("本地视频").to_owned()
     } else {
         match source::video_site_name(&source.input) {
             Some(name) => name.to_owned(),
@@ -44,9 +44,9 @@ pub enum ConversionAiOption {
 
 pub fn conversion_ai_option_label(option: ConversionAiOption) -> &'static str {
     match option {
-        ConversionAiOption::Proofread => course2md::tr!("校对文字和标点"),
-        ConversionAiOption::Vision => course2md::tr!("校对时附带对应截图"),
-        ConversionAiOption::Summary => course2md::tr!("在开头生成摘要"),
+        ConversionAiOption::Proofread => c2m_i18n::tr!("校对文字和标点"),
+        ConversionAiOption::Vision => c2m_i18n::tr!("校对时附带对应截图"),
+        ConversionAiOption::Summary => c2m_i18n::tr!("在开头生成摘要"),
     }
 }
 
@@ -75,9 +75,9 @@ pub fn apply_conversion_ai_option(
 
 pub fn text_source_choices() -> [(TranscriptSource, &'static str); 3] {
     [
-        (TranscriptSource::Auto, course2md::tr!("自动")),
-        (TranscriptSource::Subtitle, course2md::tr!("仅字幕")),
-        (TranscriptSource::Asr, course2md::tr!("语音识别")),
+        (TranscriptSource::Auto, c2m_i18n::tr!("自动")),
+        (TranscriptSource::Subtitle, c2m_i18n::tr!("仅字幕")),
+        (TranscriptSource::Asr, c2m_i18n::tr!("语音识别")),
     ]
 }
 
@@ -285,7 +285,7 @@ impl ConversionFollow {
         version: &std::path::Path,
         revision: u64,
     ) -> Option<Self> {
-        let course2md::execution::Operation::Reprocess {
+        let c2m_engine::execution::Operation::Reprocess {
             base_version_dir,
             components,
             ..
@@ -553,13 +553,13 @@ mod tests {
         subtitle_needs_confirmation, uses_speech,
     };
     use crate::source;
-    use course2md::config::TranscriptSource;
-    use course2md::subtitle::{CachedSubtitle, SubtitleEvidence, SubtitleReadError};
+    use c2m_config::config::TranscriptSource;
+    use c2m_source::subtitle::{CachedSubtitle, SubtitleEvidence, SubtitleReadError};
     use desktop_store::workspace;
 
     /// A plan's configuration as build_plan writes it from default options.
-    fn planned_config() -> course2md::settings::ConfigFile {
-        let mut config = course2md::settings::ConfigFile::default();
+    fn planned_config() -> c2m_config::settings::ConfigFile {
+        let mut config = c2m_config::settings::ConfigFile::default();
         desktop_prefs::conversion::ConversionOptions::default().apply_to(&mut config);
         config
     }
@@ -863,12 +863,12 @@ mod tests {
             Some(std::path::Path::new("versions/other")),
         ));
 
-        let course2md::execution::Operation::Reprocess { components, .. } =
+        let c2m_engine::execution::Operation::Reprocess { components, .. } =
             &mut tasks[1].plan.operation
         else {
             unreachable!();
         };
-        *components = vec![course2md::execution::Component::Exports];
+        *components = vec![c2m_engine::execution::Component::Exports];
         tasks[1].state = workspace::TaskState::Complete;
         tasks[1].artifact = Some(original.to_owned());
         assert!(ConversionFollow::reader_reprocess(&tasks[1], original, 12).is_none());
@@ -1118,9 +1118,9 @@ mod tests {
         recovery.events.error = None;
         recovery.artifact = None;
         recovery.work_dir = "work/recovery".into();
-        recovery.plan.operation = course2md::execution::Operation::Reprocess {
+        recovery.plan.operation = c2m_engine::execution::Operation::Reprocess {
             base_version_dir: "versions/original".into(),
-            components: vec![course2md::execution::Component::Summary],
+            components: vec![c2m_engine::execution::Component::Summary],
             prior_work_dir: Some(original.work_dir.clone()),
         };
         original.handled_by = Some(recovery.id.clone());
@@ -1173,11 +1173,11 @@ mod tests {
         draft = unchanged;
         assert!(super::retired_input_task(&draft, &tasks, "新视频").is_none());
         tasks[1].events.blocked.push(workspace::BlockedRequest {
-            reason: course2md::progress::BlockReason::Uncertain,
+            reason: c2m_protocol::progress::BlockReason::Uncertain,
             request_id: Some("pending-summary".into()),
             purpose: Some("summary".into()),
             description: "摘要".into(),
-            kind: Some(course2md::artifact::FailureKind::Uncertain),
+            kind: Some(c2m_artifact::artifact::FailureKind::Uncertain),
             message: "结果未知".into(),
         });
         assert!(super::retired_input_task(&draft, &tasks, &draft.input).is_none());
@@ -1317,7 +1317,7 @@ mod tests {
 
     #[test]
     fn automatic_mode_uses_speech_after_login_or_download_failure() {
-        let track = course2md::subtitle::file_track("lesson.srt".into(), None);
+        let track = c2m_source::subtitle::file_track("lesson.srt".into(), None);
         for metadata_failed in [true, false] {
             let mut source = source::Source {
                 subtitles: if metadata_failed {
@@ -1387,7 +1387,7 @@ mod tests {
 
     #[test]
     fn pending_or_failed_subtitles_remain_required_even_with_cached_text() {
-        let track = course2md::subtitle::file_track("lesson.srt".into(), None);
+        let track = c2m_source::subtitle::file_track("lesson.srt".into(), None);
         let mut source = source::Source {
             identity: "lesson".into(),
             subtitles: SubtitleEvidence::Found {
@@ -1440,7 +1440,7 @@ mod tests {
         };
         assert!(uses_speech(&source, TranscriptSource::Auto));
         assert!(!uses_speech(&source, TranscriptSource::Subtitle));
-        source.subtitle_request = Some(course2md::subtitle::file_track("lesson.srt".into(), None));
+        source.subtitle_request = Some(c2m_source::subtitle::file_track("lesson.srt".into(), None));
         assert!(!uses_speech(&source, TranscriptSource::Auto));
         assert!(!uses_speech(&source, TranscriptSource::Subtitle));
         source.subtitle_request = None;

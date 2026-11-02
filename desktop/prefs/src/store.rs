@@ -21,10 +21,10 @@ pub fn now() -> u64 {
 pub fn read(path: &Path) -> Result<Vec<u8>> {
     let mut file = std::fs::File::open(path)?;
     let metadata = file.metadata()?;
-    ensure!(metadata.is_file(), course2md::tr!("任务记录不是普通文件"));
+    ensure!(metadata.is_file(), c2m_i18n::tr!("任务记录不是普通文件"));
     ensure!(
         metadata.len() <= READ_LIMIT,
-        course2md::tr!("任务记录超过可读取范围，原文件已保留")
+        c2m_i18n::tr!("任务记录超过可读取范围，原文件已保留")
     );
     let mut bytes = Vec::new();
     file.by_ref().take(READ_LIMIT + 1).read_to_end(&mut bytes)?;
@@ -45,7 +45,7 @@ pub fn read_backup(path: &Path) -> Result<Vec<u8>> {
 /// that nothing written to `path` afterwards replaces them. Returns where they are.
 pub fn set_aside(path: &Path, bytes: &[u8]) -> Result<PathBuf> {
     let kept = path.with_extension(format!("{}.damaged", new_id("record")));
-    course2md::checkpoint::atomic_write(&kept, bytes)?;
+    c2m_core::fsio::atomic_write(&kept, bytes)?;
     Ok(kept)
 }
 
@@ -76,9 +76,9 @@ pub fn save(path: &Path, bytes: &[u8]) -> Result<()> {
             set_aside(path, &previous)?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => write_backup(path, bytes)?,
-        Err(error) => return Err(error).context(course2md::tr!("无法保留原记录")),
+        Err(error) => return Err(error).context(c2m_i18n::tr!("无法保留原记录")),
     }
-    course2md::checkpoint::atomic_write(path, bytes)
+    c2m_core::fsio::atomic_write(path, bytes)
 }
 
 #[cfg(test)]

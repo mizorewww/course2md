@@ -16,10 +16,10 @@ impl OllamaUi {
     /// What the check established, for the Ollama entry of the type select.
     pub fn status_line(&self) -> Option<String> {
         if self.working {
-            return Some(course2md::tr!("正在检查本机的 Ollama…").into());
+            return Some(c2m_i18n::tr!("正在检查本机的 Ollama…").into());
         }
         match &self.status {
-            Some(Ok((host, models))) => Some(course2md::tr!(
+            Some(Ok((host, models))) => Some(c2m_i18n::tr!(
                 "已在 {} 检测到 {} 个模型",
                 host,
                 models.len()

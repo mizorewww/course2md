@@ -6,7 +6,7 @@ use crate::preferences::{
     GenerationPreferences, ServiceConfiguration, ServicePurpose, ServiceTestEvidence, TestOutcome,
 };
 use crate::service_test::TestKind;
-use course2md::config::{AsrProvider, local_models, model_label};
+use c2m_config::config::{AsrProvider, local_models, model_label};
 
 #[derive(Clone, Copy)]
 pub enum ProviderChoice {
@@ -43,8 +43,8 @@ pub fn apply_provider_choice(
     if model_supported(resolved, model) {
         return None;
     }
-    let previous = std::mem::replace(model, course2md::config::default_model(resolved).into());
-    Some(course2md::tr!(
+    let previous = std::mem::replace(model, c2m_config::config::default_model(resolved).into());
+    Some(c2m_i18n::tr!(
         "{} 不支持「{}」，已改用 {}。",
         provider_label(Some(resolved)),
         previous,
@@ -67,8 +67,8 @@ pub fn local_model_choices(provider: AsrProvider, current: &str) -> Vec<ModelCho
             id: model.id.into(),
             label: model.label.into(),
             description: match model.id {
-                course2md::config::DEFAULT_ASR_MODEL => course2md::tr!("默认 · 更准确，占内存较多"),
-                "qwen3-0.6b" => course2md::tr!("更快，占内存较少"),
+                c2m_config::config::DEFAULT_ASR_MODEL => c2m_i18n::tr!("默认 · 更准确，占内存较多"),
+                "qwen3-0.6b" => c2m_i18n::tr!("更快，占内存较少"),
                 _ => "",
             },
         })
@@ -78,7 +78,7 @@ pub fn local_model_choices(provider: AsrProvider, current: &str) -> Vec<ModelCho
             id: current.into(),
             label: current.into(),
             description: if model_supported(provider, current) {
-                course2md::tr!("当前配置")
+                c2m_i18n::tr!("当前配置")
             } else {
                 unsupported_model()
             },
@@ -169,7 +169,7 @@ mod tests {
         ServicePurpose, ServiceTestEvidence, TestOutcome,
     };
     use crate::service_test::TestKind;
-    use course2md::config::AsrProvider;
+    use c2m_config::config::AsrProvider;
 
     #[test]
     fn online_route_round_trip_preserves_explicit_local_engine_and_alias() {
@@ -316,7 +316,7 @@ mod tests {
             AsrProvider::Coreml,
             AsrProvider::Npu,
         ] {
-            let default = course2md::config::default_model(provider);
+            let default = c2m_config::config::default_model(provider);
             for choice in local_model_choices(provider, default) {
                 assert!(
                     model_supported(provider, &choice.id),

@@ -118,11 +118,11 @@ impl Default for WorkState {
 /// What a finished model job says.
 pub fn job_exit_status(success: bool, cancelled: bool) -> &'static str {
     if success {
-        course2md::tr!("已完成")
+        c2m_i18n::tr!("已完成")
     } else if cancelled {
-        course2md::tr!("已停止")
+        c2m_i18n::tr!("已停止")
     } else {
-        course2md::tr!("未完成")
+        c2m_i18n::tr!("未完成")
     }
 }
 

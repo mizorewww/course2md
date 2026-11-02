@@ -1,7 +1,7 @@
 //! What a running job's events say, independent of rendering: the one fold over engine
 //! events, for live streams and for a task's saved `events.jsonl` alike. ETA excludes
 //! cached work and resets on retries.
-use course2md::progress::{BlockReason, Done, Event, Phase, Stage, StageStatus, Unit};
+use c2m_protocol::progress::{BlockReason, Done, Event, Phase, Stage, StageStatus, Unit};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -66,7 +66,7 @@ pub struct BlockedRequest {
     #[serde(default)]
     pub description: String,
     #[serde(default)]
-    pub kind: Option<course2md::artifact::FailureKind>,
+    pub kind: Option<c2m_artifact::artifact::FailureKind>,
     pub message: String,
 }
 
@@ -93,7 +93,7 @@ pub struct JobEvents {
     #[serde(default, skip_serializing)]
     pub blocked: Vec<BlockedRequest>,
     #[serde(default, skip_serializing)]
-    pub outcomes: Option<course2md::artifact::Outcomes>,
+    pub outcomes: Option<c2m_artifact::artifact::Outcomes>,
     /// The result of the run in progress, until the job exits.
     #[serde(skip)]
     pub done: Option<Done>,
@@ -296,7 +296,7 @@ impl Activity {
     pub fn live_counter(&self) -> String {
         let mut parts = vec![elapsed_label(self.elapsed())];
         if self.completion_tokens > 0 {
-            parts.push(course2md::tr!(
+            parts.push(c2m_i18n::tr!(
                 "↓ {} 词元",
                 compact_count(self.completion_tokens)
             ));
@@ -344,13 +344,13 @@ impl Activity {
     fn transfer_metrics_at(&self, stage: &Stage, running: bool, now: Instant) -> TransferMetrics {
         if self.done {
             return TransferMetrics {
-                note: Some(course2md::tr!("已完成").into()),
+                note: Some(c2m_i18n::tr!("已完成").into()),
                 ..TransferMetrics::default()
             };
         }
         if !running {
             return TransferMetrics {
-                note: Some(course2md::tr!("已停止").into()),
+                note: Some(c2m_i18n::tr!("已停止").into()),
                 ..TransferMetrics::default()
             };
         }
@@ -361,7 +361,7 @@ impl Activity {
         if *stage == Stage::ModelApple && !byte_download {
             return TransferMetrics {
                 quantity,
-                note: Some(course2md::tr!(
+                note: Some(c2m_i18n::tr!(
                     "已用 {}",
                     duration_label(now.saturating_duration_since(self.started).as_secs())
                 )),
@@ -374,25 +374,25 @@ impl Activity {
             || (*stage == Stage::ModelApple && byte_download))
             && !self.message.is_empty())
         .then_some(self.message.as_str());
-        let source = host.map(|host| course2md::tr!("来源 {}", host));
+        let source = host.map(|host| c2m_i18n::tr!("来源 {}", host));
         match (self.phase, host) {
             (Some(Phase::Connect), Some(host)) => {
                 return TransferMetrics {
                     quantity,
-                    note: Some(course2md::tr!("正在连接 {}", host)),
+                    note: Some(c2m_i18n::tr!("正在连接 {}", host)),
                     ..TransferMetrics::default()
                 };
             }
             (Some(Phase::Retry), Some(host)) => {
                 return TransferMetrics {
                     quantity,
-                    note: Some(course2md::tr!("连接中断，正在重新连接 {}", host)),
+                    note: Some(c2m_i18n::tr!("连接中断，正在重新连接 {}", host)),
                     ..TransferMetrics::default()
                 };
             }
             (Some(Phase::Verify), _) => {
                 return TransferMetrics {
-                    note: Some(course2md::tr!("正在校验文件完整性").into()),
+                    note: Some(c2m_i18n::tr!("正在校验文件完整性").into()),
                     ..TransferMetrics::default()
                 };
             }
@@ -416,11 +416,11 @@ impl Activity {
                 speed: byte_download.then(|| "—".into()),
                 note: Some(
                     if matches!(stage, Stage::ScenesScan | Stage::ScenesExtract) {
-                        course2md::tr!("仍在处理").into()
+                        c2m_i18n::tr!("仍在处理").into()
                     } else if byte_download {
-                        course2md::tr!("已 {}没有收到新数据", duration_label(silent.as_secs()))
+                        c2m_i18n::tr!("已 {}没有收到新数据", duration_label(silent.as_secs()))
                     } else {
-                        course2md::tr!("等待响应").into()
+                        c2m_i18n::tr!("等待响应").into()
                     },
                 ),
                 ..TransferMetrics::default()
@@ -452,14 +452,14 @@ impl Activity {
                     (self.total - self.current) as f64 / rate,
                 ))),
                 None if byte_download => {
-                    Some(TransferEta::Remaining(course2md::tr!("计算中").into()))
+                    Some(TransferEta::Remaining(c2m_i18n::tr!("计算中").into()))
                 }
                 None => None,
             }
         } else if self.total > 0 {
-            Some(TransferEta::Note(course2md::tr!("收尾中…").into()))
+            Some(TransferEta::Note(c2m_i18n::tr!("收尾中…").into()))
         } else if !byte_download {
-            Some(TransferEta::Note(course2md::tr!(
+            Some(TransferEta::Note(c2m_i18n::tr!(
                 "已用 {}",
                 duration_label(now.saturating_duration_since(self.started).as_secs())
             )))
@@ -467,14 +467,14 @@ impl Activity {
             None
         };
         let note = if in_blocks && landed == 0 {
-            Some(course2md::tr!("正在等待第一块数据").into())
+            Some(c2m_i18n::tr!("正在等待第一块数据").into())
         } else {
-            (byte_download && speed.is_none()).then(|| course2md::tr!("正在测量速度").into())
+            (byte_download && speed.is_none()).then(|| c2m_i18n::tr!("正在测量速度").into())
         };
         // How long ago the last block landed explains a falling speed; it
         // belongs with the full details, not the one-line status.
         let aside = (in_blocks && landed > 0 && silent >= QUIET_AFTER).then(|| {
-            course2md::tr!(
+            c2m_i18n::tr!(
                 "数据分块到达，上一块于 {}前到达",
                 duration_label(silent.as_secs())
             )
@@ -536,11 +536,11 @@ impl TransferMetrics {
             parts.push(self.quantity.clone());
         }
         if let Some(speed) = &self.speed {
-            parts.push(course2md::tr!("速度 {}", speed));
+            parts.push(c2m_i18n::tr!("速度 {}", speed));
         }
         if let Some(eta) = &self.eta {
             parts.push(match eta {
-                TransferEta::Remaining(value) => course2md::tr!("预计剩余 {}", value),
+                TransferEta::Remaining(value) => c2m_i18n::tr!("预计剩余 {}", value),
                 TransferEta::Note(value) => value.clone(),
             });
         }
@@ -558,7 +558,7 @@ impl TransferMetrics {
 /// "用时 45 秒", "用时 1 分 23 秒": how long work has run, in the interface
 /// language.
 pub fn elapsed_label(elapsed: Duration) -> String {
-    course2md::tr!("用时 {}", duration_label(elapsed.as_secs()))
+    c2m_i18n::tr!("用时 {}", duration_label(elapsed.as_secs()))
 }
 
 /// The one way the desktop words a span of time, for elapsed clocks and
@@ -567,28 +567,28 @@ pub fn elapsed_label(elapsed: Duration) -> String {
 /// one keeps two digits, so a ticking clock does not change width.
 pub(crate) fn duration_label(seconds: u64) -> String {
     if seconds >= 3600 {
-        course2md::tr!(
+        c2m_i18n::tr!(
             "{} 小时 {} 分",
             seconds / 3600,
             format!("{:02}", seconds % 3600 / 60)
         )
     } else if seconds >= 60 {
-        course2md::tr!("{} 分 {} 秒", seconds / 60, format!("{:02}", seconds % 60))
+        c2m_i18n::tr!("{} 分 {} 秒", seconds / 60, format!("{:02}", seconds % 60))
     } else {
-        course2md::tr!("{} 秒", seconds)
+        c2m_i18n::tr!("{} 秒", seconds)
     }
 }
 
 /// A large count in the interface language.
 fn compact_count(count: u64) -> String {
-    compact_count_in(count, course2md::i18n::lang())
+    compact_count_in(count, c2m_i18n::i18n::lang())
 }
 
 /// "950", "12.3k", "1.2M" in English. Chinese and Japanese count in their
 /// own units: "1,234" up to 9,999, then "1.2 万" / "1.2 萬" and "1.2 亿" /
 /// "1.2 億".
-fn compact_count_in(count: u64, lang: course2md::i18n::Lang) -> String {
-    use course2md::i18n::{Lang, t_for};
+fn compact_count_in(count: u64, lang: c2m_i18n::i18n::Lang) -> String {
+    use c2m_i18n::i18n::{Lang, t_for};
     if lang == Lang::En {
         return match count {
             0..1_000 => count.to_string(),
@@ -638,9 +638,9 @@ pub fn quantity(stage: &Stage, current: u64, total: u64) -> String {
 
 fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> String {
     if *stage == Stage::ScenesScan {
-        course2md::tr!("已检查 {} 张画面", current)
+        c2m_i18n::tr!("已检查 {} 张画面", current)
     } else if *stage == Stage::ScenesExtract && total > 0 {
-        course2md::tr!("已保存 {} / {} 张截图", current, total)
+        c2m_i18n::tr!("已保存 {} / {} 张截图", current, total)
     } else if byte_download {
         if total > 0 {
             format!("{} / {}", bytes(current), bytes(total))
@@ -649,7 +649,7 @@ fn quantity_of(stage: &Stage, byte_download: bool, current: u64, total: u64) -> 
         }
     } else if total > 0 {
         if *stage == Stage::Transcribe {
-            course2md::tr!("{} / {} 段", current, total)
+            c2m_i18n::tr!("{} / {} 段", current, total)
         } else {
             format!(
                 "{:.0}%",
@@ -673,10 +673,10 @@ pub enum NotePart {
 impl NotePart {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Screenshots => course2md::tr!("截图"),
-            Self::Proofreading => course2md::tr!("校对"),
-            Self::Summary => course2md::tr!("摘要"),
-            Self::Exports => course2md::tr!("导出"),
+            Self::Screenshots => c2m_i18n::tr!("截图"),
+            Self::Proofreading => c2m_i18n::tr!("校对"),
+            Self::Summary => c2m_i18n::tr!("摘要"),
+            Self::Exports => c2m_i18n::tr!("导出"),
         }
     }
 
@@ -694,8 +694,8 @@ impl NotePart {
 /// The one term naming what is missing.
 fn missing_term(part: NotePart) -> String {
     match part {
-        NotePart::Screenshots | NotePart::Summary => course2md::tr!("{}未生成", part.label()),
-        NotePart::Proofreading | NotePart::Exports => course2md::tr!("{}未完成", part.label()),
+        NotePart::Screenshots | NotePart::Summary => c2m_i18n::tr!("{}未生成", part.label()),
+        NotePart::Proofreading | NotePart::Exports => c2m_i18n::tr!("{}未完成", part.label()),
     }
 }
 
@@ -706,20 +706,23 @@ fn missing_term(part: NotePart) -> String {
 ///
 /// One term names what is missing; a cause follows only when it says more than
 /// the term (the retry button beside it already names the next step).
-pub fn outcome_failure_message(part: NotePart, outcome: &course2md::artifact::Outcome) -> String {
-    use course2md::artifact::FailureKind;
+pub fn outcome_failure_message(
+    part: NotePart,
+    outcome: &c2m_artifact::artifact::Outcome,
+) -> String {
+    use c2m_artifact::artifact::FailureKind;
     let cause = match outcome.kind {
-        Some(FailureKind::Authentication) => course2md::tr!("服务拒绝了 API Key"),
-        Some(FailureKind::Model) => course2md::tr!("服务地址或模型名称有误"),
-        Some(FailureKind::Parameters) => course2md::tr!("服务不支持当前的模型设置"),
-        Some(FailureKind::RateLimit) => course2md::tr!("服务暂时限制了请求次数"),
-        Some(FailureKind::Service) => course2md::tr!("服务暂时无法完成请求"),
-        Some(FailureKind::Uncertain) => course2md::tr!("请求结果未确认"),
+        Some(FailureKind::Authentication) => c2m_i18n::tr!("服务拒绝了 API Key"),
+        Some(FailureKind::Model) => c2m_i18n::tr!("服务地址或模型名称有误"),
+        Some(FailureKind::Parameters) => c2m_i18n::tr!("服务不支持当前的模型设置"),
+        Some(FailureKind::RateLimit) => c2m_i18n::tr!("服务暂时限制了请求次数"),
+        Some(FailureKind::Service) => c2m_i18n::tr!("服务暂时无法完成请求"),
+        Some(FailureKind::Uncertain) => c2m_i18n::tr!("请求结果未确认"),
         Some(FailureKind::Local | FailureKind::Other) | None => {
             return legacy_outcome_message(part, outcome.message.as_deref());
         }
     };
-    course2md::tr!("{}：{}", missing_term(part), cause)
+    c2m_i18n::tr!("{}：{}", missing_term(part), cause)
 }
 
 /// Older saved outcomes combined a stage label, retention message and English
@@ -739,8 +742,8 @@ pub(crate) fn legacy_outcome_message(part: NotePart, message: Option<&str>) -> S
         format!("{saved}尚未完成"),
         format!("{saved}未完成"),
         format!("{saved}未生成"),
-        course2md::tr!("{}尚未完成", part.label()),
-        course2md::tr!("{}未完成", part.label()),
+        c2m_i18n::tr!("{}尚未完成", part.label()),
+        c2m_i18n::tr!("{}未完成", part.label()),
         term.clone(),
     ] {
         if let Some(rest) = cause.strip_prefix(prefix.as_str()) {
@@ -765,32 +768,32 @@ pub(crate) fn legacy_outcome_message(part: NotePart, message: Option<&str>) -> S
     if restates {
         term
     } else {
-        course2md::tr!("{}：{}", term, cause)
+        c2m_i18n::tr!("{}：{}", term, cause)
     }
 }
 
 pub fn title(stage: &Stage) -> String {
     match stage {
-        Stage::ModelApple => course2md::tr!("准备 Apple 识别模型"),
+        Stage::ModelApple => c2m_i18n::tr!("准备 Apple 识别模型"),
         Stage::ModelFile(file) if file.starts_with("mmproj") => {
-            course2md::tr!("下载音频编码器")
+            c2m_i18n::tr!("下载音频编码器")
         }
-        Stage::ModelFile(_) => course2md::tr!("下载语音模型"),
-        Stage::ModelPrepare => course2md::tr!("检查识别模型"),
-        Stage::ModelLoad => course2md::tr!("加载识别模型"),
-        Stage::Fetch => course2md::tr!("读取课程"),
-        Stage::Download => course2md::tr!("下载视频"),
-        Stage::Scenes => course2md::tr!("提取画面"),
-        Stage::ScenesScan => course2md::tr!("扫描画面"),
-        Stage::ScenesExtract => course2md::tr!("生成截图"),
-        Stage::Audio => course2md::tr!("提取音频"),
-        Stage::Transcribe => course2md::tr!("语音转写"),
-        Stage::Subtitle => course2md::tr!("读取字幕"),
-        Stage::Llm => course2md::tr!("AI 校对"),
-        Stage::Translate => course2md::tr!("AI 翻译"),
-        Stage::Summary => course2md::tr!("生成摘要"),
-        Stage::Exports => course2md::tr!("导出文件"),
-        Stage::Render => course2md::tr!("生成笔记"),
+        Stage::ModelFile(_) => c2m_i18n::tr!("下载语音模型"),
+        Stage::ModelPrepare => c2m_i18n::tr!("检查识别模型"),
+        Stage::ModelLoad => c2m_i18n::tr!("加载识别模型"),
+        Stage::Fetch => c2m_i18n::tr!("读取课程"),
+        Stage::Download => c2m_i18n::tr!("下载视频"),
+        Stage::Scenes => c2m_i18n::tr!("提取画面"),
+        Stage::ScenesScan => c2m_i18n::tr!("扫描画面"),
+        Stage::ScenesExtract => c2m_i18n::tr!("生成截图"),
+        Stage::Audio => c2m_i18n::tr!("提取音频"),
+        Stage::Transcribe => c2m_i18n::tr!("语音转写"),
+        Stage::Subtitle => c2m_i18n::tr!("读取字幕"),
+        Stage::Llm => c2m_i18n::tr!("AI 校对"),
+        Stage::Translate => c2m_i18n::tr!("AI 翻译"),
+        Stage::Summary => c2m_i18n::tr!("生成摘要"),
+        Stage::Exports => c2m_i18n::tr!("导出文件"),
+        Stage::Render => c2m_i18n::tr!("生成笔记"),
         Stage::Other(name) => return name.clone(),
     }
     .into()
@@ -801,9 +804,9 @@ pub fn model_transfer_phase(stage: &Stage, phase: Option<Phase>) -> String {
     // Only Apple preparation names its phase in the title; model files keep
     // their own title and word their phase in the detail.
     match phase {
-        Some(Phase::Load) if *stage == Stage::ModelApple => course2md::tr!("加载识别模型").into(),
+        Some(Phase::Load) if *stage == Stage::ModelApple => c2m_i18n::tr!("加载识别模型").into(),
         Some(Phase::Download) if *stage == Stage::ModelApple => {
-            course2md::tr!("下载识别模型").into()
+            c2m_i18n::tr!("下载识别模型").into()
         }
         _ => title(stage),
     }
@@ -817,7 +820,7 @@ pub fn bytes(value: u64) -> String {
     } else if value >= 1024 {
         format!("{:.0} KB", value as f64 / 1024.)
     } else {
-        course2md::tr!("{} 字节", value)
+        c2m_i18n::tr!("{} 字节", value)
     }
 }
 
@@ -826,7 +829,7 @@ fn throughput(bytes_per_sec: f64) -> String {
     // （bytes 只接 u64，无法表达小数舍入）。
     let value = bytes_per_sec.max(0.);
     if value < 1024. {
-        return course2md::tr!("{} 字节", format!("{value:.0}"));
+        return c2m_i18n::tr!("{} 字节", format!("{value:.0}"));
     }
     bytes(value as u64)
 }
@@ -840,7 +843,7 @@ mod tests {
     #[test]
     fn counters_are_compact() {
         use super::{Duration, compact_count_in, elapsed_label};
-        use course2md::i18n::Lang;
+        use c2m_i18n::i18n::Lang;
         assert_eq!(compact_count_in(950, Lang::En), "950");
         assert_eq!(compact_count_in(12_345, Lang::En), "12.3k");
         assert_eq!(compact_count_in(1_250_000, Lang::En), "1.2M");
@@ -869,7 +872,7 @@ mod tests {
     /// into the Chinese or Japanese interface.
     #[test]
     fn durations_use_the_interface_language_units() {
-        use course2md::i18n::{Lang, t_for};
+        use c2m_i18n::i18n::{Lang, t_for};
         let words = |lang| {
             [
                 "用时 {}",
@@ -1146,7 +1149,7 @@ mod tests {
                 unit: None,
             },
             Event::Log {
-                level: course2md::progress::LogLevel::Info,
+                level: c2m_protocol::progress::LogLevel::Info,
                 message: "working".into(),
             },
             Event::Blocked {
@@ -1154,7 +1157,7 @@ mod tests {
                 request_id: Some("r.1".into()),
                 purpose: Some("proofreading".into()),
                 description: None,
-                kind: course2md::artifact::FailureKind::Uncertain,
+                kind: c2m_artifact::artifact::FailureKind::Uncertain,
                 message: "unconfirmed".into(),
             },
             Event::Stage {
@@ -1244,13 +1247,13 @@ mod tests {
         ] {
             assert_eq!(missing_term(part), term);
         }
-        use course2md::i18n::{Lang, t_for};
+        use c2m_i18n::i18n::{Lang, t_for};
         assert_eq!(t_for("{}未生成", Lang::En), "{} not generated");
         assert_eq!(t_for("摘要", Lang::En), "Summary");
     }
     #[test]
     fn classified_failures_are_worded_from_their_kind() {
-        use course2md::artifact::{FailureKind, Outcome};
+        use c2m_artifact::artifact::{FailureKind, Outcome};
         // The text is ignored when the kind already names the cause.
         let rejected = Outcome {
             kind: Some(FailureKind::Authentication),

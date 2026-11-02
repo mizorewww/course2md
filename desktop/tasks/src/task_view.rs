@@ -1,8 +1,8 @@
 //! What a task is doing and what can be done about it, as words and decisions. The task
 //! page draws this.
-use course2md::config::TranscriptSource;
-use course2md::execution::Component;
-use course2md::progress::Stage;
+use c2m_config::config::TranscriptSource;
+use c2m_engine::execution::Component;
+use c2m_protocol::progress::Stage;
 use desktop_store::{
     activity,
     workspace::{self, Intent, TaskRecord, TaskState},
@@ -41,11 +41,11 @@ impl TaskGroup {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Running => course2md::tr!("正在处理"),
-            Self::Attention => course2md::tr!("需要处理"),
-            Self::Queued => course2md::tr!("排队中"),
-            Self::Finished => course2md::tr!("已结束"),
-            Self::History => course2md::tr!("此前处理记录"),
+            Self::Running => c2m_i18n::tr!("正在处理"),
+            Self::Attention => c2m_i18n::tr!("需要处理"),
+            Self::Queued => c2m_i18n::tr!("排队中"),
+            Self::Finished => c2m_i18n::tr!("已结束"),
+            Self::History => c2m_i18n::tr!("此前处理记录"),
         }
     }
 
@@ -102,9 +102,9 @@ pub enum WorkerWait {
 impl WorkerWait {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Starting => course2md::tr!("正在启动任务…"),
-            Self::BetweenStages => course2md::tr!("正在继续处理…"),
-            Self::Finishing => course2md::tr!("正在完成笔记…"),
+            Self::Starting => c2m_i18n::tr!("正在启动任务…"),
+            Self::BetweenStages => c2m_i18n::tr!("正在继续处理…"),
+            Self::Finishing => c2m_i18n::tr!("正在完成笔记…"),
         }
     }
 }
@@ -236,7 +236,7 @@ pub fn ai_component(name: &str) -> Option<Component> {
 /// outcomes distinguish an ended attempt from a successfully completed step.
 pub(crate) fn ai_stage_outcome(
     name: &Stage,
-    outcomes: Option<&course2md::artifact::Outcomes>,
+    outcomes: Option<&c2m_artifact::artifact::Outcomes>,
 ) -> Option<StageStatus> {
     let outcome = match name {
         Stage::Llm => &outcomes?.proofreading,
@@ -245,7 +245,7 @@ pub(crate) fn ai_stage_outcome(
         _ => return None,
     };
     match outcome.status {
-        course2md::artifact::Status::Succeeded => Some(StageStatus::Complete),
+        c2m_artifact::artifact::Status::Succeeded => Some(StageStatus::Complete),
         _ if unfinished(outcome) => Some(StageStatus::Failed),
         _ => None,
     }
@@ -279,7 +279,7 @@ pub(crate) fn task_failure_summary(state: TaskState, error: Option<&str>) -> Opt
         if summary.chars().count() <= 140 {
             summary.into()
         } else if summary.is_empty() {
-            course2md::tr!("转换未完成").into()
+            c2m_i18n::tr!("转换未完成").into()
         } else {
             format!("{}…", summary.chars().take(139).collect::<String>())
         }
@@ -300,17 +300,17 @@ pub fn task_attention_summary(task: &TaskRecord) -> String {
 /// Only concrete configuration rejections change recovery from Retry to Repair.
 /// Rate limiting, timeouts and unknown outcomes keep their own recovery.
 pub(crate) fn service_repair_reason(
-    kind: course2md::artifact::FailureKind,
+    kind: c2m_artifact::artifact::FailureKind,
 ) -> Option<&'static str> {
     match kind {
-        course2md::artifact::FailureKind::Authentication => {
-            Some(course2md::tr!("AI 服务拒绝了 API Key，请检查密钥或权限"))
+        c2m_artifact::artifact::FailureKind::Authentication => {
+            Some(c2m_i18n::tr!("AI 服务拒绝了 API Key，请检查密钥或权限"))
         }
-        course2md::artifact::FailureKind::Model => {
-            Some(course2md::tr!("AI 服务地址或模型名称有误"))
+        c2m_artifact::artifact::FailureKind::Model => {
+            Some(c2m_i18n::tr!("AI 服务地址或模型名称有误"))
         }
-        course2md::artifact::FailureKind::Parameters => {
-            Some(course2md::tr!("AI 服务不支持当前的模型设置"))
+        c2m_artifact::artifact::FailureKind::Parameters => {
+            Some(c2m_i18n::tr!("AI 服务不支持当前的模型设置"))
         }
         _ => None,
     }
@@ -346,11 +346,11 @@ pub fn task_requires_service_repair(task: &TaskRecord) -> bool {
 /// Component key → retry button label; the one source shared by task cards, the library and the reader.
 pub fn retry_component_label(component: &str) -> &'static str {
     match Component::parse(component) {
-        Some(Component::Screenshots) => course2md::tr!("重新生成截图"),
-        Some(Component::Proofreading) => course2md::tr!("重试 AI 校对"),
-        Some(Component::Summary) => course2md::tr!("重新生成摘要"),
-        Some(Component::Exports) => course2md::tr!("重新导出"),
-        None => course2md::tr!("补全未完成部分"),
+        Some(Component::Screenshots) => c2m_i18n::tr!("重新生成截图"),
+        Some(Component::Proofreading) => c2m_i18n::tr!("重试 AI 校对"),
+        Some(Component::Summary) => c2m_i18n::tr!("重新生成摘要"),
+        Some(Component::Exports) => c2m_i18n::tr!("重新导出"),
+        None => c2m_i18n::tr!("补全未完成部分"),
     }
 }
 
@@ -359,7 +359,7 @@ pub fn retry_components_label(components: &[String]) -> &'static str {
     if components.len() == 1 {
         retry_component_label(&components[0])
     } else {
-        course2md::tr!("补全未完成部分")
+        c2m_i18n::tr!("补全未完成部分")
     }
 }
 
@@ -477,7 +477,7 @@ pub fn task_reasons(task: &TaskRecord) -> Vec<String> {
 /// The unfinished parts of a saved note; a task with no note has none.
 pub fn task_note_failures(
     task: &TaskRecord,
-) -> Vec<(String, activity::NotePart, course2md::artifact::Outcome)> {
+) -> Vec<(String, activity::NotePart, c2m_artifact::artifact::Outcome)> {
     if task.artifact.is_some() {
         task_component_failures(task)
     } else {
@@ -492,11 +492,11 @@ pub fn resumable(task: &TaskRecord) -> bool {
 
 pub fn adjust_label(task: &TaskRecord) -> &'static str {
     if task.artifact.is_some() {
-        course2md::tr!("调整并生成新版")
+        c2m_i18n::tr!("调整并生成新版")
     } else if task.state == TaskState::Paused {
-        course2md::tr!("调整选项")
+        c2m_i18n::tr!("调整选项")
     } else {
-        course2md::tr!("调整后重试")
+        c2m_i18n::tr!("调整后重试")
     }
 }
 
@@ -518,17 +518,17 @@ pub fn task_text_source(task: &TaskRecord) -> &'static str {
     if task.plan.options().source_mode != TranscriptSource::Asr
         && task.plan.source.selected_subtitle.is_some()
     {
-        course2md::tr!("视频字幕")
+        c2m_i18n::tr!("视频字幕")
     } else if task.plan.options().uses_cloud_provider() {
-        course2md::tr!("语音识别服务")
+        c2m_i18n::tr!("语音识别服务")
     } else {
-        course2md::tr!("本机识别")
+        c2m_i18n::tr!("本机识别")
     }
 }
 
 pub fn task_status_label(task: &TaskRecord) -> String {
     if task.handled_by.is_some() {
-        return course2md::tr!("已有后续处理任务").into();
+        return c2m_i18n::tr!("已有后续处理任务").into();
     }
     // What the folder holds is not known until the earlier worker lets go.
     if task.held {
@@ -550,18 +550,18 @@ pub fn task_status_label(task: &TaskRecord) -> String {
                     .all(|purpose| ai_component(purpose) == Some(component))
         };
         return if all(Component::Proofreading) {
-            course2md::tr!("AI 校对结果未确认")
+            c2m_i18n::tr!("AI 校对结果未确认")
         } else if all(Component::Summary) {
-            course2md::tr!("摘要结果未确认")
+            c2m_i18n::tr!("摘要结果未确认")
         } else if purpose.contains(TRANSCRIPTION_PURPOSE) {
-            course2md::tr!("语音识别结果未确认")
+            c2m_i18n::tr!("语音识别结果未确认")
         } else {
-            course2md::tr!("部分处理结果未确认")
+            c2m_i18n::tr!("部分处理结果未确认")
         }
         .into();
     }
     if task.exports_only() && task.state == TaskState::Complete {
-        course2md::tr!("文件已导出").into()
+        c2m_i18n::tr!("文件已导出").into()
     } else {
         task.status_label().into()
     }
@@ -573,27 +573,27 @@ pub fn request_scope(request: &workspace::BlockedRequest) -> String {
     } else {
         let purpose = request.purpose.as_deref().unwrap_or_default();
         let name = match ai_component(purpose) {
-            Some(Component::Proofreading) => course2md::tr!("AI 校对"),
-            Some(Component::Summary) => course2md::tr!("生成摘要"),
-            _ if purpose == TRANSCRIPTION_PURPOSE => course2md::tr!("语音识别"),
-            _ => course2md::tr!("外部处理"),
+            Some(Component::Proofreading) => c2m_i18n::tr!("AI 校对"),
+            Some(Component::Summary) => c2m_i18n::tr!("生成摘要"),
+            _ if purpose == TRANSCRIPTION_PURPOSE => c2m_i18n::tr!("语音识别"),
+            _ => c2m_i18n::tr!("外部处理"),
         };
-        course2md::tr!("{}（具体内容未记录）", name)
+        c2m_i18n::tr!("{}（具体内容未记录）", name)
     }
 }
 
 /// A component that failed, or finished only in part.
-fn unfinished(outcome: &course2md::artifact::Outcome) -> bool {
+fn unfinished(outcome: &c2m_artifact::artifact::Outcome) -> bool {
     matches!(
         outcome.status,
-        course2md::artifact::Status::Failed | course2md::artifact::Status::Partial
+        c2m_artifact::artifact::Status::Failed | c2m_artifact::artifact::Status::Partial
     )
 }
 
 /// Unfinished parts of a published note: (component, label, outcome).
 pub fn task_component_failures(
     task: &TaskRecord,
-) -> Vec<(String, activity::NotePart, course2md::artifact::Outcome)> {
+) -> Vec<(String, activity::NotePart, c2m_artifact::artifact::Outcome)> {
     let Some(outcomes) = &task.events.outcomes else {
         return Vec::new();
     };
@@ -625,7 +625,7 @@ pub fn task_component_failures(
         results.push((
             Component::Exports.as_str().into(),
             NotePart::Exports,
-            course2md::artifact::Outcome::failed(messages.join(course2md::tr!("；"))),
+            c2m_artifact::artifact::Outcome::failed(messages.join(c2m_i18n::tr!("；"))),
         ));
     }
     results
@@ -651,15 +651,15 @@ impl TaskAction {
 impl StageStatus {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Running => course2md::tr!("处理中"),
-            Self::Complete => course2md::tr!("已完成"),
-            Self::Pausing => course2md::tr!("暂停中"),
-            Self::Stopping => course2md::tr!("停止中"),
-            Self::Paused => course2md::tr!("已暂停"),
-            Self::Waiting => course2md::tr!("等待继续"),
-            Self::Failed => course2md::tr!("未完成"),
-            Self::Uncertain => course2md::tr!("待确认"),
-            Self::Cancelled => course2md::tr!("已取消"),
+            Self::Running => c2m_i18n::tr!("处理中"),
+            Self::Complete => c2m_i18n::tr!("已完成"),
+            Self::Pausing => c2m_i18n::tr!("暂停中"),
+            Self::Stopping => c2m_i18n::tr!("停止中"),
+            Self::Paused => c2m_i18n::tr!("已暂停"),
+            Self::Waiting => c2m_i18n::tr!("等待继续"),
+            Self::Failed => c2m_i18n::tr!("未完成"),
+            Self::Uncertain => c2m_i18n::tr!("待确认"),
+            Self::Cancelled => c2m_i18n::tr!("已取消"),
         }
     }
 
@@ -822,15 +822,15 @@ fn task_moves(task: &TaskRecord, queue: &[&str]) -> Vec<TaskAction> {
         to: can.then_some(to),
     };
     vec![
-        step(course2md::tr!("移到最前"), true, 0, position > 0),
+        step(c2m_i18n::tr!("移到最前"), true, 0, position > 0),
         step(
-            course2md::tr!("上移"),
+            c2m_i18n::tr!("上移"),
             true,
             position.saturating_sub(1),
             position > 0,
         ),
-        step(course2md::tr!("下移"), false, position + 1, position < last),
-        step(course2md::tr!("移到最后"), false, last, position < last),
+        step(c2m_i18n::tr!("下移"), false, position + 1, position < last),
+        step(c2m_i18n::tr!("移到最后"), false, last, position < last),
     ]
 }
 
@@ -895,7 +895,7 @@ mod tests {
         worker_wait_state,
     };
     use crate::plan::tests::source;
-    use course2md::progress::Stage;
+    use c2m_protocol::progress::Stage;
 
     fn task_record(id: &str) -> desktop_store::workspace::TaskRecord {
         desktop_store::workspace::TaskRecord {
@@ -1112,7 +1112,7 @@ mod tests {
 
     #[test]
     fn completed_ai_attempts_use_component_results_to_classify_success() {
-        use course2md::artifact::{Outcome, Outcomes, Status};
+        use c2m_artifact::artifact::{Outcome, Outcomes, Status};
         let mut outcomes = Outcomes {
             proofreading: Outcome::failed("服务拒绝凭据"),
             summary: Outcome::succeeded(),
@@ -1186,7 +1186,7 @@ mod tests {
 
     #[test]
     fn partial_task_recovery_excludes_successful_and_unrequested_components() {
-        use course2md::artifact::{Outcome, Outcomes, Status};
+        use c2m_artifact::artifact::{Outcome, Outcomes, Status};
         use desktop_store::workspace::{Intent, TaskPlan, TaskRecord, TaskState};
 
         let mut outcomes = Outcomes {
@@ -1199,7 +1199,7 @@ mod tests {
             message: Some("服务拒绝凭据".into()),
             completed: Some(1),
             total: Some(2),
-            kind: Some(course2md::artifact::FailureKind::Authentication),
+            kind: Some(c2m_artifact::artifact::FailureKind::Authentication),
         };
         outcomes.exports.insert("md".into(), Outcome::succeeded());
         outcomes
@@ -1256,32 +1256,32 @@ mod tests {
         for (message, kind, requires_repair) in [
             (
                 "服务未接受此任务保存的凭据",
-                course2md::artifact::FailureKind::Authentication,
+                c2m_artifact::artifact::FailureKind::Authentication,
                 true,
             ),
             (
                 "服务未找到此任务指定的接口或模型",
-                course2md::artifact::FailureKind::Model,
+                c2m_artifact::artifact::FailureKind::Model,
                 true,
             ),
             (
                 "服务拒绝了请求参数（HTTP 422）",
-                course2md::artifact::FailureKind::Parameters,
+                c2m_artifact::artifact::FailureKind::Parameters,
                 true,
             ),
             (
                 "服务请求次数达到限制，请稍后重试。",
-                course2md::artifact::FailureKind::RateLimit,
+                c2m_artifact::artifact::FailureKind::RateLimit,
                 false,
             ),
             (
                 "服务未完成此请求（HTTP 500）。",
-                course2md::artifact::FailureKind::Service,
+                c2m_artifact::artifact::FailureKind::Service,
                 false,
             ),
             (
                 "请求超时，请稍后重试。",
-                course2md::artifact::FailureKind::Other,
+                c2m_artifact::artifact::FailureKind::Other,
                 false,
             ),
         ] {
@@ -1295,16 +1295,16 @@ mod tests {
             );
         }
         outcomes.proofreading.message = Some("服务拒绝凭据".into());
-        outcomes.proofreading.kind = Some(course2md::artifact::FailureKind::Authentication);
+        outcomes.proofreading.kind = Some(c2m_artifact::artifact::FailureKind::Authentication);
         task.events.outcomes = Some(outcomes.clone());
         task.events
             .blocked
             .push(desktop_store::workspace::BlockedRequest {
-                reason: course2md::progress::BlockReason::Uncertain,
+                reason: c2m_protocol::progress::BlockReason::Uncertain,
                 request_id: Some("pending".into()),
                 purpose: Some("summary".into()),
                 description: "摘要".into(),
-                kind: Some(course2md::artifact::FailureKind::Uncertain),
+                kind: Some(c2m_artifact::artifact::FailureKind::Uncertain),
                 message: "结果尚未确认".into(),
             });
         assert!(!super::task_requires_service_repair(&task));

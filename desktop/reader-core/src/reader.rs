@@ -75,7 +75,7 @@ impl Frame {
         });
         let search_text = format!(
             "{}\n{}",
-            course2md::render::fmt_ts(seconds),
+            c2m_artifact::render::fmt_ts(seconds),
             transcript.to_lowercase()
         );
         Self {
@@ -169,14 +169,14 @@ impl OfflineVideoRequest {
         let metadata = media.metadata().ok()?;
         // The system player is started through the shell, which rejects `\\?\` paths.
         (media.parent() == Some(work.as_path()) && metadata.is_file() && metadata.len() > 0)
-            .then(|| course2md::config::simplify_verbatim(media))
+            .then(|| c2m_config::config::simplify_verbatim(media))
     }
 }
 
 #[derive(Clone)]
 pub struct ExportFeedback {
     pub title: String,
-    pub format: course2md::config::OutputFormat,
+    pub format: c2m_config::config::OutputFormat,
     pub result: Result<PathBuf, String>,
 }
 
@@ -229,8 +229,8 @@ pub fn exported_file_label(path: &std::path::Path) -> String {
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| course2md::tr!("导出文件").into());
-    course2md::tr!("已导出 · {}", name)
+        .unwrap_or_else(|| c2m_i18n::tr!("导出文件").into());
+    c2m_i18n::tr!("已导出 · {}", name)
 }
 
 /// Position-store key for a manifest course at one tab (`:0` is the note
@@ -327,7 +327,7 @@ pub fn gallery_row_of(items: &[GalleryItem], matches: &[usize], frame: usize) ->
 }
 
 pub fn frame_label(frame: &Frame) -> String {
-    course2md::tr!("{} 的截图", course2md::render::fmt_ts(frame.seconds))
+    c2m_i18n::tr!("{} 的截图", c2m_artifact::render::fmt_ts(frame.seconds))
 }
 
 pub fn matching_frames(frames: &[Frame], query: &str) -> Vec<usize> {
@@ -345,7 +345,7 @@ pub fn frame_excerpt(frame: &Frame, query: &str) -> String {
     let text = frame.transcript.as_str();
     let found = nav::text_matches(text, query).into_iter().next();
     if found.is_none() && text.trim().is_empty() {
-        return course2md::tr!("这张截图没有对应文字").into();
+        return c2m_i18n::tr!("这张截图没有对应文字").into();
     }
     let (mut start, end) = match &found {
         Some(found) => {
@@ -396,8 +396,8 @@ pub fn frame_excerpt(frame: &Frame, query: &str) -> String {
         walked += 1;
     }
     // A formula is shown whole or not at all.
-    for (range, piece) in course2md::math::piece_sources(text) {
-        if matches!(piece, course2md::math::Piece::Math { .. }) {
+    for (range, piece) in c2m_artifact::math::piece_sources(text) {
+        if matches!(piece, c2m_artifact::math::Piece::Math { .. }) {
             if range.start < start && start < range.end {
                 start = range.start;
             }
@@ -513,7 +513,7 @@ pub fn load_reader_data(preview: &notes::Preview) -> ReaderData {
             .or_else(|| nav::nearest_time(heading_times(&preview.blocks), frame.t).map(|(i, _)| i));
         let frame = Frame::new(
             format!("frame:{index}:{}", frame.image),
-            course2md::artifact::safe_asset_path(dir, &frame.image).ok(),
+            c2m_artifact::artifact::safe_asset_path(dir, &frame.image).ok(),
             frame.t,
             transcript,
             body_index,
@@ -538,18 +538,18 @@ pub fn load_reader_data(preview: &notes::Preview) -> ReaderData {
                 if !path.is_dir() || !path.join("manifest.json").is_file() {
                     continue;
                 }
-                match course2md::artifact::read_manifest(&path.join("manifest.json")) {
+                match c2m_artifact::artifact::read_manifest(&path.join("manifest.json")) {
                     Ok(other) if other.course_id == manifest.course_id => {
                         let mut course = preview.course.clone();
                         course.dir = path;
                         course.title = other.title.clone();
                         course.slides = other.frames.len();
-                        let label = course2md::tr!(
+                        let label = c2m_i18n::tr!(
                             "第 {} 版 · {}{}",
                             other.revision,
                             nav::timestamp_local(other.created_at_ms),
                             if notes::has_incomplete_content(&other) {
-                                course2md::tr!(" · 部分完成")
+                                c2m_i18n::tr!(" · 部分完成")
                             } else {
                                 ""
                             }
@@ -559,7 +559,7 @@ pub fn load_reader_data(preview: &notes::Preview) -> ReaderData {
                     }
                     Err(_) => data
                         .issues
-                        .push(course2md::tr!("有一个旧版本无法读取").into()),
+                        .push(c2m_i18n::tr!("有一个旧版本无法读取").into()),
                     _ => {}
                 }
             }
@@ -576,16 +576,16 @@ pub fn load_reader_data(preview: &notes::Preview) -> ReaderData {
         }
         Err(error) => data
             .issues
-            .push(course2md::tr!("其他版本暂时无法读取：{}", error)),
+            .push(c2m_i18n::tr!("其他版本暂时无法读取：{}", error)),
     }
     data
 }
 
 pub(crate) fn existing_export_folder(dir: &std::path::Path, outputs: &[String]) -> Option<PathBuf> {
-    let folder = course2md::artifact::safe_asset_path(dir, "exports").ok()?;
+    let folder = c2m_artifact::artifact::safe_asset_path(dir, "exports").ok()?;
     let has_file = outputs.iter().any(|output| {
         std::path::Path::new(output).starts_with("exports")
-            && course2md::artifact::safe_asset_path(dir, output).is_ok_and(|path| path.is_file())
+            && c2m_artifact::artifact::safe_asset_path(dir, output).is_ok_and(|path| path.is_file())
     });
     has_file.then_some(folder)
 }
@@ -594,13 +594,13 @@ pub fn processing_notice(issues: &[notes::ProcessingIssue]) -> Option<String> {
     if issues.is_empty() {
         return None;
     }
-    Some(course2md::tr!(
+    Some(c2m_i18n::tr!(
         "{}未完成",
         issues
             .iter()
             .map(|issue| issue.stage.label())
             .collect::<Vec<_>>()
-            .join(course2md::tr!("、"))
+            .join(c2m_i18n::tr!("、"))
     ))
 }
 
@@ -720,12 +720,12 @@ pub fn note_read_failure(error: &anyhow::Error) -> &'static str {
     });
     match kind {
         Some(std::io::ErrorKind::NotFound) => {
-            course2md::tr!("笔记文件不存在，请重新连接保存位置后重试")
+            c2m_i18n::tr!("笔记文件不存在，请重新连接保存位置后重试")
         }
         Some(std::io::ErrorKind::PermissionDenied) => {
-            course2md::tr!("无权读取这份笔记，请检查保存位置的访问权限")
+            c2m_i18n::tr!("无权读取这份笔记，请检查保存位置的访问权限")
         }
-        _ => course2md::tr!("这份笔记无法读取，请检查保存位置中的文件"),
+        _ => c2m_i18n::tr!("这份笔记无法读取，请检查保存位置中的文件"),
     }
 }
 
@@ -785,8 +785,8 @@ mod tests {
                 library_id: library.id.clone(),
                 folder: None,
                 subtitle: None,
-                config: course2md::settings::ConfigFile {
-                    defaults: course2md::settings::Defaults {
+                config: c2m_config::settings::ConfigFile {
+                    defaults: c2m_config::settings::Defaults {
                         keep_video: Some(true),
                         ..Default::default()
                     },
@@ -854,7 +854,7 @@ mod tests {
         let path = std::path::PathBuf::from("/exports/old-note.html");
         let success = || ExportFeedback {
             title: "旧笔记".into(),
-            format: course2md::config::OutputFormat::Html,
+            format: c2m_config::config::OutputFormat::Html,
             result: Ok(path.clone()),
         };
         let mut state = ExportState::default();
@@ -869,7 +869,7 @@ mod tests {
             &other,
             ExportFeedback {
                 title: "另一份笔记".into(),
-                format: course2md::config::OutputFormat::Html,
+                format: c2m_config::config::OutputFormat::Html,
                 result: Err("保存位置不可写".into()),
             }
         ));
@@ -982,7 +982,7 @@ mod tests {
         let request = OfflineVideoRequest::for_version(&first, &task, &library).unwrap();
         assert_eq!(
             request.inspect(),
-            OfflineVideo::Available(course2md::config::canonicalize(&media).unwrap())
+            OfflineVideo::Available(c2m_config::config::canonicalize(&media).unwrap())
         );
         assert!(OfflineVideoRequest::for_version(&second, &task, &library).is_none());
         let mut changed = task.clone();
@@ -1037,10 +1037,10 @@ mod tests {
             root.path(),
             1,
             &[10.],
-            course2md::artifact::Outcomes {
-                transcript: course2md::artifact::Outcome::succeeded(),
-                screenshots: course2md::artifact::Outcome::succeeded(),
-                summary: course2md::artifact::Outcome::failed(detail),
+            c2m_artifact::artifact::Outcomes {
+                transcript: c2m_artifact::artifact::Outcome::succeeded(),
+                screenshots: c2m_artifact::artifact::Outcome::succeeded(),
+                summary: c2m_artifact::artifact::Outcome::failed(detail),
                 ..Default::default()
             },
         );

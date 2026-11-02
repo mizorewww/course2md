@@ -1,5 +1,5 @@
 //! Provider persistence: readable ids today, legacy numeric indexes when loading.
-use course2md::config::AsrProvider;
+use c2m_config::config::AsrProvider;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Deserialize)]
