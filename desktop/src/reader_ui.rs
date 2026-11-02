@@ -2160,9 +2160,9 @@ impl Desktop {
                         ListItem::new(("toc-item", index), label.clone())
                             .density(ListDensity::Compact)
                             .container(if beside {
-                                ColorRole::SURFACE_CONTAINER_LOW
-                            } else {
                                 ColorRole::SURFACE_CONTAINER
+                            } else {
+                                ColorRole::SURFACE
                             })
                             .pill(true)
                             .selected(current == Some(index))
