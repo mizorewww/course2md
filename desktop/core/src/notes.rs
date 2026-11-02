@@ -3,7 +3,6 @@ use crate::backend::Done;
 use anyhow::{Context, Result};
 use course2md::artifact;
 use std::{
-    collections::VecDeque,
     path::{Path, PathBuf},
     sync::Arc,
     time::SystemTime,
@@ -186,10 +185,29 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
     if !root.exists() {
         return Ok(scan);
     }
-    let mut queue = VecDeque::from([(root.to_path_buf(), 0)]);
-    while let Some((dir, depth)) = queue.pop_front() {
-        if dir.join("current.json").is_file() {
-            match current_course(&dir) {
+    // Hidden folders and a note's own versions are never notes; nor is anything
+    // deeper than eight folders.
+    let mut walk = walkdir::WalkDir::new(root)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            entry.depth() == 0 || !(name.starts_with('.') || name == "versions")
+        });
+    while let Some(entry) = walk.next() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                if let Some(io) = error.io_error() {
+                    let path = error.path().unwrap_or(root).display();
+                    scan.issues.push(course2md::tr!("{}：{}", path, io));
+                }
+                continue;
+            }
+        };
+        let dir = entry.path();
+        if entry.file_type().is_dir() && dir.join("current.json").is_file() {
+            match current_course(dir) {
                 Ok(course) => scan.courses.push(course),
                 Err(error) => scan.issues.push(course2md::tr!(
                     "{}：{}",
@@ -197,42 +215,7 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
                     format!("{error:#}")
                 )),
             }
-            continue;
-        }
-        if depth < 8 {
-            match std::fs::read_dir(&dir) {
-                Ok(entries) => {
-                    for entry in entries {
-                        match entry {
-                            Ok(entry) => {
-                                if entry.file_name().to_string_lossy().starts_with('.')
-                                    || entry.file_name() == "versions"
-                                {
-                                    continue;
-                                }
-                                match entry.file_type() {
-                                    Ok(kind) if kind.is_dir() => {
-                                        queue.push_back((entry.path(), depth + 1))
-                                    }
-                                    Ok(_) => {}
-                                    Err(error) => scan.issues.push(course2md::tr!(
-                                        "{}：{}",
-                                        entry.path().display(),
-                                        error
-                                    )),
-                                }
-                            }
-                            Err(error) => {
-                                scan.issues
-                                    .push(course2md::tr!("{}：{}", dir.display(), error))
-                            }
-                        }
-                    }
-                }
-                Err(error) => scan
-                    .issues
-                    .push(course2md::tr!("{}：{}", dir.display(), error)),
-            }
+            walk.skip_current_dir();
         }
     }
     scan.courses.sort_by_key(|c| std::cmp::Reverse(c.modified));
