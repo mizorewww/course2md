@@ -460,9 +460,11 @@ impl Desktop {
                 row.child(spinner(id("spinner"), reading, cx))
             });
         let header = if full {
+            // The model leads with its circle, as the engine tiles do.
             scale
                 .row()
                 .flex_wrap()
+                .child(tinted_icon(symbols::mic(), Tint::Purple, rem(40.)))
                 .child(scale.text(
                     id("name"),
                     model_label(&request.model),
