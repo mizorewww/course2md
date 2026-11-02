@@ -5,6 +5,7 @@ use super::model_diagnostics::{
 };
 use super::*;
 use course2md::config::{AsrProvider, OutputFormat, TranscriptSource, local_models, model_label};
+use desktop_tasks::import::{text_source_choices, text_source_id};
 
 const SUBTITLE_LANGUAGES: [(&str, &str); 5] = [
     ("", "自动"),
@@ -17,23 +18,6 @@ const SUBTITLE_LANGUAGES: [(&str, &str); 5] = [
 const CUSTOM_LANGUAGES: &str = "custom";
 
 impl Desktop {
-    /// The bilingual targets, shared by settings and the per-task options.
-    fn translation_items(
-        current: Option<&'static str>,
-        pick: impl Fn(&Option<&'static str>, &mut Window, &mut App) + 'static,
-    ) -> Vec<MaterialMenuItem> {
-        ui::choice_items(
-            std::iter::once((None, course2md::tr!("不翻译"))).chain(
-                course2md::language::TARGETS
-                    .iter()
-                    .map(|(code, _)| (Some(*code), course2md::language::native_name(code))),
-            ),
-            &current,
-            pick,
-        )
-        .collect()
-    }
-
     /// One AI, recognition or saving default that turns on or off.
     fn generation_switch(
         id: &'static str,
@@ -61,26 +45,17 @@ impl Desktop {
             .tone(ButtonTone::Neutral)
             .segmented()
             .button_size(ButtonSize::Small)
-            .options([
-                ("auto", course2md::tr!("自动")),
-                ("subtitle", course2md::tr!("仅字幕")),
-                ("asr", course2md::tr!("语音识别")),
-            ])
+            .options(text_source_choices().map(|(mode, label)| (text_source_id(mode), label)))
             .icon("auto", symbols::auto_fix_high())
             .icon("subtitle", symbols::subtitles())
             .icon("asr", symbols::mic())
-            .selected(match source {
-                Some(TranscriptSource::Subtitle) => "subtitle",
-                Some(TranscriptSource::Asr) => "asr",
-                _ => "auto",
-            })
+            .selected(text_source_id(source.unwrap_or_default()))
             .on_change(cx.listener(|this, selected: &SharedString, _, cx| {
                 let mut next = this.generation_edit_base();
-                next.options.transcript_source = Some(match selected.as_ref() {
-                    "subtitle" => TranscriptSource::Subtitle,
-                    "asr" => TranscriptSource::Asr,
-                    _ => TranscriptSource::Auto,
-                });
+                next.options.transcript_source = text_source_choices()
+                    .into_iter()
+                    .map(|(mode, _)| mode)
+                    .find(|mode| text_source_id(*mode) == selected.as_ref());
                 this.commit_generation(next, cx);
             }));
         let source_hint = match source {
@@ -394,8 +369,13 @@ impl Desktop {
             shown,
             MaterialMenu::new("default-ai-translate-items")
                 .width(MENU_WIDTH)
-                .items(Self::translation_items(
-                    current,
+                .items(ui::choice_items(
+                    std::iter::once((None, course2md::tr!("不翻译"))).chain(
+                        course2md::language::TARGETS
+                            .iter()
+                            .map(|(code, _)| (Some(*code), course2md::language::native_name(code))),
+                    ),
+                    &current,
                     cx.listener(|this, code: &Option<&'static str>, _, cx| {
                         let mut next = this.generation_edit_base();
                         next.ai.translate = code.map(str::to_owned);
