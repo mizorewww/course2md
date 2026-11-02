@@ -3,6 +3,7 @@ use crate::{
     Desktop,
     course_library::CommandsButton,
     folder_tree::{Command, command_context_menu},
+    library_ui::worker_result,
     storage::{self, Phase, Progress},
     symbols,
     ui::{self, AsyncStatus, Resource},
@@ -183,12 +184,10 @@ impl Desktop {
         self.open_storage_dialog(cx);
         cx.spawn_in(window, async move |this, cx| {
             let worker_cancel = cancel.clone();
-            let inspected = crate::spawn_blocking_io(move || {
+            let inspected = worker_result(crate::spawn_blocking_io(move || {
                 storage::inspect_link(&state, &library_id, &folder, &worker_cancel)
-            })
-            .recv()
-            .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            }))
+            .await;
             let _ = this.update_in(cx, |this, window, cx| match inspected {
                 Err(error) => this.finish_link(generation, Err(error), cx),
                 Ok(link) => match &link.unmarked {
@@ -378,10 +377,7 @@ impl Desktop {
     fn abandon_library_move(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         let task = crate::spawn_blocking_io(move || storage::abandon_move(&path));
         cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let result = worker_result(task).await;
             let _ = this.update(cx, |this, cx| {
                 if let Err(error) = result {
                     this.storage_ui.error =
@@ -487,10 +483,7 @@ impl Desktop {
                     storage::validate_destination(&root, &destination)
                 });
                 cx.spawn_in(window, async move |this, cx| {
-                    let checked = checked
-                        .recv()
-                        .await
-                        .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+                    let checked = worker_result(checked).await;
                     let _ = this.update_in(cx, |this, window, cx| {
                         match checked {
                             Ok((source, destination)) => this.start_library_move(
@@ -615,10 +608,7 @@ impl Desktop {
                     }
                 });
             }
-            let result = worker
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let result = worker_result(worker).await;
             let _ = this.update_in(cx, |this, window, cx| {
                 if this.storage_ui.generation != generation {
                     return;
@@ -1313,10 +1303,7 @@ impl Desktop {
             storage::cleanup_backup(&backup, &roots, &worker_cancel)
         });
         cx.spawn_in(window, async move |this, cx| {
-            let result = worker
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let result = worker_result(worker).await;
             let _ = this.update(cx, |this, cx| {
                 this.storage_idle();
                 this.storage_ui.progress = Progress::default();
