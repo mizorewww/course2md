@@ -2396,13 +2396,30 @@ impl Workspace {
     }
 
     /// `open_at` for tests, with the startup checks applied.
+    ///
+    /// The app opens its record once per run, and an earlier run's library writes have
+    /// finished or died with it. A test reopens a record in the same process, where an
+    /// earlier opening's writes may still be on the blocking pool: they would race the
+    /// startup checks for the same task mirrors, which Windows refuses to replace while
+    /// another writer has them open. So each opening first waits for those of the
+    /// openings before it.
     #[cfg(any(test, feature = "test-support"))]
     pub fn open_at_inline(
         path: PathBuf,
         root: PathBuf,
         options: ConversionOptions,
     ) -> Result<Self> {
-        let mut workspace = Self::open_at(path, root, options)?;
+        static OPENED: Mutex<Vec<(PathBuf, LibraryWrites)>> = Mutex::new(Vec::new());
+        let earlier: Vec<_> = c2m_process::runtime::lock_recover(&OPENED)
+            .iter()
+            .filter(|(opened, _)| *opened == path)
+            .map(|(_, writes)| writes.clone())
+            .collect();
+        for writes in earlier {
+            writes.drain();
+        }
+        let mut workspace = Self::open_at(path.clone(), root, options)?;
+        c2m_process::runtime::lock_recover(&OPENED).push((path, workspace.library_writes()));
         workspace.reconcile_now();
         Ok(workspace)
     }
@@ -4181,6 +4198,8 @@ mod tests {
         assert_eq!(task.state, TaskState::Complete);
         assert_eq!(task.artifact.as_ref(), Some(&version));
         assert_eq!(reopened.state.next_task().unwrap().id, queued);
+        // Its mirrors are the ones `replaced` is about to check.
+        reopened.library_writes.drain();
         replaced.reconcile_now();
         assert!(!replaced.state.reconciling);
     }
