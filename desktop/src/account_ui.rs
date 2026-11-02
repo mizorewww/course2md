@@ -273,6 +273,7 @@ impl Desktop {
 
     pub fn close_account_dialog(&mut self, cx: &mut Context<Self>) {
         self.account.close();
+        self.clear_login_secrets(cx);
         cx.notify();
     }
 

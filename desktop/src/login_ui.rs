@@ -61,6 +61,24 @@ impl Desktop {
         }
     }
 
+    /// Empties the password and code fields, so nothing typed outlives the attempt
+    /// it was typed for. `set_value` needs the window, which a close does not have,
+    /// so this returns to it through `defer` + `update_window`.
+    pub(crate) fn clear_login_secrets(&self, cx: &mut Context<Self>) {
+        let Some(inputs) = &self.login_inputs else {
+            return;
+        };
+        let fields = [inputs.password.clone(), inputs.code.clone()];
+        let handle = self.window;
+        cx.defer(move |cx| {
+            let _ = cx.update_window(handle, |_, window, cx| {
+                for field in &fields {
+                    field.update(cx, |input, cx| input.set_value("", window, cx));
+                }
+            });
+        });
+    }
+
     pub(crate) fn ensure_login_inputs(&mut self, window: &mut Window, cx: &mut App) {
         if self.login_inputs.is_none() {
             self.login_inputs = Some(LoginInputs::new(window, cx));
@@ -78,6 +96,7 @@ impl Desktop {
             return;
         }
         self.account.choose_method(method);
+        self.clear_login_secrets(cx);
         self.ensure_login_inputs(window, cx);
         if method == LoginMethod::Qr {
             self.start_account_qr(cx);
@@ -591,13 +610,20 @@ impl Desktop {
         };
         self.choose_login_method(method, window, cx);
         if let Some(inputs) = &self.login_inputs {
-            let fill =
-                |input: &Entity<InputState>, value: &str, window: &mut Window, cx: &mut App| {
-                    input.update(cx, |input, cx| input.set_value(value, window, cx));
-                };
-            fill(&inputs.account, "someone@example.com", window, cx);
-            fill(&inputs.password, "preview-only", window, cx);
-            fill(&inputs.phone, "13800000000", window, cx);
+            // After the switch's own clearing of the password, which is deferred.
+            let fields = [
+                (inputs.account.clone(), "someone@example.com"),
+                (inputs.password.clone(), "preview-only"),
+                (inputs.phone.clone(), "13800000000"),
+            ];
+            let handle = self.window;
+            cx.defer(move |cx| {
+                let _ = cx.update_window(handle, |_, window, cx| {
+                    for (input, value) in &fields {
+                        input.update(cx, |input, cx| input.set_value(*value, window, cx));
+                    }
+                });
+            });
         }
         let form = &mut self.account.form;
         match step {
