@@ -662,7 +662,10 @@ impl Desktop {
             .is_none()
             .then(|| self.import.source_validation.clone())
             .flatten();
-        let failed = validation.is_some() || self.import.preview_error.is_some();
+        // A collection whose videos are listed did not fail: what it could not confirm
+        // is a note under the list, not an error on the link.
+        let failed = validation.is_some()
+            || (self.import.preview_error.is_some() && self.import.source_candidates.is_empty());
         // The start action owns the submit focus once it is on screen.
         let start_shown = self.import.source_preview.is_some() && self.can_start_input(cx);
         let preview_label = course2md::tr!("预览视频");
