@@ -1465,10 +1465,13 @@ impl Desktop {
                 .when(variant == ButtonVariant::Outlined, |b| {
                     b.tone(ButtonTone::Accent)
                 })
-                // What only shows more of the task is quieter than what acts on it (G4).
+                // What only shows more of the task is quieter than what acts on it (G4),
+                // and stopping the work is never the saturated action, on any page.
                 .when(
-                    (surface == TaskSurface::Home && *action == TaskAction::Cancel)
-                        || matches!(action, TaskAction::Details | TaskAction::Log),
+                    matches!(
+                        action,
+                        TaskAction::Cancel | TaskAction::Details | TaskAction::Log
+                    ),
                     |b| b.tone(ButtonTone::Neutral),
                 )
                 .icon(icon)

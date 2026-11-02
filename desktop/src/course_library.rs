@@ -1849,6 +1849,7 @@ impl Desktop {
                                 SharedString::from(format!("workbench-task-cancel-{cancel}")),
                                 ButtonVariant::Text,
                             )
+                            .tone(ButtonTone::Neutral)
                             .icon(symbols::close())
                             .child(course2md::tr!("取消任务"))
                             .disabled(task.intent == Intent::Cancel)
