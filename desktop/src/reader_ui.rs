@@ -3136,13 +3136,14 @@ impl Desktop {
         } else {
             self.reader_ui.gallery.matches.len()
         };
-        let status = searching.then(|| {
+        // A screenshot search that finds nothing says so once, in the gallery's own
+        // card with its way out; the note's search has no such card.
+        let status = (searching && (reading_note || count > 0)).then(|| {
             accessible_text(
                 "find-status",
                 if reading_note && count > 0 {
                     format!("{}/{count}", self.reader_ui.find.current + 1)
                 } else if count == 0 {
-                    // Note and screenshot searches word their empty results the same way.
                     course2md::tr!("无匹配").into()
                 } else {
                     course2md::tr!("{} 张", count)
