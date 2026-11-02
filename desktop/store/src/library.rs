@@ -215,6 +215,8 @@ pub struct LibraryState {
     pub courses: Vec<Rc<Course>>,
     pub cover_by_source: BTreeMap<String, PathBuf>,
     pub loading: bool,
+    /// Note folders a newer app wrote; see `notes::LibraryScan::newer`.
+    pub newer_notes: std::collections::BTreeSet<PathBuf>,
 }
 
 impl LibraryState {
@@ -230,6 +232,7 @@ impl LibraryState {
             folder_filter: FolderFilter::All,
             courses: Vec::new(),
             cover_by_source: BTreeMap::new(),
+            newer_notes: Default::default(),
             loading: false,
         }
     }
@@ -247,6 +250,7 @@ impl LibraryState {
         self.courses.clear();
         self.cover_by_source.clear();
         self.issues.clear();
+        self.newer_notes.clear();
         self.indexes.clear();
         self.view_cache = Default::default();
         for (location, _, (scan, organization, cache)) in results {
@@ -264,6 +268,7 @@ impl LibraryState {
                         }
                     }
                     self.courses.extend(scan.courses.into_iter().map(Rc::new));
+                    self.newer_notes.extend(scan.newer);
                     self.issues
                         .extend(scan.issues.into_iter().map(|message| LibraryIssue {
                             root: location.root.clone(),
@@ -463,6 +468,7 @@ mod tests {
                 Ok(notes::LibraryScan {
                     courses: Vec::new(),
                     issues: vec!["一份笔记无法读取".into()],
+                    newer: Vec::new(),
                 }),
                 if folders {
                     Ok(organize::Library::default())

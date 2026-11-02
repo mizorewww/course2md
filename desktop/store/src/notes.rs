@@ -28,6 +28,18 @@ impl std::fmt::Display for NewerSchema {
 
 impl std::error::Error for NewerSchema {}
 
+/// Why a conversion is refused before it starts: its note was written by a newer app.
+pub fn newer_note_refusal() -> &'static str {
+    c2m_i18n::tr!("这份笔记由更新版本的应用生成，请更新应用")
+}
+
+/// Whether the note in `dir` was written by a newer app; a missing or damaged one is
+/// not. Blocking: it reads the note's pointer and manifest.
+pub fn note_is_newer(dir: &Path) -> bool {
+    dir.join("current.json").is_file()
+        && current_course(dir).is_err_and(|error| error.is::<NewerSchema>())
+}
+
 /// The library's own wording for the engine's typed refusal.
 fn newer(error: anyhow::Error) -> anyhow::Error {
     if error.is::<artifact::NewerSchema>() {
@@ -92,6 +104,8 @@ pub fn has_incomplete_content(manifest: &artifact::Manifest) -> bool {
 pub struct LibraryScan {
     pub courses: Vec<Course>,
     pub issues: Vec<String>,
+    /// Folders of notes a newer app wrote, which this one must not publish into.
+    pub newer: Vec<PathBuf>,
 }
 
 /// Listing checks that each required file exists at its recorded size; content
@@ -180,6 +194,7 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
     let mut scan = LibraryScan {
         courses: Vec::new(),
         issues: Vec::new(),
+        newer: Vec::new(),
     };
     if !root.exists() {
         return Ok(scan);
@@ -209,6 +224,9 @@ pub fn scan_library(root: &Path) -> Result<LibraryScan> {
             match current_course(dir) {
                 Ok(course) => scan.courses.push(course),
                 Err(error) => {
+                    if error.is::<NewerSchema>() {
+                        scan.newer.push(dir.to_path_buf());
+                    }
                     scan.issues
                         .push(c2m_i18n::tr!("{}：{}", dir.display(), format!("{error:#}")))
                 }

@@ -264,6 +264,21 @@ pub fn fill_default_asr_model(
     }
 }
 
+/// Refuses a source whose note in `root` a newer app wrote: it cannot take a new
+/// version. A preview asks the last scan; a submission also reads the folder.
+pub(crate) fn refuse_newer_note(
+    library: &LibraryState,
+    root: &std::path::Path,
+    identity: &str,
+    validation: PlanValidation,
+) -> Result<()> {
+    let dir = root.join(workspace::course_dir_name(identity));
+    let newer = library.newer_notes.contains(&dir)
+        || (validation == PlanValidation::Submission && desktop_store::notes::note_is_newer(&dir));
+    ensure!(!newer, desktop_store::notes::newer_note_refusal());
+    Ok(())
+}
+
 pub(crate) fn validate_plan_config(
     source: &str,
     config: &c2m_config::settings::ConfigFile,
@@ -459,6 +474,14 @@ impl PlanInputs<'_> {
             .provider
             .get_or_insert_with(|| recommended_local_provider(self.environment));
         validate_plan_config(&source.input, &validation_config)?;
+        // A note a newer app wrote cannot take a new version: say so before anything
+        // is downloaded or sent, not when publishing refuses after paid requests.
+        if let Some(location) = self
+            .workspace
+            .and_then(|workspace| workspace.state.library(&draft.library_id))
+        {
+            refuse_newer_note(self.library, &location.root, &source.identity, validation)?;
+        }
         if validation == PlanValidation::Submission && !source.online {
             ensure!(
                 std::path::Path::new(&source.input).is_file(),
@@ -882,6 +905,43 @@ pub mod tests {
         );
         let next = desktop_store::workspace::Draft::new(true, "library".into(), Default::default());
         assert_eq!(next.local_provider, None);
+    }
+
+    /// A note a newer app wrote is refused when the plan is made, before any
+    /// download or request, in the interface language.
+    #[test]
+    fn a_note_a_newer_app_wrote_is_refused_before_any_work() {
+        use desktop_store::{library::LibraryState, notes, workspace::course_dir_name};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("library");
+        let mut library = LibraryState::new(root.clone());
+        let check = |library: &LibraryState, validation| {
+            super::refuse_newer_note(library, &root, "local:sha256:abc", validation)
+        };
+        check(&library, PlanValidation::Submission).unwrap();
+        let note = root.join(course_dir_name("local:sha256:abc"));
+        std::fs::create_dir_all(&note).unwrap();
+        std::fs::write(
+            note.join("current.json"),
+            r#"{"schema":2,"course_id":"c","version_id":"v","manifest":"versions/v/manifest.json"}"#,
+        )
+        .unwrap();
+        // Before a scan saw it, the submission's own read refuses it.
+        check(&library, PlanValidation::Preview).unwrap();
+        let error = check(&library, PlanValidation::Submission).unwrap_err();
+        assert_eq!(error.to_string(), notes::newer_note_refusal());
+        let scan = notes::scan_library(&root).unwrap();
+        assert_eq!(scan.newer, std::slice::from_ref(&note));
+        library.newer_notes.extend(scan.newer);
+        assert!(check(&library, PlanValidation::Preview).is_err());
+        // Another video's note is not this one.
+        super::refuse_newer_note(
+            &library,
+            &root,
+            "local:sha256:other",
+            PlanValidation::Submission,
+        )
+        .unwrap();
     }
 
     #[test]

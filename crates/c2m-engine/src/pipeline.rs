@@ -129,6 +129,7 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
         if let Some(error) = local_duration_error {
             return Err(error);
         }
+        task.refuse_newer_note().await?;
         task.generate(&meta, SubtitleInput::Discover(probed), Credentials::Cli)
             .await
     })
@@ -178,6 +179,7 @@ pub(crate) async fn run_task(
         started,
     };
     task.recording_failure(&platform, &request.source_id, async {
+        task.refuse_newer_note().await?;
         if let execution::Operation::Reprocess {
             base_version_dir,
             components,
@@ -247,6 +249,12 @@ impl Task<'_> {
     /// Any failure once the work directory is known leaves a diagnostic run.json:
     /// version, source, provider, asr_model, error text, elapsed time. A failed write
     /// only warns, since the original error is the outcome.
+    /// Nothing is fetched or sent for a note this app could not publish.
+    async fn refuse_newer_note(&self) -> Result<()> {
+        let target = self.target.clone();
+        blocking(move || artifact::refuse_newer(&target)).await
+    }
+
     async fn recording_failure(
         &self,
         platform: &str,
