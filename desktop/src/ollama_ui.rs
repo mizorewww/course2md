@@ -21,9 +21,8 @@ impl Desktop {
         });
         cx.spawn(async move |this, cx| {
             let result = task
-                .recv()
                 .await
-                .unwrap_or_else(|_| Err(crate::interrupted().to_owned()));
+                .unwrap_or_else(|| Err(crate::interrupted().to_owned()));
             let _ = this.update(cx, |this, cx| {
                 if this.ollama.generation != generation {
                     return;

@@ -34,9 +34,9 @@ impl Desktop {
             (saved, status)
         });
         cx.spawn(async move |this, cx| {
-            let received = task.recv().await;
+            let received = task.await;
             let _ = this.update(cx, |this, cx| {
-                let (saved, result) = received.unwrap_or_else(|_| {
+                let (saved, result) = received.unwrap_or_else(|| {
                     (
                         this.account.has_saved_login,
                         Err(crate::interrupted().to_owned()),
@@ -246,13 +246,13 @@ impl Desktop {
         // Removing the keychain/file credential can block; keep it off the UI thread.
         let task = crate::spawn_blocking_io(course2md::auth::clear_bilibili_login);
         cx.spawn(async move |this, cx| {
-            let result = task.recv().await;
+            let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 if this.account.status_generation != generation {
                     return;
                 }
                 match result {
-                    Ok(Ok(_)) => {
+                    Some(Ok(_)) => {
                         this.account.has_saved_login = false;
                         this.account.status = Some(AccountStatus::Disconnected);
                         this.account.status_error = None;
@@ -308,9 +308,9 @@ impl Desktop {
         let generation = self.account.generation;
         let task = crate::spawn_blocking_io(QrSession::generate);
         cx.spawn(async move |this, cx| {
-            let result = task.recv().await;
+            let result = task.await;
             let mut session = match result {
-                Ok(Ok(session)) => session,
+                Some(Ok(session)) => session,
                 _ => {
                     let _ = this.update(cx, |this, cx| {
                         if this.account.current(generation) {
@@ -351,7 +351,7 @@ impl Desktop {
                     let result = session.poll();
                     (session, result)
                 });
-                let Ok((next, result)) = task.recv().await else {
+                let Some((next, result)) = task.await else {
                     let _ = this.update(cx, |this, cx| {
                         if this.account.current(generation) {
                             this.account.dialog =
@@ -370,11 +370,8 @@ impl Desktop {
                     Ok(QrPoll::Authenticated(login)) => {
                         // The credential commit touches the keychain/file store; do it
                         // off the UI thread, then re-check the generation below.
-                        let save = crate::spawn_blocking_io(move || login.save());
-                        QrPollResult::Authenticated(match save.recv().await {
-                            Ok(result) => result,
-                            Err(_) => Err(anyhow::anyhow!(crate::interrupted())),
-                        })
+                        let save = crate::spawn_blocking_result(move || login.save());
+                        QrPollResult::Authenticated(save.await)
                     }
                     Err(_) => QrPollResult::Failed,
                 };

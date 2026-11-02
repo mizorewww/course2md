@@ -641,9 +641,8 @@ impl Desktop {
         });
         cx.spawn(async move |this, cx| {
             let secrets = secrets_rx
-                .recv()
                 .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(course2md::tr!("凭据读取意外中断"))));
+                .unwrap_or_else(|| Err(anyhow::anyhow!(course2md::tr!("凭据读取意外中断"))));
             let _ = this.update(cx, |this, cx| {
                 match secrets {
                     Ok(secrets) => this.finish_task_start(&task_id, secrets, cx),
@@ -689,7 +688,7 @@ impl Desktop {
         };
         let read_task = task.clone();
         // All of this touches the library's disk, which may be slow.
-        let read = crate::spawn_blocking_io(move || {
+        let read = crate::spawn_blocking_result(move || {
             workspace::check_library(&location)?;
             if read_task.plan.options().source_mode != TranscriptSource::Asr
                 && read_task.plan.subtitle.is_none()
@@ -699,10 +698,10 @@ impl Desktop {
             workspace::store_task_subtitles(&read_task)?;
             writes.write_control_now(&read_task.work_dir.join("control.json"), &control)?;
             request.validate()?;
-            Ok::<_, anyhow::Error>(request)
+            Ok(request)
         });
         cx.spawn(async move |this, cx| {
-            let read = read.recv().await.unwrap_or_else(|error| Err(error.into()));
+            let read = read.await;
             let _ = this.update(cx, |this, cx| match read {
                 Ok(request) => this.start_task_request(task, request, cx),
                 Err(error) => this.fail_task_before_start(&task.id, error, cx),
@@ -752,12 +751,9 @@ impl Desktop {
         // Starting the child and writing the full request to stdin can block on a pipe;
         // keep it off the UI thread.
         let wake = self.event_wake_tx.clone();
-        let started = crate::spawn_blocking_io(move || Job::start_task(&request, wake));
+        let started = crate::spawn_blocking_result(move || Job::start_task(&request, wake));
         cx.spawn(async move |this, cx| {
-            let job = started
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let job = started.await;
             let _ = this.update(cx, |this, cx| match job {
                 Ok(job) => {
                     this.work.install(&task.id, job);
@@ -1080,7 +1076,7 @@ impl Desktop {
         let events =
             crate::spawn_blocking_io(move || workspace::task_subtitle_events(&task).ok().flatten());
         cx.spawn_in(window, async move |this, cx| {
-            let events = events.recv().await.ok().flatten();
+            let events = events.await.flatten();
             let _ = this.update_in(cx, |this, window, cx| {
                 let adjusted = this.transact(
                     course2md::tr!("尚未打开任务调整选项：{}"),
@@ -1244,7 +1240,7 @@ impl Desktop {
                         (issues, thumbnail)
                     });
                     cx.spawn(async move |this, cx| {
-                        let Ok((issues, thumbnail)) = published.recv().await else {
+                        let Some((issues, thumbnail)) = published.await else {
                             return;
                         };
                         let _ = this.update(cx, |this, cx| {

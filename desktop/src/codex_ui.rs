@@ -62,12 +62,9 @@ impl Desktop {
             return;
         }
         let generation = self.codex.begin(surface, work);
-        let task = crate::spawn_blocking_io(action);
+        let task = crate::spawn_blocking_result(action);
         cx.spawn(async move |this, cx| {
-            let result = task
-                .recv()
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(crate::interrupted())));
+            let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 if !this.codex.current(generation, work) {
                     return;

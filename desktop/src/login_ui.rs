@@ -167,17 +167,17 @@ impl Desktop {
                     }
                 });
             }
-            let received = task.recv().await;
+            let received = task.await;
             let _ = this.update(cx, |this, cx| {
                 if !this.account.current(generation) {
                     return;
                 }
                 let result = match received {
-                    Ok((passport, result)) => {
+                    Some((passport, result)) => {
                         this.account.passport = Some(passport);
                         result
                     }
-                    Err(_) => Err(anyhow::anyhow!(crate::interrupted())),
+                    None => Err(anyhow::anyhow!(crate::interrupted())),
                 };
                 this.account.form.step = FormStep::Entry;
                 done(this, result, cx);
@@ -207,13 +207,13 @@ impl Desktop {
                 self.account.form.step = FormStep::Working;
                 let task = crate::spawn_blocking_io(move || login.save());
                 cx.spawn(async move |this, cx| {
-                    let saved = task.recv().await;
+                    let saved = task.await;
                     let _ = this.update(cx, |this, cx| {
                         if !this.account.current(generation) {
                             return;
                         }
                         match saved {
-                            Ok(Ok(profile)) => this.account.signed_in(profile),
+                            Some(Ok(profile)) => this.account.signed_in(profile),
                             _ => {
                                 this.account.form.step = FormStep::Entry;
                                 this.account.form.error = Some(

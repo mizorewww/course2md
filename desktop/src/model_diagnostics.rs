@@ -239,7 +239,7 @@ impl Desktop {
             (result, directories)
         });
         cx.spawn(async move |this, cx| {
-            let Ok((result, cache_directories)) = work.recv().await else {
+            let Some((result, cache_directories)) = work.await else {
                 return;
             };
             let _ = this.update(cx, |this, cx| {
