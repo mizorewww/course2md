@@ -143,7 +143,7 @@ UP主/作者：{}\n	UP主/作者：{}\n	Uploader/author: {}\n	UP主/作者：{}\
 asr checkpoint 无身份标记，旧进度作废重算 / asr checkpoint has no identity marker; old progress discarded and recomputed	asr checkpoint 无身份标记，旧进度作废重算	asr checkpoint has no identity marker; old progress discarded and recomputed	asr checkpoint 無身份標記，舊進度作廢重算	asr チェックポイントには ID タグがないため、古い進行状況は無効であり、再計算されます。
 asr checkpoint 身份不匹配（模型/后端/版本已变化），旧进度作废重算 / asr checkpoint identity mismatch (model/backend/version changed); old progress discarded and recomputed	asr checkpoint 身份不匹配（模型/后端/版本已变化），旧进度作废重算	asr checkpoint identity mismatch (model/backend/version changed); old progress discarded and recomputed	asr checkpoint 身份不匹配（模型/後端/版本已變化），舊進度作廢重算	ASR チェックポイント ID が一致しません (モデル/バックエンド/バージョンが変更されています)。古い進行状況は無効になり、再計算されます。
 checkpoint 末行解析失败（按崩溃残留忽略）：{e}	checkpoint 末行解析失败（按崩溃残留忽略）：{e}	Failed to parse the last checkpoint line (ignored as crash leftovers): {e}	checkpoint 末行解析失敗（按崩潰殘留忽略）：{e}	チェックポイントの最終行を解析できませんでした（クラッシュの残骸として無視）：{e}
-codex CLI 当前是 API key 模式；请在 codex 中用 ChatGPT 账号登录后重试 / The codex CLI is in API-key mode; log in with a ChatGPT account in codex and retry	codex CLI 当前是 API key 模式；请在 codex 中用 ChatGPT 账号登录后重试	The codex CLI is in API-key mode; log in with a ChatGPT account in codex and retry	codex CLI 目前是 API key 模式；請在 codex 中用 ChatGPT 帳號登入後重試	codex CLI は現在 API キー モードです。 Codex で ChatGPT アカウントを使用してログインし、もう一度試してください。
+codex CLI 当前是 API key 模式；请在 codex 中用 ChatGPT 账号登录后重试 / The codex CLI is in API-key mode; log in with a ChatGPT account in codex and retry	codex CLI 当前是 API key 模式；请在 codex 中用 ChatGPT 账号登录后重试	The codex CLI is in API-key mode; log in with a ChatGPT account in codex and retry	codex CLI 目前是 API key 模式；請在 codex 中用 ChatGPT 帳號登入後重試	codex CLI は現在 API キー モードです。Codex で ChatGPT アカウントを使用してログインし、もう一度試してください。
 codex CLI 登录态无法解析 / Cannot parse the codex CLI login state	codex CLI 登录态无法解析	Cannot parse the codex CLI login state	codex CLI 登入態無法解析	codex CLI ログイン状態を解析できません
 codex CLI 登录态缺少令牌，请在 codex 中重新登录 / The codex CLI login state is missing tokens; log in again in codex	codex CLI 登录态缺少令牌，请在 codex 中重新登录	The codex CLI login state is missing tokens; log in again in codex	codex CLI 登入態缺少令牌，請在 codex 中重新登入	Codex CLI ログイン状態にトークンがありません。Codexで再度ログインしてください。
 codex CLI 的登录已失效。改用浏览器授权登录（ChatGPT 账号）？/ The codex CLI login expired. Authorize in the browser instead?	codex CLI 的登录已失效。改用浏览器授权登录（ChatGPT 账号）？/ The codex CLI login expired. Authorize in the browser instead?	The codex CLI login expired. Authorize in the browser instead?	codex CLI 的登入已失效。改用瀏覽器授權登入（ChatGPT 帳號）？/ The codex CLI login expired. Authorize in the browser instead?	codex CLI のログインの有効期限が切れました。代わりにブラウザで認証しますか（ChatGPT アカウント）？
@@ -243,7 +243,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 二维码响应缺少 key / QR code response is missing key	二维码响应缺少 key	QR code response is missing key	QR 碼回應缺少 key	QR コードの応答に key がありません
 二维码响应缺少 url / QR code response is missing url	二维码响应缺少 url	QR code response is missing url	QR 碼回應缺少 url	QR コードの応答に url がありません
 二维码已过期	二维码已过期	QR code has expired	QR 碼已過期	QRコードの有効期限が切れています
-二维码已过期，请重新运行 course2md --login bilibili / QR code expired; run course2md --login bilibili again	二维码已过期，请重新运行 course2md --login bilibili	QR code expired; run course2md --login bilibili again	QR 碼已過期，請重新執行 course2md --login bilibili	QR コードの有効期限が切れています。 course2md --login bilibili を再実行してください。
+二维码已过期，请重新运行 course2md --login bilibili / QR code expired; run course2md --login bilibili again	二维码已过期，请重新运行 course2md --login bilibili	QR code expired; run course2md --login bilibili again	QR 碼已過期，請重新執行 course2md --login bilibili	QR コードの有効期限が切れています。course2md --login bilibili を再実行してください。
 二维码约 {} 秒后过期	二维码约 {} 秒后过期	QR code expires in approximately {} seconds	QR 碼約 {} 秒後過期	QR コードの有効期限は約 {} 秒後に切れます
 云端 API（需服务端点和 API Key，可能收费） / Cloud API (endpoint and API key required; charges may apply)	云端 API（需服务端点和 API Key，可能收费）	Cloud API (endpoint and API key required; charges may apply)	雲端 API（需服務端點和 API Key，可能收費）	クラウド API (サービス エンドポイントと API キーが必要、料金が適用される場合があります)
 云端服务	云端服务	Cloud service	雲端服務	クラウドサービス
@@ -696,7 +696,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 已就绪 / Ready	已就绪	Ready	已就緒	準備完了
 已恢复最近一次可用的设置，原文件已保留	已恢复最近一次可用的设置，原文件已保留	The last available settings have been restored and the original files have been retained.	已恢復最近一次可用的設定，原檔案已保留	最後に利用可能な設定が復元され、元のファイルが保持されています。
 已扫码，请在手机上确认登录	已扫码，请在手机上确认登录	The code has been scanned, please confirm login on your mobile phone	已掃碼，請在手機上確認登入	コードがスキャンされました。携帯電話でのログインを確認してください。
-已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	The code has been scanned, please confirm login on your mobile phone. / Code scanned; confirm the login on your phone.	已掃碼，請在手機上確認登入。/ Code scanned; confirm the login on your phone.	コードがスキャンされました。携帯電話でのログインを確認してください。 / コードがスキャンされました。携帯電話でログインを確認します。
+已扫码，请在手机上确认登录。/ Code scanned; confirm the login on your phone.	已扫码，请在手机上确认登录。	Code scanned; confirm the login on your phone.	已掃碼，請在手機上確認登入。	コードがスキャンされました。携帯電話でログインを確認してください。
 已找到	已找到	Found	已找到	見つかりました
 已找到 {} 张候选截图 / Found {} candidate slides	已找到 {} 张候选截图	Found {} candidate slides	已找到 {} 張候選截圖	{} 枚の候補スクリーンショットが見つかりました
 已把 {} 个视频加入队列	已把 {} 个视频加入队列	{} videos have been queued	已把 {} 個影片加入佇列	{} 本の動画をキューに追加しました
@@ -1011,7 +1011,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法解析账号状态 / Cannot parse account status	无法解析账号状态	Cannot parse account status	無法解析帳號狀態	アカウントのステータスを解析できません
 无法识别这个视频，请重新预览	无法识别这个视频，请重新预览	This video cannot be recognized, please preview again	無法辨識這個影片，請重新預覽	この動画は認識できません。もう一度プレビューしてください
 无法识别这个链接对应的视频，请粘贴具体视频的链接 / Cannot identify the video for this link; paste the link to a specific video	无法识别这个链接对应的视频，请粘贴具体视频的链接	Cannot identify the video for this link; paste the link to a specific video	無法辨識這個連結對應的影片，請貼上具體影片的連結	このリンクに対応する動画を認識できません。特定の動画へのリンクを貼り付けてください。
-无法读取 Bilibili 登录状态，请重新运行 course2md --login bilibili / Cannot read Bilibili login state; run course2md --login bilibili again	无法读取 Bilibili 登录状态，请重新运行 course2md --login bilibili	Cannot read Bilibili login state; run course2md --login bilibili again	無法讀取 Bilibili 登入狀態，請重新執行 course2md --login bilibili	Bilibili のログイン ステータスを読み取ることができません。 course2md --login bilibili を再実行してください。
+无法读取 Bilibili 登录状态，请重新运行 course2md --login bilibili / Cannot read Bilibili login state; run course2md --login bilibili again	无法读取 Bilibili 登录状态，请重新运行 course2md --login bilibili	Cannot read Bilibili login state; run course2md --login bilibili again	無法讀取 Bilibili 登入狀態，請重新執行 course2md --login bilibili	Bilibili のログイン ステータスを読み取ることができません。course2md --login bilibili を再実行してください。
 无法读取 Codex 登录状态 / Cannot read Codex login state	无法读取 Codex 登录状态	Cannot read Codex login state	無法讀取 Codex 登入狀態	Codex のログイン ステータスを読み取ることができません
 无法读取 {}	无法读取 {}	Unable to read {}	無法讀取 {}	{} を読み取れません
 无法读取 {} / Cannot read {}	无法读取 {}	Cannot read {}	無法讀取 {}	{} を読み取れません
@@ -1059,7 +1059,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 显示此消息或子命令的帮助	显示此消息或子命令的帮助	Show this message or help for a subcommand	顯示此訊息或子命令的說明	このメッセージまたはサブコマンドのヘルプを表示
 显示版本	显示版本	Show version	顯示版本	バージョンを表示
 显示笔记保存位置	显示笔记保存位置	Show where notes are saved	顯示筆記儲存位置	ノートの保存場所を表示する
-显示诊断日志；-vv 显示调试细节 / Diagnostic logs; -vv for debug details	显示诊断日志；-vv 显示调试细节	Diagnostic logs; -vv for debug details	顯示診斷記錄；-vv 顯示除錯細節	診断ログを表示します。 -vv はデバッグの詳細を表示します
+显示诊断日志；-vv 显示调试细节 / Diagnostic logs; -vv for debug details	显示诊断日志；-vv 显示调试细节	Diagnostic logs; -vv for debug details	顯示診斷記錄；-vv 顯示除錯細節	診断ログを表示します。-vv はデバッグの詳細を表示します
 显示配置路径和文件设置 / Show the config path and file settings	显示配置路径和文件设置	Show the config path and file settings	顯示設定路徑和檔案設定	設定パスとファイル設定を表示
 暂停	暂停	Pause	暫停	一時停止
 暂停中	暂停中	Paused	暫停中	一時停止中
@@ -1462,7 +1462,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 登录 Bilibili	登录 Bilibili	Sign in to Bilibili	登入 Bilibili	Bilibili にログイン
 登录后可读取账号有权访问的视频与字幕	登录后可读取账号有权访问的视频与字幕	Sign in to read the videos and subtitles your account can access.	登入後可讀取帳號有權存取的影片與字幕	ログイン後、アカウントがアクセスできる動画と字幕を読むことができます。
 登录响应未包含完整凭据，请重新扫码 / Login response did not include complete credentials; scan the QR code again	登录响应未包含完整凭据，请重新扫码	Login response did not include complete credentials; scan the QR code again	登入回應未包含完整憑證，請重新掃描 QR 碼	ログイン応答に完全な認証情報が含まれていません。QR コードをもう一度スキャンしてください。
-登录响应缺少凭据，请重新运行 course2md --login bilibili / Login response is missing credentials; run course2md --login bilibili again	登录响应缺少凭据，请重新运行 course2md --login bilibili	Login response is missing credentials; run course2md --login bilibili again	登入回應缺少憑證，請重新執行 course2md --login bilibili	ログイン応答に資格情報がありません。 course2md --login bilibili を再実行してください。
+登录响应缺少凭据，请重新运行 course2md --login bilibili / Login response is missing credentials; run course2md --login bilibili again	登录响应缺少凭据，请重新运行 course2md --login bilibili	Login response is missing credentials; run course2md --login bilibili again	登入回應缺少憑證，請重新執行 course2md --login bilibili	ログイン応答に資格情報がありません。course2md --login bilibili を再実行してください。
 登录回调地址无效 / Invalid login callback URL	登录回调地址无效	Invalid login callback URL	登入回呼網址無效	ログインコールバックURLが無効です
 登录失败，请回终端重试。/ Login failed; return to the terminal and retry.	登录失败，请回终端重试。/ Login failed; return to the terminal and retry.	Login failed; return to the terminal and retry.	登入失敗，請回到終端機重試。	ログインに失敗しました。ターミナルに戻って再試行してください。
 登录已失效	登录已失效	Login expired	登入已失效	ログインの有効期限切れ
@@ -1545,7 +1545,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 笔记详情	笔记详情	Note details	筆記詳情	ノートの詳細
 第 {} 版 · {} 生成	第 {} 版 · {} 生成	Version {} · generated {}	第 {} 版 · {} 生成	バージョン {} · {} に生成
 第 {} 版 · {}{}	第 {} 版 · {}{}	Version {} · {}{}	第 {} 版 · {}{}	バージョン {} · {}{}
-第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	The first paragraph should correct the grammar of have / book; the second paragraph should retain the original meaning of water freezing at zero degrees Celsius	第一段應糾正 have / book 的語法；第二段應保留水在零攝氏度結冰的原意	最初の段落では、have / book の文法を修正する必要があります。 2 番目の段落は、摂氏 0 度で水が凍るという本来の意味を保持する必要があります。
+第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	第一段应纠正 have / book 的语法；第二段应保留水在零摄氏度结冰的原意	The first paragraph should correct the grammar of have / book; the second paragraph should retain the original meaning of water freezing at zero degrees Celsius	第一段應糾正 have / book 的語法；第二段應保留水在零攝氏度結冰的原意	最初の段落では、have / book の文法を修正する必要があります。2 番目の段落は、摂氏 0 度で水が凍るという本来の意味を保持する必要があります。
 等待 yt-dlp 结束失败 / Failed waiting for yt-dlp to exit	等待 yt-dlp 结束失败	Failed waiting for yt-dlp to exit	等待 yt-dlp 結束失敗	yt-dlp の終了待ちに失敗しました
 等待准备进度	等待准备进度	Waiting for preparation progress	等待準備進度	準備の進行を待っています
 等待响应	等待响应	Waiting for response	等待回應	応答を待っています
