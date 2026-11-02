@@ -1786,7 +1786,7 @@ impl Desktop {
             ListItem::new(("diagnostic-tool", index), *name)
                 .density(ListDensity::Compact)
                 .leading(ListLeading::Icon(icon))
-                .trailing_text(state)
+                .supporting(state)
         });
         let repair =
             (!environment.ffmpeg || !environment.ffprobe || !environment.ytdlp).then(|| {
