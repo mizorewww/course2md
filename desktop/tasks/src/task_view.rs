@@ -75,6 +75,40 @@ pub fn task_group(task: &TaskRecord) -> TaskGroup {
     }
 }
 
+/// The task page header's chips. Each task counts once, in the group it is shown
+/// in: a task held by a worker from an earlier session is still `Queued` in its
+/// record, but it is being processed, not waiting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TaskCounts {
+    pub running: usize,
+    pub attention: usize,
+    pub queued: usize,
+    pub resumable: usize,
+    /// Work still meant to run that this session can pause: not a held task, whose
+    /// worker it does not command.
+    pub pausable: usize,
+}
+
+pub fn task_counts(tasks: &[TaskRecord]) -> TaskCounts {
+    tasks
+        .iter()
+        .fold(TaskCounts::default(), |mut counts, task| {
+            let group = task_group(task);
+            counts.running += usize::from(group == TaskGroup::Running);
+            counts.attention += usize::from(group == TaskGroup::Attention);
+            counts.queued +=
+                usize::from(group == TaskGroup::Queued && task.state == TaskState::Queued);
+            counts.resumable += usize::from(resumable(task));
+            counts.pausable += usize::from(
+                matches!(task.state, TaskState::Running | TaskState::Queued)
+                    && task.intent == Intent::Run
+                    && task.handled_by.is_none()
+                    && !task.held,
+            );
+            counts
+        })
+}
+
 /// What the app bar shows for the task page, in one pass over the tasks: how
 /// many still need doing, and whether one needs the person.
 pub fn task_navigation_summary(tasks: &[TaskRecord]) -> (usize, bool) {
@@ -508,6 +542,42 @@ pub fn task_note_failures(
     } else {
         Vec::new()
     }
+}
+
+/// The speech model `task` runs with: its own choice, or `fallback`'s default model
+/// where it names no engine.
+pub fn task_model_request(
+    task: &TaskRecord,
+    fallback: c2m_config::config::AsrProvider,
+) -> desktop_prefs::model_status::Request {
+    let defaults = &task.plan.config.defaults;
+    desktop_prefs::model_status::Request::new(
+        defaults.provider.unwrap_or(fallback),
+        defaults.asr_model.as_deref(),
+        &c2m_core::paths::model_dir_from(defaults.model_dir.as_deref()),
+    )
+}
+
+/// The tasks that stopped only because `request`'s model was not there, and continue
+/// once it is ready. A task the person paused, cancelled or continued in the
+/// meantime has left that state, and one stopped for another model waits for that.
+pub fn tasks_awaiting_model(
+    tasks: &[TaskRecord],
+    request: &desktop_prefs::model_status::Request,
+    fallback: c2m_config::config::AsrProvider,
+) -> Vec<String> {
+    tasks
+        .iter()
+        .filter(|task| {
+            task.state == TaskState::NeedsAttention
+                && task.events.model_required
+                && task.handled_by.is_none()
+                && !task.held
+                && !task.has_uncertain()
+                && task_model_request(task, fallback) == *request
+        })
+        .map(|task| task.id.clone())
+        .collect()
 }
 
 /// A paused task that can continue as it is.
@@ -1048,6 +1118,88 @@ mod tests {
         });
         let actions = task_actions(&task, TaskSurface::Card, &facts());
         assert!(!actions.contains(&Action::PrepareModel));
+    }
+
+    /// Once the model a task stopped for is ready, that task continues; one the
+    /// person paused or cancelled meanwhile does not, nor one waiting for another model.
+    #[test]
+    fn tasks_stopped_for_a_model_continue_once_it_is_ready() {
+        use super::{task_model_request, tasks_awaiting_model};
+        use c2m_config::config::AsrProvider;
+        use c2m_protocol::progress::{ErrorCode, Event};
+        let stopped = |id: &str, model: Option<&str>| {
+            let mut task = task_record(id);
+            task.plan.config.defaults.provider = Some(AsrProvider::Gpu);
+            task.plan.config.defaults.asr_model = model.map(str::to_owned);
+            task.state = TaskState::NeedsAttention;
+            task.events.apply(&Event::Error {
+                message: "识别模型尚未下载".into(),
+                code: ErrorCode::ModelRequired,
+            });
+            task
+        };
+        let waiting = stopped("waiting", None);
+        let mut paused = stopped("paused", None);
+        paused.state = TaskState::Paused;
+        let mut cancelled = stopped("cancelled", None);
+        cancelled.state = TaskState::Cancelled;
+        let mut continued = stopped("continued", None);
+        continued.state = TaskState::Queued;
+        let mut other_failure = stopped("other-failure", None);
+        other_failure.events.apply(&Event::Error {
+            message: "其他错误".into(),
+            code: ErrorCode::Other,
+        });
+        let request = task_model_request(&waiting, AsrProvider::Coreml);
+        let mut other_model = stopped("other-model", None);
+        other_model.plan.config.defaults.provider = Some(AsrProvider::Coreml);
+        let tasks = [
+            waiting,
+            paused,
+            cancelled,
+            continued,
+            other_failure,
+            other_model,
+        ];
+        assert_eq!(
+            tasks_awaiting_model(&tasks, &request, AsrProvider::Coreml),
+            ["waiting"]
+        );
+        // A task naming no engine waits for the one this machine would use.
+        let mut unnamed = stopped("unnamed", None);
+        unnamed.plan.config.defaults.provider = None;
+        assert_eq!(
+            tasks_awaiting_model(&[unnamed], &request, AsrProvider::Gpu),
+            ["unnamed"]
+        );
+    }
+
+    /// A task held by a worker from an earlier session is still queued in its record;
+    /// the header counts it once, as processing, and offers no pause for it.
+    #[test]
+    fn a_held_task_counts_once_as_processing() {
+        use super::{TaskCounts, task_counts};
+        let mut held = task_record("held");
+        held.state = TaskState::Queued;
+        held.held = true;
+        let mut waiting = task_record("waiting");
+        waiting.state = TaskState::Queued;
+        assert_eq!(
+            task_counts(&[held.clone()]),
+            TaskCounts {
+                running: 1,
+                ..TaskCounts::default()
+            }
+        );
+        assert_eq!(
+            task_counts(&[held, waiting]),
+            TaskCounts {
+                running: 1,
+                queued: 1,
+                pausable: 1,
+                ..TaskCounts::default()
+            }
+        );
     }
 
     #[test]

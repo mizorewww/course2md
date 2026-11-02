@@ -426,19 +426,13 @@ impl Desktop {
     /// The page title with a chip for each kind of work there is, and the
     /// action that stops or resumes all of it.
     fn queue_page_header(&self, tasks: &[TaskRecord], cx: &mut Context<Self>) -> Div {
-        let count =
-            |wanted: &dyn Fn(&TaskRecord) -> bool| tasks.iter().filter(|task| wanted(task)).count();
-        let running = count(&|task| task_group(task) == TaskGroup::Running);
-        let attention = count(&|task| task_group(task) == TaskGroup::Attention);
-        let queued = count(&|task| task.state == TaskState::Queued);
-        let resumable = count(&resumable);
-        // Pausing applies to work that is still meant to run; a task already
-        // stopping has nothing left to pause.
-        let pausable = count(&|task| {
-            matches!(task.state, TaskState::Running | TaskState::Queued)
-                && task.intent == Intent::Run
-                && task.handled_by.is_none()
-        });
+        let TaskCounts {
+            running,
+            attention,
+            queued,
+            resumable,
+            pausable,
+        } = task_counts(tasks);
         let chips = [
             (
                 running,
