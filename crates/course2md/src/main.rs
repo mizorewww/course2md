@@ -174,7 +174,7 @@ fn run(cli: Cli, no_args: bool) -> anyhow::Result<()> {
                 "--login 后只能跟视频链接或本地视频路径 / After --login, provide only a video URL or local file path"
             )
         );
-        course2md::cli::login(platform)?;
+        course2md::cli::login(platform, cli.method, cli.browser.as_deref())?;
         if cli.source.is_none() {
             return Ok(());
         }

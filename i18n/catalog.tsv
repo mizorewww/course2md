@@ -1,6 +1,24 @@
 zh	zh_hans	en	zh_hant	ja
+--browser 只适用于 --login youtube / --browser applies only to --login youtube	--browser 只适用于 --login youtube	--browser applies only to --login youtube	--browser 只適用於 --login youtube	--browser は --login youtube でのみ使えます
+--method 只适用于 --login bilibili / --method applies only to --login bilibili	--method 只适用于 --login bilibili	--method applies only to --login bilibili	--method 只適用於 --login bilibili	--method は --login bilibili でのみ使えます
+Bilibili 拒绝了登录请求	Bilibili 拒绝了登录请求	Bilibili refused the login	Bilibili 拒絕了登入請求	Bilibili がログインを拒否しました
+Bilibili 暂时限制了登录请求，请稍后再试	Bilibili 暂时限制了登录请求，请稍后再试	Bilibili is limiting login requests for now; try again later	Bilibili 暫時限制了登入請求，請稍後再試	Bilibili が一時的にログインを制限しています。しばらくしてから再試行してください
+Bilibili 登录响应不完整，请重试	Bilibili 登录响应不完整，请重试	Bilibili’s login reply was incomplete; try again	Bilibili 登入回應不完整，請重試	Bilibili のログイン応答が不完全です。再試行してください
+Bilibili 登录方式：qr（默认）、password、sms / Bilibili login method: qr (default), password, sms	Bilibili 登录方式：qr（默认）、password、sms	Bilibili login method: qr (default), password, sms	Bilibili 登入方式：qr（預設）、password、sms	Bilibili のログイン方法：qr（既定）、password、sms
+Bilibili 要求了暂不支持的验证方式，请改用扫码登录	Bilibili 要求了暂不支持的验证方式，请改用扫码登录	Bilibili asked for a check this app does not support yet; sign in with a QR code instead	Bilibili 要求了暫不支援的驗證方式，請改用掃碼登入	Bilibili が未対応の確認方法を求めています。QR コードでログインしてください
+Bilibili 要求验证手机号	Bilibili 要求验证手机号	Bilibili asks to verify a phone number	Bilibili 要求驗證手機號碼	Bilibili が電話番号の確認を求めています
+Bilibili 要求验证手机号，但账号没有绑定手机。请改用扫码登录	Bilibili 要求验证手机号，但账号没有绑定手机。请改用扫码登录	Bilibili asks to verify a phone, but the account has none bound. Sign in with a QR code instead	Bilibili 要求驗證手機號碼，但帳號沒有綁定手機。請改用掃碼登入	Bilibili が電話番号の確認を求めていますが、アカウントに電話番号が登録されていません。QR コードでログインしてください
+Bilibili 要求验证账号绑定的手机 {}。/ Bilibili asks to verify the account's phone {}.	Bilibili 要求验证账号绑定的手机 {}。	Bilibili asks to verify the account's phone {}.	Bilibili 要求驗證帳號綁定的手機 {}。	Bilibili がアカウントの電話番号 {} の確認を求めています。
+Bilibili 认为这次登录有风险，需要用账号绑定的手机确认。	Bilibili 认为这次登录有风险，需要用账号绑定的手机确认。	Bilibili considers this login risky and asks the account’s phone to confirm it.	Bilibili 認為這次登入有風險，需要用帳號綁定的手機確認。	Bilibili はこのログインを危険と判断し、アカウントの電話番号での確認を求めています。
+Bilibili 返回的登录密钥无效，请重试	Bilibili 返回的登录密钥无效，请重试	Bilibili returned an invalid login key; try again	Bilibili 傳回的登入金鑰無效，請重試	Bilibili から無効なログインキーが返されました。再試行してください
 GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查	GPU 和 CPU 识别需要 Microsoft Visual C++ 运行库，安装后重新检查	GPU and CPU transcription need the Microsoft Visual C++ runtime. Install it, then check again.	GPU 和 CPU 辨識需要 Microsoft Visual C++ 執行階段，安裝後重新檢查	GPU と CPU の音声認識には Microsoft Visual C++ ランタイムが必要です。インストール後に再確認してください。
 Microsoft Visual C++ 运行库	Microsoft Visual C++ 运行库	Microsoft Visual C++ runtime	Microsoft Visual C++ 執行階段	Microsoft Visual C++ ランタイム
+Windows 上的新版 Chrome 和 Edge 可能不允许读取登录信息；如果失败，请改用 Firefox。读取前请先退出该浏览器。	Windows 上的新版 Chrome 和 Edge 可能不允许读取登录信息；如果失败，请改用 Firefox。读取前请先退出该浏览器。	Recent Chrome and Edge on Windows may not allow reading their sign-in; if it fails, use Firefox. Quit the browser before reading.	Windows 上的新版 Chrome 和 Edge 可能不允許讀取登入資訊；如果失敗，請改用 Firefox。讀取前請先結束該瀏覽器。	Windows の新しい Chrome と Edge はログイン情報の読み取りを許可しない場合があります。失敗したら Firefox を使ってください。読み取る前にブラウザを終了してください。
+YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。	YouTube 不允许在其他应用中用密码登录。course2md 会让 yt-dlp 读取所选浏览器中的 YouTube 登录（Cookie），只在打开 YouTube 视频时使用，不保存这些 Cookie。连接时的检查会让 yt-dlp 把浏览器的 Cookie 短暂写入本机的私有临时文件，检查结束即删除。	YouTube does not allow signing in with a password in other apps. course2md has yt-dlp read the YouTube sign-in (cookies) of the browser you choose, only when it opens a YouTube video, and does not keep them. To check the connection, yt-dlp briefly writes the browser's cookies to a private temporary file on this computer, deleted as soon as the check ends.	YouTube 不允許在其他應用程式中用密碼登入。course2md 會讓 yt-dlp 讀取所選瀏覽器中的 YouTube 登入（Cookie），只在開啟 YouTube 影片時使用，不儲存這些 Cookie。連接時的檢查會讓 yt-dlp 把瀏覽器的 Cookie 短暫寫入本機的私有暫存檔，檢查結束即刪除。	YouTube は他のアプリでのパスワードによるログインを許可していません。course2md は、選んだブラウザの YouTube ログイン（Cookie）を YouTube の動画を開くときだけ yt-dlp に読み取らせ、保存はしません。接続の確認では、yt-dlp がブラウザの Cookie をこのコンピュータ上の非公開の一時ファイルに短時間書き込み、確認が終わるとすぐに削除します。
+YouTube 使用哪个浏览器的登录，如 chrome 或 "chrome:Profile 1" / Browser whose YouTube session to use, e.g. chrome or "chrome:Profile 1"	YouTube 使用哪个浏览器的登录，如 chrome 或 "chrome:Profile 1"	Browser whose YouTube session to use, e.g. chrome or "chrome:Profile 1"	YouTube 使用哪個瀏覽器的登入，如 chrome 或 "chrome:Profile 1"	YouTube で使うログインのブラウザ（例：chrome、"chrome:Profile 1"）
+YouTube 登录设置已损坏，请重新连接浏览器	YouTube 登录设置已损坏，请重新连接浏览器	The YouTube login setting is damaged; connect the browser again	YouTube 登入設定已損毀，請重新連接瀏覽器	YouTube のログイン設定が壊れています。ブラウザをもう一度接続してください
+YouTube 要求登录时，可使用浏览器中的 YouTube 登录	YouTube 要求登录时，可使用浏览器中的 YouTube 登录	When YouTube asks you to sign in, use your browser’s YouTube sign-in	YouTube 要求登入時，可使用瀏覽器中的 YouTube 登入	YouTube にログインを求められたら、ブラウザの YouTube ログインを使えます
+YouTube 账号	YouTube 账号	YouTube account	YouTube 帳號	YouTube アカウント
 \n✓ 可用 · - 可选或未设置 · ! 需要检查 · ✗ 必须修复	\n✓ 可用 · - 可选或未设置 · ! 需要检查 · ✗ 必须修复	\n✓ available · - optional or unset · ! needs attention · ✗ must fix	\n✓ 可用 · - 可選或未設定 · ! 需要檢查 · ✗ 必須修復	\n✓ 利用可能 · - 任意または未設定 · ! 要確認 · ✗ 要修正
 \n以及另外 {} 份笔记。	\n以及另外 {} 份笔记。	\nand {} more notes.	\n以及另外 {} 份筆記。	\nほか {} 件のノート。
 \n当前识别方式	\n当前识别方式	\nConfigured speech backend	\n目前語音辨識方式	\n現在の音声認識方式
@@ -85,13 +103,26 @@ CoreML 模型加载失败 / CoreML model loading failed	CoreML 模型加载失�
 Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}; Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}	Debian/Ubuntu: sudo apt install {}；Arch: sudo pacman -S {}
 HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}；响应超过 128 KiB，未读取其余内容	HTTP {}; response exceeds 128 KiB, remainder not read	HTTP {}；回應超過 128 KiB，未讀取其餘內容	HTTP {};応答が 128 KiB を超えているため、残りは読み取られていません
 Intel NPU 加速	Intel NPU 加速	Intel NPU acceleration	Intel NPU 加速	Intel NPU アクセラレーション
+course2md 人机验证	course2md 人机验证	course2md human check	course2md 人機驗證	course2md 人間確認
+macOS 不允许读取 Safari 的 Cookie。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md，或改用其他浏览器。	macOS 不允许读取 Safari 的 Cookie。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md，或改用其他浏览器。	macOS does not allow reading Safari’s cookies. Allow course2md in System Settings › Privacy & Security › Full Disk Access, or use another browser.	macOS 不允許讀取 Safari 的 Cookie。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中允許 course2md，或改用其他瀏覽器。	macOS が Safari の Cookie の読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で course2md を許可するか、別のブラウザを使ってください。
+macOS 可能询问是否允许访问浏览器的“Safe Storage”钥匙串项目。选择“始终允许”，之后打开 YouTube 视频时就不会再问。	macOS 可能询问是否允许访问浏览器的“Safe Storage”钥匙串项目。选择“始终允许”，之后打开 YouTube 视频时就不会再问。	macOS may ask to allow access to the browser’s “Safe Storage” keychain item. Choose “Always Allow” so opening YouTube videos does not ask again.	macOS 可能詢問是否允許取用瀏覽器的「Safe Storage」鑰匙圈項目。選擇「永遠允許」，之後開啟 YouTube 影片時就不會再問。	macOS がブラウザの「Safe Storage」キーチェーン項目へのアクセスを求める場合があります。「常に許可」を選ぶと、以後 YouTube の動画を開くときに再度確認されません。
+yt-dlp 已结束，但没有留下视频文件 / yt-dlp finished without leaving a video file	yt-dlp 已结束，但没有留下视频文件	yt-dlp finished without leaving a video file	yt-dlp 已結束，但沒有留下影片檔案	yt-dlp は終了しましたが、動画ファイルが残っていません
 {} 万	{} 万	{} × 10,000	{} 萬	{} 万
+{} 中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新运行 / {} is not signed in to YouTube. Sign in there first, then run this again	{} 中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新运行	{} is not signed in to YouTube. Sign in there first, then run this again	{} 中沒有登入 YouTube。請先在瀏覽器中登入 YouTube，再重新執行	{} で YouTube にログインしていません。先にブラウザでログインしてから、もう一度実行してください
 {} 亿	{} 亿	{} × 100 million	{} 億	{} 億
+{} 正在使用 Cookie 数据库。请退出 {} 后重试。	{} 正在使用 Cookie 数据库。请退出 {} 后重试。	{} is using its cookie database. Quit {}, then try again.	{} 正在使用 Cookie 資料庫。請結束 {} 後重試。	{} が Cookie データベースを使用中です。{} を終了してから再試行してください。
 ↓ {} 词元	↓ {} 词元	↓ {} tokens	↓ {} 詞元	↓ {} トークン
 下载 Microsoft Visual C++ 运行库	下载 Microsoft Visual C++ 运行库	Download the Microsoft Visual C++ runtime	下載 Microsoft Visual C++ 執行階段	Microsoft Visual C++ ランタイムをダウンロード
 不使用 AI	不使用 AI	No AI processing	不使用 AI	AI 処理なし
+不支持的浏览器：{}。可用：{} / Unsupported browser: {}. Available: {}	不支持的浏览器：{}。可用：{}	Unsupported browser: {}. Available: {}	不支援的瀏覽器：{}。可用：{}	対応していないブラウザです：{}。使用可能：{}
+人机验证未通过或已过期，请重新验证	人机验证未通过或已过期，请重新验证	The human check failed or expired; verify again	人機驗證未通過或已過期，請重新驗證	人間確認に失敗したか期限切れです。もう一度確認してください
+人机验证超时，请重新开始	人机验证超时，请重新开始	The human check timed out; start again	人機驗證逾時，請重新開始	人間確認がタイムアウトしました。最初からやり直してください
 仅对「{}」生效	仅对「{}」生效	Applies only to “{}”	僅對「{}」生效	「{}」にのみ適用されます
 仅对下一个视频生效	仅对下一个视频生效	Applies only to the next video	僅對下一個影片生效	次の動画にのみ適用されます
+使用 {} 中的登录	使用 {} 中的登录	Uses the sign-in in {}	使用 {} 中的登入	{} のログインを使用
+保存 YouTube 登录设置失败	保存 YouTube 登录设置失败	Could not save the YouTube login setting	儲存 YouTube 登入設定失敗	YouTube のログイン設定を保存できませんでした
+区号	区号	Code	區碼	国番号
+国家或地区区号 / Country calling code	国家或地区区号	Country calling code	國家或地區區碼	国・地域番号
 安装 uv 后才能用 Intel NPU 识别	安装 uv 后才能用 Intel NPU 识别	Intel NPU transcription needs uv installed	安裝 uv 後才能用 Intel NPU 辨識	Intel NPU での認識には uv のインストールが必要です
 NPU 启动器	NPU 启动器	NPU launcher	NPU 啟動器	NPUランチャー
 NPU 模型准备未完成 / NPU model preparation did not complete	NPU 模型准备未完成	NPU model preparation did not complete	NPU 模型準備未完成	NPUモデルの準備が完了していません
@@ -342,8 +373,71 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 关于	关于	About	關於	情報
 关于 course2md	关于 course2md	About course2md	關於 course2md	course2mdについて
 关闭	关闭	Close	關閉	閉じる
+密码	密码	Password	密碼	パスワード
+密码 / Password	密码	Password	密碼	パスワード
+密码只发送给 Bilibili 用于这次登录，不会保存。登录前会在浏览器中打开人机验证。	密码只发送给 Bilibili 用于这次登录，不会保存。登录前会在浏览器中打开人机验证。	The password goes only to Bilibili for this login and is not saved. A human check opens in your browser first.	密碼只傳送給 Bilibili 用於這次登入，不會儲存。登入前會在瀏覽器中開啟人機驗證。	パスワードはこのログインのために Bilibili にだけ送信され、保存されません。ログイン前にブラウザで人間確認が開きます。
+将由 yt-dlp 读取 {} 的 Cookie，仅用于访问 YouTube；course2md 不保存这些 Cookie（检查时会短暂写入私有临时文件，结束即删除）。使用账号下载存在被 YouTube 限制或封禁的风险，请适度使用。 / yt-dlp will read {}'s cookies and use them only for YouTube; course2md does not keep them (this check briefly writes them to a private temporary file, deleted when it ends). Downloading with an account risks YouTube restricting or banning it; use it sparingly.	将由 yt-dlp 读取 {} 的 Cookie，仅用于访问 YouTube；course2md 不保存这些 Cookie（检查时会短暂写入私有临时文件，结束即删除）。使用账号下载存在被 YouTube 限制或封禁的风险，请适度使用。	yt-dlp will read {}'s cookies and use them only for YouTube; course2md does not keep them (this check briefly writes them to a private temporary file, deleted when it ends). Downloading with an account risks YouTube restricting or banning it; use it sparingly.	將由 yt-dlp 讀取 {} 的 Cookie，僅用於存取 YouTube；course2md 不儲存這些 Cookie（檢查時會短暫寫入私有暫存檔，結束即刪除）。使用帳號下載有被 YouTube 限制或封鎖的風險，請適度使用。	yt-dlp が {} の Cookie を読み取り、YouTube にのみ使います。course2md は Cookie を保存しません（確認中は非公開の一時ファイルに短時間書き込み、終了時に削除します）。アカウントでのダウンロードは YouTube による制限や停止のおそれがあります。控えめに使ってください。
+尚未连接 YouTube 登录。/ No YouTube session connected.	尚未连接 YouTube 登录。	No YouTube session connected.	尚未連接 YouTube 登入。	YouTube のログインは接続されていません。
+已取消验证	已取消验证	Check cancelled	已取消驗證	確認をキャンセルしました
+已断开 YouTube 登录；浏览器中的登录不受影响。/ YouTube session disconnected; your browser stays signed in.	已断开 YouTube 登录；浏览器中的登录不受影响。	YouTube session disconnected; your browser stays signed in.	已中斷 YouTube 登入；瀏覽器中的登入不受影響。	YouTube のログインを切断しました。ブラウザのログインはそのままです。
+已连接 {} 中的 YouTube 登录。YouTube 视频将使用此登录。 / Connected to the YouTube session in {}. YouTube videos will use it.	已连接 {} 中的 YouTube 登录。YouTube 视频将使用此登录。	Connected to the YouTube session in {}. YouTube videos will use it.	已連接 {} 中的 YouTube 登入。YouTube 影片將使用此登入。	{} の YouTube ログインに接続しました。YouTube の動画で使われます。
+已连接 {} 中的 YouTube 登录。打开 YouTube 视频时会使用它。	已连接 {} 中的 YouTube 登录。打开 YouTube 视频时会使用它。	Connected to the YouTube sign-in in {}. YouTube videos will use it.	已連接 {} 中的 YouTube 登入。開啟 YouTube 影片時會使用它。	{} の YouTube ログインに接続しました。YouTube の動画を開くときに使われます。
+手机号	手机号	Phone number	手機號碼	電話番号
+手机号 / Phone number	手机号	Phone number	手機號碼	電話番号
+手机号、邮箱或用户名	手机号、邮箱或用户名	Phone, email or username	手機號碼、電子郵件或使用者名稱	電話番号、メールアドレスまたはユーザー名
+手机号格式不正确	手机号格式不正确	The phone number is not valid	手機號碼格式不正確	電話番号の形式が正しくありません
+扫码	扫码	QR code	掃碼	QR コード
+找不到 {} 的 Cookie。请确认已安装它，并至少打开过一次。	找不到 {} 的 Cookie。请确认已安装它，并至少打开过一次。	Cannot find {}’s cookies. Make sure it is installed and has been opened at least once.	找不到 {} 的 Cookie。請確認已安裝它，並至少開啟過一次。	{} の Cookie が見つかりません。インストールされていて、一度以上起動したことを確認してください。
+提示：YouTube 要求登录。可运行 course2md --login youtube 使用浏览器里的 YouTube 登录后重试。 / Hint: YouTube asks you to sign in. Run course2md --login youtube to use your browser's YouTube session, then retry.	提示：YouTube 要求登录。可运行 course2md --login youtube 使用浏览器里的 YouTube 登录后重试。	Hint: YouTube asks you to sign in. Run course2md --login youtube to use your browser's YouTube session, then retry.	提示：YouTube 要求登入。可執行 course2md --login youtube 使用瀏覽器裡的 YouTube 登入後重試。	ヒント：YouTube がログインを求めています。course2md --login youtube を実行してブラウザの YouTube ログインを使ってから再試行してください。
+提示：YouTube 要求登录。请在设置的账号中连接浏览器里的 YouTube 登录后重试。 / Hint: YouTube asks you to sign in. Connect your browser's YouTube session in Settings, then retry.	提示：YouTube 要求登录。请在设置的账号中连接浏览器里的 YouTube 登录后重试。	Hint: YouTube asks you to sign in. Connect your browser's YouTube session in Settings, then retry.	提示：YouTube 要求登入。請在設定的帳號中連接瀏覽器裡的 YouTube 登入後重試。	ヒント：YouTube がログインを求めています。設定のアカウントでブラウザの YouTube ログインを接続してから再試行してください。
+提示：若视频需要登录或会员权限，可运行 course2md --login bilibili 登录；已登录时可重新登录。 / Hint: if the video needs a login or membership, run course2md --login bilibili; if already logged in, log in again.	提示：若视频需要登录或会员权限，可运行 course2md --login bilibili 登录；已登录时可重新登录。	Hint: if the video needs a login or membership, run course2md --login bilibili; if already logged in, log in again.	提示：若影片需要登入或會員權限，可執行 course2md --login bilibili 登入；已登入時可重新登入。	ヒント：動画にログインや会員権限が必要な場合は course2md --login bilibili を実行してください。ログイン済みの場合はログインし直してください。
+提示：若视频需要登录或会员权限，请在设置的账号中登录 B 站；已登录时可重新登录。 / Hint: if the video needs a login or membership, sign in to Bilibili in Settings; if already signed in, sign in again.	提示：若视频需要登录或会员权限，请在设置的账号中登录 B 站；已登录时可重新登录。	Hint: if the video needs a login or membership, sign in to Bilibili in Settings; if already signed in, sign in again.	提示：若影片需要登入或會員權限，請在設定的帳號中登入 B 站；已登入時可重新登入。	ヒント：動画にログインや会員権限が必要な場合は、設定のアカウントで Bilibili にログインしてください。ログイン済みの場合はログインし直してください。
+断开未完成，原连接已保留	断开未完成，原连接已保留	Disconnecting did not finish; the connection is kept	中斷未完成，原連接已保留	切断できませんでした。接続はそのままです
+断开连接	断开连接	Disconnect	中斷連接	接続を解除
+无法加密密码，请重试	无法加密密码，请重试	Could not encrypt the password; try again	無法加密密碼，請重試	パスワードを暗号化できませんでした。再試行してください
+无法启动本机验证页面	无法启动本机验证页面	Could not start the check page on this computer	無法啟動本機驗證頁面	このコンピュータで確認ページを開始できませんでした
+无法解密 {} 的 Cookie。若系统询问是否允许访问钥匙串，请选择允许。	无法解密 {} 的 Cookie。若系统询问是否允许访问钥匙串，请选择允许。	Cannot decrypt {}’s cookies. If the system asks to allow keychain access, allow it.	無法解密 {} 的 Cookie。若系統詢問是否允許取用鑰匙圈，請選擇允許。	{} の Cookie を復号できません。キーチェーンへのアクセスを求められたら許可してください。
+无法解密 {} 的 Cookie：Windows 上的新版 Chromium 浏览器不允许其他程序读取。请改用 Firefox。	无法解密 {} 的 Cookie：Windows 上的新版 Chromium 浏览器不允许其他程序读取。请改用 Firefox。	Cannot decrypt {}’s cookies: recent Chromium browsers on Windows do not let other programs read them. Use Firefox instead.	無法解密 {} 的 Cookie：Windows 上的新版 Chromium 瀏覽器不允許其他程式讀取。請改用 Firefox。	{} の Cookie を復号できません。Windows の新しい Chromium 系ブラウザは他のプログラムからの読み取りを許可していません。Firefox を使ってください。
+无法读取 YouTube 登录设置	无法读取 YouTube 登录设置	Cannot read the YouTube login setting	無法讀取 YouTube 登入設定	YouTube のログイン設定を読み込めません
+无法读取 {} 的 Cookie。	无法读取 {} 的 Cookie。	Cannot read {}’s cookies.	無法讀取 {} 的 Cookie。	{} の Cookie を読み込めません。
+更换浏览器	更换浏览器	Change browser	更換瀏覽器	ブラウザを変更
 最小化	最小化	Minimize	最小化	最小化
 最大化	最大化	Maximize	最大化	最大化
+本机验证页面已停止	本机验证页面已停止	The check page on this computer stopped	本機驗證頁面已停止	このコンピュータの確認ページが停止しました
+检查并连接	检查并连接	Check and connect	檢查並連接	確認して接続
+正在加载验证…	正在加载验证…	Loading the check…	正在載入驗證…	確認を読み込んでいます…
+正在登录	正在登录	Signing in	正在登入	ログインしています
+正在读取浏览器中的登录	正在读取浏览器中的登录	Reading the browser’s sign-in	正在讀取瀏覽器中的登入	ブラウザのログインを読み取っています
+没有找到可读取的浏览器。请安装并登录 Chrome、Edge、Firefox 或 Safari 后重试。	没有找到可读取的浏览器。请安装并登录 Chrome、Edge、Firefox 或 Safari 后重试。	No browser to read was found. Install Chrome, Edge, Firefox or Safari, sign in to YouTube there, then try again.	沒有找到可讀取的瀏覽器。請安裝並登入 Chrome、Edge、Firefox 或 Safari 後重試。	読み取れるブラウザが見つかりません。Chrome、Edge、Firefox または Safari をインストールしてログインしてから再試行してください。
+没有找到可读取的浏览器。请用 --browser 指定，例如 --browser firefox / No browser found; name one with --browser, for example --browser firefox	没有找到可读取的浏览器。请用 --browser 指定，例如 --browser firefox	No browser found; name one with --browser, for example --browser firefox	沒有找到可讀取的瀏覽器。請用 --browser 指定，例如 --browser firefox	読み取れるブラウザが見つかりません。--browser で指定してください（例：--browser firefox）
+浏览器	浏览器	Browser	瀏覽器	ブラウザ
+浏览器个人资料	浏览器个人资料	Browser profile	瀏覽器設定檔	ブラウザのプロファイル
+浏览器未登录	浏览器未登录	Browser signed out	瀏覽器未登入	ブラウザ未ログイン
+清除 YouTube 登录设置失败	清除 YouTube 登录设置失败	Could not remove the YouTube login setting	清除 YouTube 登入設定失敗	YouTube のログイン設定を削除できませんでした
+用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。	用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。	Downloading with an account may lead YouTube to restrict or ban it. Use it sparingly, or use an account you rarely need.	用帳號下載可能讓 YouTube 限制或封鎖這個帳號。請適度使用，或使用不常用的帳號。	アカウントでダウンロードすると、YouTube がそのアカウントを制限または停止するおそれがあります。控えめに使うか、普段使わないアカウントを使ってください。
+登录	登录	Sign in	登入	ログイン
+登录密钥已过期，请重新登录	登录密钥已过期，请重新登录	The login key expired; sign in again	登入金鑰已過期，請重新登入	ログインキーの期限が切れました。もう一度ログインしてください
+登录方式	登录方式	Sign-in method	登入方式	ログイン方法
+登录（bilibili 扫码、密码或短信；youtube 浏览器登录；ollama 本地服务；codex 订阅），可接视频地址继续转换 / Log in (bilibili QR, password or SMS; youtube browser session; ollama local; codex subscription), optionally then process a video	登录（bilibili 扫码、密码或短信；youtube 浏览器登录；ollama 本地服务；codex 订阅），可接视频地址继续转换	Log in (bilibili QR, password or SMS; youtube browser session; ollama local; codex subscription), optionally then process a video	登入（bilibili 掃碼、密碼或簡訊；youtube 瀏覽器登入；ollama 本機服務；codex 訂閱），可接影片網址繼續轉換	ログイン（bilibili は QR コード・パスワード・SMS、youtube はブラウザのログイン、ollama はローカルサービス、codex はサブスクリプション）。続けて動画URLを指定して変換できます
+短信	短信	SMS	簡訊	SMS
+短信发送次数已达上限，请稍后再试	短信发送次数已达上限，请稍后再试	Too many codes sent; try again later	簡訊傳送次數已達上限，請稍後再試	SMS の送信回数が上限に達しました。しばらくしてから再試行してください
+短信验证码	短信验证码	SMS code	簡訊驗證碼	SMS 認証コード
+短信验证码 / SMS code	短信验证码	SMS code	簡訊驗證碼	SMS 認証コード
+短信验证码不正确	短信验证码不正确	The SMS code is not correct	簡訊驗證碼不正確	SMS 認証コードが正しくありません
+短信验证码已过期，请重新获取	短信验证码已过期，请重新获取	The SMS code expired; get a new one	簡訊驗證碼已過期，請重新取得	SMS 認証コードの期限が切れました。もう一度取得してください
+系统不允许读取 {} 的 Cookie，请检查权限后重试。	系统不允许读取 {} 的 Cookie，请检查权限后重试。	The system does not allow reading {}’s cookies. Check permissions, then try again.	系統不允許讀取 {} 的 Cookie，請檢查權限後重試。	システムが {} の Cookie の読み取りを許可していません。権限を確認してから再試行してください。
+获取验证码	获取验证码	Get code	取得驗證碼	コードを取得
+获取验证码前会在浏览器中打开人机验证。	获取验证码前会在浏览器中打开人机验证。	A human check opens in your browser before the code is sent.	取得驗證碼前會在瀏覽器中開啟人機驗證。	コードを送信する前に、ブラウザで人間確認が開きます。
+该手机号无法用于登录 Bilibili	该手机号无法用于登录 Bilibili	This phone number cannot sign in to Bilibili	此手機號碼無法用於登入 Bilibili	この電話番号では Bilibili にログインできません
+请先获取验证码	请先获取验证码	Get a code first	請先取得驗證碼	先に認証コードを取得してください
+请在浏览器中完成人机验证	请在浏览器中完成人机验证	Complete the human check in your browser	請在瀏覽器中完成人機驗證	ブラウザで人間確認を完了してください
+请在浏览器中完成人机验证（Ctrl+C 取消）：{} / Complete the human check in your browser (Ctrl+C to cancel): {}	请在浏览器中完成人机验证（Ctrl+C 取消）：{}	Complete the human check in your browser (Ctrl+C to cancel): {}	請在瀏覽器中完成人機驗證（Ctrl+C 取消）：{}	ブラウザで人間確認を完了してください（Ctrl+C でキャンセル）：{}
+请填写账号和密码	请填写账号和密码	Enter the account and password	請填寫帳號和密碼	アカウントとパスワードを入力してください
+请完成验证。完成后回到 course2md。	请完成验证。完成后回到 course2md。	Complete the check, then return to course2md.	請完成驗證。完成後回到 course2md。	確認を完了してから course2md に戻ってください。
+读取 Safari 需要在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md。	读取 Safari 需要在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md。	Reading Safari needs course2md allowed in System Settings › Privacy & Security › Full Disk Access.	讀取 Safari 需要在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中允許 course2md。	Safari を読み取るには「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で course2md を許可する必要があります。
+账号已确认，但保存登录状态失败。请检查本地权限后重试。	账号已确认，但保存登录状态失败。请检查本地权限后重试。	The account was confirmed, but the login could not be saved. Check local permissions, then try again.	帳號已確認，但儲存登入狀態失敗。請檢查本機權限後重試。	アカウントは確認されましたが、ログイン状態を保存できませんでした。ローカルの権限を確認してから再試行してください。
+账号或密码错误	账号或密码错误	Wrong account or password	帳號或密碼錯誤	アカウントまたはパスワードが正しくありません
+账号（手机号、邮箱或用户名）/ Account (phone, email or username)	账号（手机号、邮箱或用户名）	Account (phone, email or username)	帳號（手機號碼、電子郵件或使用者名稱）	アカウント（電話番号、メールアドレスまたはユーザー名）
 还原	还原	Restore	還原	元に戻す
 关闭 / disabled	关闭	Disabled	關閉	オフ
 关闭 AI 校对并保留凭据 / Disable AI proofreading and keep credentials	关闭 AI 校对并保留凭据	Disable AI proofreading and keep credentials	關閉 AI 校對並保留憑證	AI 校正をオフにして資格情報を保持する
@@ -687,7 +781,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 待确认的请求已变化，请查看最新范围后再选择是否重新发送	待确认的请求已变化，请查看最新范围后再选择是否重新发送	The request to be confirmed has changed. Please check the latest range before choosing whether to resend it.	待確認的請求已變化，請檢視最新範圍後再選擇是否重新傳送	確認待ちのリクエストが変更されました。再送信するかどうかを選択する前に、最新の範囲を確認してください。
 待确认请求已变化，请查看最新范围后再选择是否重新发送	待确认请求已变化，请查看最新范围后再选择是否重新发送	The request to be confirmed has changed. Please check the latest range before choosing whether to resend it.	待確認請求已變化，請檢視最新範圍後再選擇是否重新傳送	確認待ちのリクエストが変更されました。再送信するかどうかを選択する前に、最新の範囲を確認してください。
 德语	德语	German	德語	ドイツ語
-快速开始 / Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式 / Transcripts:\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  Uses platform subtitles first, then speech recognition when needed.\n  --transcript-source subtitle  仅使用字幕 / Subtitles only\n  --transcript-source asr       强制语音识别 / Speech recognition only\n\n下一步 / Next steps:\n  course2md --login bilibili    扫码登录 / Log in with a QR code\n  course2md --logout bilibili   清除登录 / Remove saved login\n  course2md doctor              检查依赖与配置 / Check dependencies and settings\n  course2md config init         生成配置模板 / Create a configuration template\n  course2md llm setup           配置可选的 AI 校对 / Set up optional AI proofreading\n  course2md summarize ./notes   为已有笔记生成摘要 / Summarize existing notes\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\nFirst conversion in a terminal offers setup; scripts should pass options explicitly.\n使用 <command> --help 查看子命令帮助 / Use <command> --help for details.\n	快速开始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式：\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  --transcript-source subtitle  仅使用字幕\n  --transcript-source asr       强制语音识别\n\n下一步：\n  course2md --login bilibili    扫码登录\n  course2md --logout bilibili   清除登录\n  course2md doctor              检查依赖与配置\n  course2md config init         生成配置模板\n  course2md llm setup           配置可选的 AI 校对\n  course2md summarize ./notes   为已有笔记生成摘要\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\n使用 <command> --help 查看子命令帮助。\n	Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\nTranscripts:\n  Platform subtitles are used first; speech recognition runs when none exist.\n  --transcript-source subtitle  Use subtitles only\n  --transcript-source asr       Force speech recognition\n\nNext steps:\n  course2md --login bilibili    Sign in with a QR code\n  course2md --logout bilibili   Remove the saved login\n  course2md doctor              Check dependencies and settings\n  course2md config init         Create a configuration template\n  course2md llm setup           Set up optional AI proofreading\n  course2md summarize ./notes   Summarize existing notes\n\nThe first conversion in a terminal offers setup; scripts should pass options explicitly.\nUse <command> --help for details.\n	快速開始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n轉寫方式：\n  預設優先使用平台字幕，無字幕時使用語音辨識。\n  --transcript-source subtitle  僅使用字幕\n  --transcript-source asr       強制語音辨識\n\n下一步：\n  course2md --login bilibili    掃碼登入\n  course2md --logout bilibili   清除登入\n  course2md doctor              檢查依賴與設定\n  course2md config init         產生設定範本\n  course2md llm setup           設定可選的 AI 校對\n  course2md summarize ./notes   為已有筆記產生摘要\n\n互動式終端首次轉換會引導設定；指令碼請明確傳入所需參數。\n使用 <command> --help 查看子命令說明。\n	クイックスタート：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n文字起こし：\n  プラットフォームの字幕を優先し、ない場合は音声認識を使います。\n  --transcript-source subtitle  字幕のみ\n  --transcript-source asr       音声認識を強制\n\n次のステップ：\n  course2md --login bilibili    QR コードでログイン\n  course2md --logout bilibili   保存したログインを削除\n  course2md doctor              依存関係と設定を確認\n  course2md config init         設定テンプレートを作成\n  course2md llm setup           任意の AI 校正を設定\n  course2md summarize ./notes   既存のノートに要約を追加\n\nターミナルでの初回変換では設定を案内します。スクリプトでは必要な引数を明示してください。\n詳細は <command> --help を参照してください。\n
+快速开始 / Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式 / Transcripts:\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  Uses platform subtitles first, then speech recognition when needed.\n  --transcript-source subtitle  仅使用字幕 / Subtitles only\n  --transcript-source asr       强制语音识别 / Speech recognition only\n\n下一步 / Next steps:\n  course2md --login bilibili    扫码登录 / Log in with a QR code\n  course2md --login bilibili --method password|sms\n                                密码或短信登录 / Log in with a password or SMS code\n  course2md --login youtube     使用浏览器中的 YouTube 登录 / Use your browser's YouTube session\n  course2md --logout bilibili   清除登录 / Remove saved login\n  course2md doctor              检查依赖与配置 / Check dependencies and settings\n  course2md config init         生成配置模板 / Create a configuration template\n  course2md llm setup           配置可选的 AI 校对 / Set up optional AI proofreading\n  course2md summarize ./notes   为已有笔记生成摘要 / Summarize existing notes\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\nFirst conversion in a terminal offers setup; scripts should pass options explicitly.\n使用 <command> --help 查看子命令帮助 / Use <command> --help for details.\n	快速开始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n转写方式：\n  默认优先使用平台字幕，无字幕时使用语音识别。\n  --transcript-source subtitle  仅使用字幕\n  --transcript-source asr       强制语音识别\n\n下一步：\n  course2md --login bilibili    扫码登录\n  course2md --login bilibili --method password|sms\n                                密码或短信登录\n  course2md --login youtube     使用浏览器中的 YouTube 登录\n  course2md --logout bilibili   清除登录\n  course2md doctor              检查依赖与配置\n  course2md config init         生成配置模板\n  course2md llm setup           配置可选的 AI 校对\n  course2md summarize ./notes   为已有笔记生成摘要\n\n交互终端首次转换会引导配置；脚本请显式传入所需参数。\n使用 <command> --help 查看子命令帮助。\n	Quick start:\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\nTranscripts:\n  Platform subtitles are used first; speech recognition runs when none exist.\n  --transcript-source subtitle  Use subtitles only\n  --transcript-source asr       Force speech recognition\n\nNext steps:\n  course2md --login bilibili    Sign in with a QR code\n  course2md --login bilibili --method password|sms\n                                Sign in with a password or SMS code\n  course2md --login youtube     Use your browser's YouTube session\n  course2md --logout bilibili   Remove the saved login\n  course2md doctor              Check dependencies and settings\n  course2md config init         Create a configuration template\n  course2md llm setup           Set up optional AI proofreading\n  course2md summarize ./notes   Summarize existing notes\n\nThe first conversion in a terminal offers setup; scripts should pass options explicitly.\nUse <command> --help for details.\n	快速開始：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n轉寫方式：\n  預設優先使用平台字幕，無字幕時使用語音辨識。\n  --transcript-source subtitle  僅使用字幕\n  --transcript-source asr       強制語音辨識\n\n下一步：\n  course2md --login bilibili    掃碼登入\n  course2md --login bilibili --method password|sms\n                                密碼或簡訊登入\n  course2md --login youtube     使用瀏覽器中的 YouTube 登入\n  course2md --logout bilibili   清除登入\n  course2md doctor              檢查依賴與設定\n  course2md config init         產生設定範本\n  course2md llm setup           設定可選的 AI 校對\n  course2md summarize ./notes   為已有筆記產生摘要\n\n互動式終端首次轉換會引導設定；指令碼請明確傳入所需參數。\n使用 <command> --help 查看子命令說明。\n	クイックスタート：\n  course2md ./lecture.mp4\n  course2md https://www.youtube.com/watch?v=VIDEO_ID\n  course2md ./lecture.mp4 -o ./notes\n\n文字起こし：\n  プラットフォームの字幕を優先し、ない場合は音声認識を使います。\n  --transcript-source subtitle  字幕のみ\n  --transcript-source asr       音声認識を強制\n\n次のステップ：\n  course2md --login bilibili    QR コードでログイン\n  course2md --login bilibili --method password|sms\n                                パスワードまたは SMS でログイン\n  course2md --login youtube     ブラウザの YouTube ログインを使う\n  course2md --logout bilibili   保存したログインを削除\n  course2md doctor              依存関係と設定を確認\n  course2md config init         設定テンプレートを作成\n  course2md llm setup           任意の AI 校正を設定\n  course2md summarize ./notes   既存のノートに要約を追加\n\nターミナルでの初回変換では設定を案内します。スクリプトでは必要な引数を明示してください。\n詳細は <command> --help を参照してください。\n
 恢复 AI 默认	恢复 AI 默认	Restore AI defaults	恢復 AI 預設	AI のデフォルトを復元する
 恢复为原始标题	恢复为原始标题	Revert to original title	恢復為原始標題	元のタイトルに戻す
 恢复最近名称备份	恢复最近名称备份	Restore recent name backup	恢復最近名稱備份	最近の名前のバックアップを復元する
@@ -784,6 +878,13 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 正在等待第一块数据	正在等待第一块数据	Waiting for the first block	正在等待第一塊資料	最初のブロックを待っています
 由环境变量指定	由环境变量指定	Set by environment variable	由環境變數指定	環境変数で指定
 系统安装	系统安装	Installed on the system	系統安裝	システムにインストール済み
+这个浏览器中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新检查。	这个浏览器中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新检查。	This browser is not signed in to YouTube. Sign in to YouTube there first, then check again.	這個瀏覽器中沒有登入 YouTube。請先在瀏覽器中登入 YouTube，再重新檢查。	このブラウザでは YouTube にログインしていません。先にブラウザで YouTube にログインしてから、もう一度確認してください。
+连接 YouTube	连接 YouTube	Connect YouTube	連接 YouTube	YouTube を接続
+选择已登录 YouTube 的浏览器 / Choose the browser where you are signed in to YouTube	选择已登录 YouTube 的浏览器	Choose the browser where you are signed in to YouTube	選擇已登入 YouTube 的瀏覽器	YouTube にログインしているブラウザを選んでください
+重新打开	重新打开	Open again	重新開啟	もう一度開く
+重新获取	重新获取	Resend	重新取得	再送信
+重新连接 YouTube	重新连接 YouTube	Reconnect YouTube	重新連接 YouTube	YouTube を再接続
+重新验证	重新验证	Check again	重新驗證	もう一度確認
 随应用附带	随应用附带	Included with the app	隨應用程式附帶	アプリに同梱
 音频不离开本机	音频不离开本机	Audio stays on this device	音訊不離開本機	音声はこのデバイスの外に送信されません
 提取画面	提取画面	Extract frames	提取畫面	フレームを抽出
@@ -1060,7 +1161,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 未找到 uv，也没有装好 openvino-genai 的 Python，无法启动 NPU 识别 / Intel NPU transcription needs uv, or Python with openvino-genai, numpy and huggingface_hub installed	未找到 uv，也没有装好 openvino-genai 的 Python，无法启动 NPU 识别	Intel NPU transcription needs uv, or Python with openvino-genai, numpy and huggingface_hub installed	找不到 uv，也沒有已安裝 openvino-genai 的 Python，無法啟動 NPU 辨識	uv も、openvino-genai をインストールした Python も見つからないため、NPU 認識を開始できません
 未找到 llama-server。请安装 llama.cpp 并加入 PATH	未找到 llama-server。请安装 llama.cpp 并加入 PATH	llama-server not found. Install llama.cpp and add it to PATH.	找不到 llama-server。請安裝 llama.cpp 並加入 PATH	llama-server が見つかりません。llama.cpp をインストールして PATH に追加してください
 未找到 uv 或 Python	未找到 uv 或 Python	uv or Python not found	找不到 uv 或 Python	uv または Python が見つかりません
-未找到下载的视频（期望 {} 或 {}） / Downloaded video missing (expected {} or {})	未找到下载的视频（期望 {} 或 {}）	Downloaded video missing (expected {} or {})	找不到下載的影片（預期 {} 或 {}）	ダウンロードした動画が見つかりません（{} または {} を想定）
 未找到字幕	未找到字幕	Subtitles not found	未找到字幕	字幕が見つかりません
 未找到字幕。请选择已有字幕，或改用语音识别	未找到字幕。请选择已有字幕，或改用语音识别	No subtitles found. Select existing subtitles, or use speech recognition.	找不到字幕。請選擇現有字幕，或改用語音辨識	字幕が見つかりません。既存の字幕を選択するか、代わりに音声認識を使用してください
 未提供 API 密钥。请在向导中输入，或设置环境变量 COURSE2MD_ASR_API_KEY 后重试。 / No API key provided. Enter one in setup, or set COURSE2MD_ASR_API_KEY and retry.	未提供 API 密钥。请在向导中输入，或设置环境变量 COURSE2MD_ASR_API_KEY 后重试。	No API key provided. Enter one in setup, or set COURSE2MD_ASR_API_KEY and retry.	未提供 API 金鑰。請在嚮導中輸入，或設定環境變數 COURSE2MD_ASR_API_KEY 後重試。	API キーが提供されていません。ウィザードに入力するか、環境変数 COURSE2MD_ASR_API_KEY を設定して再試行してください。
@@ -1371,7 +1471,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 登录请求失败，请检查网络后重新获取二维码	登录请求失败，请检查网络后重新获取二维码	Login request failed. Check the network and get a new QR code.	登入請求失敗，請檢查網路後重新取得 QR 碼	ログイン要求に失敗しました。ネットワークを確認して QR コードを再度取得してください。
 登录跳转地址无效 / Invalid login redirect URL	登录跳转地址无效	Invalid login redirect URL	登入重新導向網址無效	ログインリダイレクトURLが無効です
 登录跳转缺少地址 / Login redirect is missing an address	登录跳转缺少地址	Login redirect is missing an address	登入重新導向缺少網址	ログインリダイレクトにURLがありません
-登录（bilibili 扫码；ollama 本地服务；codex 订阅），可接视频地址继续转换 / Log in (bilibili QR, ollama local, codex subscription), optionally then process a video	登录（bilibili 扫码；ollama 本地服务；codex 订阅），可接视频地址继续转换	Log in (bilibili QR, ollama local, codex subscription), optionally then process a video	登入（bilibili 掃碼；ollama 本機服務；codex 訂閱），可接影片網址繼續轉換	ログイン（bilibili は QR コード、ollama はローカルサービス、codex はサブスクリプション）。続けて動画URLを指定して変換できます
 目前使用 {}	目前使用 {}	Currently using {}	目前使用 {}	現在{}を使用しています
 目前可读取 {} 份笔记：\n{}	目前可读取 {} 份笔记：\n{}	{} notes are currently readable:\n{}	目前可讀取 {} 份筆記：\n{}	現在読み取り可能なノートは {} 件です:\n{}
 目录	目录	Directory	目錄	ディレクトリ
@@ -1846,6 +1945,12 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 首次识别时会自动下载所选模型	首次识别时会自动下载所选模型	The selected model is automatically downloaded upon first recognition	首次辨識時會自動下載所選模型	選択したモデルは最初の認識時に自動的にダウンロードされます
 首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。 / Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次识别时选择并下载 Apple 模型（约 1–2.3 GB）。	Choose and download an Apple model at first transcription (about 1–2.3 GB).	首次辨識時選擇並下載 Apple 模型（約 1–2.3 GB）。	初回認識時に Apple モデル (約 1 ～ 2.3 GB) を選択してダウンロードします。
 验证中	验证中	Verifying	驗證中	検証中
+验证完成，可以关闭此页面并回到 course2md。	验证完成，可以关闭此页面并回到 course2md。	Check complete. You can close this page and return to course2md.	驗證完成，可以關閉此頁面並回到 course2md。	確認が完了しました。このページを閉じて course2md に戻れます。
+验证已关闭。	验证已关闭。	The check was closed.	驗證已關閉。	確認が閉じられました。
+验证并登录	验证并登录	Verify and sign in	驗證並登入	確認してログイン
+验证未能加载或未通过，请回到 course2md 重新开始。	验证未能加载或未通过，请回到 course2md 重新开始。	The check did not load or did not pass. Return to course2md and start again.	驗證未能載入或未通過，請回到 course2md 重新開始。	確認を読み込めなかったか、通過できませんでした。course2md に戻ってやり直してください。
+验证码已发送。/ Code sent.	验证码已发送。	Code sent.	驗證碼已傳送。	認証コードを送信しました。
+验证码已发送，请稍后再试	验证码已发送，请稍后再试	A code was already sent; try again later	驗證碼已傳送，請稍後再試	認証コードは送信済みです。しばらくしてから再試行してください
 默认 · 更准确，占内存较多	默认 · 更准确，占内存较多	Default · More accurate, takes up more memory	預設 · 更準確，佔記憶體較多	デフォルト · より正確、メモリ使用量が多い
 默认位置尚未更改：{}	默认位置尚未更改：{}	The default location has not been changed: {}	預設位置尚未更改：{}	デフォルトの場所は変更されていません: {}
 默认保存位置	默认保存位置	Default save location	預設儲存位置	デフォルトの保存場所

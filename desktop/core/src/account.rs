@@ -1,8 +1,14 @@
-//! The Bilibili account and its QR login, as state. No ticket is logged or stored in
-//! interface text.
+//! The Bilibili account and its logins (QR code, password or SMS), as state. No
+//! ticket or password is logged or stored in interface text.
 use anyhow::Result;
-use course2md::auth::{AccountProfile, AccountStatus};
-use std::sync::Arc;
+use course2md::auth::{
+    AccountProfile, AccountStatus,
+    passport::{Passport, RiskCheck, SmsTicket},
+};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 #[derive(Default)]
 pub struct AccountUi {
@@ -20,6 +26,14 @@ pub struct AccountUi {
     /// copy change cannot silently break the status derivation.
     pub logout_failed: bool,
     pub retry_source: Option<(u64, String)>,
+    /// The dialog's sign-in method; the QR state above belongs to [`LoginMethod::Qr`].
+    pub method: LoginMethod,
+    pub form: LoginForm,
+    /// The password or SMS attempt's connection, between its steps.
+    pub passport: Option<Passport>,
+    pub sms: Option<SmsTicket>,
+    /// Bilibili asks the account's bound phone to confirm this login.
+    pub risk: Option<RiskCheck>,
 }
 
 impl AccountUi {
@@ -30,12 +44,35 @@ impl AccountUi {
         self.generation = self.generation.wrapping_add(1);
         self.dialog = None;
         self.modules = None;
+        self.reset_form();
     }
 
     pub fn close(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.closing = self.dialog.take().or(self.closing.take());
         self.retry_source = None;
+        self.reset_form();
+    }
+
+    /// Ends a password or SMS attempt: its browser check stops waiting, and its
+    /// connection, code and phone check are dropped.
+    pub fn reset_form(&mut self) {
+        self.form.stop();
+        self.form = LoginForm::default();
+        self.passport = None;
+        self.sms = None;
+        self.risk = None;
+    }
+
+    /// Switches the dialog's method. Late replies of the previous one are stale.
+    pub fn choose_method(&mut self, method: LoginMethod) {
+        if self.method == method {
+            return;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.modules = None;
+        self.reset_form();
+        self.method = method;
     }
 
     pub fn apply_status(
@@ -86,6 +123,81 @@ impl AccountUi {
                 .is_some_and(|(saved_generation, saved_input)| {
                     *saved_generation == generation && saved_input == input
                 })
+    }
+}
+
+/// How the person signs in to Bilibili. One dialog offers all three.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LoginMethod {
+    #[default]
+    Qr,
+    Password,
+    Sms,
+}
+
+impl LoginMethod {
+    pub const ALL: [Self; 3] = [Self::Qr, Self::Password, Self::Sms];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Qr => "qr",
+            Self::Password => "password",
+            Self::Sms => "sms",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|method| method.id() == id)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Qr => course2md::tr!("扫码"),
+            Self::Password => course2md::tr!("密码"),
+            Self::Sms => course2md::tr!("短信"),
+        }
+    }
+}
+
+/// Where a password or SMS login stands.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum FormStep {
+    /// The fields are the person's to fill.
+    #[default]
+    Entry,
+    /// The human check is open in the browser at `url` (unknown while it is fetched).
+    Captcha { url: Option<String> },
+    /// A request to Bilibili is in flight.
+    Working,
+}
+
+#[derive(Default)]
+pub struct LoginForm {
+    pub step: FormStep,
+    /// Bilibili's or the check's reason the last step failed.
+    pub error: Option<String>,
+    /// A code was sent: to the phone typed (SMS login) or the bound phone (check).
+    pub code_sent: bool,
+    cancel: Option<Arc<AtomicBool>>,
+}
+
+impl LoginForm {
+    pub fn busy(&self) -> bool {
+        matches!(self.step, FormStep::Captcha { .. } | FormStep::Working)
+    }
+
+    /// The flag a browser check waits on; set when the attempt ends.
+    pub fn watch(&mut self) -> Arc<AtomicBool> {
+        self.stop();
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.cancel = Some(cancel.clone());
+        cancel
+    }
+
+    pub fn stop(&mut self) {
+        if let Some(cancel) = self.cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
     }
 }
 

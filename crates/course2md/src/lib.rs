@@ -20,6 +20,7 @@ pub mod config {
     pub use c2m_config::config::*;
 }
 
+pub mod account;
 pub mod cli;
 pub mod doctor;
 pub mod wizard;

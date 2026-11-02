@@ -534,6 +534,7 @@ impl Desktop {
         self.close_service_editor(cx);
         self.close_palette_picker(cx);
         self.close_account_dialog(cx);
+        self.youtube.close();
     }
     /// The editor's dialog, while it is open or playing its exit.
     pub(crate) fn service_editor_dialog(

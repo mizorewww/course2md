@@ -278,10 +278,14 @@ pub fn task_failure_summary(state: TaskState, error: Option<&str>) -> Option<Str
                     && !line.starts_with("panic")
             })
             .unwrap_or_default();
+        // A long cause (a tool's own error line) is cut, not replaced: the start
+        // of the real reason helps more than a generic one.
         if summary.chars().count() <= 140 {
             summary.into()
-        } else {
+        } else if summary.is_empty() {
             course2md::tr!("转换未完成").into()
+        } else {
+            format!("{}…", summary.chars().take(139).collect::<String>())
         }
     })
 }
@@ -1170,6 +1174,19 @@ mod tests {
         };
         assert!(!message.contains("ERROR"));
         assert!(!message.contains("Traceback"));
+        // A download's own reason leads, even when long; the hint follows on its own line.
+        let cause = format!(
+            "yt-dlp: [BiliBili] BV1: {}",
+            "Unable to download ".repeat(12)
+        );
+        let summary = task_failure_summary(
+            TaskState::NeedsAttention,
+            Some(&format!("{cause}\n提示：若视频需要登录…\nyt-dlp 运行失败")),
+        )
+        .unwrap();
+        assert!(summary.starts_with("yt-dlp: [BiliBili] BV1: Unable"));
+        assert!(summary.ends_with('…'));
+        assert_eq!(summary.chars().count(), 140);
     }
 
     #[test]

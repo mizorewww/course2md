@@ -399,6 +399,62 @@ pub fn enrich_bilibili_candidates(candidates: &mut [SourceCandidate]) {
     }
 }
 
+/// Bilibili's own hosts and image CDNs, which reset some rustls handshakes
+/// (see [`crate::bilibili_agent_builder`]).
+fn bilibili_host(url: &str) -> bool {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .is_some_and(|host| {
+            [
+                "bilibili.com",
+                "hdslb.com",
+                "biliimg.com",
+                "bilivideo.com",
+                "bilivideo.cn",
+            ]
+            .iter()
+            .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+        })
+}
+
+/// A small remote file such as a cover image, at most `limit` bytes, over the TLS
+/// stack its host accepts. Stops between reads once `cancel` is set.
+pub fn read_remote(
+    url: &str,
+    limit: usize,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<u8>> {
+    use std::io::Read;
+    use std::sync::atomic::Ordering;
+    let builder = if bilibili_host(url) {
+        crate::bilibili_agent_builder()
+    } else {
+        crate::runtime::agent_builder()
+    };
+    // Image CDNs redirect (http to https, a mirror); covers always followed them.
+    let agent = builder
+        .max_redirects(3)
+        .timeout_connect(Some(std::time::Duration::from_secs(3)))
+        .timeout_per_read(Some(std::time::Duration::from_secs(2)))
+        .timeout_global(Some(std::time::Duration::from_secs(6)))
+        .build()
+        .new_agent();
+    let mut response = agent.get(url).call()?;
+    let mut reader = response.body_mut().as_reader();
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 32 * 1024];
+    loop {
+        ensure!(!cancel.load(Ordering::Relaxed), tr!("已取消读取"));
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(bytes);
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+        ensure!(bytes.len() <= limit, tr!("封面超过读取上限"));
+    }
+}
+
 fn subtitle_evidence(
     info: &ExtractorInfo,
     identity: &str,
@@ -729,10 +785,19 @@ pub async fn download(
         !dest.exists(),
         tr!("视频位置已有未校验的文件 / An unverified file already exists at the video location")
     );
-    if let Some(p) = dest.parent() {
-        tokio::fs::create_dir_all(p).await?;
-    }
-    let tmp: PathBuf = dest.with_extension("mp4.part");
+    let parent = dest
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    tokio::fs::create_dir_all(parent).await?;
+    // yt-dlp names the result itself: a merged download takes the merge format's
+    // extension, and a single-file one its own (with `-o media.mp4.part` that
+    // was `media.mp4`, the destination, left behind unverified). A private
+    // directory beside the destination holds whatever it writes; only the one
+    // finished file in it is moved into place.
+    let work = tempfile::Builder::new()
+        .prefix(".download-")
+        .tempdir_in(parent)?;
     let (mut cmd, _cookies) = ytdlp_command(url)?;
     let fmt = format!("bv*[height<={max_height}]+ba/b[height<={max_height}]/b");
     cmd.args([
@@ -750,31 +815,36 @@ pub async fn download(
         "download:[C2MD] %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s",
         "-o",
     ]);
-    cmd.arg(&tmp);
+    cmd.arg(work.path().join("media.%(ext)s"));
     if verbose {
         cmd.arg("-v");
     }
     run_ytdlp(url, &mut cmd, control, true).await?;
-    // 新版 yt-dlp 在 merge 时会按 --merge-output-format 再补后缀：
-    // -o media.mp4.part 实际产出 media.mp4.part.mp4。两种命名都兼容。
-    let merged = PathBuf::from({
-        let mut name = tmp.clone().into_os_string();
-        name.push(".mp4");
-        name
-    });
-    let produced = if merged.is_file() { &merged } else { &tmp };
-    ensure!(
-        produced.is_file(),
-        tr!(
-            "未找到下载的视频（期望 {} 或 {}） / Downloaded video missing (expected {} or {})",
-            tmp.display(),
-            merged.display(),
-            tmp.display(),
-            merged.display()
-        )
-    );
-    tokio::fs::rename(produced, dest).await?;
+    let produced = downloaded_file(work.path())?;
+    tokio::fs::rename(&produced, dest).await?;
     Ok(())
+}
+
+/// The one finished media file yt-dlp left in its private directory. Format
+/// fragments (`media.f137.mp4`), partial files and subtitles are not a result.
+fn downloaded_file(dir: &Path) -> Result<PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        // `media.<ext>` only: fragments are `media.f137.mp4`, partials `media.mp4.part`.
+        let finished = name
+            .strip_prefix("media.")
+            .is_some_and(|ext| !ext.is_empty() && !ext.contains('.'));
+        if finished && path.is_file() {
+            found.push(path);
+        }
+    }
+    // A merge names its output by the merge format, so that one wins.
+    found.sort_by_key(|path| path.extension().is_none_or(|ext| ext != "mp4"));
+    found.into_iter().next().context(tr!(
+        "yt-dlp 已结束，但没有留下视频文件 / yt-dlp finished without leaving a video file"
+    ))
 }
 
 /// Bilibili can reject a request transiently at either the webpage or API stage.
@@ -785,6 +855,31 @@ pub fn is_bilibili_412(stderr: &str) -> bool {
         && (lower.contains("http error 412")
             || lower.contains("http 412")
             || lower.contains("request is blocked by server (412)"))
+}
+
+/// The site's edge dropped the connection mid-handshake or mid-request. Bilibili's
+/// CDN does this intermittently to yt-dlp's TLS stack as it does to rustls (see
+/// [`crate::bilibili_agent_builder`]); the next attempt usually gets through, so
+/// even a probe, which retries nothing else, tries again.
+pub fn is_connection_reset(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    [
+        "connection reset by peer",
+        "connectionreseterror",
+        "connection aborted",
+        "unexpected_eof_while_reading",
+        "eof occurred in violation of protocol",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+/// Whether yt-dlp itself failed on a dropped connection: its final reason, not
+/// a warning about an earlier attempt it retried on its own.
+fn ended_by_connection_reset(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<YtDlpFailure>()
+        .is_some_and(|failure| is_connection_reset(&failure.cause))
 }
 
 /// Shared by CLI extraction and the desktop preview. At most three attempts.
@@ -822,14 +917,67 @@ pub const BILIBILI_412_HINT: &str = "B 站暂时限制了访问。请稍后重�
 
 /// What a failed yt-dlp run suggests. A stopped task did not fail, and a 412
 /// already carries its own advice, so neither is told to log in.
-fn login_tip(url: &str, error: anyhow::Error) -> anyhow::Error {
+fn login_tip(url: &str, mut error: anyhow::Error) -> anyhow::Error {
     if error.downcast_ref::<crate::dispatch::Failure>().is_some()
         || error.downcast_ref::<Bilibili412>().is_some()
     {
         return error;
     }
+    if let Some(failure) = error.downcast_mut::<YtDlpFailure>() {
+        failure.hint = crate::auth::login_hint(url, &failure.cause);
+        return error;
+    }
     crate::auth::with_bilibili_login_tip(url, error)
 }
+
+/// A failed yt-dlp run. Its own last `ERROR:` line comes first: that is what a
+/// person can act on, and the line the desktop shows for a failed task. A login
+/// suggestion, when one applies, follows it rather than replacing it, and the
+/// end of yt-dlp's output follows for the log.
+#[derive(Debug)]
+pub struct YtDlpFailure {
+    /// yt-dlp's own words, without the `ERROR:` prefix.
+    pub cause: String,
+    hint: Option<&'static str>,
+    code: Option<i32>,
+    tail: String,
+}
+
+impl YtDlpFailure {
+    fn new(code: Option<i32>, stderr: &str) -> Self {
+        let lines = || stderr.lines().rev().map(str::trim);
+        let cause = lines()
+            .find_map(|line| line.strip_prefix("ERROR:"))
+            .or_else(|| lines().find(|line| !line.is_empty()))
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        Self {
+            cause,
+            hint: None,
+            code,
+            tail: crate::error::tail_lines(stderr, 5),
+        }
+    }
+}
+
+impl std::fmt::Display for YtDlpFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.cause.is_empty() {
+            writeln!(f, "yt-dlp: {}", self.cause)?;
+        }
+        if let Some(hint) = self.hint {
+            writeln!(f, "{hint}")?;
+        }
+        write!(
+            f,
+            "yt-dlp 运行失败 / failed (code={:?}):\n{}",
+            self.code, self.tail
+        )
+    }
+}
+
+impl std::error::Error for YtDlpFailure {}
 
 /// Runs yt-dlp, the URL last (`--` keeps it from reading as an option).
 async fn run_ytdlp(
@@ -866,8 +1014,10 @@ async fn run_retrying(
             rejections += 1;
             bilibili_retry_delay_steps(rejections - 1)
         } else {
-            (retry_transient && !is_deterministic_download_error(&format!("{error:#}")))
-                .then_some(TRANSIENT_RETRY_DELAY)
+            let text = format!("{error:#}");
+            ((retry_transient && !is_deterministic_download_error(&text))
+                || ended_by_connection_reset(&error))
+            .then_some(TRANSIENT_RETRY_DELAY)
         };
         let Some(delay) = delay.filter(|_| attempt < YTDLP_ATTEMPTS) else {
             return Err(error);
@@ -971,7 +1121,7 @@ async fn run_once(cmd: &mut Command) -> Result<std::process::Output> {
             stderr: stderr.into_bytes(),
         });
     }
-    let error = crate::error::cmd_error("yt-dlp", status.code(), &stderr);
+    let error = anyhow::Error::new(YtDlpFailure::new(status.code(), &stderr));
     Err(if is_bilibili_412(&stderr) {
         bilibili_hint(error.context(Bilibili412))
     } else {
@@ -1059,6 +1209,105 @@ mod tests {
         let message = format!("{error:#}");
         assert!(message.contains("--login bilibili"), "{message}");
         assert!(message.contains("HTTP Error 403"), "{message}");
+    }
+
+    #[test]
+    fn a_download_is_the_one_finished_file_whatever_yt_dlp_named_it() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(downloaded_file(dir.path()).is_err());
+        // A single-file format keeps its own extension (ACCEPTANCE C3).
+        std::fs::write(dir.path().join("media.m4a"), b"audio").unwrap();
+        assert!(downloaded_file(dir.path()).unwrap().ends_with("media.m4a"));
+        for leftover in [
+            "media.f137.mp4",
+            "media.mp4.part",
+            "media.zh.srt",
+            "other.mp4",
+        ] {
+            std::fs::write(dir.path().join(leftover), b"x").unwrap();
+        }
+        std::fs::write(dir.path().join("media.mp4"), b"video").unwrap();
+        assert!(downloaded_file(dir.path()).unwrap().ends_with("media.mp4"));
+    }
+
+    #[test]
+    fn a_failed_run_puts_yt_dlps_reason_first_and_the_login_hint_after_it() {
+        let stderr = "WARNING: [BiliBili] something\nERROR: [BiliBili] BV1: Unable to download webpage: HTTP Error 403: Forbidden\n";
+        let error = login_tip(
+            "https://www.bilibili.com/video/BV1",
+            anyhow::Error::new(YtDlpFailure::new(Some(1), stderr)),
+        );
+        let message = format!("{error:#}");
+        let mut lines = message.lines();
+        assert_eq!(
+            lines.next(),
+            Some("yt-dlp: [BiliBili] BV1: Unable to download webpage: HTTP Error 403: Forbidden")
+        );
+        assert!(lines.next().unwrap().contains("--login bilibili"));
+        assert!(message.contains("WARNING: [BiliBili] something"));
+        assert!(error.downcast_ref::<YtDlpFailure>().is_some());
+        // YouTube suggests its browser login only when YouTube asked for one.
+        let bot = "ERROR: [youtube] x: Sign in to confirm you’re not a bot.";
+        let error = login_tip(
+            "https://www.youtube.com/watch?v=x",
+            anyhow::Error::new(YtDlpFailure::new(Some(1), bot)),
+        );
+        assert!(format!("{error:#}").contains("--login youtube"));
+        let gone = "ERROR: [youtube] x: Video unavailable";
+        let error = login_tip(
+            "https://www.youtube.com/watch?v=x",
+            anyhow::Error::new(YtDlpFailure::new(Some(1), gone)),
+        );
+        assert!(!format!("{error:#}").contains("--login"));
+    }
+
+    #[test]
+    fn a_dropped_connection_is_worth_another_attempt() {
+        for text in [
+            "ERROR: [BiliBili] 1xx411c7mD: Unable to download webpage: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))",
+            "ERROR: [youtube] x: Unable to download API page: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol",
+        ] {
+            assert!(is_connection_reset(text), "{text}");
+        }
+        for text in [
+            "ERROR: [BiliBili] BV1: HTTP Error 404: Not Found",
+            "ERROR: Unsupported URL: https://example.com/",
+        ] {
+            assert!(!is_connection_reset(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn only_a_run_that_ended_on_a_dropped_connection_is_retried_for_it() {
+        let failure = |stderr: &str| anyhow::Error::new(YtDlpFailure::new(Some(1), stderr));
+        assert!(ended_by_connection_reset(&failure(
+            "ERROR: [BiliBili] BV1: Unable to download webpage: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))"
+        )));
+        // yt-dlp retried the reset itself; its final reason is a refusal.
+        let refused = failure(
+            "WARNING: [download] Got error: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer')). Retrying (1/10)...\nERROR: unable to download video data: HTTP Error 403: Forbidden",
+        );
+        assert!(!ended_by_connection_reset(&refused));
+        assert!(!ended_by_connection_reset(&anyhow::anyhow!(
+            "Connection reset by peer"
+        )));
+    }
+
+    #[test]
+    fn bilibili_image_hosts_use_the_platform_tls_stack() {
+        for url in [
+            "https://i0.hdslb.com/bfs/archive/x.jpg",
+            "http://i2.hdslb.com/x.jpg",
+            "https://api.bilibili.com/x",
+        ] {
+            assert!(bilibili_host(url), "{url}");
+        }
+        for url in [
+            "https://i.ytimg.com/vi/x/hq.jpg",
+            "https://hdslb.com.evil.test/x",
+        ] {
+            assert!(!bilibili_host(url), "{url}");
+        }
     }
 
     #[test]

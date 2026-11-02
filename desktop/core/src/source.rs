@@ -83,6 +83,10 @@ impl std::error::Error for Interrupted {}
 struct CommandFailure {
     kind: FailureKind,
     message: String,
+    /// The helper's final reason was a dropped connection (see
+    /// [`preview_ended_by_connection_reset`]); decided from its own last error
+    /// line, before `message` may become a translated summary.
+    reset: bool,
 }
 
 impl std::fmt::Display for CommandFailure {
@@ -182,7 +186,14 @@ fn preview_command_error(program: &str, code: Option<i32>, stderr: &str) -> anyh
         .copied()
         .unwrap_or_default();
     let kind = failure_kind(stderr);
-    let failure = |message: String| anyhow::Error::new(CommandFailure { kind, message });
+    let reset = course2md::fetch::is_connection_reset(cause);
+    let failure = |message: String| {
+        anyhow::Error::new(CommandFailure {
+            kind,
+            message,
+            reset,
+        })
+    };
     let summary = match kind {
         FailureKind::NotFound => {
             course2md::tr!("无法找到这个视频，请检查链接或确认视频仍可访问。").to_owned()
@@ -248,6 +259,15 @@ fn subtitle_failure_message(error: &anyhow::Error) -> String {
     }
 }
 
+/// yt-dlp's final reason was a dropped connection. Its log may mention a reset
+/// it already retried on its own before a refusal, and a timeout warning may
+/// turn the message into a summary, so only that final line is consulted.
+fn preview_ended_by_connection_reset(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<CommandFailure>()
+        .is_some_and(|failure| failure.reset)
+}
+
 fn command(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Vec<u8>> {
     command_output(name, args, cancel).map(|output| output.stdout)
 }
@@ -263,11 +283,16 @@ fn command_output(name: &str, args: &[&str], cancel: &AtomicBool) -> Result<Comm
         {
             return result;
         }
-        if !course2md::fetch::is_bilibili_412(&message) {
+        let delay = if course2md::fetch::is_bilibili_412(&message) {
+            let Some(delay) = course2md::fetch::bilibili_retry_delay(&message, retries) else {
+                return result.context(course2md::fetch::BILIBILI_412_DESKTOP_HINT);
+            };
+            delay
+        } else if preview_ended_by_connection_reset(error) && retries < 2 {
+            // The site's edge dropped the connection; the next attempt usually passes.
+            Duration::from_secs(1)
+        } else {
             return result;
-        }
-        let Some(delay) = course2md::fetch::bilibili_retry_delay(&message, retries) else {
-            return result.context(course2md::fetch::BILIBILI_412_DESKTOP_HINT);
         };
         retries += 1;
         let retry_at = Instant::now() + delay;
@@ -624,29 +649,8 @@ pub fn cache_remote_cover(url: &str, cancel: &AtomicBool) -> Result<PathBuf> {
     if cache_hit(&target) {
         return Ok(target);
     }
-    let response = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(3))
-        .timeout_read(Duration::from_secs(2))
-        .timeout(Duration::from_secs(6))
-        .build()
-        .get(url)
-        .call()?;
-    use std::io::Read;
-    let mut reader = response.into_reader();
-    let mut bytes = Vec::new();
-    let mut buffer = [0; 32 * 1024];
-    loop {
-        check_cancel(cancel)?;
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        bytes.extend_from_slice(&buffer[..count]);
-        ensure!(
-            bytes.len() <= 12 * 1024 * 1024,
-            course2md::tr!("封面超过读取上限")
-        );
-    }
+    // Bilibili's image CDN needs the platform TLS stack, as its pages do.
+    let bytes = course2md::fetch::read_remote(url, 12 * 1024 * 1024, cancel)?;
     check_cancel(cancel)?;
     let image = image::load_from_memory(&bytes).context(course2md::tr!("封面格式无法识别"))?;
     let file = tempfile::Builder::new().suffix(".jpg").tempfile_in(
@@ -1115,6 +1119,36 @@ mod tests {
         assert_eq!(pasted_local_path(dir.path().to_str().unwrap()), None);
         assert_eq!(pasted_local_path("/no/such/video.mp4"), None);
         assert_eq!(pasted_local_path("bilibili.com/video/BV1"), None);
+    }
+
+    #[test]
+    fn a_preview_is_retried_only_when_yt_dlp_ended_on_a_dropped_connection() {
+        let reset = "ERROR: [BiliBili] BV1: Unable to download webpage: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))";
+        assert!(preview_ended_by_connection_reset(&preview_command_error(
+            "yt-dlp",
+            Some(1),
+            reset
+        )));
+        // A timeout warning makes the message a summary; the final reset still counts.
+        let after_timeout = format!("WARNING: [BiliBili] Read timed out. Retrying\n{reset}");
+        let error = preview_command_error("yt-dlp", Some(1), &after_timeout);
+        let summary = error
+            .to_string()
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        assert!(!summary.contains("Connection reset"), "{error}");
+        assert!(preview_ended_by_connection_reset(&error), "{error}");
+        let refused = format!(
+            "WARNING: [BiliBili] Got error: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer')). Retrying\n{}",
+            "ERROR: [BiliBili] BV1: Unable to download JSON metadata: HTTP Error 403: Forbidden"
+        );
+        assert!(!preview_ended_by_connection_reset(&preview_command_error(
+            "yt-dlp",
+            Some(1),
+            &refused
+        )));
     }
 
     #[test]
