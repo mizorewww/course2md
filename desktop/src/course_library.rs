@@ -2058,7 +2058,11 @@ impl Desktop {
                                 .min_w(rem(160.))
                                 .flex_1(),
                         )
-                        .child(status_chip(StatusKind::Warning).child(task.state.label()))
+                        // The same colour as on Tasks: a failure is red, a pause amber.
+                        .child(
+                            status_chip(crate::task_ui::task_status_kind(task.state))
+                                .child(task.state.label()),
+                        )
                         .child(actions),
                 )
                 .when(summary != task.state.label(), |card| {

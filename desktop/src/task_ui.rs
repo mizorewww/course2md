@@ -1608,7 +1608,7 @@ impl Desktop {
     }
 }
 
-fn task_status_kind(state: TaskState) -> StatusKind {
+pub(crate) fn task_status_kind(state: TaskState) -> StatusKind {
     match state {
         TaskState::Complete => StatusKind::Success,
         TaskState::Running | TaskState::Pausing => StatusKind::Progress,
