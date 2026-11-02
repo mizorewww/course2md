@@ -53,16 +53,25 @@ fn identity() -> Div {
 
 /// The rows of the 关于 group, in reading order, with the page's own `last` row.
 pub fn fields(last: ui::Field) -> Vec<ui::Field> {
-    let summary = LICENSES
-        .iter()
-        .map(|(name, _)| *name)
-        .collect::<Vec<_>>()
-        .join(course2md::tr!("、"));
-    let licenses = LICENSES.into_iter().map(|(name, url)| {
-        MaterialMenuItem::new(name)
-            .leading(Icon::from(symbols::open_in_new()))
-            .on_click(move |_, _, cx| cx.open_url(url))
-    });
+    // Each license is a document to open, not a value to choose: one link per text,
+    // named in full, wrapping as the row narrows (V3).
+    let licenses = h_flex()
+        .w_full()
+        .min_w_0()
+        .flex_wrap()
+        .gap(rem(8.))
+        .children(
+            LICENSES
+                .into_iter()
+                .enumerate()
+                .map(|(index, (name, url))| {
+                    material_button(("about-license", index), ButtonVariant::Outlined)
+                        .tone(ButtonTone::Accent)
+                        .icon(symbols::open_in_new())
+                        .child(name)
+                        .on_click(move |_, _, cx| cx.open_url(url))
+                }),
+        );
     vec![
         ui::Field::content("about-identity", identity()),
         ui::Field::tile("about-links", |outer| {
@@ -110,14 +119,7 @@ pub fn fields(last: ui::Field) -> Vec<ui::Field> {
                 ))
                 .into_any_element()
         }),
-        ui::Field::menu(
-            "about-license",
-            course2md::tr!("开源许可"),
-            summary,
-            MaterialMenu::new("about-license-items")
-                .width(320.)
-                .items(licenses),
-        ),
+        ui::Field::below("about-license", course2md::tr!("开源许可"), licenses),
         last,
     ]
 }
