@@ -560,7 +560,18 @@ mod tests {
         // A folder dated in the future (the clock went back) is kept.
         let ahead = dir.path().join("check-ahead");
         std::fs::create_dir(&ahead).unwrap();
-        std::fs::File::open(&ahead)
+        // Windows opens a folder only with backup semantics, and dating it needs
+        // the write-attributes right.
+        let mut options = std::fs::OpenOptions::new();
+        #[cfg(windows)]
+        std::os::windows::fs::OpenOptionsExt::custom_flags(
+            std::os::windows::fs::OpenOptionsExt::access_mode(&mut options, 0x0100),
+            0x0200_0000,
+        );
+        #[cfg(not(windows))]
+        options.read(true);
+        options
+            .open(&ahead)
             .unwrap()
             .set_modified(std::time::SystemTime::now() + Duration::from_secs(3600))
             .unwrap();
