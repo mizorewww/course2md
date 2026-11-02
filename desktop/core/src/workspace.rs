@@ -1063,10 +1063,11 @@ impl State {
             !selected.is_empty() && current == selected,
             course2md::tr!("待确认的请求已变化，请查看最新范围后再选择是否重新发送")
         );
-        ensure!(
-            selected.iter().all(|id| !task.resend.contains(id)),
-            course2md::tr!("这些请求已获得重新发送授权，请等待对应任务处理")
-        );
+        // The task is neither waiting nor running, so an earlier authorization of these
+        // requests was never used: its start failed or the task was paused. A request
+        // that was resent is no longer uncertain under this id, so confirming again
+        // cannot send anything twice.
+        task.resend.retain(|id| !selected.contains(&id));
         task.resend.extend(requests.iter().cloned());
         task.intent = Intent::Run;
         task.state = TaskState::Queued;
@@ -4105,12 +4106,15 @@ mod tests {
                 .authorize_uncertain(&id, std::slice::from_ref(&first))
                 .is_err()
         );
+        // Its start failed: the task needs attention again, the request still uncertain
+        // under the same id, so the authorization was never used and may be given again.
+        ws.state.task_mut(&id).unwrap().state = TaskState::NeedsAttention;
+        ws.state
+            .authorize_uncertain(&id, std::slice::from_ref(&first))
+            .unwrap();
+        assert_eq!(ws.state.task(&id).unwrap().resend, vec![first.clone()]);
+        assert_eq!(ws.state.task(&id).unwrap().state, TaskState::Queued);
         ws.state.task_mut(&id).unwrap().state = TaskState::Uncertain;
-        assert!(
-            ws.state
-                .authorize_uncertain(&id, std::slice::from_ref(&first))
-                .is_err()
-        );
         let second = write_unknown(ws.state.task(&id).unwrap(), 2);
         assert!(ws.state.authorize_uncertain(&id, &[first]).is_err());
         ws.state.authorize_uncertain(&id, &[second]).unwrap();
