@@ -91,10 +91,9 @@ impl Desktop {
                     "缺少读取视频所需的组件，请在设置中检查运行环境"
                 ))
             })?;
+            // Only the check runs here: the choice is saved below, and only
+            // while the dialog that asked for it is still open.
             let session = youtube::check_session(&program, &choice)?;
-            if save && session == Session::SignedIn {
-                youtube::save_choice(&choice)?;
-            }
             anyhow::Ok((choice, session))
         });
         cx.spawn(async move |this, cx| {
@@ -103,6 +102,13 @@ impl Desktop {
                 if !this.youtube.current(generation) {
                     return;
                 }
+                let result = match result {
+                    // A small atomic write, once the person is still waiting for it.
+                    Ok(Ok((choice, Session::SignedIn))) if save => {
+                        Ok(youtube::save_choice(&choice).map(|()| (choice, Session::SignedIn)))
+                    }
+                    other => other,
+                };
                 let step = match result {
                     Ok(Ok((choice, Session::SignedIn))) => {
                         if save {
