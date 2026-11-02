@@ -309,3 +309,5 @@ tree), after this branch. B5 ran under `sandbox-exec` with only loopback reachab
 - **B9.** `ad13bf4f`. 2.0.1 ignored the proxy variables too (ureq 2, `try_proxy_from_env` never set). Agents now use
   them with `NO_PROXY`, loopback always direct. Test `an_environment_proxy_leaves_loopback_and_no_proxy_hosts_direct`.
   `model-fetch` downloads are outside these agents.
+| D2 follow-up | `7484387e` | The desktop starts its worker with `COURSE2MD_LANG` set to the app's interface language, so a task that discovers online subtitles at run time chooses as the preview does; tasks that already chose keep their `.subs/language` record. Test: a spawned worker sees the app language |
+| D6 follow-up | `cd591943` | The mirror-fallback warning and the downloader's "Apple 模型下载失败 / …" error are localized outside `--json`; `--json` text is unchanged. Real run without network (`ja`): both lines in Japanese; `--json`: as before |
