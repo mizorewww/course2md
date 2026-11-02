@@ -2159,10 +2159,16 @@ impl Desktop {
                         let time = seconds
                             .filter(|seconds| *label != course2md::render::fmt_ts(*seconds))
                             .map(course2md::render::fmt_ts);
+                        // Flat pills on whatever the contents sit on (R9): the page
+                        // ground beside the note, the sheet's surface over it.
                         ListItem::new(("toc-item", index), label.clone())
                             .density(ListDensity::Compact)
-                            .container(ColorRole::SURFACE_CONTAINER)
-                            .segment([true; 4])
+                            .container(if beside {
+                                ColorRole::SURFACE_CONTAINER_LOW
+                            } else {
+                                ColorRole::SURFACE_CONTAINER
+                            })
+                            .pill(true)
                             .selected(current == Some(index))
                             .when_some(time, |item, time| item.trailing_text(time))
                             .on_click(cx.listener(move |this, _, _, cx| {

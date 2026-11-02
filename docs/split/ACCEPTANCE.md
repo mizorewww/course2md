@@ -151,6 +151,11 @@ Each line names the commit by subject; evidence is under the session scratchpad 
   (`u10/l`, `u10/ld`); the pill waits on #26. S1, `desktop: narrow settings keep their categories as the tinted list`
   (`s1/c`, `s1/cd`, `s1/cen`). U1 waits on #19.
 
+- Kit main `53fa0fd` (all of #19 to #27 merged), `desktop: pin gpui-kit-material main at 53fa0fd`. L1 pill
+  (`pill/l`, `pill/ld`); R9 pills (source only: the fixture notes have no outline); S11 (`s11/p`, `s11/pd`, `s11/p200`);
+  drop zones on `drop_target` (source only: the capture build cannot drag files from outside); U1 dropdowns
+  (`u1/gopen`, `u1/ho`, `u1/ad`). U17 is the kit's palette change (#27): every palette's error colours follow it.
+
 ## Plan conformance (after the three fix agents)
 
 | ID | Sev | Finding |

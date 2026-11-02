@@ -189,7 +189,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 {}需要是有效的非负数	{}需要是有效的非负数	{} needs to be a valid non-negative number	{}需要是有效的非負數	{}は有効な非負の数値である必要があります
 {}（具体内容未记录）	{}（具体内容未记录）	{} (specific content not recorded)	{}（具體內容未記錄）	{}（詳細は記録されていません）
 {}（自动选择）	{}（自动选择）	{} (automatic)	{}（自動選擇）	{}（自動）
-{}，{}{}	{}，{}{}	{}, {}{}	{}，{}{}	{}、{}{}
+{}，{}	{}，{}	{}, {}	{}，{}	{}、{}
 {}：{}	{}：{}	{}: {}	{}：{}	{}:{}
 {}：{}{}	{}：{}{}	{}: {}{}	{}：{}{}	{}：{}{}
 {}；尚未发送请求	{}；尚未发送请求	{}; request not sent yet	{}；尚未傳送請求	{};リクエストはまだ送信されていません
@@ -1967,7 +1967,6 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 （输入隐藏；回车保留已保存的密钥） / API key (hidden; Enter keeps the saved key)	（输入隐藏；回车保留已保存的密钥）	API key (hidden; Enter keeps the saved key)	（輸入隱藏；按 Enter 保留已儲存的金鑰）	（入力は非表示。Enter で保存済みのキーを保持）
 （输入隐藏；无密钥的本地服务可留空） / API key (hidden; leave blank for a local service without authentication)	（输入隐藏；无密钥的本地服务可留空）	API key (hidden; leave blank for a local service without authentication)	（輸入隱藏；無金鑰的本地服務可留空）	(入力は非表示になります。キーのないローカル サービスは空白のままにすることができます)
 （输出 json）	（输出 json）	(output json)	（輸出 json）	（json を出力）
-，已选择	，已选择	, selected	，已選擇	、選択済み
 ，或 Hugging Face 仓库名（如 org/model）	，或 Hugging Face 仓库名（如 org/model）	, or Hugging Face repository name (such as org/model)	，或 Hugging Face 儲存庫名（如 org/model）	、または Hugging Face リポジトリ名（org/model など）
 ；	；	; 	；	;
 原笔记已关闭；服务正在保存，但未用于其他笔记	原笔记已关闭；服务正在保存，但未用于其他笔记	The original note is closed; the service is still being saved and was not used for other notes	原筆記已關閉；服務正在儲存，但未用於其他筆記	元のノートは閉じられています。サービスは保存中で、他のノートには使用されていません

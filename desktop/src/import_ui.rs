@@ -752,31 +752,39 @@ impl Desktop {
         };
         if input.is_empty() {
             return Some(
-                tile([true; 4])
-                    .flex()
-                    .flex_col()
-                    .gap(rem(16.))
-                    .p(rem(32.))
-                    .items_center()
-                    .border_2()
-                    .border_dashed()
-                    .border_color(color(ColorRole::OUTLINE))
-                    .child(
-                        Icon::from(symbols::file_upload())
-                            .size(rem(32.))
-                            .color(color(ColorRole::PRIMARY)),
-                    )
-                    .child(
-                        accessible_text("import-drop-instruction", course2md::tr!("拖入本地视频"))
+                // The kit's drop target on the tile's surface: dashed at rest, primary
+                // while a file is dragged over it.
+                div().w_full().min_w_0().child(
+                    drop_target("import-drop-zone", course2md::tr!("拖入本地视频"), false)
+                        .w_full()
+                        .min_w_0()
+                        .bg(color(ColorRole::SURFACE))
+                        .rounded(TILE_RADIUS)
+                        .flex()
+                        .flex_col()
+                        .gap(rem(16.))
+                        .p(rem(32.))
+                        .items_center()
+                        .child(
+                            Icon::from(symbols::file_upload())
+                                .size(rem(32.))
+                                .color(color(ColorRole::PRIMARY)),
+                        )
+                        .child(
+                            accessible_text(
+                                "import-drop-instruction",
+                                course2md::tr!("拖入本地视频"),
+                            )
                             .text_size(TEXT_BODY)
                             .font_weight(FontWeight::MEDIUM),
-                    )
-                    .child(choose(
-                        "choose-video",
-                        ButtonVariant::Filled,
-                        course2md::tr!("选择视频"),
-                        cx,
-                    )),
+                        )
+                        .child(choose(
+                            "choose-video",
+                            ButtonVariant::Filled,
+                            course2md::tr!("选择视频"),
+                            cx,
+                        )),
+                ),
             );
         }
         if self.import.source_preview.is_some() {
@@ -2559,22 +2567,27 @@ impl Desktop {
             .bg(color(ColorRole::SURFACE_CONTAINER).opacity(0.88))
             .p(rem(24.))
             .child(
-                v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .gap(rem(16.))
-                    .rounded(RADIUS_HERO)
-                    .border_2()
-                    .border_dashed()
-                    .border_color(color(ColorRole::PRIMARY))
-                    .child(tinted_icon(symbols::file_upload(), Tint::Teal, rem(88.)))
-                    .child(
-                        div()
-                            .text_size(TEXT_HEADLINE)
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(course2md::tr!("松开以添加视频")),
-                    ),
+                // Shown only while a file is over the window, so it draws the
+                // kit's dragged-over look outright.
+                drop_target(
+                    "workbench-drop-target",
+                    course2md::tr!("松开以添加视频"),
+                    true,
+                )
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(rem(16.))
+                .rounded(RADIUS_HERO)
+                .child(tinted_icon(symbols::file_upload(), Tint::Teal, rem(88.)))
+                .child(
+                    div()
+                        .text_size(TEXT_HEADLINE)
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(course2md::tr!("松开以添加视频")),
+                ),
             )
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 this.drop_source_files(paths.paths(), window, cx);

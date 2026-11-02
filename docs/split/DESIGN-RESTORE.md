@@ -171,9 +171,6 @@ A `restore` verdict states the intent. These are not there yet:
 | # | What remains |
 | --- | --- |
 | R6 | The reader bar has its breadcrumb over the note title again, in a 64 bar rather than the baseline's 56; centring is not yet confirmed in the running app (acceptance U15 to U25) |
-| R9 | Contents as flat pills: `ListItem::pill` (kit #26), without the surface container |
-| S11 | Palette picker: the kit's largest dialog is 720 against the baseline's 918, so names wrap at four across; the selected card has no ring. Kit #23 (`MaterialDialog::max_width`) and #22 (`MaterialCard::selected`, a secondary 1dp outline and tint per M3; the old 2dp ring would be a departure) |
-| U1 | Value choices as rows opening a menu, not `ExposedDropdown`s: kit #18 (`show_label`, ready for the owner) and #19 (a caller's menu with its value, in review) let a row hold one with its supporting text, icons and actions |
 
 ## Finished after the audit
 
@@ -204,8 +201,11 @@ The rows above state the verdict; this says what the last pass did.
 | G8 | The folder picker takes `TextFieldShape::Rounded`; the custom model field floats its label. The note title field is named by its row |
 | H4 | 20 from the hero title to the link field, 24 from the field to the line under it |
 | R12 | Kept on the title row: the design language puts a card's commands on its title row, not over its image. The note's own figures carry their time and enlarge action over the image (A5) |
-| G25 | The image viewer's frame is the kit's outlined `CardSurface`, not a hand-painted border. The workbench's dashed drop zones wait on kit #24 (`drop_target`) |
 | U23 | The run check's recheck and chips share the text's ruler beside the circle, so they wrap together at 900 wide and 200% text |
 | S1 | Narrow, the settings categories are the same list as wide (a list-detail pattern): `ListLeading::Tinted` circles in their families, short names, the kit's list selection, the same arrow and Home/End keys. The rail's band (U18) is gone with it. The pill selection follows kit #26 |
 | G17 | Page titles are headline medium 28/36: kit #20 lets `ui::page_title`'s size reach the text |
-| L1 | Sidebar rows are 44 tall (`ListDensity::Minus3`, kit #21); the drop outline is drawn inside the row. The pill selection follows kit #26 |
+| L1 | Sidebar rows are 44 tall pills (`ListDensity::Minus3`, `ListItem::pill`, kit #21 and #26); the drop outline is drawn inside the row |
+| R9 | The contents are flat pills on what they sit on (kit #26) |
+| S11 | The palette picker is full width up to 920 (kit #23), four previews across; the cards are a kit `CardGroup` whose selected card has the secondary outline, tint and check (kit #22) |
+| U1 | Every value choice is an outlined `ExposedDropdown` at its row's end, named by the row (kit #18), with the caller's menu (kit #19) |
+| G25 | The image viewer's frame is the kit's outlined `CardSurface`; the workbench's drop zones are the kit's `drop_target` (kit #24) |
