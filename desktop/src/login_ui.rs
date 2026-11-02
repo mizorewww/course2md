@@ -8,7 +8,7 @@
 use crate::{Desktop, symbols};
 use course2md::auth::{
     geetest::{CAPTCHA_TIMEOUT, CaptchaPage},
-    passport::{Captcha, GeetestSolution, LoginOutcome, Passport, Password},
+    passport::{Captcha, GeetestSolution, LoginOutcome, Passport, Password, Zeroizing},
 };
 use desktop_core::account::*;
 use gpui::{prelude::*, *};
@@ -43,6 +43,11 @@ impl Desktop {
             .as_ref()
             .map(|inputs| pick(inputs).read(cx).value().trim().to_owned())
             .unwrap_or_default()
+    }
+
+    /// A one-time code as typed, in a buffer zeroized when the login drops it.
+    fn login_code(&self, cx: &App) -> Zeroizing<String> {
+        Zeroizing::new(self.login_field(|inputs| &inputs.code, cx))
     }
 
     fn clear_login_field(
@@ -310,7 +315,7 @@ impl Desktop {
     }
 
     fn submit_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let code = self.login_field(|inputs| &inputs.code, cx);
+        let code = self.login_code(cx);
         if code.is_empty() {
             self.account.form.error = Some(course2md::tr!("短信验证码不正确").into());
             cx.notify();

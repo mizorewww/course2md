@@ -2,7 +2,7 @@
 //! terminal side of the source accounts in [`crate::auth`].
 use crate::auth::{
     geetest::{CAPTCHA_TIMEOUT, CaptchaPage, open_in_browser},
-    passport::{Captcha, GeetestSolution, LoginOutcome, Passport, Password},
+    passport::{Captcha, GeetestSolution, LoginOutcome, Passport, Password, Zeroizing},
     youtube::{Browser, BrowserChoice},
 };
 use crate::{println_tr, tr};
@@ -75,10 +75,13 @@ fn solve(captcha: &Captcha) -> Result<GeetestSolution> {
     page.wait(&AtomicBool::new(false), CAPTCHA_TIMEOUT)
 }
 
-fn code_prompt() -> Result<String> {
-    Ok(dialoguer::Input::new()
-        .with_prompt(tr!("短信验证码 / SMS code"))
-        .interact_text()?)
+/// A one-time code, zeroized once the login is done with it.
+fn code_prompt() -> Result<Zeroizing<String>> {
+    Ok(Zeroizing::new(
+        dialoguer::Input::new()
+            .with_prompt(tr!("短信验证码 / SMS code"))
+            .interact_text()?,
+    ))
 }
 
 /// Saves a session, after the phone check Bilibili may ask for first.

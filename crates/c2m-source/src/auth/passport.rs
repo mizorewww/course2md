@@ -10,7 +10,8 @@ use crate::tr;
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
 use std::time::Duration;
-use zeroize::Zeroizing;
+/// Holds a password or a one-time code; zeroized when dropped.
+pub use zeroize::Zeroizing;
 
 /// A password typed by the person. Zeroized on drop; deliberately not `Debug`,
 /// `Clone`, `Display` or serializable.
@@ -329,8 +330,9 @@ impl Passport {
         })
     }
 
+    /// `code` is the person's one-time code; keep it in a [`Zeroizing`] buffer.
     pub fn login_sms(&mut self, ticket: &SmsTicket, code: &str) -> Result<LoginOutcome> {
-        let code = digits(code);
+        let code = Zeroizing::new(digits(code));
         ensure!(!code.is_empty(), PassportError::new(1006, ""));
         let url = format!("{}/x/passport-login/web/login/sms", self.endpoints.passport);
         let response = self.post(
@@ -446,9 +448,10 @@ impl Passport {
         Ok(())
     }
 
+    /// `code` is the person's one-time code; keep it in a [`Zeroizing`] buffer.
     /// Confirms the code sent to the bound phone and exchanges it for the session.
     pub fn risk_verify(&mut self, check: &RiskCheck, code: &str) -> Result<VerifiedLogin> {
-        let code = digits(code);
+        let code = Zeroizing::new(digits(code));
         ensure!(!code.is_empty(), PassportError::new(1006, ""));
         let captcha_key = check.captcha_key.clone().context(tr!("请先获取验证码"))?;
         let url = format!("{}/x/safecenter/login/tel/verify", self.endpoints.passport);
