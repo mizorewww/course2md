@@ -1391,6 +1391,10 @@ impl Desktop {
         let pending = source.subtitle_request.is_some() || source.subtitle_read_error.is_some();
         let value: SharedString = if self.import.subtitle_loading {
             course2md::tr!("正在读取字幕…").into()
+        } else if !speech && failure.is_some() {
+            // The failure beneath says what happened; the chip does not also say
+            // the read is still going.
+            course2md::tr!("尚未选择文字来源").into()
         } else if !speech && pending {
             course2md::tr!("字幕还没读取完成").into()
         } else if speech {
