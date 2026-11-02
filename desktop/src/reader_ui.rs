@@ -1533,15 +1533,7 @@ impl Desktop {
             return;
         };
         let title = self.library.course_display_title(&course);
-        // The engine's file-name rules: also control characters, trailing dots,
-        // device names such as `CON` and over-long titles.
-        let stem = course2md::config::sanitize_filename_with_fallback(&title, "course");
-        let extension = match format {
-            course2md::config::OutputFormat::Md => "zip",
-            course2md::config::OutputFormat::Html => "html",
-            course2md::config::OutputFormat::Json => "json",
-        };
-        let suggested = format!("{stem}.{extension}");
+        let suggested = export_file_name(&title, format);
         let receiver = cx.prompt_for_new_path(&self.output(), Some(&suggested));
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
@@ -1582,34 +1574,12 @@ impl Desktop {
             }
             let target = path.clone();
             let source = version.clone();
-            let exported = crate::spawn_blocking_io(move || {
-                let protected = source.canonicalize()?;
-                let parent = target
-                    .parent()
-                    .ok_or_else(|| anyhow::anyhow!(course2md::tr!("导出位置无效")))?
-                    .canonicalize()?;
-                anyhow::ensure!(
-                    !parent.starts_with(&protected)
-                        && !parent.ancestors().any(|ancestor| ancestor
-                            .join("manifest.json")
-                            .is_file()
-                            && ancestor.parent().is_some_and(|parent| parent
-                                .file_name()
-                                .is_some_and(|name| name == "versions"))),
-                    course2md::tr!("不能保存在笔记自己的文件夹里，请换个位置")
-                );
-                // The native save panel owns the explicit overwrite decision; the old file
-                // remains intact until a complete export is ready beside it.
-                // A dropped temporary folder takes an unfinished export with it.
-                let temp = tempfile::Builder::new()
-                    .prefix(".course2md-export-")
-                    .tempdir_in(&parent)?;
-                let file = temp.path().join(target.file_name().unwrap_or_default());
-                course2md::portable::export(&source, format, &file)?;
-                Ok(std::fs::rename(&file, &target)?)
-            })
-            .await
-            .unwrap_or_else(|| Err(anyhow::anyhow!(course2md::tr!("导出时意外中断，请重试"))));
+            let exported =
+                crate::spawn_blocking_io(move || export_version(&source, format, &target))
+                    .await
+                    .unwrap_or_else(|| {
+                        Err(anyhow::anyhow!(course2md::tr!("导出时意外中断，请重试")))
+                    });
             let _ = this.update(cx, |this, cx| {
                 let result = exported
                     .map(|()| path.clone())

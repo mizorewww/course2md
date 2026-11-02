@@ -233,6 +233,54 @@ pub fn exported_file_label(path: &std::path::Path) -> String {
     c2m_i18n::tr!("已导出 · {}", name)
 }
 
+/// The file name the save panel suggests for an export of the note titled `title`.
+pub fn export_file_name(title: &str, format: c2m_config::config::OutputFormat) -> String {
+    use c2m_config::config::OutputFormat;
+    // The engine's file-name rules: also control characters, trailing dots,
+    // device names such as `CON` and over-long titles.
+    let stem = c2m_config::config::sanitize_filename_with_fallback(title, "course");
+    let extension = match format {
+        OutputFormat::Md => "zip",
+        OutputFormat::Html => "html",
+        OutputFormat::Json => "json",
+    };
+    format!("{stem}.{extension}")
+}
+
+/// Exports the note version at `version` to `target`. It refuses a place inside the
+/// note's own folder or any other note version, and writes beside `target` first, so
+/// an existing file stays whole until the export is complete. Blocking.
+pub fn export_version(
+    version: &std::path::Path,
+    format: c2m_config::config::OutputFormat,
+    target: &std::path::Path,
+) -> anyhow::Result<()> {
+    let protected = version.canonicalize()?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!(c2m_i18n::tr!("导出位置无效")))?
+        .canonicalize()?;
+    anyhow::ensure!(
+        !parent.starts_with(&protected)
+            && !parent
+                .ancestors()
+                .any(|ancestor| ancestor.join("manifest.json").is_file()
+                    && ancestor.parent().is_some_and(|parent| parent
+                        .file_name()
+                        .is_some_and(|name| name == "versions"))),
+        c2m_i18n::tr!("不能保存在笔记自己的文件夹里，请换个位置")
+    );
+    // The native save panel owns the explicit overwrite decision; the old file
+    // remains intact until a complete export is ready beside it.
+    // A dropped temporary folder takes an unfinished export with it.
+    let temp = tempfile::Builder::new()
+        .prefix(".course2md-export-")
+        .tempdir_in(&parent)?;
+    let file = temp.path().join(target.file_name().unwrap_or_default());
+    c2m_artifact::portable::export(version, format, &file)?;
+    Ok(std::fs::rename(&file, target)?)
+}
+
 /// Position-store key for a manifest course at one tab (`:0` is the note
 /// tab). The library's "继续阅读" probe and the reader's save/restore build
 /// identical keys through this function.
@@ -880,6 +928,47 @@ mod tests {
         assert!(state.finish(completed, &old, success()));
         assert_eq!(state.feedback[&old].result.as_ref().unwrap(), &path);
         assert!(state.feedback[&other].result.is_err());
+    }
+
+    #[test]
+    fn an_export_stays_out_of_note_folders_and_replaces_a_file_whole() {
+        use c2m_config::config::OutputFormat;
+        assert_eq!(
+            export_file_name("课程/第 1 讲", OutputFormat::Md),
+            format!(
+                "{}.zip",
+                c2m_config::config::sanitize_filename_with_fallback("课程/第 1 讲", "course")
+            )
+        );
+        assert_eq!(export_file_name("", OutputFormat::Html), "course.html");
+        let temp = tempfile::tempdir().unwrap();
+        let note = desktop_store::notes::fixtures::published_note(
+            temp.path(),
+            1,
+            &[0.],
+            Default::default(),
+        );
+        // The note's own folder, and any version folder of a note, are refused.
+        assert!(export_version(&note.dir, OutputFormat::Html, &note.dir.join("x.html")).is_err());
+        let other = desktop_store::notes::fixtures::published_note(
+            &temp.path().join("other"),
+            2,
+            &[0.],
+            Default::default(),
+        );
+        let inside_other = other.dir.join("exports");
+        std::fs::create_dir_all(&inside_other).unwrap();
+        assert!(
+            export_version(&note.dir, OutputFormat::Html, &inside_other.join("x.html")).is_err()
+        );
+        let outside = temp.path().join("exports");
+        std::fs::create_dir_all(&outside).unwrap();
+        let target = outside.join("note.html");
+        std::fs::write(&target, "older").unwrap();
+        export_version(&note.dir, OutputFormat::Html, &target).unwrap();
+        assert_ne!(std::fs::read_to_string(&target).unwrap(), "older");
+        // Nothing is left beside it.
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1);
     }
 
     #[test]
