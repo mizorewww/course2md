@@ -2915,7 +2915,10 @@ impl Desktop {
         let play = cx.listener(|this: &mut Self, _: &ClickEvent, _, cx| this.play_reader_video(cx));
         Some(if icon_only {
             tool(
+                // Folded to its icon it is an outlined icon button, as it is outlined
+                // with its label.
                 IconButton::new("reader-play", symbols::play_arrow(), label)
+                    .variant(IconButtonVariant::Outlined)
                     .disabled(opening)
                     .on_click(play),
                 "reader-play-tip",
