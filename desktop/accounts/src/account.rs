@@ -64,6 +64,18 @@ impl AccountUi {
         self.risk = None;
     }
 
+    /// A saved session from any method: the row and the dialog show it.
+    pub fn signed_in(&mut self, profile: AccountProfile) {
+        self.status_generation = self.status_generation.wrapping_add(1);
+        self.checking = false;
+        self.has_saved_login = true;
+        self.status = Some(AccountStatus::Connected(profile.clone()));
+        self.status_error = None;
+        self.logout_failed = false;
+        self.reset_form();
+        self.dialog = Some(QrDialogState::Success(profile));
+    }
+
     /// Switches the dialog's method. Late replies of the previous one are stale.
     pub fn choose_method(&mut self, method: LoginMethod) {
         if self.method == method {

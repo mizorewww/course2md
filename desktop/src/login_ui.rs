@@ -213,7 +213,7 @@ impl Desktop {
                             return;
                         }
                         match saved {
-                            Ok(Ok(profile)) => this.account_signed_in(profile),
+                            Ok(Ok(profile)) => this.account.signed_in(profile),
                             _ => {
                                 this.account.form.step = FormStep::Entry;
                                 this.account.form.error = Some(
@@ -235,18 +235,6 @@ impl Desktop {
             }
             Err(error) => self.login_failed(error),
         }
-    }
-
-    /// A saved session from any method: the row and the dialog show it.
-    pub(crate) fn account_signed_in(&mut self, profile: course2md::auth::AccountProfile) {
-        self.account.status_generation = self.account.status_generation.wrapping_add(1);
-        self.account.checking = false;
-        self.account.has_saved_login = true;
-        self.account.status = Some(course2md::auth::AccountStatus::Connected(profile.clone()));
-        self.account.status_error = None;
-        self.account.logout_failed = false;
-        self.account.reset_form();
-        self.account.dialog = Some(QrDialogState::Success(profile));
     }
 
     fn submit_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
