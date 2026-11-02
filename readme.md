@@ -177,6 +177,6 @@ CLI settings live in `~/.config/course2md/config.toml` (`%APPDATA%\course2md\con
 
 [Documentation (Wiki)](https://github.com/mizorewww/course2md/wiki) · [Upgrade and uninstall](https://github.com/mizorewww/course2md/wiki/GUI-Installation#upgrade-and-uninstall) · [Troubleshooting](https://github.com/mizorewww/course2md/wiki/Troubleshooting) · [Report a problem](https://github.com/mizorewww/course2md/issues) · [Release notes](https://github.com/mizorewww/course2md/releases)
 
-For developers: [contributing](AGENTS.md) · [desktop development](desktop/README.md) · [engine architecture](docs/DESIGN.md) · [benchmarks](docs/BENCHMARKS.md) · [releases](docs/PACKAGING.md) · [Changelog](CHANGELOG.md)
+For developers: [contributing](AGENTS.md) · [desktop development](desktop/README.md) · [crate layout](docs/CRATES.md) · [engine architecture](docs/DESIGN.md) · [benchmarks](docs/BENCHMARKS.md) · [releases](docs/PACKAGING.md) · [Changelog](CHANGELOG.md)
 
 course2md is released under the [MIT license](LICENSE).

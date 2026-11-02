@@ -177,6 +177,6 @@ CLI 的设置保存在 `~/.config/course2md/config.toml`（Windows 为 `%APPDATA
 
 [全部文档（Wiki）](https://github.com/mizorewww/course2md/wiki) · [升级与卸载](https://github.com/mizorewww/course2md/wiki/%E5%AE%89%E8%A3%85%E6%A1%8C%E9%9D%A2%E5%BA%94%E7%94%A8#升级与卸载) · [故障排查](https://github.com/mizorewww/course2md/wiki/%E6%95%85%E9%9A%9C%E6%8E%92%E6%9F%A5) · [反馈问题](https://github.com/mizorewww/course2md/issues) · [发布说明](https://github.com/mizorewww/course2md/releases)
 
-开发者：[参与贡献](AGENTS.md) · [桌面开发](desktop/README.md) · [引擎架构](docs/DESIGN.md) · [性能基准](docs/BENCHMARKS.md) · [发布流程](docs/PACKAGING.md) · [更新日志](CHANGELOG.md)
+开发者：[参与贡献](AGENTS.md) · [桌面开发](desktop/README.md) · [crate 结构](docs/CRATES.md) · [引擎架构](docs/DESIGN.md) · [性能基准](docs/BENCHMARKS.md) · [发布流程](docs/PACKAGING.md) · [更新日志](CHANGELOG.md)
 
 course2md 以 [MIT 许可证](LICENSE)发布。
