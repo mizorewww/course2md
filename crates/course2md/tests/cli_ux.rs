@@ -676,6 +676,11 @@ exit 1
     assert_eq!(tried, ["manual en", "auto en", "auto zh-Hans"], "{text}");
     assert!(text.contains("读取视频字幕失败"), "{text}");
     assert!(text.contains("for 'en'"), "{text}");
+    // In English nothing else is the video's or the person's language: no
+    // translation into another language is read in their place.
+    let (tried, text) = run("en", &["manual en", "auto en"]);
+    assert_eq!(tried, ["manual en", "auto en"], "{text}");
+    assert!(text.contains("for 'en'"), "{text}");
 }
 
 /// Password and SMS login type into a terminal; without one the error says what

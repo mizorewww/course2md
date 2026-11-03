@@ -649,17 +649,23 @@ pub async fn fetch_subtitle(
     match &video.subtitles {
         SubtitleEvidence::Found { tracks, .. } => {
             let mut tracks = tracks.clone();
+            let language = subtitle_language(out_dir)?;
             crate::subtitle::sort_tracks(
                 &mut tracks,
                 &[],
-                &subtitle_language(out_dir)?,
+                &language,
                 video.original_language.as_deref(),
             );
             let track = tracks.first().context(tr!(
                 "字幕列表为空，请重新读取字幕 / Subtitle list is empty; probe subtitles again"
             ))?;
             let mut first_error = None;
-            for candidate in crate::subtitle::fallback_tracks(&tracks, track) {
+            for candidate in crate::subtitle::fallback_tracks(
+                &tracks,
+                track,
+                &language,
+                video.original_language.as_deref(),
+            ) {
                 control.check()?;
                 if first_error.is_some() {
                     tracing::warn!(
@@ -1628,13 +1634,25 @@ mod tests {
                 interface,
                 video.original_language.as_deref(),
             );
-            let tried: Vec<_> = crate::subtitle::fallback_tracks(&tracks, &tracks[0])
-                .into_iter()
-                .map(key)
-                .collect();
-            // The subtitles, the captions once, then the best translation.
+            let tried: Vec<_> = crate::subtitle::fallback_tracks(
+                &tracks,
+                &tracks[0],
+                interface,
+                video.original_language.as_deref(),
+            )
+            .into_iter()
+            .map(key)
+            .collect();
+            // The subtitles, the captions once, then a translation into the
+            // person's language when there is one, never into another.
             assert_eq!(tried[..2], ["manual en", "auto en"], "{interface}");
-            assert!(tracks[tried.len()..].iter().all(|track| track.translated));
+            match interface {
+                "en" | "fr" => assert_eq!(tried.len(), 2, "{interface}"),
+                _ => {
+                    let family = interface.split('-').next().unwrap();
+                    assert!(tried[2].starts_with(&format!("auto {family}")), "{tried:?}");
+                }
+            }
         }
     }
 

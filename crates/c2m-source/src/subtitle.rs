@@ -19,12 +19,22 @@ pub use subtitle_parse::{
 pub const SUBTITLE_ATTEMPTS: usize = 3;
 
 /// The tracks to try, in order, when `chosen` was picked for the person rather than
-/// by them: `chosen`, then the tracks after it in `ordered` (as [`sort_tracks`] left
-/// them). A second key for the same online text (YouTube's `en-orig` is `en`) is not
-/// tried again. An explicit choice is read alone and never falls back.
+/// by them: `chosen`, then up to two of the tracks after it in `ordered` (as
+/// [`sort_tracks`] left them). An explicit choice is read alone and never falls back.
+///
+/// A fallback stays in a language the person can use: a track of the video's own
+/// language (`original_language`, or `chosen`'s when the source does not say) or
+/// of `interface_language`, and a machine translation only into
+/// `interface_language`. A track in an unrelated language is never read in their
+/// place; one that names no language may be. A track whose text was already
+/// tried does not use a try: a second key for the same online text (YouTube's
+/// `en-orig` is `en`), or a machine translation into a language already tried
+/// (`en-en` after `en-orig`).
 pub fn fallback_tracks<'a>(
     ordered: &'a [SubtitleTrack],
     chosen: &'a SubtitleTrack,
+    interface_language: &str,
+    original_language: Option<&str>,
 ) -> Vec<&'a SubtitleTrack> {
     fn text_key(track: &SubtitleTrack) -> Option<(&str, bool)> {
         match &track.origin {
@@ -39,6 +49,29 @@ pub fn fallback_tracks<'a>(
             _ => None,
         }
     }
+    /// The language family (`zh` for `zh-Hans`, `en` for `en-orig`), which is
+    /// also the target of a translation key such as `zh-Hans-en`.
+    fn family(language: &str) -> String {
+        normalize_language(language)
+            .split('-')
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    }
+    let track_family = |track: &SubtitleTrack| track.language.as_deref().map(family);
+    let interface = family(interface_language);
+    let original = original_language
+        .map(family)
+        .filter(|language| !language.is_empty())
+        .or_else(|| (!chosen.translated).then(|| track_family(chosen)).flatten());
+    let acceptable = |track: &SubtitleTrack| {
+        // A track that names no language (a local file) is not known to be
+        // unrelated; only a translation always names the one it was made into.
+        let Some(language) = track_family(track) else {
+            return !track.translated;
+        };
+        language == interface || (!track.translated && Some(&language) == original.as_ref())
+    };
     let after = ordered
         .iter()
         .position(|track| track.id == chosen.id)
@@ -49,8 +82,14 @@ pub fn fallback_tracks<'a>(
             break;
         }
         let same_text = text_key(track)
-            .is_some_and(|key| tracks.iter().any(|tried| text_key(tried) == Some(key)));
-        if !same_text {
+            .is_some_and(|key| tracks.iter().any(|tried| text_key(tried) == Some(key)))
+            || (track.translated
+                && track_family(track).is_some_and(|language| {
+                    tracks
+                        .iter()
+                        .any(|tried| track_family(tried).as_ref() == Some(&language))
+                }));
+        if !same_text && acceptable(track) {
             tracks.push(track);
         }
     }
@@ -248,48 +287,146 @@ fn preferred_file(tracks: Vec<SubtitleTrack>, interface_language: &str) -> Optio
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_default_choice_falls_back_three_tracks_deep_without_repeating_text() {
-        let online = |key: &str, automatic: bool| SubtitleTrack {
+    fn online(key: &str, automatic: bool, translated: bool) -> SubtitleTrack {
+        SubtitleTrack {
             id: format!("v:subtitle:{automatic}:{key}"),
             language: Some(key.into()),
             name: None,
-            kind: SubtitleKind::Automatic,
-            translated: false,
+            kind: if automatic {
+                SubtitleKind::Automatic
+            } else {
+                SubtitleKind::Manual
+            },
+            translated,
             origin: SubtitleOrigin::Online {
                 language_key: key.into(),
                 automatic,
                 inline_text: None,
             },
             source_order: 0,
-        };
+        }
+    }
+
+    fn keys(tracks: Vec<&SubtitleTrack>) -> Vec<String> {
+        tracks
+            .into_iter()
+            .map(|track| match &track.origin {
+                SubtitleOrigin::Online {
+                    language_key,
+                    automatic,
+                    ..
+                } => format!(
+                    "{} {language_key}",
+                    if *automatic { "auto" } else { "manual" }
+                ),
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_default_choice_falls_back_three_tracks_deep_without_repeating_text() {
         let tracks = [
-            online("en-orig", true),
-            online("en", true),
-            online("en", false),
-            online("fr", true),
-            online("de", true),
+            online("en-orig", true, false),
+            online("en", true, false),
+            online("en", false, false),
+            online("en-US", true, false),
+            online("fr", true, false),
         ];
-        let ids = |chosen: &SubtitleTrack| -> Vec<String> {
-            fallback_tracks(&tracks, chosen)
-                .into_iter()
-                .map(|track| track.id.clone())
-                .collect()
-        };
         assert_eq!(
-            ids(&tracks[0]),
-            [
-                "v:subtitle:true:en-orig",
-                "v:subtitle:false:en",
-                "v:subtitle:true:fr"
-            ]
+            keys(fallback_tracks(&tracks, &tracks[0], "ja", Some("en"))),
+            ["auto en-orig", "manual en", "auto en-US"]
         );
         // Only what comes after the choice, and a track not in the list alone.
         assert_eq!(
-            ids(&tracks[3]),
-            ["v:subtitle:true:fr", "v:subtitle:true:de"]
+            keys(fallback_tracks(&tracks, &tracks[4], "fr", Some("en"))),
+            ["auto fr"]
         );
-        assert_eq!(ids(&online("ja", true)), ["v:subtitle:true:ja"]);
+        // Files that name no language are not ruled out.
+        let files = [
+            file_track("a.srt".into(), None),
+            file_track("b.srt".into(), None),
+        ];
+        assert_eq!(fallback_tracks(&files, &files[0], "en", None).len(), 2);
+        let alone = online("ja", true, false);
+        assert_eq!(
+            keys(fallback_tracks(&tracks, &alone, "ja", None)),
+            ["auto ja"]
+        );
+    }
+
+    /// YouTube's list for an English video with only automatic captions, as
+    /// [`sort_tracks`] orders it: a 429 on the captions must never end in an
+    /// Afrikaans transcript, and `en-en` is the captions' own words again.
+    #[test]
+    fn a_fallback_never_reads_an_unrelated_language() {
+        let list = || {
+            [
+                ("af-en", true),
+                ("ar-en", true),
+                ("zh-Hans-en", true),
+                ("en-en", true),
+                ("ja-en", true),
+                ("af", true),
+                ("zh-Hans", true),
+                ("en-orig", false),
+                ("en", false),
+                ("ja", true),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (key, translated))| SubtitleTrack {
+                source_order: index,
+                ..online(key, true, translated)
+            })
+            .collect::<Vec<_>>()
+        };
+        let tried = |interface: &str, original: Option<&str>| {
+            let mut tracks = list();
+            sort_tracks(&mut tracks, &[], interface, original);
+            keys(fallback_tracks(&tracks, &tracks[0], interface, original))
+        };
+        // The captions once; nothing else is English or the video's.
+        assert_eq!(tried("en", Some("en")), ["auto en-orig"]);
+        assert_eq!(tried("en", None), ["auto en-orig"]);
+        // A person reading Chinese may get a translation into Chinese, once.
+        assert_eq!(
+            tried("zh-Hans", Some("en")),
+            ["auto en-orig", "auto zh-Hans"]
+        );
+        assert_eq!(tried("ja", None), ["auto en-orig", "auto ja-en"]);
+        // A language with no track of its own gets no stranger in its place.
+        assert_eq!(tried("fr", Some("en")), ["auto en-orig"]);
+    }
+
+    /// With English subtitles as well, the subtitles and the captions are both
+    /// the video's language; `en-en` (the subtitles, "translated" to English)
+    /// is not a third try.
+    #[test]
+    fn a_translation_into_a_tried_language_is_not_tried() {
+        let mut tracks = vec![online("en", false, false)];
+        tracks.extend(
+            [
+                ("en-en", true),
+                ("af-en", true),
+                ("ja-en", true),
+                ("en-orig", false),
+                ("en", false),
+                ("ja", true),
+            ]
+            .into_iter()
+            .map(|(key, translated)| online(key, true, translated)),
+        );
+        for (index, track) in tracks.iter_mut().enumerate() {
+            track.source_order = index;
+        }
+        let tried = |interface: &str| {
+            let mut tracks = tracks.clone();
+            sort_tracks(&mut tracks, &[], interface, Some("en"));
+            keys(fallback_tracks(&tracks, &tracks[0], interface, Some("en")))
+        };
+        assert_eq!(tried("en"), ["manual en", "auto en"]);
+        assert_eq!(tried("ja"), ["manual en", "auto en", "auto ja-en"]);
     }
 
     #[test]

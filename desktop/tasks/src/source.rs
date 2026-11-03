@@ -1050,7 +1050,12 @@ pub fn read_default_subtitle(
 > {
     use c2m_source::subtitle::SubtitleReadError;
     let mut first_error = None;
-    for candidate in c2m_source::subtitle::fallback_tracks(source.subtitles.tracks(), track) {
+    for candidate in c2m_source::subtitle::fallback_tracks(
+        source.subtitles.tracks(),
+        track,
+        c2m_i18n::i18n::lang().code(),
+        source.original_language.as_deref(),
+    ) {
         if first_error.is_some() {
             eprintln!("trying the next subtitle track: {}", candidate.id);
         }
