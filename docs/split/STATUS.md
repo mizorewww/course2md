@@ -161,6 +161,9 @@ Each saves a little and changes behaviour, so it waits for the owner; the defaul
 
 ## Open problems
 
+- **`desktop/src/a11y.rs` naming.** It holds validation diagnostics, not accessibility code; a known minor
+  leftover, not renamed.
+
 - **Stale worktree records.** `../gpui-component/.git/worktrees` still lists entries for the removed
   `desktop/.deps` worktrees. Left alone, as it is a sibling repository; `git worktree prune` there clears them
   if the owner wants.

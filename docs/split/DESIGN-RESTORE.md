@@ -166,11 +166,7 @@ accent tint. A straight swap would have painted the settings navigation one colo
 
 ## Not finished
 
-A `restore` verdict states the intent. These are not there yet:
-
-| # | What remains |
-| --- | --- |
-| R6 | The reader bar is 64 tall rather than the baseline's 56 (`TITLE_BAR_HEIGHT` in `reader_ui.rs`) |
+A `restore` verdict states the intent. Every one is now there; none remains.
 
 ## Finished after the audit
 
@@ -208,5 +204,5 @@ The rows above state the verdict; this says what the last pass did.
 | R9 | The contents are flat pills on what they sit on (kit #26) |
 | S11 | The palette picker is full width up to 920 (kit #23), four previews across; the cards are a kit `CardGroup` whose selected card has the secondary outline, tint and check (kit #22) |
 | U1 | Every value choice is an outlined `ExposedDropdown` at its row's end, named by the row (kit #18), with the caller's menu (kit #19); this restores H7 and S13 |
-| R6 | The breadcrumb sits over the note title again, and both centre on the back button within 1pt at 1600 wide (U20); the bar's height is under Not finished |
+| R6 | The breadcrumb sits over the note title again, and both centre on the back button within 1pt at 1600 wide (U20); the bar is 56 tall, as in the baseline (`TITLE_BAR_HEIGHT` in `reader_ui.rs`, `97744d7f`) |
 | G25 | The image viewer's frame is the kit's outlined `CardSurface`; the workbench's drop zones are the kit's `drop_target` (kit #24) |

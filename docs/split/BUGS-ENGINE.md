@@ -1,6 +1,6 @@
 # Engine and tooling bugs (P2)
 
-Status of `AUDIT.md` § Bugs, E1–E22, T1–T6 and T8, on branch `split/bugs`.
+Status of `AUDIT.md` § Bugs, E1–E22 and T1–T8. All but T7 were fixed on branch `split/bugs`.
 
 | Bug | Status | Commit | How verified |
 | --- | --- | --- | --- |
@@ -32,6 +32,7 @@ Status of `AUDIT.md` § Bugs, E1–E22, T1–T6 and T8, on branch `split/bugs`.
 | T4 | fixed | 721839c | Here, without Xcode: `cargo build --release` exits 101 with the message; `cargo build` warns and finishes |
 | T5 | fixed | 23cb817 | Boundary logic run as a standalone Swift program at every cut; shim compiled and linked; not run on a long transcript |
 | T6 | fixed | 23cb817 | Compiled and linked only; not run, because there is no metallib or model here |
+| T7 | fixed | a0448a87, 596cd6e2 | Every package carries `THIRD-PARTY-LICENSES.txt` (Rust crates through `cargo-about`, Swift packages on Apple Silicon); CLI releases publish it as an asset that every channel installs (`docs/PACKAGING.md` § Bundled tools) |
 | T8 | fixed in part | 07da58d | `_headers` comment and `build.rs` comment corrected, by reading |
 | T8 "CUDA" | not a bug | none | The bytes spell C-U-D-A, NVIDIA's name; `asr.rs` also matches it as a device prefix |
 | T8 `sources.py:26` | not done | none | Left alone as instructed; the file is being deleted |
@@ -41,7 +42,7 @@ Status of `AUDIT.md` § Bugs, E1–E22, T1–T6 and T8, on branch `split/bugs`.
 - **E2.** A plain response has `timeout_recv_body` of 90 s; a stream has `timeout_per_read` of 90 s. `timeout_per_read` alone would also cut off a model that thinks past 90 s before its first byte, and `timeout_recv_body` alone would cut off a healthy long stream. The 300 s total stays.
 - **ureq 3 multipart.** Not used. The API is outside ureq's version promise, and its form is consumed by sending, while a retry resends the same bytes.
 - **Never-sent errors.** Only DNS failure, resolve and connect timeouts, and refused or unavailable connections count. Unreachable errors do not, because an established connection can also fail with them, so such a connect failure now asks before resending.
-- **Environment proxies.** Still ignored, as under ureq 2. ureq 3 reads them by default, which would catch loopback services.
+- **Environment proxies.** Honoured (acceptance B9, `ad13bf4f`; model downloads through mizorewww/model-fetch#1): `ALL_PROXY`, `HTTPS_PROXY` or `HTTP_PROXY` with `NO_PROXY`, and loopback always direct, so local services are never sent through a proxy.
 - **E17.** No IP lookup by default. A mainland China locale or time zone keeps domestic mirrors first, and other hosts remain fallbacks. `HF_ENDPOINT` overrides everything; `COURSE2MD_IP_LOOKUP=1` opts in. A mainland user with a foreign locale and zone, or on Windows with a non-CN locale, tries Hugging Face first and falls back after it fails.
 - **E18.** Everything sent to a service is one fixed text, the Simplified Chinese the desktop already sent, so desktop receipts stay valid. Excluding prompts from the identity would let an edited prompt replay old results. A CLI task left unfinished in another locale by 2.0.1 finds its receipts through the former wording of the proofreading rule (acceptance C1).
 - **E20.** `C` and `POSIX` select English. An unsupported language such as `fr_FR` still falls through to the next variable.
