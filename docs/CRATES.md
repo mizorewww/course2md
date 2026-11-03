@@ -87,12 +87,16 @@ wake channel and deadlines). `Desktop` still decides when work starts and ends (
 and notifies `Work` with the records at the coalesced repaint. A page that is its own entity renders itself and
 tells the window what it needs through events: `ReaderPage` (`desktop/src/reader_ui.rs`) emits
 `ReaderEvent` (navigate, open a task, reprocess or repair it, a message, a record error, the viewer
-opening) and `Desktop` subscribes. `TasksPage` (`desktop/src/task_ui.rs`) reads `Records` and `Work`,
+opening) and `Desktop` subscribes; its title bar is a view of its own, `ReaderBar`. `AccountsView`
+(`desktop/src/account_ui.rs`) holds the Bilibili account, its login fields and the YouTube connection, draws their
+rows and dialogs for settings, first use and the workbench, and emits `AccountsEvent` (open a dialog, signed in,
+connected). `TasksPage` (`desktop/src/task_ui.rs`) reads `Records` and `Work`,
 keeps the queue's list and which card is open, and draws the task page and the task cards the
 workbench and the library show; it emits `TasksEvent` (run an action, select, resend, move, pause or
 resume all, navigate, import) and `Desktop` runs them. What a card shows that only the window knows
 (service names, libraries to associate again, a storage operation) reaches it as `ShellFacts`, set
-before each draw. The other pages are still methods of `Desktop`; they move out the same way.
+before each draw. The library page and settings are still methods of `Desktop`, and preferences are its fields;
+the split stops there for now.
 
 A change that needs an edge against these directions usually means a type sits in the wrong
 crate: move it rather than adding the edge. Cargo rejects cycles; the rest is kept by review.

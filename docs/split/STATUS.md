@@ -2,10 +2,10 @@
 
 Update this file in the same commit as the work it records.
 
-**Current phase:** Wave 4. The acceptance-round-1 fixes, the reduction chunks and the `desktop-core` split are
-merged into `split/workspace`; acceptance round 2 is next. Every `DESIGN-RESTORE.md` restore that waited on the kit
-is in, through kit PRs #16 to #27. Open: U2 (reader resize, unmeasured: load stayed high), U21 (not reproduced),
-and kit #28 (a menu opens above its field when there is no room below), ready for the owner.
+**Current phase:** Wave 4, acceptance round 3, against `e31032b1` (3.0.0-alpha.1). The fixes of rounds 1 and 2 and
+the thin-wrapper work up to decision 9's stopping point (`PLAN.md`) are merged into `split/workspace`. 3.0.0-alpha.1 is
+being released from `main` once `split/workspace` merges into it (PR #24). Every `DESIGN-RESTORE.md` restore that
+waited on the kit is in, through kit PRs #16 to #30. Open: U2 (reader resize, unmeasured: load stayed high).
 
 **Dependency form:** git, `gpui-kit-material` `main` at `1bc3ea7`, in `[workspace.dependencies]` and all six
 `[patch]` entries of the root `Cargo.toml`. No temporary pin. Kit #28 to #30 are in.
@@ -121,12 +121,15 @@ Branch `split/thin-wrapper`, first step of P2-b. The binary moved logic out and 
   request in both scenarios, no resend.
 - **Numbers.** After step 2: 30,616 lines, 38 fields, 18 files, `metrics.py` 69,045; the binary
   grew by the page's struct, its event enum and handler, and `ShellFacts`.
-- **Next.** The library page as an entity reading `Records`, then `Prefs`, which would let `ShellFacts` go.
+- **Stopped here (decision 9).** The owner set the stopping point after `TasksPage`. The library page (still
+  `Desktop`'s methods, reading `Records`) and a `Prefs` entity, which would let `ShellFacts` go, are known
+  unfinished and not required for acceptance.
 
 ## Next action
 
-Acceptance round 2 with fresh reviewers (UI, app, CLI, plan), per `PLAN.md` § Acceptance; repin to the kit `main`
-that has #28 when it merges.
+Acceptance round 3 with fresh reviewers (UI, app, CLI, plan) against `e31032b1`, per `PLAN.md` § Acceptance; the
+coordinator records findings and resolutions in `ACCEPTANCE.md`. Then merge `split/workspace` into `main` (PR #24) and
+release 3.0.0-alpha.1 (`docs/PACKAGING.md`).
 
 ## Owner questions
 
