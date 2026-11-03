@@ -272,12 +272,10 @@ impl Desktop {
             // back and its title lead its navigation pane instead.
             return app_bar(title_bar_height(window), window, cx).child(bar);
         }
-        if page == Page::Result && self.opened(cx).preview.is_some() {
+        if page == Page::Result {
+            // The reader draws its own part, so the shell does not read it.
             let height = crate::reader_ui::TITLE_BAR_HEIGHT.to_pixels(window.rem_size());
-            let bar = self
-                .reader
-                .update(cx, |reader, cx| reader.title_bar(bar, window, cx));
-            return app_bar(height, window, cx).child(bar);
+            return app_bar(height, window, cx).child(self.reader_bar.clone());
         }
         // The brand leads the bar and returns to the workbench, as on the M3
         // canvas; destinations follow on the trailing edge with icon and label.
@@ -325,7 +323,7 @@ impl Desktop {
             course2md::tr!("笔记库"),
             shown(course2md::tr!("笔记库")),
             cx.listener(|this, _, _, cx| {
-                this.records.update(cx, |records, _| {
+                this.records.change(cx, |records, _| {
                     records.library.folder_filter = crate::FolderFilter::All
                 });
                 this.navigate(Page::Library, cx);
@@ -396,8 +394,8 @@ impl Desktop {
                     && task.unread
                     && task.handled_by.is_none()
                     && visible_task != Some(task.id.as_str())
-                    && !(self.opened(cx).reading
-                        && self.page == Page::New
+                    && !(self.page == Page::New
+                        && self.opened(cx).reading
                         && self
                             .import
                             .following_conversion
@@ -558,6 +556,8 @@ impl Desktop {
 
 impl Render for Desktop {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "capture")]
+        crate::capture::count_render(crate::capture::Counted::Desktop);
         if self.onboarding.active {
             let content = self.onboarding_page(window, cx);
             // The shell's brand, without its destinations: setup is modal, so the
@@ -586,7 +586,13 @@ impl Render for Desktop {
             Page::Task => self.queue_page(window, cx),
             Page::Library => self.library_page(window, cx),
             Page::Settings => self.settings_page(window, cx),
-            Page::Result => self.reader.clone().into_any_element(),
+            // Drawn cached: it is built again when it, the records or the exports
+            // change, not with every frame of the shell around it.
+            Page::Result => self
+                .reader
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
         };
         // Task and library content virtualize their long lists: the list owns
         // scrolling for the page instead of the shared page-scroll container.
@@ -600,9 +606,10 @@ impl Render for Desktop {
             )
             .when(
                 // The workbench card already shows a followed result opening.
-                self.opened(cx).reading
-                    && !matches!(self.page, Page::Library | Page::Result)
-                    && !(self.page == Page::New && self.import.following_conversion.is_some()),
+                // The reader page does not read the reader: it is drawn on its own.
+                !matches!(self.page, Page::Library | Page::Result)
+                    && !(self.page == Page::New && self.import.following_conversion.is_some())
+                    && self.opened(cx).reading,
                 |v| {
                     v.child(
                         h_flex()

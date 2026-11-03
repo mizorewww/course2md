@@ -63,12 +63,23 @@ Branch `split/thin-wrapper`, first step of P2-b. The binary moved logic out and 
   window with the contents over the note): every pair is pixel-identical. Reading positions saved after a scroll
   and restored on the next open are the same. The export to a file goes through the native save panel, which the
   harness cannot drive; `export_version` is tested on a published fixture instead.
-- **Rendering.** Not yet lighter: a notify on the reader marks `Desktop` dirty as its ancestor, and the reader is
-  drawn uncached, so it still renders with every `Desktop` frame. Drawing it `cached` needs `Records` to notify
-  its observers on every change, so the reader can observe it; that is the next step's.
+- **Rendering (step 1).** Every change Desktop makes to `Records` or the reader goes through `Change::change`,
+  which notifies the entity; a running job's events update the record quietly and notify it at the coalesced
+  repaint, as Desktop itself was. The reader is drawn `cached` in its old column, and its title bar is a view of
+  its own (`ReaderBar`); the shell no longer reads or observes the reader on the reader page. Capture builds count
+  builds per simulated input, with a frame after each step (gpui-fast, retention on): find's next match
+  Desktop 0 / reader 4; a decoded screenshot in the viewer (1.5 s) Desktop 0 / reader 13; one wheel step
+  Desktop 2 / reader 9, three steps 6 / 13 (new list rows ask for layout, and gpui-fast builds the view around a
+  view that does). Before, the reader was Desktop's own render, so each of those reader builds was a Desktop
+  build. Stale state: with `COURSE2MD_CAPTURE_RETAINED` (no window refresh before a shot), a note with failed
+  screenshots whose 重新生成截图 creates a follow-up task while the reader shows (the retry leaves, the record
+  changes) and the whole suite match the before build. The before build itself varies between runs (formula
+  raster, the viewer's zoom-out state, scrollbar fade, a few others); every after shot equals a before shot from
+  one of three runs, except two paper shots whose differing regions are each one of those variations.
 - **Numbers.** Binary `desktop/src` 30,212 → 30,104 lines (`wc -l`), `Desktop` 44 → 43 fields, `impl Desktop` in
   23 → 22 files; `metrics.py` 67,603 → 68,162 (+559: `run.rs` and `records.rs`, their tests excluded, and the
-  entity plumbing).
+  entity plumbing). After step 1: 30,216 lines, 44 fields (`reader_bar`), 22 files, 68,274 (the build counter
+  and retained captures are about 60 of the +112).
 - **Next.** `AccountsView` (Bilibili login, account, YouTube; Codex and Ollama are tied to the service forms and
   follow those), then the library and task pages, and `Records` notifying so pages can be drawn cached.
 
