@@ -7,8 +7,8 @@ merged into `split/workspace`; acceptance round 2 is next. Every `DESIGN-RESTORE
 is in, through kit PRs #16 to #27. Open: U2 (reader resize, unmeasured: load stayed high), U21 (not reproduced),
 and kit #28 (a menu opens above its field when there is no room below), ready for the owner.
 
-**Dependency form:** git, `gpui-kit-material` `main` at `53fa0fd`, in `[workspace.dependencies]` and all six
-`[patch]` entries of the root `Cargo.toml`. No temporary pin. Repin when #28 merges.
+**Dependency form:** git, `gpui-kit-material` `main` at `1bc3ea7`, in `[workspace.dependencies]` and all six
+`[patch]` entries of the root `Cargo.toml`. No temporary pin. Kit #28 to #30 are in.
 
 ## Metrics
 
