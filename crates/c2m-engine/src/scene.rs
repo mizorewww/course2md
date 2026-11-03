@@ -79,6 +79,9 @@ pub async fn run(
             // cooldown instead: a note of moving footage still shows what it shows.
             Err(Error::NoFrames) if params.stable_secs > 0.0 => {
                 tracing::info!("no settled picture; sampling the first after each cooldown");
+                // The first pass reported its scan done: this one is a scan of its own,
+                // so the task shows it running with its count, not a step-less pause.
+                progress::start(Stage::ScenesScan);
                 detect(&SlideParams {
                     stable_secs: 0.0,
                     ..params
