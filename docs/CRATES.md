@@ -80,12 +80,19 @@ course2md-desktop
 
 `course2md-desktop` joins these crates into pages. Shared state lives in entities that pages read
 with `read(cx)` and change with `update(cx)`, as the kit gallery's `Entity<GalleryShared>` does:
-`Entity<Records>` (the workspace record and the library scan) and `Entity<NoteExports>` (exports
-of notes, shared by the reader and the library). A page that is its own entity renders itself and
+`Entity<Records>` (the workspace record and the library scan), `Entity<NoteExports>` (exports
+of notes, shared by the reader and the library) and `Entity<Work>` (`desktop_tasks::job::Work`:
+the running job, the task being started, the finished task's announcement and the event loop's
+wake channel and deadlines). `Desktop` still decides when work starts and ends (`task_runner.rs`)
+and notifies `Work` with the records at the coalesced repaint. A page that is its own entity renders itself and
 tells the window what it needs through events: `ReaderPage` (`desktop/src/reader_ui.rs`) emits
 `ReaderEvent` (navigate, open a task, reprocess or repair it, a message, a record error, the viewer
-opening) and `Desktop` subscribes. The other pages are still methods of `Desktop`; they move out the
-same way.
+opening) and `Desktop` subscribes. `TasksPage` (`desktop/src/task_ui.rs`) reads `Records` and `Work`,
+keeps the queue's list and which card is open, and draws the task page and the task cards the
+workbench and the library show; it emits `TasksEvent` (run an action, select, resend, move, pause or
+resume all, navigate, import) and `Desktop` runs them. What a card shows that only the window knows
+(service names, libraries to associate again, a storage operation) reaches it as `ShellFacts`, set
+before each draw. The other pages are still methods of `Desktop`; they move out the same way.
 
 A change that needs an edge against these directions usually means a type sits in the wrong
 crate: move it rather than adding the edge. Cargo rejects cycles; the rest is kept by review.

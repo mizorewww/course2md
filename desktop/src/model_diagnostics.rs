@@ -1,5 +1,6 @@
 //! Model evidence is loaded in the background; preparation uses the existing model job.
 //! One surface reports a model everywhere: setup, settings and the workbench.
+use crate::Change;
 use crate::{
     Desktop, Kind, activity, provider_label, symbols,
     ui::{self, AsyncStatus},
@@ -121,13 +122,13 @@ fn repairs(issue: DeviceIssue) -> Vec<(&'static str, SymbolIcon, &'static str, R
 
 impl Desktop {
     /// The request a running model job is preparing.
-    fn active_preparation(&self) -> Option<&Request> {
-        (self.work.kind == Kind::Models && self.work.job.is_some())
+    fn active_preparation(&self, cx: &App) -> Option<&Request> {
+        (self.work.read(cx).kind == Kind::Models && self.work.read(cx).job.is_some())
             .then_some(self.settings_ui.model_diagnostics.preparing.as_ref())
             .flatten()
     }
-    pub(crate) fn is_preparing(&self, request: &Request) -> bool {
-        self.active_preparation() == Some(request)
+    pub(crate) fn is_preparing(&self, request: &Request, cx: &App) -> bool {
+        self.active_preparation(cx) == Some(request)
     }
     /// How the last preparation of this model ended, if it was the last one.
     pub(crate) fn model_outcome(&self, request: &Request) -> Option<&Outcome> {
@@ -149,8 +150,8 @@ impl Desktop {
             .map(|status| status.state)
     }
     /// Whether the guide's forward action should wait behind a prepare action.
-    pub(crate) fn model_awaits_download(&self, request: &Request) -> bool {
-        self.work.job.is_none()
+    pub(crate) fn model_awaits_download(&self, request: &Request, cx: &App) -> bool {
+        self.work.read(cx).job.is_none()
             && self.environment.is_some()
             && self.engine_issue(request.provider).is_none()
             && matches!(
@@ -160,8 +161,8 @@ impl Desktop {
     }
 
     /// What a surface says this model is doing, in one short phrase.
-    pub(crate) fn model_reading(&self, request: &Request) -> (StatusKind, &'static str) {
-        if self.is_preparing(request) {
+    pub(crate) fn model_reading(&self, request: &Request, cx: &App) -> (StatusKind, &'static str) {
+        if self.is_preparing(request, cx) {
             return (StatusKind::Progress, course2md::tr!("正在准备模型"));
         }
         if self.model_outcome(request).is_some_and(|o| o.cancelled) {
@@ -265,7 +266,7 @@ impl Desktop {
             .collect::<BTreeMap<_, _>>();
         let default = self.default_model_request();
         requests.insert(default.key(), default);
-        if let Some(request) = self.active_preparation().cloned() {
+        if let Some(request) = self.active_preparation(cx).cloned() {
             requests.insert(request.key(), request);
         }
         for request in requests.into_values() {
@@ -311,7 +312,7 @@ impl Desktop {
         for_tasks: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.work.job.is_some() {
+        if self.work.read(cx).job.is_some() {
             self.message = Some(job_busy().into());
             cx.notify();
             return;
@@ -346,6 +347,7 @@ impl Desktop {
                 "{} 的准备未完成：{}",
                 name,
                 self.work
+                    .read(cx)
                     .job_events
                     .error
                     .as_deref()
@@ -472,14 +474,14 @@ impl Desktop {
         let id = |part: &str| SharedString::from(format!("model-{part}-{key}"));
         let state = &self.settings_ui.model_diagnostics;
         let entry = state.entries.get(&key);
-        let preparing = self.is_preparing(request);
+        let preparing = self.is_preparing(request, cx);
         let checking = self.environment.is_none() || entry.is_none_or(|entry| entry.checking);
         let status = entry.and_then(Entry::status);
         let issue = self.engine_issue(request.provider);
         let outcome = self.model_outcome(request);
         let scale = TileScale::Regular;
 
-        let (kind, reading) = self.model_reading(request);
+        let (kind, reading) = self.model_reading(request, cx);
         let chip = h_flex()
             .gap(ICON_GAP)
             .items_center()
@@ -540,7 +542,7 @@ impl Desktop {
         let prepare_allowed = self.environment.is_some()
             && issue.is_none()
             && status.is_some_and(|status| status.can_prepare);
-        if self.work.job.is_some() && !preparing && prepare_allowed {
+        if self.work.read(cx).job.is_some() && !preparing && prepare_allowed {
             lines.push(("job-busy", AsyncStatus::Warning(job_busy().into())));
         }
 
@@ -550,16 +552,20 @@ impl Desktop {
                 material_button(id("pause"), ButtonVariant::Outlined)
                     .tone(ButtonTone::Accent)
                     .icon(symbols::pause())
-                    .child(if self.work.cancelling {
+                    .child(if self.work.read(cx).cancelling {
                         course2md::tr!("正在暂停…")
                     } else {
                         course2md::tr!("暂停准备")
                     })
-                    .disabled(self.work.cancelling)
+                    .disabled(self.work.read(cx).cancelling)
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(job) = &this.work.job {
+                        let cancelled = this.work.change(cx, |work, _| {
+                            let job = work.job.as_ref()?;
                             job.cancel();
-                            this.work.cancelling = true;
+                            work.cancelling = true;
+                            Some(())
+                        });
+                        if cancelled.is_some() {
                             cx.notify();
                         }
                     })),
@@ -584,7 +590,7 @@ impl Desktop {
                 material_button(id("prepare"), variant)
                     .icon(icon)
                     .child(label)
-                    .disabled(self.work.job.is_some() || checking)
+                    .disabled(self.work.read(cx).job.is_some() || checking)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.begin_model_preparation(target.clone(), false, cx)
                     })),
@@ -651,7 +657,7 @@ impl Desktop {
                 view.child(motion::disclosure(
                     id("details-content"),
                     open,
-                    self.model_details(request, entry),
+                    self.model_details(request, entry, cx),
                 ))
             })
     }
@@ -661,11 +667,19 @@ impl Desktop {
     fn model_transfers(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let transfers: Vec<_> = self
             .work
+            .read(cx)
             .job_events
             .stages
             .iter()
             .filter(|(stage, progress)| {
                 stage.is_model_transfer() && progress.has_samples() && !progress.done
+            })
+            .map(|(stage, progress)| {
+                (
+                    activity::model_transfer_phase(stage, progress.phase),
+                    progress.transfer_metrics(stage, true).summary(),
+                    progress.fraction(),
+                )
             })
             .collect();
         let view = v_flex().w_full().min_w_0().min_h(rem(80.)).gap(rem(12.));
@@ -676,25 +690,22 @@ impl Desktop {
                 Icon::from(symbols::download()),
             ));
         }
-        view.children(
-            transfers
-                .into_iter()
-                .enumerate()
-                .map(|(index, (stage, progress))| {
-                    ui::transfer_status(
-                        ("model-download-progress", index),
-                        activity::model_transfer_phase(stage, progress.phase),
-                        &progress.transfer_metrics(stage, true).summary(),
-                        progress.fraction(),
-                        window,
-                        cx,
-                    )
-                }),
-        )
+        view.children(transfers.into_iter().enumerate().map(
+            |(index, (phase, summary, fraction))| {
+                ui::transfer_status(
+                    ("model-download-progress", index),
+                    phase,
+                    &summary,
+                    fraction,
+                    window,
+                    cx,
+                )
+            },
+        ))
     }
 
     /// Size, files and the last preparation's log.
-    fn model_details(&self, request: &Request, entry: Option<&Entry>) -> Div {
+    fn model_details(&self, request: &Request, entry: Option<&Entry>, cx: &App) -> Div {
         let key = request.key();
         let id = |part: String| SharedString::from(format!("model-{part}-{key}"));
         let scale = TileScale::Regular;
@@ -753,11 +764,11 @@ impl Desktop {
             }
         }
         // Logs belong to the last model job: shown while it runs and after it ends.
-        if self.work.kind == Kind::Models
-            && !self.work.job_events.logs.is_empty()
-            && (self.is_preparing(request) || self.model_outcome(request).is_some())
+        if self.work.read(cx).kind == Kind::Models
+            && !self.work.read(cx).job_events.logs.is_empty()
+            && (self.is_preparing(request, cx) || self.model_outcome(request).is_some())
         {
-            let logs = &self.work.job_events.logs;
+            let logs = &self.work.read(cx).job_events.logs;
             details = details
                 .child(section_title(
                     id("log-heading".into()),
@@ -780,7 +791,7 @@ impl Desktop {
     ) -> Div {
         let request = self.default_model_request();
         let other = self
-            .active_preparation()
+            .active_preparation(cx)
             .filter(|active| **active != request)
             .cloned();
         let elsewhere = self

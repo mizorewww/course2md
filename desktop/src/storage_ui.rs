@@ -161,7 +161,7 @@ impl Desktop {
             return;
         }
         let op = StorageOp::Link(library_id.clone());
-        if self.work.job.is_some() || self.import.preview_workers > 0 {
+        if self.work.read(cx).job.is_some() || self.import.preview_workers > 0 {
             let message = course2md::tr!("正在处理内容，结束或停止后再重新定位");
             return self.storage_refused(op, message.into(), cx);
         }
@@ -218,11 +218,11 @@ impl Desktop {
             let _ = this.update_in(cx, |this, window, cx| {
                 let result = finished.and_then(|tasks| {
                     ensure!(
-                        !this.work.closing && !cancel.load(Ordering::Relaxed),
+                        !this.work.read(cx).closing && !cancel.load(Ordering::Relaxed),
                         course2md::tr!("已取消重新定位")
                     );
                     ensure!(
-                        this.work.job.is_none() && this.import.preview_workers == 0,
+                        this.work.read(cx).job.is_none() && this.import.preview_workers == 0,
                         course2md::tr!("内容仍在处理中，请停止后重新定位")
                     );
                     this.with_workspace(cx, |workspace| {
@@ -278,9 +278,9 @@ impl Desktop {
     }
 
     /// Back to idle after an operation: others may run again.
-    fn storage_idle(&mut self) {
+    fn storage_idle(&mut self, cx: &App) {
         self.storage_ui.busy = false;
-        self.wake_poll();
+        self.wake_poll(cx);
         self.storage_ui.cancel = None;
     }
 
@@ -288,7 +288,7 @@ impl Desktop {
         if self.storage_ui.generation != generation {
             return;
         }
-        self.storage_idle();
+        self.storage_idle(cx);
         self.storage_ui.progress = Progress::default();
         if let Err(error) = result {
             self.storage_ui.error = Some(course2md::tr!("尚未重新定位：{}", format!("{error:#}")));
@@ -426,7 +426,7 @@ impl Desktop {
 
     pub fn poll_storage(&mut self, cx: &mut Context<Self>) {
         if !self.storage_ui.busy
-            && self.work.job.is_none()
+            && self.work.read(cx).job.is_none()
             && let Some(id) = self.storage_ui.resume_task.take()
         {
             let can_resume = self
@@ -510,19 +510,19 @@ impl Desktop {
             return self.storage_refused(op, registry_unavailable().into(), cx);
         };
         // Only a conversion task can pause and resume around a move.
-        if self.work.job.is_some() && self.work.active_task.is_none() {
+        if self.work.read(cx).job.is_some() && self.work.read(cx).active_task.is_none() {
             let message = course2md::tr!("模型下载完成或停止后再移动笔记库");
             return self.storage_refused(op, message.into(), cx);
         }
         self.storage_ui.begin(op);
         let (generation, cancel) = self.storage_busy();
-        let job_exit = self.work.job.is_some().then(|| {
+        let job_exit = self.work.read(cx).job.is_some().then(|| {
             let (exit, exited) = smol::channel::bounded(1);
             self.storage_ui.job_exit = Some(exit);
             self.storage_ui.progress.message = course2md::tr!("正在暂停当前任务…").into();
             exited
         });
-        if let Some(id) = self.work.active_task.clone() {
+        if let Some(id) = self.work.read(cx).active_task.clone() {
             let running = state
                 .task(&id)
                 .is_some_and(|task| task.intent == workspace::Intent::Run);
@@ -598,7 +598,7 @@ impl Desktop {
                 }
                 match result {
                     Ok(mut prepared) => {
-                        if this.work.closing || cancel.load(Ordering::Relaxed) {
+                        if this.work.read(cx).closing || cancel.load(Ordering::Relaxed) {
                             this.finish_storage_error(
                                 course2md::tr!("副本已核验，保存位置尚未切换").into(),
                                 cx,
@@ -641,7 +641,7 @@ impl Desktop {
                         }
                         // A record left behind is marked committed at the next start.
                         let _ = storage::save_journal(&prepared.path, &prepared.journal);
-                        this.storage_idle();
+                        this.storage_idle(cx);
                         this.storage_ui.progress = Progress {
                             message: course2md::tr!(
                                 "笔记库已移动到 {}。旧位置保留为已核验备份。",
@@ -672,7 +672,7 @@ impl Desktop {
     }
 
     fn finish_storage_error(&mut self, message: String, cx: &mut Context<Self>) {
-        self.storage_idle();
+        self.storage_idle(cx);
         self.storage_ui.error = Some(message);
         self.restore_storage_state(cx);
         self.refresh_library(cx);
@@ -745,7 +745,7 @@ impl Desktop {
                             this.storage_ui.link_question = None;
                             this.storage_ui.dialog_open = false;
                             this.storage_ui.progress = Progress::default();
-                            this.storage_idle();
+                            this.storage_idle(cx);
                             this.start_next_task(cx);
                             cx.notify();
                         })),
@@ -1292,7 +1292,7 @@ impl Desktop {
         cx.spawn_in(window, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
-                this.storage_idle();
+                this.storage_idle(cx);
                 this.storage_ui.progress = Progress::default();
                 match result {
                     Ok(()) => {

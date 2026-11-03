@@ -174,7 +174,7 @@ impl ServiceAction {
 
 impl Desktop {
     pub(crate) fn start_onboarding(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.setup_model_job_running() {
+        if self.setup_model_job_running(cx) {
             self.open_setup_model_status(window, cx);
             return;
         }
@@ -306,7 +306,7 @@ impl Desktop {
     }
 
     fn setup_step(&mut self, step: Step, cx: &mut Context<Self>) {
-        if step == Step::Engine && self.setup_model_job_running() {
+        if step == Step::Engine && self.setup_model_job_running(cx) {
             return;
         }
         if step != Step::Model {
@@ -668,11 +668,11 @@ impl Desktop {
         }
     }
 
-    fn setup_model_job_running(&self) -> bool {
+    fn setup_model_job_running(&self, cx: &App) -> bool {
         self.onboarding
             .background_model
             .as_ref()
-            .is_some_and(|request| self.is_preparing(request))
+            .is_some_and(|request| self.is_preparing(request, cx))
     }
 
     fn open_setup_model_status(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -985,7 +985,7 @@ impl Desktop {
                     }))
                 },
             ));
-        let (_, model_status) = self.model_reading(&self.setup_model_request());
+        let (_, model_status) = self.model_reading(&self.setup_model_request(), cx);
         let fields = ui::field_table(
             "setup-local-engine",
             course2md::tr!("识别模型"),
@@ -1346,13 +1346,13 @@ impl Desktop {
         }
         let step = self.onboarding.step;
         let model_review = self.onboarding.model_return_page.is_some();
-        let model_running = self.setup_model_job_running();
+        let model_running = self.setup_model_job_running(cx);
         // While the model still needs downloading, that is the step's main action.
         let prepare_first = step == Step::Model && {
             let request = self.setup_model_request();
             request.provider != AsrProvider::Api
                 && !model_running
-                && self.model_awaits_download(&request)
+                && self.model_awaits_download(&request, cx)
         };
         let purpose = self.footer_service_purpose();
         let service_action = purpose.map(|purpose| self.setup_service_action(purpose, cx));
@@ -1474,12 +1474,13 @@ impl Desktop {
             return None;
         }
         let request = self.onboarding.background_model.as_ref()?;
-        let running = self.is_preparing(request);
+        let running = self.is_preparing(request, cx);
         let outcome = self.model_outcome(request);
-        let label = if running && self.work.cancelling {
+        let label = if running && self.work.read(cx).cancelling {
             course2md::tr!("正在暂停").to_owned()
         } else if running {
             self.work
+                .read(cx)
                 .job_events
                 .stages
                 .iter()

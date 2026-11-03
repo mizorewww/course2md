@@ -87,8 +87,37 @@ Branch `split/thin-wrapper`, first step of P2-b. The binary moved logic out and 
   23 → 22 files; `metrics.py` 67,603 → 68,162 (+559: `run.rs` and `records.rs`, their tests excluded, and the
   entity plumbing). After step 1: 30,216 lines, 44 fields (`reader_bar`), 22 files, 68,274 (the build counter
   and retained captures are about 60 of the +112). After step 2: 30,345 lines, 42 fields, 19 files, 68,403.
-- **Next.** `AccountsView` (Bilibili login, account, YouTube; Codex and Ollama are tied to the service forms and
-  follow those), then the library and task pages, and `Records` notifying so pages can be drawn cached.
+- **Work (P2-c, branch `split/thin-wrapper2`, step 1).** `Entity<Work>` replaces five `Desktop` fields (`work`,
+  `transient_task_result`, `draft_deadline` and the wake channel's two ends). `desktop_tasks::job::Work` (was
+  `WorkState`) also holds the finished task's announcement, the draft deadline and the wake channel, and computes its
+  part of the poll deadline, the event batch, a task job's and a model job's install and the job's exit; tests
+  `deadlines_come_from_the_draft_the_announcement_and_quitting`, `a_running_job_ticks_and_its_exit_names_its_task`.
+  The run orchestration in `task_runner.rs` reads and writes it through the entity; `claim_start` (A3), held tasks
+  (A2), the poll (B1), model consent (B5), resend authorization and the paid-request guards are unchanged.
+  Verified before (`ab18df27`) and after with the capture build, paper and ink, normal and retained: home, tasks
+  (scrolled, details), library (cards, list, grouped, search), settings (generation, storage), first use's model step
+  are pixel-identical (storage differs only in the fixture's folder name when runs share no fixture; identical when
+  they do). Behaviour, fake AI server on loopback, 25 s or 40 s per request: a local video submitted, a second task
+  queued, pause all, resume all, cancel — the same screens except the running clock and progress bar, 1 proofread +
+  1 summary request in both builds; the app `kill -9`ed during proofreading with the worker left running, relaunched:
+  held (no pause), then continued from the worker's answer to complete, identical screens, 1 proofread + 1 summary in
+  both builds, no resend.
+- **Numbers.** Before P2-c (`ab18df27`): 30,345 lines, 42 fields, 19 files, `metrics.py` 68,699. After step 1:
+  30,362 lines, 38 fields, 19 files, 68,835 (`job.rs` +136: what moved out of the binary plus the entity's methods;
+  the binary's `cx` threading adds back what it lost).
+- **TasksPage (step 2).** `Entity<TasksPage>` replaces `task_list`: it renders the task page (drawn with the window,
+  not cached) and the task cards of the workbench and the library rows' menus, observes `Records` and `Work`, and
+  emits `TasksEvent`; running an action, pause or resume all, moving a waiting task and opening a task's note are
+  `Desktop` methods in `task_runner.rs`, so `task_ui.rs` has no `impl Desktop`. Opening a row asks the window to
+  select the task and only then opens it, as before (test `a_row_opens_through_the_window_and_folds_on_its_own`).
+  Captures (before `ab18df27`, paper and ink, normal and retained) of the step-1 suite plus the task page's details
+  opened and closed, its ⋯ and right-click menus, the bottom of the queue, history, and back from the library:
+  identical to the before build (one paper run had one pixel differ in a scrolled shot; rerun, identical). The
+  behaviour runs of step 1 again: the same screens apart from the clock and progress bars, 1 proofread + 1 summary
+  request in both scenarios, no resend.
+- **Numbers.** After step 2: 30,616 lines, 38 fields, 18 files, `metrics.py` 69,045; the binary
+  grew by the page's struct, its event enum and handler, and `ShellFacts`.
+- **Next.** The library page as an entity reading `Records`, then `Prefs`, which would let `ShellFacts` go.
 
 ## Next action
 

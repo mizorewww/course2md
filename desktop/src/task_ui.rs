@@ -1,12 +1,12 @@
 //! The task page: one card for every task, and one table of what can be done to it.
 use crate::{
-    Desktop, Done, Page, activity,
+    Desktop, Page, activity,
     import_ui::{self, video_cover, video_title},
-    notes::Course,
     symbols, ui,
     workspace::{Intent, TaskRecord, TaskState},
 };
-use course2md::execution::Component;
+use desktop_store::records::Records;
+use desktop_tasks::job::Work;
 use desktop_tasks::task_view::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
@@ -18,7 +18,11 @@ use gpui_kit_material::{
     prelude::*,
     tokens::shape::OuterCorners,
 };
-use std::{path::PathBuf, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    rc::Rc,
+};
 
 /// The task page's own view state.
 pub(crate) struct TaskListUi {
@@ -140,15 +144,68 @@ trait StageStatusView {
     fn icon(self) -> SymbolIcon;
 }
 
-/// How an action draws and runs; the action itself is in `desktop_tasks::task_view`.
-pub(crate) trait TaskActionView {
-    fn present(&self, task: &TaskRecord, desktop: &Desktop) -> (&'static str, SymbolIcon, bool);
-    fn run(&self, id: &str, this: &mut Desktop, window: &mut Window, cx: &mut Context<Desktop>);
-    fn click(
-        self,
-        desktop: WeakEntity<Desktop>,
+/// The task page: the queue of every task and its cards, which the workbench and the
+/// library also show. It reads the records and the running work, keeps what is open,
+/// and asks the window for everything that changes a task.
+pub(crate) struct TasksPage {
+    records: Entity<Records>,
+    work: Entity<Work>,
+    this: WeakEntity<Self>,
+    pub(crate) task_list: TaskListUi,
+    /// What the window knows beyond the records and the work.
+    facts: ShellFacts,
+    /// Details already shown once; a virtualized row remounts without replaying them.
+    entered: HashSet<String>,
+}
+
+/// What the cards show that neither the records nor the work hold. The window sets it
+/// before it draws.
+#[derive(Default, PartialEq)]
+pub(crate) struct ShellFacts {
+    /// The names of the AI services the tasks send to, by saved version.
+    pub services: HashMap<String, String>,
+    /// Libraries whose location must be associated again.
+    pub reassociate: HashSet<String>,
+    /// A storage operation is under way.
+    pub storage_busy: bool,
+}
+
+/// What the task page asks of the window.
+pub(crate) enum TasksEvent {
+    /// Run one of a task's actions.
+    Run(String, TaskAction),
+    /// Select a task; `expand` then opens its details.
+    Select {
         id: String,
-    ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static;
+        expand: bool,
+    },
+    /// Send a task's uncertain requests again, as its card's button says.
+    Resend(String),
+    /// Move a waiting task to this place in the queue.
+    Move {
+        id: String,
+        position: usize,
+    },
+    PauseAll,
+    ResumeAll,
+    Navigate(Page),
+    /// Import a video, from the empty page.
+    Import,
+}
+
+impl EventEmitter<TasksEvent> for TasksPage {}
+
+/// Runs `action` on task `id` through the page's window.
+pub(crate) fn action_click(
+    page: WeakEntity<TasksPage>,
+    id: String,
+    action: TaskAction,
+) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+    move |_, _, cx| {
+        let _ = page.update(cx, |_, cx| {
+            cx.emit(TasksEvent::Run(id.clone(), action.clone()))
+        });
+    }
 }
 
 /// Where a task's plan goes and what it does: a card's second line.
@@ -220,17 +277,69 @@ fn stage_row(stage: TaskStage, window: &mut Window, cx: &mut App) -> Div {
 /// The cover's width on a task card away from home.
 const COVER_WIDTH: Rems = Rems(160.);
 
-impl Desktop {
+impl TasksPage {
+    pub(crate) fn new(
+        records: Entity<Records>,
+        work: Entity<Work>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        cx.observe(&records, |_, _, cx| cx.notify()).detach();
+        cx.observe(&work, |_, _, cx| cx.notify()).detach();
+        Self {
+            records,
+            work,
+            this: cx.weak_entity(),
+            task_list: TaskListUi::new(),
+            facts: ShellFacts::default(),
+            entered: HashSet::new(),
+        }
+    }
+
+    /// Takes what the window knows; a change draws the page again.
+    pub(crate) fn set_facts(&mut self, facts: ShellFacts, cx: &mut Context<Self>) {
+        if self.facts != facts {
+            self.facts = facts;
+            cx.notify();
+        }
+    }
+
+    fn workspace<'a>(&self, cx: &'a App) -> Option<&'a crate::workspace::Workspace> {
+        self.records.read(cx).workspace.as_ref()
+    }
+
+    fn library<'a>(&self, cx: &'a App) -> &'a desktop_store::library::LibraryState {
+        &self.records.read(cx).library
+    }
+
+    fn task<'a>(&self, id: &str, cx: &'a App) -> Option<&'a TaskRecord> {
+        self.records.read(cx).task(id)
+    }
+
+    fn task_library<'a>(
+        &self,
+        task: &TaskRecord,
+        cx: &'a App,
+    ) -> Option<&'a crate::workspace::LibraryLocation> {
+        self.records.read(cx).task_library(task)
+    }
+
+    fn is_running_task(&self, id: &str, cx: &App) -> bool {
+        self.work.read(cx).is_running(id)
+    }
+
+    fn enter_once(&mut self, id: String) -> bool {
+        self.entered.insert(id)
+    }
+
     /// What the task's actions depend on beyond its own record.
     fn task_facts<'a>(&'a self, task: &TaskRecord, cx: &'a App) -> TaskFacts<'a> {
         TaskFacts {
-            active: self.is_running_task(&task.id),
+            active: self.is_running_task(&task.id, cx),
             expanded: self.task_list.expanded.as_ref() == Some(&task.id),
             library: self.task_library(task, cx),
-            needs_reassociation: self.task_library(task, cx).is_some_and(|library| {
-                self.cached_location_check(library)
-                    .is_some_and(|check| check.needs_reassociation)
-            }),
+            needs_reassociation: self
+                .task_library(task, cx)
+                .is_some_and(|library| self.facts.reassociate.contains(&library.id)),
             queue: self
                 .workspace(cx)
                 .map(|workspace| {
@@ -253,11 +362,11 @@ impl Desktop {
         task_actions(task, surface, &self.task_facts(task, cx))
     }
 
-    fn task_stage_rows(&self, task: &TaskRecord) -> Vec<TaskStage> {
-        task_stage_rows(task, self.is_running_task(&task.id))
+    fn task_stage_rows(&self, task: &TaskRecord, cx: &App) -> Vec<TaskStage> {
+        task_stage_rows(task, self.is_running_task(&task.id, cx))
     }
 
-    pub fn queue_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn queue_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let rem_size = f32::from(window.rem_size());
         let mut items = Vec::new();
         let tasks: Rc<Vec<TaskRecord>> = match &self.records.read(cx).workspace {
@@ -372,7 +481,7 @@ impl Desktop {
             }
         }
         let keys = items.iter().map(|item| item.key(&tasks)).collect();
-        Self::reconcile_list_items(
+        Desktop::reconcile_list_items(
             &self.task_list.list,
             &mut self.task_list.keys,
             &mut self.task_list.focus,
@@ -386,36 +495,35 @@ impl Desktop {
         let focus = Rc::new(self.task_list.focus.clone());
         let state = self.task_list.list.clone();
         let items = Rc::new(items);
-        let desktop = cx.weak_entity();
+        let page = cx.weak_entity();
         let queue = list(state, move |index, window, cx| {
             let Some(item) = items.get(index) else {
                 return div().into_any_element();
             };
             let last = index + 1 == items.len();
-            desktop
-                .update(cx, |this, cx| {
-                    let gap = match item {
-                        QueueItem::GroupLabel { .. } => rems(SECTION_TITLE_GAP.as_f32() / 14.),
-                        QueueItem::Task { joined: true, .. } => rems(TILE_GAP.as_f32() / 14.),
-                        _ => TASK_SECTION_GAP,
-                    };
-                    let mut wrapper = div()
-                        .w_full()
-                        .min_w_0()
-                        .max_w(TASK_COLUMN)
-                        .mx_auto()
-                        .flex()
-                        .flex_col()
-                        .when(!last, |view| view.pb(gap))
-                        .child(this.queue_item(item, &tasks, window, cx))
-                        .id(("queue-item", index))
-                        .tab_stop(false);
-                    if let Some(focus) = focus.get(index) {
-                        wrapper = wrapper.track_focus(focus);
-                    }
-                    wrapper.into_any_element()
-                })
-                .unwrap_or_else(|_| div().into_any_element())
+            page.update(cx, |this, cx| {
+                let gap = match item {
+                    QueueItem::GroupLabel { .. } => rems(SECTION_TITLE_GAP.as_f32() / 14.),
+                    QueueItem::Task { joined: true, .. } => rems(TILE_GAP.as_f32() / 14.),
+                    _ => TASK_SECTION_GAP,
+                };
+                let mut wrapper = div()
+                    .w_full()
+                    .min_w_0()
+                    .max_w(TASK_COLUMN)
+                    .mx_auto()
+                    .flex()
+                    .flex_col()
+                    .when(!last, |view| view.pb(gap))
+                    .child(this.queue_item(item, &tasks, window, cx))
+                    .id(("queue-item", index))
+                    .tab_stop(false);
+                if let Some(focus) = focus.get(index) {
+                    wrapper = wrapper.track_focus(focus);
+                }
+                wrapper.into_any_element()
+            })
+            .unwrap_or_else(|_| div().into_any_element())
         })
         .w_full()
         .h_full()
@@ -490,7 +598,7 @@ impl Desktop {
                                 .tone(ButtonTone::Accent)
                                 .icon(symbols::pause())
                                 .child(course2md::tr!("全部暂停"))
-                                .on_click(cx.listener(|this, _, _, cx| this.pause_all_tasks(cx))),
+                                .on_click(cx.listener(|_, _, _, cx| cx.emit(TasksEvent::PauseAll))),
                         )
                     })
                     .when(resumable > 0, |row| {
@@ -499,72 +607,12 @@ impl Desktop {
                                 .tone(ButtonTone::Accent)
                                 .icon(symbols::play_arrow())
                                 .child(course2md::tr!("全部继续"))
-                                .on_click(cx.listener(|this, _, _, cx| this.resume_all_tasks(cx))),
+                                .on_click(
+                                    cx.listener(|_, _, _, cx| cx.emit(TasksEvent::ResumeAll)),
+                                ),
                         )
                     }),
             )
-    }
-
-    /// Stop the running task first, so its stop starts nothing new, then hold
-    /// the queue in one step, so no queued task starts between two pauses.
-    pub(crate) fn pause_all_tasks(&mut self, cx: &mut Context<Self>) {
-        let Some(workspace) = &self.records.read(cx).workspace else {
-            return;
-        };
-        let pausable = |task: &&TaskRecord| task.handled_by.is_none() && task.intent == Intent::Run;
-        let running: Vec<String> = workspace
-            .state
-            .tasks
-            .iter()
-            .filter(|task| task.state == TaskState::Running)
-            .filter(pausable)
-            .map(|task| task.id.clone())
-            .collect();
-        let queued: Vec<String> = workspace
-            .state
-            .queued_tasks()
-            .filter(pausable)
-            .map(|task| task.id.clone())
-            .collect();
-        for id in running {
-            self.set_task_intent(id, Intent::Pause, cx);
-        }
-        // Queued work has no worker to tell; its record is the whole state.
-        self.transact(
-            course2md::tr!("任务状态尚未保存：{}"),
-            |state| {
-                queued
-                    .iter()
-                    .try_for_each(|id| state.set_intent(id, Intent::Pause))
-            },
-            cx,
-        );
-        cx.notify();
-    }
-
-    pub(crate) fn resume_all_tasks(&mut self, cx: &mut Context<Self>) {
-        let Some(workspace) = &self.records.read(cx).workspace else {
-            return;
-        };
-        let ids: Vec<String> = workspace
-            .state
-            .tasks
-            .iter()
-            .filter(|task| resumable(task))
-            .map(|task| task.id.clone())
-            .collect();
-        for id in ids {
-            self.set_task_intent(id, Intent::Run, cx);
-        }
-    }
-
-    pub(crate) fn move_waiting_task(&mut self, id: &str, position: usize, cx: &mut Context<Self>) {
-        self.transact(
-            course2md::tr!("任务顺序尚未保存：{}"),
-            |state| state.move_waiting_task(id, position),
-            cx,
-        );
-        cx.notify();
     }
 
     fn queue_item(
@@ -587,7 +635,9 @@ impl Desktop {
                     .tone(ButtonTone::Accent)
                     .icon(symbols::menu_book())
                     .child(course2md::tr!("前往笔记库"))
-                    .on_click(cx.listener(|this, _, _, cx| this.navigate(Page::Library, cx))),
+                    .on_click(
+                        cx.listener(|_, _, _, cx| cx.emit(TasksEvent::Navigate(Page::Library))),
+                    ),
             )
             .into_any_element(),
             QueueItem::Empty => tile([true; 4])
@@ -607,11 +657,7 @@ impl Desktop {
                     material_button("task-new", ButtonVariant::Filled)
                         .icon(symbols::add())
                         .child(course2md::tr!("导入视频"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            if this.prepare_workbench_input(window, cx) {
-                                this.navigate(Page::New, cx);
-                            }
-                        })),
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(TasksEvent::Import))),
                 )
                 .into_any_element(),
             QueueItem::GroupLabel {
@@ -718,9 +764,9 @@ impl Desktop {
     pub(crate) fn task_menu(
         &self,
         task: &TaskRecord,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> impl Fn(&mut Window, &mut App) -> MaterialMenu + 'static {
-        let entity = cx.weak_entity();
+        let entity = self.this.clone();
         let id = task.id.clone();
         let actions = self.task_actions(task, TaskSurface::Menu, cx);
         // A divider ends each menu section.
@@ -731,7 +777,7 @@ impl Desktop {
                 let ends = actions
                     .get(index + 1)
                     .is_some_and(|next| next.group() != action.group());
-                (action.present(task, self), ends, action.clone())
+                (self.present(action, task, cx), ends, action.clone())
             })
             .collect();
         move |_, _| {
@@ -745,7 +791,7 @@ impl Desktop {
                         )
                         .disabled(*disabled)
                         .divider(*ends)
-                        .on_click(action.clone().click(entity.clone(), id.clone()))
+                        .on_click(action_click(entity.clone(), id.clone(), action.clone()))
                 }),
             )
         }
@@ -787,16 +833,21 @@ impl Desktop {
             cx.notify();
             return;
         }
-        self.select_task(id, cx);
-        self.task_list.expanded = Some(id.to_owned());
+        cx.emit(TasksEvent::Select {
+            id: id.to_owned(),
+            expand: true,
+        });
     }
 
     /// Show or hide a task's log; a stopped task opens its details to show it.
-    fn toggle_task_log(&mut self, task: &TaskRecord, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_task_log(&mut self, task: &TaskRecord, cx: &mut Context<Self>) {
         if !self.task_list.logs_open.remove(&task.id) {
             self.task_list.logs_open.insert(task.id.clone());
             if task_group(task) != TaskGroup::Running {
-                self.select_task(&task.id, cx);
+                cx.emit(TasksEvent::Select {
+                    id: task.id.clone(),
+                    expand: false,
+                });
             }
         }
         cx.notify();
@@ -806,27 +857,6 @@ impl Desktop {
     pub(crate) fn close_task_details(&mut self, id: &str) {
         self.entered.remove(&format!("task-detail-{id}"));
         self.task_list.logs_open.remove(id);
-    }
-
-    fn open_task_note(&mut self, task: &TaskRecord, cx: &mut Context<Self>) {
-        let Some(path) = &task.artifact else {
-            return;
-        };
-        // The note opens from its path even before the library has listed it.
-        let course = self
-            .library(cx)
-            .courses
-            .iter()
-            .find(|course| &course.dir == path)
-            .cloned()
-            .unwrap_or_else(|| {
-                Rc::new(Course::from_completed(&Done {
-                    out_dir: path.clone(),
-                    title: task.plan.title.clone(),
-                    ..Default::default()
-                }))
-            });
-        self.open_course(course, cx);
     }
 
     /// Where a task saves, as its supporting line.
@@ -839,7 +869,7 @@ impl Desktop {
 
     /// Which service receives the text, when one does.
     fn task_ai_destination(&self, task: &TaskRecord) -> Option<String> {
-        let version = self.preferences.version(
+        let name = self.facts.services.get(
             task.plan
                 .ai_service
                 .as_ref()
@@ -852,7 +882,7 @@ impl Desktop {
             } else {
                 course2md::tr!("文字")
             },
-            version.config.name,
+            name,
         ))
     }
 
@@ -981,6 +1011,7 @@ impl Desktop {
                     self.task_destination(task, cx),
                     self.task_cover(task, cx),
                     COVER_WIDTH,
+                    self.task_step_line(task, false, cx),
                 );
                 let head = self.task_card_head(task, place, chip, more, None, facts);
                 (outer, head.into_any_element(), true)
@@ -990,6 +1021,7 @@ impl Desktop {
                     self.task_destination(task, cx),
                     self.task_cover(task, cx),
                     import_ui::cover_width(window),
+                    self.task_step_line(task, true, cx),
                 );
                 let head = self.task_card_head(task, place, chip, more, inner, facts);
                 (
@@ -1105,7 +1137,11 @@ impl Desktop {
                                         )
                                         .child(course2md::tr!("阅读笔记"))
                                         .on_click(
-                                            TaskAction::Read.click(cx.weak_entity(), id.clone()),
+                                            action_click(
+                                                cx.weak_entity(),
+                                                id.clone(),
+                                                TaskAction::Read,
+                                            ),
                                         ),
                                     )
                                 },
@@ -1128,8 +1164,11 @@ impl Desktop {
                     .drag_over::<QueueDrag>(|style, _, _, _| {
                         style.bg(color(ColorRole::SECONDARY_CONTAINER))
                     })
-                    .on_drop(cx.listener(move |this, drag: &QueueDrag, _, cx| {
-                        this.move_waiting_task(&drag.id, number - 1, cx)
+                    .on_drop(cx.listener(move |_, drag: &QueueDrag, _, cx| {
+                        cx.emit(TasksEvent::Move {
+                            id: drag.id.clone(),
+                            position: number - 1,
+                        })
                     }))
             }
             None => head,
@@ -1144,8 +1183,8 @@ impl Desktop {
         chip: Option<Div>,
         more: AnyElement,
         inner: Option<Div>,
-        // Where it saves, its cover and the cover's width.
-        (destination, cover, cover_width): (String, Option<PathBuf>, Rems),
+        // Where it saves, its cover and the cover's width, and the step it is on.
+        (destination, cover, cover_width, step): (String, Option<PathBuf>, Rems, Option<String>),
     ) -> Div {
         let id = &task.id;
         let home = matches!(place, CardPlace::Home);
@@ -1171,7 +1210,6 @@ impl Desktop {
                 .collect::<Vec<_>>()
                 .join(" · ")
         };
-        let step = self.task_step_line(task, home);
         // A running task's status ends its title; one that waits says so below it.
         let (title_chip, line_chip) = if home || needs_person(task) {
             (None, chip)
@@ -1262,8 +1300,8 @@ impl Desktop {
     /// The step a running task is on. Later steps depend on what the video turns out
     /// to need, so the position counts the steps reached so far, without a total. The
     /// workbench says the step and its measure instead, above the bar.
-    fn task_step_line(&self, task: &TaskRecord, home: bool) -> Option<String> {
-        let stages = self.task_stage_rows(task);
+    fn task_step_line(&self, task: &TaskRecord, home: bool, cx: &App) -> Option<String> {
+        let stages = self.task_stage_rows(task, cx);
         let index = stages.iter().position(|stage| stage.status.running());
         index
             .map(|index| {
@@ -1276,12 +1314,12 @@ impl Desktop {
                     format!("{} · {}", stage.title, stage.detail)
                 }
             })
-            .or_else(|| self.task_wait(task).map(|wait| wait.label().to_owned()))
+            .or_else(|| self.task_wait(task, cx).map(|wait| wait.label().to_owned()))
     }
 
-    fn task_wait(&self, task: &TaskRecord) -> Option<WorkerWait> {
+    fn task_wait(&self, task: &TaskRecord, cx: &App) -> Option<WorkerWait> {
         worker_wait_state(
-            self.is_running_task(&task.id),
+            self.is_running_task(&task.id, cx),
             task.events.done.is_some(),
             task.intent,
             task.events
@@ -1299,11 +1337,12 @@ impl Desktop {
         task: &TaskRecord,
         stages: &[TaskStage],
         surface: TaskSurface,
+        cx: &App,
     ) -> Option<Div> {
         let id = &task.id;
-        let active = self.is_running_task(id);
+        let active = self.is_running_task(id, cx);
         let current = stages.iter().find(|stage| stage.status.running());
-        if !active || (current.is_none() && self.task_wait(task).is_none()) {
+        if !active || (current.is_none() && self.task_wait(task, cx).is_none()) {
             return None;
         }
         let detail = current
@@ -1311,8 +1350,9 @@ impl Desktop {
             .filter(|detail| !detail.is_empty())
             .or_else(|| {
                 self.work
+                    .read(cx)
                     .job_started
-                    .filter(|_| self.work.job.is_some())
+                    .filter(|_| self.work.read(cx).job.is_some())
                     .map(|started| activity::elapsed_label(started.elapsed()))
             })
             .filter(|_| surface != TaskSurface::Home || current.is_none());
@@ -1352,7 +1392,7 @@ impl Desktop {
         if uncertain.is_empty() || task.handled_by.is_some() {
             return None;
         }
-        let active = self.is_running_task(id);
+        let active = self.is_running_task(id, cx);
         Some(
             notice_banner(
                 SharedString::from(format!("unknown-effect-{id}")),
@@ -1390,7 +1430,7 @@ impl Desktop {
                         .disabled(active)
                         .on_click(cx.listener({
                             let id = id.clone();
-                            move |this, _, _, cx| this.resend_uncertain(id.clone(), cx)
+                            move |_, _, _, cx| cx.emit(TasksEvent::Resend(id.clone()))
                         })),
                     ),
             ),
@@ -1428,9 +1468,9 @@ impl Desktop {
                     .join(course2md::tr!("、"))
             )
         });
-        let stages = self.task_stage_rows(task);
+        let stages = self.task_stage_rows(task, cx);
         let running = stages.iter().any(|stage| stage.status.running());
-        let progress = self.task_progress(task, &stages, surface);
+        let progress = self.task_progress(task, &stages, surface, cx);
         // A single reached step is already the step line above.
         let chips = (running && stages.len() > 1 && surface != TaskSurface::Home).then(|| {
             h_flex()
@@ -1456,7 +1496,7 @@ impl Desktop {
                 }))
         });
         let buttons = actions.iter().map(|action| {
-            let (label, icon, disabled) = action.present(task, self);
+            let (label, icon, disabled) = self.present(action, task, cx);
             let variant = if lead.as_ref() == Some(action) {
                 ButtonVariant::Filled
             } else {
@@ -1490,7 +1530,7 @@ impl Desktop {
                     disabled && matches!(action, TaskAction::Pause | TaskAction::Cancel),
                     |b| b.loading(true, label),
                 )
-                .on_click(action.clone().click(cx.weak_entity(), id.clone()))
+                .on_click(action_click(cx.weak_entity(), id.clone(), action.clone()))
         });
         let mut buttons: Vec<MaterialButton> = buttons.collect();
         let home_running = surface == TaskSurface::Home && runs_in_card(task);
@@ -1540,7 +1580,7 @@ impl Desktop {
                 ))))
                 .children(self.task_plan_rows(task, false, cx))
                 .children(
-                    self.task_stage_rows(task)
+                    self.task_stage_rows(task, cx)
                         .into_iter()
                         .map(|stage| stage_row(stage, window, cx)),
                 );
@@ -1597,16 +1637,25 @@ impl Desktop {
 
     /// A waiting line with the running job's clock, so a pause between
     /// stages never looks stalled.
-    pub(crate) fn with_job_clock(&self, label: &str) -> String {
-        match self.work.job_started.filter(|_| self.work.job.is_some()) {
+    pub(crate) fn with_job_clock(&self, label: &str, cx: &App) -> String {
+        match self
+            .work
+            .read(cx)
+            .job_started
+            .filter(|_| self.work.read(cx).job.is_some())
+        {
             Some(started) => format!("{label} · {}", activity::elapsed_label(started.elapsed())),
             None => label.to_owned(),
         }
     }
 
     /// Compact status uses the same measured progress as task details.
-    pub(crate) fn compact_task_progress(&self, task: &TaskRecord) -> Option<(String, Option<f32>)> {
-        self.task_stage_rows(task)
+    pub(crate) fn compact_task_progress(
+        &self,
+        task: &TaskRecord,
+        cx: &App,
+    ) -> Option<(String, Option<f32>)> {
+        self.task_stage_rows(task, cx)
             .into_iter()
             .find(|stage| stage.status.running())
             .map(|stage| {
@@ -1617,6 +1666,74 @@ impl Desktop {
                 };
                 (label, stage.fraction)
             })
+    }
+}
+
+impl Render for TasksPage {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.queue_page(window, cx)
+    }
+}
+
+impl TasksPage {
+    /// Its label and icon, and whether it is unavailable right now.
+    pub(crate) fn present(
+        &self,
+        action: &TaskAction,
+        task: &TaskRecord,
+        cx: &App,
+    ) -> (&'static str, SymbolIcon, bool) {
+        let cancelling = task.state == TaskState::Pausing && task.intent == Intent::Cancel;
+        let pausing = task.state == TaskState::Pausing && !cancelling;
+        let details = self.task_list.expanded.as_ref() == Some(&task.id);
+        let log = self.task_list.logs_open.contains(&task.id);
+        use course2md::tr;
+        match action {
+            TaskAction::Read => (tr!("阅读笔记"), symbols::menu_book(), false),
+            TaskAction::OpenNoteFolder => (tr!("打开笔记保存位置"), symbols::folder_open(), false),
+            TaskAction::OpenExports => (tr!("打开导出位置"), symbols::folder_open(), false),
+            TaskAction::OpenSource => (tr!("打开原视频"), symbols::open_in_new(), false),
+            TaskAction::CopyLink => (tr!("复制视频链接"), symbols::content_copy(), false),
+            TaskAction::Details if details => {
+                (tr!("收起详情"), symbols::keyboard_arrow_up(), false)
+            }
+            TaskAction::Details => (tr!("查看详情"), symbols::keyboard_arrow_down(), false),
+            TaskAction::Log if log => (tr!("收起日志"), symbols::description(), false),
+            TaskAction::Log => (tr!("查看日志"), symbols::description(), false),
+            TaskAction::Followup(_) => (tr!("查看后续处理任务"), symbols::arrow_forward(), false),
+            TaskAction::Move { label, up, to } => (
+                label,
+                if *up {
+                    symbols::arrow_upward()
+                } else {
+                    symbols::arrow_downward()
+                },
+                to.is_none(),
+            ),
+            TaskAction::Pause if pausing => (tr!("正在暂停…"), symbols::pause(), true),
+            TaskAction::Pause => (tr!("暂停"), symbols::pause(), false),
+            TaskAction::Resume => (tr!("继续生成"), symbols::play_arrow(), false),
+            TaskAction::PrepareModel => (
+                tr!("下载并准备模型"),
+                symbols::download(),
+                self.work.read(cx).job.is_some(),
+            ),
+            TaskAction::Repair => (tr!("修复 AI 服务并补做"), symbols::settings(), false),
+            TaskAction::Retry(component) => {
+                (retry_component_label(component), symbols::refresh(), false)
+            }
+            TaskAction::Reassociate(_) => (
+                tr!("重新关联此保存位置"),
+                symbols::database(),
+                self.facts.storage_busy,
+            ),
+            TaskAction::Resend => (tr!("重新发送以上内容"), symbols::refresh(), false),
+            TaskAction::Adjust => (adjust_label(task), symbols::tune(), false),
+            TaskAction::Cancel if cancelling => (tr!("正在取消…"), symbols::close(), true),
+            TaskAction::Cancel => (tr!("取消任务"), symbols::close(), false),
+            TaskAction::ViewTask => (tr!("查看任务"), symbols::task(), false),
+            TaskAction::NextVideo => (tr!("设置下一个视频"), symbols::add(), false),
+        }
     }
 }
 
@@ -1659,136 +1776,6 @@ impl StageStatusView for StageStatus {
             Self::Stopping | Self::Cancelled => symbols::close(),
             Self::Failed | Self::Uncertain => symbols::warning(),
             Self::Waiting => symbols::schedule(),
-        }
-    }
-}
-
-impl TaskActionView for TaskAction {
-    /// Its label and icon, and whether it is unavailable right now.
-    fn present(&self, task: &TaskRecord, desktop: &Desktop) -> (&'static str, SymbolIcon, bool) {
-        let cancelling = task.state == TaskState::Pausing && task.intent == Intent::Cancel;
-        let pausing = task.state == TaskState::Pausing && !cancelling;
-        let details = desktop.task_list.expanded.as_ref() == Some(&task.id);
-        let log = desktop.task_list.logs_open.contains(&task.id);
-        use course2md::tr;
-        match self {
-            Self::Read => (tr!("阅读笔记"), symbols::menu_book(), false),
-            Self::OpenNoteFolder => (tr!("打开笔记保存位置"), symbols::folder_open(), false),
-            Self::OpenExports => (tr!("打开导出位置"), symbols::folder_open(), false),
-            Self::OpenSource => (tr!("打开原视频"), symbols::open_in_new(), false),
-            Self::CopyLink => (tr!("复制视频链接"), symbols::content_copy(), false),
-            Self::Details if details => (tr!("收起详情"), symbols::keyboard_arrow_up(), false),
-            Self::Details => (tr!("查看详情"), symbols::keyboard_arrow_down(), false),
-            Self::Log if log => (tr!("收起日志"), symbols::description(), false),
-            Self::Log => (tr!("查看日志"), symbols::description(), false),
-            Self::Followup(_) => (tr!("查看后续处理任务"), symbols::arrow_forward(), false),
-            Self::Move { label, up, to } => (
-                label,
-                if *up {
-                    symbols::arrow_upward()
-                } else {
-                    symbols::arrow_downward()
-                },
-                to.is_none(),
-            ),
-            Self::Pause if pausing => (tr!("正在暂停…"), symbols::pause(), true),
-            Self::Pause => (tr!("暂停"), symbols::pause(), false),
-            Self::Resume => (tr!("继续生成"), symbols::play_arrow(), false),
-            Self::PrepareModel => (
-                tr!("下载并准备模型"),
-                symbols::download(),
-                desktop.work.job.is_some(),
-            ),
-            Self::Repair => (tr!("修复 AI 服务并补做"), symbols::settings(), false),
-            Self::Retry(component) => (retry_component_label(component), symbols::refresh(), false),
-            Self::Reassociate(_) => (
-                tr!("重新关联此保存位置"),
-                symbols::database(),
-                desktop.storage_ui.busy,
-            ),
-            Self::Resend => (tr!("重新发送以上内容"), symbols::refresh(), false),
-            Self::Adjust => (adjust_label(task), symbols::tune(), false),
-            Self::Cancel if cancelling => (tr!("正在取消…"), symbols::close(), true),
-            Self::Cancel => (tr!("取消任务"), symbols::close(), false),
-            Self::ViewTask => (tr!("查看任务"), symbols::task(), false),
-            Self::NextVideo => (tr!("设置下一个视频"), symbols::add(), false),
-        }
-    }
-
-    fn run(&self, id: &str, this: &mut Desktop, window: &mut Window, cx: &mut Context<Desktop>) {
-        let Some(task) = this.task(id, cx).cloned() else {
-            return;
-        };
-        let id = id.to_owned();
-        match self {
-            Self::Read => this.open_task_note(&task, cx),
-            Self::OpenNoteFolder => {
-                if let Some(path) = &task.artifact {
-                    cx.open_with_system(path);
-                }
-            }
-            Self::OpenExports => this.open_task_export_location(id, cx),
-            Self::OpenSource => cx.open_url(&task.plan.source.input),
-            Self::CopyLink => {
-                cx.write_to_clipboard(ClipboardItem::new_string(task.plan.source.input.clone()))
-            }
-            Self::Details => this.toggle_task_row(&id, cx),
-            Self::Log => this.toggle_task_log(&task, cx),
-            Self::Followup(next) => this.select_task(next, cx),
-            Self::Move { to, .. } => {
-                if let Some(to) = to {
-                    this.move_waiting_task(&id, *to, cx);
-                }
-            }
-            Self::Pause => this.set_task_intent(id, Intent::Pause, cx),
-            Self::Resume => this.set_task_intent(id, Intent::Run, cx),
-            Self::PrepareModel => this.prepare_task_model(&task, cx),
-            Self::Cancel => this.set_task_intent(id, Intent::Cancel, cx),
-            Self::Repair => this.repair_task_service(id, window, cx),
-            Self::Retry(component) => {
-                let part = Component::parse(component).unwrap_or(Component::Proofreading);
-                this.reprocess_task(id, vec![part], Vec::new(), cx)
-            }
-            Self::Reassociate(library) => {
-                this.begin_library_reassociation(library.clone(), window, cx)
-            }
-            // A menu has no room for the consequence, so it is asked here. The card's
-            // own button stands beside it and sends directly.
-            Self::Resend => {
-                let mut question = ui::Confirm::new(
-                    course2md::tr!("重新发送以上内容"),
-                    course2md::tr!("暂不发送"),
-                    course2md::tr!("重新发送以上内容"),
-                );
-                for request in task.events.blocked.iter().filter(|b| b.is_uncertain()) {
-                    question = question.text(request_scope(request));
-                }
-                question
-                    .text(course2md::tr!(
-                        "服务可能已处理这些内容，重新发送可能产生额外费用"
-                    ))
-                    .ask(
-                        cx.listener(move |this, _, _, cx| this.resend_uncertain(id.clone(), cx)),
-                        window,
-                        cx,
-                    );
-            }
-            Self::Adjust => this.adjust_task(id, window, cx),
-            Self::ViewTask => {
-                this.select_task(&id, cx);
-                this.navigate(Page::Task, cx);
-            }
-            Self::NextVideo => this.set_up_next_video(window, cx),
-        }
-    }
-
-    fn click(
-        self,
-        desktop: WeakEntity<Desktop>,
-        id: String,
-    ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
-        move |_, window, cx| {
-            let _ = desktop.update(cx, |this, cx| self.run(&id, this, window, cx));
         }
     }
 }
@@ -1836,6 +1823,50 @@ mod tests {
             let mut moved = tasks;
             moved.swap(0, 1);
             assert_eq!(row(0).key(&moved), "task-task-b");
+        });
+    }
+
+    /// Opening a row asks the window to select the task, which then opens it; folding the
+    /// open row is the page's own and closes its log with it.
+    #[gpui::test]
+    fn a_row_opens_through_the_window_and_folds_on_its_own(cx: &mut gpui::TestAppContext) {
+        use super::{TasksEvent, TasksPage};
+        use gpui::AppContext as _;
+        let records = cx.new(|_| {
+            desktop_store::records::Records::new(
+                None,
+                desktop_store::library::LibraryState::new(std::env::temp_dir()),
+            )
+        });
+        let work = cx.new(|_| desktop_tasks::job::Work::new());
+        let page = cx.new(|cx| TasksPage::new(records, work, cx));
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.update(|cx| {
+            let asked = asked.clone();
+            cx.subscribe(&page, move |_, event: &TasksEvent, _| {
+                if let TasksEvent::Select { id, expand } = event {
+                    asked.borrow_mut().push((id.clone(), *expand));
+                }
+            })
+            .detach();
+        });
+        page.update(cx, |page, cx| page.toggle_task_row("a", cx));
+        cx.run_until_parked();
+        assert_eq!(*asked.borrow(), [("a".to_owned(), true)]);
+        assert_eq!(
+            page.read_with(cx, |page, _| page.task_list.expanded.clone()),
+            None
+        );
+        page.update(cx, |page, cx| {
+            page.task_list.expanded = Some("a".into());
+            page.task_list.logs_open.insert("a".into());
+            page.toggle_task_row("a", cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(asked.borrow().len(), 1, "folding asks nothing");
+        page.read_with(cx, |page, _| {
+            assert_eq!(page.task_list.expanded, None);
+            assert!(page.task_list.logs_open.is_empty());
         });
     }
 
