@@ -238,12 +238,13 @@ impl AccountsView {
                 .item(
                     MaterialMenuItem::new(course2md::tr!("更换浏览器"))
                         .leading(Icon::from(symbols::web()))
+                        // Disconnecting stands apart, below the line.
+                        .divider(true)
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(AccountsEvent::OpenYoutube))),
                 )
                 .item(
                     MaterialMenuItem::new(course2md::tr!("断开连接"))
                         .leading(Icon::from(symbols::logout()))
-                        .divider(true)
                         .on_click(cx.listener(|this, _, _, cx| this.disconnect_youtube(cx))),
                 );
             actions.push(
