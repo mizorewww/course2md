@@ -25,9 +25,9 @@ native libraries; `--workspace` adds the desktop. Every crate inherits its versi
 | `c2m-test-http` | `crates/c2m-test-http` | A loopback HTTP server, a dev-dependency only |
 | `desktop-prefs` | `desktop/prefs` | Preferences, services and their checks, credentials, this machine's components, and how the desktop keeps a JSON record |
 | `desktop-accounts` | `desktop/accounts` | The sign-ins' state: Bilibili, YouTube, Codex and Ollama |
-| `desktop-store` | `desktop/store` | The workspace record of drafts and tasks, libraries and their folders, published notes, task activity |
-| `desktop-reader-core` | `desktop/reader-core` | What the reader shows of a note, its links and reading positions |
-| `desktop-tasks` | `desktop/tasks` | Sources, the import session, task plans, engine runs and the task view |
+| `desktop-store` | `desktop/store` | The workspace record of drafts and tasks, libraries and their folders, published notes, task activity; `Records`, the record and the library scan every page reads, and where a note is filed |
+| `desktop-reader-core` | `desktop/reader-core` | What the reader shows of a note, its links, reading positions and exports |
+| `desktop-tasks` | `desktop/tasks` | Sources, the import session, task plans, engine runs (the request, control file and record changes of a run) and the task view |
 | `desktop-ui` | `desktop/ui` | Shared compositions on `gpui-kit-material` (settings rows, confirm dialogs, note text, formulas, symbols), without page state |
 | `course2md-desktop` | `desktop` | The app: pages, windows and the `course2md-desktop` binary |
 
@@ -75,6 +75,17 @@ course2md-desktop
 - The `test-support` features of `desktop-prefs` and `desktop-store` (an in-memory credential
   vault, workspace and note fixtures) are enabled only under `[dev-dependencies]`.
 - `c2m-test-http` appears only under `[dev-dependencies]`.
+
+## The app
+
+`course2md-desktop` joins these crates into pages. Shared state lives in entities that pages read
+with `read(cx)` and change with `update(cx)`, as the kit gallery's `Entity<GalleryShared>` does:
+`Entity<Records>` (the workspace record and the library scan) and `Entity<NoteExports>` (exports
+of notes, shared by the reader and the library). A page that is its own entity renders itself and
+tells the window what it needs through events: `ReaderPage` (`desktop/src/reader_ui.rs`) emits
+`ReaderEvent` (navigate, open a task, reprocess or repair it, a message, a record error, the viewer
+opening) and `Desktop` subscribes. The other pages are still methods of `Desktop`; they move out the
+same way.
 
 A change that needs an edge against these directions usually means a type sits in the wrong
 crate: move it rather than adding the edge. Cargo rejects cycles; the rest is kept by review.
