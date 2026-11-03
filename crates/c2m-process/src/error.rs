@@ -19,7 +19,16 @@ pub fn tail_lines(s: &str, n: usize) -> String {
 /// 子进程失败时附带 stderr 摘要的便捷构造。
 pub fn cmd_error(program: &str, code: Option<i32>, stderr: &str) -> anyhow::Error {
     let tail = tail_lines(stderr, 5);
-    anyhow::anyhow!("{program} 运行失败 / failed (code={code:?}):\n{tail}")
+    anyhow::anyhow!("{}\n{tail}", failure_header(program, code))
+}
+
+/// The line before a failed program's last output: its name and exit code
+/// (none when a signal ended it).
+pub fn failure_header(program: &str, code: Option<i32>) -> String {
+    match code {
+        Some(code) => c2m_i18n::tr!("{} 运行失败（退出码 {}）：", program, code),
+        None => c2m_i18n::tr!("{} 运行失败：", program),
+    }
 }
 
 /// 校验 PATH 上的外部工具存在（yt-dlp 请用 [`require_ytdlp`]）。

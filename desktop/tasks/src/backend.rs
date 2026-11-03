@@ -24,6 +24,7 @@ impl Event {
         Self::Engine(EngineEvent::Log {
             level: LogLevel::Info,
             message,
+            fields: Default::default(),
         })
     }
     fn error(message: String) -> Self {

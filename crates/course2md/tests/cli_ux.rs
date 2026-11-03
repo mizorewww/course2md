@@ -669,7 +669,9 @@ exit 1
     let (tried, text) = run("zh-Hans", &["manual en"]);
     assert_eq!(tried, ["manual en", "auto en"], "{text}");
     assert!(text.contains("429"), "{text}");
-    assert!(text.contains("下一条字幕"), "{text}");
+    assert!(text.contains("改读字幕「English · 自动字幕」"), "{text}");
+    // One line per failure: yt-dlp's raw output is not repeated under it.
+    assert_eq!(text.matches("HTTP Error 429").count(), 1, "{text}");
     assert!(!text.contains("读取视频字幕失败"), "{text}");
     // Nothing readable in three tries: the first failure is the one reported.
     let (tried, text) = run("zh-Hans", &["manual en", "auto en"]);

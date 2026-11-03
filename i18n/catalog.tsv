@@ -110,6 +110,8 @@ yt-dlp 已结束，但没有留下视频文件 / yt-dlp finished without leaving
 {} 中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新运行 / {} is not signed in to YouTube. Sign in there first, then run this again	{} 中没有登录 YouTube。请先在浏览器中登录 YouTube，再重新运行	{} is not signed in to YouTube. Sign in there first, then run this again	{} 中沒有登入 YouTube。請先在瀏覽器中登入 YouTube，再重新執行	{} で YouTube にログインしていません。先にブラウザでログインしてから、もう一度実行してください
 {} 亿	{} 亿	{} × 100 million	{} 億	{} 億
 {} 正在使用 Cookie 数据库。请退出 {} 后重试。	{} 正在使用 Cookie 数据库。请退出 {} 后重试。	{} is using its cookie database. Quit {}, then try again.	{} 正在使用 Cookie 資料庫。請結束 {} 後重試。	{} が Cookie データベースを使用中です。{} を終了してから再試行してください。
+{} 运行失败（退出码 {}）：	{} 运行失败（退出码 {}）：	{} failed (exit code {}):	{} 執行失敗（結束代碼 {}）：	{} が失敗しました（終了コード {}）：
+{} 运行失败：	{} 运行失败：	{} failed:	{} 執行失敗：	{} が失敗しました：
 ↓ {} 词元	↓ {} 词元	↓ {} tokens	↓ {} 詞元	↓ {} トークン
 下载 Microsoft Visual C++ 运行库	下载 Microsoft Visual C++ 运行库	Download the Microsoft Visual C++ runtime	下載 Microsoft Visual C++ 執行階段	Microsoft Visual C++ ランタイムをダウンロード
 不使用 AI	不使用 AI	No AI processing	不使用 AI	AI 処理なし
@@ -391,6 +393,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 提示：YouTube 要求登录。请在设置的账号中连接浏览器里的 YouTube 登录后重试。 / Hint: YouTube asks you to sign in. Connect your browser's YouTube session in Settings, then retry.	提示：YouTube 要求登录。请在设置的账号中连接浏览器里的 YouTube 登录后重试。	Hint: YouTube asks you to sign in. Connect your browser's YouTube session in Settings, then retry.	提示：YouTube 要求登入。請在設定的帳號中連接瀏覽器裡的 YouTube 登入後重試。	ヒント：YouTube がログインを求めています。設定のアカウントでブラウザの YouTube ログインを接続してから再試行してください。
 提示：若视频需要登录或会员权限，可运行 course2md --login bilibili 登录；已登录时可重新登录。 / Hint: if the video needs a login or membership, run course2md --login bilibili; if already logged in, log in again.	提示：若视频需要登录或会员权限，可运行 course2md --login bilibili 登录；已登录时可重新登录。	Hint: if the video needs a login or membership, run course2md --login bilibili; if already logged in, log in again.	提示：若影片需要登入或會員權限，可執行 course2md --login bilibili 登入；已登入時可重新登入。	ヒント：動画にログインや会員権限が必要な場合は course2md --login bilibili を実行してください。ログイン済みの場合はログインし直してください。
 提示：若视频需要登录或会员权限，请在设置的账号中登录 B 站；已登录时可重新登录。 / Hint: if the video needs a login or membership, sign in to Bilibili in Settings; if already signed in, sign in again.	提示：若视频需要登录或会员权限，请在设置的账号中登录 B 站；已登录时可重新登录。	Hint: if the video needs a login or membership, sign in to Bilibili in Settings; if already signed in, sign in again.	提示：若影片需要登入或會員權限，請在設定的帳號中登入 B 站；已登入時可重新登入。	ヒント：動画にログインや会員権限が必要な場合は、設定のアカウントで Bilibili にログインしてください。ログイン済みの場合はログインし直してください。
+改读字幕「{}」	改读字幕「{}」	Trying the subtitle track “{}” instead	改讀字幕「{}」	代わりに字幕「{}」を読み込みます
 断开未完成，原连接已保留	断开未完成，原连接已保留	Disconnecting did not finish; the connection is kept	中斷未完成，原連接已保留	切断できませんでした。接続はそのままです
 断开连接	断开连接	Disconnect	中斷連接	接続を解除
 无法加密密码，请重试	无法加密密码，请重试	Could not encrypt the password; try again	無法加密密碼，請重試	パスワードを暗号化できませんでした。再試行してください
@@ -399,6 +402,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 无法解密 {} 的 Cookie：Windows 上的新版 Chromium 浏览器不允许其他程序读取。请改用 Firefox。	无法解密 {} 的 Cookie：Windows 上的新版 Chromium 浏览器不允许其他程序读取。请改用 Firefox。	Cannot decrypt {}’s cookies: recent Chromium browsers on Windows do not let other programs read them. Use Firefox instead.	無法解密 {} 的 Cookie：Windows 上的新版 Chromium 瀏覽器不允許其他程式讀取。請改用 Firefox。	{} の Cookie を復号できません。Windows の新しい Chromium 系ブラウザは他のプログラムからの読み取りを許可していません。Firefox を使ってください。
 无法读取 YouTube 登录设置	无法读取 YouTube 登录设置	Cannot read the YouTube login setting	無法讀取 YouTube 登入設定	YouTube のログイン設定を読み込めません
 无法读取 {} 的 Cookie。	无法读取 {} 的 Cookie。	Cannot read {}’s cookies.	無法讀取 {} 的 Cookie。	{} の Cookie を読み込めません。
+无法读取字幕「{}」：{}	无法读取字幕「{}」：{}	Could not read the subtitle track “{}”: {}	無法讀取字幕「{}」：{}	字幕「{}」を読み込めません：{}
 更换浏览器	更换浏览器	Change browser	更換瀏覽器	ブラウザを変更
 最小化	最小化	Minimize	最小化	最小化
 最大化	最大化	Maximize	最大化	最大化
