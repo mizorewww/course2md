@@ -114,6 +114,8 @@ struct Desktop {
     storage_records: Option<Task<()>>,
     /// The reader page, with the note it shows.
     reader: Entity<reader_ui::ReaderPage>,
+    /// The reader's part of the title bar.
+    reader_bar: Entity<reader_ui::ReaderBar>,
     /// Exports of notes, which the reader and the library share.
     exports: Entity<exports_ui::NoteExports>,
     /// The workspace record and the libraries' notes, which every page reads.
@@ -162,6 +164,22 @@ struct Desktop {
     message: Option<String>,
     _subscriptions: Vec<Subscription>,
     _poll: Task<()>,
+}
+
+/// Changes an entity and tells everything that reads it: the pages drawn from the shared
+/// records, and a page Desktop hands something to, draw again from what changed.
+pub(crate) trait Change<T> {
+    fn change<R>(&self, cx: &mut App, change: impl FnOnce(&mut T, &mut Context<T>) -> R) -> R;
+}
+
+impl<T: 'static> Change<T> for Entity<T> {
+    fn change<R>(&self, cx: &mut App, change: impl FnOnce(&mut T, &mut Context<T>) -> R) -> R {
+        self.update(cx, |value, cx| {
+            let result = change(value, cx);
+            cx.notify();
+            result
+        })
+    }
 }
 
 actions!(
@@ -311,7 +329,7 @@ impl Desktop {
                         if this.draft(cx).is_some_and(|draft| draft.input != value) {
                             this.import.following_conversion = None;
                             if this.page == Page::New {
-                                this.reader.update(cx, |reader, _| {
+                                this.reader.change(cx, |reader, _| {
                                     if reader.opened.reading {
                                         reader.opened.stop_reading();
                                     }
@@ -427,15 +445,17 @@ impl Desktop {
         let exports = cx.new(|_| exports_ui::NoteExports::new(records.clone()));
         let reader =
             cx.new(|cx| reader_ui::ReaderPage::new(records.clone(), exports.clone(), window, cx));
+        let reader_bar = cx.new(|_| reader_ui::ReaderBar::new(reader.clone()));
         subscriptions.push(cx.subscribe_in(&reader, window, Self::reader_event));
-        // Desktop reads what the reader and the exports say, beside drawing them.
-        subscriptions.push(cx.observe(&reader, |_, _, cx| cx.notify()));
+        // The library's note rows show what the exports say. The reader is not observed:
+        // the shell reads it only on other pages, and draws it as a view of its own.
         subscriptions.push(cx.observe(&exports, |_, _, cx| cx.notify()));
         let mut this = Self {
             preferences,
             settings_ui,
             onboarding,
             reader,
+            reader_bar,
             exports,
             storage_ui: Default::default(),
             records,
@@ -658,7 +678,7 @@ impl Desktop {
     fn search_content(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.page == Page::Result {
             self.reader
-                .update(cx, |reader, cx| reader.open_reader_find(window, cx));
+                .change(cx, |reader, cx| reader.open_reader_find(window, cx));
         } else {
             self.navigate(Page::Library, cx);
             self.inputs[&Field::Search].update(cx, |input, cx| input.focus(window, cx));
@@ -676,7 +696,7 @@ impl Desktop {
             self.import.following_conversion = None;
         }
         self.save_reading_position(cx);
-        self.reader.update(cx, |reader, cx| {
+        self.reader.change(cx, |reader, cx| {
             reader.opened.stop_reading();
             reader.opened.opening_course = None;
             if page != Page::Result {
@@ -724,7 +744,7 @@ impl Desktop {
         change: impl FnOnce(&mut workspace::Workspace) -> R,
     ) -> Option<R> {
         self.records
-            .update(cx, |records, _| records.workspace.as_mut().map(change))
+            .change(cx, |records, _| records.workspace.as_mut().map(change))
     }
     fn pick_video(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prompt = cx.prompt_for_paths(PathPromptOptions {
@@ -874,13 +894,15 @@ impl Desktop {
                         event,
                         EngineEvent::Error { .. } | EngineEvent::Blocked { .. }
                     );
-                    self.with_workspace(cx, |workspace| {
-                        workspace
-                            .state
-                            .task_mut(id)
+                    // Applied quietly: the records tell their readers once the
+                    // coalesced repaint below is due.
+                    self.records.update(cx, |records, _| {
+                        records
+                            .workspace
+                            .as_mut()
+                            .and_then(|workspace| workspace.state.task_mut(id))
                             .is_some_and(|task| task.apply_event(&event))
                     })
-                    .unwrap_or(false)
                 }
                 None => self.work.job_events.apply(&event),
             };
@@ -912,6 +934,7 @@ impl Desktop {
             self.start_next_task(cx);
         }
         if self.work.repaint_due(streaming, immediate) {
+            self.records.change(cx, |_, _| {});
             cx.notify();
         }
     }
@@ -919,7 +942,7 @@ impl Desktop {
         let locations = self.registered_storage_locations(cx);
         let generation = self
             .records
-            .update(cx, |records, _| records.library.begin_scan());
+            .change(cx, |records, _| records.library.begin_scan());
         self.storage_ui
             .location_checks
             .begin(generation, &locations);
@@ -963,10 +986,10 @@ impl Desktop {
                     this.wake_poll();
                 }
                 this.records
-                    .update(cx, |records, _| records.library.apply_scan(results));
+                    .change(cx, |records, _| records.library.apply_scan(results));
                 this.apply_course_title_aliases(cx);
                 this.open_validation_note(cx);
-                this.records.update(cx, |records, _| {
+                this.records.change(cx, |records, _| {
                     let registered = records
                         .workspace
                         .as_ref()
@@ -1025,7 +1048,7 @@ impl Desktop {
         cx.notify();
         let reading_path = course.dir.clone();
         let origin = self.page;
-        let generation = self.reader.update(cx, |reader, _| {
+        let generation = self.reader.change(cx, |reader, _| {
             reader.opened.begin_read(reading_path.clone(), origin)
         });
         let task = spawn_blocking_io(move || notes::read_preview(course));
@@ -1037,7 +1060,7 @@ impl Desktop {
                 if this.opened(cx).read_generation != generation || this.page != origin {
                     return;
                 }
-                let viewer_open = this.reader.update(cx, |reader, _| {
+                let viewer_open = this.reader.change(cx, |reader, _| {
                     reader.opened.reading = false;
                     reader.opened.opening_course = None;
                     reader.reader_viewer_open()
@@ -1106,7 +1129,7 @@ impl Desktop {
                                 Some(course2md::tr!("阅读进度未能保存：{}", format!("{error:#}")));
                         }
                         let message = &mut this.message;
-                        this.reader.update(cx, |reader, cx| {
+                        this.reader.change(cx, |reader, cx| {
                             settle_reader_notice(message, &mut reader.opened.reader_failure_notice);
                             if reader_origin.is_none() {
                                 reader.opened.result_tab = 0;
@@ -1116,7 +1139,7 @@ impl Desktop {
                         });
                         this.apply_course_title_aliases(cx);
                         this.reader
-                            .update(cx, |reader, cx| reader.restore_reading_position(cx));
+                            .change(cx, |reader, cx| reader.restore_reading_position(cx));
                         this.set_page(Page::Result, cx);
                         this.show_validation_panels(cx);
                         if follow.is_some() {
@@ -1126,7 +1149,7 @@ impl Desktop {
                     Err(error) => {
                         let message = note_read_failure(&error).to_owned();
                         let notice = (origin != Page::Library).then(|| message.clone());
-                        this.reader.update(cx, |reader, _| {
+                        this.reader.change(cx, |reader, _| {
                             reader.opened.reader_course_error = Some((reading_path, message));
                             if notice.is_some() {
                                 reader.opened.reader_failure_notice = notice.clone();
@@ -1152,13 +1175,13 @@ impl Desktop {
     fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
         self.page = page;
         self.reader
-            .update(cx, |reader, _| reader.visible = page == Page::Result);
+            .change(cx, |reader, _| reader.visible = page == Page::Result);
     }
 
     /// Records where the open note is read, while the reader shows it.
     pub(crate) fn save_reading_position(&mut self, cx: &mut Context<Self>) {
         self.reader
-            .update(cx, |reader, cx| reader.save_reading_position(cx));
+            .change(cx, |reader, cx| reader.save_reading_position(cx));
     }
 
     /// What the reader asks of the window.
@@ -1217,7 +1240,7 @@ impl Desktop {
         }
         if let Some(validation) = self.validation.take() {
             self.reader
-                .update(cx, |reader, _| reader.show_panels(&validation.panels));
+                .change(cx, |reader, _| reader.show_panels(&validation.panels));
         }
     }
 }
@@ -1458,7 +1481,7 @@ impl Desktop {
         }
         self.relocalize_settings_inputs(window, cx);
         self.reader
-            .update(cx, |reader, cx| reader.relocalize_reader_inputs(window, cx));
+            .change(cx, |reader, cx| reader.relocalize_reader_inputs(window, cx));
         install_menus(cx);
         cx.notify();
     }

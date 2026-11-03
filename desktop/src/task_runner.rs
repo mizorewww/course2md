@@ -47,7 +47,7 @@ impl Desktop {
         edit: impl FnOnce(&mut workspace::State) -> Result<T>,
         cx: &mut App,
     ) -> Option<T> {
-        let result = self.records.update(cx, |records, _| {
+        let result = self.records.change(cx, |records, _| {
             Some(records.workspace.as_mut()?.transaction(edit))
         })?;
         match result {
@@ -126,7 +126,7 @@ impl Desktop {
     ) {
         self.message = workspace.recovery.clone();
         self.records
-            .update(cx, |records, _| records.workspace = Some(workspace));
+            .change(cx, |records, _| records.workspace = Some(workspace));
         self.workspace_error = None;
         self.restore_draft(window, cx);
         self.refresh_library(cx);
@@ -1041,7 +1041,7 @@ impl Desktop {
                                 ));
                             }
                             if let Some(manifest) = &manifest {
-                                this.records.update(cx, |records, _| {
+                                this.records.change(cx, |records, _| {
                                     update_published_course(
                                         &mut records.library.courses,
                                         &done,

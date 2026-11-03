@@ -39,6 +39,7 @@
 //! shows the idle result state ("操作已完成"). `dialog:storage~move:<folder>` runs a
 //! real move of the first library, and `dialog:storage~link` a real reassociation,
 //! so use them only on a fixture; the harness fakes none of their states.
+use crate::Change as _;
 use crate::{Desktop, Page, settings_ui::SettingsTab};
 use gpui::{App, AsyncWindowContext, WeakEntity, Window};
 use gpui_kit::component::WindowExt as _;
@@ -54,6 +55,28 @@ thread_local! {
     static LIBRARY_PRESENTATION: Cell<Option<(bool, bool)>> = const { Cell::new(None) };
     /// The saved processing-options visibility, restored before each home shot.
     static HOME_OPTIONS: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+thread_local! {
+    /// How often each view was built: the shell, the reader and the reader's bar.
+    static RENDERS: Cell<[u64; 3]> = const { Cell::new([0; 3]) };
+}
+
+/// The views whose builds the capture counts.
+#[derive(Clone, Copy)]
+pub enum Counted {
+    Desktop,
+    Reader,
+    ReaderBar,
+}
+
+/// Counts a build of `view`; an input step reports the builds it caused.
+pub fn count_render(view: Counted) {
+    RENDERS.with(|cell| {
+        let mut counts = cell.get();
+        counts[view as usize] += 1;
+        cell.set(counts);
+    });
 }
 
 /// The palette and text scale to paint instead of the saved ones.
@@ -127,9 +150,19 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
             for (page, path) in shots {
                 if let Some(steps) = page.strip_prefix("input:") {
                     // Simulated input on whatever the previous shot left open.
+                    let before = RENDERS.with(Cell::get);
                     for step in steps.split('+') {
                         simulate_input(step, cx).await;
                     }
+                    // What the input built, before the capture draws everything again.
+                    cx.background_executor().timer(delay).await;
+                    let after = RENDERS.with(Cell::get);
+                    eprintln!(
+                        "renders {page}: desktop {} reader {} reader-bar {}",
+                        after[0] - before[0],
+                        after[1] - before[1],
+                        after[2] - before[2]
+                    );
                 } else {
                     let _ = cx.update(|window, cx| {
                         view.update(cx, |this, cx| this.capture_navigate(&page, window, cx))
@@ -308,7 +341,7 @@ impl Desktop {
         self.library_ui.name_dialog = None;
         self.library_ui.move_dialog = None;
         self.reader
-            .update(cx, |reader, cx| reader.close_reader_image(cx));
+            .change(cx, |reader, cx| reader.close_reader_image(cx));
         self.close_settings_dialogs(cx);
         self.close_storage_dialog();
         // First use is reviewed on its own; captured pages show the app behind it.
@@ -405,7 +438,7 @@ impl Desktop {
                             .timer(Duration::from_millis(1200))
                             .await;
                         let _ = this.update_in(cx, |this, window, cx| {
-                            this.reader.update(cx, |reader, cx| {
+                            this.reader.change(cx, |reader, cx| {
                                 reader.capture_reader_view(shots, shot, end, window, cx)
                             })
                         });
@@ -505,7 +538,7 @@ impl Desktop {
                     .await;
                 let _ = this.update_in(cx, |this, window, cx| {
                     this.reader
-                        .update(cx, |reader, cx| reader.open_reader_image(0, window, cx))
+                        .change(cx, |reader, cx| reader.open_reader_image(0, window, cx))
                 });
             }
         })

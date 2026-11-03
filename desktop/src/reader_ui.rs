@@ -2,7 +2,7 @@
 //! Markdown document in a scrollable `TextView` (see `note_text`), which owns selection,
 //! highlights and virtualization; the screenshots are a list of rows beside it.
 use crate::{
-    Course, Page,
+    Change, Course, Page,
     exports_ui::NoteExports,
     note_text,
     notes::{self, PreviewBlock},
@@ -694,7 +694,7 @@ impl ReaderPage {
         change: impl FnOnce(&mut workspace::Workspace) -> R,
     ) -> Option<R> {
         self.records
-            .update(cx, |records, _| records.workspace.as_mut().map(change))
+            .change(cx, |records, _| records.workspace.as_mut().map(change))
     }
 
     fn course_location<'a>(
@@ -4037,8 +4037,38 @@ impl ReaderPage {
     }
 }
 
+/// The reader's part of the title bar: the way back, where the note is, its title and
+/// the reading tools. A view of its own, so the shell around it is not built again when
+/// the reader changes.
+pub(crate) struct ReaderBar {
+    reader: Entity<ReaderPage>,
+}
+
+impl ReaderBar {
+    pub(crate) fn new(reader: Entity<ReaderPage>) -> Self {
+        Self { reader }
+    }
+}
+
+impl Render for ReaderBar {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "capture")]
+        crate::capture::count_render(crate::capture::Counted::ReaderBar);
+        let bar = h_flex()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .gap(px(4.))
+            .items_center();
+        self.reader
+            .update(cx, |reader, cx| reader.title_bar(bar, window, cx))
+    }
+}
+
 impl Render for ReaderPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "capture")]
+        crate::capture::count_render(crate::capture::Counted::Reader);
         self.reader_page(window, cx)
     }
 }

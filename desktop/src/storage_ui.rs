@@ -1,4 +1,5 @@
 //! Controlled library migration and explicit cleanup of verified old-location backups.
+use crate::Change as _;
 use crate::{
     Desktop,
     course_library::CommandsButton,
@@ -252,9 +253,9 @@ impl Desktop {
     ) {
         if self.library(cx).root == link.previous_root {
             self.records
-                .update(cx, |records, _| records.library.root = link.folder.clone());
+                .change(cx, |records, _| records.library.root = link.folder.clone());
         }
-        self.reader.update(cx, |reader, cx| {
+        self.reader.change(cx, |reader, cx| {
             reader.opened.stop_reading();
             if let Some(preview) = reader.opened.preview.as_mut() {
                 let was_inside = preview.course.dir.starts_with(&link.previous_root);
@@ -622,7 +623,7 @@ impl Desktop {
                             return;
                         }
                         if this.library(cx).root == prepared.journal.source {
-                            this.records.update(cx, |records, _| {
+                            this.records.change(cx, |records, _| {
                                 records.library.root = prepared.journal.destination.clone()
                             });
                         }

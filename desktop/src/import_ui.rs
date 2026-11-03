@@ -1,5 +1,6 @@
 //! The workbench: a link, its video and options, and one start intent carried through
 //! preparation to a readable note.
+use crate::Change as _;
 use crate::{
     ConversionOptions, Desktop, Field, Page, notes::Course, preferences::ServicePurpose, source,
     symbols, task_ui::CardPlace, ui, workspace,
@@ -127,7 +128,7 @@ impl Desktop {
     /// Explicit confirmation of an already visible preview owns submission.
     pub fn start_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.page == Page::New {
-            self.reader.update(cx, |reader, _| {
+            self.reader.change(cx, |reader, _| {
                 if reader.opened.reading {
                     reader.opened.stop_reading();
                 }

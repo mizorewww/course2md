@@ -236,7 +236,7 @@ impl Desktop {
         filter: FolderFilter,
         cx: &mut Context<Self>,
     ) {
-        self.records.update(cx, |records, _| {
+        self.records.change(cx, |records, _| {
             if let Some(organization) = records.library.indexes.get(&root) {
                 records.library.current = organization.clone();
             }
@@ -259,7 +259,7 @@ impl Desktop {
             }
             self.library_ui.folder_tree_open.remove(&(root.clone(), 0));
         }
-        self.records.update(cx, |records, _| {
+        self.records.change(cx, |records, _| {
             records.library.root = root;
             records.library.folder_filter = filter;
         });

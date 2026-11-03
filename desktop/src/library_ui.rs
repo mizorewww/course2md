@@ -499,7 +499,7 @@ impl Desktop {
     }
 
     pub(crate) fn store_folders(&mut self, root: &Path, library: organize::Library, cx: &mut App) {
-        self.records.update(cx, |records, _| {
+        self.records.change(cx, |records, _| {
             let library_state = &mut records.library;
             if library_state.root == root {
                 library_state.current = library.clone();
@@ -843,7 +843,7 @@ impl Desktop {
                     move |this, result, cx| match result {
                         // Drafts keep the deleted folder so their next submission
                         // asks for a deliberate destination.
-                        Ok(()) => this.records.update(cx, |records, _| {
+                        Ok(()) => this.records.change(cx, |records, _| {
                             let library = &mut records.library;
                             let removed = library.folder_filter.folder_id().is_some_and(|folder| {
                                 library

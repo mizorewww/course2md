@@ -306,14 +306,14 @@ impl Desktop {
     /// Apply the names already read by the library worker. The UI does no I/O.
     pub fn apply_course_title_aliases(&mut self, cx: &mut App) {
         self.records
-            .update(cx, |records, _| records.apply_course_title_aliases());
+            .change(cx, |records, _| records.apply_course_title_aliases());
         let title = self
             .opened(cx)
             .preview
             .as_ref()
             .map(|preview| self.library(cx).course_display_title(&preview.course));
         if let Some(title) = title {
-            self.reader.update(cx, |reader, _| {
+            self.reader.change(cx, |reader, _| {
                 if let Some(preview) = reader.opened.preview.as_mut() {
                     Rc::make_mut(preview).course.title = title;
                 }
@@ -412,7 +412,7 @@ impl Desktop {
                     }
                     if reading {
                         this.reader
-                            .update(cx, |reader, _| reader.opened.preview = None);
+                            .change(cx, |reader, _| reader.opened.preview = None);
                     }
                     this.message = Some(course2md::tr!(
                         "已将《{}》移到{}",
@@ -2172,7 +2172,7 @@ impl Desktop {
                     .icon_position(ButtonIconPosition::Trailing)
                     .child(course2md::tr!("笔记库"))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.records.update(cx, |records, _| {
+                        this.records.change(cx, |records, _| {
                             records.library.folder_filter = FolderFilter::All
                         });
                         this.navigate(Page::Library, cx);
