@@ -633,6 +633,11 @@ pub struct State {
     /// Startup reconciliation has not been applied yet; nothing is dispatched.
     #[serde(skip)]
     pub reconciling: bool,
+    /// In-memory counter of what running tasks reported (stages, counts, logs) since
+    /// the record was read. It changes without `revision`, so a view of the task list
+    /// keys on both.
+    #[serde(skip)]
+    pub progress: u64,
 }
 
 impl State {
@@ -658,6 +663,7 @@ impl State {
             collapsed: BTreeSet::new(),
             storage_backups: Vec::new(),
             reconciling: false,
+            progress: 0,
         }
     }
 
@@ -701,6 +707,17 @@ impl State {
     }
     pub fn task_mut(&mut self, id: &str) -> Option<&mut TaskRecord> {
         self.tasks.iter_mut().find(|t| t.id == id)
+    }
+    /// Applies what running task `id` reported to its record, counting it in
+    /// `progress`. Whether the task's state visibly changed, as
+    /// [`TaskRecord::apply_event`] tells.
+    pub fn apply_task_event(&mut self, id: &str, event: &c2m_protocol::progress::Event) -> bool {
+        let Some(task) = self.task_mut(id) else {
+            return false;
+        };
+        let visible = task.apply_event(event);
+        self.progress = self.progress.wrapping_add(1);
+        visible
     }
     pub fn next_task(&self) -> Option<&TaskRecord> {
         if self.reconciling {
@@ -2999,6 +3016,35 @@ mod tests {
         ws.write_control(&task, b"{}".to_vec());
         ws.library_writes.drain();
         assert!(ws.take_write_error().unwrap().control);
+    }
+
+    #[test]
+    fn a_running_task_s_progress_counts_without_changing_the_revision() {
+        use c2m_protocol::progress::{Event, Stage, StageStatus};
+        let dir = tempfile::tempdir().unwrap();
+        let mut ws = test_workspace(dir.path());
+        let library = ws.state.default_library.clone();
+        let id = ws.state.enqueue(plan(&library), None).unwrap().0;
+        let (revision, progress) = (ws.state.revision, ws.state.progress);
+        let start = Event::Stage {
+            stage: Stage::ScenesScan,
+            status: StageStatus::Start,
+        };
+        assert!(ws.state.apply_task_event(&id, &start));
+        let counted = Event::Progress {
+            stage: Stage::ScenesScan,
+            current: 215,
+            total: 1800,
+            message: None,
+            phase: None,
+            unit: None,
+        };
+        ws.state.apply_task_event(&id, &counted);
+        assert_eq!(ws.state.revision, revision);
+        assert_eq!(ws.state.progress, progress + 2);
+        // A task the record no longer holds changes nothing.
+        assert!(!ws.state.apply_task_event("gone", &counted));
+        assert_eq!(ws.state.progress, progress + 2);
     }
 
     #[test]
