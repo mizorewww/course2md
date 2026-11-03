@@ -117,6 +117,9 @@ pub enum YoutubeStep {
     Failed {
         summary: String,
         detail: String,
+        /// The system keeps the browser's data from the app; Full Disk Access
+        /// in System Settings lets it through.
+        blocked: bool,
     },
     Connected,
 }
