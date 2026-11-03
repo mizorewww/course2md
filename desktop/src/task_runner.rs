@@ -9,7 +9,7 @@ use anyhow::{Context as _, Result, ensure};
 use course2md::execution::Component;
 use desktop_tasks::plan::*;
 use desktop_tasks::run;
-use desktop_tasks::task_view::{TaskGroup, task_group};
+use desktop_tasks::task_view::{TaskAction, TaskGroup, request_scope, resumable, task_group};
 use std::collections::HashMap;
 
 /// Options shown before the workspace has restored a draft.
@@ -725,7 +725,8 @@ impl Desktop {
         if previous.as_deref() != Some(id)
             && let Some(previous) = previous
         {
-            self.close_task_details(&previous);
+            self.tasks
+                .update(cx, |page, _| page.close_task_details(&previous));
         }
         self.transact(
             course2md::tr!("任务选择尚未保存：{}"),
@@ -743,7 +744,11 @@ impl Desktop {
         let waiting = self
             .task(id, cx)
             .is_some_and(|task| matches!(task_group(task), TaskGroup::Running | TaskGroup::Queued));
-        self.task_list.expanded = (!waiting).then(|| id.to_owned());
+        let expanded = (!waiting).then(|| id.to_owned());
+        self.tasks.update(cx, |page, cx| {
+            page.task_list.expanded = expanded;
+            cx.notify();
+        });
         cx.notify();
     }
 
@@ -1084,5 +1089,231 @@ impl Desktop {
             }
         }
         cx.notify();
+    }
+
+    /// Stop the running task first, so its stop starts nothing new, then hold
+    /// the queue in one step, so no queued task starts between two pauses.
+    pub(crate) fn pause_all_tasks(&mut self, cx: &mut Context<Self>) {
+        let Some(workspace) = &self.records.read(cx).workspace else {
+            return;
+        };
+        let pausable = |task: &&TaskRecord| task.handled_by.is_none() && task.intent == Intent::Run;
+        let running: Vec<String> = workspace
+            .state
+            .tasks
+            .iter()
+            .filter(|task| task.state == TaskState::Running)
+            .filter(pausable)
+            .map(|task| task.id.clone())
+            .collect();
+        let queued: Vec<String> = workspace
+            .state
+            .queued_tasks()
+            .filter(pausable)
+            .map(|task| task.id.clone())
+            .collect();
+        for id in running {
+            self.set_task_intent(id, Intent::Pause, cx);
+        }
+        // Queued work has no worker to tell; its record is the whole state.
+        self.transact(
+            course2md::tr!("任务状态尚未保存：{}"),
+            |state| {
+                queued
+                    .iter()
+                    .try_for_each(|id| state.set_intent(id, Intent::Pause))
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
+    pub(crate) fn resume_all_tasks(&mut self, cx: &mut Context<Self>) {
+        let Some(workspace) = &self.records.read(cx).workspace else {
+            return;
+        };
+        let ids: Vec<String> = workspace
+            .state
+            .tasks
+            .iter()
+            .filter(|task| resumable(task))
+            .map(|task| task.id.clone())
+            .collect();
+        for id in ids {
+            self.set_task_intent(id, Intent::Run, cx);
+        }
+    }
+
+    pub(crate) fn move_waiting_task(&mut self, id: &str, position: usize, cx: &mut Context<Self>) {
+        self.transact(
+            course2md::tr!("任务顺序尚未保存：{}"),
+            |state| state.move_waiting_task(id, position),
+            cx,
+        );
+        cx.notify();
+    }
+
+    fn open_task_note(&mut self, task: &TaskRecord, cx: &mut Context<Self>) {
+        let Some(path) = &task.artifact else {
+            return;
+        };
+        // The note opens from its path even before the library has listed it.
+        let course = self
+            .library(cx)
+            .courses
+            .iter()
+            .find(|course| &course.dir == path)
+            .cloned()
+            .unwrap_or_else(|| {
+                Rc::new(Course::from_completed(&Done {
+                    out_dir: path.clone(),
+                    title: task.plan.title.clone(),
+                    ..Default::default()
+                }))
+            });
+        self.open_course(course, cx);
+    }
+
+    /// Runs one of a task's actions, from its card, its menu or a library row.
+    pub(crate) fn run_task_action(
+        &mut self,
+        action: &TaskAction,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(task) = self.task(id, cx).cloned() else {
+            return;
+        };
+        let id = id.to_owned();
+        match action {
+            TaskAction::Read => self.open_task_note(&task, cx),
+            TaskAction::OpenNoteFolder => {
+                if let Some(path) = &task.artifact {
+                    cx.open_with_system(path);
+                }
+            }
+            TaskAction::OpenExports => self.open_task_export_location(id, cx),
+            TaskAction::OpenSource => cx.open_url(&task.plan.source.input),
+            TaskAction::CopyLink => {
+                cx.write_to_clipboard(ClipboardItem::new_string(task.plan.source.input.clone()))
+            }
+            TaskAction::Details => self
+                .tasks
+                .update(cx, |page, cx| page.toggle_task_row(&id, cx)),
+            TaskAction::Log => self
+                .tasks
+                .update(cx, |page, cx| page.toggle_task_log(&task, cx)),
+            TaskAction::Followup(next) => self.select_task(next, cx),
+            TaskAction::Move { to, .. } => {
+                if let Some(to) = to {
+                    self.move_waiting_task(&id, *to, cx);
+                }
+            }
+            TaskAction::Pause => self.set_task_intent(id, Intent::Pause, cx),
+            TaskAction::Resume => self.set_task_intent(id, Intent::Run, cx),
+            TaskAction::PrepareModel => self.prepare_task_model(&task, cx),
+            TaskAction::Cancel => self.set_task_intent(id, Intent::Cancel, cx),
+            TaskAction::Repair => self.repair_task_service(id, window, cx),
+            TaskAction::Retry(component) => {
+                let part = Component::parse(component).unwrap_or(Component::Proofreading);
+                self.reprocess_task(id, vec![part], Vec::new(), cx)
+            }
+            TaskAction::Reassociate(library) => {
+                self.begin_library_reassociation(library.clone(), window, cx)
+            }
+            // A menu has no room for the consequence, so it is asked here. The card's
+            // own button stands beside it and sends directly.
+            TaskAction::Resend => {
+                let mut question = ui::Confirm::new(
+                    course2md::tr!("重新发送以上内容"),
+                    course2md::tr!("暂不发送"),
+                    course2md::tr!("重新发送以上内容"),
+                );
+                for request in task.events.blocked.iter().filter(|b| b.is_uncertain()) {
+                    question = question.text(request_scope(request));
+                }
+                question
+                    .text(course2md::tr!(
+                        "服务可能已处理这些内容，重新发送可能产生额外费用"
+                    ))
+                    .ask(
+                        cx.listener(move |this, _, _, cx| this.resend_uncertain(id.clone(), cx)),
+                        window,
+                        cx,
+                    );
+            }
+            TaskAction::Adjust => self.adjust_task(id, window, cx),
+            TaskAction::ViewTask => {
+                self.select_task(&id, cx);
+                self.navigate(Page::Task, cx);
+            }
+            TaskAction::NextVideo => self.set_up_next_video(window, cx),
+        }
+    }
+
+    /// What the task page asks of the window.
+    pub(crate) fn tasks_event(
+        &mut self,
+        _: &Entity<task_ui::TasksPage>,
+        event: &task_ui::TasksEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use task_ui::TasksEvent;
+        match event {
+            TasksEvent::Run(id, action) => self.run_task_action(action, id, window, cx),
+            TasksEvent::Select { id, expand } => {
+                self.select_task(id, cx);
+                if *expand {
+                    let id = id.clone();
+                    self.tasks.update(cx, |page, cx| {
+                        page.task_list.expanded = Some(id);
+                        cx.notify();
+                    });
+                }
+            }
+            TasksEvent::Resend(id) => self.resend_uncertain(id.clone(), cx),
+            TasksEvent::Move { id, position } => self.move_waiting_task(id, *position, cx),
+            TasksEvent::PauseAll => self.pause_all_tasks(cx),
+            TasksEvent::ResumeAll => self.resume_all_tasks(cx),
+            TasksEvent::Navigate(page) => self.navigate(*page, cx),
+            TasksEvent::Import => {
+                if self.prepare_workbench_input(window, cx) {
+                    self.navigate(Page::New, cx);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// What the task cards show that only the window knows.
+    pub(crate) fn shell_facts(&self, cx: &App) -> task_ui::ShellFacts {
+        let records = self.records.read(cx);
+        let services = records
+            .workspace
+            .iter()
+            .flat_map(|workspace| &workspace.state.tasks)
+            .filter_map(|task| task.plan.ai_service.as_ref())
+            .filter_map(|id| {
+                let version = self.preferences.version(id)?;
+                Some((id.clone(), version.config.name.clone()))
+            })
+            .collect();
+        let reassociate = records
+            .workspace
+            .iter()
+            .flat_map(|workspace| &workspace.state.libraries)
+            .filter(|library| {
+                self.cached_location_check(library)
+                    .is_some_and(|check| check.needs_reassociation)
+            })
+            .map(|library| library.id.clone())
+            .collect();
+        task_ui::ShellFacts {
+            services,
+            reassociate,
+            storage_busy: self.storage_ui.busy,
+        }
     }
 }

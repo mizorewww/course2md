@@ -105,7 +105,19 @@ Branch `split/thin-wrapper`, first step of P2-b. The binary moved logic out and 
 - **Numbers.** Before P2-c (`ab18df27`): 30,345 lines, 42 fields, 19 files, `metrics.py` 68,699. After step 1:
   30,362 lines, 38 fields, 19 files, 68,835 (`job.rs` +136: what moved out of the binary plus the entity's methods;
   the binary's `cx` threading adds back what it lost).
-- **Next.** The task page as an entity reading `Records` and `Work`, then the library page, then `Prefs`.
+- **TasksPage (step 2).** `Entity<TasksPage>` replaces `task_list`: it renders the task page (drawn with the window,
+  not cached) and the task cards of the workbench and the library rows' menus, observes `Records` and `Work`, and
+  emits `TasksEvent`; running an action, pause or resume all, moving a waiting task and opening a task's note are
+  `Desktop` methods in `task_runner.rs`, so `task_ui.rs` has no `impl Desktop`. Opening a row asks the window to
+  select the task and only then opens it, as before (test `a_row_opens_through_the_window_and_folds_on_its_own`).
+  Captures (before `ab18df27`, paper and ink, normal and retained) of the step-1 suite plus the task page's details
+  opened and closed, its ⋯ and right-click menus, the bottom of the queue, history, and back from the library:
+  identical to the before build (one paper run had one pixel differ in a scrolled shot; rerun, identical). The
+  behaviour runs of step 1 again: the same screens apart from the clock and progress bars, 1 proofread + 1 summary
+  request in both scenarios, no resend.
+- **Numbers.** After step 2: 30,616 lines, 38 fields, 18 files, `metrics.py` 69,045; the binary
+  grew by the page's struct, its event enum and handler, and `ShellFacts`.
+- **Next.** The library page as an entity reading `Records`, then `Prefs`, which would let `ShellFacts` go.
 
 ## Next action
 

@@ -124,7 +124,8 @@ struct Desktop {
     import: desktop_tasks::import::ImportSession,
     /// The running job, a task's or a model's, and the event loop's deadlines.
     work: Entity<Work>,
-    task_list: task_ui::TaskListUi,
+    /// The task page, whose cards the workbench and the library also show.
+    tasks: Entity<task_ui::TasksPage>,
     theme_frame: views::ThemeFrame,
     library_ui: library_ui::LibraryUi,
     preference_defaults_pending: bool,
@@ -447,6 +448,8 @@ impl Desktop {
         // The library's note rows show what the exports say. The reader is not observed:
         // the shell reads it only on other pages, and draws it as a view of its own.
         subscriptions.push(cx.observe(&exports, |_, _, cx| cx.notify()));
+        let tasks = cx.new(|cx| task_ui::TasksPage::new(records.clone(), work.clone(), cx));
+        subscriptions.push(cx.subscribe_in(&tasks, window, Self::tasks_event));
         let accounts = cx.new(|cx| account_ui::AccountsView::new(window, cx));
         subscriptions.push(cx.subscribe_in(&accounts, window, Self::accounts_event));
         // Its rows and dialogs are drawn in the pages.
@@ -463,7 +466,7 @@ impl Desktop {
             workspace_error,
             import: Default::default(),
             work,
-            task_list: task_ui::TaskListUi::new(),
+            tasks,
             theme_frame: Default::default(),
             library_ui: library_ui::LibraryUi::new(),
             storage_records: None,

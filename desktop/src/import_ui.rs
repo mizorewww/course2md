@@ -2280,7 +2280,7 @@ impl Desktop {
                     .min_w_0()
                     .gap(rem(12.))
                     .p(ITEM_INSET)
-                    .children(self.task_plan_rows(task, true, cx)),
+                    .children(self.tasks.read(cx).task_plan_rows(task, true, cx)),
                 None => v_flex()
                     .w_full()
                     .min_w_0()
@@ -2473,7 +2473,9 @@ impl Desktop {
             Some(task) if opening_result && task.state.finished() => {
                 Some(self.task_opening_result(&task, cx))
             }
-            Some(task) => Some(self.task_card(&task, CardPlace::Home, window, cx)),
+            Some(task) => Some(self.tasks.update(cx, |page, cx| {
+                page.task_card(&task, CardPlace::Home, window, cx)
+            })),
             None if self.preview_card_shown(cx) => self.selected_video(window, cx),
             None => None,
         };

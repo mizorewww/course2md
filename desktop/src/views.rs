@@ -581,9 +581,12 @@ impl Render for Desktop {
                 .children(crate::ui::confirm_host(cx))
                 .into_any_element();
         }
+        // The task cards show on Tasks, the workbench and the library.
+        let facts = self.shell_facts(cx);
+        self.tasks.update(cx, |page, cx| page.set_facts(facts, cx));
         let content = match self.page {
             Page::New => self.new_page(window, cx),
-            Page::Task => self.queue_page(window, cx),
+            Page::Task => self.tasks.clone().into_any_element(),
             Page::Library => self.library_page(window, cx),
             Page::Settings => self.settings_page(window, cx),
             // Drawn cached: it is built again when it, the records or the exports
