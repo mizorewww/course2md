@@ -77,7 +77,7 @@ enum Backend {
 
 impl Backend {
     /// Fails before any work when the selection cannot run at all.
-    async fn resolve(cfg: &PipelineConfig, control: &TaskControl) -> Result<Self> {
+    async fn resolve(cfg: &PipelineConfig) -> Result<Self> {
         Ok(match cfg.provider {
             AsrProvider::Api => Self::Api(cfg.asr_api.clone()),
             AsrProvider::Npu => Self::Npu(crate::npu::resolve_npu_model(cfg.asr_model.as_deref())),
@@ -90,8 +90,7 @@ impl Backend {
                 "此版本不支持 Apple 识别，请改用 GPU 或 CPU 识别 / This build lacks Apple transcription; use GPU or CPU transcription."
             )),
             AsrProvider::Gpu | AsrProvider::Cpu => {
-                let llama =
-                    crate::models::ensure_llama_or_download(&cfg.model_dir, control).await?;
+                let llama = crate::models::require_llama(cfg.provider, &cfg.model_dir)?;
                 Self::Llama(LlamaServer {
                     model: llama.model,
                     mmproj: llama.mmproj,
@@ -150,7 +149,7 @@ pub async fn run(
     wav: &Path,
     job: &crate::job::Job,
 ) -> Result<Vec<TranscriptEvent>> {
-    let backend = Backend::resolve(cfg, &job.control).await?;
+    let backend = Backend::resolve(cfg).await?;
     let mut cp = Checkpoint::open(&job.dir, true, &backend.identity(cfg.max_speech))?;
     let (wav, control) = (wav.to_path_buf(), job.control.clone());
     let max_speech = cfg.max_speech as f64;

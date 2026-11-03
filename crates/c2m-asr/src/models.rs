@@ -10,7 +10,7 @@
 //! ```
 
 use crate::progress::Stage;
-use crate::{eprintln_tr, println_tr, tr};
+use crate::{println_tr, tr};
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::Read;
@@ -106,9 +106,27 @@ pub async fn ensure_cache(
     fetch_model(provider, &status.model, root, CoremlMode::Cache, control).await
 }
 
-/// `ensure_cache` for a task that may not download: a model not yet on disk is
-/// `ModelRequired`, for the person to prepare.
-pub fn require_cache(provider: crate::config::AsrProvider, model: &str, root: &Path) -> Result<()> {
+/// A local speech model that is not on disk yet: what the person agrees to download.
+#[derive(Debug, Clone)]
+pub struct ModelOffer {
+    pub provider: crate::config::AsrProvider,
+    /// The canonical model id.
+    pub model: String,
+    /// Approximately how much is downloaded, when known.
+    pub size: Option<u64>,
+    /// Where the files are stored.
+    pub location: PathBuf,
+    /// The `course2md models prepare` command that downloads it on its own.
+    pub prepare_command: String,
+}
+
+/// The download `ensure_cache` would start: `None` when the model is already on disk.
+/// Only reads the disk.
+pub fn missing(
+    provider: crate::config::AsrProvider,
+    model: &str,
+    root: &Path,
+) -> Result<Option<ModelOffer>> {
     let status = status::inspect(provider, model, root)?;
     if !status.can_prepare {
         return Err(unsupported_model(&status));
@@ -117,13 +135,69 @@ pub fn require_cache(provider: crate::config::AsrProvider, model: &str, root: &P
         status.state,
         status::CacheState::Cached | status::CacheState::Loaded
     ) {
-        return Ok(());
+        return Ok(None);
     }
-    Err(c2m_core::speech::ModelRequired {
+    Ok(Some(ModelOffer {
         provider,
+        size: download_size(provider, &status.model),
+        location: common_dir(status.parts.iter().map(|part| part.path.as_path()))
+            .unwrap_or_else(|| root.to_path_buf()),
+        prepare_command: prepare_command(provider, &status.model, root),
         model: status.model,
+    }))
+}
+
+/// About how much a model's download is, when this application knows.
+fn download_size(provider: crate::config::AsrProvider, model: &str) -> Option<u64> {
+    use crate::config::AsrProvider;
+    const GB: f64 = (1u64 << 30) as f64;
+    match (provider, model) {
+        (AsrProvider::Cpu | AsrProvider::Gpu, _) => Some(LLAMA_MODEL.size + LLAMA_MMPROJ.size),
+        // The sizes the Apple model choice names.
+        (AsrProvider::Coreml, "qwen3-1.7b") => Some((2.3 * GB) as u64),
+        (AsrProvider::Coreml, "qwen3-0.6b") => Some((1.0 * GB) as u64),
+        _ => None,
     }
-    .into())
+}
+
+/// The deepest directory holding every one of `paths`.
+fn common_dir<'a>(mut paths: impl Iterator<Item = &'a Path>) -> Option<PathBuf> {
+    let mut common = paths.next()?.to_path_buf();
+    for path in paths {
+        while !path.starts_with(&common) {
+            if !common.pop() {
+                return None;
+            }
+        }
+    }
+    Some(common)
+}
+
+/// `course2md models prepare` for this model; the gpu/cpu model directory is named when
+/// it is not the default one.
+fn prepare_command(provider: crate::config::AsrProvider, model: &str, root: &Path) -> String {
+    use crate::config::AsrProvider;
+    let mut command = format!("course2md models prepare --provider {provider} --model {model}");
+    if matches!(provider, AsrProvider::Cpu | AsrProvider::Gpu)
+        && root != crate::config::model_dir_from(None)
+    {
+        command.push_str(&format!(" --dir \"{}\"", root.display()));
+    }
+    command
+}
+
+/// `ensure_cache` for a task that may not download: a model not yet on disk is
+/// `ModelRequired`, for the person to prepare.
+pub fn require_cache(provider: crate::config::AsrProvider, model: &str, root: &Path) -> Result<()> {
+    match missing(provider, model, root)? {
+        None => Ok(()),
+        Some(offer) => Err(c2m_core::speech::ModelRequired {
+            provider,
+            model: offer.model,
+            remedy: c2m_core::speech::Remedy::Prepare,
+        }
+        .into()),
+    }
 }
 
 /// Prepare the exact selected backend without sending course content or changing settings.
@@ -237,19 +311,16 @@ fn file_complete(path: &Path) -> bool {
     true
 }
 
-/// 没有模型就下载；下载过程请保持进程运行。
-pub(crate) async fn ensure_llama_or_download(
-    root: &Path,
-    control: &crate::dispatch::TaskControl,
-) -> Result<LlamaAsr> {
+/// The prepared gpu/cpu model. Transcription never downloads: the model check before
+/// the media download already did, with the person's consent, or stopped.
+pub(crate) fn require_llama(provider: crate::config::AsrProvider, root: &Path) -> Result<LlamaAsr> {
     if !llama_ready(root) {
-        if !crate::progress::is_json() && !crate::progress::is_quiet() {
-            eprintln_tr!(
-                "正在下载识别模型（约 2.4GB）/ Downloading speech models (~2.4GB): {}",
-                root.display()
-            );
+        return Err(c2m_core::speech::ModelRequired {
+            provider,
+            model: LLAMA_MODEL_SLUG.to_owned(),
+            remedy: c2m_core::speech::Remedy::Prepare,
         }
-        download_models(root, control).await?;
+        .into());
     }
     Ok(llama_paths(root))
 }

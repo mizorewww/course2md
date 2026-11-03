@@ -50,20 +50,50 @@ impl AsrProvider {
 
 /// A task needs a local speech model that is not downloaded, and may not download it
 /// on its own: a download of a gigabyte or more waits for the person to agree to it
-/// (`course2md models prepare`, or the desktop's prepare action).
+/// (`course2md models prepare`, the desktop's prepare action, or a yes at the terminal).
 #[derive(Debug)]
 pub struct ModelRequired {
     pub provider: AsrProvider,
     pub model: String,
+    pub remedy: Remedy,
+}
+
+/// What the person can do about a [`ModelRequired`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Remedy {
+    /// Prepare the model (the desktop's action), then continue the task.
+    Prepare,
+    /// The command line may not download without consent: run this `models prepare`
+    /// command first, or pass `--download-models`.
+    Command(String),
+    /// The person said no at the terminal; this command prepares it later.
+    Declined(String),
 }
 
 impl std::fmt::Display for ModelRequired {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&tr!(
-            "识别模型 {} 尚未下载，请先下载并准备模型，再继续 / The speech model {} is not downloaded yet; prepare it, then continue",
-            self.model,
-            self.model
-        ))
+        let model = &self.model;
+        f.write_str(&match &self.remedy {
+            Remedy::Prepare => tr!(
+                "识别模型 {} 尚未下载，请先下载并准备模型，再继续 / The speech model {} is not downloaded yet; prepare it, then continue",
+                model,
+                model
+            ),
+            Remedy::Command(command) => tr!(
+                "识别模型 {} 尚未下载，未经同意不会下载。请先运行 {} 准备模型，或加 --download-models 允许本次下载 / The speech model {} is not downloaded, and it is not downloaded without your consent. Prepare it first with {}, or pass --download-models to allow the download in this run",
+                model,
+                command,
+                model,
+                command
+            ),
+            Remedy::Declined(command) => tr!(
+                "未下载识别模型 {}。之后可运行 {} 准备模型，再重新运行本命令 / The speech model {} was not downloaded. To prepare it later, run {}, then run this command again",
+                model,
+                command,
+                model,
+                command
+            ),
+        })
     }
 }
 

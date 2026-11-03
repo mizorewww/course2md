@@ -12,6 +12,7 @@ use crate::{
 };
 use crate::{eprintln_tr, tr};
 use anyhow::{Context, Result};
+use c2m_core::speech::{ModelRequired, Remedy};
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -39,9 +40,21 @@ struct Task<'a> {
     started: Instant,
 }
 
+/// Whether a command-line run may download a local speech model it lacks. A task the
+/// desktop runs (`run-task`) never downloads one.
+#[derive(Clone, Copy)]
+pub enum ModelDownload<'a> {
+    /// Download it: `--download-models`, or the person already agreed in this run.
+    Allowed,
+    /// Ask the person at the terminal; `Ok(true)` downloads.
+    Ask(&'a (dyn Fn(&crate::models::ModelOffer) -> Result<bool> + Sync)),
+    /// Stop with `ModelRequired`, naming the command that prepares it.
+    Refused,
+}
+
 /// Traditional CLI entry. Its generated task directory is stable for compatible recovery.
 /// New settings or --no-resume use another work directory and never overwrite old notes.
-pub async fn run(cfg: &PipelineConfig) -> Result<()> {
+pub async fn run(cfg: &PipelineConfig, models: ModelDownload<'_>) -> Result<()> {
     let started = Instant::now();
     cfg.validate()
         .context(tr!("配置预检失败 / Invalid settings"))?;
@@ -130,8 +143,12 @@ pub async fn run(cfg: &PipelineConfig) -> Result<()> {
             return Err(error);
         }
         task.refuse_newer_note().await?;
-        task.generate(&meta, SubtitleInput::Discover(probed), Credentials::Cli)
-            .await
+        task.generate(
+            &meta,
+            SubtitleInput::Discover(probed),
+            Credentials::Cli(models),
+        )
+        .await
     })
     .await
 }
@@ -234,8 +251,8 @@ struct TranscriptCache {
 /// Where cloud credentials come from: the CLI may read the environment; a desktop task
 /// carries fully resolved credentials and an explicit no-auth decision.
 #[derive(Clone, Copy)]
-enum Credentials {
-    Cli,
+enum Credentials<'a> {
+    Cli(ModelDownload<'a>),
     Task { allow_unauthenticated_asr: bool },
 }
 
@@ -404,7 +421,7 @@ impl Task<'_> {
         &self,
         meta: &VideoMeta,
         input: SubtitleInput,
-        credentials: Credentials,
+        credentials: Credentials<'_>,
     ) -> Result<()> {
         let Self {
             cfg, job, target, ..
@@ -927,11 +944,11 @@ impl Task<'_> {
 
     /// Tools and credentials the chosen path needs, and the speech model cache,
     /// all checked before any full media download.
-    async fn check_tools(&self, needs_speech: bool, credentials: Credentials) -> Result<()> {
+    async fn check_tools(&self, needs_speech: bool, credentials: Credentials<'_>) -> Result<()> {
         let cfg = self.cfg;
         if needs_speech {
             let (require_key, allow_environment) = match credentials {
-                Credentials::Cli => (true, true),
+                Credentials::Cli(_) => (true, true),
                 Credentials::Task {
                     allow_unauthenticated_asr,
                 } => (!allow_unauthenticated_asr, false),
@@ -950,30 +967,53 @@ impl Task<'_> {
             crate::error::require_ytdlp()?;
         }
         if needs_speech && cfg.provider != config::AsrProvider::Api {
-            progress::start(Stage::ModelPrepare);
             let model = cfg
                 .asr_model
                 .as_deref()
-                .unwrap_or(config::default_model(cfg.provider));
+                .unwrap_or(config::default_model(cfg.provider))
+                .to_owned();
+            let (provider, root) = (cfg.provider, cfg.model_dir.clone());
             match credentials {
-                Credentials::Cli => {
-                    crate::models::ensure_cache(
-                        cfg.provider,
-                        model,
-                        &cfg.model_dir,
-                        &self.job.control,
-                    )
-                    .await?
+                Credentials::Cli(download) => {
+                    let offer = {
+                        let (model, root) = (model.clone(), root.clone());
+                        blocking(move || crate::models::missing(provider, &model, &root)).await?
+                    };
+                    // Asked before the stage starts, so no progress line covers the question.
+                    let Some(offer) = offer else {
+                        progress::start(Stage::ModelPrepare);
+                        progress::done(Stage::ModelPrepare);
+                        return Ok(());
+                    };
+                    let remedy = match download {
+                        ModelDownload::Allowed => None,
+                        ModelDownload::Ask(ask) => {
+                            (!ask(&offer)?).then(|| Remedy::Declined(offer.prepare_command.clone()))
+                        }
+                        ModelDownload::Refused => {
+                            Some(Remedy::Command(offer.prepare_command.clone()))
+                        }
+                    };
+                    if let Some(remedy) = remedy {
+                        return Err(ModelRequired {
+                            provider,
+                            model: offer.model,
+                            remedy,
+                        }
+                        .into());
+                    }
+                    progress::start(Stage::ModelPrepare);
+                    crate::models::ensure_cache(provider, &model, &root, &self.job.control).await?;
+                    progress::done(Stage::ModelPrepare);
                 }
                 // A task never downloads a model on the way: the person agrees to that
                 // download first, when the app asks them to prepare it.
                 Credentials::Task { .. } => {
-                    let (provider, root) = (cfg.provider, cfg.model_dir.clone());
-                    let model = model.to_owned();
-                    blocking(move || crate::models::require_cache(provider, &model, &root)).await?
+                    progress::start(Stage::ModelPrepare);
+                    blocking(move || crate::models::require_cache(provider, &model, &root)).await?;
+                    progress::done(Stage::ModelPrepare);
                 }
             }
-            progress::done(Stage::ModelPrepare);
         }
         Ok(())
     }
@@ -1588,7 +1628,9 @@ mod tests {
             mmproj_offload: true,
             transcript_source: c::TranscriptSource::Asr,
         };
-        let r = tokio::runtime::Runtime::new().unwrap().block_on(run(&cfg));
+        let r = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(run(&cfg, super::ModelDownload::Refused));
         assert!(r.is_err(), "损坏视频必须失败");
 
         let source_id = format!(

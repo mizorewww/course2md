@@ -304,6 +304,10 @@ pub struct RunOpts {
     #[cfg_attr(feature = "clap", arg(long, help_heading = SPEECH))]
     pub model_dir: Option<PathBuf>,
 
+    /// 缺少识别模型时直接下载，不再询问（适用于脚本；也可设 COURSE2MD_DOWNLOAD_MODELS=1）/ Download a missing speech model without asking (for scripts; or set COURSE2MD_DOWNLOAD_MODELS=1)
+    #[cfg_attr(feature = "clap", arg(long, help_heading = SPEECH))]
+    pub download_models: bool,
+
     /// 保留下载的视频 / Keep the downloaded video
     #[cfg_attr(feature = "clap", arg(long, help_heading = IO))]
     pub keep_video: bool,
