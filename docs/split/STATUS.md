@@ -76,10 +76,17 @@ Branch `split/thin-wrapper`, first step of P2-b. The binary moved logic out and 
   changes) and the whole suite match the before build. The before build itself varies between runs (formula
   raster, the viewer's zoom-out state, scrollbar fade, a few others); every after shot equals a before shot from
   one of three runs, except two paper shots whose differing regions are each one of those variations.
+- **AccountsView (step 2).** `Entity<AccountsView>` (`desktop/src/account_ui.rs`) holds the Bilibili account, its
+  login fields and the YouTube connection, and draws their rows and dialogs for settings, first use and the
+  workbench. It emits `AccountsEvent` (open a dialog, signed in, connected); Desktop decides which failed source
+  preview a dialog may retry when it opens, and retries it only while that preview is still shown and still needs
+  it, as before. Codex and Ollama stay with the service forms. Captures of home, settings › services, first use's
+  account step, every login dialog state and every YouTube dialog state, paper and ink, match the before build
+  except spinner frames and a 2 px caret column; the retained-mode run matches likewise.
 - **Numbers.** Binary `desktop/src` 30,212 → 30,104 lines (`wc -l`), `Desktop` 44 → 43 fields, `impl Desktop` in
   23 → 22 files; `metrics.py` 67,603 → 68,162 (+559: `run.rs` and `records.rs`, their tests excluded, and the
   entity plumbing). After step 1: 30,216 lines, 44 fields (`reader_bar`), 22 files, 68,274 (the build counter
-  and retained captures are about 60 of the +112).
+  and retained captures are about 60 of the +112). After step 2: 30,345 lines, 42 fields, 19 files, 68,403.
 - **Next.** `AccountsView` (Bilibili login, account, YouTube; Codex and Ollama are tied to the service forms and
   follow those), then the library and task pages, and `Records` notifying so pages can be drawn cached.
 
