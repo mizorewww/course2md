@@ -264,8 +264,8 @@ pub fn job_exit_status(success: bool, cancelled: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        CLOCK_TICK, DRAFT_SAVE_DELAY, EVENT_REPAINT_INTERVAL, IDLE_POLL_SLEEP, MIN_POLL_SLEEP,
-        RESULT_SHOWN, Work, earliest_deadline, poll_timeout,
+        DRAFT_SAVE_DELAY, EVENT_REPAINT_INTERVAL, IDLE_POLL_SLEEP, MIN_POLL_SLEEP, RESULT_SHOWN,
+        Work, earliest_deadline, poll_timeout,
     };
     use std::time::{Duration, Instant};
 
@@ -383,7 +383,7 @@ mod tests {
         assert!(work.is_running("t"));
         assert!(!work.is_running("u"));
         assert!(!work.claim_start("u"), "one job at a time");
-        assert_eq!(work.deadline(now), Some(now + CLOCK_TICK));
+        assert_eq!(work.deadline(now), Some(now + super::CLOCK_TICK));
         assert_eq!(work.exited().as_deref(), Some("t"));
         assert!(!work.is_running("t"));
         assert_eq!(work.exited(), None);
