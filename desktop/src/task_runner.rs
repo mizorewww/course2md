@@ -938,7 +938,7 @@ impl Desktop {
                     this.import.following_conversion = None;
                     this.invalidate_source();
                     this.restore_draft(window, cx);
-                    this.page = Page::New;
+                    this.set_page(Page::New, cx);
                 }
                 cx.notify();
             });
