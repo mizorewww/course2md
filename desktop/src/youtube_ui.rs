@@ -6,7 +6,7 @@ use crate::{
     symbols,
     ui::Resource,
 };
-use course2md::auth::youtube::{self, Browser, BrowserChoice, Session};
+use course2md::auth::youtube::{self, Browser, BrowserChoice, Reader, Session};
 use desktop_accounts::youtube::*;
 use gpui::{prelude::*, *};
 use gpui_base::{h_flex, v_flex};
@@ -89,7 +89,7 @@ impl AccountsView {
                 })?;
             // Only the check runs here: the choice is saved below, and only
             // while the dialog that asked for it is still open.
-            let session = youtube::check_session(&program, &choice)?;
+            let session = youtube::check_session(&program, &choice, Reader::App)?;
             anyhow::Ok((choice, session))
         });
         cx.spawn(async move |this, cx| {
@@ -500,8 +500,9 @@ impl AccountsView {
                 "checking" => YoutubeStep::Checking,
                 "signedout" => YoutubeStep::SignedOut,
                 "failed" => YoutubeStep::Failed {
-                    summary: course2md::tr!("macOS 不允许读取 Safari 的 Cookie。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md，或改用其他浏览器。").into(),
-                    detail: "[Errno 1] Operation not permitted: '~/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies'".into(),
+                    summary: youtube::blocked_summary(Browser::Chrome, Reader::App),
+                    detail: "Operation not permitted: ~/Library/Application Support/Google/Chrome"
+                        .into(),
                 },
                 "connected" => YoutubeStep::Connected,
                 _ => YoutubeStep::Choose,

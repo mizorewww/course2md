@@ -147,6 +147,16 @@ impl Browser {
             .collect()
     }
 
+    /// Whether the system refuses to list this browser's data folder. macOS 27
+    /// keeps the folders of Chrome and other browsers to the browser itself unless
+    /// the reading app has Full Disk Access; the folder still exists (so the browser
+    /// is offered), but yt-dlp cannot search it and reports no cookie database.
+    pub fn blocked(self) -> bool {
+        c2m_core::paths::home_dir()
+            .and_then(|home| self.data_dir(&home))
+            .is_some_and(|dir| listing_denied(&dir))
+    }
+
     /// A Chromium browser's profiles by the names the person gave them. Others
     /// (and a browser with one profile) need no choice: yt-dlp finds the profile.
     pub fn profiles(self) -> Vec<Profile> {
@@ -167,29 +177,43 @@ pub struct Profile {
     pub name: String,
 }
 
+/// Whether listing `dir` is refused, as opposed to the folder being absent.
+fn listing_denied(dir: &Path) -> bool {
+    matches!(std::fs::read_dir(dir), Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied)
+}
+
 fn chromium_profiles(data_dir: &Path) -> Vec<Profile> {
     let names: serde_json::Value = std::fs::read(data_dir.join("Local State"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default();
-    let mut profiles: Vec<_> = std::fs::read_dir(data_dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|entry| {
-            let path = entry.path();
-            path.join("Cookies").is_file() || path.join("Network/Cookies").is_file()
-        })
-        .filter_map(|entry| {
-            let dir = entry.file_name().into_string().ok()?;
-            let name = names["profile"]["info_cache"][&dir]["name"]
-                .as_str()
-                .filter(|name| !name.trim().is_empty())
-                .unwrap_or(&dir)
-                .to_owned();
-            Some(Profile { dir, name })
-        })
-        .collect();
+    let name_of = |dir: String| {
+        let name = names["profile"]["info_cache"][&dir]["name"]
+            .as_str()
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(&dir)
+            .to_owned();
+        Profile { dir, name }
+    };
+    let mut profiles: Vec<_> = match std::fs::read_dir(data_dir) {
+        Ok(entries) => entries
+            .flatten()
+            .filter(|entry| {
+                let path = entry.path();
+                path.join("Cookies").is_file() || path.join("Network/Cookies").is_file()
+            })
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .map(name_of)
+            .collect(),
+        // A folder that cannot be listed may still let its "Local State" be
+        // opened by name: it names every profile the browser knows.
+        Err(_) => names["profile"]["info_cache"]
+            .as_object()
+            .into_iter()
+            .flat_map(|cache| cache.keys().cloned())
+            .map(name_of)
+            .collect(),
+    };
     // The default profile first, then as the browser lists them.
     profiles.sort_by_key(|profile| (profile.dir != "Default", profile.dir.clone()));
     profiles
@@ -346,6 +370,22 @@ pub fn wants_sign_in(cause: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
+/// A run failed reading the connected browser's cookies because the system keeps
+/// its folder from this app (yt-dlp words that as a missing database).
+pub fn cookies_blocked(cause: &str) -> bool {
+    cookie_read_refused(cause)
+        && saved_choice()
+            .ok()
+            .flatten()
+            .is_some_and(|choice| choice.browser.blocked())
+}
+
+fn cookie_read_refused(cause: &str) -> bool {
+    let lower = cause.to_lowercase();
+    (lower.contains("could not find") && lower.contains("cookies database"))
+        || lower.contains("operation not permitted")
+}
+
 /// Whether the chosen browser holds a YouTube session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Session {
@@ -360,6 +400,59 @@ pub struct BrowserReadError {
     pub summary: String,
     /// yt-dlp's own words.
     pub detail: String,
+    /// The system kept the browser's data from this app: Full Disk Access, in
+    /// System Settings, lets it through ([`FULL_DISK_ACCESS_SETTINGS`]).
+    pub blocked: bool,
+}
+
+/// Who asks to read the browser, and so who the system lets through: the app,
+/// or for the command line the terminal app it runs in (macOS holds the app
+/// that started a program responsible for what it reads).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reader {
+    App,
+    Terminal,
+}
+
+/// System Settings › Privacy & Security › Full Disk Access (macOS 13 and later).
+pub const FULL_DISK_ACCESS_SETTINGS: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
+/// What to do when the system keeps `browser`'s data from `reader`.
+pub fn blocked_summary(browser: Browser, reader: Reader) -> String {
+    let name = browser.name();
+    if !cfg!(target_os = "macos") {
+        return tr!("系统不允许读取 {} 的 Cookie，请检查权限后重试。", name);
+    }
+    match reader {
+        Reader::App => tr!(
+            "macOS 不允许 course2md 读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开 course2md，然后退出并重新打开 course2md，再试一次。",
+            name
+        ),
+        Reader::Terminal => tr!(
+            "macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中打开你使用的终端应用（如“终端”），然后退出并重新打开它，再试一次。可运行 open \"{}\" 打开该设置。",
+            name,
+            FULL_DISK_ACCESS_SETTINGS
+        ),
+    }
+}
+
+/// The folder yt-dlp searches for `choice`'s cookies, when the system refuses to
+/// list it: the browser's data folder, or a profile given as a path.
+fn blocked_dir(choice: &BrowserChoice, home: &Path) -> Option<PathBuf> {
+    let profile_path = choice
+        .profile
+        .as_deref()
+        .map(Path::new)
+        .filter(|profile| profile.components().count() > 1);
+    let dirs = [
+        profile_path.map(Path::to_path_buf),
+        // Safari's cookies are not in the folder that marks it installed.
+        (choice.browser != Browser::Safari)
+            .then(|| choice.browser.data_dir(home))
+            .flatten(),
+    ];
+    dirs.into_iter().flatten().find(|dir| listing_denied(dir))
 }
 
 /// Where a check's private directories live, so one a crash left behind is
@@ -405,7 +498,9 @@ fn remove_stale_in(dir: &Path, age: Duration) {
 /// returns, and one a crash left behind is removed by the next check or start.
 /// Blocking: on macOS the system may ask the person to allow access to the
 /// browser's keychain item.
-pub fn check_session(program: &Path, choice: &BrowserChoice) -> Result<Session> {
+pub fn check_session(program: &Path, choice: &BrowserChoice, reader: Reader) -> Result<Session> {
+    ensure_readable(choice, reader)?;
+    let home = c2m_core::paths::home_dir();
     remove_stale_checks();
     let parent = checks_dir();
     std::fs::create_dir_all(&parent)?;
@@ -425,7 +520,11 @@ pub fn check_session(program: &Path, choice: &BrowserChoice) -> Result<Session> 
     let text = zeroize::Zeroizing::new(std::fs::read_to_string(&jar).unwrap_or_default());
     drop(dir);
     if !text.starts_with("# Netscape HTTP Cookie File") {
-        bail!(read_error(choice.browser, &output.stderr));
+        let denied = home
+            .as_deref()
+            .and_then(|home| blocked_dir(choice, home))
+            .is_some();
+        bail!(read_error(choice.browser, &output.stderr, reader, denied));
     }
     Ok(if signed_in(&text) {
         Session::SignedIn
@@ -451,7 +550,26 @@ fn signed_in(jar: &str) -> bool {
         })
 }
 
-fn read_error(browser: Browser, stderr: &str) -> BrowserReadError {
+/// A folder the system will not let yt-dlp search reads to it as "no cookie
+/// database"; this says what is really wrong without starting it.
+pub fn ensure_readable(choice: &BrowserChoice, reader: Reader) -> Result<(), BrowserReadError> {
+    match c2m_core::paths::home_dir().and_then(|home| blocked_dir(choice, &home)) {
+        Some(dir) => Err(blocked_error(choice.browser, reader, &dir)),
+        None => Ok(()),
+    }
+}
+
+fn blocked_error(browser: Browser, reader: Reader, dir: &Path) -> BrowserReadError {
+    BrowserReadError {
+        summary: blocked_summary(browser, reader),
+        detail: format!("Operation not permitted: {}", dir.display()),
+        blocked: cfg!(target_os = "macos"),
+    }
+}
+
+/// `denied`: the folder yt-dlp searched cannot be listed, which yt-dlp reports
+/// as a missing cookie database.
+fn read_error(browser: Browser, stderr: &str, reader: Reader, denied: bool) -> BrowserReadError {
     let detail = stderr
         .lines()
         .rev()
@@ -470,17 +588,19 @@ fn read_error(browser: Browser, stderr: &str) -> BrowserReadError {
         .to_owned();
     let lower = detail.to_lowercase();
     let name = browser.name();
+    let refused = lower.contains("operation not permitted") || lower.contains("permission denied");
+    if denied || refused {
+        return BrowserReadError {
+            summary: blocked_summary(browser, reader),
+            detail,
+            blocked: cfg!(target_os = "macos"),
+        };
+    }
     let summary = if lower.contains("could not find") && lower.contains("database") {
         tr!(
             "找不到 {} 的 Cookie。请确认已安装它，并至少打开过一次。",
             name
         )
-    } else if lower.contains("operation not permitted") || lower.contains("permission denied") {
-        if browser == Browser::Safari {
-            tr!("macOS 不允许读取 Safari 的 Cookie。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md，或改用其他浏览器。").to_owned()
-        } else {
-            tr!("系统不允许读取 {} 的 Cookie，请检查权限后重试。", name)
-        }
     } else if lower.contains("database is locked") || lower.contains("could not copy") {
         tr!("{} 正在使用 Cookie 数据库。请退出 {} 后重试。", name, name)
     } else if lower.contains("decrypt") || lower.contains("keyring") || lower.contains("key") {
@@ -498,7 +618,11 @@ fn read_error(browser: Browser, stderr: &str) -> BrowserReadError {
     } else {
         tr!("无法读取 {} 的 Cookie。", name)
     };
-    BrowserReadError { summary, detail }
+    BrowserReadError {
+        summary,
+        detail,
+        blocked: false,
+    }
 }
 
 /// CLI: `course2md --login youtube [--browser chrome[:profile]]`; the CLI picks
@@ -511,7 +635,7 @@ pub fn login_youtube(choice: BrowserChoice) -> Result<()> {
         choice.label()
     );
     let program = crate::ytdlp::program();
-    match check_session(&program, &choice)? {
+    match check_session(&program, &choice, Reader::Terminal)? {
         Session::SignedIn => {
             save_choice(&choice)?;
             println_tr!(
@@ -622,19 +746,158 @@ mod tests {
 
     #[test]
     fn read_failures_say_what_to_do() {
-        let error = read_error(
-            Browser::Chrome,
-            "Extracting cookies from chrome\nERROR: could not find chrome cookies database in \"/x\"",
-        );
+        let missing = "Extracting cookies from chrome\nERROR: could not find chrome cookies database in \"/x\"";
+        let error = read_error(Browser::Chrome, missing, Reader::App, false);
         assert!(error.summary.contains("找不到 Google Chrome 的 Cookie"));
         assert!(error.detail.starts_with("could not find chrome"));
-        let locked = read_error(Browser::Edge, "ERROR: database is locked");
+        assert!(!error.blocked);
+        let locked = read_error(
+            Browser::Edge,
+            "ERROR: database is locked",
+            Reader::App,
+            false,
+        );
         assert!(locked.summary.contains("退出 Microsoft Edge"));
+        // A folder that cannot be listed is what yt-dlp calls a missing database.
+        let hidden = read_error(Browser::Chrome, missing, Reader::App, true);
+        assert_eq!(
+            hidden.summary,
+            blocked_summary(Browser::Chrome, Reader::App)
+        );
+        assert!(hidden.detail.starts_with("could not find chrome"));
         let safari = read_error(
             Browser::Safari,
             "ERROR: [Errno 1] Operation not permitted: '/Users/x/Library/Cookies'",
+            Reader::Terminal,
+            false,
         );
-        assert!(safari.summary.contains("完全磁盘访问权限"));
+        assert_eq!(
+            safari.summary,
+            blocked_summary(Browser::Safari, Reader::Terminal)
+        );
+        assert_eq!(safari.blocked, hidden.blocked);
+        if cfg!(target_os = "macos") {
+            assert!(hidden.blocked);
+            for (reader, who) in [(Reader::App, "course2md"), (Reader::Terminal, "终端")] {
+                let summary = blocked_summary(Browser::Chrome, reader);
+                assert!(summary.contains("Google Chrome"), "{summary}");
+                assert!(summary.contains("完全磁盘访问权限"), "{summary}");
+                assert!(summary.contains(who), "{summary}");
+            }
+            assert!(
+                blocked_summary(Browser::Chrome, Reader::Terminal)
+                    .contains(FULL_DISK_ACCESS_SETTINGS)
+            );
+        } else {
+            assert!(!hidden.blocked);
+        }
+    }
+
+    /// A folder that exists but cannot be listed, as macOS shows another app's
+    /// protected data. `None` where permissions do not bind (running as root).
+    #[cfg(unix)]
+    fn unlistable(dir: &Path, mode: u32) -> Option<()> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap();
+        std::fs::read_dir(dir).is_err().then_some(())
+    }
+
+    #[cfg(unix)]
+    fn restore(dir: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_cannot_be_listed_is_blocked_not_missing() {
+        let home = tempfile::tempdir().unwrap();
+        let profile = home.path().join("profile");
+        std::fs::create_dir(&profile).unwrap();
+        let choice = BrowserChoice {
+            browser: Browser::Firefox,
+            profile: Some(profile.display().to_string()),
+        };
+        assert!(!listing_denied(&profile));
+        assert!(!listing_denied(&home.path().join("absent")));
+        assert_eq!(blocked_dir(&choice, home.path()), None);
+        if unlistable(&profile, 0o000).is_some() {
+            assert!(listing_denied(&profile));
+            assert_eq!(blocked_dir(&choice, home.path()), Some(profile.clone()));
+            let error = blocked_error(Browser::Firefox, Reader::App, &profile);
+            assert_eq!(
+                error.summary,
+                blocked_summary(Browser::Firefox, Reader::App)
+            );
+            assert!(error.detail.contains("Operation not permitted"));
+        }
+        restore(&profile);
+    }
+
+    /// macOS 27 refuses to list Chrome's folder; Chrome is still offered, and the
+    /// check says what to grant instead of running yt-dlp into "could not find".
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_protected_chrome_folder_is_installed_but_blocked() {
+        let home = tempfile::tempdir().unwrap();
+        let data = Browser::Chrome.data_dir(home.path()).unwrap();
+        std::fs::create_dir_all(data.join("Default")).unwrap();
+        let choice = BrowserChoice {
+            browser: Browser::Chrome,
+            profile: Some("Default".into()),
+        };
+        assert_eq!(blocked_dir(&choice, home.path()), None);
+        if unlistable(&data, 0o000).is_some() {
+            assert!(data.exists());
+            assert_eq!(blocked_dir(&choice, home.path()), Some(data.clone()));
+        }
+        restore(&data);
+    }
+
+    /// When the folder cannot be listed but "Local State" opens by name (execute
+    /// without read), the profiles still come from it rather than vanishing.
+    #[cfg(unix)]
+    #[test]
+    fn profiles_fall_back_to_local_state_when_the_folder_cannot_be_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("Chrome");
+        std::fs::create_dir_all(data.join("Default/Network")).unwrap();
+        std::fs::write(data.join("Default/Network/Cookies"), "").unwrap();
+        std::fs::write(
+            data.join("Local State"),
+            r#"{"profile":{"info_cache":{"Default":{"name":"Personal"},"Profile 3":{"name":"Work"}}}}"#,
+        )
+        .unwrap();
+        if unlistable(&data, 0o311).is_some() {
+            assert_eq!(
+                chromium_profiles(&data),
+                [
+                    Profile {
+                        dir: "Default".into(),
+                        name: "Personal".into()
+                    },
+                    Profile {
+                        dir: "Profile 3".into(),
+                        name: "Work".into()
+                    }
+                ]
+            );
+            // Nothing opens at all: no profiles, and no error either.
+            unlistable(&data, 0o000);
+            assert_eq!(chromium_profiles(&data), []);
+        }
+        restore(&data);
+    }
+
+    #[test]
+    fn cookie_read_refusals_are_recognised() {
+        assert!(cookie_read_refused(
+            "could not find chrome cookies database in \"/Users/x/Library/Application Support/Google/Chrome\""
+        ));
+        assert!(cookie_read_refused(
+            "[Errno 1] Operation not permitted: '/Users/x/Library/Application Support/Microsoft Edge/Default/Cookies'"
+        ));
+        assert!(!cookie_read_refused("[youtube] abc: Video unavailable"));
     }
 
     #[test]
@@ -713,18 +976,21 @@ mod tests {
             "INSERT INTO moz_cookies (name,value,host,path,expiry,isSecure,isHttpOnly) VALUES ('PREF','x','.youtube.com','/',2000000000,1,0);",
         );
         assert_eq!(
-            check_session(&program, &choice).unwrap(),
+            check_session(&program, &choice, Reader::App).unwrap(),
             Session::SignedOut
         );
         insert(
             "INSERT INTO moz_cookies (name,value,host,path,expiry,isSecure,isHttpOnly) VALUES ('SAPISID','fake','.youtube.com','/',2000000000,1,0);",
         );
-        assert_eq!(check_session(&program, &choice).unwrap(), Session::SignedIn);
+        assert_eq!(
+            check_session(&program, &choice, Reader::App).unwrap(),
+            Session::SignedIn
+        );
         let missing = BrowserChoice {
             browser: Browser::Firefox,
             profile: Some(profile.path().join("absent").display().to_string()),
         };
-        let error = check_session(&program, &missing).unwrap_err();
+        let error = check_session(&program, &missing, Reader::App).unwrap_err();
         let error = error.downcast_ref::<BrowserReadError>().unwrap();
         assert!(error.summary.contains("Firefox"), "{error}");
     }
