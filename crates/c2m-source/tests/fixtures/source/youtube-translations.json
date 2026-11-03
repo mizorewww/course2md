@@ -1,0 +1,183 @@
+{
+ "id": "r2vYObllqJU",
+ "title": "How to use the assistant",
+ "duration": 516.0,
+ "webpage_url": "https://www.youtube.com/watch?v=r2vYObllqJU",
+ "extractor": "youtube",
+ "extractor_key": "Youtube",
+ "uploader": "Tester",
+ "_type": "video",
+ "language": "en",
+ "subtitles": {
+  "en": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&fmt=json3",
+    "name": "English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&fmt=vtt",
+    "name": "English"
+   }
+  ]
+ },
+ "automatic_captions": {
+  "af-en": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=af&fmt=json3",
+    "name": "Afrikaans from English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=af&fmt=vtt",
+    "name": "Afrikaans from English"
+   }
+  ],
+  "ar-en": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=ar&fmt=json3",
+    "name": "Arabic from English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=ar&fmt=vtt",
+    "name": "Arabic from English"
+   }
+  ],
+  "zh-Hans-en": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=zh-Hans&fmt=json3",
+    "name": "Chinese (Simplified) from English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=zh-Hans&fmt=vtt",
+    "name": "Chinese (Simplified) from English"
+   }
+  ],
+  "zh-Hant-en": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=zh-Hant&fmt=json3",
+    "name": "Chinese (Traditional) from English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=zh-Hant&fmt=vtt",
+    "name": "Chinese (Traditional) from English"
+   }
+  ],
+  "en-en": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=en&fmt=json3",
+    "name": "English from English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=en&fmt=vtt",
+    "name": "English from English"
+   }
+  ],
+  "ja-en": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=ja&fmt=json3",
+    "name": "Japanese from English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=ja&fmt=vtt",
+    "name": "Japanese from English"
+   }
+  ],
+  "af": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=af&fmt=json3",
+    "name": "Afrikaans"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=af&fmt=vtt",
+    "name": "Afrikaans"
+   }
+  ],
+  "ar": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=ar&fmt=json3",
+    "name": "Arabic"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=ar&fmt=vtt",
+    "name": "Arabic"
+   }
+  ],
+  "zh-Hans": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=zh-Hans&fmt=json3",
+    "name": "Chinese (Simplified)"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=zh-Hans&fmt=vtt",
+    "name": "Chinese (Simplified)"
+   }
+  ],
+  "zh-Hant": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=zh-Hant&fmt=json3",
+    "name": "Chinese (Traditional)"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=zh-Hant&fmt=vtt",
+    "name": "Chinese (Traditional)"
+   }
+  ],
+  "en-orig": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&fmt=json3",
+    "name": "English (Original)"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&fmt=vtt",
+    "name": "English (Original)"
+   }
+  ],
+  "en": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&fmt=json3",
+    "name": "English"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&fmt=vtt",
+    "name": "English"
+   }
+  ],
+  "ja": [
+   {
+    "ext": "json3",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=ja&fmt=json3",
+    "name": "Japanese"
+   },
+   {
+    "ext": "vtt",
+    "url": "https://www.youtube.com/api/timedtext?v=r2vYObllqJU&lang=en&tlang=ja&fmt=vtt",
+    "name": "Japanese"
+   }
+  ]
+ }
+}

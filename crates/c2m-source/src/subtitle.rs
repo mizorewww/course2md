@@ -13,6 +13,50 @@ pub use subtitle_parse::{
     is_subtitle_file, sidecars as sidecar_tracks, sort_tracks,
 };
 
+/// How many tracks a default choice tries before it gives up: the chosen one and
+/// two after it. Each try is a request to the platform, and one that rate-limits
+/// (YouTube's 429) should not be met with a burst.
+pub const SUBTITLE_ATTEMPTS: usize = 3;
+
+/// The tracks to try, in order, when `chosen` was picked for the person rather than
+/// by them: `chosen`, then the tracks after it in `ordered` (as [`sort_tracks`] left
+/// them). A second key for the same online text (YouTube's `en-orig` is `en`) is not
+/// tried again. An explicit choice is read alone and never falls back.
+pub fn fallback_tracks<'a>(
+    ordered: &'a [SubtitleTrack],
+    chosen: &'a SubtitleTrack,
+) -> Vec<&'a SubtitleTrack> {
+    fn text_key(track: &SubtitleTrack) -> Option<(&str, bool)> {
+        match &track.origin {
+            SubtitleOrigin::Online {
+                language_key,
+                automatic,
+                ..
+            } => Some((
+                language_key.strip_suffix("-orig").unwrap_or(language_key),
+                *automatic,
+            )),
+            _ => None,
+        }
+    }
+    let after = ordered
+        .iter()
+        .position(|track| track.id == chosen.id)
+        .map_or(&[][..], |index| &ordered[index + 1..]);
+    let mut tracks = vec![chosen];
+    for track in after {
+        if tracks.len() == SUBTITLE_ATTEMPTS {
+            break;
+        }
+        let same_text = text_key(track)
+            .is_some_and(|key| tracks.iter().any(|tried| text_key(tried) == Some(key)));
+        if !same_text {
+            tracks.push(track);
+        }
+    }
+    tracks
+}
+
 /// A track's name for people.
 pub fn track_label(track: &SubtitleTrack) -> String {
     let mut parts = Vec::new();
@@ -203,6 +247,50 @@ fn preferred_file(tracks: Vec<SubtitleTrack>, interface_language: &str) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_default_choice_falls_back_three_tracks_deep_without_repeating_text() {
+        let online = |key: &str, automatic: bool| SubtitleTrack {
+            id: format!("v:subtitle:{automatic}:{key}"),
+            language: Some(key.into()),
+            name: None,
+            kind: SubtitleKind::Automatic,
+            translated: false,
+            origin: SubtitleOrigin::Online {
+                language_key: key.into(),
+                automatic,
+                inline_text: None,
+            },
+            source_order: 0,
+        };
+        let tracks = [
+            online("en-orig", true),
+            online("en", true),
+            online("en", false),
+            online("fr", true),
+            online("de", true),
+        ];
+        let ids = |chosen: &SubtitleTrack| -> Vec<String> {
+            fallback_tracks(&tracks, chosen)
+                .into_iter()
+                .map(|track| track.id.clone())
+                .collect()
+        };
+        assert_eq!(
+            ids(&tracks[0]),
+            [
+                "v:subtitle:true:en-orig",
+                "v:subtitle:false:en",
+                "v:subtitle:true:fr"
+            ]
+        );
+        // Only what comes after the choice, and a track not in the list alone.
+        assert_eq!(
+            ids(&tracks[3]),
+            ["v:subtitle:true:fr", "v:subtitle:true:de"]
+        );
+        assert_eq!(ids(&online("ja", true)), ["v:subtitle:true:ja"]);
+    }
 
     #[test]
     fn labels_never_invent_a_caption_kind() {

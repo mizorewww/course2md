@@ -304,6 +304,23 @@ impl Desktop {
         explicit: bool,
         cx: &mut Context<Self>,
     ) {
+        self.read_track(track, explicit, false, cx);
+    }
+
+    /// Read the track the source's order put first. When it cannot be read, the
+    /// next ones are tried, as the command line does; a track the person picked,
+    /// or one they had before, is read alone.
+    pub fn confirm_default_subtitle(&mut self, track: SubtitleTrack, cx: &mut Context<Self>) {
+        self.read_track(track, false, true, cx);
+    }
+
+    fn read_track(
+        &mut self,
+        track: SubtitleTrack,
+        explicit: bool,
+        fallback: bool,
+        cx: &mut Context<Self>,
+    ) {
         let requested = track.clone();
         self.read_subtitles(
             move |this, cx| {
@@ -317,7 +334,13 @@ impl Desktop {
                     source.subtitle_read_error = None;
                 }
             },
-            move |source, cancel| source::read_subtitle(source, &track, cancel),
+            move |source, cancel| {
+                if fallback {
+                    source::read_default_subtitle(source, &track, cancel)
+                } else {
+                    source::read_subtitle(source, &track, cancel)
+                }
+            },
             || {
                 Err(SubtitleReadError::Failed {
                     message: course2md::tr!("字幕读取意外中断").into(),
@@ -495,8 +518,10 @@ impl Desktop {
                 .map(|message| SubtitleReadError::Failed { message });
         }
         self.save_current_draft(cx);
-        if let Some(track) = track {
-            self.confirm_subtitle(track, false, cx);
+        match track {
+            Some(track) if old_id.is_none() => self.confirm_default_subtitle(track, cx),
+            Some(track) => self.confirm_subtitle(track, false, cx),
+            None => {}
         }
     }
 

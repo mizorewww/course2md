@@ -65,7 +65,7 @@ security-framework = "3.7"
 embed-resource = "3.0"
 model-fetch = { version = "0.1", git = "https://github.com/mizorewww/model-fetch", rev = "b7e06822400edb4ed1042ad1b07daa24a880c287", features = ["ip-lookup"] }
 slide-detect = { version = "0.1", git = "https://github.com/mizorewww/slide-detect", rev = "87f8b78a8a70d8330a4bf1cb09924fe845c6c4ab" }
-subtitle-parse = { version = "0.1", git = "https://github.com/mizorewww/subtitle-parse", rev = "53e0ab4aaf02ca2600e05f9b13085f97228c65ad", features = ["serde"] }
+subtitle-parse = { version = "0.1", git = "https://github.com/mizorewww/subtitle-parse", rev = "048299ffbe1c23a132a89857038c547df338f618", features = ["serde"] }
 
 [profile.dev]
 debug = "line-tables-only"

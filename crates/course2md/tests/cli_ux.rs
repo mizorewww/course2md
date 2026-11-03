@@ -567,6 +567,117 @@ exit 1
     assert_eq!(run("en", &[]).0, "zh-Hans");
 }
 
+/// A machine-translated track never comes before the original (#25). YouTube
+/// lists an English video's translations beside its captions (yt-dlp marks them
+/// with `tlang`) and answered 429 for them, which ended the run. A track that
+/// cannot be read is followed by the next ones, at most three in all.
+#[cfg(unix)]
+#[test]
+fn online_subtitles_prefer_the_original_and_fall_back_when_one_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let cli = CliTest::new();
+    let log = cli.dir.path().join("yt-dlp.log");
+    let fail = cli.dir.path().join("fail");
+    let fake = cli.dir.path().join("yt-dlp");
+    // yt-dlp's YouTube track list for an English video with English subtitles:
+    // their translations (`<lang>-en`), the captions' translations, and the
+    // captions themselves as `en-orig` and `en`. Translations and the keys in
+    // `fail` answer 429; the video download is refused, which ends the run.
+    let track = |name: &str, tlang: &str| {
+        format!(
+            r#"[{{"ext":"vtt","name":"{name}","url":"https://www.youtube.com/api/timedtext?v=abcdefghijk&lang=en{tlang}&fmt=vtt"}}]"#
+        )
+    };
+    let json = format!(
+        r#"{{"id":"abcdefghijk","title":"Fake lecture","duration":240,"webpage_url":"https://www.youtube.com/watch?v=abcdefghijk","extractor":"youtube","extractor_key":"Youtube","_type":"video","language":"en","subtitles":{{"en":{}}},"automatic_captions":{{"zh-Hans-en":{},"ja-en":{},"zh-Hans":{},"en-orig":{},"en":{},"ja":{}}}}}"#,
+        track("English", ""),
+        track("Chinese (Simplified) from English", "&tlang=zh-Hans"),
+        track("Japanese from English", "&tlang=ja"),
+        track("Chinese (Simplified)", "&tlang=zh-Hans"),
+        track("English (Original)", ""),
+        track("English", ""),
+        track("Japanese", "&tlang=ja"),
+    );
+    std::fs::write(
+        &fake,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then echo 2026.08.19; exit 0; fi
+json='{json}'
+prev=""; langs=""; out=""; skip=""; channel=""
+for arg in "$@"; do
+  [ "$prev" = "--sub-langs" ] && langs="$arg"
+  [ "$prev" = "-o" ] && out="$arg"
+  [ "$arg" = "--skip-download" ] && skip=1
+  [ "$arg" = "--write-subs" ] && channel=manual
+  [ "$arg" = "--write-auto-subs" ] && channel=auto
+  prev="$arg"
+done
+if [ -n "$skip" ]; then
+  lang=$(printf '%s' "$langs" | sed -e 's/^\^//' -e 's/\$$//' -e 's/\\//g')
+  echo "$channel $lang" >> "{log}"
+  case "$channel $lang" in
+    "manual en"|"auto en"|"auto en-orig") grep -qx "$channel $lang" "{fail}" 2>/dev/null || ok=1 ;;
+  esac
+  if [ -z "$ok" ]; then
+    echo "ERROR: Unable to download video subtitles for '$lang': HTTP Error 429: Too Many Requests" >&2
+    exit 1
+  fi
+  printf '1\n00:00:00,000 --> 00:00:02,000\nsubtitle %s\n' "$channel $lang" > "$out.$lang.srt"
+  echo "$json"; exit 0
+fi
+for arg in "$@"; do [ "$arg" = "--dump-single-json" ] && {{ echo "$json"; exit 0; }}; done
+echo "ERROR: [youtube] abcdefghijk: Private video" >&2
+exit 1
+"#,
+            log = log.display(),
+            fail = fail.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let run = |lang: &str, failing: &[&str]| {
+        std::fs::write(&fail, failing.join("\n") + "\n").unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_course2md"))
+            .args(["https://www.youtube.com/watch?v=abcdefghijk"])
+            .args(["--transcript-source", "subtitle", "--no-resume", "-o"])
+            .arg(cli.dir.path().join("out"))
+            .current_dir(cli.dir.path())
+            .env("HOME", cli.dir.path())
+            .env("XDG_CONFIG_HOME", cli.dir.path().join("config"))
+            .env("XDG_CACHE_HOME", cli.dir.path().join("cache"))
+            .env("COURSE2MD_LANG", lang)
+            .env("COURSE2MD_YTDLP", &fake)
+            .env_remove("RUST_LOG")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let tried = std::fs::read_to_string(&log).unwrap_or_default();
+        let _ = std::fs::remove_file(&log);
+        (
+            tried.lines().map(str::to_owned).collect::<Vec<_>>(),
+            stderr(&output),
+        )
+    };
+    // Whatever the interface language, the English subtitles come first.
+    for lang in ["zh-Hans", "zh-Hant", "ja", "en"] {
+        let (tried, text) = run(lang, &[]);
+        assert_eq!(tried, ["manual en"], "{lang}: {text}");
+    }
+    // The subtitles fail: the captions are next; `en-orig` is `en` again.
+    let (tried, text) = run("zh-Hans", &["manual en"]);
+    assert_eq!(tried, ["manual en", "auto en"], "{text}");
+    assert!(text.contains("429"), "{text}");
+    assert!(text.contains("下一条字幕"), "{text}");
+    assert!(!text.contains("读取视频字幕失败"), "{text}");
+    // Nothing readable in three tries: the first failure is the one reported.
+    let (tried, text) = run("zh-Hans", &["manual en", "auto en"]);
+    assert_eq!(tried, ["manual en", "auto en", "auto zh-Hans"], "{text}");
+    assert!(text.contains("读取视频字幕失败"), "{text}");
+    assert!(text.contains("for 'en'"), "{text}");
+}
+
 /// Password and SMS login type into a terminal; without one the error says what
 /// to do instead, in the interface language, before anything is sent.
 #[test]
