@@ -375,8 +375,8 @@ impl Desktop {
     fn task_result_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // A new result can briefly announce itself. Historical unresolved work
         // remains in Tasks; it must not consume every unrelated page's height.
-        let (announced_id, shown) = self.transient_task_result.as_ref()?;
-        if shown.elapsed() >= std::time::Duration::from_secs(8) {
+        let (announced_id, shown) = self.work.read(cx).result_shown.as_ref()?;
+        if shown.elapsed() >= desktop_tasks::job::RESULT_SHOWN {
             return None;
         }
         let visible_task = if self.page == Page::New {
@@ -466,7 +466,7 @@ impl Desktop {
                         course2md::tr!("关闭提示"),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.transient_task_result = None;
+                        this.work.change(cx, |work, _| work.result_shown = None);
                         if let Some(Err(error)) = this.with_workspace(cx, |workspace| {
                             workspace.transaction(|state| {
                                 if let Some(task) = state.task_mut(&dismiss_id) {
@@ -669,7 +669,9 @@ impl Render for Desktop {
                                 material_button("retry-workspace-records", ButtonVariant::Tonal)
                                     .icon(symbols::refresh())
                                     .child(course2md::tr!("重试"))
-                                    .disabled(self.work.job.is_some() || self.storage_ui.busy)
+                                    .disabled(
+                                        self.work.read(cx).job.is_some() || self.storage_ui.busy,
+                                    )
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.retry_workspace_records(window, cx)
                                     })),
@@ -682,7 +684,9 @@ impl Render for Desktop {
                                     )
                                     .icon(symbols::restart_alt())
                                     .child(course2md::tr!("备份并重建任务记录"))
-                                    .disabled(self.work.job.is_some() || self.storage_ui.busy)
+                                    .disabled(
+                                        self.work.read(cx).job.is_some() || self.storage_ui.busy,
+                                    )
                                     .on_click(cx.listener(
                                         |this, _, window, cx| {
                                             this.rebuild_workspace_records(window, cx)

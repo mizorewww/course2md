@@ -45,7 +45,7 @@ use desktop_reader_core::reader::note_read_failure;
 use desktop_reader_core::reader::{carry_repaired_reading_positions, settle_reader_notice};
 use desktop_store::library::FolderFilter;
 use desktop_store::page::{Kind, Page};
-use desktop_tasks::job::{earliest_deadline, job_exit_status, poll_timeout};
+use desktop_tasks::job::{Work, earliest_deadline, job_exit_status, poll_timeout};
 
 use backend::{Done, EngineEvent, Event, Job};
 use conversion::ConversionOptions;
@@ -122,14 +122,12 @@ struct Desktop {
     records: Entity<desktop_store::records::Records>,
     workspace_error: Option<String>,
     import: desktop_tasks::import::ImportSession,
-    /// The running job: a task's or a model's.
-    work: desktop_tasks::job::WorkState,
+    /// The running job, a task's or a model's, and the event loop's deadlines.
+    work: Entity<Work>,
     task_list: task_ui::TaskListUi,
     theme_frame: views::ThemeFrame,
     library_ui: library_ui::LibraryUi,
     preference_defaults_pending: bool,
-    transient_task_result: Option<(String, Instant)>,
-    draft_deadline: Option<Instant>,
     /// The Bilibili and YouTube sign-ins.
     accounts: Entity<account_ui::AccountsView>,
     codex: desktop_accounts::codex::CodexUi,
@@ -154,8 +152,6 @@ struct Desktop {
     /// and the reader panels to show once it has loaded.
     validation: Option<ValidationOpen>,
     candidate_scroll: ScrollHandle,
-    event_wake_tx: smol::channel::Sender<()>,
-    event_wake_rx: smol::channel::Receiver<()>,
     // Entrance animations already played for logical content that a
     // virtualized list may unmount and remount while scrolling.
     entered: HashSet<String>,
@@ -263,11 +259,14 @@ impl Desktop {
         }
         self.import.cancel_background_reads();
         self.codex.cancel_authorization();
-        self.work.closing = true;
-        self.work.quit_deadline = Some(Instant::now() + Duration::from_secs(10));
+        self.work.update(cx, |work, _| {
+            work.closing = true;
+            work.quit_deadline = Some(Instant::now() + Duration::from_secs(10));
+        });
         self.refresh_dispatch_controls(cx);
-        if self.work.active_task.is_none()
-            && let Some(job) = &self.work.job
+        let work = self.work.read(cx);
+        if work.active_task.is_none()
+            && let Some(job) = &work.job
         {
             job.cancel();
         }
@@ -283,7 +282,7 @@ impl Desktop {
         }
         self.message = Some(course2md::tr!("正在保存进度并退出…").into());
         cx.notify();
-        self.work.job.is_none() && self.import.preview_workers == 0
+        self.work.read(cx).job.is_none() && self.import.preview_workers == 0
     }
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let configuration_directory = course2md::config::config_dir();
@@ -340,8 +339,8 @@ impl Desktop {
                         }
                     }
                     if matches!(field, Field::Source | Field::Title) {
-                        this.draft_deadline = Some(Instant::now() + Duration::from_millis(350));
-                        this.schedule_wake(Duration::from_millis(350));
+                        this.work
+                            .update(cx, |work, _| work.save_draft_later(Instant::now()));
                     }
                     if field == Field::Title
                         && !this.value(Field::Title, cx).is_empty()
@@ -402,7 +401,7 @@ impl Desktop {
         let poll = cx.spawn_in(window, async |this, cx| {
             loop {
                 let Ok((wake, deadline)) = this.update_in(cx, |this, _, cx| {
-                    (this.event_wake_rx.clone(), this.next_poll_deadline(cx))
+                    (this.work.read(cx).woken(), this.next_poll_deadline(cx))
                 }) else {
                     break;
                 };
@@ -428,9 +427,9 @@ impl Desktop {
                     Some(course2md::tr!("任务记录读取失败：{}", format!("{error:#}"))),
                 ),
             };
-        let (event_wake_tx, event_wake_rx) = smol::channel::bounded(1);
+        let work = cx.new(|_| Work::new());
         if let Some(workspace) = &workspace {
-            workspace.set_wake_sender(event_wake_tx.clone());
+            workspace.set_wake_sender(work.read(cx).waker());
         }
         let settings_ui = settings_ui::State::new(window, cx);
         let onboarding = onboarding::State::new(window, cx);
@@ -463,14 +462,12 @@ impl Desktop {
             records,
             workspace_error,
             import: Default::default(),
-            work: desktop_tasks::job::WorkState::new(),
+            work,
             task_list: task_ui::TaskListUi::new(),
             theme_frame: Default::default(),
             library_ui: library_ui::LibraryUi::new(),
             storage_records: None,
             preference_defaults_pending: false,
-            transient_task_result: None,
-            draft_deadline: None,
             page: Page::New,
             workspace_reconciling: false,
             import_submit_focus: cx.focus_handle(),
@@ -489,8 +486,6 @@ impl Desktop {
             settings_options: options,
             validation: ValidationOpen::from_env(),
             candidate_scroll: ScrollHandle::new(),
-            event_wake_tx,
-            event_wake_rx,
             entered: HashSet::new(),
             message,
             _subscriptions: subscriptions,
@@ -529,7 +524,7 @@ impl Desktop {
             });
             // A job that missed its instruction must not send anything new.
             if failure.control
-                && let Some(job) = &self.work.job
+                && let Some(job) = &self.work.read(cx).job
             {
                 job.cancel();
             }
@@ -538,7 +533,7 @@ impl Desktop {
         if self.workspace_reconciling {
             return;
         }
-        let wake = self.event_wake_tx.clone();
+        let wake = self.work.read(cx).waker();
         let Some(Some(reconciliation)) = self.with_workspace(cx, |workspace| {
             let reconciliation = workspace.reconciliation()?;
             // A record reopened elsewhere needs the wake sender too.
@@ -567,7 +562,7 @@ impl Desktop {
                 }
                 this.start_next_task(cx);
                 // The loop's deadline was computed while the check ran.
-                this.wake_poll();
+                this.wake_poll(cx);
                 cx.notify();
             });
         })
@@ -684,7 +679,7 @@ impl Desktop {
     }
 
     fn navigate(&mut self, page: Page, cx: &mut Context<Self>) {
-        self.transient_task_result = None;
+        self.work.update(cx, |work, _| work.result_shown = None);
         if page != Page::New
             || matches!(
                 self.import.following_conversion,
@@ -774,43 +769,27 @@ impl Desktop {
         .detach();
     }
     fn start_model_preparation(&mut self, cx: &mut Context<Self>) {
-        match Job::start(self.model_preparation_args(), self.event_wake_tx.clone()) {
-            Ok(job) => {
-                self.work.job = Some(job);
-                self.work.active_task = None;
-                self.work.kind = Kind::Models;
-                self.work.cancelling = false;
-                self.work.job_events = Default::default();
-                self.work.task_status = course2md::tr!("正在准备识别模型").into();
-            }
+        match Job::start(self.model_preparation_args(), self.work.read(cx).waker()) {
+            Ok(job) => self.work.update(cx, |work, _| work.install_models(job)),
             Err(error) => {
-                self.work.job_events.error = Some(format!("{error:#}"));
+                self.work.update(cx, |work, _| {
+                    work.job_events.error = Some(format!("{error:#}"))
+                });
                 self.model_preparation_finished(false, false, cx);
             }
         }
         cx.notify();
     }
-    fn wake_poll(&self) {
-        let _ = self.event_wake_tx.try_send(());
-    }
-    /// Makes the event loop recompute its next deadline now. Every delayed
-    /// wake (the draft save, a transient task result) is a deadline in
-    /// `next_poll_deadline`, which the loop sleeps toward on an async timer, so
-    /// no thread has to sleep for `_after`.
-    fn schedule_wake(&self, _after: Duration) {
-        self.wake_poll();
+    /// Makes the event loop recompute its next deadline now. Every delayed wake (the
+    /// draft save, a finished task's announcement) is a deadline in `next_poll_deadline`,
+    /// which the loop sleeps toward on an async timer.
+    fn wake_poll(&self, cx: &App) {
+        self.work.read(cx).wake();
     }
     /// The next instant the UI must run `poll` even without a job event.
     /// Returning `None` lets the loop sleep until an explicit wake.
     fn next_poll_deadline(&self, cx: &App) -> Option<Instant> {
-        let mut deadline = earliest_deadline(self.draft_deadline, self.work.quit_deadline);
-        if let Some((_, shown)) = &self.transient_task_result {
-            deadline = earliest_deadline(deadline, Some(*shown + Duration::from_secs(8)));
-        }
-        // Running work shows a live clock.
-        if self.work.job.is_some() {
-            deadline = earliest_deadline(deadline, Some(Instant::now() + Duration::from_secs(1)));
-        }
+        let mut deadline = self.work.read(cx).deadline(Instant::now());
         if self.storage_ui.resume_ready() {
             deadline = earliest_deadline(deadline, Some(Instant::now()));
         }
@@ -825,27 +804,17 @@ impl Desktop {
     }
     fn poll(&mut self, cx: &mut Context<Self>) {
         if self
-            .transient_task_result
-            .as_ref()
-            .is_some_and(|(_, shown)| shown.elapsed() >= Duration::from_secs(8))
+            .work
+            .update(cx, |work, _| work.expire_result(Instant::now()))
         {
-            self.transient_task_result = None;
             cx.notify();
         }
         self.poll_storage(cx);
         self.poll_workspace(cx);
-        if self
-            .draft_deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
-        {
+        if self.work.read(cx).draft_due(Instant::now()) {
             self.save_current_draft(cx);
         }
-        let events: Vec<_> = self
-            .work
-            .job
-            .as_ref()
-            .map(|job| job.events.try_iter().take(512).collect())
-            .unwrap_or_default();
+        let events = self.work.read(cx).take_events();
         let streaming = !events.is_empty();
         // Visible state transitions repaint now; log/progress lines coalesce.
         let mut immediate = false;
@@ -854,14 +823,15 @@ impl Desktop {
             let event = match event {
                 Event::Exit { success, cancelled } => {
                     immediate = true;
-                    self.work.job = None;
+                    let task = self.work.update(cx, |work, _| work.exited());
                     self.storage_ui.job_exited();
-                    self.work.cancelling = false;
-                    if let Some(id) = self.work.active_task.take() {
+                    if let Some(id) = task {
                         self.finish_task(&id, success, cancelled, cx);
                         self.refresh_model_diagnostics(cx);
                     } else {
-                        self.work.task_status = job_exit_status(success, cancelled).into();
+                        self.work.update(cx, |work, _| {
+                            work.task_status = job_exit_status(success, cancelled).into()
+                        });
                         self.model_preparation_finished(success, cancelled, cx);
                     }
                     continue;
@@ -876,15 +846,16 @@ impl Desktop {
                     .as_ref()
                     .map(|model| format!("{model} · "))
                     .unwrap_or_default();
-                self.work.task_status = format!(
+                let status = format!(
                     "{name}{}",
                     match operation {
                         ModelOperation::Prepare => course2md::tr!("模型已就绪"),
                         ModelOperation::Download => course2md::tr!("模型已下载"),
                     }
                 );
+                self.work.update(cx, |work, _| work.task_status = status);
             }
-            immediate |= match &self.work.active_task {
+            immediate |= match self.work.read(cx).active_task.clone() {
                 Some(id) => {
                     // What the task said lives in `events.jsonl`. Only what changes
                     // its record needs committing.
@@ -898,11 +869,13 @@ impl Desktop {
                         records
                             .workspace
                             .as_mut()
-                            .and_then(|workspace| workspace.state.task_mut(id))
+                            .and_then(|workspace| workspace.state.task_mut(&id))
                             .is_some_and(|task| task.apply_event(&event))
                     })
                 }
-                None => self.work.job_events.apply(&event),
+                None => self
+                    .work
+                    .update(cx, |work, _| work.job_events.apply(&event)),
             };
         }
         if commit
@@ -912,17 +885,17 @@ impl Desktop {
             self.workspace_error =
                 Some(course2md::tr!("任务进度尚未保存：{}", format!("{error:#}")));
         }
-        if self.work.closing {
-            if self.work.job.is_none() && self.import.preview_workers == 0 {
+        let work = self.work.read(cx);
+        if work.closing {
+            if work.job.is_none() && self.import.preview_workers == 0 {
                 cx.quit();
                 return;
             }
-            if self
-                .work
+            if work
                 .quit_deadline
                 .is_some_and(|deadline| Instant::now() >= deadline)
             {
-                if let Some(job) = &self.work.job {
+                if let Some(job) = &work.job {
                     job.cancel();
                 }
                 cx.quit();
@@ -931,8 +904,13 @@ impl Desktop {
         } else {
             self.start_next_task(cx);
         }
-        if self.work.repaint_due(streaming, immediate) {
+        // The records and the work tell their readers together, at most once per interval.
+        if self
+            .work
+            .update(cx, |work, _| work.repaint_due(streaming, immediate))
+        {
             self.records.change(cx, |_, _| {});
+            self.work.change(cx, |_, _| {});
             cx.notify();
         }
     }
@@ -981,7 +959,7 @@ impl Desktop {
                     workspace.state.reconciling
                 });
                 if reconciling == Some(true) {
-                    this.wake_poll();
+                    this.wake_poll(cx);
                 }
                 this.records
                     .change(cx, |records, _| records.library.apply_scan(results));

@@ -156,7 +156,7 @@ impl Desktop {
 
     /// Called only by the explicit global recovery action; rebuilding never starts the queue.
     pub fn rebuild_workspace_records(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.work.job.is_some() || self.storage_ui.busy {
+        if self.work.read(cx).job.is_some() || self.storage_ui.busy {
             self.workspace_error = Some(
                 course2md::tr!("当前还有处理或文件移动在进行，请等候停止后再重建记录。").into(),
             );
@@ -182,8 +182,8 @@ impl Desktop {
     }
 
     /// Whether this task holds the running background job (its record may lag the event stream).
-    pub(crate) fn is_running_task(&self, id: &str) -> bool {
-        self.work.active_task.as_deref() == Some(id) && self.work.job.is_some()
+    pub(crate) fn is_running_task(&self, id: &str, cx: &App) -> bool {
+        self.work.read(cx).is_running(id)
     }
 
     /// The library location a task's plan saves to; the record may name a removed library.
@@ -211,7 +211,7 @@ impl Desktop {
         let title = self.value(Field::Title, cx);
         let source = self.import.source_preview.clone();
         let scroll = f32::from(self.scrolls[Page::New as usize].offset().y);
-        self.draft_deadline = None;
+        self.work.update(cx, |work, _| work.draft_saved());
         self.update_draft(
             |draft| {
                 update_draft_source_title(draft, input, title, source);
@@ -249,7 +249,7 @@ impl Desktop {
         self.inputs[&Field::Source].update(cx, |s, cx| s.set_value(draft.input, window, cx));
         self.inputs[&Field::Title].update(cx, |s, cx| s.set_value(draft.title, window, cx));
         self.scrolls[Page::New as usize].set_offset(point(px(0.), px(draft.scroll)));
-        self.draft_deadline = None;
+        self.work.update(cx, |work, _| work.draft_saved());
         cx.notify();
     }
 
@@ -513,13 +513,14 @@ impl Desktop {
     pub fn refresh_dispatch_controls(&mut self, cx: &mut Context<Self>) {
         if let Some(task) = self
             .work
+            .read(cx)
             .active_task
             .as_deref()
             .and_then(|id| self.task(id, cx))
             && let Err(error) = self.send_task_control(task, cx)
         {
             self.report(course2md::tr!("停止新请求的指令尚未保存：{}"), error);
-            if let Some(job) = &self.work.job {
+            if let Some(job) = &self.work.read(cx).job {
                 job.cancel();
             }
             cx.notify();
@@ -538,7 +539,7 @@ impl Desktop {
             return;
         };
         // Held until the job runs or the start fails: polls keep coming meanwhile.
-        if !self.work.claim_start(&task.id) {
+        if !self.work.update(cx, |work, _| work.claim_start(&task.id)) {
             return;
         }
         let needed = match run::needed_credentials(&self.preferences, &task) {
@@ -587,12 +588,13 @@ impl Desktop {
         let Some(task) = self
             .workspace(cx)
             .filter(|workspace| {
-                self.work.is_starting(task_id) && run::still_runnable(&workspace.state, task_id)
+                self.work.read(cx).is_starting(task_id)
+                    && run::still_runnable(&workspace.state, task_id)
             })
             .and_then(|workspace| workspace.state.task(task_id))
             .cloned()
         else {
-            self.work.end_start(task_id);
+            self.work.update(cx, |work, _| work.end_start(task_id));
             return;
         };
         let start = match run::start_request(&self.preferences, self.workspace(cx), &task, &secrets)
@@ -623,12 +625,9 @@ impl Desktop {
         let current = self
             .workspace(cx)
             .is_some_and(|workspace| run::still_runnable(&workspace.state, &task.id));
-        if !self.work.is_starting(&task.id)
-            || self.work.job.is_some()
-            || self.work.closing
-            || !current
-        {
-            self.work.end_start(&task.id);
+        let work = self.work.read(cx);
+        if !work.is_starting(&task.id) || work.job.is_some() || work.closing || !current {
+            self.work.update(cx, |work, _| work.end_start(&task.id));
             return;
         }
         let running = self
@@ -642,17 +641,16 @@ impl Desktop {
         }
         // Starting the child and writing the full request to stdin can block on a pipe;
         // keep it off the UI thread.
-        let wake = self.event_wake_tx.clone();
+        let wake = self.work.read(cx).waker();
         let started = crate::spawn_blocking_result(move || Job::start_task(&request, wake));
         cx.spawn(async move |this, cx| {
             let job = started.await;
             let _ = this.update(cx, |this, cx| match job {
                 Ok(job) => {
-                    this.work.install(&task.id, job);
-                    this.work.kind = Kind::Convert;
-                    this.work.cancelling = false;
-                    this.work.job_started = Some(std::time::Instant::now());
-                    this.work.task_status = course2md::tr!("正在生成《{}》", task.plan.title);
+                    let status = course2md::tr!("正在生成《{}》", task.plan.title);
+                    this.work.change(cx, |work, _| {
+                        work.install(&task.id, job, status, Instant::now())
+                    });
                     cx.notify();
                 }
                 Err(error) => this.fail_task_before_start(&task.id, error, cx),
@@ -668,7 +666,7 @@ impl Desktop {
         error: anyhow::Error,
         cx: &mut Context<Self>,
     ) {
-        self.work.end_start(task_id);
+        self.work.update(cx, |work, _| work.end_start(task_id));
         if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
             run::fail_before_start(workspace, task_id, &error)
         }) {
@@ -678,7 +676,7 @@ impl Desktop {
     }
 
     pub fn set_task_intent(&mut self, id: String, intent: Intent, cx: &mut Context<Self>) {
-        let active = self.is_running_task(&id);
+        let active = self.is_running_task(&id, cx);
         if active && intent == Intent::Run {
             self.message = Some(course2md::tr!("当前任务还在处理，请等候当前操作结束。").into());
             cx.notify();
@@ -708,8 +706,9 @@ impl Desktop {
                 && let Err(error) = self.send_task_control(&task, cx)
             {
                 self.report(course2md::tr!("任务指令尚未保存：{}"), error);
-                if self.work.active_task.as_ref() == Some(&id)
-                    && let Some(job) = &self.work.job
+                let work = self.work.read(cx);
+                if work.active_task.as_ref() == Some(&id)
+                    && let Some(job) = &work.job
                 {
                     job.cancel();
                 }
@@ -774,7 +773,7 @@ impl Desktop {
     }
 
     pub fn resend_uncertain(&mut self, id: String, cx: &mut Context<Self>) {
-        if self.is_running_task(&id) {
+        if self.is_running_task(&id, cx) {
             self.message = Some(
                 course2md::tr!("正在保存当前结果，请等候当前任务停止后再选择重新发送。").into(),
             );
@@ -819,7 +818,7 @@ impl Desktop {
         resend: Vec<String>,
         cx: &mut Context<Self>,
     ) {
-        if self.is_running_task(&id) {
+        if self.is_running_task(&id, cx) {
             self.message =
                 Some(course2md::tr!("正在保存当前结果，请等候当前任务停止后再补做。").into());
             cx.notify();
@@ -875,7 +874,7 @@ impl Desktop {
     ) -> bool {
         let result = (|| -> Result<String> {
             ensure!(
-                !self.is_running_task(&id),
+                !self.is_running_task(&id, cx),
                 course2md::tr!("正在保存当前结果，请等待任务停止后再补做")
             );
             let task = self
@@ -912,7 +911,7 @@ impl Desktop {
     }
 
     pub fn adjust_task(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_running_task(&id) {
+        if self.is_running_task(&id, cx) {
             self.message =
                 Some(course2md::tr!("当前任务还在处理，请先暂停并等候当前步骤结束。").into());
             cx.notify();
@@ -1021,7 +1020,8 @@ impl Desktop {
                             )
                         });
                 if let Some(done) = done {
-                    self.work.completed = Some(done.clone());
+                    self.work
+                        .update(cx, |work, _| work.completed = Some(done.clone()));
                     let root = self.task_library(&task, cx).map(|l| l.root.clone());
                     let open = !task.exports_only()
                         && (follow_input_completion || follow_reader_completion);
@@ -1059,9 +1059,10 @@ impl Desktop {
                     })
                     .detach();
                 }
-                self.work.task_status = task.status_label().into();
-                self.transient_task_result = Some((id.to_owned(), std::time::Instant::now()));
-                self.schedule_wake(std::time::Duration::from_secs(8));
+                self.work.change(cx, |work, _| {
+                    work.task_status = task.status_label().into();
+                    work.show_result(id, Instant::now());
+                });
             }
             Err(error) => self.report(
                 course2md::tr!("完成状态尚未保存：{}。已发布的笔记仍保留。"),

@@ -116,7 +116,7 @@ impl Job {
         Self::spawn_input(resolve_cli()?, args, None, Redactions(vec![]), None, wake)
     }
     #[cfg(all(test, unix))]
-    fn spawn(bin: PathBuf, args: Vec<String>) -> Result<Self> {
+    pub(crate) fn spawn(bin: PathBuf, args: Vec<String>) -> Result<Self> {
         let (wake, _) = smol::channel::bounded(1);
         Self::spawn_input(bin, args, None, Redactions(vec![]), None, wake)
     }

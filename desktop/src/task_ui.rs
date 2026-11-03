@@ -142,7 +142,12 @@ trait StageStatusView {
 
 /// How an action draws and runs; the action itself is in `desktop_tasks::task_view`.
 pub(crate) trait TaskActionView {
-    fn present(&self, task: &TaskRecord, desktop: &Desktop) -> (&'static str, SymbolIcon, bool);
+    fn present(
+        &self,
+        task: &TaskRecord,
+        desktop: &Desktop,
+        cx: &App,
+    ) -> (&'static str, SymbolIcon, bool);
     fn run(&self, id: &str, this: &mut Desktop, window: &mut Window, cx: &mut Context<Desktop>);
     fn click(
         self,
@@ -224,7 +229,7 @@ impl Desktop {
     /// What the task's actions depend on beyond its own record.
     fn task_facts<'a>(&'a self, task: &TaskRecord, cx: &'a App) -> TaskFacts<'a> {
         TaskFacts {
-            active: self.is_running_task(&task.id),
+            active: self.is_running_task(&task.id, cx),
             expanded: self.task_list.expanded.as_ref() == Some(&task.id),
             library: self.task_library(task, cx),
             needs_reassociation: self.task_library(task, cx).is_some_and(|library| {
@@ -253,8 +258,8 @@ impl Desktop {
         task_actions(task, surface, &self.task_facts(task, cx))
     }
 
-    fn task_stage_rows(&self, task: &TaskRecord) -> Vec<TaskStage> {
-        task_stage_rows(task, self.is_running_task(&task.id))
+    fn task_stage_rows(&self, task: &TaskRecord, cx: &App) -> Vec<TaskStage> {
+        task_stage_rows(task, self.is_running_task(&task.id, cx))
     }
 
     pub fn queue_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -731,7 +736,7 @@ impl Desktop {
                 let ends = actions
                     .get(index + 1)
                     .is_some_and(|next| next.group() != action.group());
-                (action.present(task, self), ends, action.clone())
+                (action.present(task, self, cx), ends, action.clone())
             })
             .collect();
         move |_, _| {
@@ -981,6 +986,7 @@ impl Desktop {
                     self.task_destination(task, cx),
                     self.task_cover(task, cx),
                     COVER_WIDTH,
+                    self.task_step_line(task, false, cx),
                 );
                 let head = self.task_card_head(task, place, chip, more, None, facts);
                 (outer, head.into_any_element(), true)
@@ -990,6 +996,7 @@ impl Desktop {
                     self.task_destination(task, cx),
                     self.task_cover(task, cx),
                     import_ui::cover_width(window),
+                    self.task_step_line(task, true, cx),
                 );
                 let head = self.task_card_head(task, place, chip, more, inner, facts);
                 (
@@ -1144,8 +1151,8 @@ impl Desktop {
         chip: Option<Div>,
         more: AnyElement,
         inner: Option<Div>,
-        // Where it saves, its cover and the cover's width.
-        (destination, cover, cover_width): (String, Option<PathBuf>, Rems),
+        // Where it saves, its cover and the cover's width, and the step it is on.
+        (destination, cover, cover_width, step): (String, Option<PathBuf>, Rems, Option<String>),
     ) -> Div {
         let id = &task.id;
         let home = matches!(place, CardPlace::Home);
@@ -1171,7 +1178,6 @@ impl Desktop {
                 .collect::<Vec<_>>()
                 .join(" · ")
         };
-        let step = self.task_step_line(task, home);
         // A running task's status ends its title; one that waits says so below it.
         let (title_chip, line_chip) = if home || needs_person(task) {
             (None, chip)
@@ -1262,8 +1268,8 @@ impl Desktop {
     /// The step a running task is on. Later steps depend on what the video turns out
     /// to need, so the position counts the steps reached so far, without a total. The
     /// workbench says the step and its measure instead, above the bar.
-    fn task_step_line(&self, task: &TaskRecord, home: bool) -> Option<String> {
-        let stages = self.task_stage_rows(task);
+    fn task_step_line(&self, task: &TaskRecord, home: bool, cx: &App) -> Option<String> {
+        let stages = self.task_stage_rows(task, cx);
         let index = stages.iter().position(|stage| stage.status.running());
         index
             .map(|index| {
@@ -1276,12 +1282,12 @@ impl Desktop {
                     format!("{} · {}", stage.title, stage.detail)
                 }
             })
-            .or_else(|| self.task_wait(task).map(|wait| wait.label().to_owned()))
+            .or_else(|| self.task_wait(task, cx).map(|wait| wait.label().to_owned()))
     }
 
-    fn task_wait(&self, task: &TaskRecord) -> Option<WorkerWait> {
+    fn task_wait(&self, task: &TaskRecord, cx: &App) -> Option<WorkerWait> {
         worker_wait_state(
-            self.is_running_task(&task.id),
+            self.is_running_task(&task.id, cx),
             task.events.done.is_some(),
             task.intent,
             task.events
@@ -1299,11 +1305,12 @@ impl Desktop {
         task: &TaskRecord,
         stages: &[TaskStage],
         surface: TaskSurface,
+        cx: &App,
     ) -> Option<Div> {
         let id = &task.id;
-        let active = self.is_running_task(id);
+        let active = self.is_running_task(id, cx);
         let current = stages.iter().find(|stage| stage.status.running());
-        if !active || (current.is_none() && self.task_wait(task).is_none()) {
+        if !active || (current.is_none() && self.task_wait(task, cx).is_none()) {
             return None;
         }
         let detail = current
@@ -1311,8 +1318,9 @@ impl Desktop {
             .filter(|detail| !detail.is_empty())
             .or_else(|| {
                 self.work
+                    .read(cx)
                     .job_started
-                    .filter(|_| self.work.job.is_some())
+                    .filter(|_| self.work.read(cx).job.is_some())
                     .map(|started| activity::elapsed_label(started.elapsed()))
             })
             .filter(|_| surface != TaskSurface::Home || current.is_none());
@@ -1352,7 +1360,7 @@ impl Desktop {
         if uncertain.is_empty() || task.handled_by.is_some() {
             return None;
         }
-        let active = self.is_running_task(id);
+        let active = self.is_running_task(id, cx);
         Some(
             notice_banner(
                 SharedString::from(format!("unknown-effect-{id}")),
@@ -1428,9 +1436,9 @@ impl Desktop {
                     .join(course2md::tr!("、"))
             )
         });
-        let stages = self.task_stage_rows(task);
+        let stages = self.task_stage_rows(task, cx);
         let running = stages.iter().any(|stage| stage.status.running());
-        let progress = self.task_progress(task, &stages, surface);
+        let progress = self.task_progress(task, &stages, surface, cx);
         // A single reached step is already the step line above.
         let chips = (running && stages.len() > 1 && surface != TaskSurface::Home).then(|| {
             h_flex()
@@ -1456,7 +1464,7 @@ impl Desktop {
                 }))
         });
         let buttons = actions.iter().map(|action| {
-            let (label, icon, disabled) = action.present(task, self);
+            let (label, icon, disabled) = action.present(task, self, cx);
             let variant = if lead.as_ref() == Some(action) {
                 ButtonVariant::Filled
             } else {
@@ -1540,7 +1548,7 @@ impl Desktop {
                 ))))
                 .children(self.task_plan_rows(task, false, cx))
                 .children(
-                    self.task_stage_rows(task)
+                    self.task_stage_rows(task, cx)
                         .into_iter()
                         .map(|stage| stage_row(stage, window, cx)),
                 );
@@ -1597,16 +1605,25 @@ impl Desktop {
 
     /// A waiting line with the running job's clock, so a pause between
     /// stages never looks stalled.
-    pub(crate) fn with_job_clock(&self, label: &str) -> String {
-        match self.work.job_started.filter(|_| self.work.job.is_some()) {
+    pub(crate) fn with_job_clock(&self, label: &str, cx: &App) -> String {
+        match self
+            .work
+            .read(cx)
+            .job_started
+            .filter(|_| self.work.read(cx).job.is_some())
+        {
             Some(started) => format!("{label} · {}", activity::elapsed_label(started.elapsed())),
             None => label.to_owned(),
         }
     }
 
     /// Compact status uses the same measured progress as task details.
-    pub(crate) fn compact_task_progress(&self, task: &TaskRecord) -> Option<(String, Option<f32>)> {
-        self.task_stage_rows(task)
+    pub(crate) fn compact_task_progress(
+        &self,
+        task: &TaskRecord,
+        cx: &App,
+    ) -> Option<(String, Option<f32>)> {
+        self.task_stage_rows(task, cx)
             .into_iter()
             .find(|stage| stage.status.running())
             .map(|stage| {
@@ -1665,7 +1682,12 @@ impl StageStatusView for StageStatus {
 
 impl TaskActionView for TaskAction {
     /// Its label and icon, and whether it is unavailable right now.
-    fn present(&self, task: &TaskRecord, desktop: &Desktop) -> (&'static str, SymbolIcon, bool) {
+    fn present(
+        &self,
+        task: &TaskRecord,
+        desktop: &Desktop,
+        cx: &App,
+    ) -> (&'static str, SymbolIcon, bool) {
         let cancelling = task.state == TaskState::Pausing && task.intent == Intent::Cancel;
         let pausing = task.state == TaskState::Pausing && !cancelling;
         let details = desktop.task_list.expanded.as_ref() == Some(&task.id);
@@ -1697,7 +1719,7 @@ impl TaskActionView for TaskAction {
             Self::PrepareModel => (
                 tr!("下载并准备模型"),
                 symbols::download(),
-                desktop.work.job.is_some(),
+                desktop.work.read(cx).job.is_some(),
             ),
             Self::Repair => (tr!("修复 AI 服务并补做"), symbols::settings(), false),
             Self::Retry(component) => (retry_component_label(component), symbols::refresh(), false),

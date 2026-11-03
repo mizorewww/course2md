@@ -2649,7 +2649,7 @@ impl Desktop {
     /// What stands between this video and a conversion, each obstacle with its one
     /// way forward. Only unresolved choices interrupt a submitted conversion.
     fn conversion_recovery(&mut self, cx: &mut Context<Self>) -> Option<Div> {
-        let busy = self.work.job.is_some()
+        let busy = self.work.read(cx).job.is_some()
             || self.workspace(cx).is_some_and(|workspace| {
                 workspace.state.tasks.iter().any(|task| {
                     matches!(

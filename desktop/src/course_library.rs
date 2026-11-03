@@ -1808,7 +1808,7 @@ impl Desktop {
                     && (matches!(
                         task.state,
                         TaskState::Queued | TaskState::Running | TaskState::Pausing
-                    ) || self.is_running_task(&task.id))
+                    ) || self.is_running_task(&task.id, cx))
             })
             .cloned()
             .collect();
@@ -1820,7 +1820,7 @@ impl Desktop {
         let mut list = v_flex().w_full().min_w_0().gap(TILE_GAP);
         for (index, task) in tasks.iter().enumerate() {
             let id = task.id.clone();
-            let queued = task.state == TaskState::Queued && !self.is_running_task(&id);
+            let queued = task.state == TaskState::Queued && !self.is_running_task(&id, cx);
             let cancel = id.clone();
             let menu = self.task_menu(task, cx);
             let row = scale
@@ -1914,9 +1914,9 @@ impl Desktop {
     ) -> Vec<AnyElement> {
         use crate::workspace::{Intent, TaskState};
         let id = &task.id;
-        let queued = task.state == TaskState::Queued && !self.is_running_task(id);
+        let queued = task.state == TaskState::Queued && !self.is_running_task(id, cx);
         let cancelling = task.intent == Intent::Cancel;
-        let progress_now = self.compact_task_progress(task);
+        let progress_now = self.compact_task_progress(task, cx);
         let status = if cancelling {
             course2md::tr!("正在取消…").to_owned()
         } else if task.state == TaskState::Pausing {
@@ -1928,8 +1928,8 @@ impl Desktop {
                 .as_ref()
                 .map(|(label, _)| label.clone())
                 .unwrap_or_else(|| {
-                    if self.is_running_task(id) {
-                        self.with_job_clock(course2md::tr!("正在准备…"))
+                    if self.is_running_task(id, cx) {
+                        self.with_job_clock(course2md::tr!("正在准备…"), cx)
                     } else {
                         course2md::tr!("正在准备…").into()
                     }
@@ -2049,7 +2049,7 @@ impl Desktop {
             } else {
                 TaskAction::ViewTask
             };
-            let (label, icon, _) = next.present(&task, self);
+            let (label, icon, _) = next.present(&task, self, cx);
             action(label, ButtonVariant::Text)
                 .icon(icon)
                 .child(label)
