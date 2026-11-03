@@ -70,6 +70,10 @@ MIRRORS = {
         f"https://deb.debian.org/debian/pool/main/f/ffmpeg/ffmpeg_{FFMPEG_VERSION}.orig.tar.xz",
         _gentoo(f"ffmpeg-{FFMPEG_VERSION}.tar.xz"),
     ),
+    # zlib's own release asset on GitHub, the same file as zlib.net's.
+    ZLIB_SOURCE[0]: (
+        f"https://github.com/madler/zlib/releases/download/v{ZLIB_VERSION}/zlib-{ZLIB_VERSION}.tar.gz",
+    ),
 }
 # Each URL is tried this many times, waiting RETRY_DELAY seconds, then twice that.
 ATTEMPTS = 3
