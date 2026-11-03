@@ -217,20 +217,22 @@ fn stage_row(stage: TaskStage, window: &mut Window, cx: &mut App) -> Div {
         })
 }
 
+/// The cover's width on a task card away from home.
+const COVER_WIDTH: Rems = Rems(160.);
+
 impl Desktop {
     /// What the task's actions depend on beyond its own record.
-    fn task_facts(&self, task: &TaskRecord) -> TaskFacts<'_> {
+    fn task_facts<'a>(&'a self, task: &TaskRecord, cx: &'a App) -> TaskFacts<'a> {
         TaskFacts {
             active: self.is_running_task(&task.id),
             expanded: self.task_list.expanded.as_ref() == Some(&task.id),
-            library: self.task_library(task),
-            needs_reassociation: self.task_library(task).is_some_and(|library| {
+            library: self.task_library(task, cx),
+            needs_reassociation: self.task_library(task, cx).is_some_and(|library| {
                 self.cached_location_check(library)
                     .is_some_and(|check| check.needs_reassociation)
             }),
             queue: self
-                .workspace
-                .as_ref()
+                .workspace(cx)
                 .map(|workspace| {
                     workspace
                         .state
@@ -242,8 +244,13 @@ impl Desktop {
         }
     }
 
-    pub(crate) fn task_actions(&self, task: &TaskRecord, surface: TaskSurface) -> Vec<TaskAction> {
-        task_actions(task, surface, &self.task_facts(task))
+    pub(crate) fn task_actions(
+        &self,
+        task: &TaskRecord,
+        surface: TaskSurface,
+        cx: &App,
+    ) -> Vec<TaskAction> {
+        task_actions(task, surface, &self.task_facts(task, cx))
     }
 
     fn task_stage_rows(&self, task: &TaskRecord) -> Vec<TaskStage> {
@@ -253,7 +260,7 @@ impl Desktop {
     pub fn queue_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let rem_size = f32::from(window.rem_size());
         let mut items = Vec::new();
-        let tasks: Rc<Vec<TaskRecord>> = match &self.workspace {
+        let tasks: Rc<Vec<TaskRecord>> = match &self.records.read(cx).workspace {
             None => {
                 items.push(QueueItem::Unavailable);
                 self.task_list.cache = None;
@@ -289,7 +296,7 @@ impl Desktop {
                 }
             }
         };
-        if self.workspace.is_some() {
+        if self.records.read(cx).workspace.is_some() {
             items.insert(0, QueueItem::Header);
         }
         let completed_state = window.use_keyed_state("task-history-open", cx, |_, _| false);
@@ -501,7 +508,7 @@ impl Desktop {
     /// Stop the running task first, so its stop starts nothing new, then hold
     /// the queue in one step, so no queued task starts between two pauses.
     pub(crate) fn pause_all_tasks(&mut self, cx: &mut Context<Self>) {
-        let Some(workspace) = &self.workspace else {
+        let Some(workspace) = &self.records.read(cx).workspace else {
             return;
         };
         let pausable = |task: &&TaskRecord| task.handled_by.is_none() && task.intent == Intent::Run;
@@ -523,16 +530,20 @@ impl Desktop {
             self.set_task_intent(id, Intent::Pause, cx);
         }
         // Queued work has no worker to tell; its record is the whole state.
-        self.transact(course2md::tr!("任务状态尚未保存：{}"), |state| {
-            queued
-                .iter()
-                .try_for_each(|id| state.set_intent(id, Intent::Pause))
-        });
+        self.transact(
+            course2md::tr!("任务状态尚未保存：{}"),
+            |state| {
+                queued
+                    .iter()
+                    .try_for_each(|id| state.set_intent(id, Intent::Pause))
+            },
+            cx,
+        );
         cx.notify();
     }
 
     pub(crate) fn resume_all_tasks(&mut self, cx: &mut Context<Self>) {
-        let Some(workspace) = &self.workspace else {
+        let Some(workspace) = &self.records.read(cx).workspace else {
             return;
         };
         let ids: Vec<String> = workspace
@@ -548,9 +559,11 @@ impl Desktop {
     }
 
     pub(crate) fn move_waiting_task(&mut self, id: &str, position: usize, cx: &mut Context<Self>) {
-        self.transact(course2md::tr!("任务顺序尚未保存：{}"), |state| {
-            state.move_waiting_task(id, position)
-        });
+        self.transact(
+            course2md::tr!("任务顺序尚未保存：{}"),
+            |state| state.move_waiting_task(id, position),
+            cx,
+        );
         cx.notify();
     }
 
@@ -685,7 +698,7 @@ impl Desktop {
                     if open
                         && let Some(id) = this.task_list.expanded.clone()
                         && this
-                            .task(&id)
+                            .task(&id, cx)
                             .is_some_and(|task| task_group(task).settled())
                     {
                         this.close_task_details(&id);
@@ -709,7 +722,7 @@ impl Desktop {
     ) -> impl Fn(&mut Window, &mut App) -> MaterialMenu + 'static {
         let entity = cx.weak_entity();
         let id = task.id.clone();
-        let actions = self.task_actions(task, TaskSurface::Menu);
+        let actions = self.task_actions(task, TaskSurface::Menu, cx);
         // A divider ends each menu section.
         let items: Vec<_> = actions
             .iter()
@@ -801,7 +814,7 @@ impl Desktop {
         };
         // The note opens from its path even before the library has listed it.
         let course = self
-            .library
+            .library(cx)
             .courses
             .iter()
             .find(|course| &course.dir == path)
@@ -817,8 +830,8 @@ impl Desktop {
     }
 
     /// Where a task saves, as its supporting line.
-    fn task_destination(&self, task: &TaskRecord) -> String {
-        match self.task_library(task) {
+    fn task_destination(&self, task: &TaskRecord, cx: &App) -> String {
+        match self.task_library(task, cx) {
             Some(location) => course2md::tr!("保存到 {}", location.label()),
             None => course2md::tr!("保存位置暂时不可用").to_owned(),
         }
@@ -845,7 +858,7 @@ impl Desktop {
 
     /// What a task was planned with, read from its saved plan: a submitted task's
     /// options on the workbench, and the record in its details.
-    pub(crate) fn task_plan_rows(&self, task: &TaskRecord, flat: bool) -> Vec<Div> {
+    pub(crate) fn task_plan_rows(&self, task: &TaskRecord, flat: bool, cx: &App) -> Vec<Div> {
         let options = task.plan.options();
         let mut ai: Vec<String> = [
             desktop_tasks::import::ConversionAiOption::Proofread,
@@ -869,14 +882,13 @@ impl Desktop {
             None => ai,
         };
         let library = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| workspace.state.library(&task.plan.library_id));
         let folder = task
             .plan
             .folder
             .and_then(|id| {
-                self.library
+                self.library(cx)
                     .indexes
                     .get(&library?.root)?
                     .folders
@@ -914,9 +926,9 @@ impl Desktop {
         .collect()
     }
 
-    fn task_cover(&self, task: &TaskRecord) -> Option<PathBuf> {
+    fn task_cover(&self, task: &TaskRecord, cx: &App) -> Option<PathBuf> {
         task.plan.source.cover.clone().or_else(|| {
-            self.library
+            self.library(cx)
                 .cover_by_source
                 .get(&task.plan.source_id)
                 .cloned()
@@ -965,11 +977,21 @@ impl Desktop {
                 (outer, head.into_any_element(), expanded)
             }
             CardPlace::Open { outer } => {
-                let head = self.task_card_head(task, place, chip, more, None, window);
+                let facts = (
+                    self.task_destination(task, cx),
+                    self.task_cover(task, cx),
+                    COVER_WIDTH,
+                );
+                let head = self.task_card_head(task, place, chip, more, None, facts);
                 (outer, head.into_any_element(), true)
             }
             CardPlace::Home => {
-                let head = self.task_card_head(task, place, chip, more, inner, window);
+                let facts = (
+                    self.task_destination(task, cx),
+                    self.task_cover(task, cx),
+                    import_ui::cover_width(window),
+                );
+                let head = self.task_card_head(task, place, chip, more, inner, facts);
                 (
                     [true, true, false, false],
                     head.into_any_element(),
@@ -1020,7 +1042,7 @@ impl Desktop {
         let waiting = number.map(|_| task.state);
         let scale = TileScale::Regular;
         let cover = crate::course_library::row_cover(
-            self.task_cover(task),
+            self.task_cover(task, cx),
             match waiting {
                 Some(TaskState::Paused) => symbols::pause(),
                 Some(_) => symbols::schedule(),
@@ -1063,7 +1085,7 @@ impl Desktop {
                             )
                             .child(scale.support(
                                 SharedString::from(format!("task-row-place-{id}")),
-                                self.task_destination(task),
+                                self.task_destination(task, cx),
                             )),
                     )
                     .child(
@@ -1122,7 +1144,8 @@ impl Desktop {
         chip: Option<Div>,
         more: AnyElement,
         inner: Option<Div>,
-        window: &Window,
+        // Where it saves, its cover and the cover's width.
+        (destination, cover, cover_width): (String, Option<PathBuf>, Rems),
     ) -> Div {
         let id = &task.id;
         let home = matches!(place, CardPlace::Home);
@@ -1142,19 +1165,11 @@ impl Desktop {
         let support = if home {
             desktop_tasks::import::source_metadata(&task.plan.source)
         } else {
-            [
-                self.task_destination(task),
-                task_text_source(task).to_owned(),
-            ]
-            .into_iter()
-            .chain(self.task_ai_destination(task))
-            .collect::<Vec<_>>()
-            .join(" · ")
-        };
-        let cover_width = if !home {
-            rem(160.)
-        } else {
-            import_ui::cover_width(window)
+            [destination, task_text_source(task).to_owned()]
+                .into_iter()
+                .chain(self.task_ai_destination(task))
+                .collect::<Vec<_>>()
+                .join(" · ")
         };
         let step = self.task_step_line(task, home);
         // A running task's status ends its title; one that waits says so below it.
@@ -1183,7 +1198,7 @@ impl Desktop {
                         ui::RESOURCE_ICON,
                     ))
                 } else {
-                    head.child(video_cover(self.task_cover(task), cover_width))
+                    head.child(video_cover(cover, cover_width))
                 }
             })
             .child(
@@ -1398,7 +1413,7 @@ impl Desktop {
         } else {
             TaskSurface::Card
         };
-        let mut actions = self.task_actions(task, surface);
+        let mut actions = self.task_actions(task, surface, cx);
         // A row carries reading at its edge and folds itself.
         actions.retain(|action| !row || !matches!(action, TaskAction::Read | TaskAction::Details));
         let lead = lead_action(&actions, task, surface).cloned();
@@ -1523,7 +1538,7 @@ impl Desktop {
                 .child(MaterialDivider::new(SharedString::from(format!(
                     "task-detail-divider-{id}"
                 ))))
-                .children(self.task_plan_rows(task, false))
+                .children(self.task_plan_rows(task, false, cx))
                 .children(
                     self.task_stage_rows(task)
                         .into_iter()
@@ -1701,7 +1716,7 @@ impl TaskActionView for TaskAction {
     }
 
     fn run(&self, id: &str, this: &mut Desktop, window: &mut Window, cx: &mut Context<Desktop>) {
-        let Some(task) = this.task(id).cloned() else {
+        let Some(task) = this.task(id, cx).cloned() else {
             return;
         };
         let id = id.to_owned();

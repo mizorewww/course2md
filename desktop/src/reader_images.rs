@@ -8,7 +8,7 @@
 //! slide text. Here the gallery asks for a thumbnail of the width it draws,
 //! the viewer for the original, and the least recently drawn images are
 //! released (bitmap and texture) once the cache exceeds its budget.
-use crate::Desktop;
+use crate::reader_ui::ReaderPage;
 use gpui::{App, AppContext as _, Context, RenderImage};
 use image::{DynamicImage, imageops::thumbnail};
 use std::{
@@ -88,7 +88,7 @@ impl ReaderImages {
     }
 
     /// The image at `size`, starting its decode when it is not cached.
-    pub(crate) fn get(&mut self, path: &Path, size: Size, cx: &mut Context<Desktop>) -> Loaded {
+    pub(crate) fn get(&mut self, path: &Path, size: Size, cx: &mut Context<ReaderPage>) -> Loaded {
         let tick = self.tick;
         let key = (path.to_path_buf(), size);
         match self.entries.get_mut(&key) {
@@ -182,7 +182,7 @@ impl ReaderImages {
         // Decodes in flight finish into the void; their slots free then.
     }
 
-    fn pump(&mut self, cx: &mut Context<Desktop>) {
+    fn pump(&mut self, cx: &mut Context<ReaderPage>) {
         let slots = std::thread::available_parallelism()
             .map_or(2, |cores| cores.get() / 2)
             .clamp(2, MAX_IN_FLIGHT);
@@ -206,11 +206,11 @@ impl ReaderImages {
             });
             cx.spawn(async move |this, cx| {
                 let result = decode.await;
-                let _ = this.update(cx, |desktop, cx| {
-                    let images = &mut desktop.reader_ui.images;
+                let _ = this.update(cx, |reader, cx| {
+                    let images = &mut reader.images;
                     images.finish(key, generation, result, cx);
                     images.pump(cx);
-                    desktop.reader_image_loaded(cx);
+                    reader.reader_image_loaded(cx);
                 });
             })
             .detach();

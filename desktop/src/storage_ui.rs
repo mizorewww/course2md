@@ -29,24 +29,16 @@ const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 const TASK_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl Desktop {
-    pub(super) fn registered_storage_locations(&self) -> Vec<workspace::LibraryLocation> {
-        self.workspace
-            .as_ref()
-            .map(|workspace| workspace.state.libraries.clone())
-            .unwrap_or_else(|| {
-                // Without a workspace record the root has no registered id; an
-                // empty id skips the marker identity check for this placeholder.
-                vec![workspace::LibraryLocation {
-                    id: String::new(),
-                    name: course2md::tr!("笔记库").into(),
-                    root: self.library.root.clone(),
-                    previous_roots: Vec::new(),
-                }]
-            })
+    pub(super) fn registered_storage_locations(&self, cx: &App) -> Vec<workspace::LibraryLocation> {
+        self.records.read(cx).locations()
     }
 
-    fn registered_library(&self, id: &str) -> Option<&workspace::LibraryLocation> {
-        self.workspace.as_ref()?.state.library(id)
+    fn registered_library<'a>(
+        &self,
+        id: &str,
+        cx: &'a App,
+    ) -> Option<&'a workspace::LibraryLocation> {
+        self.records.read(cx).library_location(id)
     }
 
     pub(super) fn cached_location_check(
@@ -56,10 +48,10 @@ impl Desktop {
         self.storage_ui.location_checks.get(location)
     }
 
-    pub(super) fn cached_library_access(&self) -> Option<storage::LibraryAccess> {
+    pub(super) fn cached_library_access(&self, cx: &App) -> Option<storage::LibraryAccess> {
         self.storage_ui
             .location_checks
-            .access(&self.registered_storage_locations())
+            .access(&self.registered_storage_locations(cx))
     }
 }
 
@@ -148,7 +140,10 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(root) = self.registered_library(&library_id).map(|l| l.root.clone()) {
+        if let Some(root) = self
+            .registered_library(&library_id, cx)
+            .map(|l| l.root.clone())
+        {
             self.link_library(library_id, root, window, cx);
         }
     }
@@ -173,7 +168,7 @@ impl Desktop {
         if !self.save_current_draft(cx) {
             return;
         }
-        let Some(state) = self.workspace.as_ref().map(|w| w.state.clone()) else {
+        let Some(state) = self.workspace(cx).map(|w| w.state.clone()) else {
             return;
         };
         let (generation, cancel) = self.storage_busy();
@@ -229,8 +224,10 @@ impl Desktop {
                         this.work.job.is_none() && this.import.preview_workers == 0,
                         course2md::tr!("内容仍在处理中，请停止后重新定位")
                     );
-                    let workspace = this.workspace.as_mut().context(registry_unavailable())?;
-                    workspace.transaction(|state| storage::publish_link(state, &link, tasks))?;
+                    this.with_workspace(cx, |workspace| {
+                        workspace.transaction(|state| storage::publish_link(state, &link, tasks))
+                    })
+                    .context(registry_unavailable())??;
                     Ok(link)
                 });
                 let linked = result.is_ok();
@@ -253,17 +250,20 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.library.root == link.previous_root {
-            self.library.root = link.folder.clone();
+        if self.library(cx).root == link.previous_root {
+            self.records
+                .update(cx, |records, _| records.library.root = link.folder.clone());
         }
-        self.opened.stop_reading();
-        if let Some(preview) = self.opened.preview.as_mut() {
-            let was_inside = preview.course.dir.starts_with(&link.previous_root);
-            relocate_preview(Rc::make_mut(preview), &link.previous_root, &link.folder);
-            if was_inside {
-                self.restore_reading_position(cx);
+        self.reader.update(cx, |reader, cx| {
+            reader.opened.stop_reading();
+            if let Some(preview) = reader.opened.preview.as_mut() {
+                let was_inside = preview.course.dir.starts_with(&link.previous_root);
+                relocate_preview(Rc::make_mut(preview), &link.previous_root, &link.folder);
+                if was_inside {
+                    reader.restore_reading_position(cx);
+                }
             }
-        }
+        });
         let settings = self.relocate_settings_paths(&link.previous_root, &link.folder, cx);
         self.storage_ui.error = settings.err().map(|error| {
             course2md::tr!(
@@ -301,8 +301,7 @@ impl Desktop {
     pub fn restore_storage_state(&mut self, cx: &mut Context<Self>) {
         let directory = self.preferences.root().join("storage");
         let (libraries, backups) = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .map(|workspace| {
                 (
                     workspace
@@ -331,6 +330,8 @@ impl Desktop {
         // Model paths follow a moved library. Repeating this after a crash is harmless,
         // and once they follow there is nothing left to do.
         let moved: Vec<_> = self
+            .records
+            .read(cx)
             .workspace
             .iter()
             .flat_map(|workspace| workspace.state.storage_backups.iter())
@@ -346,15 +347,14 @@ impl Desktop {
             }
         }
         if !records.cleaned.is_empty()
-            && let Some(workspace) = &mut self.workspace
-            && workspace
-                .transaction(|state| {
+            && let Some(Err(_)) = self.with_workspace(cx, |workspace| {
+                workspace.transaction(|state| {
                     state
                         .storage_backups
                         .retain(|backup| !records.cleaned.contains(&backup.id));
                     Ok(())
                 })
-                .is_err()
+            })
         {
             self.storage_ui.error = Some(backup_list_stale().into());
         }
@@ -381,7 +381,7 @@ impl Desktop {
 
     fn set_default_library(&mut self, id: String, cx: &mut Context<Self>) {
         let Some(root) = self
-            .registered_library(&id)
+            .registered_library(&id, cx)
             .map(|library| library.root.clone())
         else {
             self.workspace_error = Some(course2md::tr!("这个笔记库已被移除").into());
@@ -393,14 +393,18 @@ impl Desktop {
         cx.spawn(async move |this, cx| {
             let writable = matches!(probe.await, Some(Ok(())));
             let _ = this.update(cx, |this, cx| {
-                let Some(workspace) = &mut this.workspace else {
-                    return;
-                };
                 let result = if writable {
-                    workspace.transaction(|state| {
-                        state.default_library = id.clone();
-                        Ok(())
-                    })
+                    let Some(result) = this.with_workspace(cx, |workspace| {
+                        workspace.transaction(|state| {
+                            state.default_library = id.clone();
+                            Ok(())
+                        })
+                    }) else {
+                        return;
+                    };
+                    result
+                } else if this.records.read(cx).workspace.is_none() {
+                    return;
                 } else {
                     Err(anyhow::anyhow!(course2md::tr!(
                         "这个文件夹暂时不能写入，请重新连接磁盘或检查访问权限"
@@ -425,8 +429,7 @@ impl Desktop {
             && let Some(id) = self.storage_ui.resume_task.take()
         {
             let can_resume = self
-                .workspace
-                .as_ref()
+                .workspace(cx)
                 .and_then(|workspace| workspace.state.task(&id))
                 .is_some_and(|task| {
                     task.state == workspace::TaskState::Paused
@@ -451,7 +454,7 @@ impl Desktop {
         if self.storage_ui.busy {
             return;
         }
-        let Some(location) = self.registered_library(&library_id).cloned() else {
+        let Some(location) = self.registered_library(&library_id, cx).cloned() else {
             return;
         };
         self.pick_folder(
@@ -502,11 +505,7 @@ impl Desktop {
             return;
         }
         let op = StorageOp::Move;
-        let Some(state) = self
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.state.clone())
-        else {
+        let Some(state) = self.workspace(cx).map(|workspace| workspace.state.clone()) else {
             return self.storage_refused(op, registry_unavailable().into(), cx);
         };
         // Only a conversion task can pause and resume around a move.
@@ -606,13 +605,12 @@ impl Desktop {
                             return;
                         }
                         let committed = this
-                            .workspace
-                            .as_mut()
-                            .context(registry_unavailable())
-                            .and_then(|workspace| {
+                            .with_workspace(cx, |workspace| {
                                 workspace
                                     .transaction(|state| storage::publish_move(state, &prepared))
-                            });
+                            })
+                            .context(registry_unavailable())
+                            .and_then(|committed| committed);
                         if let Err(error) = committed {
                             this.finish_storage_error(
                                 course2md::tr!(
@@ -623,8 +621,10 @@ impl Desktop {
                             );
                             return;
                         }
-                        if this.library.root == prepared.journal.source {
-                            this.library.root = prepared.journal.destination.clone();
+                        if this.library(cx).root == prepared.journal.source {
+                            this.records.update(cx, |records, _| {
+                                records.library.root = prepared.journal.destination.clone()
+                            });
                         }
                         prepared.journal.phase = Phase::Committed;
                         this.storage_ui.error = None;
@@ -700,8 +700,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let Some(library) = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| workspace.state.libraries.first().cloned())
         else {
             return self.open_storage_dialog(cx);
@@ -856,7 +855,7 @@ impl Desktop {
                 AsyncStatus::Success(storage.progress.message.clone().into()),
             ));
         }
-        match self.cached_library_access() {
+        match self.cached_library_access(cx) {
             None => lines.push((
                 "storage-locations-checking",
                 AsyncStatus::Busy(course2md::tr!("正在检查保存位置…").into()),
@@ -943,8 +942,7 @@ impl Desktop {
             )
         });
         let backups = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .map(|workspace| workspace.state.storage_backups.as_slice())
             .filter(|backups| !backups.is_empty())
             .map(|backups| {
@@ -1190,11 +1188,13 @@ impl Desktop {
     pub(super) fn storage_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut locations =
             TileGroup::new("storage-locations-heading", course2md::tr!("笔记库位置"));
-        if let Some(workspace) = &self.workspace {
+        if let Some(workspace) = &self.records.read(cx).workspace {
+            let libraries = workspace.state.libraries.clone();
+            let default_library = workspace.state.default_library.clone();
             // The default is only a choice once there is more than one location.
-            let several = workspace.state.libraries.len() > 1;
-            for (index, library) in workspace.state.libraries.iter().enumerate() {
-                let default = workspace.state.default_library == library.id;
+            let several = libraries.len() > 1;
+            for (index, library) in libraries.iter().enumerate() {
+                let default = default_library == library.id;
                 locations =
                     locations.child(self.location_row(index, library, several, default, cx));
             }
@@ -1225,8 +1225,7 @@ impl Desktop {
             return;
         }
         let Some(backup) = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| {
                 workspace
                     .state
@@ -1277,6 +1276,8 @@ impl Desktop {
         self.storage_ui.progress.message = course2md::tr!("正在清理备份…").into();
         self.open_storage_dialog(cx);
         let roots = self
+            .records
+            .read(cx)
             .workspace
             .iter()
             .flat_map(|workspace| &workspace.state.libraries)
@@ -1294,11 +1295,13 @@ impl Desktop {
                 this.storage_ui.progress = Progress::default();
                 match result {
                     Ok(()) => {
-                        if let Some(workspace) = &mut this.workspace {
-                            match workspace.transaction(|state| {
+                        if let Some(cleaned) = this.with_workspace(cx, |workspace| {
+                            workspace.transaction(|state| {
                                 state.storage_backups.retain(|backup| backup.id != id);
                                 Ok(())
-                            }) {
+                            })
+                        }) {
+                            match cleaned {
                                 Ok(()) => {
                                     this.storage_ui.progress.message =
                                         course2md::tr!("旧位置备份已清理").into();

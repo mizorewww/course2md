@@ -40,6 +40,38 @@ Under the no-drop rule this is the reachable figure; see `REDUCTION.md` § Worki
 | Fixes and logins | `5863f22` | 67,456 |
 | Reduction chunks, crate split | `edf140d` | 66,768 |
 
+## P2: the thin wrapper (decision 9, finding Q2)
+
+Branch `split/thin-wrapper`, first step of P2-b. The binary moved logic out and the reader became an entity:
+
+- **Out of the binary.** The reader's export (the suggested name, refusing any note-version folder, a temporary
+  folder beside the target and the rename) is `desktop_reader_core::reader::{export_file_name, export_version}`.
+  What a task run sends and records is `desktop_tasks::run`: the engine request and control file, the start's
+  library checks, the record of a failed start, a run and its end, filing a published note, the repair
+  configuration and the uncertain requests. The app keeps when each happens: `claim_start` (A3), held tasks (A2),
+  the poll (B1), model consent (B5), resend authorization and the paid-request guards are unchanged. The folder
+  context of a note or the next note is `desktop_store::records::Records::folder_context`.
+- **Shared entities.** `Entity<Records>` (`desktop_store::records`) holds the workspace record and the library
+  scan, which were two `Desktop` fields; `Entity<NoteExports>` holds exports for the reader and the library rows.
+- **ReaderPage.** `Entity<ReaderPage>` holds the reader's state and `OpenedNote`, renders itself, reads
+  `Records` and `NoteExports`, and emits `ReaderEvent` (navigate, open task, reprocess, repair service, message,
+  record error, viewer opened). Desktop subscribes, keeps opening a note (its conversion guards and the draft),
+  and draws the reader's title bar from `ReaderPage::title_bar`.
+- **Verified.** Captures of the capture build before (`5ad1305b`) and after, paper and ink, of home, tasks,
+  library, settings (appearance, storage), the reader (top, `~shots`, `~shot:1`, `~end`, `dialog:image`, find
+  with next and close, version menu and switching to the other version, export menu, scroll, back, a narrow
+  window with the contents over the note): every pair is pixel-identical. Reading positions saved after a scroll
+  and restored on the next open are the same. The export to a file goes through the native save panel, which the
+  harness cannot drive; `export_version` is tested on a published fixture instead.
+- **Rendering.** Not yet lighter: a notify on the reader marks `Desktop` dirty as its ancestor, and the reader is
+  drawn uncached, so it still renders with every `Desktop` frame. Drawing it `cached` needs `Records` to notify
+  its observers on every change, so the reader can observe it; that is the next step's.
+- **Numbers.** Binary `desktop/src` 30,212 → 30,104 lines (`wc -l`), `Desktop` 44 → 43 fields, `impl Desktop` in
+  23 → 22 files; `metrics.py` 67,603 → 68,162 (+559: `run.rs` and `records.rs`, their tests excluded, and the
+  entity plumbing).
+- **Next.** `AccountsView` (Bilibili login, account, YouTube; Codex and Ollama are tied to the service forms and
+  follow those), then the library and task pages, and `Records` notifying so pages can be drawn cached.
+
 ## Next action
 
 Acceptance round 2 with fresh reviewers (UI, app, CLI, plan), per `PLAN.md` § Acceptance; repin to the kit `main`

@@ -3,14 +3,13 @@
 use super::*;
 use crate::{
     notes::default_output,
-    preferences::ServiceRefs,
     workspace::{Intent, TaskPlan, TaskRecord, TaskState},
 };
 use anyhow::{Context as _, Result, ensure};
-use course2md::config::TranscriptSource;
 use course2md::execution::Component;
 use desktop_tasks::plan::*;
-use desktop_tasks::task_view::{TaskGroup, ai_component, task_component_failures, task_group};
+use desktop_tasks::run;
+use desktop_tasks::task_view::{TaskGroup, task_group};
 use std::collections::HashMap;
 
 /// Options shown before the workspace has restored a draft.
@@ -20,24 +19,24 @@ static NO_DRAFT_OPTIONS: std::sync::LazyLock<ConversionOptions> =
 impl Desktop {
     /// The current input form. It is the only copy of its choices: views read
     /// it and option controls write through `update_draft`.
-    pub(crate) fn draft(&self) -> Option<&workspace::Draft> {
-        self.workspace.as_ref().and_then(|w| w.state.draft())
+    pub(crate) fn draft<'a>(&self, cx: &'a App) -> Option<&'a workspace::Draft> {
+        self.records.read(cx).draft()
     }
 
     /// Whether the current input is an online link (the default before a
     /// workspace is restored) rather than a local file.
-    pub(crate) fn online(&self) -> bool {
-        self.draft().is_none_or(|draft| draft.online)
+    pub(crate) fn online(&self, cx: &App) -> bool {
+        self.draft(cx).is_none_or(|draft| draft.online)
     }
 
-    pub(crate) fn task_options(&self) -> &ConversionOptions {
-        self.draft()
+    pub(crate) fn task_options<'a>(&self, cx: &'a App) -> &'a ConversionOptions {
+        self.draft(cx)
             .map(|draft| &draft.options)
             .unwrap_or(&NO_DRAFT_OPTIONS)
     }
 
-    pub(crate) fn target_folder(&self) -> Option<u64> {
-        self.draft().and_then(|draft| draft.folder)
+    pub(crate) fn target_folder(&self, cx: &App) -> Option<u64> {
+        self.draft(cx).and_then(|draft| draft.folder)
     }
 
     /// One saved change to the workspace. A failure shows in the shell as `failure`,
@@ -46,8 +45,12 @@ impl Desktop {
         &mut self,
         failure: &str,
         edit: impl FnOnce(&mut workspace::State) -> Result<T>,
+        cx: &mut App,
     ) -> Option<T> {
-        match self.workspace.as_mut()?.transaction(edit) {
+        let result = self.records.update(cx, |records, _| {
+            Some(records.workspace.as_mut()?.transaction(edit))
+        })?;
+        match result {
             Ok(value) => Some(value),
             Err(error) => {
                 self.report(failure, error);
@@ -62,8 +65,8 @@ impl Desktop {
     }
 
     /// The task with this id, if the record is readable.
-    pub(crate) fn task(&self, id: &str) -> Option<&TaskRecord> {
-        self.workspace.as_ref()?.state.task(id)
+    pub(crate) fn task<'a>(&self, id: &str, cx: &'a App) -> Option<&'a TaskRecord> {
+        self.records.read(cx).task(id)
     }
 
     /// Change the current draft and record it. A failed write is reported
@@ -73,10 +76,11 @@ impl Desktop {
         edit: impl FnOnce(&mut workspace::Draft),
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(workspace) = &mut self.workspace else {
+        let Some(edited) = self.with_workspace(cx, |workspace| edit_current_draft(workspace, edit))
+        else {
             return false;
         };
-        match edit_current_draft(workspace, edit) {
+        match edited {
             Ok(_) => {
                 self.workspace_error = None;
                 true
@@ -121,14 +125,15 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         self.message = workspace.recovery.clone();
-        self.workspace = Some(workspace);
+        self.records
+            .update(cx, |records, _| records.workspace = Some(workspace));
         self.workspace_error = None;
         self.restore_draft(window, cx);
         self.refresh_library(cx);
     }
 
     pub fn retry_workspace_records(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(workspace) = &self.workspace {
+        if let Some(workspace) = &self.records.read(cx).workspace {
             self.workspace_error = None;
             if let Err(error) = workspace.save() {
                 self.report(course2md::tr!("记录仍未保存：{}"), error);
@@ -160,7 +165,7 @@ impl Desktop {
         }
         let root = self.workspace_root();
         let options = ConversionOptions::from_config(&self.preferences.defaults_config());
-        let result = if let Some(workspace) = &self.workspace {
+        let result = if let Some(workspace) = &self.records.read(cx).workspace {
             workspace::Workspace::rebuild_at(workspace.storage_path().to_owned(), root, options)
         } else {
             workspace::Workspace::rebuild(root, options)
@@ -182,10 +187,12 @@ impl Desktop {
     }
 
     /// The library location a task's plan saves to; the record may name a removed library.
-    pub(crate) fn task_library(&self, task: &TaskRecord) -> Option<&workspace::LibraryLocation> {
-        self.workspace
-            .as_ref()
-            .and_then(|w| w.state.library(&task.plan.library_id))
+    pub(crate) fn task_library<'a>(
+        &self,
+        task: &TaskRecord,
+        cx: &'a App,
+    ) -> Option<&'a workspace::LibraryLocation> {
+        self.records.read(cx).task_library(task)
     }
 
     /// Record the text fields, preview and scroll position of the visible form.
@@ -195,8 +202,7 @@ impl Desktop {
         // can detach the submitted task. Failed preparation cannot fall through
         // to saving the previous video's title and overrides against a new URL.
         if self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| workspace.state.draft())
             .is_some_and(|draft| draft.submitted_task.is_some() && draft.input != input)
         {
@@ -216,12 +222,7 @@ impl Desktop {
     }
 
     pub fn restore_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(draft) = self
-            .workspace
-            .as_ref()
-            .and_then(|w| w.state.draft())
-            .cloned()
-        else {
+        let Some(draft) = self.workspace(cx).and_then(|w| w.state.draft()).cloned() else {
             return;
         };
         self.import.source_preview = draft.source.clone();
@@ -258,17 +259,21 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.online() == online {
+        if self.online(cx) == online {
             return;
         }
         if !self.save_current_draft(cx) {
             return;
         }
         let defaults = ConversionOptions::from_config(&self.preferences.defaults_config());
-        let switched = self.transact(course2md::tr!("无法切换来源：{}"), |state| {
-            state.switch_source_kind(online, defaults);
-            Ok(())
-        });
+        let switched = self.transact(
+            course2md::tr!("无法切换来源：{}"),
+            |state| {
+                state.switch_source_kind(online, defaults);
+                Ok(())
+            },
+            cx,
+        );
         if switched.is_some() {
             self.import.following_conversion = None;
             self.invalidate_source();
@@ -278,13 +283,13 @@ impl Desktop {
     }
 
     /// What a plan is built from, as of now.
-    fn plan_inputs(&self) -> PlanInputs<'_> {
+    fn plan_inputs<'a>(&'a self, cx: &'a App) -> PlanInputs<'a> {
         PlanInputs {
             preferences: &self.preferences,
-            workspace: self.workspace.as_ref(),
+            workspace: self.workspace(cx),
             environment: self.environment.as_ref(),
             import: &self.import,
-            library: &self.library,
+            library: self.library(cx),
             locations: &self.storage_ui.location_checks,
             defaults_pending: self.preference_defaults_pending,
             preferences_issue: self
@@ -293,16 +298,17 @@ impl Desktop {
         }
     }
 
-    fn build_plan(&self, validation: PlanValidation) -> Result<TaskPlan> {
-        self.plan_inputs().build_plan(validation)
+    fn build_plan(&self, validation: PlanValidation, cx: &App) -> Result<TaskPlan> {
+        self.plan_inputs(cx).build_plan(validation)
     }
 
     fn build_batch_plan(
         &self,
         candidate: &source::SourceCandidate,
         title: String,
+        cx: &App,
     ) -> Result<TaskPlan> {
-        self.plan_inputs().build_batch_plan(candidate, title)
+        self.plan_inputs(cx).build_batch_plan(candidate, title)
     }
 
     /// Queue the selected candidates at once, reusing per-candidate deduplication (an identical task in
@@ -329,7 +335,7 @@ impl Desktop {
                 continue;
             }
             let title = batch_note_title(&candidate, collection.as_deref(), index);
-            match self.build_batch_plan(&candidate, title) {
+            match self.build_batch_plan(&candidate, title, cx) {
                 Ok(plan) => plans.push(plan),
                 Err(error) => {
                     self.message = Some(course2md::tr!(
@@ -351,18 +357,22 @@ impl Desktop {
             return;
         }
         let total = plans.len();
-        let queued = self.transact(course2md::tr!("任务尚未加入队列：{}"), |state| {
-            let mut first_id = None;
-            let mut duplicates = 0usize;
-            for plan in plans {
-                let (id, created) = state.enqueue(plan, None)?;
-                first_id.get_or_insert_with(|| id.clone());
-                if !created {
-                    duplicates += 1;
+        let queued = self.transact(
+            course2md::tr!("任务尚未加入队列：{}"),
+            |state| {
+                let mut first_id = None;
+                let mut duplicates = 0usize;
+                for plan in plans {
+                    let (id, created) = state.enqueue(plan, None)?;
+                    first_id.get_or_insert_with(|| id.clone());
+                    if !created {
+                        duplicates += 1;
+                    }
                 }
-            }
-            Ok((first_id, duplicates))
-        });
+                Ok((first_id, duplicates))
+            },
+            cx,
+        );
         if let Some((first_id, duplicates)) = queued {
             self.import.selected_candidates.clear();
             let created = total - duplicates;
@@ -391,14 +401,14 @@ impl Desktop {
     /// The plan the form would submit, checked against loaded snapshots.
     /// Submission rechecks live storage, local source and dispatch markers
     /// before a task can enter the queue.
-    pub fn preview_plan(&self) -> Result<TaskPlan> {
-        self.build_plan(PlanValidation::Preview)
+    pub fn preview_plan(&self, cx: &App) -> Result<TaskPlan> {
+        self.build_plan(PlanValidation::Preview, cx)
     }
 
     /// An unfinished task already doing the same work as `plan`; the task the
     /// current input retries is not one.
-    pub fn matching_task(&self, plan: &TaskPlan) -> Option<&TaskRecord> {
-        let state = &self.workspace.as_ref()?.state;
+    pub fn matching_task<'a>(&self, plan: &TaskPlan, cx: &'a App) -> Option<&'a TaskRecord> {
+        let state = &self.workspace(cx)?.state;
         let parent = state.draft().and_then(|draft| draft.retry_of.as_deref());
         state.duplicate_of(plan, parent)
     }
@@ -408,19 +418,19 @@ impl Desktop {
             return;
         }
         self.message = None;
-        let plan = match self.build_plan(PlanValidation::Submission) {
+        let plan = match self.build_plan(PlanValidation::Submission, cx) {
             Ok(plan) => plan,
             Err(error) => {
                 self.import.title_required = error.downcast_ref::<TitleRequired>().is_some();
                 self.import.source_validation = Some(format!("{error:#}"));
                 self.import.validation_attempt = self.import.validation_attempt.wrapping_add(1);
-                let subtitle_attention = self.subtitle_attention_required();
+                let subtitle_attention = self.subtitle_attention_required(cx);
                 let field = if self.import.source_preview.is_some()
                     && !subtitle_attention
                     && self.value(Field::Title, cx).trim().is_empty()
                 {
                     Some(Field::Title)
-                } else if self.import.source_preview.is_none() && self.online() {
+                } else if self.import.source_preview.is_none() && self.online(cx) {
                     Some(Field::Source)
                 } else {
                     None
@@ -449,9 +459,10 @@ impl Desktop {
             .flatten()
             .filter(|task| task.state.finished())
             .map(|task| task.id.clone());
-        let parent = self.draft().and_then(|draft| draft.retry_of.clone());
-        if let Some((id, created)) =
-            self.transact(course2md::tr!("任务尚未加入队列：{}"), |state| {
+        let parent = self.draft(cx).and_then(|draft| draft.retry_of.clone());
+        if let Some((id, created)) = self.transact(
+            course2md::tr!("任务尚未加入队列：{}"),
+            |state| {
                 let (id, created) = state.enqueue(plan, parent)?;
                 if let Some(previous) = acknowledged_input
                     .as_deref()
@@ -463,8 +474,9 @@ impl Desktop {
                     draft.submitted_task = Some(id.clone());
                 }
                 Ok((id, created))
-            })
-        {
+            },
+            cx,
+        ) {
             self.import.pending_conversion = None;
             self.import.source_validation = None;
             self.import.title_required = false;
@@ -488,95 +500,13 @@ impl Desktop {
         cx.notify();
     }
 
-    fn request_for(
-        &self,
-        task: &TaskRecord,
-        secrets: &HashMap<String, String>,
-    ) -> Result<course2md::execution::Request> {
-        let location = self
-            .task_library(task)
-            .context(course2md::tr!("任务保存位置暂时不可用"))?;
-        let refs = ServiceRefs {
-            asr: task.plan.asr_service.clone(),
-            llm: task.plan.ai_service.clone(),
-        };
-        let config = self
-            .preferences
-            .resolve_for_execution_with_secrets(&task.plan.config, &refs, secrets)?
-            .into_config();
-        let course_id = workspace::course_dir_name(&task.plan.source_id);
-        let service_versions = [("asr", refs.asr), ("llm", refs.llm)]
-            .into_iter()
-            .filter_map(|(purpose, reference)| reference.map(|r| (purpose.to_owned(), r)))
-            .collect();
-        let source = self
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.state.reader_sources.get(&task.plan.source_id))
-            .filter(|path| path.is_file())
-            .map(|path| path.to_string_lossy().into_owned())
-            .filter(|_| {
-                !task.plan.source.online && !std::path::Path::new(&task.plan.source.input).is_file()
-            })
-            .unwrap_or_else(|| task.plan.source.input.clone());
-        Ok(course2md::execution::Request {
-            schema: 1,
-            operation: task.plan.operation.clone(),
-            task_id: task.id.clone(),
-            version_id: task.id.clone(),
-            course_dir: location.root.join(&course_id),
-            course_id,
-            source,
-            source_id: task.plan.source_id.clone(),
-            title: task.plan.title.clone(),
-            author: task.plan.source.author.clone(),
-            duration: task.plan.source.duration,
-            subtitle: if task.plan.options().source_mode != TranscriptSource::Asr {
-                task.plan.subtitle.clone()
-            } else {
-                None
-            },
-            subtitle_events: None,
-            config,
-            work_dir: task.work_dir.clone(),
-            allow_unauthenticated_asr: task
-                .plan
-                .asr_service
-                .as_deref()
-                .and_then(|id| self.preferences.version(id))
-                .is_some_and(|version| {
-                    version.config.authentication == preferences::Authentication::None
-                }),
-            control_path: Some(task.work_dir.join("control.json")),
-            service_versions,
-        })
-    }
-
-    /// What a task's control file should say: the engine reads it at every safe boundary.
-    fn task_control(&self, task: &TaskRecord) -> Result<Vec<u8>> {
-        let stopped: Vec<_> = [&task.plan.asr_service, &task.plan.ai_service]
-            .into_iter()
-            .flatten()
-            .filter(|id| {
-                self.preferences
-                    .version(id)
-                    .is_none_or(|version| self.preferences.is_service_retired(&version.service_id))
-            })
-            .cloned()
-            .collect();
-        Ok(serde_json::to_vec(&serde_json::json!({
-            "intent": task.intent, "stopped_services": stopped, "resend": task.resend,
-        }))?)
-    }
-
     /// Sends a task its current instruction. A failure comes back through
     /// `take_write_error`, which stops the job rather than let it miss the instruction.
-    fn send_task_control(&self, task: &TaskRecord) -> Result<()> {
+    fn send_task_control(&self, task: &TaskRecord, cx: &App) -> Result<()> {
         let workspace = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .context(course2md::tr!("任务记录不可用"))?;
-        workspace.write_control(task, self.task_control(task)?);
+        workspace.write_control(task, run::task_control(&self.preferences, task)?);
         Ok(())
     }
 
@@ -585,8 +515,8 @@ impl Desktop {
             .work
             .active_task
             .as_deref()
-            .and_then(|id| self.task(id))
-            && let Err(error) = self.send_task_control(task)
+            .and_then(|id| self.task(id, cx))
+            && let Err(error) = self.send_task_control(task, cx)
         {
             self.report(course2md::tr!("停止新请求的指令尚未保存：{}"), error);
             if let Some(job) = &self.work.job {
@@ -601,8 +531,7 @@ impl Desktop {
             return;
         }
         let Some(task) = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|w| w.state.next_task())
             .cloned()
         else {
@@ -612,14 +541,7 @@ impl Desktop {
         if !self.work.claim_start(&task.id) {
             return;
         }
-        let refs = ServiceRefs {
-            asr: task.plan.asr_service.clone(),
-            llm: task.plan.ai_service.clone(),
-        };
-        let needed = match self
-            .preferences
-            .credential_references_for(&task.plan.config, &refs)
-        {
+        let needed = match run::needed_credentials(&self.preferences, &task) {
             Ok(needed) => needed,
             Err(error) => return self.fail_task_before_start(&task.id, error, cx),
         };
@@ -662,45 +584,24 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         // The queue may have changed while credentials were being resolved off-thread.
-        let Some(task) = self.task(task_id).cloned().filter(|task| {
-            self.work.is_starting(&task.id)
-                && task.state == TaskState::Queued
-                && task.intent == Intent::Run
-        }) else {
+        let Some(task) = self
+            .workspace(cx)
+            .filter(|workspace| {
+                self.work.is_starting(task_id) && run::still_runnable(&workspace.state, task_id)
+            })
+            .and_then(|workspace| workspace.state.task(task_id))
+            .cloned()
+        else {
             self.work.end_start(task_id);
             return;
         };
-        let prepared = self.request_for(&task, &secrets).and_then(|request| {
-            let control = self.task_control(&task)?;
-            let location = self
-                .task_library(&task)
-                .cloned()
-                .context(course2md::tr!("任务保存位置尚未恢复"))?;
-            let writes = self
-                .workspace
-                .as_ref()
-                .context(course2md::tr!("任务记录不可用"))?
-                .library_writes();
-            Ok((request, control, location, writes))
-        });
-        let (mut request, control, location, writes) = match prepared {
-            Ok(prepared) => prepared,
+        let start = match run::start_request(&self.preferences, self.workspace(cx), &task, &secrets)
+        {
+            Ok(start) => start,
             Err(error) => return self.fail_task_before_start(&task.id, error, cx),
         };
         let read_task = task.clone();
-        // All of this touches the library's disk, which may be slow.
-        let read = crate::spawn_blocking_result(move || {
-            workspace::check_library(&location)?;
-            if read_task.plan.options().source_mode != TranscriptSource::Asr
-                && read_task.plan.subtitle.is_none()
-            {
-                request.subtitle_events = workspace::task_subtitle_events(&read_task)?;
-            }
-            workspace::store_task_subtitles(&read_task)?;
-            writes.write_control_now(&read_task.work_dir.join("control.json"), &control)?;
-            request.validate()?;
-            Ok(request)
-        });
+        let read = crate::spawn_blocking_result(move || start.prepare(&read_task));
         cx.spawn(async move |this, cx| {
             let read = read.await;
             let _ = this.update(cx, |this, cx| match read {
@@ -719,9 +620,9 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         // What the task is now, not the copy taken before the library was read.
-        let current = self.task(&task.id).is_some_and(|record| {
-            record.state == TaskState::Queued && record.intent == Intent::Run
-        });
+        let current = self
+            .workspace(cx)
+            .is_some_and(|workspace| run::still_runnable(&workspace.state, &task.id));
         if !self.work.is_starting(&task.id)
             || self.work.job.is_some()
             || self.work.closing
@@ -731,21 +632,11 @@ impl Desktop {
             return;
         }
         let running = self
-            .workspace
-            .as_mut()
+            .with_workspace(cx, |workspace| {
+                workspace.transaction(|state| run::mark_running(state, &task.id))
+            })
             .context(course2md::tr!("任务记录不可用"))
-            .and_then(|workspace| {
-                workspace.transaction(|state| {
-                    let record = state
-                        .task_mut(&task.id)
-                        .context(course2md::tr!("任务不存在"))?;
-                    record.state = TaskState::Running;
-                    record.events.begin_run();
-                    workspace::forget_task_subtitles(record);
-                    record.updated = workspace::now();
-                    Ok(())
-                })
-            });
+            .and_then(|running| running);
         if let Err(error) = running {
             return self.fail_task_before_start(&task.id, error, cx);
         }
@@ -777,27 +668,11 @@ impl Desktop {
         error: anyhow::Error,
         cx: &mut Context<Self>,
     ) {
-        let message = format!("{error:#}");
-        let mark = |record: &mut TaskRecord| {
-            record.state = TaskState::NeedsAttention;
-            record.events.error = Some(message.clone());
-            record.unread = true;
-        };
         self.work.end_start(task_id);
-        if let Some(workspace) = &mut self.workspace {
-            let compensated = workspace.transaction(|state| {
-                let record = state.task_mut(task_id);
-                mark(record.context(course2md::tr!("任务不存在"))?);
-                Ok(())
-            });
-            if let Err(error) = compensated {
-                // Even if recording the compensation fails, the task must not stay Running and be ignored by the
-                // scheduler: mark it NeedsAttention in memory too; recover() reconciles with the disk on restart.
-                if let Some(record) = workspace.state.task_mut(task_id) {
-                    mark(record);
-                }
-                self.report(course2md::tr!("任务状态尚未保存：{}"), error);
-            }
+        if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
+            run::fail_before_start(workspace, task_id, &error)
+        }) {
+            self.report(course2md::tr!("任务状态尚未保存：{}"), error);
         }
         cx.notify();
     }
@@ -809,24 +684,28 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let changed = self.transact(course2md::tr!("任务状态尚未保存：{}"), |state| {
-            state.set_intent(&id, intent)?;
-            if active && intent != Intent::Run {
-                state
-                    .task_mut(&id)
-                    .context(course2md::tr!("任务记录不存在"))?
-                    .state = TaskState::Pausing;
-            }
-            Ok(())
-        });
+        let changed = self.transact(
+            course2md::tr!("任务状态尚未保存：{}"),
+            |state| {
+                state.set_intent(&id, intent)?;
+                if active && intent != Intent::Run {
+                    state
+                        .task_mut(&id)
+                        .context(course2md::tr!("任务记录不存在"))?
+                        .state = TaskState::Pausing;
+                }
+                Ok(())
+            },
+            cx,
+        );
         if changed.is_some() {
             if intent == Intent::Run {
                 self.follow_resumed_input_task(&id, cx);
             } else if intent == Intent::Cancel {
                 self.import.following_conversion = None;
             }
-            if let Some(task) = self.task(&id).cloned()
-                && let Err(error) = self.send_task_control(&task)
+            if let Some(task) = self.task(&id, cx).cloned()
+                && let Err(error) = self.send_task_control(&task, cx)
             {
                 self.report(course2md::tr!("任务指令尚未保存：{}"), error);
                 if self.work.active_task.as_ref() == Some(&id)
@@ -842,25 +721,28 @@ impl Desktop {
 
     pub fn select_task(&mut self, id: &str, cx: &mut Context<Self>) {
         let previous = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| workspace.state.selected_task.clone());
         if previous.as_deref() != Some(id)
             && let Some(previous) = previous
         {
             self.close_task_details(&previous);
         }
-        self.transact(course2md::tr!("任务选择尚未保存：{}"), |state| {
-            state.selected_task = Some(id.to_owned());
-            if let Some(task) = state.task_mut(id) {
-                task.unread = false;
-            }
-            Ok(())
-        });
+        self.transact(
+            course2md::tr!("任务选择尚未保存：{}"),
+            |state| {
+                state.selected_task = Some(id.to_owned());
+                if let Some(task) = state.task_mut(id) {
+                    task.unread = false;
+                }
+                Ok(())
+            },
+            cx,
+        );
         // Going to a task opens its details when there is something to read
         // or decide; new and running work stays a compact row.
         let waiting = self
-            .task(id)
+            .task(id, cx)
             .is_some_and(|task| matches!(task_group(task), TaskGroup::Running | TaskGroup::Queued));
         self.task_list.expanded = (!waiting).then(|| id.to_owned());
         cx.notify();
@@ -877,15 +759,15 @@ impl Desktop {
                     id: id.to_owned(),
                     source_revision: self.import.preview_generation,
                 });
-        } else if self.page == Page::Result && !self.opened.reading {
+        } else if self.page == Page::Result && !self.opened(cx).reading {
             self.import.following_conversion = self
-                .task(id)
-                .zip(self.opened.preview.as_ref())
+                .task(id, cx)
+                .zip(self.opened(cx).preview.as_ref())
                 .and_then(|(task, preview)| {
                     desktop_tasks::import::ConversionFollow::reader_reprocess(
                         task,
                         &preview.course.dir,
-                        self.opened.read_generation,
+                        self.opened(cx).read_generation,
                     )
                 });
         }
@@ -899,40 +781,27 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let Some(task) = self.task(&id).cloned() else {
+        let Some(task) = self.task(&id, cx).cloned() else {
             return;
         };
         if let Some(followup) = &task.handled_by {
             self.select_task(followup, cx);
             return;
         }
-        let requests: Vec<_> = task
-            .events
-            .blocked
-            .iter()
-            .filter(|b| b.is_uncertain())
-            .filter_map(|b| b.request_id.clone())
-            .collect();
+        let requests = run::uncertain_requests(&task);
         if requests.is_empty() {
             return;
         }
         if task.artifact.is_some() {
-            let components = task
-                .events
-                .blocked
-                .iter()
-                .filter(|b| b.is_uncertain())
-                .filter_map(|b| b.purpose.as_deref())
-                .map(|purpose| ai_component(purpose).unwrap_or(Component::Proofreading))
-                .collect();
-            self.reprocess_task(id, components, requests, cx);
+            self.reprocess_task(id, run::uncertain_components(&task), requests, cx);
             return;
         }
-        if self.workspace.is_some()
+        if self.records.read(cx).workspace.is_some()
             && self
                 .transact(
                     course2md::tr!("重新发送的选择尚未保存：{}"),
                     |state| state.authorize_uncertain(&id, &requests),
+                    cx,
                 )
                 .is_none()
         {
@@ -958,9 +827,11 @@ impl Desktop {
         }
         components.sort();
         components.dedup();
-        if let Some(id) = self.transact(course2md::tr!("补做任务尚未建立：{}"), |state| {
-            state.reprocess(&id, components, resend)
-        }) {
+        if let Some(id) = self.transact(
+            course2md::tr!("补做任务尚未建立：{}"),
+            |state| state.reprocess(&id, components, resend),
+            cx,
+        ) {
             self.select_task(&id, cx);
             self.follow_resumed_input_task(&id, cx);
             self.start_next_task(cx);
@@ -975,7 +846,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         // A followed-up or unconfirmed task is decided on its card.
-        if let Some(task) = self.task(&id)
+        if let Some(task) = self.task(&id, cx)
             && (task.handled_by.is_some() || task.has_uncertain())
         {
             let shown = task.handled_by.clone().unwrap_or_else(|| id.clone());
@@ -984,15 +855,8 @@ impl Desktop {
             return;
         }
         let components = self
-            .task(&id)
-            .filter(|task| task.artifact.is_some())
-            .map(|task| {
-                task_component_failures(task)
-                    .into_iter()
-                    .filter_map(|(component, _, _)| Component::parse(&component))
-                    .filter(|component| ai_component(component.as_str()).is_some())
-                    .collect::<Vec<_>>()
-            })
+            .task(&id, cx)
+            .map(run::repairable_components)
             .unwrap_or_default();
         if components.is_empty() {
             self.message = Some(course2md::tr!("这份笔记没有需要修复的校对或摘要").into());
@@ -1015,27 +879,11 @@ impl Desktop {
                 course2md::tr!("正在保存当前结果，请等待任务停止后再补做")
             );
             let task = self
-                .task(&id)
+                .task(&id, cx)
                 .context(course2md::tr!("原任务记录暂时不可用"))?;
-            let mut base = task.plan.config.clone();
-            base.defaults.transcript_source = Some(course2md::config::TranscriptSource::Subtitle);
-            base.llm.enabled = components.contains(&Component::Proofreading);
-            base.llm.summarize = components.contains(&Component::Summary);
-            // Translation follows the proofread paragraphs it is redone with.
-            if !base.llm.enabled {
-                base.llm.translate = None;
-            }
-            let config = self.preferences.config_for_refs(
-                &base,
-                &ServiceRefs {
-                    asr: None,
-                    llm: Some(ai_service.clone()),
-                },
-            )?;
-            self.workspace
-                .as_mut()
-                .context(course2md::tr!("任务记录暂时不可用"))?
-                .transaction(|state| {
+            let config = run::reprocess_config(&self.preferences, task, &components, &ai_service)?;
+            self.with_workspace(cx, |workspace| {
+                workspace.transaction(|state| {
                     state.reprocess_with_service(
                         &id,
                         components,
@@ -1043,6 +891,8 @@ impl Desktop {
                         Some((ai_service, config)),
                     )
                 })
+            })
+            .context(course2md::tr!("任务记录暂时不可用"))?
         })();
         match result {
             Ok(next) => {
@@ -1071,7 +921,7 @@ impl Desktop {
         if !self.save_current_draft(cx) {
             return;
         }
-        let Some(task) = self.task(&id).cloned() else {
+        let Some(task) = self.task(&id, cx).cloned() else {
             return;
         };
         let events =
@@ -1082,12 +932,13 @@ impl Desktop {
                 let adjusted = this.transact(
                     course2md::tr!("尚未打开任务调整选项：{}"),
                     |state| state.adjust_task(&id, events),
+                    cx,
                 );
                 if adjusted.is_some() {
                     this.import.following_conversion = None;
                     this.invalidate_source();
                     this.restore_draft(window, cx);
-                    this.page = Page::New;
+                    this.set_page(Page::New, cx);
                 }
                 cx.notify();
             });
@@ -1103,69 +954,37 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let done = self
-            .workspace
-            .as_mut()
-            .and_then(|workspace| workspace.state.task_mut(id))
-            .and_then(|task| task.events.done.take());
+            .with_workspace(cx, |workspace| {
+                workspace
+                    .state
+                    .task_mut(id)
+                    .and_then(|task| task.events.done.take())
+            })
+            .flatten();
         let manifest = done.as_ref().and_then(|d| {
             course2md::artifact::read_manifest(&d.out_dir.join("manifest.json")).ok()
         });
-        let Some(workspace) = &mut self.workspace else {
+        let page = self.page;
+        let Some(result) = self.with_workspace(cx, |workspace| {
+            let visible =
+                page == Page::Task && workspace.state.selected_task.as_deref() == Some(id);
+            workspace.transaction(|state| {
+                run::record_finish(
+                    state,
+                    id,
+                    done.as_ref(),
+                    manifest.as_ref(),
+                    visible,
+                    success,
+                    cancelled,
+                )
+            })
+        }) else {
             return;
         };
-        let visible =
-            self.page == Page::Task && workspace.state.selected_task.as_deref() == Some(id);
-        let result = workspace.transaction(|state| {
-            let task = state
-                .task_mut(id)
-                .context(course2md::tr!("任务记录不存在"))?;
-            task.updated = workspace::now();
-            task.unread = !visible;
-            task.events.outcomes = done
-                .as_ref()
-                .and_then(|done| done.outcomes.clone())
-                .or_else(|| manifest.as_ref().map(|manifest| manifest.outcomes.clone()));
-            workspace::reconcile_receipts(task)?;
-            if let (Some(done), Some(manifest)) = (&done, &manifest) {
-                task.artifact = Some(done.out_dir.clone());
-                let partial = done.partial.unwrap_or(manifest.partial);
-                task.state = if task.has_uncertain() {
-                    TaskState::Uncertain
-                } else if partial {
-                    TaskState::Partial
-                } else {
-                    TaskState::Complete
-                };
-                if !partial && task.state != TaskState::Uncertain {
-                    task.events.error = None;
-                }
-            } else {
-                task.state = match task.intent {
-                    Intent::Cancel => TaskState::Cancelled,
-                    Intent::Pause | Intent::Quit => TaskState::Paused,
-                    Intent::Run if task.has_uncertain() => TaskState::Uncertain,
-                    Intent::Run => TaskState::NeedsAttention,
-                };
-                if task.events.error.is_none() && !cancelled && task.intent == Intent::Run {
-                    task.events.error = Some(
-                        if success {
-                            course2md::tr!("未生成可读笔记")
-                        } else {
-                            course2md::tr!("生成中断")
-                        }
-                        .into(),
-                    );
-                }
-            }
-            let record = task.clone();
-            if record.state == TaskState::Complete && state.selected_task.as_deref() == Some(id) {
-                state.selected_task = None;
-            }
-            Ok(record)
-        });
         match result {
             Ok(task) => {
-                if self.reader_viewer_open() {
+                if self.reader.read(cx).reader_viewer_open() {
                     desktop_tasks::import::ConversionFollow::interrupt_for_reader_viewer(
                         &mut self.import.following_conversion,
                     );
@@ -1174,7 +993,7 @@ impl Desktop {
                     .import
                     .following_conversion
                     .as_ref()
-                    .zip(self.workspace.as_ref())
+                    .zip(self.workspace(cx))
                     .and_then(|(follow, workspace)| {
                         follow.completed_task(
                             self.page == Page::New,
@@ -1185,7 +1004,7 @@ impl Desktop {
                         )
                     })
                     .is_some_and(|task| task.id == id);
-                let follow_reader_completion = !self.opened.reading
+                let follow_reader_completion = !self.opened(cx).reading
                     && self
                         .import
                         .following_conversion
@@ -1194,8 +1013,8 @@ impl Desktop {
                             follow.completed_reader_task(
                                 &task,
                                 self.page,
-                                self.opened.read_generation,
-                                self.opened
+                                self.opened(cx).read_generation,
+                                self.opened(cx)
                                     .preview
                                     .as_ref()
                                     .map(|preview| preview.course.dir.as_path()),
@@ -1203,43 +1022,13 @@ impl Desktop {
                         });
                 if let Some(done) = done {
                     self.work.completed = Some(done.clone());
-                    let root = self.task_library(&task).map(|l| l.root.clone());
+                    let root = self.task_library(&task, cx).map(|l| l.root.clone());
                     let open = !task.exports_only()
                         && (follow_input_completion || follow_reader_completion);
-                    let source = task.plan.source.clone();
-                    let folder = task.plan.folder;
-                    let out_dir = done.out_dir.clone();
-                    let storage_dir = Course::from_completed(&done).storage_dir();
-                    let frames = manifest
-                        .as_ref()
-                        .map(|manifest| manifest.frames.clone())
-                        .unwrap_or_default();
+                    let publication = run::Publication::new(&task, root, &done, manifest.as_ref());
                     // Cover copy, folder assignment and thumbnail lookup touch the
                     // library disk; the record above is already committed.
-                    let published = crate::spawn_blocking_io(move || {
-                        let mut issues = Vec::new();
-                        if let Some(root) = &root {
-                            if let Err(error) = source::save_cover(&source, &out_dir) {
-                                issues
-                                    .push(course2md::tr!("封面暂未保存：{}", format!("{error:#}")));
-                            }
-                            if let Err(error) = organize::Library::edit(root, |library| {
-                                library.assign(root, &storage_dir, folder)
-                            }) {
-                                issues.push(course2md::tr!(
-                                    "文件夹归属暂未更新：{}",
-                                    format!("{error:#}")
-                                ));
-                            }
-                        }
-                        let cover = out_dir.join("cover.jpg");
-                        let thumbnail = cover.is_file().then_some(cover).or_else(|| {
-                            frames.iter().find_map(|frame| {
-                                course2md::artifact::safe_asset_path(&out_dir, &frame.image).ok()
-                            })
-                        });
-                        (issues, thumbnail)
-                    });
+                    let published = crate::spawn_blocking_io(move || publication.file());
                     cx.spawn(async move |this, cx| {
                         let Some((issues, thumbnail)) = published.await else {
                             return;
@@ -1252,12 +1041,14 @@ impl Desktop {
                                 ));
                             }
                             if let Some(manifest) = &manifest {
-                                update_published_course(
-                                    &mut this.library.courses,
-                                    &done,
-                                    manifest,
-                                    thumbnail,
-                                );
+                                this.records.update(cx, |records, _| {
+                                    update_published_course(
+                                        &mut records.library.courses,
+                                        &done,
+                                        manifest,
+                                        thumbnail,
+                                    )
+                                });
                             }
                             this.refresh_library(cx);
                             if open {
@@ -1281,18 +1072,10 @@ impl Desktop {
     }
 
     pub(crate) fn open_task_export_location(&mut self, id: String, cx: &mut Context<Self>) {
-        let destination = (|| {
-            let state = &self
-                .workspace
-                .as_ref()
-                .context(course2md::tr!("任务记录暂时不可用"))?
-                .state;
-            let task = state.task(&id).context(course2md::tr!("任务记录不存在"))?;
-            let location = state
-                .library(&task.plan.library_id)
-                .context(course2md::tr!("任务保存位置暂时不可用"))?;
-            workspace::available_task_export(task, location)
-        })();
+        let destination = self
+            .workspace(cx)
+            .context(course2md::tr!("任务记录暂时不可用"))
+            .and_then(|workspace| run::task_export_destination(&workspace.state, &id));
         match destination {
             Ok(path) => cx.reveal_path(&path),
             Err(error) => {

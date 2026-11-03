@@ -255,14 +255,9 @@ pub(crate) struct ThemeFrame {
 
 impl Desktop {
     /// Keep task results reachable while the user is on another page.
-    fn shell_topbar(
-        &self,
-        reader_tools: Option<AnyElement>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AppBar {
+    fn shell_topbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AppBar {
         let (task_count, tasks_need_attention) =
-            self.workspace.as_ref().map_or((0, false), |workspace| {
+            self.workspace(cx).map_or((0, false), |workspace| {
                 desktop_tasks::task_view::task_navigation_summary(&workspace.state.tasks)
             });
         let page = self.page;
@@ -277,8 +272,12 @@ impl Desktop {
             // back and its title lead its navigation pane instead.
             return app_bar(title_bar_height(window), window, cx).child(bar);
         }
-        if let (Page::Result, Some(tools)) = (page, reader_tools) {
-            return self.reader_title_bar(bar, tools, window, cx);
+        if page == Page::Result && self.opened(cx).preview.is_some() {
+            let height = crate::reader_ui::TITLE_BAR_HEIGHT.to_pixels(window.rem_size());
+            let bar = self
+                .reader
+                .update(cx, |reader, cx| reader.title_bar(bar, window, cx));
+            return app_bar(height, window, cx).child(bar);
         }
         // The brand leads the bar and returns to the workbench, as on the M3
         // canvas; destinations follow on the trailing edge with icon and label.
@@ -326,7 +325,9 @@ impl Desktop {
             course2md::tr!("笔记库"),
             shown(course2md::tr!("笔记库")),
             cx.listener(|this, _, _, cx| {
-                this.library.folder_filter = crate::FolderFilter::All;
+                this.records.update(cx, |records, _| {
+                    records.library.folder_filter = crate::FolderFilter::All
+                });
                 this.navigate(Page::Library, cx);
             }),
         );
@@ -386,8 +387,7 @@ impl Desktop {
             None
         };
         let task = self
-            .workspace
-            .as_ref()?
+            .workspace(cx)?
             .state
             .tasks
             .iter()
@@ -396,7 +396,7 @@ impl Desktop {
                     && task.unread
                     && task.handled_by.is_none()
                     && visible_task != Some(task.id.as_str())
-                    && !(self.opened.reading
+                    && !(self.opened(cx).reading
                         && self.page == Page::New
                         && self
                             .import
@@ -469,14 +469,14 @@ impl Desktop {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.transient_task_result = None;
-                        if let Some(workspace) = &mut this.workspace
-                            && let Err(error) = workspace.transaction(|state| {
+                        if let Some(Err(error)) = this.with_workspace(cx, |workspace| {
+                            workspace.transaction(|state| {
                                 if let Some(task) = state.task_mut(&dismiss_id) {
                                     task.unread = false;
                                 }
                                 Ok(())
                             })
-                        {
+                        }) {
                             this.workspace_error = Some(course2md::tr!(
                                 "提示关闭状态未能保存：{}",
                                 format!("{error:#}")
@@ -581,17 +581,12 @@ impl Render for Desktop {
                 .children(crate::ui::confirm_host(cx))
                 .into_any_element();
         }
-        let mut reader_tools = None;
         let content = match self.page {
             Page::New => self.new_page(window, cx),
             Page::Task => self.queue_page(window, cx),
             Page::Library => self.library_page(window, cx),
             Page::Settings => self.settings_page(window, cx),
-            Page::Result => {
-                let (page, tools) = self.reader_page(window, cx);
-                reader_tools = tools;
-                page
-            }
+            Page::Result => self.reader.clone().into_any_element(),
         };
         // Task and library content virtualize their long lists: the list owns
         // scrolling for the page instead of the shared page-scroll container.
@@ -605,7 +600,7 @@ impl Render for Desktop {
             )
             .when(
                 // The workbench card already shows a followed result opening.
-                self.opened.reading
+                self.opened(cx).reading
                     && !matches!(self.page, Page::Library | Page::Result)
                     && !(self.page == Page::New && self.import.following_conversion.is_some()),
                 |v| {
@@ -635,7 +630,7 @@ impl Render for Desktop {
         } else {
             motion::page_enter(("page-content", self.page as usize), content)
         };
-        let topbar = self.shell_topbar(reader_tools, window, cx);
+        let topbar = self.shell_topbar(window, cx);
         let task_notice = self.task_result_notice(cx);
         let model_notice = self.onboarding_background_notice(cx);
         let body = v_flex()
@@ -672,7 +667,7 @@ impl Render for Desktop {
                                         this.retry_workspace_records(window, cx)
                                     })),
                             )
-                            .when(self.workspace.is_none(), |row| {
+                            .when(self.records.read(cx).workspace.is_none(), |row| {
                                 row.child(
                                     material_button(
                                         "rebuild-workspace-records",

@@ -6,5 +6,6 @@ pub mod backend;
 pub mod import;
 pub mod job;
 pub mod plan;
+pub mod run;
 pub mod source;
 pub mod task_view;

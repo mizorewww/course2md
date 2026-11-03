@@ -295,39 +295,29 @@ impl RenderOnce for CommandsButton {
 
 impl Desktop {
     /// Notes already made from the video with this identity.
-    pub(crate) fn notes_for_source(&self, identity: &str) -> impl Iterator<Item = &Course> {
-        self.library.notes_for_source(identity)
+    pub(crate) fn notes_for_source<'a>(
+        &self,
+        identity: &'a str,
+        cx: &'a App,
+    ) -> impl Iterator<Item = &'a Course> {
+        self.library(cx).notes_for_source(identity)
     }
 
     /// Apply the names already read by the library worker. The UI does no I/O.
-    pub fn apply_course_title_aliases(&mut self) {
-        let tasks = self
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.state.tasks.as_slice())
-            .unwrap_or_default();
-        self.library.index_note_sources(tasks);
-        self.library.merge_alias_issues();
-        for course in &mut self.library.courses {
-            if let Some(location) = self.library.view_cache.locations.get(&course.storage_dir())
-                && let Some(name) = self
-                    .library
-                    .view_cache
-                    .aliases
-                    .get(&location.root)
-                    .and_then(|names| names.get(&location.relative))
-                && course.title != *name
-            {
-                Rc::make_mut(course).title = name.clone();
-            }
-        }
+    pub fn apply_course_title_aliases(&mut self, cx: &mut App) {
+        self.records
+            .update(cx, |records, _| records.apply_course_title_aliases());
         let title = self
-            .opened
+            .opened(cx)
             .preview
             .as_ref()
-            .map(|preview| self.library.course_display_title(&preview.course));
-        if let (Some(preview), Some(title)) = (self.opened.preview.as_mut(), title) {
-            Rc::make_mut(preview).course.title = title;
+            .map(|preview| self.library(cx).course_display_title(&preview.course));
+        if let Some(title) = title {
+            self.reader.update(cx, |reader, _| {
+                if let Some(preview) = reader.opened.preview.as_mut() {
+                    Rc::make_mut(preview).course.title = title;
+                }
+            });
         }
     }
 
@@ -338,7 +328,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let Some(root) = self
-            .course_location(&course)
+            .course_location(&course, cx)
             .map(|library| library.root.clone())
         else {
             self.message = Some(
@@ -360,7 +350,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) {
         let Some((root, library_id)) = self
-            .course_location(&course)
+            .course_location(&course, cx)
             .map(|library| (library.root.clone(), library.id.clone()))
         else {
             self.message = Some(
@@ -373,7 +363,7 @@ impl Desktop {
             .manifest
             .as_ref()
             .map(|manifest| manifest.source_id.as_str());
-        let busy = self.workspace.as_ref().is_some_and(|workspace| {
+        let busy = self.workspace(cx).is_some_and(|workspace| {
             note_has_unfinished_task(&workspace.state.tasks, &library_id, source)
         });
         if busy {
@@ -382,7 +372,7 @@ impl Desktop {
             cx.notify();
             return;
         }
-        let title = self.library.course_display_title(&course);
+        let title = self.library(cx).course_display_title(&course);
         let trash = organize::trash_name();
         ui::Confirm::new(
             course2md::tr!("删除笔记"),
@@ -403,7 +393,7 @@ impl Desktop {
     }
 
     fn delete_course(&mut self, root: PathBuf, course: Course, cx: &mut Context<Self>) {
-        let title = self.library.course_display_title(&course);
+        let title = self.library(cx).course_display_title(&course);
         let dir = course.storage_dir();
         let worker_dir = dir.clone();
         self.in_background(
@@ -411,7 +401,7 @@ impl Desktop {
             move |this, result, cx| match result {
                 Ok(()) => {
                     let reading = this
-                        .opened
+                        .opened(cx)
                         .preview
                         .as_ref()
                         .is_some_and(|preview| preview.course.storage_dir() == dir);
@@ -421,7 +411,8 @@ impl Desktop {
                         this.refresh_library(cx);
                     }
                     if reading {
-                        this.opened.preview = None;
+                        this.reader
+                            .update(cx, |reader, _| reader.opened.preview = None);
                     }
                     this.message = Some(course2md::tr!(
                         "已将《{}》移到{}",
@@ -443,7 +434,7 @@ impl Desktop {
         let desktop = cx.weak_entity();
         let path = course.storage_dir();
         let link = self
-            .library
+            .library(cx)
             .note_source(course)
             .and_then(|source| source.link.clone());
         let on_course =
@@ -461,7 +452,11 @@ impl Desktop {
                 label,
                 symbols::download(),
                 &desktop,
-                move |this, window, cx| this.export_course(course.clone(), format, window, cx),
+                move |this, window, cx| {
+                    let course = course.clone();
+                    this.exports
+                        .update(cx, |exports, cx| exports.export(course, format, window, cx))
+                },
             )
         };
         let mut commands = vec![
@@ -495,7 +490,7 @@ impl Desktop {
                 course2md::tr!("移动到…"),
                 symbols::drive_file_move(),
                 |this, course, _, cx| {
-                    let root = this.folder_context(Some(course.dir.clone())).root;
+                    let root = this.folder_context(Some(course.dir.clone()), cx).root;
                     this.begin_move(root, Moving::Note(course.storage_dir()), cx)
                 },
             ),
@@ -541,7 +536,7 @@ impl Desktop {
             move || organize::recover(&worker_root, rebuild),
             move |this, result, cx| match result {
                 Ok((library, _)) => {
-                    this.store_folders(&root, library);
+                    this.store_folders(&root, library, cx);
                     this.message = Some(if rebuild {
                         course2md::tr!("已重新开始整理文件夹，原损坏文件已另存").into()
                     } else {
@@ -573,17 +568,17 @@ impl Desktop {
         );
     }
 
-    fn library_needs_recovery(&self, access: &crate::storage::LibraryAccess) -> bool {
-        self.workspace.as_ref().is_some_and(|workspace| {
+    fn library_needs_recovery(&self, access: &crate::storage::LibraryAccess, cx: &App) -> bool {
+        self.workspace(cx).is_some_and(|workspace| {
             workspace.state.libraries.iter().any(|location| {
                 access.unavailable.contains(&location.root)
                     || self
-                        .library
+                        .library(cx)
                         .view_cache
                         .recovery
                         .contains_key(&location.root)
                     || self
-                        .library
+                        .library(cx)
                         .view_cache
                         .title_recovery
                         .contains_key(&location.root)
@@ -596,9 +591,9 @@ impl Desktop {
         access: &crate::storage::LibraryAccess,
         cx: &mut Context<Self>,
     ) -> Option<Div> {
-        let workspace = self.workspace.as_ref()?;
+        let workspace = self.workspace(cx)?;
         let details = |prefix: &str, location: &crate::workspace::LibraryLocation, kind| {
-            let messages = self.library.issue_messages(&location.root, kind);
+            let messages = self.library(cx).issue_messages(&location.root, kind);
             (!messages.is_empty())
                 .then(|| IssueDetails::new(format!("{prefix}:{}", location.id), messages))
         };
@@ -612,13 +607,13 @@ impl Desktop {
                         material_button(("retry-library-location", index), ButtonVariant::Tonal)
                             .icon(symbols::refresh())
                             .child(course2md::tr!("重新检查保存位置"))
-                            .loading(self.library.loading, course2md::tr!("重新检查保存位置"))
+                            .loading(self.library(cx).loading, course2md::tr!("重新检查保存位置"))
                             .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
                     ),
                 );
                 continue;
             }
-            if let Some(recovery) = self.library.view_cache.recovery.get(root) {
+            if let Some(recovery) = self.library(cx).view_cache.recovery.get(root) {
                 let (restore, rebuild, folder) = (root.clone(), root.clone(), root.clone());
                 let message = course2md::tr!("{} 的文件夹信息已损坏", location.label());
                 notices.push(
@@ -670,7 +665,7 @@ impl Desktop {
                     )),
                 );
             }
-            if let Some(recovery) = self.library.view_cache.title_recovery.get(root) {
+            if let Some(recovery) = self.library(cx).view_cache.title_recovery.get(root) {
                 let actions = [false, true]
                     .into_iter()
                     .filter(|reset| *reset || recovery.has_backup)
@@ -769,12 +764,13 @@ impl Desktop {
     ) -> (Vec<LibraryItem>, Option<String>) {
         let query = self.value(Field::Search, cx).to_lowercase();
         let mut items = Vec::new();
-        let Some(all_access) = self.cached_library_access() else {
+        let Some(all_access) = self.cached_library_access(cx) else {
             items.push(LibraryItem::Status(course2md::tr!("正在检查保存位置…")));
             return (items, None);
         };
-        let in_scope =
-            |root: &&PathBuf| self.library.folder_filter.is_all() || **root == self.library.root;
+        let in_scope = |root: &&PathBuf| {
+            self.library(cx).folder_filter.is_all() || **root == self.library(cx).root
+        };
         let scope = crate::storage::LibraryAccess {
             available: all_access
                 .available
@@ -790,28 +786,28 @@ impl Desktop {
                 .collect(),
         };
         let coverage = scope.coverage();
-        let searched: Option<Vec<u64>> = match self.library.folder_filter {
+        let searched: Option<Vec<u64>> = match self.library(cx).folder_filter {
             FolderFilter::Folder(id) if !query.is_empty() => self
-                .library
+                .library(cx)
                 .indexes
-                .get(&self.library.root)
+                .get(&self.library(cx).root)
                 .map(|library| library.subtree(id)),
             _ => None,
         };
         let courses: Vec<usize> = self
-            .library
+            .library(cx)
             .courses
             .iter()
             .enumerate()
             .filter_map(|(index, course)| {
-                let location = self.course_location(course);
+                let location = self.course_location(course, cx);
                 let in_scope = location
                     .as_ref()
                     .map(|location| scope.available.contains(&location.root))
                     .unwrap_or_else(|| {
-                        self.workspace.is_none()
+                        self.records.read(cx).workspace.is_none()
                             && self
-                                .library
+                                .library(cx)
                                 .view_cache
                                 .locations
                                 .get(&course.storage_dir())
@@ -820,14 +816,17 @@ impl Desktop {
                 if !in_scope || !course.title.to_lowercase().contains(&query) {
                     return None;
                 }
-                let matches_folder = match self.library.folder_filter {
+                let matches_folder = match self.library(cx).folder_filter {
                     FolderFilter::All => true,
                     filter => {
-                        let folder = self.course_folder(course);
+                        let folder = self.course_folder(course, cx);
                         location
                             .as_ref()
-                            .is_some_and(|location| location.root == self.library.root)
-                            && (!self.library.indexes.contains_key(&self.library.root)
+                            .is_some_and(|location| location.root == self.library(cx).root)
+                            && (!self
+                                .library(cx)
+                                .indexes
+                                .contains_key(&self.library(cx).root)
                                 || match filter {
                                     // Searching a place covers everything below it, as
                                     // in a file manager; browsing shows its own notes.
@@ -843,7 +842,7 @@ impl Desktop {
                 matches_folder.then_some(index)
             })
             .collect();
-        if self.library_needs_recovery(&all_access) {
+        if self.library_needs_recovery(&all_access, cx) {
             items.push(LibraryItem::Recovery(all_access.clone()));
         }
         use crate::storage::LibraryCoverage;
@@ -863,17 +862,19 @@ impl Desktop {
         // Recovery cards own their matching diagnostics. Keep unrelated read
         // failures visible without repeating the same classification warning.
         let remaining_issues: Vec<_> = self
-            .library
+            .library(cx)
             .issues
             .iter()
             .filter(|issue| {
                 let claimed = match issue.kind {
                     LibraryIssueKind::Scan => false,
-                    LibraryIssueKind::Folders => {
-                        self.library.view_cache.recovery.contains_key(&issue.root)
-                    }
+                    LibraryIssueKind::Folders => self
+                        .library(cx)
+                        .view_cache
+                        .recovery
+                        .contains_key(&issue.root),
                     LibraryIssueKind::Titles => self
-                        .library
+                        .library(cx)
                         .view_cache
                         .title_recovery
                         .contains_key(&issue.root),
@@ -886,71 +887,82 @@ impl Desktop {
             items.push(LibraryItem::Issues(remaining_issues));
         }
         // 刷新期间保留已加载的列表：Loading 只是一行状态，不再整页替换
-        if self.library.loading {
+        if self.library(cx).loading {
             items.push(LibraryItem::Status(course2md::tr!("正在读取笔记…")));
         }
-        if coverage == LibraryCoverage::Unavailable || (self.library.loading && courses.is_empty())
+        if coverage == LibraryCoverage::Unavailable
+            || (self.library(cx).loading && courses.is_empty())
         {
             return (items, None);
         }
         // Inside a folder, its folders come before its notes.
         let folders = self
-            .library
+            .library(cx)
             .folder_filter
             .folder_id()
             .map(Some)
             .filter(|parent| {
                 query.is_empty()
                     && self
-                        .library
+                        .library(cx)
                         .indexes
-                        .get(&self.library.root)
+                        .get(&self.library(cx).root)
                         .is_some_and(|library| !library.children(*parent).is_empty())
             });
         // The place's notes, its subfolders' included as in the navigation;
         // a search reports its matches on the same line, so nothing moves.
         let count = Some(if !query.is_empty() {
             found_notes(courses.len())
-        } else if let FolderFilter::Folder(id) = self.library.folder_filter {
-            note_count(self.folder_note_count(&self.library.root, id))
+        } else if let FolderFilter::Folder(id) = self.library(cx).folder_filter {
+            note_count(self.folder_note_count(&self.library(cx).root, id, cx))
         } else {
             note_count(courses.len())
         });
         if let Some(parent) = folders {
-            items.push(LibraryItem::Folders(self.library.root.clone(), parent));
+            items.push(LibraryItem::Folders(self.library(cx).root.clone(), parent));
         }
         if courses.is_empty() {
             let obstructed = query.is_empty()
-                && (coverage == LibraryCoverage::Partial || !self.library.issues.is_empty());
+                && (coverage == LibraryCoverage::Partial || !self.library(cx).issues.is_empty());
             if folders.is_none() && !obstructed {
                 items.push(LibraryItem::Empty);
             }
         } else if self.desktop_settings.library_group_folders
-            && self.library.folder_filter.is_all()
-            && self.library.error.is_none()
+            && self.library(cx).folder_filter.is_all()
+            && self.library(cx).error.is_none()
         {
-            self.push_groups(&mut items, courses, query.is_empty());
+            self.push_groups(&mut items, courses, query.is_empty(), cx);
         } else {
-            items.extend(LibraryItem::notes(&self.library.courses, &courses, columns));
+            items.extend(LibraryItem::notes(
+                &self.library(cx).courses,
+                &courses,
+                columns,
+            ));
         }
         (items, count)
     }
 
     /// The notes grouped by folder, each group its header and its body.
-    fn push_groups(&self, items: &mut Vec<LibraryItem>, courses: Vec<usize>, collapsible: bool) {
+    fn push_groups(
+        &self,
+        items: &mut Vec<LibraryItem>,
+        courses: Vec<usize>,
+        collapsible: bool,
+        cx: &App,
+    ) {
         let mut groups: BTreeMap<(PathBuf, u64), Vec<usize>> = BTreeMap::new();
         for index in courses {
-            let course = &self.library.courses[index];
+            let course = &self.library(cx).courses[index];
             let root = self
-                .course_location(course)
+                .course_location(course, cx)
                 .map(|lib| lib.root.clone())
-                .unwrap_or_else(|| self.library.root.clone());
+                .unwrap_or_else(|| self.library(cx).root.clone());
             groups
-                .entry((root, self.course_folder(course).unwrap_or(0)))
+                .entry((root, self.course_folder(course, cx).unwrap_or(0)))
                 .or_default()
                 .push(index);
         }
-        let state = self.workspace.as_ref().map(|workspace| &workspace.state);
+        let state = self.workspace(cx).map(|workspace| &workspace.state);
         for ((root, id), entries) in groups {
             let location = state.and_then(|s| s.libraries.iter().find(|lib| lib.root == root));
             let key = format!(
@@ -960,7 +972,7 @@ impl Desktop {
                     .unwrap_or_else(|| root.display().to_string())
             );
             let collapsed = collapsible && state.is_some_and(|s| s.collapsed.contains(&key));
-            let folder_name = match self.library.indexes.get(&root) {
+            let folder_name = match self.library(cx).indexes.get(&root) {
                 Some(library) if library.folders.contains_key(&id) => library.path(id).join(" / "),
                 Some(_) => course2md::tr!("未分类").into(),
                 None => course2md::tr!("文件夹暂不可用").into(),
@@ -988,14 +1000,14 @@ impl Desktop {
     }
 
     fn toggle_group(&mut self, key: &str, cx: &mut Context<Self>) {
-        if let Some(workspace) = &mut self.workspace
-            && let Err(error) = workspace.transaction(|state| {
+        if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
+            workspace.transaction(|state| {
                 if !state.collapsed.remove(key) {
                     state.collapsed.insert(key.to_owned());
                 }
                 Ok(())
             })
-        {
+        }) {
             self.workspace_error = Some(course2md::tr!(
                 "分组展开状态尚未保存：{}",
                 format!("{error:#}")
@@ -1030,21 +1042,21 @@ impl Desktop {
     /// The selected place's name and item count, its folder commands and
     /// the page's main action.
     fn library_header(&self, count: Option<String>, cx: &mut Context<Self>) -> Div {
-        let (place, library) = self.library_place();
+        let (place, library) = self.library_place(cx);
         let supporting = match (library, count) {
             (Some(library), Some(count)) => Some(format!("{library} · {count}")),
             (Some(library), None) => Some(library),
             (None, count) => count,
         };
         let folder_commands = self
-            .library
+            .library(cx)
             .folder_filter
             .folder_id()
             .map(|id| CommandsButton {
                 id: "manage-folder".into(),
                 label: course2md::tr!("文件夹操作").into(),
                 subject: None,
-                commands: self.folder_commands(&self.library.root.clone(), id, cx),
+                commands: self.folder_commands(&self.library(cx).root.clone(), id, cx),
                 width: Some(COMMAND_MENU_WIDTH),
                 tonal: false,
             });
@@ -1187,7 +1199,7 @@ impl Desktop {
                 material_button("retry-unread-library-content", ButtonVariant::Tonal)
                     .icon(symbols::refresh())
                     .child(course2md::tr!("重新检查"))
-                    .loading(self.library.loading, course2md::tr!("重新检查"))
+                    .loading(self.library(cx).loading, course2md::tr!("重新检查"))
                     .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
             )
             .child(IssueDetails::new("unread-content", messages.clone()))
@@ -1253,7 +1265,7 @@ impl Desktop {
     /// What an empty place says, and the way forward from it.
     fn library_empty(&self, cx: &mut Context<Self>) -> Div {
         let query = self.value(Field::Search, cx);
-        let (icon, heading) = match self.library.folder_filter {
+        let (icon, heading) = match self.library(cx).folder_filter {
             _ if !query.is_empty() => (symbols::search(), course2md::tr!("没有匹配的笔记")),
             FolderFilter::All => (symbols::book_2(), course2md::tr!("还没有笔记")),
             FolderFilter::Unfiled => (symbols::inbox(), course2md::tr!("没有未分类的笔记")),
@@ -1269,7 +1281,7 @@ impl Desktop {
                         .update(cx, |state, cx| state.set_value("", window, cx));
                     cx.notify();
                 }))
-        } else if self.library.folder_filter.is_all() {
+        } else if self.library(cx).folder_filter.is_all() {
             material_button("empty-library-add", ButtonVariant::Filled)
                 .icon(symbols::add())
                 .child(course2md::tr!("导入视频"))
@@ -1280,7 +1292,7 @@ impl Desktop {
                 .icon(symbols::book_2())
                 .child(course2md::tr!("浏览全部笔记"))
                 .on_click(cx.listener(|this, _, _, cx| {
-                    let root = this.library.root.clone();
+                    let root = this.library(cx).root.clone();
                     this.select_library_scope(root, FolderFilter::All, cx);
                 }))
         };
@@ -1288,21 +1300,21 @@ impl Desktop {
     }
 
     pub(super) fn library_controls_visible(&self, cx: &App) -> bool {
-        !(self.library.courses.is_empty()
-            && self.library.folder_filter.is_all()
+        !(self.library(cx).courses.is_empty()
+            && self.library(cx).folder_filter.is_all()
             && self.value(Field::Search, cx).is_empty()
-            && self.library.error.is_none()
-            && self.library.issues.is_empty()
-            && !self.library.loading)
+            && self.library(cx).error.is_none()
+            && self.library(cx).issues.is_empty()
+            && !self.library(cx).loading)
     }
 
     /// Search, the folders on narrow windows, grouping, the card/list choice
     /// and a manual rescan, above the notes.
     fn library_toolbar(&self, sidebar: bool, cx: &mut Context<Self>) -> Div {
         let group_on = self.desktop_settings.library_group_folders;
-        let can_group = self.library.folder_filter.is_all() && self.library.error.is_none();
+        let can_group = self.library(cx).folder_filter.is_all() && self.library(cx).error.is_none();
         let desktop = cx.weak_entity();
-        let places = self.library_place().0;
+        let places = self.library_place(cx).0;
         let view = ConnectedButtonGroup::new("library-view", course2md::tr!("显示"))
             .tone(ButtonTone::Neutral)
             .options([
@@ -1411,7 +1423,7 @@ impl Desktop {
                                 symbols::refresh(),
                                 course2md::tr!("重新扫描笔记库"),
                             )
-                            .disabled(self.library.loading)
+                            .disabled(self.library(cx).loading)
                             .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
                         ),
                     ),
@@ -1422,7 +1434,7 @@ impl Desktop {
     /// where it came from. Its folder is named only where the place does not already
     /// say it; source identity helps recognize a note; routine revision numbers remain
     /// in the reader's version history.
-    fn note_line(&self, course: &Course, card: bool) -> String {
+    fn note_line(&self, course: &Course, card: bool, cx: &App) -> String {
         use chrono::Datelike;
         let ms = course
             .manifest
@@ -1441,19 +1453,23 @@ impl Desktop {
             .map(|instant| instant.with_timezone(&chrono::Local).date_naive());
         let home = self.page != Page::Library;
         let names_folder = home
-            || (self.library.folder_filter.is_all()
+            || (self.library(cx).folder_filter.is_all()
                 && !self.desktop_settings.library_group_folders);
         let mut parts = Vec::new();
         if names_folder {
-            let location = self.course_location(course);
-            let library = location.and_then(|location| self.library.indexes.get(&location.root));
-            match (self.course_folder(course).filter(|id| *id != 0), library) {
+            let location = self.course_location(course, cx);
+            let library =
+                location.and_then(|location| self.library(cx).indexes.get(&location.root));
+            match (
+                self.course_folder(course, cx).filter(|id| *id != 0),
+                library,
+            ) {
                 (Some(id), Some(library)) => parts.extend(library.folders.get(&id).cloned()),
                 (None, Some(_)) if !home => parts.push(course2md::tr!("未分类").to_owned()),
                 _ => {}
             }
         }
-        if let Some(source) = self.library.note_source(course).filter(|_| !card) {
+        if let Some(source) = self.library(cx).note_source(course).filter(|_| !card) {
             if !source.author.trim().is_empty() {
                 parts.push(source.author.clone());
             }
@@ -1480,15 +1496,14 @@ impl Desktop {
         cx.notify();
     }
 
-    fn course_has_reading_position(&self, course: &Course) -> bool {
+    fn course_has_reading_position(&self, course: &Course, cx: &App) -> bool {
         course.manifest.as_ref().is_some_and(|manifest| {
             let key = desktop_reader_core::reader::manifest_reading_key(
                 &manifest.course_id,
                 &manifest.version_id,
                 0,
             );
-            self.workspace
-                .as_ref()
+            self.workspace(cx)
                 .and_then(|workspace| workspace.state.positions.get(&key))
                 .is_some_and(desktop_reader_core::reader::has_reading_position)
         })
@@ -1502,7 +1517,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let (_, message) = self
-            .opened
+            .opened(cx)
             .reader_course_error
             .as_ref()
             .filter(|(path, _)| path == &course.dir)?;
@@ -1572,17 +1587,17 @@ impl Desktop {
             .w_full()
             .gap(rem(GRID_GAP))
             .children(row.iter().filter_map(|index| {
-                let course = self.library.courses.get(*index)?;
-                Some(self.note_card(course, *index, cx))
+                let course = self.library(cx).courses.get(*index)?.clone();
+                Some(self.note_card(&course, *index, cx))
             }))
     }
 
     /// A note's real state worth flagging on its cover or row: opening now, a task
     /// still writing a version of it, or content that still needs completing.
-    fn note_status(&self, course: &Course) -> Option<Div> {
+    fn note_status(&self, course: &Course, cx: &App) -> Option<Div> {
         let busy = self
-            .course_location(course)
-            .zip(self.workspace.as_ref())
+            .course_location(course, cx)
+            .zip(self.workspace(cx))
             .is_some_and(|(location, workspace)| {
                 note_has_unfinished_task(
                     &workspace.state.tasks,
@@ -1593,7 +1608,7 @@ impl Desktop {
                         .map(|manifest| manifest.source_id.as_str()),
                 )
             });
-        if self.opened.opening_course.as_ref() == Some(&course.dir) {
+        if self.opened(cx).opening_course.as_ref() == Some(&course.dir) {
             Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在打开笔记…")))
         } else if busy {
             Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在处理")))
@@ -1613,7 +1628,7 @@ impl Desktop {
         let cover = cover(course.thumbnail.clone(), symbols::description())
             .rounded(RADIUS_LARGE)
             .children(
-                self.note_status(course)
+                self.note_status(course, cx)
                     .map(|status| div().absolute().left(rem(8.)).top(rem(8.)).child(status)),
             );
         let card = MaterialCard::new(("note-card", index), CardVariant::Surface)
@@ -1654,7 +1669,7 @@ impl Desktop {
                                 scale
                                     .support(
                                         ("note-card-meta", index),
-                                        self.note_line(course, true),
+                                        self.note_line(course, true, cx),
                                     )
                                     .truncate(),
                             ),
@@ -1674,7 +1689,10 @@ impl Desktop {
                     .child(self.note_commands_button(course, index, false, cx)),
             )
             .children(self.course_read_error(course, index, cx))
-            .children(self.course_export_feedback(course, cx))
+            .children(
+                self.exports
+                    .update(cx, |exports, cx| exports.feedback(course, cx)),
+            )
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
             .into_any_element()
     }
@@ -1683,9 +1701,10 @@ impl Desktop {
     /// and its commands at the end. Library lists and the workbench's recent notes
     /// show the same row.
     fn note_row(&self, index: usize, outer: OuterCorners, cx: &mut Context<Self>) -> AnyElement {
-        let Some(course) = self.library.courses.get(index) else {
+        let Some(course) = self.library(cx).courses.get(index).cloned() else {
             return div().into_any_element();
         };
+        let course = &course;
         let scale = TileScale::Regular;
         let home = self.page != Page::Library;
         let commands = self.note_commands(course, cx);
@@ -1693,66 +1712,69 @@ impl Desktop {
             .course_read_error(course, index, cx)
             .into_iter()
             .chain(
-                self.course_export_feedback(course, cx)
+                self.exports
+                    .update(cx, |exports, cx| exports.feedback(course, cx))
                     .map(|feedback| feedback.px(rem(16.)).pb(rem(12.))),
             )
             .collect();
         let open = course.clone();
         let duration = self
-            .library
+            .library(cx)
             .note_source(course)
             .and_then(|source| source.duration)
             .filter(|_| home)
             .map(course2md::render::fmt_ts);
-        let row = scale
-            .button(
-                ("note-row", index),
-                if details.is_empty() {
-                    outer
-                } else {
-                    [outer[0], outer[1], false, false]
-                },
-            )
-            .accessibility_label(course2md::tr!("阅读 {}", course.title))
-            .on_click(cx.listener(move |this, _, _, cx| this.open_course(open.clone(), cx)))
-            .child(
-                scale
-                    .row()
-                    .child(
-                        row_cover(course.thumbnail.clone(), symbols::description()).children(
-                            duration.map(|duration| {
-                                media_label(("note-duration", index), duration)
-                                    .absolute()
-                                    .right(rem(4.))
-                                    .bottom(rem(4.))
-                            }),
-                        ),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap(rem(2.))
-                            .child(
-                                scale
-                                    .label(("note-title", index), course.title.clone())
-                                    .whitespace_normal()
-                                    .line_clamp(2)
-                                    .text_ellipsis(),
-                            )
-                            .child(
-                                scale.support(("note-meta", index), self.note_line(course, false)),
+        let row =
+            scale
+                .button(
+                    ("note-row", index),
+                    if details.is_empty() {
+                        outer
+                    } else {
+                        [outer[0], outer[1], false, false]
+                    },
+                )
+                .accessibility_label(course2md::tr!("阅读 {}", course.title))
+                .on_click(cx.listener(move |this, _, _, cx| this.open_course(open.clone(), cx)))
+                .child(
+                    scale
+                        .row()
+                        .child(
+                            row_cover(course.thumbnail.clone(), symbols::description()).children(
+                                duration.map(|duration| {
+                                    media_label(("note-duration", index), duration)
+                                        .absolute()
+                                        .right(rem(4.))
+                                        .bottom(rem(4.))
+                                }),
                             ),
-                    )
-                    .children(self.note_status(course))
-                    .map(|row| {
-                        if home {
-                            row.child(tile_chevron())
-                        } else {
-                            row.child(self.note_commands_button(course, index, false, cx))
-                        }
-                    }),
-            );
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(rem(2.))
+                                .child(
+                                    scale
+                                        .label(("note-title", index), course.title.clone())
+                                        .whitespace_normal()
+                                        .line_clamp(2)
+                                        .text_ellipsis(),
+                                )
+                                .child(scale.support(
+                                    ("note-meta", index),
+                                    self.note_line(course, false, cx),
+                                )),
+                        )
+                        .children(self.note_status(course, cx))
+                        .map(|row| {
+                            if home {
+                                row.child(tile_chevron())
+                            } else {
+                                row.child(self.note_commands_button(course, index, false, cx))
+                            }
+                        }),
+                );
         list_surface(outer)
             .id(("note", index))
             .relative()
@@ -1776,8 +1798,7 @@ impl Desktop {
         use crate::workspace::{Intent, TaskState};
         let linked = self.current_input_task(cx).map(|task| task.id.clone());
         let tasks: Vec<_> = self
-            .workspace
-            .as_ref()?
+            .workspace(cx)?
             .state
             .tasks
             .iter()
@@ -1789,6 +1810,7 @@ impl Desktop {
                         TaskState::Queued | TaskState::Running | TaskState::Pausing
                     ) || self.is_running_task(&task.id))
             })
+            .cloned()
             .collect();
         if tasks.is_empty() {
             return None;
@@ -1796,7 +1818,7 @@ impl Desktop {
         let scale = TileScale::Regular;
         let count = tasks.len();
         let mut list = v_flex().w_full().min_w_0().gap(TILE_GAP);
-        for (index, task) in tasks.into_iter().enumerate() {
+        for (index, task) in tasks.iter().enumerate() {
             let id = task.id.clone();
             let queued = task.state == TaskState::Queued && !self.is_running_task(&id);
             let cancel = id.clone();
@@ -1986,13 +2008,13 @@ impl Desktop {
         };
         let mut actions = h_flex().gap(rem(8.)).flex_wrap();
         if let Some(course) = task.artifact.as_ref().and_then(|path| {
-            self.library
+            self.library(cx)
                 .courses
                 .iter()
                 .find(|course| &course.dir == path)
                 .cloned()
         }) {
-            let label = if self.course_has_reading_position(&course) {
+            let label = if self.course_has_reading_position(&course, cx) {
                 course2md::tr!("继续阅读")
             } else {
                 course2md::tr!("阅读笔记")
@@ -2083,6 +2105,8 @@ impl Desktop {
         let show_notes = self.desktop_settings.home_recent_notes;
         let linked = self.current_input_task(cx).map(|task| task.id.clone());
         let mut attention: Vec<_> = self
+            .records
+            .read(cx)
             .workspace
             .iter()
             .flat_map(|workspace| &workspace.state.tasks)
@@ -2101,7 +2125,7 @@ impl Desktop {
         attention.truncate(2);
         let attention: Vec<_> = attention.into_iter().cloned().collect();
         let notes: Vec<usize> = self
-            .library
+            .library(cx)
             .courses
             .iter()
             .enumerate()
@@ -2148,7 +2172,9 @@ impl Desktop {
                     .icon_position(ButtonIconPosition::Trailing)
                     .child(course2md::tr!("笔记库"))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.library.folder_filter = FolderFilter::All;
+                        this.records.update(cx, |records, _| {
+                            records.library.folder_filter = FolderFilter::All
+                        });
                         this.navigate(Page::Library, cx);
                     }))
                     .into_any_element(),
@@ -2160,9 +2186,9 @@ impl Desktop {
     /// The workbench with no notes: still loading, unreachable, or the first use's
     /// short account of what happens.
     fn recent_empty(&self, cx: &mut Context<Self>) -> Div {
-        let access = self.cached_library_access();
-        let checking = self.library.loading || access.is_none();
-        let unavailable = !self.library.issues.is_empty()
+        let access = self.cached_library_access(cx);
+        let checking = self.library(cx).loading || access.is_none();
+        let unavailable = !self.library(cx).issues.is_empty()
             || access.is_some_and(|access| !access.unavailable.is_empty());
         if checking {
             return empty_state(symbols::menu_book(), course2md::tr!("正在读取笔记库"), None);

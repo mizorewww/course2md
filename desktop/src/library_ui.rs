@@ -1,5 +1,6 @@
 use super::*;
 use crate::{symbols, ui};
+use desktop_store::records::{FolderContext, FolderPlace, folders_unavailable};
 use gpui_kit_material::{
     color::ColorRole,
     icons::Icon,
@@ -16,10 +17,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-
-fn folders_unavailable() -> &'static str {
-    course2md::tr!("文件夹暂不可用，请重新扫描笔记库。")
-}
 
 /// What the name dialog names.
 #[derive(Clone)]
@@ -99,22 +96,10 @@ pub(crate) struct MoveDialog {
     open: bool,
 }
 
-/// Resolved picker state for the draft or a note.
-#[derive(Clone)]
-pub(crate) struct FolderContext {
-    pub(crate) root: PathBuf,
-    draft_id: Option<String>,
-    folder: Option<u64>,
-    pub(crate) load_error: Option<String>,
-    pub(crate) label: String,
-    /// Every folder in tree order, labelled with its path.
-    folders: Vec<(u64, String)>,
-}
-
 impl Desktop {
     pub fn begin_add(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.import_video_from_action(window, cx);
-        if self.online() && self.value(Field::Source, cx).is_empty() {
+        if self.online(cx) && self.value(Field::Source, cx).is_empty() {
             self.inputs[&Field::Source].update(cx, |state, cx| state.focus(window, cx));
         }
     }
@@ -129,7 +114,7 @@ impl Desktop {
             return;
         }
         if self.import.preview_cancel.is_some()
-            && self.draft().is_some_and(|draft| draft.input == input)
+            && self.draft(cx).is_some_and(|draft| draft.input == input)
         {
             return;
         }
@@ -137,7 +122,7 @@ impl Desktop {
         self.invalidate_source();
         if input.is_empty() {
             self.import.source_validation = Some(
-                if self.online() {
+                if self.online(cx) {
                     course2md::tr!("先粘贴视频链接")
                 } else {
                     course2md::tr!("先选择一个视频")
@@ -147,13 +132,13 @@ impl Desktop {
             cx.notify();
             return;
         }
-        if self.online()
+        if self.online(cx)
             && let Some(path) = source::pasted_local_path(&input)
         {
             self.drop_source_files(&[path], window, cx);
             return;
         }
-        if self.online() {
+        if self.online(cx) {
             let links = source::video_links(&input);
             if links.len() > 1 {
                 self.import.source_candidates = links
@@ -197,8 +182,7 @@ impl Desktop {
             return;
         }
         let token = self
-            .workspace
-            .as_ref()
+            .workspace(cx)
             .and_then(|workspace| workspace.state.draft())
             .map(|draft| (draft.id.clone(), draft.revision));
         let generation = self.import.preview_generation;
@@ -206,7 +190,7 @@ impl Desktop {
         self.import.preview_workers += 1;
         let cancel = Arc::new(AtomicBool::new(false));
         self.import.preview_cancel = Some(cancel.clone());
-        let online = self.online();
+        let online = self.online(cx);
         let handle = window.window_handle();
         // probe is blocking network/subprocess work; see crate::spawn_blocking_io.
         let task = crate::spawn_blocking_result(move || source::probe(input, online, cancel));
@@ -220,7 +204,7 @@ impl Desktop {
                 let _ = cx.update_window(handle, |_, window, cx| this.update(cx, |this, cx| {
                     if this.import.preview_generation != generation || this.value(Field::Source, cx) != request_input { return; }
                     if let Some((id, revision)) = &token
-                        && !this.workspace.as_ref().is_some_and(|workspace| workspace.state.matches_input(id, *revision))
+                        && !this.workspace(cx).is_some_and(|workspace| workspace.state.matches_input(id, *revision))
                     {
                         return;
                     }
@@ -231,7 +215,7 @@ impl Desktop {
                             if let course2md::subtitle::SubtitleEvidence::Found { tracks, .. } = &mut source.subtitles {
                                 course2md::subtitle::sort_tracks(tracks, &this.preferences.generation().preferred_subtitle_languages, course2md::i18n::lang().code(), source.original_language.as_deref());
                             }
-                            let title = this.workspace.as_ref().and_then(|workspace| workspace.state.draft())
+                            let title = this.workspace(cx).and_then(|workspace| workspace.state.draft())
                                 .filter(|draft| draft.custom_title).map(|draft| draft.title.clone()).unwrap_or_else(|| source.title.clone());
                             this.inputs[&Field::Title].update(cx, |state, cx| state.set_value(title, window, cx));
                             let previous_source = previous_source.as_ref().filter(|previous| previous.identity == source.identity);
@@ -248,7 +232,7 @@ impl Desktop {
                             }
                             this.import.source_preview = Some(source);
                             this.save_current_draft(cx);
-                            if this.task_options().source_mode != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
+                            if this.task_options(cx).source_mode != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
                                 this.confirm_subtitle(track, false, cx);
                             }
                         }
@@ -365,20 +349,20 @@ impl Desktop {
     }
 
     /// The library a new folder goes in, and the draft it is for on the workbench.
-    fn current_folder_origin(&self) -> (PathBuf, Option<String>) {
+    fn current_folder_origin(&self, cx: &App) -> (PathBuf, Option<String>) {
         if self.page == Page::New
-            && let Some(workspace) = &self.workspace
+            && let Some(workspace) = &self.records.read(cx).workspace
             && let Some(draft) = workspace.state.draft()
             && let Some(library) = workspace.state.library(&draft.library_id)
         {
             return (library.root.clone(), Some(draft.id.clone()));
         }
-        (self.library.root.clone(), None)
+        (self.library(cx).root.clone(), None)
     }
 
     /// A new top-level folder in the current library, for the workbench's draft there.
     pub fn begin_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (root, draft) = self.current_folder_origin();
+        let (root, draft) = self.current_folder_origin(cx);
         let parent = None;
         self.begin_naming(
             NameTarget::NewFolder {
@@ -421,7 +405,7 @@ impl Desktop {
         let name = match &target {
             NameTarget::NewFolder { .. } => String::new(),
             NameTarget::Folder { root, id } => {
-                let Some(library) = self.library.indexes.get(root) else {
+                let Some(library) = self.library(cx).indexes.get(root) else {
                     self.message = Some(folders_unavailable().into());
                     cx.notify();
                     return;
@@ -429,7 +413,7 @@ impl Desktop {
                 library.folders.get(id).cloned().unwrap_or_default()
             }
             NameTarget::Note { storage, .. } => self
-                .library
+                .library(cx)
                 .courses
                 .iter()
                 .find(|course| &course.storage_dir() == storage)
@@ -505,7 +489,7 @@ impl Desktop {
             },
             move |this, result, cx| {
                 let result = result.map(|(library, value)| {
-                    this.store_folders(&root, library);
+                    this.store_folders(&root, library, cx);
                     value
                 });
                 done(this, result, cx);
@@ -514,12 +498,15 @@ impl Desktop {
         );
     }
 
-    pub(crate) fn store_folders(&mut self, root: &Path, library: organize::Library) {
-        if self.library.root == root {
-            self.library.current = library.clone();
-            self.library.error = None;
-        }
-        self.library.indexes.insert(root.to_owned(), library);
+    pub(crate) fn store_folders(&mut self, root: &Path, library: organize::Library, cx: &mut App) {
+        self.records.update(cx, |records, _| {
+            let library_state = &mut records.library;
+            if library_state.root == root {
+                library_state.current = library.clone();
+                library_state.error = None;
+            }
+            library_state.indexes.insert(root.to_owned(), library);
+        });
     }
 
     /// Saves the dialog's name. Pressing Return in its field lands here too.
@@ -595,8 +582,8 @@ impl Desktop {
                 draft: Some(draft_id),
                 ..
             } => {
-                if let Some(workspace) = &mut self.workspace
-                    && let Err(error) = workspace.transaction(|state| {
+                if let Some(Err(error)) = self.with_workspace(cx, |workspace| {
+                    workspace.transaction(|state| {
                         if let Some(draft) =
                             state.drafts.iter_mut().find(|draft| &draft.id == draft_id)
                         {
@@ -604,7 +591,7 @@ impl Desktop {
                         }
                         Ok(())
                     })
-                    && let Some(dialog) = &mut self.library_ui.name_dialog
+                }) && let Some(dialog) = &mut self.library_ui.name_dialog
                 {
                     dialog.error = Some(course2md::tr!(
                         "文件夹已创建，保存位置尚未更新：{}",
@@ -734,12 +721,12 @@ impl Desktop {
     /// outgrow a menu, and a folder cannot move inside itself.
     pub(crate) fn move_dialog_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.library_ui.move_dialog.as_ref()?;
-        let library = self.library.indexes.get(&dialog.root)?;
+        let library = self.library(cx).indexes.get(&dialog.root)?;
         let (top, top_icon, current, inside) = match &dialog.moving {
             Moving::Note(storage) => (
                 course2md::tr!("未分类").to_owned(),
                 symbols::inbox(),
-                self.library
+                self.library(cx)
                     .view_cache
                     .locations
                     .get(storage)
@@ -747,7 +734,7 @@ impl Desktop {
                 Vec::new(),
             ),
             Moving::Folder(id) => (
-                self.library_name(&dialog.root),
+                self.library_name(&dialog.root, cx),
                 symbols::database(),
                 library.parent(*id),
                 library.subtree(*id),
@@ -820,8 +807,8 @@ impl Desktop {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let library = self.library.indexes.get(&root);
-        let name = [library, Some(&self.library.current)]
+        let library = self.library(cx).indexes.get(&root);
+        let name = [library, Some(&self.library(cx).current)]
             .into_iter()
             .flatten()
             .find_map(|library| library.folders.get(&id))
@@ -853,23 +840,21 @@ impl Desktop {
                         library.remove(id);
                         Ok(())
                     },
-                    move |this, result, _| match result {
+                    move |this, result, cx| match result {
                         // Drafts keep the deleted folder so their next submission
                         // asks for a deliberate destination.
-                        Ok(()) => {
-                            let removed =
-                                this.library
-                                    .folder_filter
-                                    .folder_id()
-                                    .is_some_and(|folder| {
-                                        this.library.indexes.get(&removed_root).is_none_or(
-                                            |library| !library.folders.contains_key(&folder),
-                                        )
-                                    });
-                            if this.library.root == removed_root && removed {
-                                this.library.folder_filter = FolderFilter::Unfiled;
+                        Ok(()) => this.records.update(cx, |records, _| {
+                            let library = &mut records.library;
+                            let removed = library.folder_filter.folder_id().is_some_and(|folder| {
+                                library
+                                    .indexes
+                                    .get(&removed_root)
+                                    .is_none_or(|index| !index.folders.contains_key(&folder))
+                            });
+                            if library.root == removed_root && removed {
+                                library.folder_filter = FolderFilter::Unfiled;
                             }
-                        }
+                        }),
                         Err(error) => {
                             this.message =
                                 Some(course2md::tr!("无法删除文件夹：{}", format!("{error:#}")))
@@ -883,73 +868,24 @@ impl Desktop {
         );
     }
 
-    pub(crate) fn folder_context(&self, course: Option<PathBuf>) -> FolderContext {
-        let storage = course.as_ref().map(|path| {
-            self.library
-                .courses
-                .iter()
-                .find(|course| &course.dir == path || &course.storage_dir() == path)
-                .map(|course| course.storage_dir())
-                .unwrap_or_else(|| path.clone())
-        });
-        let (root, draft_id) = match &storage {
-            Some(path) => (
-                self.library
-                    .view_cache
-                    .locations
-                    .get(path)
-                    .map(|location| location.root.clone())
-                    .unwrap_or_else(|| self.library.root.clone()),
-                None,
-            ),
-            None => self.current_folder_origin(),
+    pub(crate) fn folder_context(&self, course: Option<PathBuf>, cx: &App) -> FolderContext {
+        let place = match &course {
+            Some(path) => FolderPlace::Note(path),
+            None => {
+                let (root, draft_id) = self.current_folder_origin(cx);
+                FolderPlace::Draft {
+                    root,
+                    draft_id,
+                    folder: self.target_folder(cx),
+                }
+            }
         };
-        let loaded = self.library.indexes.get(&root);
-        let checking = loaded.is_none() && self.library.loading;
-        let load_error = (loaded.is_none() && !checking).then(|| folders_unavailable().to_owned());
-        let folder = match &storage {
-            Some(path) => self
-                .library
-                .view_cache
-                .locations
-                .get(path)
-                .filter(|location| location.root == root)
-                .and_then(|location| loaded?.folder_key(&location.relative)),
-            None => self.target_folder(),
-        };
-        let label = if checking {
-            course2md::tr!("正在读取文件夹…").to_owned()
-        } else if load_error.is_some() {
-            course2md::tr!("文件夹暂不可用").to_owned()
-        } else if let Some(id) = folder {
-            loaded
-                .filter(|organization| organization.folders.contains_key(&id))
-                .map(|organization| organization.path(id).join(" / "))
-                .unwrap_or_else(|| course2md::tr!("文件夹已删除，请重新选择").into())
-        } else {
-            course2md::tr!("未分类").into()
-        };
-        FolderContext {
-            root,
-            draft_id,
-            folder,
-            load_error,
-            label,
-            folders: loaded
-                .map(|organization| {
-                    organization
-                        .tree()
-                        .into_iter()
-                        .map(|(id, _)| (id, organization.path(id).join(" / ")))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        }
+        self.records.read(cx).folder_context(place)
     }
 
     /// Where the workbench's next note is saved: one of many folders, by name.
     pub fn folder_picker(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let context = self.folder_context(None);
+        let context = self.folder_context(None, cx);
         let mut destinations = vec![None];
         destinations.extend(context.folders.iter().map(|(id, _)| Some(*id)));
         let selected = destinations.iter().position(|id| *id == context.folder);
@@ -966,7 +902,7 @@ impl Desktop {
             .selected(selected)
             .full_width()
             .open(self.library_ui.folder_picker_open)
-            .disabled(self.library.loading || context.load_error.is_some())
+            .disabled(self.library(cx).loading || context.load_error.is_some())
             .error(context.load_error.is_some())
             .when_some(context.load_error, |picker, error| {
                 picker.supporting_text(error)
@@ -978,8 +914,7 @@ impl Desktop {
             .on_select(cx.listener(move |this, index: &usize, _, cx| {
                 this.library_ui.folder_picker_open = false;
                 let current = this
-                    .workspace
-                    .as_ref()
+                    .workspace(cx)
                     .and_then(|workspace| workspace.state.draft())
                     .is_some_and(|draft| Some(&draft.id) == draft_id.as_ref());
                 if current {

@@ -503,7 +503,7 @@ impl Desktop {
     fn saving_fields(&self, cx: &mut Context<Self>) -> Vec<ui::Field> {
         let value = self.preferences.generation();
         let selected = value.options.formats.clone().unwrap_or_default();
-        let location = self.workspace.as_ref().and_then(|workspace| {
+        let location = self.workspace(cx).and_then(|workspace| {
             let state = &workspace.state;
             state
                 .libraries
