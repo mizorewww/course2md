@@ -352,6 +352,8 @@ impl Desktop {
         let (page, category) = page.split_once(':').unwrap_or((page, ""));
         // One dialog per shot: close whatever the previous capture opened.
         window.close_all_dialogs(cx);
+        // A `ui::Confirm` is drawn by the shell, not the window's dialog stack.
+        crate::ui::dismiss_confirm(window, cx);
         self.library_ui.name_dialog = None;
         self.library_ui.move_dialog = None;
         self.reader
