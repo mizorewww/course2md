@@ -308,12 +308,16 @@ impl Desktop {
         self.records
             .update(cx, |records, _| records.apply_course_title_aliases());
         let title = self
-            .opened
+            .opened(cx)
             .preview
             .as_ref()
             .map(|preview| self.library(cx).course_display_title(&preview.course));
-        if let (Some(preview), Some(title)) = (self.opened.preview.as_mut(), title) {
-            Rc::make_mut(preview).course.title = title;
+        if let Some(title) = title {
+            self.reader.update(cx, |reader, _| {
+                if let Some(preview) = reader.opened.preview.as_mut() {
+                    Rc::make_mut(preview).course.title = title;
+                }
+            });
         }
     }
 
@@ -397,7 +401,7 @@ impl Desktop {
             move |this, result, cx| match result {
                 Ok(()) => {
                     let reading = this
-                        .opened
+                        .opened(cx)
                         .preview
                         .as_ref()
                         .is_some_and(|preview| preview.course.storage_dir() == dir);
@@ -407,7 +411,8 @@ impl Desktop {
                         this.refresh_library(cx);
                     }
                     if reading {
-                        this.opened.preview = None;
+                        this.reader
+                            .update(cx, |reader, _| reader.opened.preview = None);
                     }
                     this.message = Some(course2md::tr!(
                         "已将《{}》移到{}",
@@ -447,7 +452,11 @@ impl Desktop {
                 label,
                 symbols::download(),
                 &desktop,
-                move |this, window, cx| this.export_course(course.clone(), format, window, cx),
+                move |this, window, cx| {
+                    let course = course.clone();
+                    this.exports
+                        .update(cx, |exports, cx| exports.export(course, format, window, cx))
+                },
             )
         };
         let mut commands = vec![
@@ -1508,7 +1517,7 @@ impl Desktop {
         cx: &mut Context<Self>,
     ) -> Option<Div> {
         let (_, message) = self
-            .opened
+            .opened(cx)
             .reader_course_error
             .as_ref()
             .filter(|(path, _)| path == &course.dir)?;
@@ -1599,7 +1608,7 @@ impl Desktop {
                         .map(|manifest| manifest.source_id.as_str()),
                 )
             });
-        if self.opened.opening_course.as_ref() == Some(&course.dir) {
+        if self.opened(cx).opening_course.as_ref() == Some(&course.dir) {
             Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在打开笔记…")))
         } else if busy {
             Some(status_chip(StatusKind::Progress).child(course2md::tr!("正在处理")))
@@ -1680,7 +1689,10 @@ impl Desktop {
                     .child(self.note_commands_button(course, index, false, cx)),
             )
             .children(self.course_read_error(course, index, cx))
-            .children(self.course_export_feedback(course, cx))
+            .children(
+                self.exports
+                    .update(cx, |exports, cx| exports.feedback(course, cx)),
+            )
             .on_drag(note_drag(course), |drag, _, _, cx| cx.new(|_| drag.clone()))
             .into_any_element()
     }
@@ -1700,7 +1712,8 @@ impl Desktop {
             .course_read_error(course, index, cx)
             .into_iter()
             .chain(
-                self.course_export_feedback(course, cx)
+                self.exports
+                    .update(cx, |exports, cx| exports.feedback(course, cx))
                     .map(|feedback| feedback.px(rem(16.)).pb(rem(12.))),
             )
             .collect();

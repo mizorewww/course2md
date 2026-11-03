@@ -11,6 +11,7 @@ mod appearance_ui;
 mod capture;
 mod codex_ui;
 mod course_library;
+mod exports_ui;
 mod folder_tree;
 mod i18n;
 mod import_ui;
@@ -111,15 +112,16 @@ struct Desktop {
     storage_ui: desktop_store::locations::State,
     /// Reading the move records; a newer read replaces it.
     storage_records: Option<Task<()>>,
-    reader_ui: reader_ui::State,
+    /// The reader page, with the note it shows.
+    reader: Entity<reader_ui::ReaderPage>,
+    /// Exports of notes, which the reader and the library share.
+    exports: Entity<exports_ui::NoteExports>,
     /// The workspace record and the libraries' notes, which every page reads.
     records: Entity<desktop_store::records::Records>,
     workspace_error: Option<String>,
     import: desktop_tasks::import::ImportSession,
     /// The running job: a task's or a model's.
     work: desktop_tasks::job::WorkState,
-    /// The note being read, or on its way.
-    opened: desktop_reader_core::reader::OpenedNote,
     task_list: task_ui::TaskListUi,
     theme_frame: views::ThemeFrame,
     library_ui: library_ui::LibraryUi,
@@ -308,8 +310,12 @@ impl Desktop {
                         // preview accepts it; anything else is a new edit.
                         if this.draft(cx).is_some_and(|draft| draft.input != value) {
                             this.import.following_conversion = None;
-                            if this.opened.reading && this.page == Page::New {
-                                this.opened.stop_reading();
+                            if this.page == Page::New {
+                                this.reader.update(cx, |reader, _| {
+                                    if reader.opened.reading {
+                                        reader.opened.stop_reading();
+                                    }
+                                });
                             }
                             if !this.prepare_next_import(&value, window, cx) {
                                 return;
@@ -412,23 +418,30 @@ impl Desktop {
         }
         let settings_ui = settings_ui::State::new(window, cx);
         let onboarding = onboarding::State::new(window, cx);
-        let reader_ui = reader_ui::State::new(window, cx);
+        let records = cx.new(|_| {
+            desktop_store::records::Records::new(
+                workspace,
+                desktop_store::library::LibraryState::new(output),
+            )
+        });
+        let exports = cx.new(|_| exports_ui::NoteExports::new(records.clone()));
+        let reader =
+            cx.new(|cx| reader_ui::ReaderPage::new(records.clone(), exports.clone(), window, cx));
+        subscriptions.push(cx.subscribe_in(&reader, window, Self::reader_event));
+        // Desktop reads what the reader and the exports say, beside drawing them.
+        subscriptions.push(cx.observe(&reader, |_, _, cx| cx.notify()));
+        subscriptions.push(cx.observe(&exports, |_, _, cx| cx.notify()));
         let mut this = Self {
             preferences,
             settings_ui,
             onboarding,
-            reader_ui,
+            reader,
+            exports,
             storage_ui: Default::default(),
-            records: cx.new(|_| {
-                desktop_store::records::Records::new(
-                    workspace,
-                    desktop_store::library::LibraryState::new(output),
-                )
-            }),
+            records,
             workspace_error,
             import: Default::default(),
             work: desktop_tasks::job::WorkState::new(),
-            opened: Default::default(),
             task_list: task_ui::TaskListUi::new(),
             theme_frame: Default::default(),
             library_ui: library_ui::LibraryUi::new(),
@@ -644,7 +657,8 @@ impl Desktop {
     /// Find inside the open note, otherwise search the library.
     fn search_content(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.page == Page::Result {
-            self.open_reader_find(window, cx);
+            self.reader
+                .update(cx, |reader, cx| reader.open_reader_find(window, cx));
         } else {
             self.navigate(Page::Library, cx);
             self.inputs[&Field::Search].update(cx, |input, cx| input.focus(window, cx));
@@ -662,15 +676,17 @@ impl Desktop {
             self.import.following_conversion = None;
         }
         self.save_reading_position(cx);
-        self.opened.stop_reading();
-        self.opened.opening_course = None;
+        self.reader.update(cx, |reader, cx| {
+            reader.opened.stop_reading();
+            reader.opened.opening_course = None;
+            if page != Page::Result {
+                reader.release_reader_images(cx);
+            }
+        });
         if self.page == Page::New {
             self.save_current_draft(cx);
         }
-        if page != Page::Result {
-            self.release_reader_images(cx);
-        }
-        self.page = page;
+        self.set_page(page, cx);
         self.message = None;
         if page == Page::Library {
             self.refresh_library(cx);
@@ -709,9 +725,6 @@ impl Desktop {
     ) -> Option<R> {
         self.records
             .update(cx, |records, _| records.workspace.as_mut().map(change))
-    }
-    fn output(&self, cx: &App) -> PathBuf {
-        self.records.read(cx).output()
     }
     fn pick_video(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prompt = cx.prompt_for_paths(PathPromptOptions {
@@ -997,7 +1010,8 @@ impl Desktop {
         // Reading needs its own copy on the worker; rendering shares the rest.
         let course = Rc::unwrap_or_clone(course);
         self.save_reading_position(cx);
-        let reader_revision = self.opened.read_generation;
+        let opened = &self.reader.read(cx).opened;
+        let reader_revision = opened.read_generation;
         let reader_origin = follow.as_ref().and_then(|follow| {
             if !matches!(
                 follow,
@@ -1005,25 +1019,30 @@ impl Desktop {
             ) {
                 return None;
             }
-            let manifest = self.opened.preview.as_ref()?.course.manifest.as_ref()?;
+            let manifest = opened.preview.as_ref()?.course.manifest.as_ref()?;
             Some((manifest.course_id.clone(), manifest.version_id.clone()))
         });
         cx.notify();
         let reading_path = course.dir.clone();
         let origin = self.page;
-        let generation = self.opened.begin_read(reading_path.clone(), origin);
+        let generation = self.reader.update(cx, |reader, _| {
+            reader.opened.begin_read(reading_path.clone(), origin)
+        });
         let task = spawn_blocking_io(move || notes::read_preview(course));
         cx.spawn(async move |this, cx| {
             let result = task
                 .await
                 .unwrap_or_else(|| Err(anyhow::anyhow!(course2md::tr!("读取笔记时出错，请重试"))));
             let _ = this.update(cx, |this, cx| {
-                if this.opened.read_generation != generation || this.page != origin {
+                if this.opened(cx).read_generation != generation || this.page != origin {
                     return;
                 }
-                this.opened.reading = false;
-                this.opened.opening_course = None;
-                if this.reader_viewer_open() {
+                let viewer_open = this.reader.update(cx, |reader, _| {
+                    reader.opened.reading = false;
+                    reader.opened.opening_course = None;
+                    reader.reader_viewer_open()
+                });
+                if viewer_open {
                     desktop_tasks::import::ConversionFollow::interrupt_for_reader_viewer(
                         &mut this.import.following_conversion,
                     );
@@ -1034,7 +1053,7 @@ impl Desktop {
                             this.page,
                             this.import.preview_generation,
                             reader_revision,
-                            this.opened
+                            this.opened(cx)
                                 .preview
                                 .as_ref()
                                 .map(|preview| preview.course.dir.as_path()),
@@ -1086,29 +1105,35 @@ impl Desktop {
                             this.workspace_error =
                                 Some(course2md::tr!("阅读进度未能保存：{}", format!("{error:#}")));
                         }
-                        settle_reader_notice(
-                            &mut this.message,
-                            &mut this.opened.reader_failure_notice,
-                        );
-                        if reader_origin.is_none() {
-                            this.opened.result_tab = 0;
-                        }
-                        this.opened.preview = Some(Rc::new(preview));
-                        this.ensure_reader_data(cx);
+                        let message = &mut this.message;
+                        this.reader.update(cx, |reader, cx| {
+                            settle_reader_notice(message, &mut reader.opened.reader_failure_notice);
+                            if reader_origin.is_none() {
+                                reader.opened.result_tab = 0;
+                            }
+                            reader.opened.preview = Some(Rc::new(preview));
+                            reader.ensure_reader_data(cx);
+                        });
                         this.apply_course_title_aliases(cx);
-                        this.restore_reading_position(cx);
-                        this.page = Page::Result;
-                        this.show_validation_panels();
+                        this.reader
+                            .update(cx, |reader, cx| reader.restore_reading_position(cx));
+                        this.set_page(Page::Result, cx);
+                        this.show_validation_panels(cx);
                         if follow.is_some() {
                             this.import.following_conversion = None;
                         }
                     }
                     Err(error) => {
                         let message = note_read_failure(&error).to_owned();
-                        this.opened.reader_course_error = Some((reading_path, message.clone()));
-                        if origin != Page::Library {
-                            this.message = Some(message);
-                            this.opened.reader_failure_notice = this.message.clone();
+                        let notice = (origin != Page::Library).then(|| message.clone());
+                        this.reader.update(cx, |reader, _| {
+                            reader.opened.reader_course_error = Some((reading_path, message));
+                            if notice.is_some() {
+                                reader.opened.reader_failure_notice = notice.clone();
+                            }
+                        });
+                        if notice.is_some() {
+                            this.message = notice;
                         }
                     }
                 }
@@ -1116,6 +1141,84 @@ impl Desktop {
             });
         })
         .detach();
+    }
+
+    /// The note the reader shows, or is opening.
+    fn opened<'a>(&self, cx: &'a App) -> &'a desktop_reader_core::reader::OpenedNote {
+        &self.reader.read(cx).opened
+    }
+
+    /// Shows `page`; the reader records reading positions only while it shows.
+    fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.page = page;
+        self.reader
+            .update(cx, |reader, _| reader.visible = page == Page::Result);
+    }
+
+    /// Records where the open note is read, while the reader shows it.
+    pub(crate) fn save_reading_position(&mut self, cx: &mut Context<Self>) {
+        self.reader
+            .update(cx, |reader, cx| reader.save_reading_position(cx));
+    }
+
+    /// What the reader asks of the window.
+    fn reader_event(
+        &mut self,
+        _: &Entity<reader_ui::ReaderPage>,
+        event: &reader_ui::ReaderEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use reader_ui::ReaderEvent;
+        match event {
+            ReaderEvent::Navigate(page) => self.navigate(*page, cx),
+            ReaderEvent::OpenTask(id) => {
+                self.select_task(id, cx);
+                self.navigate(Page::Task, cx);
+            }
+            ReaderEvent::Reprocess { id, components } => {
+                self.reprocess_task(id.clone(), components.clone(), Vec::new(), cx)
+            }
+            ReaderEvent::RepairService(id) => self.repair_task_service(id.clone(), window, cx),
+            ReaderEvent::Message(text) => self.message = Some(text.clone()),
+            ReaderEvent::RecordError(text) => self.workspace_error = Some(text.clone()),
+            ReaderEvent::ViewerOpened => {
+                desktop_tasks::import::ConversionFollow::interrupt_for_reader_viewer(
+                    &mut self.import.following_conversion,
+                )
+            }
+        }
+        cx.notify();
+    }
+
+    /// Debug validation: open the requested note after the first scan.
+    pub(crate) fn open_validation_note(&mut self, cx: &mut Context<Self>) {
+        let Some(wanted) = self.validation.as_mut().and_then(|v| v.note.take()) else {
+            return;
+        };
+        let found = self
+            .library(cx)
+            .courses
+            .iter()
+            .find(|course| {
+                course.title.contains(&wanted) || course.dir.to_string_lossy().contains(&wanted)
+            })
+            .cloned();
+        if let Some(course) = found {
+            self.open_course(course, cx);
+        }
+    }
+
+    /// Debug validation: show the requested reader panels once the note loaded.
+    fn show_validation_panels(&mut self, cx: &mut Context<Self>) {
+        // Only after the requested note was opened.
+        if self.validation.as_ref().is_none_or(|v| v.note.is_some()) {
+            return;
+        }
+        if let Some(validation) = self.validation.take() {
+            self.reader
+                .update(cx, |reader, _| reader.show_panels(&validation.panels));
+        }
     }
 }
 
@@ -1354,7 +1457,8 @@ impl Desktop {
             });
         }
         self.relocalize_settings_inputs(window, cx);
-        self.relocalize_reader_inputs(window, cx);
+        self.reader
+            .update(cx, |reader, cx| reader.relocalize_reader_inputs(window, cx));
         install_menus(cx);
         cx.notify();
     }

@@ -307,7 +307,8 @@ impl Desktop {
         window.close_all_dialogs(cx);
         self.library_ui.name_dialog = None;
         self.library_ui.move_dialog = None;
-        self.close_reader_image(cx);
+        self.reader
+            .update(cx, |reader, cx| reader.close_reader_image(cx));
         self.close_settings_dialogs(cx);
         self.close_storage_dialog();
         // First use is reviewed on its own; captured pages show the app behind it.
@@ -404,7 +405,9 @@ impl Desktop {
                             .timer(Duration::from_millis(1200))
                             .await;
                         let _ = this.update_in(cx, |this, window, cx| {
-                            this.capture_reader_view(shots, shot, end, window, cx)
+                            this.reader.update(cx, |reader, cx| {
+                                reader.capture_reader_view(shots, shot, end, window, cx)
+                            })
                         });
                     })
                     .detach();
@@ -500,8 +503,10 @@ impl Desktop {
                 cx.background_executor()
                     .timer(Duration::from_millis(1500))
                     .await;
-                let _ =
-                    this.update_in(cx, |this, window, cx| this.open_reader_image(0, window, cx));
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.reader
+                        .update(cx, |reader, cx| reader.open_reader_image(0, window, cx))
+                });
             }
         })
         .detach();

@@ -759,15 +759,15 @@ impl Desktop {
                     id: id.to_owned(),
                     source_revision: self.import.preview_generation,
                 });
-        } else if self.page == Page::Result && !self.opened.reading {
+        } else if self.page == Page::Result && !self.opened(cx).reading {
             self.import.following_conversion = self
                 .task(id, cx)
-                .zip(self.opened.preview.as_ref())
+                .zip(self.opened(cx).preview.as_ref())
                 .and_then(|(task, preview)| {
                     desktop_tasks::import::ConversionFollow::reader_reprocess(
                         task,
                         &preview.course.dir,
-                        self.opened.read_generation,
+                        self.opened(cx).read_generation,
                     )
                 });
         }
@@ -984,7 +984,7 @@ impl Desktop {
         };
         match result {
             Ok(task) => {
-                if self.reader_viewer_open() {
+                if self.reader.read(cx).reader_viewer_open() {
                     desktop_tasks::import::ConversionFollow::interrupt_for_reader_viewer(
                         &mut self.import.following_conversion,
                     );
@@ -1004,7 +1004,7 @@ impl Desktop {
                         )
                     })
                     .is_some_and(|task| task.id == id);
-                let follow_reader_completion = !self.opened.reading
+                let follow_reader_completion = !self.opened(cx).reading
                     && self
                         .import
                         .following_conversion
@@ -1013,8 +1013,8 @@ impl Desktop {
                             follow.completed_reader_task(
                                 &task,
                                 self.page,
-                                self.opened.read_generation,
-                                self.opened
+                                self.opened(cx).read_generation,
+                                self.opened(cx)
                                     .preview
                                     .as_ref()
                                     .map(|preview| preview.course.dir.as_path()),

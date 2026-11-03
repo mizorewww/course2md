@@ -126,8 +126,12 @@ struct SubtitleRead {
 impl Desktop {
     /// Explicit confirmation of an already visible preview owns submission.
     pub fn start_conversion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.opened.reading && self.page == Page::New {
-            self.opened.stop_reading();
+        if self.page == Page::New {
+            self.reader.update(cx, |reader, _| {
+                if reader.opened.reading {
+                    reader.opened.stop_reading();
+                }
+            });
         }
         let input = self.value(Field::Source, cx);
         if self.draft(cx).is_some_and(|draft| draft.input != input) {
@@ -2318,7 +2322,7 @@ impl Desktop {
                 matches!(
                     task.state,
                     workspace::TaskState::Complete | workspace::TaskState::Cancelled
-                ) && !(self.opened.reading
+                ) && !(self.opened(cx).reading
                     && self
                         .import
                         .following_conversion
@@ -2349,7 +2353,7 @@ impl Desktop {
 
     /// The source card and hero share one definition of the submitted task.
     fn workbench_linked_task<'a>(&'a self, cx: &'a App) -> Option<&'a workspace::TaskRecord> {
-        let opening_result = self.opened.reading && self.import.following_conversion.is_some();
+        let opening_result = self.opened(cx).reading && self.import.following_conversion.is_some();
         self.current_input_task(cx).filter(|task| {
             (opening_result
                 && matches!(
@@ -2451,7 +2455,7 @@ impl Desktop {
             self.scrolls[Page::New as usize].set_offset(point(px(0.), px(-offset)));
         }
         let compact = is_compact(window);
-        let opening_result = self.opened.reading && self.import.following_conversion.is_some();
+        let opening_result = self.opened(cx).reading && self.import.following_conversion.is_some();
         let linked_task = self.workbench_linked_task(cx).cloned();
         let cancelled = self
             .current_input_task(cx)

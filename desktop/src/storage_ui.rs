@@ -254,14 +254,16 @@ impl Desktop {
             self.records
                 .update(cx, |records, _| records.library.root = link.folder.clone());
         }
-        self.opened.stop_reading();
-        if let Some(preview) = self.opened.preview.as_mut() {
-            let was_inside = preview.course.dir.starts_with(&link.previous_root);
-            relocate_preview(Rc::make_mut(preview), &link.previous_root, &link.folder);
-            if was_inside {
-                self.restore_reading_position(cx);
+        self.reader.update(cx, |reader, cx| {
+            reader.opened.stop_reading();
+            if let Some(preview) = reader.opened.preview.as_mut() {
+                let was_inside = preview.course.dir.starts_with(&link.previous_root);
+                relocate_preview(Rc::make_mut(preview), &link.previous_root, &link.folder);
+                if was_inside {
+                    reader.restore_reading_position(cx);
+                }
             }
-        }
+        });
         let settings = self.relocate_settings_paths(&link.previous_root, &link.folder, cx);
         self.storage_ui.error = settings.err().map(|error| {
             course2md::tr!(
