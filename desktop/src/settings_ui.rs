@@ -93,7 +93,7 @@ const MENU_WIDTH: f32 = 280.;
 const TEXT_SAVE_DELAY_MS: u64 = 600;
 
 pub(crate) struct State {
-    model_diagnostics: model_diagnostics::State,
+    pub(crate) model_diagnostics: model_diagnostics::State,
     /// Arrow keys move among the categories while focus is in their list.
     navigation_focus: FocusHandle,
     /// Settings search in the navigation pane.

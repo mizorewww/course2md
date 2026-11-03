@@ -1310,10 +1310,39 @@ impl Desktop {
             })
             .map(|library| library.id.clone())
             .collect();
+        // A card that asked for its model says how that went: the outcome lives in
+        // settings' model state until another preparation starts.
+        let state = &self.settings_ui.model_diagnostics;
+        let provider = self.recommended_local_provider();
+        let models = records
+            .workspace
+            .iter()
+            .flat_map(|workspace| &workspace.state.tasks)
+            .filter(|task| task.state == TaskState::NeedsAttention && task.events.model_required)
+            .filter_map(|task| {
+                let key = desktop_tasks::task_view::task_model_request(task, provider).key();
+                let preparation = if state.preparing_for_tasks
+                    && state
+                        .preparing
+                        .as_ref()
+                        .is_some_and(|request| request.key() == key)
+                {
+                    task_ui::ModelPreparation::Preparing
+                } else {
+                    let outcome = state
+                        .outcome
+                        .as_ref()
+                        .filter(|outcome| outcome.error && outcome.key == key)?;
+                    task_ui::ModelPreparation::Failed(outcome.message.clone())
+                };
+                Some((task.id.clone(), preparation))
+            })
+            .collect();
         task_ui::ShellFacts {
             services,
             reassociate,
             storage_busy: self.storage_ui.busy,
+            models,
         }
     }
 }
