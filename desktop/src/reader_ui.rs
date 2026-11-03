@@ -969,6 +969,23 @@ impl ReaderPage {
         self.refresh_reader_data(cx);
     }
 
+    /// The note's name as the library shows it, after a rename: the bar and the
+    /// document's heading both read it. The published files keep their title.
+    pub(crate) fn retitle(&mut self, title: String, cx: &mut Context<Self>) {
+        let Some(preview) = self.opened.preview.as_mut() else {
+            return;
+        };
+        if preview.course.title == title {
+            return;
+        }
+        Rc::make_mut(preview).course.title = title;
+        let preview = preview.clone();
+        // A note whose data has not loaded yet builds its document with the name then.
+        if self.loaded.as_ref() == Some(&preview.course.dir) {
+            self.rebuild_note_document(&preview, cx);
+        }
+    }
+
     /// The note's document and contents follow the loaded note.
     fn rebuild_note_document(&mut self, preview: &notes::Preview, cx: &mut Context<Self>) {
         let source = self.unmapped_reader_source(cx);
