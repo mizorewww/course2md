@@ -637,8 +637,9 @@ pub struct SubtitleFetch {
 }
 
 /// CLI compatibility path. `video` comes from the run's single probe so discovery
-/// stays consistent; select from every language, then fetch that exact track
-/// without silent fallback.
+/// stays consistent; select from every language, then fetch that track. When it
+/// cannot be read, the next ones in order are tried, as the desktop does for its
+/// default choice ([`crate::subtitle::fallback_tracks`]), and each fallback is logged.
 pub async fn fetch_subtitle(
     video: &OnlineVideo,
     out_dir: &Path,
@@ -657,15 +658,37 @@ pub async fn fetch_subtitle(
             let track = tracks.first().context(tr!(
                 "字幕列表为空，请重新读取字幕 / Subtitle list is empty; probe subtitles again"
             ))?;
-            fetch_selected_subtitle(
-                &video.meta.webpage_url,
-                &video.identity,
-                track,
-                out_dir,
-                control,
-            )
-            .await
-            .map(Some)
+            let mut first_error = None;
+            for candidate in crate::subtitle::fallback_tracks(&tracks, track) {
+                control.check()?;
+                if first_error.is_some() {
+                    tracing::warn!(
+                        track = %candidate.id,
+                        "改读下一条字幕 / Trying the next subtitle track"
+                    );
+                }
+                match fetch_selected_subtitle(
+                    &video.meta.webpage_url,
+                    &video.identity,
+                    candidate,
+                    out_dir,
+                    control,
+                )
+                .await
+                {
+                    Ok(fetched) => return Ok(Some(fetched)),
+                    Err(error) => {
+                        control.check()?;
+                        tracing::warn!(
+                            track = %candidate.id,
+                            error = %format!("{error:#}"),
+                            "字幕读取失败 / Could not read the subtitle track"
+                        );
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+            Err(first_error.expect("the chosen track is always tried"))
         }
         SubtitleEvidence::Failed { message } => {
             anyhow::bail!("读取字幕失败 / Could not read subtitles: {message}")
@@ -1561,6 +1584,58 @@ mod tests {
             video,
             serde_json::from_str::<OnlineVideo>(&serde_json::to_string(&video).unwrap()).unwrap()
         );
+    }
+
+    /// yt-dlp's YouTube list for an English video with English subtitles, in
+    /// yt-dlp 2026.08.19's shape (`--write-subs --write-auto-subs`): translations
+    /// of the subtitles (`zh-Hans-en`, "… from English") and of the captions
+    /// (`zh-Hans`), whose URLs carry `tlang`, and the captions as `en-orig` and `en`.
+    #[test]
+    fn machine_translations_are_marked_and_never_chosen_first() {
+        let OnlineProbe::Video { video } = parse_online_probe(
+            include_bytes!("../tests/fixtures/source/youtube-translations.json"),
+            "https://www.youtube.com/watch?v=r2vYObllqJU",
+            "",
+        )
+        .unwrap() else {
+            panic!("expected video")
+        };
+        let key = |track: &crate::subtitle::SubtitleTrack| match &track.origin {
+            crate::subtitle::SubtitleOrigin::Online {
+                language_key,
+                automatic,
+                ..
+            } => format!(
+                "{} {language_key}",
+                if *automatic { "auto" } else { "manual" }
+            ),
+            _ => unreachable!(),
+        };
+        let original: Vec<_> = video
+            .subtitles
+            .tracks()
+            .iter()
+            .filter(|track| !track.translated)
+            .map(key)
+            .collect();
+        assert_eq!(original, ["manual en", "auto en-orig", "auto en"]);
+        assert_eq!(video.subtitles.tracks().len(), 14);
+        for interface in ["zh-Hans", "zh", "zh-Hant", "ja", "en", "fr"] {
+            let mut tracks = video.subtitles.tracks().to_vec();
+            crate::subtitle::sort_tracks(
+                &mut tracks,
+                &[],
+                interface,
+                video.original_language.as_deref(),
+            );
+            let tried: Vec<_> = crate::subtitle::fallback_tracks(&tracks, &tracks[0])
+                .into_iter()
+                .map(key)
+                .collect();
+            // The subtitles, the captions once, then the best translation.
+            assert_eq!(tried[..2], ["manual en", "auto en"], "{interface}");
+            assert!(tracks[tried.len()..].iter().all(|track| track.translated));
+        }
     }
 
     #[test]
