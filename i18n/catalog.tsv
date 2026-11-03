@@ -1,6 +1,7 @@
 zh	zh_hans	en	zh_hant	ja
 --browser 只适用于 --login youtube / --browser applies only to --login youtube	--browser 只适用于 --login youtube	--browser applies only to --login youtube	--browser 只適用於 --login youtube	--browser は --login youtube でのみ使えます
 --method 只适用于 --login bilibili / --method applies only to --login bilibili	--method 只适用于 --login bilibili	--method applies only to --login bilibili	--method 只適用於 --login bilibili	--method は --login bilibili でのみ使えます
+AI 校对密钥（建议用 llm setup 设置，避免留在命令历史）/ AI proofreading key (prefer llm setup to keep it out of shell history)	AI 校对密钥（建议用 llm setup 设置，避免留在命令历史）	AI proofreading key (prefer llm setup to keep it out of shell history)	AI 校對金鑰（建議用 llm setup 設定，避免留在命令歷史）	AI 校正の API キー（シェル履歴に残さないよう llm setup での設定を推奨）
 Bilibili 拒绝了登录请求	Bilibili 拒绝了登录请求	Bilibili refused the login	Bilibili 拒絕了登入請求	Bilibili がログインを拒否しました
 Bilibili 暂时限制了登录请求，请稍后再试	Bilibili 暂时限制了登录请求，请稍后再试	Bilibili is limiting login requests for now; try again later	Bilibili 暫時限制了登入請求，請稍後再試	Bilibili が一時的にログインを制限しています。しばらくしてから再試行してください
 Bilibili 登录响应不完整，请重试	Bilibili 登录响应不完整，请重试	Bilibili’s login reply was incomplete; try again	Bilibili 登入回應不完整，請重試	Bilibili のログイン応答が不完全です。再試行してください
@@ -112,8 +113,11 @@ yt-dlp 已结束，但没有留下视频文件 / yt-dlp finished without leaving
 {} 正在使用 Cookie 数据库。请退出 {} 后重试。	{} 正在使用 Cookie 数据库。请退出 {} 后重试。	{} is using its cookie database. Quit {}, then try again.	{} 正在使用 Cookie 資料庫。請結束 {} 後重試。	{} が Cookie データベースを使用中です。{} を終了してから再試行してください。
 {} 运行失败（退出码 {}）：	{} 运行失败（退出码 {}）：	{} failed (exit code {}):	{} 執行失敗（結束代碼 {}）：	{} が失敗しました（終了コード {}）：
 {} 运行失败：	{} 运行失败：	{} failed:	{} 執行失敗：	{} が失敗しました：
+{}（{}）	{}（{}）	{} ({})	{}（{}）	{}（{}）
+{}；重跑 install.sh 可安装随包版本	{}；重跑 install.sh 可安装随包版本	{}; rerun install.sh for the bundled build	{}；重跑 install.sh 可安裝隨包版本	{}（install.sh を再実行すると同梱版をインストールできます）
 ↓ {} 词元	↓ {} 词元	↓ {} tokens	↓ {} 詞元	↓ {} トークン
 下载 Microsoft Visual C++ 运行库	下载 Microsoft Visual C++ 运行库	Download the Microsoft Visual C++ runtime	下載 Microsoft Visual C++ 執行階段	Microsoft Visual C++ ランタイムをダウンロード
+下载视频最大高度（推荐 1080）/ Maximum download height (1080 recommended)	下载视频最大高度（推荐 1080）	Maximum download height (1080 recommended)	下載影片最大高度（建議 1080）	ダウンロードする動画の最大の高さ（推奨 1080）
 不使用 AI	不使用 AI	No AI processing	不使用 AI	AI 処理なし
 不支持的浏览器：{}。可用：{} / Unsupported browser: {}. Available: {}	不支持的浏览器：{}。可用：{}	Unsupported browser: {}. Available: {}	不支援的瀏覽器：{}。可用：{}	対応していないブラウザです：{}。使用可能：{}
 人机验证未通过或已过期，请重新验证	人机验证未通过或已过期，请重新验证	The human check failed or expired; verify again	人機驗證未通過或已過期，請重新驗證	人間確認に失敗したか期限切れです。もう一度確認してください
@@ -406,6 +410,7 @@ stdout 管道已配置	stdout 管道已配置	The stdout pipe is configured	stdo
 更换浏览器	更换浏览器	Change browser	更換瀏覽器	ブラウザを変更
 最小化	最小化	Minimize	最小化	最小化
 最大化	最大化	Maximize	最大化	最大化
+本地模型目录（默认使用系统缓存）/ Local model directory (default: platform cache)	本地模型目录（默认使用系统缓存）	Local model directory (default: platform cache)	本機模型目錄（預設使用系統快取）	ローカルモデルのディレクトリ（既定はシステムのキャッシュ）
 本机验证页面已停止	本机验证页面已停止	The check page on this computer stopped	本機驗證頁面已停止	このコンピュータの確認ページが停止しました
 检查并连接	检查并连接	Check and connect	檢查並連接	確認して接続
 正在加载验证…	正在加载验证…	Loading the check…	正在載入驗證…	確認を読み込んでいます…
@@ -435,6 +440,7 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md（命令行则允许所用的终端应用），重新打开后重试。 / Hint: macOS does not allow reading the connected browser's data. Allow course2md (on the command line, your terminal app) in System Settings › Privacy & Security › Full Disk Access, reopen it, then retry.	提示：macOS 不允许读取所连接浏览器的数据。请在“系统设置 › 隐私与安全性 › 完全磁盘访问权限”中允许 course2md（命令行则允许所用的终端应用），重新打开后重试。	Hint: macOS does not allow reading the connected browser's data. Allow course2md (on the command line, your terminal app) in System Settings › Privacy & Security › Full Disk Access, reopen it, then retry.	提示：macOS 不允許讀取所連接瀏覽器的資料。請在「系統設定 › 隱私權與安全性 › 完整磁碟取用權限」中允許 course2md（命令列則允許所用的終端機 App），重新開啟後重試。	ヒント：macOS が接続したブラウザのデータの読み取りを許可していません。「システム設定 › プライバシーとセキュリティ › フルディスクアクセス」で course2md（コマンドラインでは使用中のターミナル App）を許可し、開き直してから再試行してください。
 获取验证码	获取验证码	Get code	取得驗證碼	コードを取得
 获取验证码前会在浏览器中打开人机验证。	获取验证码前会在浏览器中打开人机验证。	A human check opens in your browser before the code is sent.	取得驗證碼前會在瀏覽器中開啟人機驗證。	コードを送信する前に、ブラウザで人間確認が開きます。
+识别后端：coreml（Apple 芯片）、gpu、cpu、npu（Intel）、api（云端）/ Speech backend: coreml (Apple Silicon), gpu, cpu, npu (Intel), api (cloud)	识别后端：coreml（Apple 芯片）、gpu、cpu、npu（Intel）、api（云端）	Speech backend: coreml (Apple silicon), gpu, cpu, npu (Intel), api (cloud)	辨識方式：coreml（Apple 晶片）、gpu、cpu、npu（Intel）、api（雲端）	認識方式：coreml（Apple シリコン）、gpu、cpu、npu（Intel）、api（クラウド）
 该手机号无法用于登录 Bilibili	该手机号无法用于登录 Bilibili	This phone number cannot sign in to Bilibili	此手機號碼無法用於登入 Bilibili	この電話番号では Bilibili にログインできません
 请先获取验证码	请先获取验证码	Get a code first	請先取得驗證碼	先に認証コードを取得してください
 请在浏览器中完成人机验证	请在浏览器中完成人机验证	Complete the human check in your browser	請在瀏覽器中完成人機驗證	ブラウザで人間確認を完了してください
@@ -1913,7 +1919,6 @@ macOS 不允许终端读取 {} 的数据。请在“系统设置 › 隐私与�
 重试补做	重试补做	Retry reprocessing	重試補做	再処理を再試行
 重试转换	重试转换	Retry conversion	重試轉換	変換を再試行する
 重试预览	重试预览	Retry preview	重試預覽	プレビューを再試行する
-重跑 install.sh 可安装随包版本	重跑 install.sh 可安装随包版本	Rerun install.sh for the bundled build	重跑 install.sh 可安裝隨包版本	install.sh を再実行すると同梱版をインストールできます
 钥匙串中找不到此服务的凭据，请重新保存 API Key	钥匙串中找不到此服务的凭据，请重新保存 API Key	The credentials for this service were not found in the keychain. Please save the API key again.	鑰匙圈中找不到此服務的憑證，請重新儲存 API 金鑰	このサービスの認証情報がキーチェーンに見つかりませんでした。API キーを再度保存してください。
 链接无效；请提供完整的视频链接 / Invalid URL; provide a complete video URL	链接无效；请提供完整的视频链接	Invalid URL; provide a complete video URL	連結無效；請提供完整的影片連結	無効なリンクです。完全な動画リンクを提供してください
 链接缺少主机名 / URL is missing a host	链接缺少主机名	URL is missing a host	連結缺少主機名	リンクにホスト名がありません
