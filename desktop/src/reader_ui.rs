@@ -4054,12 +4054,8 @@ impl Render for ReaderBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(feature = "capture")]
         crate::capture::count_render(crate::capture::Counted::ReaderBar);
-        let bar = h_flex()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .gap(px(4.))
-            .items_center();
+        // Fills the cached box the shell lays out for it.
+        let bar = h_flex().size_full().min_w_0().gap(px(4.)).items_center();
         self.reader
             .update(cx, |reader, cx| reader.title_bar(bar, window, cx))
     }
