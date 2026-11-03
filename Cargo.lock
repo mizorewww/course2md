@@ -7761,7 +7761,7 @@ dependencies = [
 [[package]]
 name = "subtitle-parse"
 version = "0.1.0"
-source = "git+https://github.com/mizorewww/subtitle-parse?rev=53e0ab4aaf02ca2600e05f9b13085f97228c65ad#53e0ab4aaf02ca2600e05f9b13085f97228c65ad"
+source = "git+https://github.com/mizorewww/subtitle-parse?rev=048299ffbe1c23a132a89857038c547df338f618#048299ffbe1c23a132a89857038c547df338f618"
 dependencies = [
  "serde",
 ]

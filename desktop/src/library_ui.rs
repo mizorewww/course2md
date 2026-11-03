@@ -233,7 +233,7 @@ impl Desktop {
                             this.import.source_preview = Some(source);
                             this.save_current_draft(cx);
                             if this.task_options(cx).source_mode != course2md::config::TranscriptSource::Asr && let Some(track) = default_track {
-                                this.confirm_subtitle(track, false, cx);
+                                if wanted.is_none() { this.confirm_default_subtitle(track, cx); } else { this.confirm_subtitle(track, false, cx); }
                             }
                         }
                         Ok(source::SourceProbe::Collection { title, candidates, unavailable_entries }) => {

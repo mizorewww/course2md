@@ -784,6 +784,7 @@ fn local_subtitle_evidence(
                 .filter(|title| !title.is_empty())
                 .map(str::to_owned),
             kind: SubtitleKind::Unknown,
+            translated: false,
             origin: SubtitleOrigin::Embedded {
                 stream_index: index,
                 codec: codec.to_owned(),
@@ -1035,6 +1036,36 @@ pub fn read_subtitle(
     }
 }
 
+/// Read the track chosen for the person rather than by them, or, when it cannot be
+/// read, the next ones in the source's order, as the command line does
+/// ([`c2m_source::subtitle::fallback_tracks`]). The first failure is reported when
+/// none can be read.
+pub fn read_default_subtitle(
+    source: &Source,
+    track: &c2m_source::subtitle::SubtitleTrack,
+    cancel: Arc<AtomicBool>,
+) -> std::result::Result<
+    c2m_source::subtitle::CachedSubtitle,
+    c2m_source::subtitle::SubtitleReadError,
+> {
+    use c2m_source::subtitle::SubtitleReadError;
+    let mut first_error = None;
+    for candidate in c2m_source::subtitle::fallback_tracks(source.subtitles.tracks(), track) {
+        if first_error.is_some() {
+            eprintln!("trying the next subtitle track: {}", candidate.id);
+        }
+        match read_subtitle(source, candidate, cancel.clone()) {
+            Ok(subtitle) => return Ok(subtitle),
+            Err(SubtitleReadError::Cancelled) => return Err(SubtitleReadError::Cancelled),
+            Err(error) => {
+                eprintln!("cannot read subtitle track {}: {error}", candidate.id);
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    Err(first_error.expect("the chosen track is always tried"))
+}
+
 pub fn save_cover(source: &Source, dir: &Path) -> Result<()> {
     if let Some(path) = &source.cover {
         c2m_core::fsio::atomic_write(&dir.join("cover.jpg"), &std::fs::read(path)?)?;
@@ -1159,6 +1190,59 @@ mod tests {
             source,
             serde_json::from_str::<Source>(&serde_json::to_string(&source).unwrap()).unwrap()
         );
+    }
+
+    /// A default choice that cannot be read gives way to the next track (#25);
+    /// a track read on its own reports its own failure.
+    #[test]
+    fn a_default_subtitle_that_cannot_be_read_falls_back_to_the_next() {
+        let dir = tempfile::tempdir().unwrap();
+        let broken = dir.path().join("lecture.zh.srt");
+        let readable = dir.path().join("lecture.en.srt");
+        std::fs::write(&broken, "not subtitles").unwrap();
+        std::fs::write(&readable, "1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
+        let tracks = vec![
+            c2m_source::subtitle::file_track(broken, None),
+            c2m_source::subtitle::file_track(readable, None),
+        ];
+        let source = Source {
+            input: "lecture.mp4".into(),
+            identity: "local:fixture".into(),
+            subtitles: c2m_source::subtitle::SubtitleEvidence::Found {
+                tracks: tracks.clone(),
+                warning: None,
+            },
+            ..Source::default()
+        };
+        let cancel = || Arc::new(AtomicBool::new(false));
+        assert!(matches!(
+            read_subtitle(&source, &tracks[0], cancel()),
+            Err(c2m_source::subtitle::SubtitleReadError::NoReadableText { .. })
+        ));
+        let cached = read_default_subtitle(&source, &tracks[0], cancel()).unwrap();
+        assert_eq!(cached.track_id, tracks[1].id);
+        assert_eq!(cached.events[0].text, "Hello");
+        std::fs::remove_file(cached.path).unwrap();
+        // A chosen track that can be read is the one read.
+        assert!(matches!(
+            read_default_subtitle(&source, &tracks[1], cancel()).map(|cached| {
+                let _ = std::fs::remove_file(&cached.path);
+                cached.track_id
+            }),
+            Ok(id) if id == tracks[1].id
+        ));
+        // Nothing after it: the chosen track's own failure.
+        let lone = Source {
+            subtitles: c2m_source::subtitle::SubtitleEvidence::Found {
+                tracks: tracks[..1].to_vec(),
+                warning: None,
+            },
+            ..source
+        };
+        assert!(matches!(
+            read_default_subtitle(&lone, &tracks[0], cancel()),
+            Err(c2m_source::subtitle::SubtitleReadError::NoReadableText { .. })
+        ));
     }
 
     #[test]
