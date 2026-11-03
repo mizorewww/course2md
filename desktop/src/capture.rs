@@ -18,6 +18,8 @@
 //! `COURSE2MD_CAPTURE_CHROME` (`windows` or `linux`) draws that platform's
 //! caption buttons and leading edge instead of this one's, so the Windows and
 //! Linux title bars can be reviewed from a macOS capture.
+//! `COURSE2MD_CAPTURE_RETAINED` draws each shot without refreshing the window, so only
+//! views whose state changed are built again and a stale view shows as stale.
 //!
 //! `input:<steps>` dispatches simulated pointer and keyboard input to the
 //! window as it is (see `simulate_input`), steps joined by `+`, then
@@ -150,12 +152,18 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
             for (page, path) in shots {
                 if let Some(steps) = page.strip_prefix("input:") {
                     // Simulated input on whatever the previous shot left open.
+                    // A frame for what came before, then one after each step, as a
+                    // window on screen draws: what the input built, before the capture
+                    // draws everything again.
+                    let draw = |cx: &mut AsyncWindowContext| {
+                        let _ = cx.update(|window, cx| window.draw(cx).clear(cx));
+                    };
+                    draw(cx);
                     let before = RENDERS.with(Cell::get);
                     for step in steps.split('+') {
                         simulate_input(step, cx).await;
+                        draw(cx);
                     }
-                    // What the input built, before the capture draws everything again.
-                    cx.background_executor().timer(delay).await;
                     let after = RENDERS.with(Cell::get);
                     eprintln!(
                         "renders {page}: desktop {} reader {} reader-bar {}",
@@ -176,7 +184,11 @@ pub fn start(view: WeakEntity<Desktop>, window: &mut Window, cx: &mut App) {
                 for settle in [true, false] {
                     let _ = cx.update(|window, cx| {
                         let _ = view.update(cx, |this, cx| this.prepare_theme(window, cx));
-                        window.refresh();
+                        // `COURSE2MD_CAPTURE_RETAINED` draws only what changed, as a window
+                        // on screen does, so a view left stale shows as stale.
+                        if std::env::var_os("COURSE2MD_CAPTURE_RETAINED").is_none() {
+                            window.refresh();
+                        }
                         window.draw(cx).clear(cx);
                     });
                     if settle {

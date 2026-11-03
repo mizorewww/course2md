@@ -4069,7 +4069,12 @@ impl Render for ReaderPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(feature = "capture")]
         crate::capture::count_render(crate::capture::Counted::Reader);
-        self.reader_page(window, cx)
+        // The column the page sat in before it was a view of its own, so it centres
+        // and fills the same way inside its cached box.
+        v_flex()
+            .size_full()
+            .min_h_0()
+            .child(self.reader_page(window, cx))
     }
 }
 
