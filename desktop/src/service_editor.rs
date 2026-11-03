@@ -532,8 +532,10 @@ impl Desktop {
     pub(crate) fn close_settings_dialogs(&mut self, cx: &mut Context<Self>) {
         self.close_service_editor(cx);
         self.close_palette_picker(cx);
-        self.close_account_dialog(cx);
-        self.youtube.close();
+        self.accounts.update(cx, |accounts, cx| {
+            accounts.close_account_dialog(cx);
+            accounts.youtube.close();
+        });
     }
     /// The editor's dialog, while it is open or playing its exit.
     pub(crate) fn service_editor_dialog(

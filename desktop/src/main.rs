@@ -130,10 +130,8 @@ struct Desktop {
     preference_defaults_pending: bool,
     transient_task_result: Option<(String, Instant)>,
     draft_deadline: Option<Instant>,
-    account: desktop_accounts::account::AccountUi,
-    /// The password and SMS login fields, made when the login dialog first opens.
-    login_inputs: Option<login_ui::LoginInputs>,
-    youtube: desktop_accounts::youtube::YoutubeUi,
+    /// The Bilibili and YouTube sign-ins.
+    accounts: Entity<account_ui::AccountsView>,
     codex: desktop_accounts::codex::CodexUi,
     ollama: desktop_accounts::ollama::OllamaUi,
     /// A startup reconciliation of the task record is running.
@@ -450,6 +448,10 @@ impl Desktop {
         // The library's note rows show what the exports say. The reader is not observed:
         // the shell reads it only on other pages, and draws it as a view of its own.
         subscriptions.push(cx.observe(&exports, |_, _, cx| cx.notify()));
+        let accounts = cx.new(|cx| account_ui::AccountsView::new(window, cx));
+        subscriptions.push(cx.subscribe_in(&accounts, window, Self::accounts_event));
+        // Its rows and dialogs are drawn in the pages.
+        subscriptions.push(cx.observe(&accounts, |_, _, cx| cx.notify()));
         let mut this = Self {
             preferences,
             settings_ui,
@@ -473,9 +475,7 @@ impl Desktop {
             workspace_reconciling: false,
             import_submit_focus: cx.focus_handle(),
             root_focus: Self::install_root_focus(window, cx),
-            account: desktop_accounts::account::AccountUi::default(),
-            login_inputs: None,
-            youtube: desktop_accounts::youtube::YoutubeUi::default(),
+            accounts,
             codex: desktop_accounts::codex::CodexUi::default(),
             ollama: desktop_accounts::ollama::OllamaUi::default(),
             window: window.window_handle(),
@@ -506,8 +506,6 @@ impl Desktop {
         // A YouTube check a crash or force quit interrupted left cookies behind.
         std::thread::spawn(course2md::auth::youtube::remove_stale_checks);
         cx.set_reduce_motion(this.desktop_settings.reduce_motion);
-        this.refresh_account(cx);
-        this.load_youtube(cx);
         this.refresh_environment(cx);
         this.refresh_library(cx);
         this.poll_workspace(cx);

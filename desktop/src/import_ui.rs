@@ -1231,7 +1231,12 @@ impl Desktop {
             .child(supporting_info("import-source-input", source.input.clone()))
             .when(
                 source.online && course2md::auth::is_bilibili_url(&source.input),
-                |view| view.child(self.source_account_row(cx)),
+                |view| {
+                    view.child(
+                        self.accounts
+                            .update(cx, |accounts, cx| accounts.source_account_row(cx)),
+                    )
+                },
             );
         let actions = h_flex()
             .w_full()
@@ -2922,5 +2927,94 @@ impl Desktop {
                         .children(actions),
                 ),
         )
+    }
+}
+
+/// The sign-ins as the workbench needs them: what a failed source preview may retry
+/// once signed in.
+impl Desktop {
+    /// The source preview a sign-in may retry: the workbench's failed online link.
+    fn sign_in_source(&self, subtitles: bool, cx: &App) -> bool {
+        !self.onboarding.active
+            && matches!(self.page, Page::New)
+            && self.online(cx)
+            && (self.import.preview_error.is_some()
+                || (subtitles && self.subtitle_attention_required(cx)))
+    }
+
+    fn source_now(&self, cx: &App) -> (u64, String) {
+        (
+            self.import.preview_generation,
+            self.value(Field::Source, cx),
+        )
+    }
+
+    /// The Bilibili sign-in dialog, retrying the source preview it was opened from.
+    pub(crate) fn open_account_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let retry = (self.sign_in_source(true, cx)
+            && course2md::auth::is_bilibili_url(&self.value(Field::Source, cx)))
+        .then(|| self.source_now(cx));
+        self.accounts.update(cx, |accounts, cx| {
+            accounts.open_account_dialog(retry, window, cx)
+        });
+    }
+
+    /// The YouTube connection dialog, retrying the source preview it was opened from.
+    pub(crate) fn open_youtube_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let retry = (self.sign_in_source(false, cx)
+            && course2md::auth::is_youtube_url(&self.value(Field::Source, cx)))
+        .then(|| self.source_now(cx));
+        self.accounts.update(cx, |accounts, cx| {
+            accounts.open_youtube_dialog(retry, window, cx)
+        });
+    }
+
+    /// Whether the Bilibili sign-in can retry the source preview it was opened from.
+    fn can_retry_account_source(&self, cx: &App) -> bool {
+        let (generation, input) = self.source_now(cx);
+        self.accounts.read(cx).account.can_resume_source(
+            generation,
+            &input,
+            self.sign_in_source(true, cx),
+        )
+    }
+
+    /// The Bilibili sign-in dialog, drawn over the page.
+    pub(crate) fn account_dialog(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let ready = self.can_retry_account_source(cx);
+        self.accounts.update(cx, |accounts, cx| {
+            accounts.account_dialog(ready, window, cx)
+        })
+    }
+
+    /// The YouTube connection dialog, drawn over the page.
+    pub(crate) fn youtube_dialog(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        self.accounts
+            .update(cx, |accounts, cx| accounts.youtube_dialog(window, cx))
+    }
+
+    /// What the sign-ins ask of the window.
+    pub(crate) fn accounts_event(
+        &mut self,
+        _: &Entity<crate::account_ui::AccountsView>,
+        event: &crate::account_ui::AccountsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::account_ui::AccountsEvent;
+        match event {
+            AccountsEvent::OpenAccount => self.open_account_dialog(window, cx),
+            AccountsEvent::OpenYoutube => self.open_youtube_dialog(window, cx),
+            AccountsEvent::SignedIn { source } => {
+                if self.sign_in_source(true, cx) && *source == self.source_now(cx) {
+                    self.inspect_source(window, cx);
+                }
+            }
+            AccountsEvent::YoutubeConnected { source } => {
+                if *source == self.source_now(cx) {
+                    self.inspect_source(window, cx);
+                }
+            }
+        }
     }
 }

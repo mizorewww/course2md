@@ -1,7 +1,11 @@
 //! The YouTube connection: its row in Settings › 来源账号 and the dialog that
 //! connects a browser's YouTube session. yt-dlp reads the browser's cookies; this
 //! app keeps only which browser to use.
-use crate::{Desktop, Field, Page, symbols, ui::Resource};
+use crate::{
+    account_ui::{AccountsEvent, AccountsView},
+    symbols,
+    ui::Resource,
+};
 use course2md::auth::youtube::{self, Browser, BrowserChoice, Session};
 use desktop_accounts::youtube::*;
 use gpui::{prelude::*, *};
@@ -10,7 +14,7 @@ use gpui_kit_material::{color::ColorRole, icons::Icon, prelude::*};
 
 const YOUTUBE_DIALOG_WIDTH: f32 = 480.;
 
-impl Desktop {
+impl AccountsView {
     /// Reads the saved browser choice; no browser is touched until the person asks.
     pub(crate) fn load_youtube(&mut self, cx: &mut Context<Self>) {
         let task = crate::spawn_blocking_result(youtube::saved_choice);
@@ -30,21 +34,18 @@ impl Desktop {
         .detach();
     }
 
-    pub(crate) fn open_youtube_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the connection dialog. `retry_source` is the source preview to try again
+    /// once connected, as the window saw it when the dialog opened.
+    pub(crate) fn open_youtube_dialog(
+        &mut self,
+        retry_source: Option<(u64, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.youtube.dialog.is_some() {
             return;
         }
-        self.youtube.retry_source = (!self.onboarding.active
-            && matches!(self.page, Page::New)
-            && self.online(cx)
-            && self.import.preview_error.is_some()
-            && course2md::auth::is_youtube_url(&self.value(Field::Source, cx)))
-        .then(|| {
-            (
-                self.import.preview_generation,
-                self.value(Field::Source, cx),
-            )
-        });
+        self.youtube.retry_source = retry_source;
         self.youtube.generation = self.youtube.generation.wrapping_add(1);
         self.youtube.dialog = Some(YoutubeDialog::new(
             Browser::installed(),
@@ -54,21 +55,16 @@ impl Desktop {
         cx.notify();
     }
 
-    fn close_youtube_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn close_youtube_dialog(&mut self, cx: &mut Context<Self>) {
         let resume = matches!(
             self.youtube.dialog.as_ref().map(|dialog| &dialog.step),
             Some(YoutubeStep::Connected)
-        ) && self
-            .youtube
-            .retry_source
-            .as_ref()
-            .is_some_and(|(generation, input)| {
-                *generation == self.import.preview_generation
-                    && *input == self.value(Field::Source, cx)
-            });
+        )
+        .then(|| self.youtube.retry_source.clone())
+        .flatten();
         self.youtube.close();
-        if resume {
-            self.inspect_source(window, cx);
+        if let Some(source) = resume {
+            cx.emit(AccountsEvent::YoutubeConnected { source });
         }
         cx.notify();
     }
@@ -210,9 +206,7 @@ impl Desktop {
                     } else {
                         course2md::tr!("连接 YouTube")
                     })
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.open_youtube_dialog(window, cx)),
-                    )
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(AccountsEvent::OpenYoutube)))
                     .into_any_element(),
             );
         }
@@ -240,9 +234,7 @@ impl Desktop {
                 .item(
                     MaterialMenuItem::new(course2md::tr!("更换浏览器"))
                         .leading(Icon::from(symbols::web()))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.open_youtube_dialog(window, cx)),
-                        ),
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(AccountsEvent::OpenYoutube))),
                 )
                 .item(
                     MaterialMenuItem::new(course2md::tr!("断开连接"))
@@ -448,7 +440,7 @@ impl Desktop {
         } else {
             course2md::tr!("取消")
         })
-        .on_click(cx.listener(|this, _, window, cx| this.close_youtube_dialog(window, cx)));
+        .on_click(cx.listener(|this, _, _, cx| this.close_youtube_dialog(cx)));
         let choice = dialog.choice();
         let _ = window;
         MaterialDialog::new("youtube-dialog")
@@ -474,8 +466,8 @@ impl Desktop {
             .modal(open)
             .on_dismiss({
                 let this = cx.weak_entity();
-                move |window, cx| {
-                    let _ = this.update(cx, |this, cx| this.close_youtube_dialog(window, cx));
+                move |_, cx| {
+                    let _ = this.update(cx, |this, cx| this.close_youtube_dialog(cx));
                 }
             })
             .into_any_element()
@@ -501,7 +493,7 @@ fn browser_note(browser: Browser) -> Option<&'static str> {
 
 /// Capture builds: the connection dialog in each state, without reading a browser.
 #[cfg(feature = "capture")]
-impl Desktop {
+impl AccountsView {
     pub(crate) fn capture_youtube_state(&mut self, state: &str, cx: &mut Context<Self>) {
         if let Some(dialog) = &mut self.youtube.dialog {
             dialog.step = match state {

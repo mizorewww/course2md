@@ -314,7 +314,8 @@ impl Desktop {
             self.onboarding.model_return_page = None;
         }
         if step == Step::Account {
-            self.refresh_account(cx);
+            self.accounts
+                .update(cx, |accounts, cx| accounts.refresh_account(cx));
         }
         if step == Step::Ai && self.onboarding.ai.form.is_codex() {
             self.codex_refresh_status(CodexSurface::Onboarding, cx);
@@ -761,9 +762,9 @@ impl Desktop {
         let content = match step {
             Step::Engine => self.setup_engine_content(window, cx),
             Step::Ai => self.setup_service_content(ServicePurpose::Ai, window, cx),
-            Step::Account => {
-                setup_tile().child(self.account_row(course2md::tr!("账号状态"), window, cx))
-            }
+            Step::Account => setup_tile().child(self.accounts.update(cx, |accounts, cx| {
+                accounts.account_row(course2md::tr!("账号状态"), window, cx)
+            })),
             Step::Model => self.setup_model_content(window, cx),
         };
         let position = course2md::tr!("第 {} 步，共 {} 步", number, STEPS);
@@ -1361,7 +1362,9 @@ impl Desktop {
         });
         let label = match (service_action, step) {
             (Some(action), _) => action.label(),
-            (_, Step::Account) if self.account_connected() => course2md::tr!("继续"),
+            (_, Step::Account) if self.accounts.read(cx).account_connected() => {
+                course2md::tr!("继续")
+            }
             (_, Step::Account) => course2md::tr!("跳过登录"),
             (_, Step::Model) if model_review => course2md::tr!("返回应用"),
             (_, Step::Model) if model_running => course2md::tr!("继续使用"),
