@@ -81,6 +81,8 @@ impl AccountsView {
             self.youtube.recheck = Some(generation);
         }
         let task = crate::spawn_blocking_result(move || {
+            // A browser folder macOS keeps from the app needs no yt-dlp to report.
+            youtube::ensure_readable(&choice, Reader::App)?;
             let program = course2md::ytdlp::resolve_in(Some(&crate::environment::tool_path()))
                 .ok_or_else(|| {
                     anyhow::anyhow!(course2md::tr!(
@@ -122,10 +124,12 @@ impl AccountsView {
                         Ok(read) => YoutubeStep::Failed {
                             summary: read.summary,
                             detail: read.detail,
+                            blocked: read.blocked,
                         },
                         Err(error) => YoutubeStep::Failed {
                             summary: format!("{error:#}"),
                             detail: String::new(),
+                            blocked: false,
                         },
                     },
                 };
@@ -378,17 +382,14 @@ impl AccountsView {
                             })),
                     );
                 }
-                if let Some(note) = browser.and_then(browser_note) {
+                // A keychain prompt is not what stands in the way of a blocked folder.
+                let blocked = matches!(dialog.step, YoutubeStep::Failed { blocked: true, .. });
+                if let Some(note) = browser.and_then(browser_note).filter(|_| !blocked) {
                     body = body.child(supporting_info("youtube-browser-note", note));
                 }
             }
-            body = body.child(notice_banner(
-                "youtube-risk",
-                NoticeKind::Warning,
-                course2md::tr!(
-                    "用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。"
-                ),
-            ));
+            // The check's result sits under the choice it is about, above the
+            // standing risk notice, so it shows without scrolling.
             match &dialog.step {
                 YoutubeStep::Checking => {
                     body = body.child(
@@ -415,16 +416,49 @@ impl AccountsView {
                         ),
                     ));
                 }
-                YoutubeStep::Failed { summary, detail } => {
+                YoutubeStep::Failed {
+                    summary,
+                    detail,
+                    blocked,
+                } => {
                     let text = if detail.is_empty() {
                         summary.clone()
                     } else {
                         format!("{summary}\n{detail}")
                     };
-                    body = body.child(notice_banner("youtube-failed", NoticeKind::Danger, text));
+                    body = body.child(
+                        notice_banner("youtube-failed", NoticeKind::Danger, text).when(
+                            *blocked,
+                            |banner| {
+                                // Below the long guidance, not beside it.
+                                banner.child(
+                                    h_flex().w_full().justify_end().child(
+                                        material_button(
+                                            "youtube-open-privacy",
+                                            ButtonVariant::Text,
+                                        )
+                                        .icon(symbols::settings())
+                                        .child(course2md::tr!("打开系统设置"))
+                                        .on_click(
+                                            |_, _, cx| {
+                                                cx.open_url(youtube::FULL_DISK_ACCESS_SETTINGS)
+                                            },
+                                        ),
+                                    ),
+                                )
+                            },
+                        ),
+                    );
                 }
                 _ => {}
             }
+            body = body.child(notice_banner(
+                "youtube-risk",
+                NoticeKind::Warning,
+                course2md::tr!(
+                    "用账号下载可能让 YouTube 限制或封禁这个账号。请适度使用，或使用不常用的账号。"
+                ),
+            ));
         }
         let close = material_button(
             "youtube-close",
@@ -495,6 +529,13 @@ fn browser_note(browser: Browser) -> Option<&'static str> {
 #[cfg(feature = "capture")]
 impl AccountsView {
     pub(crate) fn capture_youtube_state(&mut self, state: &str, cx: &mut Context<Self>) {
+        // A real check of the first installed browser, for a fixture home.
+        if state == "check" {
+            if let Some(choice) = self.youtube.dialog.as_ref().and_then(|d| d.choice()) {
+                self.check_youtube(choice, true, cx);
+            }
+            return;
+        }
         if let Some(dialog) = &mut self.youtube.dialog {
             dialog.step = match state {
                 "checking" => YoutubeStep::Checking,
@@ -503,6 +544,7 @@ impl AccountsView {
                     summary: youtube::blocked_summary(Browser::Chrome, Reader::App),
                     detail: "Operation not permitted: ~/Library/Application Support/Google/Chrome"
                         .into(),
+                    blocked: cfg!(target_os = "macos"),
                 },
                 "connected" => YoutubeStep::Connected,
                 _ => YoutubeStep::Choose,

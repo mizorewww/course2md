@@ -32,7 +32,9 @@
 //! `dialog:login~<password|sms|phone>[-captcha|-working|-error|-sent]` and
 //! `dialog:login~success` show the Bilibili login's other methods and steps, and
 //! `dialog:youtube~<checking|signedout|failed|connected|empty>` the YouTube
-//! connection's, with fixture text and no request. Each
+//! connection's, with fixture text and no request; `dialog:youtube~check` runs
+//! the real check of the first installed browser, so use it only with a fixture
+//! `HOME`. Each
 //! capture first closes the dialogs an earlier one opened, so one shot shows
 //! one dialog. Nothing a dialog would change is saved unless its action is
 //! taken.
