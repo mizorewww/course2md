@@ -1155,6 +1155,7 @@ mod tests {
             Event::Log {
                 level: c2m_protocol::progress::LogLevel::Info,
                 message: "working".into(),
+                fields: Default::default(),
             },
             Event::Blocked {
                 reason: BlockReason::Uncertain,

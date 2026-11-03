@@ -912,9 +912,10 @@ pub fn test_connection(s: &LlmSettings) -> Result<()> {
     for (name, value) in crate::provider::auth_headers(s)? {
         request = request.header(&name, &value);
     }
+    // The cause follows the hint after a colon, so the hint's own full stop goes.
     let mut resp = crate::runtime::send_json(request, &body)
         .map_err(RequestError::from)
-        .context(fail_hint)?;
+        .context(fail_hint.trim_end_matches(['.', '。']))?;
     let v: serde_json::Value = if crate::provider::is_sse(s) {
         let bytes = read_sse_body(resp.into_body().into_reader())?;
         crate::provider::sse_to_chat_json(&bytes)?

@@ -3012,6 +3012,7 @@ mod tests {
         let event = c2m_protocol::progress::Event::Log {
             level: c2m_protocol::progress::LogLevel::Info,
             message: "实际进度".into(),
+            fields: Default::default(),
         };
         std::fs::write(
             work.join(TASK_EVENTS_FILE),

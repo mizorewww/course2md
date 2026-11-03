@@ -94,10 +94,9 @@ pub fn run() -> Result<()> {
         origin: crate::tools::origin_of(&path, crate::ytdlp::ENV_OVERRIDE),
         path,
     });
-    let missing = format!(
-        "{}；{}",
-        crate::error::install_hint("yt-dlp"),
-        tr!("重跑 install.sh 可安装随包版本")
+    let missing = tr!(
+        "{}；重跑 install.sh 可安装随包版本",
+        crate::error::install_hint("yt-dlp")
     );
     report_tool(&mut out, "yt-dlp", ytdlp, &["--version"], missing, false);
     let missing = tr!(
@@ -205,10 +204,11 @@ pub fn run() -> Result<()> {
                 .defaults
                 .provider
                 .unwrap_or_else(crate::asr::default_provider_hint);
-            let (zh, en) = provider.label();
+            let (label, _) = provider.label();
             out.push(format!(
-                "{}\n{provider}（{zh} / {en}）",
-                tr!("\n当前识别方式")
+                "{}\n{}",
+                tr!("\n当前识别方式"),
+                tr!("{}（{}）", provider, label)
             ));
         }
         Err(error) => {

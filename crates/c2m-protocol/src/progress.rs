@@ -10,6 +10,7 @@
 use crate::tr;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -260,6 +261,10 @@ pub enum Event {
     Log {
         level: LogLevel,
         message: String,
+        /// The event's other fields (a subtitle track's id, the error that ended
+        /// it), for consumers that act on them rather than read the message.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        fields: BTreeMap<String, String>,
     },
     Stage {
         stage: Stage,
@@ -695,18 +700,20 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for JsonLogLayer {
             tracing::Level::INFO => LogLevel::Info,
             _ => LogLevel::Debug,
         };
+        let (message, fields) = visitor.into_parts();
         emit(&Event::Log {
             level,
-            message: visitor.into_message(),
+            message,
+            fields,
         });
     }
 }
 
-/// 提取事件 message；没有 message 字段时把其余 fields 拼成 `k=v` 文本。
+/// 提取事件 message 与其余 fields；没有 message 字段时把 fields 拼成 `k=v` 文本。
 #[derive(Default)]
 struct LogVisitor {
     message: Option<String>,
-    fields: Vec<String>,
+    fields: Vec<(String, String)>,
 }
 
 impl LogVisitor {
@@ -714,12 +721,22 @@ impl LogVisitor {
         if field.name() == "message" {
             self.message = Some(value);
         } else {
-            self.fields.push(format!("{}={value}", field.name()));
+            self.fields.push((field.name().to_owned(), value));
         }
     }
 
-    fn into_message(self) -> String {
-        self.message.unwrap_or_else(|| self.fields.join(" "))
+    fn into_parts(self) -> (String, BTreeMap<String, String>) {
+        match self.message {
+            Some(message) => (message, self.fields.into_iter().collect()),
+            None => (
+                self.fields
+                    .iter()
+                    .map(|(name, value)| format!("{name}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                BTreeMap::new(),
+            ),
+        }
     }
 }
 
@@ -743,16 +760,22 @@ mod tests {
     fn visitor_message_fallback_to_fields() {
         let v = LogVisitor {
             message: Some("hello".into()),
-            fields: vec!["k=v".into()],
+            fields: vec![("k".into(), "v".into())],
         };
-        assert_eq!(v.into_message(), "hello");
+        assert_eq!(
+            v.into_parts(),
+            ("hello".into(), BTreeMap::from([("k".into(), "v".into())]))
+        );
 
         let mut v = LogVisitor::default();
-        v.fields.push("a=1".into());
-        v.fields.push("b=2".into());
-        assert_eq!(v.into_message(), "a=1 b=2");
+        v.fields.push(("a".into(), "1".into()));
+        v.fields.push(("b".into(), "2".into()));
+        assert_eq!(v.into_parts(), ("a=1 b=2".into(), BTreeMap::new()));
 
-        assert_eq!(LogVisitor::default().into_message(), "");
+        assert_eq!(
+            LogVisitor::default().into_parts(),
+            (String::new(), BTreeMap::new())
+        );
     }
 
     #[test]
@@ -761,6 +784,7 @@ mod tests {
         let ev = Event::Log {
             level: LogLevel::Info,
             message: "hi".into(),
+            fields: BTreeMap::new(),
         };
         emit_to(&mut buf, &ev).unwrap();
         let s = String::from_utf8(buf).unwrap();
@@ -769,6 +793,23 @@ mod tests {
             s.trim().parse::<serde_json::Value>().unwrap(),
             serde_json::json!({"type": "log", "level": "info", "message": "hi"})
         );
+        let ev = Event::Log {
+            level: LogLevel::Warn,
+            message: "字幕".into(),
+            fields: BTreeMap::from([("track".into(), "t".into()), ("error".into(), "e".into())]),
+        };
+        let value = serde_json::to_value(&ev).unwrap();
+        assert_eq!(
+            value["fields"],
+            serde_json::json!({"track": "t", "error": "e"})
+        );
+        assert!(matches!(
+            serde_json::from_value::<Event>(
+                serde_json::json!({"type": "log", "level": "info", "message": "hi"})
+            )
+            .unwrap(),
+            Event::Log { fields, .. } if fields.is_empty()
+        ));
     }
 
     fn ledger(repos: &[&[(u64, u64)]]) -> TransferLedger {

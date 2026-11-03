@@ -649,23 +649,31 @@ pub async fn fetch_subtitle(
     match &video.subtitles {
         SubtitleEvidence::Found { tracks, .. } => {
             let mut tracks = tracks.clone();
+            let language = subtitle_language(out_dir)?;
             crate::subtitle::sort_tracks(
                 &mut tracks,
                 &[],
-                &subtitle_language(out_dir)?,
+                &language,
                 video.original_language.as_deref(),
             );
             let track = tracks.first().context(tr!(
                 "字幕列表为空，请重新读取字幕 / Subtitle list is empty; probe subtitles again"
             ))?;
             let mut first_error = None;
-            for candidate in crate::subtitle::fallback_tracks(&tracks, track) {
+            for candidate in crate::subtitle::fallback_tracks(
+                &tracks,
+                track,
+                &language,
+                video.original_language.as_deref(),
+            ) {
                 control.check()?;
                 if first_error.is_some() {
-                    tracing::warn!(
-                        track = %candidate.id,
-                        "改读下一条字幕 / Trying the next subtitle track"
-                    );
+                    let message = tr!("改读字幕「{}」", crate::subtitle::track_label(candidate));
+                    if c2m_protocol::progress::is_json() {
+                        tracing::warn!(track = %candidate.id, "{message}");
+                    } else {
+                        tracing::warn!("{message}");
+                    }
                 }
                 match fetch_selected_subtitle(
                     &video.meta.webpage_url,
@@ -679,11 +687,20 @@ pub async fn fetch_subtitle(
                     Ok(fetched) => return Ok(Some(fetched)),
                     Err(error) => {
                         control.check()?;
-                        tracing::warn!(
-                            track = %candidate.id,
-                            error = %format!("{error:#}"),
-                            "字幕读取失败 / Could not read the subtitle track"
+                        let raw = format!("{error:#}");
+                        let message = tr!(
+                            "无法读取字幕「{}」：{}",
+                            crate::subtitle::track_label(candidate),
+                            failure_reason(&error)
                         );
+                        // The terminal gets one line; machines get the track and
+                        // the whole error; yt-dlp's full output is in the debug log.
+                        if c2m_protocol::progress::is_json() {
+                            tracing::warn!(track = %candidate.id, error = %raw, "{message}");
+                        } else {
+                            tracing::warn!("{message}");
+                            tracing::debug!(track = %candidate.id, error = %raw);
+                        }
                         first_error.get_or_insert(error);
                     }
                 }
@@ -698,6 +715,23 @@ pub async fn fetch_subtitle(
         )),
         SubtitleEvidence::NoneFound | SubtitleEvidence::Unsupported { .. } => Ok(None),
     }
+}
+
+/// One line saying why a track could not be read: yt-dlp's own words when it
+/// was yt-dlp that failed, else the error's first line.
+fn failure_reason(error: &anyhow::Error) -> String {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<YtDlpFailure>())
+        .map(|failure| failure.cause.clone())
+        .filter(|cause| !cause.is_empty())
+        .unwrap_or_else(|| {
+            format!("{error:#}")
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned()
+        })
 }
 
 /// The language a task's online subtitle choice prefers, as the desktop's does:
@@ -1029,8 +1063,9 @@ impl std::fmt::Display for YtDlpFailure {
         }
         write!(
             f,
-            "yt-dlp 运行失败 / failed (code={:?}):\n{}",
-            self.code, self.tail
+            "{}\n{}",
+            crate::error::failure_header("yt-dlp", self.code),
+            self.tail
         )
     }
 }
@@ -1628,13 +1663,25 @@ mod tests {
                 interface,
                 video.original_language.as_deref(),
             );
-            let tried: Vec<_> = crate::subtitle::fallback_tracks(&tracks, &tracks[0])
-                .into_iter()
-                .map(key)
-                .collect();
-            // The subtitles, the captions once, then the best translation.
+            let tried: Vec<_> = crate::subtitle::fallback_tracks(
+                &tracks,
+                &tracks[0],
+                interface,
+                video.original_language.as_deref(),
+            )
+            .into_iter()
+            .map(key)
+            .collect();
+            // The subtitles, the captions once, then a translation into the
+            // person's language when there is one, never into another.
             assert_eq!(tried[..2], ["manual en", "auto en"], "{interface}");
-            assert!(tracks[tried.len()..].iter().all(|track| track.translated));
+            match interface {
+                "en" | "fr" => assert_eq!(tried.len(), 2, "{interface}"),
+                _ => {
+                    let family = interface.split('-').next().unwrap();
+                    assert!(tried[2].starts_with(&format!("auto {family}")), "{tried:?}");
+                }
+            }
         }
     }
 
