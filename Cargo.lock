@@ -881,7 +881,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "c2m-ai"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-artifact"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-asr"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-config"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-core",
@@ -976,7 +976,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-core"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-i18n",
@@ -990,7 +990,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-dispatch"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-core",
@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-engine"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-ai",
@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-i18n"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "sys-locale",
  "whatlang",
@@ -1043,7 +1043,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-process"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1064,7 +1064,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-protocol"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-core",
@@ -1079,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-source"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1109,7 +1109,7 @@ dependencies = [
 
 [[package]]
 name = "c2m-test-http"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 
 [[package]]
 name = "calloop"
@@ -1590,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "course2md"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-ai",
@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "course2md-desktop"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1810,7 +1810,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-accounts"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-ai",
@@ -1821,7 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-prefs"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1850,7 +1850,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-reader-core"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-artifact",
@@ -1866,7 +1866,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-store"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-artifact",
@@ -1892,7 +1892,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-tasks"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-artifact",
@@ -1918,7 +1918,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-ui"
-version = "2.0.1"
+version = "3.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "c2m-artifact",
