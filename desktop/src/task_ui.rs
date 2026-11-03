@@ -275,7 +275,7 @@ fn stage_row(stage: TaskStage, window: &mut Window, cx: &mut App) -> Div {
 }
 
 /// The cover's width on a task card away from home.
-const COVER_WIDTH: Rems = Rems(160.);
+const COVER_WIDTH: Rems = rem(160.);
 
 impl TasksPage {
     pub(crate) fn new(
