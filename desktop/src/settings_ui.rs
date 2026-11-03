@@ -112,6 +112,8 @@ pub(crate) struct State {
     custom_languages: bool,
     model_details_open: bool,
     diagnostics_details_open: bool,
+    /// The one-column category menu is open.
+    category_menu_open: bool,
     /// The last failed save of each group, and what lies behind it.
     failures: BTreeMap<PreferenceGroup, String>,
     failure_details: BTreeMap<PreferenceGroup, String>,
@@ -181,6 +183,7 @@ impl State {
             custom_languages: false,
             model_details_open: false,
             diagnostics_details_open: false,
+            category_menu_open: false,
             failures: BTreeMap::new(),
             failure_details: BTreeMap::new(),
             expanded_feedback: Default::default(),
@@ -199,6 +202,44 @@ impl State {
 pub(crate) fn dialog_body_height(window: &Window) -> Pixels {
     let chrome = rem(152.).to_pixels(window.rem_size()) + px(48.);
     (window.viewport_size().height - chrome).max(px(120.))
+}
+
+/// How settings sits in the window.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SettingsLayout {
+    /// The navigation pane beside the content.
+    Pane,
+    /// A narrow window: the categories in a rail of short names beside the content.
+    Rail,
+    /// No room for anything beside the content: one column, the categories in a menu.
+    Single,
+}
+
+/// The rail and its gap, in 100%-scale px.
+const SETTINGS_RAIL: f32 = 184. + 16.;
+/// The narrowest content beside the rail that holds a resource row (its circle, name,
+/// status and action) and a label beside its control, in 100%-scale px.
+const SETTINGS_CONTENT_MIN: f32 = 400.;
+
+impl SettingsLayout {
+    /// From the page's width in 100%-scale px, so a larger text size narrows it as a
+    /// narrower window would.
+    fn of(window: &Window) -> Self {
+        if !is_compact(window) {
+            return Self::Pane;
+        }
+        let unit = f32::from(rem(1.).to_pixels(window.rem_size()));
+        let width = crate::views::shell_content_width(Page::Settings, window) / unit;
+        Self::for_width(width)
+    }
+
+    fn for_width(width: f32) -> Self {
+        if width >= SETTINGS_RAIL + SETTINGS_CONTENT_MIN {
+            Self::Rail
+        } else {
+            Self::Single
+        }
+    }
 }
 
 /// Settings categories in navigation order.
@@ -624,8 +665,41 @@ impl Desktop {
                 cx,
             )
             .children(lists);
-        // Narrow or wide, the search stays: the pane is narrower, not poorer (V2).
-        let search = {
+        div()
+            .id("settings-navigation")
+            .size_full()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap(rem(16.))
+                    .pb(rem(64.))
+                    .child(self.settings_header(cx))
+                    .child(self.settings_search(cx))
+                    .child(list),
+            )
+            .into_any_element()
+    }
+
+    /// The way back and the 设置 title.
+    fn settings_header(&self, cx: &mut Context<Self>) -> Div {
+        h_flex()
+            .min_h(rem(56.))
+            .items_center()
+            .gap(rem(16.))
+            .child(self.settings_back_button(cx))
+            .child(
+                ui::page_title("settings-page-title", course2md::tr!("设置"))
+                    .min_w_0()
+                    .truncate(),
+            )
+    }
+
+    /// Narrow or wide, the search stays: the pane is narrower, not poorer (V2).
+    fn settings_search(&self, cx: &mut Context<Self>) -> SearchField {
+        {
             SearchField::new(&self.settings_ui.search)
                 .id("settings-search")
                 .field_style(SearchFieldStyle::Surface)
@@ -654,34 +728,35 @@ impl Desktop {
                         )
                     },
                 )
-        };
-        div()
-            .id("settings-navigation")
-            .size_full()
-            .min_h_0()
-            .overflow_y_scroll()
-            .child(
-                v_flex()
-                    .w_full()
-                    .min_w_0()
-                    .gap(rem(16.))
-                    .pb(rem(64.))
-                    .child(
-                        h_flex()
-                            .min_h(rem(56.))
-                            .items_center()
-                            .gap(rem(16.))
-                            .child(self.settings_back_button(cx))
-                            .child(
-                                ui::page_title("settings-page-title", course2md::tr!("设置"))
-                                    .min_w_0()
-                                    .truncate(),
-                            ),
-                    )
-                    .child(search)
-                    .child(list),
-            )
-            .into_any_element()
+        }
+    }
+
+    /// The categories as one menu field, for a window and text size that leave no
+    /// room for a pane beside the content: it names the current category with its
+    /// icon, and lists every category the search leaves.
+    fn settings_category_menu(&self, cx: &mut Context<Self>) -> ExposedDropdown {
+        let visible = self.visible_settings_tabs(cx);
+        let selected = visible.iter().position(|tab| *tab == self.settings_tab);
+        let options = visible.iter().map(|tab| tab.label().to_owned());
+        ExposedDropdown::new("settings-category", course2md::tr!("设置分类"))
+            .variant(TextFieldVariant::Outlined)
+            .shape(TextFieldShape::Rounded)
+            .leading_icon(Icon::from(self.settings_tab.icon()))
+            .options(options)
+            .selected(selected)
+            .full_width()
+            .open(self.settings_ui.category_menu_open)
+            .on_open_change(cx.listener(|this, open: &bool, _, cx| {
+                this.settings_ui.category_menu_open = *open;
+                cx.notify();
+            }))
+            .on_select(cx.listener(move |this, index: &usize, window, cx| {
+                this.settings_ui.category_menu_open = false;
+                if let Some(tab) = visible.get(*index) {
+                    this.select_settings_tab(*tab, window, cx);
+                }
+                cx.notify();
+            }))
     }
 
     /// The categories' keyboard: arrows and Home/End choose, as in a list.
@@ -751,8 +826,8 @@ impl Desktop {
     pub fn settings_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         // Rendering has no side effects: hydration and diagnostics run from event entries such as
         // open_settings, select_settings_tab and restore_ordinary_preferences.
-        let compact = is_compact(window);
-        let navigation = self.settings_navigation(compact, cx);
+        let layout = SettingsLayout::of(window);
+        let compact = layout == SettingsLayout::Rail;
         // A search that matches nothing says so here, where the category would be, and
         // shows none of the categories it ruled out (V7).
         let no_match = self.visible_settings_tabs(cx).is_empty();
@@ -764,15 +839,19 @@ impl Desktop {
             SettingsTab::Application => self.application_settings_page(cx),
             SettingsTab::Appearance => self.appearance_page(window, cx),
         };
+        let single = layout == SettingsLayout::Single;
         let heading = (!no_match).then(|| {
             v_flex()
                 .w_full()
                 .min_w_0()
                 .gap(rem(6.))
-                .child(h_flex().min_h(rem(56.)).child(ui::page_title(
-                    "settings-category-heading",
-                    self.settings_tab.label(),
-                )))
+                // In one column the category menu names the category.
+                .when(!single, |heading| {
+                    heading.child(h_flex().min_h(rem(56.)).child(ui::page_title(
+                        "settings-category-heading",
+                        self.settings_tab.label(),
+                    )))
+                })
                 .when(self.settings_tab == SettingsTab::Generation, |view| {
                     view.child(TileScale::Regular.support(
                         "generation-default-explanation",
@@ -782,6 +861,10 @@ impl Desktop {
         });
         let scroll = &self.scrolls[Page::Settings as usize];
         let notices: Vec<_> = self.settings_notices(cx).into_iter().collect();
+        if single {
+            return self.settings_single_column(heading, notices, content, cx);
+        }
+        let navigation = self.settings_navigation(compact, cx);
         let panel = v_flex()
             .relative()
             .id("settings-panel")
@@ -846,6 +929,62 @@ impl Desktop {
                     .child(navigation),
             )
             .child(panel)
+            .into_any_element()
+    }
+
+    /// Settings in one column, for a window and text size that leave no room for a
+    /// pane beside the content: the way back, the search and the category menu
+    /// scroll with the category, so nothing is cut at any text size.
+    fn settings_single_column(
+        &self,
+        heading: Option<Div>,
+        notices: Vec<AnyElement>,
+        content: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let scroll = &self.scrolls[Page::Settings as usize];
+        let has_tabs = !self.visible_settings_tabs(cx).is_empty();
+        div()
+            .relative()
+            .size_full()
+            .min_h_0()
+            .child(
+                div()
+                    .id("settings-content-scroll")
+                    .size_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(scroll)
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .min_w_0()
+                            .max_w(rem(760.))
+                            .mx_auto()
+                            .pt(rem(8.))
+                            .pr(rem(12.))
+                            .pb(rem(64.))
+                            .gap(rem(16.))
+                            .child(self.settings_header(cx))
+                            .child(self.settings_search(cx))
+                            .when(has_tabs, |column| {
+                                column.child(self.settings_category_menu(cx))
+                            })
+                            .children(notices)
+                            .child(motion::page_enter(
+                                ("settings-category", self.settings_tab.index()),
+                                v_flex()
+                                    .w_full()
+                                    .min_w_0()
+                                    .pt(rem(12.))
+                                    .gap(rem(28.))
+                                    .children(heading)
+                                    .child(content),
+                            )),
+                    ),
+            )
+            .child(Scrollbar::vertical(scroll))
             .into_any_element()
     }
 
@@ -2074,5 +2213,16 @@ mod tests {
     fn a_failed_save_keeps_the_staged_edit_and_a_successful_one_clears_it() {
         assert_eq!(pending_after_save::<_, ()>(&Ok(()), 7), None);
         assert_eq!(pending_after_save(&Err("disk full"), 7), Some(7));
+    }
+
+    #[test]
+    fn settings_leave_the_rail_when_text_leaves_the_content_no_room() {
+        use super::SettingsLayout;
+        // 720 points wide less the narrow gutters, at 100% and at 150% text.
+        assert_eq!(SettingsLayout::for_width(720. - 32.), SettingsLayout::Rail);
+        assert_eq!(
+            SettingsLayout::for_width((720. - 32.) / 1.5),
+            SettingsLayout::Single
+        );
     }
 }
