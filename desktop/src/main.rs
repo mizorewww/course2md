@@ -872,8 +872,7 @@ impl Desktop {
                         records
                             .workspace
                             .as_mut()
-                            .and_then(|workspace| workspace.state.task_mut(&id))
-                            .is_some_and(|task| task.apply_event(&event))
+                            .is_some_and(|workspace| workspace.state.apply_task_event(&id, &event))
                     })
                 }
                 None => self

@@ -24,11 +24,15 @@ use std::{
     rc::Rc,
 };
 
+/// The record's revision and running-task progress the sorted tasks were copied at.
+type TaskListKey = (u64, u64);
+
 /// The task page's own view state.
 pub(crate) struct TaskListUi {
     /// The virtualized queue: the list, and the identity and focus of what it describes.
     pub list: ListState,
-    pub cache: Option<(u64, Rc<Vec<TaskRecord>>)>,
+    /// The sorted tasks, as of the record's (revision, progress).
+    pub cache: Option<(TaskListKey, Rc<Vec<TaskRecord>>)>,
     pub keys: Vec<String>,
     pub focus: Vec<FocusHandle>,
     pub rem: f32,
@@ -381,8 +385,10 @@ impl TasksPage {
                 Rc::new(Vec::new())
             }
             Some(workspace) => {
-                if let Some((revision, tasks)) = &self.task_list.cache
-                    && *revision == workspace.state.revision
+                // A running task's progress changes the record without its revision.
+                let key = (workspace.state.revision, workspace.state.progress);
+                if let Some((cached, tasks)) = &self.task_list.cache
+                    && *cached == key
                 {
                     Rc::clone(tasks)
                 } else {
@@ -400,7 +406,7 @@ impl TasksPage {
                     });
                     let tasks: Vec<_> = tasks.into_iter().map(|(_, task)| task).collect();
                     let tasks = Rc::new(tasks);
-                    self.task_list.cache = Some((workspace.state.revision, Rc::clone(&tasks)));
+                    self.task_list.cache = Some((key, Rc::clone(&tasks)));
                     tasks
                 }
             }
@@ -1469,7 +1475,9 @@ impl TasksPage {
             )
         });
         let stages = self.task_stage_rows(task, cx);
-        let running = stages.iter().any(|stage| stage.status.running());
+        // Between two steps the job still runs: the steps it has reached stay in view.
+        let running = stages.iter().any(|stage| stage.status.running())
+            || self.is_running_task(&task.id, cx) && !stages.is_empty();
         let progress = self.task_progress(task, &stages, surface, cx);
         // A single reached step is already the step line above.
         let chips = (running && stages.len() > 1 && surface != TaskSurface::Home).then(|| {
