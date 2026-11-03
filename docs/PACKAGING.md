@@ -46,8 +46,8 @@ On macOS arm64 `cargo build --release` stops if the Apple speech module (`native
 
 To retry a channel, run `brew-tap` or `aur` manually with `version`; `aur` accepts `dry_run: true`, and `packaging/aur/update-aur.sh <version> --dry-run` runs the same validation locally on Arch.
 
-## The self-hosted Mac
+## macOS runners
 
-macOS jobs of `ci`, `native desktop` and `release` run on the maintainer's Mac (labels `self-hosted, macOS, ARM64, course2md`; installed under `~/actions-runners/course2md` as a launchd service). Pull requests from forks use GitHub's `macos-26` instead. The runner's `.env` sets `DEVELOPER_DIR` to the installed Xcode, whose Metal Toolchain comes from `xcodebuild -downloadComponent MetalToolchain`. Desktop jobs there create a virtualenv from the Homebrew Python 3.11+, because `actions/setup-python` only installs under `/Users/runner`.
+Every macOS job (`ci`, `native desktop`, `release`) runs on GitHub's hosted `macos-26`. A release job that finds no Metal compiler fetches Xcode's Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain`) and fails if it still has none, since without it the CLI would ship without CoreML recognition. Signing and notarization use the repository secrets `MACOS_CERT_P12`, `MACOS_CERT_PASS`, `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`, imported into a temporary keychain for each job.
 
 User documentation lives in the [GitHub Wiki](https://github.com/mizorewww/course2md/wiki) (`git clone git@github.com:mizorewww/course2md.wiki.git`). Keep the Chinese and English pages aligned.

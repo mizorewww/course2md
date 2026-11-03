@@ -4,8 +4,7 @@ description: >-
   APPLE_SIGNING_IDENTITY. Does nothing when no certificate is configured.
   Run the cleanup step of the calling job with `security delete-keychain
   "$RUNNER_TEMP/signing.keychain"` under `if: always()`, then restore the
-  keychain search list saved in "$RUNNER_TEMP/keychains.orig" (the
-  self-hosted Mac keeps its user keychains between jobs).
+  keychain search list saved in "$RUNNER_TEMP/keychains.orig".
 inputs:
   certificate:
     description: Base64-encoded Developer ID Application .p12

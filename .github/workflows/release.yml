@@ -58,15 +58,14 @@ jobs:
             target: x86_64-pc-windows-msvc
             asset: course2md-windows-x86_64.exe
             exe: true
-    # macOS builds run on the maintainer's self-hosted Mac.
-    runs-on: ${{ matrix.os == 'macos-26' && fromJSON('["self-hosted", "macOS", "ARM64", "course2md"]') || matrix.os }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Require the Metal compiler on macOS
         # Without Xcode's Metal toolchain c2m-asr's build.rs skips the Apple speech
         # module, which would ship a macOS build without CoreML recognition.
         if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
-        run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is unavailable on this runner. Point DEVELOPER_DIR (runner .env) or xcode-select at Xcode and run xcodebuild -downloadComponent MetalToolchain."; exit 1; }
+        run: xcrun --find metal >/dev/null 2>&1 || { xcodebuild -downloadComponent MetalToolchain; xcrun --find metal >/dev/null || { echo "::error::Xcode's Metal compiler is unavailable on this runner."; exit 1; }; }
       - uses: ./.github/actions/rust-toolchain
         with:
           targets: ${{ matrix.target }}
@@ -145,8 +144,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-26, ubuntu-24.04, windows-latest]
-    # macOS builds run on the maintainer's self-hosted Mac.
-    runs-on: ${{ matrix.os == 'macos-26' && fromJSON('["self-hosted", "macOS", "ARM64", "course2md"]') || matrix.os }}
+    runs-on: ${{ matrix.os }}
     env:
       APPLE_API_P8: ${{ secrets.APPLE_API_KEY }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -157,7 +155,7 @@ jobs:
         # Without Xcode's Metal toolchain c2m-asr's build.rs skips the Apple speech
         # module, which would ship a macOS build without CoreML recognition.
         if: runner.os == 'macOS'
-        run: xcrun --find metal >/dev/null 2>&1 || { echo "::error::Xcode's Metal compiler is unavailable on this runner. Point DEVELOPER_DIR (runner .env) or xcode-select at Xcode and run xcodebuild -downloadComponent MetalToolchain."; exit 1; }
+        run: xcrun --find metal >/dev/null 2>&1 || { xcodebuild -downloadComponent MetalToolchain; xcrun --find metal >/dev/null || { echo "::error::Xcode's Metal compiler is unavailable on this runner."; exit 1; }; }
       - uses: ./.github/actions/desktop-deps
       - uses: actions/download-artifact@v4
         if: runner.os == 'Windows'
