@@ -53,9 +53,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-26, ubuntu-24.04, windows-latest]
-    # macOS jobs run on the maintainer's self-hosted Mac. Pull requests from
-    # forks never reach it; they use GitHub's macos-26 runner instead.
-    runs-on: ${{ matrix.os != 'macos-26' && matrix.os || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted", "macOS", "ARM64", "course2md"]') || 'macos-26') }}
+    runs-on: ${{ matrix.os }}
     steps:
       # The hosted Ubuntu image has about 14 GB free; the workspace's debug build
       # with tests and both binaries outgrew it. Its Android, .NET and Haskell
