@@ -331,6 +331,15 @@ no AI service, no model host. Before is `36e40f03`'s tree.
   stopped with "The speech model qwen3-1.7b is not downloaded yet"; model files were put in place (no download), one
   click on "Download and prepare the model", and without Continue the task ran on through slides and audio to the
   fake engine's own failure.
+- **B5, CLI (owner decision: the CLI asks).** `18cafc88`, branch `split/cli-ask`. The "left as is" above is
+  reversed: a video command downloads a missing speech model only with consent. At a terminal it names the model, its
+  size and where it goes and asks `[y/N]` (no, the default, exits 1 with the `models prepare` command); without one
+  (pipe, script, `--json`, `--quiet`) it exits 1 before the media download, `--json` with `model_required` in
+  Simplified Chinese; `--download-models` or `COURSE2MD_DOWNLOAD_MODELS=1` restores the download. Apple's first-run
+  model choice counts as consent; `models prepare` never asks; `run-task` is unchanged. Tests in `consent` and
+  `cli_ux` (fake model host, `script(1)` pseudo-terminal). Native under `sandbox-exec` with only loopback: plain
+  (en, ja), `--json` and a terminal "n" stop with nothing fetched; `--download-models` reaches the hosts (blocked);
+  with model files in place, the same command runs on past the check in the same work folder.
 - **Held count.** `9e62b141`. A held task's record is still Queued, so the header counted it under both chips. The
   header counts each task in the group it is drawn in (`task_counts`), and 全部暂停 leaves out a held task. Test
   `a_held_task_counts_once_as_processing`. Native (app `kill -9`ed mid-run, the task's lock held by another process,
