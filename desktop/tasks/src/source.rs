@@ -784,6 +784,7 @@ fn local_subtitle_evidence(
                 .filter(|title| !title.is_empty())
                 .map(str::to_owned),
             kind: SubtitleKind::Unknown,
+            translated: false,
             origin: SubtitleOrigin::Embedded {
                 stream_index: index,
                 codec: codec.to_owned(),

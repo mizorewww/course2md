@@ -515,6 +515,17 @@ fn subtitle_evidence(
                 .find_map(|format| format["name"].as_str())
                 .filter(|name| !name.is_empty())
                 .map(str::to_owned);
+            // yt-dlp asks YouTube for a machine translation with `tlang`; the
+            // original track's URL has none, whatever its key or name says.
+            let translated = automatic
+                && readable.iter().any(|format| {
+                    format["url"]
+                        .as_str()
+                        .and_then(|url| url.split_once('?'))
+                        .is_some_and(|(_, query)| {
+                            query.split('&').any(|pair| pair.starts_with("tlang="))
+                        })
+                });
             let inline_text = readable
                 .iter()
                 .find(|format| matches!(format["ext"].as_str(), Some("srt" | "vtt")))
@@ -528,6 +539,7 @@ fn subtitle_evidence(
                 language: Some(language),
                 name,
                 kind,
+                translated,
                 origin: SubtitleOrigin::Online {
                     language_key: language_key.clone(),
                     automatic,
