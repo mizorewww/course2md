@@ -46,10 +46,10 @@ which = "8.0.6"
 sys-locale = "0.3"
 # The desktop. Its GPUI stack is the one gpui-kit-material pins, at one revision of that
 # repository; members add the features they use.
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4", features = ["gpui-fast"] }
-gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4" }
-gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4", default-features = false, features = ["serde", "gpui-fast"] }
-gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4", features = ["serde"] }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d", features = ["gpui-fast"] }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-kit-material = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d", default-features = false, features = ["serde", "gpui-fast"] }
+gpui-kit-material-color = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d", features = ["serde"] }
 # The revision gpui-kit-material pins.
 gpui-material-symbols = { git = "https://github.com/mizorewww/gpui-material-symbols", rev = "593aa15a46076f3e2870c23c0e4fd79f94f105bd", default-features = false }
 smol = "2"
@@ -82,11 +82,11 @@ strip = true
 
 # Only the workspace root's patches count, so the desktop's stack is pinned here.
 [patch.crates-io]
-gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4" }
-gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4" }
-gpui-fast-macos = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4" }
-gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4" }
+gpui-fast = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-fast-apple = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-fast-macos = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
 
 [patch."https://github.com/longbridge/gpui-kit"]
-gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4" }
-gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "53fa0fd6d29c61530befea8e7e746681b3ea72b4" }
+gpui-kit = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
+gpui-base = { git = "https://github.com/mizorewww/gpui-kit-material", rev = "1bc3ea75b4b41a616ad3877ea2de30ed2cc9e89d" }
