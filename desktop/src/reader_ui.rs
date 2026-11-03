@@ -398,6 +398,8 @@ impl ReaderPage {
 
 /// The address of the note's opening: its facts, notices and details.
 const HEAD_BLOCK: &str = "reader:head";
+/// The address of the space after the note's last block.
+const END_BLOCK: &str = "reader:end";
 const FIGURE_BLOCK: &str = "figure:";
 
 /// A note as Markdown, with what each top-level block of it shows.
@@ -516,6 +518,8 @@ impl NoteDocument {
             index += 1;
         }
         parts.append(&mut figures);
+        // The card's inset below the last block, inside the scrolled document.
+        parts.push((format!("![]({END_BLOCK})"), None));
         let (parts, blocks): (Vec<_>, Vec<_>) = parts.into_iter().unzip();
         Self {
             markdown: parts.join("\n\n"),
@@ -1999,6 +2003,8 @@ impl ReaderPage {
             Some(preview) if address == HEAD_BLOCK => {
                 self.reader_head(preview, window, cx).into_any_element()
             }
+            // As far below the last block as the note's opening is below the card's top.
+            _ if address == END_BLOCK => div().h(rem(24.)).into_any_element(),
             _ => div().into_any_element(),
         }
     }
@@ -4212,9 +4218,12 @@ mod tests {
                 Some(6),
                 Some(7),
                 Some(5),
-                Some(8)
+                Some(8),
+                None
             ]
         );
+        // The card's inset below the last block scrolls with the note.
+        assert!(document.markdown.ends_with("![](reader:end)"));
         // The overview and every key point are in the summary's panel.
         assert_eq!(document.item_of(1), Some(2));
         assert_eq!(document.item_of(3), Some(2));
